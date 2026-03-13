@@ -9,8 +9,6 @@ import type {
     ActivityEntry,
 } from "../types";
 
-export type AgentRole = "admin" | "agent";
-
 export const MOCK_CONVERSATIONS: Conversation[] = [
     {
         id: "c1",

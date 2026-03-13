@@ -1,6 +1,7 @@
 import { ReactNode, CSSProperties, MouseEventHandler } from "react";
 import { initials } from "@/lib/utils";
-import { AgentRole, ROLE_DEFINITIONS } from "@/lib/mockData";
+import type { AgentRole } from "@/types"
+import { ROLE_DEFINITIONS } from "@/lib/mockData";
 
 // ── Avatar ─────────────────────────────────────────────────────────────────────
 

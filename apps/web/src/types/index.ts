@@ -2,6 +2,10 @@ import type React from "react";
 
 export type ThemeMode = "light" | "dark";
 export type ToastType = "success" | "error" | "warning" | "info";
+export type InterceptMode = "ai" | "human";
+export type OrderStatus = "pending" | "confirmed" | "shipped" | "delivered" | "cancelled";
+export type AgentRole = "admin" | "agent";
+export type Channel = "whatsapp" | "sms" | "email";
 export type ViewId =
     | "conversations"
     | "orders"
@@ -20,7 +24,7 @@ export interface Session {
     user: {
         email: string;
         name: string;
-        role: "admin" | "agent";
+        role: AgentRole;
     };
 }
 
@@ -37,10 +41,11 @@ export interface Conversation {
     contact_phone: string;
     last_message: string;
     last_message_at: string;
-    intercept_mode: "ai" | "human";
+    intercept_mode: InterceptMode;
     status: "open" | "closed" | "pending";
     unread_count?: number;
     assigned_agent_id?: string | null;
+    channel?: Channel;
 }
 
 export type MessagesMap = Record<string, Message[]>;
@@ -58,7 +63,7 @@ export interface Agent {
     id: string;
     name: string;
     email: string;
-    role: "admin" | "agent";
+    role: AgentRole;
     is_available: boolean;
     active_convs: number;
     avatar_url?: string | null;
@@ -72,7 +77,7 @@ export interface Order {
     contact_phone: string;
     items: OrderItem[];
     total: number;
-    status: "pending" | "confirmed" | "shipped" | "delivered" | "cancelled";
+    status: OrderStatus;
     created_at: string;
     notes?: string;
 }
