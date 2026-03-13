@@ -192,25 +192,31 @@ async def touch_session(db: AsyncSession, body) -> dict:
     from sqlalchemy.dialects.postgresql import insert as pg_insert
     from datetime import datetime
 
+    def parse_dt(val):
+        if not val:
+            return None
+        if isinstance(val, datetime):
+            return val
+        return datetime.fromisoformat(val.replace("Z", "+00:00"))
+
     session_id = body.session_id or f"{body.wa_id}_{int(datetime.utcnow().timestamp())}"
 
     stmt = pg_insert(SessionModel).values(
         id=session_id,
         wa_id=body.wa_id,
         turns=body.turns,
-        start_ts=body.start_ts,
-        last_ts=body.last_ts,
+        start_ts=parse_dt(body.start_ts),
+        last_ts=parse_dt(body.last_ts),
     ).on_conflict_do_update(
         index_elements=["id"],
         set_={
             "turns": body.turns,
-            "last_ts": body.last_ts,
+            "last_ts": parse_dt(body.last_ts),
         },
     )
     await db.execute(stmt)
     await db.commit()
     return {"ok": True, "session_id": session_id}
-
 
 
 # ── Get Messages ──────────────────────────────────────────
