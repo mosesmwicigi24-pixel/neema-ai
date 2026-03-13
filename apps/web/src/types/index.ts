@@ -4,7 +4,7 @@ export type ThemeMode = "light" | "dark";
 export type ToastType = "success" | "error" | "warning" | "info";
 export type InterceptMode = "ai" | "human" | "paused";
 export type OrderStatus = "pending" | "confirmed" | "delivered" | "cancelled";
-export type AgentRole = "admin" | "agent";
+export type AgentRole = "admin" | "agent" | "readonly" | "supervisor" | "manager" | "support" | "sales";
 export type Channel = "whatsapp" | "sms" | "email";
 export type ViewId =
     | "conversations"
