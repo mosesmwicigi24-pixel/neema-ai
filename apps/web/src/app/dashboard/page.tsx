@@ -36,7 +36,6 @@ import type {
     ToastType,
 } from "@/types";
 
-// ── Nav icons ─────────────────────────────────────────────────────────────────
 const Icon = ({ d }: { d: string }) => (
     <svg
         className="w-5 h-5"
@@ -66,7 +65,6 @@ export default function NeemaDashboard(): React.ReactElement {
     const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
     const isMobile = useIsMobile();
 
-    // Apply dark mode class to html element
     useEffect(() => {
         const root = document.documentElement;
         if (theme === "dark") root.classList.add("dark");
@@ -74,7 +72,7 @@ export default function NeemaDashboard(): React.ReactElement {
     }, [theme]);
 
     const session: Session = {
-        user: { email: "priya@neema.co", name: "Priya Sharma", role: "admin" },
+        user: { email: "mwicigi@bethanyhouse.co.ke", name: "Moses Mwicigi", role: "admin" },
     };
     const isAdmin = session.user.role === "admin";
 
@@ -205,21 +203,56 @@ export default function NeemaDashboard(): React.ReactElement {
     };
 
     return (
-        <div className="flex h-dvh overflow-hidden bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-white">
-            {/* Global styles */}
+        <div className="flex h-dvh overflow-hidden bg-stone-50 text-stone-900">
             <style>{`
-        @keyframes slideInDown { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }
+        /* ── Font ──────────────────────────────────────── */
+        @import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&display=swap');
+        * { font-family: 'Geist', system-ui, sans-serif; }
+
+        /* ── Globals ───────────────────────────────────── */
+        :root {
+          --accent: #15803d;
+          --accent-hover: #16a34a;
+          --surface: #ffffff;
+          --border: #f1f0ef;
+          --text: #1c1917;
+          --text-muted: #a8a29e;
+        }
+
+        /* ── Scrollbar ─────────────────────────────────── */
         .scrollbar-none::-webkit-scrollbar { display: none; }
         .scrollbar-none { scrollbar-width: none; }
+
+        /* ── Layout ────────────────────────────────────── */
         .h-dvh { height: 100dvh; }
         .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
-        @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
-        .animate-in { animation: fadeIn 0.2s ease; }
+
+        /* ── Transitions ───────────────────────────────── */
+        @keyframes slideInDown {
+          from { opacity: 0; transform: translateY(-8px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
+        .animate-in { animation: fadeIn 0.18s ease; }
+
+        /* ── Focus ring ────────────────────────────────── */
+        *:focus-visible {
+          outline: 2px solid var(--accent);
+          outline-offset: 2px;
+          border-radius: 6px;
+        }
+
+        /* ── Custom input styles ───────────────────────── */
+        input, textarea, select {
+          font-family: inherit;
+        }
+
+        /* ── Smooth hover transitions ──────────────────── */
+        button { transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease, transform 0.15s ease; }
       `}</style>
-            <link
-                href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-                rel="stylesheet"
-            />
 
             <Toast toast={toast} isMobile={isMobile} />
 

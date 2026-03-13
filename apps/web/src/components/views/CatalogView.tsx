@@ -1,6 +1,5 @@
 import React, { useState } from "react";
 import { Btn } from "@/components/ui/Btn";
-import { SectionHeader } from "@/components/ui/Layout";
 import { Modal } from "@/components/ui/Modal";
 import { InputField } from "@/components/ui/FormFields";
 import { fmtCurrency } from "@/lib/utils";
@@ -11,20 +10,18 @@ const catEmoji: Record<string, string> = {
     Sides: "🌽",
     Snacks: "🍩",
 };
+const catColors: Record<string, string> = {
+    Mains: "from-orange-50 to-green-50",
+    Sides: "from-green-50 to-emerald-50",
+    Snacks: "from-pink-50 to-rose-50",
+};
 
 interface CatalogViewProps extends SharedViewProps {
     catalog: CatalogItem[];
     setCatalog: React.Dispatch<React.SetStateAction<CatalogItem[]>>;
 }
 
-const EMPTY: {
-    sku: string;
-    name: string;
-    category: string;
-    price: string;
-    in_stock: boolean;
-    description: string;
-} = {
+const EMPTY = {
     sku: "",
     name: "",
     category: "",
@@ -67,7 +64,6 @@ export function CatalogView({
         setForm({ ...EMPTY });
         onToast("Item added to catalog");
     };
-
     const toggleStock = (id: string) => {
         setCatalog((cs) =>
             cs.map((c) => (c.id === id ? { ...c, in_stock: !c.in_stock } : c)),
@@ -79,29 +75,61 @@ export function CatalogView({
         onToast("Item removed", "error");
     };
 
+    const inStockCount = catalog.filter((c) => c.in_stock).length;
+    const outStockCount = catalog.filter((c) => !c.in_stock).length;
+
     return (
         <div
-            className={`flex-1 overflow-y-auto ${isMobile ? "p-4 pb-24" : "p-6"}`}
+            className={`flex-1 overflow-y-auto bg-stone-50 ${isMobile ? "p-4 pb-24" : "p-6"}`}
         >
-            <SectionHeader
-                title="Menu Catalog"
-                subtitle={`${catalog.length} items · ${catalog.filter((c) => !c.in_stock).length} out of stock`}
-                action={
-                    <Btn
-                        onClick={() => setModal(true)}
-                        variant="primary"
-                        size="sm"
+            {/* Header */}
+            <div className="flex items-center justify-between mb-6">
+                <div>
+                    <h1 className="text-xl font-bold text-stone-800 tracking-tight">
+                        Catalog
+                    </h1>
+                    <p className="text-sm text-stone-400 mt-0.5">
+                        {catalog.length} items
+                        <span className="mx-1.5 text-stone-200">·</span>
+                        <span className="text-emerald-600">
+                            {inStockCount} in stock
+                        </span>
+                        {outStockCount > 0 && (
+                            <>
+                                <span className="mx-1.5 text-stone-200">·</span>
+                                <span className="text-red-500">
+                                    {outStockCount} out of stock
+                                </span>
+                            </>
+                        )}
+                    </p>
+                </div>
+                <button
+                    onClick={() => setModal(true)}
+                    className="flex items-center gap-2 h-9 px-4 rounded-lg bg-green-700 hover:bg-green-600 text-white text-sm font-semibold transition-colors shadow-sm"
+                >
+                    <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
                     >
-                        + Add Item
-                    </Btn>
-                }
-            />
+                        <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M12 4v16m8-8H4"
+                        />
+                    </svg>
+                    Add Item
+                </button>
+            </div>
 
             {/* Search + category filters */}
             <div className="flex flex-col sm:flex-row gap-2 mb-5">
                 <div className="relative flex-1">
                     <svg
-                        className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
+                        className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-300"
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"
@@ -117,7 +145,7 @@ export function CatalogView({
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                         placeholder="Search items…"
-                        className="w-full h-10 pl-9 pr-3 text-sm bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                        className="w-full h-10 pl-9 pr-3 text-sm bg-white border border-stone-200 rounded-xl text-stone-800 placeholder-stone-300 focus:outline-none focus:ring-2 focus:ring-green-600 focus:border-transparent transition-all"
                         style={{ fontSize: 16 }}
                     />
                 </div>
@@ -126,13 +154,11 @@ export function CatalogView({
                         <button
                             key={cat}
                             onClick={() => setFilter(cat)}
-                            className={`px-3 h-10 rounded-xl border text-xs font-medium capitalize transition-all ${
-                                filter === cat
-                                    ? "bg-gray-900 dark:bg-white text-white dark:text-gray-900 border-transparent"
-                                    : "bg-white dark:bg-gray-900 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-800 hover:border-gray-400"
-                            }`}
+                            className={`px-3 h-10 rounded-xl border text-xs font-medium capitalize transition-all ${filter === cat ? "bg-stone-800 text-white border-stone-800" : "bg-white text-stone-500 border-stone-200 hover:border-stone-400"}`}
                         >
-                            {cat}
+                            {cat === "all"
+                                ? "All"
+                                : `${catEmoji[cat] ?? "🍽"} ${cat}`}
                         </button>
                     ))}
                 </div>
@@ -140,73 +166,90 @@ export function CatalogView({
 
             {/* Product grid */}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-                {filtered.map((item) => (
-                    <div
-                        key={item.id}
-                        className={`group bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden shadow-sm hover:shadow-md transition-shadow ${!item.in_stock ? "opacity-60" : ""}`}
-                    >
-                        {/* Header */}
-                        <div className="h-20 bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-950/20 dark:to-orange-950/20 flex items-center justify-center text-3xl">
-                            {catEmoji[item.category] ?? "🍽"}
-                        </div>
-                        <div className="p-3">
-                            <div className="flex items-start justify-between gap-1 mb-1">
-                                <span className="text-sm font-semibold text-gray-900 dark:text-white leading-tight">
-                                    {item.name}
-                                </span>
-                                {!item.in_stock && (
-                                    <span className="flex-shrink-0 text-[10px] bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 px-1.5 py-0.5 rounded font-medium">
-                                        OUT
+                {filtered.map((item) => {
+                    const gradient =
+                        catColors[item.category] ??
+                        "from-stone-50 to-stone-100";
+                    return (
+                        <div
+                            key={item.id}
+                            className={`group bg-white rounded-xl border border-stone-100 overflow-hidden shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 ${!item.in_stock ? "opacity-60" : ""}`}
+                        >
+                            {/* Thumbnail */}
+                            <div
+                                className={`h-20 bg-gradient-to-br ${gradient} flex items-center justify-center text-3xl`}
+                            >
+                                {catEmoji[item.category] ?? "🍽"}
+                            </div>
+
+                            <div className="p-3">
+                                <div className="flex items-start justify-between gap-1 mb-1">
+                                    <span className="text-sm font-semibold text-stone-800 leading-tight">
+                                        {item.name}
                                     </span>
-                                )}
-                            </div>
-                            <p className="text-xs text-gray-400 dark:text-gray-500 mb-2 leading-snug line-clamp-2">
-                                {item.description}
-                            </p>
-                            <div className="text-base font-bold text-amber-600 dark:text-amber-400 mb-3">
-                                {fmtCurrency(item.price)}
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                                <Btn
-                                    size="xs"
-                                    onClick={() => toggleStock(item.id)}
-                                    variant={
-                                        item.in_stock ? "outline" : "success"
-                                    }
-                                    className="flex-1"
-                                >
-                                    {item.in_stock
-                                        ? "Out of Stock"
-                                        : "In Stock"}
-                                </Btn>
-                                <Btn
-                                    size="xs"
-                                    onClick={() => deleteItem(item.id)}
-                                    variant="danger"
-                                >
-                                    <svg
-                                        className="w-3 h-3"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        viewBox="0 0 24 24"
+                                    {!item.in_stock && (
+                                        <span className="flex-shrink-0 text-[10px] bg-red-50 text-red-500 border border-red-200 px-1.5 py-0.5 rounded font-semibold">
+                                            OUT
+                                        </span>
+                                    )}
+                                </div>
+                                <p className="text-xs text-stone-400 mb-2.5 leading-snug line-clamp-2">
+                                    {item.description}
+                                </p>
+                                <div className="text-sm font-bold text-green-800 mb-3">
+                                    {fmtCurrency(item.price)}
+                                </div>
+
+                                <div className="flex items-center gap-1.5">
+                                    <button
+                                        onClick={() => toggleStock(item.id)}
+                                        className={`flex-1 h-7 rounded-md text-xs font-medium transition-colors ${
+                                            item.in_stock
+                                                ? "bg-stone-100 text-stone-600 hover:bg-stone-200"
+                                                : "bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100"
+                                        }`}
                                     >
-                                        <path
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            strokeWidth={2}
-                                            d="M6 18L18 6M6 6l12 12"
-                                        />
-                                    </svg>
-                                </Btn>
-                            </div>
-                            <div className="text-[10px] text-gray-300 dark:text-gray-600 font-mono mt-2">
-                                {item.sku}
+                                        {item.in_stock
+                                            ? "Mark Out"
+                                            : "In Stock"}
+                                    </button>
+                                    <button
+                                        onClick={() => deleteItem(item.id)}
+                                        className="w-7 h-7 rounded-md bg-red-50 text-red-500 hover:bg-red-100 transition-colors flex items-center justify-center border border-red-100"
+                                    >
+                                        <svg
+                                            className="w-3.5 h-3.5"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            viewBox="0 0 24 24"
+                                        >
+                                            <path
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                                strokeWidth={2}
+                                                d="M6 18L18 6M6 6l12 12"
+                                            />
+                                        </svg>
+                                    </button>
+                                </div>
+
+                                <div className="text-[10px] text-stone-300 font-mono mt-2">
+                                    {item.sku}
+                                </div>
                             </div>
                         </div>
+                    );
+                })}
+
+                {filtered.length === 0 && (
+                    <div className="col-span-full py-16 text-center">
+                        <span className="text-3xl mb-3 block">🍽</span>
+                        <p className="text-sm text-stone-400">No items found</p>
                     </div>
-                ))}
+                )}
             </div>
 
+            {/* Add item modal */}
             <Modal
                 show={modal}
                 onClose={() => setModal(false)}

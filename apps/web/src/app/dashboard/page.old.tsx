@@ -165,8 +165,8 @@ const MOCK_AGENTS = [
     },
     {
         id: "a3",
-        name: "Priya Sharma",
-        email: "priya@neema.co",
+        name: "Moses Mwicigi",
+        email: "mwicigi@bethanyhouse.co.ke",
         role: "admin",
         is_available: false,
         active_convs: 0,
@@ -561,7 +561,7 @@ function Btn({ onClick, children, variant = "primary", small, disabled }) {
 export default function NeemaDashboard() {
     // Auth/session simulation
     const session = {
-        user: { email: "priya@neema.co", name: "Priya Sharma", role: "admin" },
+        user: { email: "mwicigi@bethanyhouse.co.ke", name: "Moses Mwicigi", role: "admin" },
     };
 
     // State

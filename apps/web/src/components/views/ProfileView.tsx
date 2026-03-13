@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Avatar } from "@/components/ui/Avatar";
 import { RoleBadge } from "@/components/ui/Badges";
 import { Btn } from "@/components/ui/Btn";
-import { Card, SectionHeader, Divider, Toggle } from "@/components/ui/Layout";
+import { Toggle } from "@/components/ui/Layout";
 import { InputField } from "@/components/ui/FormFields";
 import { fmtDate } from "@/lib/utils";
 import { ALL_PERMISSIONS } from "@/lib/mockData";
@@ -59,51 +59,78 @@ export function ProfileView({
         ? ALL_PERMISSIONS.map((p) => p.key)
         : agent.permissions;
 
+    const notifItems = [
+        {
+            key: "new_conv" as keyof NotifSettings,
+            label: "New conversation assigned",
+            desc: "When assigned to you",
+        },
+        {
+            key: "human_transfer" as keyof NotifSettings,
+            label: "Human takeover requests",
+            desc: "When AI flags for you",
+        },
+        {
+            key: "order_updates" as keyof NotifSettings,
+            label: "Order status changes",
+            desc: "Confirmations and deliveries",
+        },
+        {
+            key: "daily_summary" as keyof NotifSettings,
+            label: "Daily digest",
+            desc: "End-of-day performance report",
+        },
+    ];
+
     return (
         <div
-            className={`flex-1 overflow-y-auto ${isMobile ? "p-4 pb-24" : "p-6"}`}
+            className={`flex-1 overflow-y-auto bg-stone-50 ${isMobile ? "p-4 pb-24" : "p-6"}`}
         >
-            <SectionHeader
-                title="My Profile"
-                subtitle="Manage account, preferences and security"
-            />
+            {/* Page header */}
+            <div className="mb-6">
+                <h1 className="text-xl font-bold text-stone-800 tracking-tight">
+                    My Profile
+                </h1>
+                <p className="text-sm text-stone-400 mt-0.5">
+                    Manage account, preferences and security
+                </p>
+            </div>
 
             <div
-                className={`grid gap-5 ${isMobile ? "grid-cols-1" : "grid-cols-[320px_1fr]"}`}
+                className={`grid gap-5 ${isMobile ? "grid-cols-1" : "grid-cols-[300px_1fr]"}`}
             >
-                {/* Left column */}
+                {/* ── Left column ──────────────────────────────────────────── */}
                 <div className="space-y-4">
                     {/* Profile card */}
-                    <Card className="text-center">
+                    <div className="bg-white rounded-xl border border-stone-100 shadow-sm p-5 text-center">
                         <div className="flex justify-center mb-4">
                             <div className="relative">
                                 <Avatar name={agent.name} size="xl" />
                                 <div
-                                    className={`absolute bottom-1 right-1 w-4 h-4 rounded-full ring-2 ring-white dark:ring-gray-900 ${agent.is_available ? "bg-emerald-500" : "bg-gray-400"}`}
+                                    className={`absolute bottom-1 right-1 w-3.5 h-3.5 rounded-full ring-2 ring-white ${agent.is_available ? "bg-emerald-500" : "bg-stone-300"}`}
                                 />
                             </div>
                         </div>
-                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1">
+                        <h3 className="text-base font-bold text-stone-800 mb-0.5">
                             {agent.name}
                         </h3>
-                        <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
+                        <p className="text-sm text-stone-400 mb-3">
                             {agent.email}
                         </p>
                         <div className="flex justify-center gap-2 mb-4">
                             <RoleBadge role={agent.role} />
                             {agent.department && (
-                                <span className="text-xs bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 px-2 py-0.5 rounded-lg">
+                                <span className="text-xs bg-stone-100 text-stone-500 px-2 py-0.5 rounded-md">
                                     {agent.department}
                                 </span>
                             )}
                         </div>
-                        <Divider />
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="border-t border-stone-100 pt-4 grid grid-cols-2 gap-2">
                             {(
                                 [
-                                    ["Active", agent.active_convs],
+                                    ["Active convs", agent.active_convs],
                                     [
-                                        "Since",
+                                        "Member since",
                                         agent.joined_at
                                             ? fmtDate(agent.joined_at)
                                             : "—",
@@ -112,32 +139,32 @@ export function ProfileView({
                             ).map(([k, v]) => (
                                 <div
                                     key={k}
-                                    className="bg-gray-50 dark:bg-gray-800 rounded-xl p-3"
+                                    className="bg-stone-50 rounded-lg p-3"
                                 >
-                                    <div className="text-xs text-gray-400 uppercase tracking-wider mb-1">
+                                    <div className="text-xs text-stone-400 mb-1">
                                         {k}
                                     </div>
-                                    <div className="text-sm font-bold text-gray-900 dark:text-white">
+                                    <div className="text-sm font-bold text-stone-800">
                                         {v}
                                     </div>
                                 </div>
                             ))}
                         </div>
-                    </Card>
+                    </div>
 
                     {/* Permissions */}
-                    <Card>
-                        <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+                    <div className="bg-white rounded-xl border border-stone-100 shadow-sm p-5">
+                        <h4 className="text-xs font-semibold text-stone-400 uppercase tracking-wider mb-3">
                             Your Permissions
                         </h4>
-                        <div className="space-y-1.5">
+                        <div className="space-y-1">
                             {permKeys.map((perm) => (
                                 <div
                                     key={perm}
                                     className="flex items-center gap-2 py-1"
                                 >
-                                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0" />
-                                    <span className="text-xs text-gray-600 dark:text-gray-400">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
+                                    <span className="text-xs text-stone-500">
                                         {ALL_PERMISSIONS.find(
                                             (p) => p.key === perm,
                                         )?.label ?? perm}
@@ -145,27 +172,27 @@ export function ProfileView({
                                 </div>
                             ))}
                         </div>
-                    </Card>
+                    </div>
                 </div>
 
-                {/* Right column */}
+                {/* ── Right column ─────────────────────────────────────────── */}
                 <div className="space-y-4">
                     {/* Account info */}
-                    <Card>
-                        <div className="flex justify-between items-center mb-4">
-                            <h4 className="text-sm font-semibold text-gray-900 dark:text-white">
+                    <div className="bg-white rounded-xl border border-stone-100 shadow-sm p-5">
+                        <div className="flex items-center justify-between mb-4">
+                            <h4 className="text-sm font-semibold text-stone-800">
                                 Account Information
                             </h4>
                             {!editMode && (
-                                <Btn
-                                    size="xs"
+                                <button
                                     onClick={() => setEditMode(true)}
-                                    variant="outline"
+                                    className="h-7 px-3 rounded-md text-xs font-medium text-stone-600 bg-stone-100 hover:bg-stone-200 transition-colors"
                                 >
                                     Edit
-                                </Btn>
+                                </button>
                             )}
                         </div>
+
                         {editMode ? (
                             <>
                                 <InputField
@@ -222,23 +249,23 @@ export function ProfileView({
                                 ).map(([k, v]) => (
                                     <div
                                         key={k}
-                                        className="bg-gray-50 dark:bg-gray-800 rounded-xl p-3"
+                                        className="bg-stone-50 rounded-lg p-3"
                                     >
-                                        <div className="text-xs text-gray-400 uppercase tracking-wider mb-1">
+                                        <div className="text-xs text-stone-400 mb-1">
                                             {k}
                                         </div>
-                                        <div className="text-sm text-gray-900 dark:text-white font-medium truncate">
+                                        <div className="text-sm text-stone-800 font-medium truncate">
                                             {v}
                                         </div>
                                     </div>
                                 ))}
                             </div>
                         )}
-                    </Card>
+                    </div>
 
                     {/* Appearance */}
-                    <Card>
-                        <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">
+                    <div className="bg-white rounded-xl border border-stone-100 shadow-sm p-5">
+                        <h4 className="text-sm font-semibold text-stone-800 mb-4">
                             Appearance
                         </h4>
                         <div className="grid grid-cols-2 gap-3">
@@ -246,65 +273,50 @@ export function ProfileView({
                                 <button
                                     key={t}
                                     onClick={() => setTheme(t)}
-                                    className={`p-4 rounded-xl border-2 transition-all ${theme === t ? "border-amber-500 bg-amber-50 dark:bg-amber-950/20" : "border-gray-200 dark:border-gray-700 hover:border-gray-300"}`}
+                                    className={`p-4 rounded-xl border-2 transition-all text-left ${theme === t ? "border-green-600 bg-green-50 shadow-sm" : "border-stone-200 hover:border-stone-300"}`}
                                 >
+                                    {/* Preview */}
                                     <div
-                                        className={`w-full h-12 rounded-lg mb-3 flex items-start p-2 gap-1.5 ${t === "light" ? "bg-white border border-gray-200" : "bg-gray-900 border border-gray-700"}`}
+                                        className={`w-full h-10 rounded-lg mb-3 flex items-start gap-1.5 p-2 overflow-hidden ${t === "light" ? "bg-white border border-stone-200" : "bg-stone-900 border border-stone-700"}`}
                                     >
                                         <div
-                                            className={`w-14 h-1.5 rounded-full ${t === "light" ? "bg-gray-200" : "bg-gray-700"}`}
+                                            className={`w-12 h-1.5 rounded-full mt-0.5 ${t === "light" ? "bg-stone-200" : "bg-stone-700"}`}
                                         />
                                         <div
-                                            className={`w-8 h-1.5 rounded-full ${t === "light" ? "bg-amber-300" : "bg-amber-500"}`}
+                                            className={`w-7 h-1.5 rounded-full mt-0.5 ${t === "light" ? "bg-green-500" : "bg-green-700"}`}
                                         />
                                     </div>
                                     <div
-                                        className={`text-sm font-semibold capitalize ${theme === t ? "text-amber-700 dark:text-amber-300" : "text-gray-600 dark:text-gray-400"}`}
+                                        className={`text-sm font-semibold capitalize ${theme === t ? "text-green-900" : "text-stone-500"}`}
                                     >
-                                        {t} {theme === t ? "✓" : ""}
+                                        {t}{" "}
+                                        {theme === t && (
+                                            <span className="text-green-700">
+                                                ✓
+                                            </span>
+                                        )}
                                     </div>
                                 </button>
                             ))}
                         </div>
-                    </Card>
+                    </div>
 
                     {/* Notifications */}
-                    <Card>
-                        <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">
+                    <div className="bg-white rounded-xl border border-stone-100 shadow-sm p-5">
+                        <h4 className="text-sm font-semibold text-stone-800 mb-4">
                             Notifications
                         </h4>
-                        <div className="divide-y divide-gray-100 dark:divide-gray-800">
-                            {[
-                                {
-                                    key: "new_conv" as keyof NotifSettings,
-                                    label: "New conversation assigned",
-                                    desc: "When assigned to you",
-                                },
-                                {
-                                    key: "human_transfer" as keyof NotifSettings,
-                                    label: "Human takeover requests",
-                                    desc: "When AI flags for you",
-                                },
-                                {
-                                    key: "order_updates" as keyof NotifSettings,
-                                    label: "Order status changes",
-                                    desc: "Confirmations and deliveries",
-                                },
-                                {
-                                    key: "daily_summary" as keyof NotifSettings,
-                                    label: "Daily digest",
-                                    desc: "End-of-day performance report",
-                                },
-                            ].map((item) => (
+                        <div className="divide-y divide-stone-100">
+                            {notifItems.map((item) => (
                                 <div
                                     key={item.key}
                                     className="flex items-center justify-between py-3 gap-3"
                                 >
                                     <div>
-                                        <div className="text-sm font-medium text-gray-900 dark:text-white">
+                                        <div className="text-sm font-medium text-stone-700">
                                             {item.label}
                                         </div>
-                                        <div className="text-xs text-gray-400 dark:text-gray-500">
+                                        <div className="text-xs text-stone-400 mt-0.5">
                                             {item.desc}
                                         </div>
                                     </div>
@@ -320,32 +332,30 @@ export function ProfileView({
                                 </div>
                             ))}
                         </div>
-                    </Card>
+                    </div>
 
                     {/* Security */}
-                    <Card>
-                        <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">
+                    <div className="bg-white rounded-xl border border-stone-100 shadow-sm p-5">
+                        <h4 className="text-sm font-semibold text-stone-800 mb-4">
                             Security
                         </h4>
                         <div className="flex gap-2 flex-wrap">
-                            <Btn
+                            <button
                                 onClick={() =>
                                     onToast("Password reset email sent")
                                 }
-                                variant="outline"
-                                size="sm"
+                                className="h-9 px-4 rounded-lg text-sm font-medium text-stone-700 bg-stone-100 hover:bg-stone-200 transition-colors border border-stone-200"
                             >
                                 Change Password
-                            </Btn>
-                            <Btn
+                            </button>
+                            <button
                                 onClick={() => onToast("2FA setup initiated")}
-                                variant="blue"
-                                size="sm"
+                                className="h-9 px-4 rounded-lg text-sm font-medium text-white bg-stone-800 hover:bg-stone-700 transition-colors shadow-sm"
                             >
                                 Enable 2FA
-                            </Btn>
+                            </button>
                         </div>
-                    </Card>
+                    </div>
                 </div>
             </div>
         </div>

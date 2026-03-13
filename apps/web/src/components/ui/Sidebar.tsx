@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { Avatar } from "@/components/ui/Avatar";
 import { cn } from "@/lib/utils";
 import type { NavItem, Session, ThemeMode, ViewId } from "@/types";
@@ -12,6 +12,7 @@ interface SidebarProps {
     session: Session;
     theme: ThemeMode;
     setTheme: React.Dispatch<React.SetStateAction<ThemeMode>>;
+    onLogout?: () => void;
 }
 
 export function Sidebar({
@@ -23,7 +24,9 @@ export function Sidebar({
     session,
     theme,
     setTheme,
+    onLogout,
 }: SidebarProps): React.ReactElement {
+    const [confirmLogout, setConfirmLogout] = useState(false);
     return (
         <aside
             className={cn(
@@ -40,7 +43,7 @@ export function Sidebar({
             >
                 {!collapsed && (
                     <div className="flex items-center gap-2 flex-1 min-w-0">
-                        <div className="w-7 h-7 rounded-lg bg-amber-500 flex items-center justify-center flex-shrink-0">
+                        <div className="w-7 h-7 rounded-lg bg-green-700 flex items-center justify-center flex-shrink-0">
                             <svg
                                 className="w-4 h-4 text-white"
                                 fill="none"
@@ -104,7 +107,7 @@ export function Sidebar({
                                     ? "justify-center h-10 px-0"
                                     : "gap-2.5 px-3 h-10",
                                 isActive
-                                    ? "bg-amber-500 text-white shadow-sm"
+                                    ? "bg-green-700 text-white shadow-sm"
                                     : "text-gray-400 hover:text-white hover:bg-gray-800",
                             )}
                         >
@@ -117,14 +120,14 @@ export function Sidebar({
                                         {item.label}
                                     </span>
                                     {item.badge != null && (
-                                        <span className="ml-auto flex-shrink-0 bg-amber-400 text-gray-900 text-xs font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
+                                        <span className="ml-auto flex-shrink-0 bg-green-600 text-gray-900 text-xs font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
                                             {item.badge}
                                         </span>
                                     )}
                                 </>
                             )}
                             {collapsed && item.badge != null && (
-                                <span className="absolute top-1 right-1 w-4 h-4 bg-amber-400 text-gray-900 text-[9px] font-bold rounded-full flex items-center justify-center">
+                                <span className="absolute top-1 right-1 w-4 h-4 bg-green-600 text-gray-900 text-[9px] font-bold rounded-full flex items-center justify-center">
                                     {item.badge}
                                 </span>
                             )}
@@ -155,7 +158,7 @@ export function Sidebar({
                             <div className="text-xs font-semibold text-white truncate">
                                 {session.user.name}
                             </div>
-                            <div className="text-[10px] text-amber-400 uppercase tracking-wider font-medium">
+                            <div className="text-[10px] text-green-400 uppercase tracking-wider font-medium">
                                 {session.user.role}
                             </div>
                         </div>

@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Btn } from "@/components/ui/Btn";
-import { Card, SectionHeader, Toggle } from "@/components/ui/Layout";
+import { Toggle } from "@/components/ui/Layout";
 import { InputField } from "@/components/ui/FormFields";
 import type { SharedViewProps } from "@/types";
 
@@ -17,7 +17,6 @@ interface BizSettings {
     open_hours: string;
     timezone: string;
 }
-
 interface Integration {
     name: string;
     status: "connected" | "disconnected";
@@ -76,6 +75,32 @@ const INTEGRATIONS: Integration[] = [
     },
 ];
 
+function SectionCard({
+    title,
+    description,
+    children,
+}: {
+    title: string;
+    description?: string;
+    children: React.ReactNode;
+}) {
+    return (
+        <div className="bg-white rounded-xl border border-stone-100 shadow-sm p-5">
+            <div className="mb-5">
+                <h4 className="text-sm font-semibold text-stone-800">
+                    {title}
+                </h4>
+                {description && (
+                    <p className="text-xs text-stone-400 mt-1 leading-relaxed">
+                        {description}
+                    </p>
+                )}
+            </div>
+            {children}
+        </div>
+    );
+}
+
 export function SettingsView({
     onToast,
     isMobile,
@@ -96,19 +121,21 @@ export function SettingsView({
 
     return (
         <div
-            className={`flex-1 overflow-y-auto ${isMobile ? "p-4 pb-24" : "p-6"}`}
+            className={`flex-1 overflow-y-auto bg-stone-50 ${isMobile ? "p-4 pb-24" : "p-6"}`}
         >
-            <SectionHeader
-                title="System Settings"
-                subtitle="Configure AI behavior, business info, and integrations"
-            />
+            {/* Header */}
+            <div className="mb-6">
+                <h1 className="text-xl font-bold text-stone-800 tracking-tight">
+                    Settings
+                </h1>
+                <p className="text-sm text-stone-400 mt-0.5">
+                    Configure AI behavior, business info, and integrations
+                </p>
+            </div>
 
-            <div className="space-y-5">
+            <div className="space-y-4">
                 {/* Business info */}
-                <Card>
-                    <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-5">
-                        Business Information
-                    </h4>
+                <SectionCard title="Business Information">
                     <div
                         className={`grid gap-x-4 ${isMobile ? "grid-cols-1" : "grid-cols-2"}`}
                     >
@@ -149,49 +176,44 @@ export function SettingsView({
                             hint="IANA identifier e.g. Africa/Nairobi"
                         />
                     </div>
-                    <Btn
+                    <button
                         onClick={() => onToast("Business settings saved")}
-                        variant="primary"
-                        size="sm"
+                        className="h-9 px-5 rounded-lg text-sm font-semibold text-white bg-green-700 hover:bg-green-600 transition-colors shadow-sm"
                     >
                         Save Changes
-                    </Btn>
-                </Card>
+                    </button>
+                </SectionCard>
 
-                {/* AI Configuration */}
-                <Card>
-                    <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-1">
-                        AI Configuration
-                    </h4>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
-                        Control how the AI handles conversations and when to
-                        escalate to agents.
-                    </p>
+                {/* AI config */}
+                <SectionCard
+                    title="AI Configuration"
+                    description="Control how the AI handles conversations and when to escalate to agents."
+                >
                     <div
                         className={`grid gap-x-4 ${isMobile ? "grid-cols-1" : "grid-cols-2"}`}
                     >
                         <InputField
                             label="Escalation Threshold"
                             value={ai.auto_intercept_threshold}
+                            type="number"
                             onChange={(v) =>
                                 setAi((s) => ({
                                     ...s,
                                     auto_intercept_threshold: Number(v),
                                 }))
                             }
-                            type="number"
                             hint="Escalate after N unanswered messages"
                         />
                         <InputField
                             label="Response Delay (ms)"
                             value={ai.response_delay_ms}
+                            type="number"
                             onChange={(v) =>
                                 setAi((s) => ({
                                     ...s,
                                     response_delay_ms: Number(v),
                                 }))
                             }
-                            type="number"
                             hint="Simulate human-like typing delay"
                         />
                     </div>
@@ -203,12 +225,14 @@ export function SettingsView({
                         }
                         hint="Comma-separated words that trigger human handover"
                     />
-                    <div className="flex items-center justify-between py-4 border-y border-gray-100 dark:border-gray-800 mb-4">
+
+                    {/* Draft approval toggle */}
+                    <div className="flex items-center justify-between py-4 border-y border-stone-100 mb-4">
                         <div>
-                            <div className="text-sm font-medium text-gray-900 dark:text-white">
+                            <div className="text-sm font-medium text-stone-800">
                                 Require draft approval
                             </div>
-                            <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                            <div className="text-xs text-stone-400 mt-0.5">
                                 AI drafts must be approved before sending
                             </div>
                         </div>
@@ -222,75 +246,72 @@ export function SettingsView({
                             }
                         />
                     </div>
-                    <Btn
+
+                    <button
                         onClick={() => onToast("AI settings saved")}
-                        variant="primary"
-                        size="sm"
+                        className="h-9 px-5 rounded-lg text-sm font-semibold text-white bg-green-700 hover:bg-green-600 transition-colors shadow-sm"
                     >
                         Save AI Settings
-                    </Btn>
-                </Card>
+                    </button>
+                </SectionCard>
 
                 {/* Integrations */}
-                <Card>
-                    <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-5">
-                        Integrations
-                    </h4>
-                    <div className="divide-y divide-gray-100 dark:divide-gray-800">
-                        {INTEGRATIONS.map((integ) => (
-                            <div
-                                key={integ.name}
-                                className="flex items-center justify-between py-3.5 gap-4"
-                            >
-                                <div className="flex items-center gap-3 min-w-0">
-                                    <div className="w-9 h-9 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 flex items-center justify-center text-lg flex-shrink-0">
-                                        {integ.icon}
-                                    </div>
-                                    <div className="min-w-0">
-                                        <div className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                                            {integ.name}
-                                        </div>
-                                        <div className="flex items-center gap-1.5 mt-0.5">
-                                            <div
-                                                className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${integ.status === "connected" ? "bg-emerald-500" : "bg-gray-400"}`}
-                                            />
-                                            <span
-                                                className={`text-xs ${integ.status === "connected" ? "text-emerald-600 dark:text-emerald-400" : "text-gray-400"}`}
-                                            >
-                                                {integ.status === "connected"
-                                                    ? "Connected"
-                                                    : "Not connected"}
-                                            </span>
-                                            <span className="text-gray-300 dark:text-gray-600">
-                                                ·
-                                            </span>
-                                            <span className="text-xs text-gray-400 truncate">
-                                                {integ.description}
-                                            </span>
-                                        </div>
-                                    </div>
-                                </div>
-                                <Btn
-                                    size="xs"
-                                    onClick={() =>
-                                        onToast(
-                                            `${integ.name} ${integ.status === "connected" ? "disconnected" : "connected"}`,
-                                        )
-                                    }
-                                    variant={
-                                        integ.status === "connected"
-                                            ? "danger"
-                                            : "success"
-                                    }
+                <SectionCard title="Integrations">
+                    <div className="divide-y divide-stone-100">
+                        {INTEGRATIONS.map((integ) => {
+                            const isConnected = integ.status === "connected";
+                            return (
+                                <div
+                                    key={integ.name}
+                                    className="flex items-center justify-between py-3.5 gap-4 group"
                                 >
-                                    {integ.status === "connected"
-                                        ? "Disconnect"
-                                        : "Connect"}
-                                </Btn>
-                            </div>
-                        ))}
+                                    <div className="flex items-center gap-3 min-w-0">
+                                        <div className="w-9 h-9 rounded-xl bg-stone-50 border border-stone-100 flex items-center justify-center text-lg flex-shrink-0">
+                                            {integ.icon}
+                                        </div>
+                                        <div className="min-w-0">
+                                            <div className="text-sm font-semibold text-stone-800 truncate">
+                                                {integ.name}
+                                            </div>
+                                            <div className="flex items-center gap-1.5 mt-0.5">
+                                                <div
+                                                    className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isConnected ? "bg-emerald-500" : "bg-stone-300"}`}
+                                                />
+                                                <span
+                                                    className={`text-xs font-medium ${isConnected ? "text-emerald-600" : "text-stone-400"}`}
+                                                >
+                                                    {isConnected
+                                                        ? "Connected"
+                                                        : "Not connected"}
+                                                </span>
+                                                <span className="text-stone-200">
+                                                    ·
+                                                </span>
+                                                <span className="text-xs text-stone-400 truncate">
+                                                    {integ.description}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={() =>
+                                            onToast(
+                                                `${integ.name} ${isConnected ? "disconnected" : "connected"}`,
+                                            )
+                                        }
+                                        className={`flex-shrink-0 h-8 px-3 rounded-lg text-xs font-semibold transition-colors ${
+                                            isConnected
+                                                ? "bg-red-50 text-red-600 border border-red-200 hover:bg-red-100"
+                                                : "bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100"
+                                        }`}
+                                    >
+                                        {isConnected ? "Disconnect" : "Connect"}
+                                    </button>
+                                </div>
+                            );
+                        })}
                     </div>
-                </Card>
+                </SectionCard>
             </div>
         </div>
     );

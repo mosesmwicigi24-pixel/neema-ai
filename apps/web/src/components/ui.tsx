@@ -12,11 +12,11 @@ interface AvatarProps {
 
 export function Avatar({ name, size = 36, color }: AvatarProps) {
     const colors = [
-        "#c9a84c",
+        "#15803d",
         "#5b9cf0",
         "#4caf7d",
         "#e05555",
-        "#e8a84c",
+        "#16a34a",
         "#9b72d0",
         "#2ecc71",
         "#e74c3c",
@@ -57,8 +57,8 @@ export function Badge({ type }: BadgeProps) {
         ai: { label: "AI", bg: "var(--blue-dim)", color: "var(--blue)" },
         human: {
             label: "HUMAN",
-            bg: "var(--amber-dim)",
-            color: "var(--amber)",
+            bg: "var(--green-dim)",
+            color: "var(--green)",
         },
         paused: {
             label: "PAUSED",
@@ -201,7 +201,7 @@ export function Modal({ show, onClose, title, children, wide }: ModalProps) {
                         style={{
                             fontFamily: "var(--font-serif)",
                             fontSize: 20,
-                            color: "var(--gold2)",
+                            color: "var(--green2)",
                             letterSpacing: "0.01em",
                         }}
                     >
@@ -376,7 +376,7 @@ export function Btn({
 }: BtnProps) {
     const styles: Record<BtnVariant, CSSProperties> = {
         primary: {
-            background: "var(--gold)",
+            background: "var(--green)",
             color: "var(--bg)",
             border: "none",
         },
