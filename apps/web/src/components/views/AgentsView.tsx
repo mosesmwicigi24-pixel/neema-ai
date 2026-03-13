@@ -56,6 +56,7 @@ export function AgentsView({
                 active_convs: 0,
                 last_seen_at: null,
                 joined_at: new Date().toISOString().split("T")[0],
+                created_at: new Date().toISOString(),
             },
         ]);
         setModal(null);
