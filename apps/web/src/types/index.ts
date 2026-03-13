@@ -100,3 +100,7 @@ export interface CatalogItem {
     description?: string;
     in_stock: boolean;
 }
+export interface SharedViewProps {
+    onToast: (msg: string, type?: ToastType) => void;
+    isMobile: boolean;
+}
