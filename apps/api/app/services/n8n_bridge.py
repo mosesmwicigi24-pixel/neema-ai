@@ -145,7 +145,7 @@ async def upsert_message(db: AsyncSession, body) -> dict:
         db.add(conv)
         await db.flush()
 
-    sender = MsgSender.customer if body.direction == "inbound" else MsgSender.ai
+    sender = MsgSender.user if body.direction == "inbound" else MsgSender.ai
     direction = MsgDirection.inbound if body.direction == "inbound" else MsgDirection.outbound
 
     msg = Message(
