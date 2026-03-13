@@ -3,7 +3,7 @@ import type React from "react";
 export type ThemeMode = "light" | "dark";
 export type ToastType = "success" | "error" | "warning" | "info";
 export type InterceptMode = "ai" | "human" | "paused";
-export type OrderStatus = "pending" | "confirmed" | "shipped" | "delivered" | "cancelled";
+export type OrderStatus = "pending" | "confirmed" | "delivered" | "cancelled";
 export type AgentRole = "admin" | "agent";
 export type Channel = "whatsapp" | "sms" | "email";
 export type ViewId =
