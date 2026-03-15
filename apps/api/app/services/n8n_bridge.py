@@ -77,10 +77,17 @@ async def _send_waba(wa_id: str, text: str) -> None:
         resp = await client.post(
             url,
             headers={"Authorization": f"Bearer {settings.waba_token}"},
-            json={"messaging_product": "whatsapp", "to": wa_id,
-                  "type": "text", "text": {"body": text}},
+            json={
+                "messaging_product": "whatsapp",
+                "to": wa_id,
+                "type": "text",
+                "text": {"body": text},
+            },
         )
-        resp.raise_for_status()
+        if not resp.is_success:
+            import logging
+            logging.error(f"WABA error {resp.status_code}: {resp.text}")
+            resp.raise_for_status()
 
 
 # ── Redis Broadcast ───────────────────────────────────────
