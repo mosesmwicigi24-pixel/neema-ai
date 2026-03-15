@@ -1,14 +1,21 @@
 "use client";
 import React, { useState, useCallback, useEffect } from "react";
+import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
+
+import { useIsMobile } from "@/hooks/useIsMobile";
+import { usePolling } from "@/hooks/useApi";
 
 import {
-    MOCK_CONVERSATIONS,
-    MOCK_MESSAGES,
-    MOCK_AGENTS,
-    MOCK_ORDERS,
-    MOCK_CATALOG,
-} from "@/lib/mockData";
-import { useIsMobile } from "@/hooks/useIsMobile";
+    conversationsApi,
+    agentsApi,
+    catalogApi,
+    ordersApi,
+    mapConversation,
+    mapAgent,
+    mapCatalogItem,
+    mapOrder,
+} from "@/lib/api";
 
 import { Toast } from "@/components/ui/Toast";
 import { Sidebar } from "@/components/ui/Sidebar";
@@ -52,30 +59,98 @@ const Icon = ({ d }: { d: string }) => (
     </svg>
 );
 
+function LoadingScreen() {
+    return (
+        <div className="flex h-screen items-center justify-center bg-stone-50">
+            <div className="text-center">
+                <div className="w-8 h-8 border-2 border-green-700 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                <p className="text-sm text-stone-400">Loading Neema…</p>
+            </div>
+        </div>
+    );
+}
+
 export default function NeemaDashboard(): React.ReactElement {
+    const { data: nextAuthSession, status: authStatus } = useSession();
+    const router = useRouter();
+
     const [theme, setTheme] = useState<ThemeMode>("light");
     const [view, setView] = useState<ViewId>("conversations");
-    const [conversations, setConversations] =
-        useState<Conversation[]>(MOCK_CONVERSATIONS);
-    const [messages, setMessages] = useState<MessagesMap>(MOCK_MESSAGES);
-    const [agents, setAgents] = useState<Agent[]>(MOCK_AGENTS);
-    const [orders, setOrders] = useState<Order[]>(MOCK_ORDERS);
-    const [catalog, setCatalog] = useState<CatalogItem[]>(MOCK_CATALOG);
+    const [messages, setMessages] = useState<MessagesMap>({});
     const [toast, setToast] = useState<ToastState | null>(null);
     const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
     const isMobile = useIsMobile();
 
+    // ── Redirect if unauthenticated ───────────────────────────────────────────
+    useEffect(() => {
+        if (authStatus === "unauthenticated") router.push("/login");
+    }, [authStatus, router]);
+
+    // ── Theme ─────────────────────────────────────────────────────────────────
     useEffect(() => {
         const root = document.documentElement;
         if (theme === "dark") root.classList.add("dark");
         else root.classList.remove("dark");
     }, [theme]);
 
-    const session: Session = {
-        user: { email: "mwicigi@bethanyhouse.co.ke", name: "Moses Mwicigi", role: "admin" },
-    };
-    const isAdmin = session.user.role === "admin";
+    // ── Live data polling (8s interval for real-time feel) ───────────────────
+    const { data: rawConversations, refetch: refetchConversations } =
+        usePolling(() => conversationsApi.list(), 8000);
 
+    const { data: rawAgents, refetch: refetchAgents } = usePolling(
+        () => agentsApi.list(),
+        15000,
+    );
+
+    const { data: rawCatalog, refetch: refetchCatalog } = usePolling(
+        () => catalogApi.list(),
+        30000,
+    );
+
+    const { data: rawOrders, refetch: refetchOrders } = usePolling(
+        () => ordersApi.list(),
+        10000,
+    );
+
+    // ── Map API data to UI types ──────────────────────────────────────────────
+    const conversations: Conversation[] = (rawConversations ?? []).map(
+        mapConversation,
+    );
+    const agents: Agent[] = (rawAgents ?? []).map(mapAgent);
+    const catalog: CatalogItem[] = (rawCatalog ?? []).map(mapCatalogItem);
+    const orders: Order[] = (rawOrders ?? []).map(mapOrder);
+
+    // ── Optimistic setters (update UI immediately, API call in background) ────
+    const setConversations = useCallback(
+        (updater: React.SetStateAction<Conversation[]>) => {
+            // For optimistic updates — refetch shortly after
+            setTimeout(refetchConversations, 1000);
+        },
+        [refetchConversations],
+    );
+
+    const setAgents = useCallback(
+        (updater: React.SetStateAction<Agent[]>) => {
+            setTimeout(refetchAgents, 1000);
+        },
+        [refetchAgents],
+    );
+
+    const setCatalog = useCallback(
+        (updater: React.SetStateAction<CatalogItem[]>) => {
+            setTimeout(refetchCatalog, 1000);
+        },
+        [refetchCatalog],
+    );
+
+    const setOrders = useCallback(
+        (updater: React.SetStateAction<Order[]>) => {
+            setTimeout(refetchOrders, 1000);
+        },
+        [refetchOrders],
+    );
+
+    // ── Toast ─────────────────────────────────────────────────────────────────
     const showToast = useCallback(
         (msg: string, type: ToastType = "success"): void => {
             setToast({ msg, type });
@@ -84,11 +159,29 @@ export default function NeemaDashboard(): React.ReactElement {
         [],
     );
 
+    // ── Session ───────────────────────────────────────────────────────────────
+    const session: Session = {
+        user: {
+            email: (nextAuthSession?.user?.email as string) ?? "",
+            name: (nextAuthSession?.user?.name as string) ?? "",
+            role: ((nextAuthSession as any)?.role ?? "agent") as
+                | "admin"
+                | "agent",
+        },
+    };
+    const isAdmin =
+        session.user.role === "admin" ||
+        agents.find((a) => a.email === session.user.email)?.role === "admin";
+
+    // ── Badges ────────────────────────────────────────────────────────────────
     const humanConvs = conversations.filter(
         (c) => c.intercept_mode === "human",
     ).length;
     const pendingOrders = orders.filter((o) => o.status === "pending").length;
 
+    if (authStatus === "loading") return <LoadingScreen />;
+
+    // ── Nav items ─────────────────────────────────────────────────────────────
     const baseNavItems: NavItem[] = [
         {
             id: "conversations",
@@ -164,19 +257,31 @@ export default function NeemaDashboard(): React.ReactElement {
                 messages={messages}
                 setMessages={setMessages}
                 agents={agents}
+                refetchConversations={refetchConversations}
                 {...viewProps}
             />
         ),
         orders: (
-            <OrdersView orders={orders} setOrders={setOrders} {...viewProps} />
+            <OrdersView
+                orders={orders}
+                setOrders={setOrders}
+                refetchOrders={refetchOrders}
+                {...viewProps}
+            />
         ),
         agents: (
-            <AgentsView agents={agents} setAgents={setAgents} {...viewProps} />
+            <AgentsView
+                agents={agents}
+                setAgents={setAgents}
+                refetchAgents={refetchAgents}
+                {...viewProps}
+            />
         ),
         catalog: (
             <CatalogView
                 catalog={catalog}
                 setCatalog={setCatalog}
+                refetchCatalog={refetchCatalog}
                 {...viewProps}
             />
         ),
@@ -196,6 +301,7 @@ export default function NeemaDashboard(): React.ReactElement {
                 setAgents={setAgents}
                 theme={theme}
                 setTheme={setTheme}
+                refetchAgents={refetchAgents}
                 {...viewProps}
             />
         ),
@@ -205,11 +311,8 @@ export default function NeemaDashboard(): React.ReactElement {
     return (
         <div className="flex h-dvh overflow-hidden bg-stone-50 text-stone-900">
             <style>{`
-        /* ── Font ──────────────────────────────────────── */
         @import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&display=swap');
         * { font-family: 'Geist', system-ui, sans-serif; }
-
-        /* ── Globals ───────────────────────────────────── */
         :root {
           --accent: #15803d;
           --accent-hover: #16a34a;
@@ -218,45 +321,23 @@ export default function NeemaDashboard(): React.ReactElement {
           --text: #1c1917;
           --text-muted: #a8a29e;
         }
-
-        /* ── Scrollbar ─────────────────────────────────── */
         .scrollbar-none::-webkit-scrollbar { display: none; }
         .scrollbar-none { scrollbar-width: none; }
-
-        /* ── Layout ────────────────────────────────────── */
         .h-dvh { height: 100dvh; }
         .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
-
-        /* ── Transitions ───────────────────────────────── */
         @keyframes slideInDown {
           from { opacity: 0; transform: translateY(-8px); }
           to   { opacity: 1; transform: translateY(0); }
         }
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to   { opacity: 1; }
-        }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         .animate-in { animation: fadeIn 0.18s ease; }
-
-        /* ── Focus ring ────────────────────────────────── */
-        *:focus-visible {
-          outline: 2px solid var(--accent);
-          outline-offset: 2px;
-          border-radius: 6px;
-        }
-
-        /* ── Custom input styles ───────────────────────── */
-        input, textarea, select {
-          font-family: inherit;
-        }
-
-        /* ── Smooth hover transitions ──────────────────── */
+        *:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+        input, textarea, select { font-family: inherit; }
         button { transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease, transform 0.15s ease; }
       `}</style>
 
             <Toast toast={toast} isMobile={isMobile} />
 
-            {/* Desktop sidebar */}
             {!isMobile && (
                 <Sidebar
                     navItems={desktopNavItems}
@@ -270,7 +351,6 @@ export default function NeemaDashboard(): React.ReactElement {
                 />
             )}
 
-            {/* Main area */}
             <div className="flex flex-col flex-1 overflow-hidden">
                 {isMobile && (
                     <MobileHeader

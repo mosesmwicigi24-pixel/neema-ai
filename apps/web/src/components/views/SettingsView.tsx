@@ -4,12 +4,15 @@ import { Toggle } from "@/components/ui/Layout";
 import { InputField } from "@/components/ui/FormFields";
 import type { SharedViewProps } from "@/types";
 
+// ── Types ─────────────────────────────────────────────────────────────────────
+
 interface AiSettings {
     auto_intercept_threshold: number;
     draft_approval: boolean;
     response_delay_ms: number;
     escalation_keywords: string;
 }
+
 interface BizSettings {
     business_name: string;
     currency: string;
@@ -17,12 +20,15 @@ interface BizSettings {
     open_hours: string;
     timezone: string;
 }
+
 interface Integration {
     name: string;
     status: "connected" | "disconnected";
     icon: string;
     description: string;
 }
+
+// ── Static data ───────────────────────────────────────────────────────────────
 
 const INTEGRATIONS: Integration[] = [
     {
@@ -75,6 +81,8 @@ const INTEGRATIONS: Integration[] = [
     },
 ];
 
+// ── Sub-components ────────────────────────────────────────────────────────────
+
 function SectionCard({
     title,
     description,
@@ -101,23 +109,82 @@ function SectionCard({
     );
 }
 
+// ── Main component ────────────────────────────────────────────────────────────
+
 export function SettingsView({
     onToast,
     isMobile,
 }: SharedViewProps): React.ReactElement {
+    const [savingBiz, setSavingBiz] = useState(false);
+    const [savingAi, setSavingAi] = useState(false);
+    const [integrations, setIntegrations] =
+        useState<Integration[]>(INTEGRATIONS);
+
     const [ai, setAi] = useState<AiSettings>({
         auto_intercept_threshold: 3,
         draft_approval: true,
         response_delay_ms: 1500,
         escalation_keywords: "refund, complaint, manager, urgent",
     });
+
     const [biz, setBiz] = useState<BizSettings>({
-        business_name: "Neema",
+        business_name: "Bethany House",
         currency: "KES",
         wa_number: "+254712000000",
         open_hours: "08:00–22:00",
         timezone: "Africa/Nairobi",
     });
+
+    // ── Save handlers ─────────────────────────────────────────────────────────
+
+    const saveBiz = async () => {
+        setSavingBiz(true);
+        try {
+            // POST /api/admin/settings/business when endpoint exists
+            // await settingsApi.saveBusiness(biz);
+            await new Promise((r) => setTimeout(r, 600)); // optimistic delay
+            onToast("Business settings saved");
+        } catch {
+            onToast("Failed to save settings", "error");
+        } finally {
+            setSavingBiz(false);
+        }
+    };
+
+    const saveAi = async () => {
+        setSavingAi(true);
+        try {
+            // POST /api/admin/settings/ai when endpoint exists
+            // await settingsApi.saveAi(ai);
+            await new Promise((r) => setTimeout(r, 600));
+            onToast("AI settings saved");
+        } catch {
+            onToast("Failed to save AI settings", "error");
+        } finally {
+            setSavingAi(false);
+        }
+    };
+
+    const toggleIntegration = (name: string) => {
+        setIntegrations((prev) =>
+            prev.map((integ) =>
+                integ.name === name
+                    ? {
+                          ...integ,
+                          status:
+                              integ.status === "connected"
+                                  ? "disconnected"
+                                  : "connected",
+                      }
+                    : integ,
+            ),
+        );
+        const integ = integrations.find((i) => i.name === name);
+        const wasConnected = integ?.status === "connected";
+        onToast(`${name} ${wasConnected ? "disconnected" : "connected"}`);
+    };
+
+    // ── Render ────────────────────────────────────────────────────────────────
 
     return (
         <div
@@ -133,7 +200,7 @@ export function SettingsView({
                 </p>
             </div>
 
-            <div className="space-y-4">
+            <div className="space-y-4 max-w-2xl">
                 {/* Business info */}
                 <SectionCard title="Business Information">
                     <div
@@ -177,10 +244,14 @@ export function SettingsView({
                         />
                     </div>
                     <button
-                        onClick={() => onToast("Business settings saved")}
-                        className="h-9 px-5 rounded-lg text-sm font-semibold text-white bg-green-700 hover:bg-green-600 transition-colors shadow-sm"
+                        onClick={saveBiz}
+                        disabled={savingBiz}
+                        className="h-9 px-5 rounded-lg text-sm font-semibold text-white bg-green-700 hover:bg-green-600 disabled:opacity-60 transition-colors shadow-sm flex items-center gap-2"
                     >
-                        Save Changes
+                        {savingBiz && (
+                            <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        )}
+                        {savingBiz ? "Saving…" : "Save Changes"}
                     </button>
                 </SectionCard>
 
@@ -233,7 +304,8 @@ export function SettingsView({
                                 Require draft approval
                             </div>
                             <div className="text-xs text-stone-400 mt-0.5">
-                                AI drafts must be approved before sending
+                                AI drafts must be approved by an agent before
+                                sending
                             </div>
                         </div>
                         <Toggle
@@ -248,22 +320,78 @@ export function SettingsView({
                     </div>
 
                     <button
-                        onClick={() => onToast("AI settings saved")}
-                        className="h-9 px-5 rounded-lg text-sm font-semibold text-white bg-green-700 hover:bg-green-600 transition-colors shadow-sm"
+                        onClick={saveAi}
+                        disabled={savingAi}
+                        className="h-9 px-5 rounded-lg text-sm font-semibold text-white bg-green-700 hover:bg-green-600 disabled:opacity-60 transition-colors shadow-sm flex items-center gap-2"
                     >
-                        Save AI Settings
+                        {savingAi && (
+                            <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        )}
+                        {savingAi ? "Saving…" : "Save AI Settings"}
                     </button>
+                </SectionCard>
+
+                {/* Danger zone */}
+                <SectionCard
+                    title="Danger Zone"
+                    description="Irreversible actions. Proceed with caution."
+                >
+                    <div className="space-y-3">
+                        <div className="flex items-center justify-between p-3 rounded-lg border border-red-100 bg-red-50">
+                            <div>
+                                <div className="text-sm font-medium text-red-800">
+                                    Clear conversation history
+                                </div>
+                                <div className="text-xs text-red-600 mt-0.5">
+                                    Permanently delete all messages older than
+                                    90 days
+                                </div>
+                            </div>
+                            <button
+                                onClick={() =>
+                                    onToast(
+                                        "This action requires confirmation — coming soon",
+                                        "warning" as any,
+                                    )
+                                }
+                                className="flex-shrink-0 h-8 px-3 rounded-lg text-xs font-semibold bg-red-100 text-red-700 border border-red-200 hover:bg-red-200 transition-colors"
+                            >
+                                Clear
+                            </button>
+                        </div>
+                        <div className="flex items-center justify-between p-3 rounded-lg border border-red-100 bg-red-50">
+                            <div>
+                                <div className="text-sm font-medium text-red-800">
+                                    Reset AI memory
+                                </div>
+                                <div className="text-xs text-red-600 mt-0.5">
+                                    Clear all customer facts and session history
+                                </div>
+                            </div>
+                            <button
+                                onClick={() =>
+                                    onToast(
+                                        "This action requires confirmation — coming soon",
+                                        "warning" as any,
+                                    )
+                                }
+                                className="flex-shrink-0 h-8 px-3 rounded-lg text-xs font-semibold bg-red-100 text-red-700 border border-red-200 hover:bg-red-200 transition-colors"
+                            >
+                                Reset
+                            </button>
+                        </div>
+                    </div>
                 </SectionCard>
 
                 {/* Integrations */}
                 <SectionCard title="Integrations">
                     <div className="divide-y divide-stone-100">
-                        {INTEGRATIONS.map((integ) => {
+                        {integrations.map((integ) => {
                             const isConnected = integ.status === "connected";
                             return (
                                 <div
                                     key={integ.name}
-                                    className="flex items-center justify-between py-3.5 gap-4 group"
+                                    className="flex items-center justify-between py-3.5 gap-4"
                                 >
                                     <div className="flex items-center gap-3 min-w-0">
                                         <div className="w-9 h-9 rounded-xl bg-stone-50 border border-stone-100 flex items-center justify-center text-lg flex-shrink-0">
@@ -295,9 +423,7 @@ export function SettingsView({
                                     </div>
                                     <button
                                         onClick={() =>
-                                            onToast(
-                                                `${integ.name} ${isConnected ? "disconnected" : "connected"}`,
-                                            )
+                                            toggleIntegration(integ.name)
                                         }
                                         className={`flex-shrink-0 h-8 px-3 rounded-lg text-xs font-semibold transition-colors ${
                                             isConnected

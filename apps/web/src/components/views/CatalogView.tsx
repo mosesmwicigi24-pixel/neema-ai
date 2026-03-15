@@ -1,24 +1,33 @@
+// ── CatalogView.tsx ───────────────────────────────────────────────────────────
 import React, { useState } from "react";
 import { Btn } from "@/components/ui/Btn";
 import { Modal } from "@/components/ui/Modal";
 import { InputField } from "@/components/ui/FormFields";
 import { fmtCurrency } from "@/lib/utils";
+import { catalogApi } from "@/lib/api";
 import type { CatalogItem, SharedViewProps } from "@/types";
 
 const catEmoji: Record<string, string> = {
-    Mains: "🍛",
-    Sides: "🌽",
-    Snacks: "🍩",
+    anointing: "🕯️",
+    communion: "🍷",
+    vestments: "👘",
+    trays: "🫙",
+    wine: "🍾",
+    apparel: "👕",
 };
 const catColors: Record<string, string> = {
-    Mains: "from-orange-50 to-green-50",
-    Sides: "from-green-50 to-emerald-50",
-    Snacks: "from-pink-50 to-rose-50",
+    anointing: "from-amber-50 to-yellow-50",
+    communion: "from-red-50 to-rose-50",
+    vestments: "from-purple-50 to-violet-50",
+    trays: "from-stone-50 to-slate-50",
+    wine: "from-red-50 to-pink-50",
+    apparel: "from-blue-50 to-indigo-50",
 };
 
 interface CatalogViewProps extends SharedViewProps {
     catalog: CatalogItem[];
     setCatalog: React.Dispatch<React.SetStateAction<CatalogItem[]>>;
+    refetchCatalog?: () => void;
 }
 
 const EMPTY = {
@@ -35,8 +44,10 @@ export function CatalogView({
     setCatalog,
     onToast,
     isMobile,
+    refetchCatalog,
 }: CatalogViewProps): React.ReactElement {
     const [modal, setModal] = useState(false);
+    const [saving, setSaving] = useState(false);
     const [form, setForm] = useState({ ...EMPTY });
     const [filter, setFilter] = useState("all");
     const [search, setSearch] = useState("");
@@ -51,28 +62,50 @@ export function CatalogView({
             (!search || c.name.toLowerCase().includes(search.toLowerCase())),
     );
 
-    const createItem = () => {
-        setCatalog((cs) => [
-            ...cs,
-            {
-                id: `cat${Date.now()}`,
-                ...form,
+    const createItem = async () => {
+        if (!form.name || !form.price) {
+            onToast("Name and price are required", "error");
+            return;
+        }
+        setSaving(true);
+        try {
+            await catalogApi.create({
+                sku: form.sku,
+                name: form.name,
+                category: form.category,
                 price: parseInt(form.price, 10) || 0,
-            },
-        ]);
-        setModal(false);
-        setForm({ ...EMPTY });
-        onToast("Item added to catalog");
+                description: form.description,
+                in_stock: form.in_stock,
+            });
+            refetchCatalog?.();
+            setModal(false);
+            setForm({ ...EMPTY });
+            onToast("Item added to catalog");
+        } catch (e: any) {
+            onToast(e.message ?? "Failed to add item", "error");
+        } finally {
+            setSaving(false);
+        }
     };
-    const toggleStock = (id: string) => {
-        setCatalog((cs) =>
-            cs.map((c) => (c.id === id ? { ...c, in_stock: !c.in_stock } : c)),
-        );
-        onToast("Stock status updated");
+
+    const toggleStock = async (id: string, current: boolean) => {
+        try {
+            await catalogApi.toggleStock(id, !current);
+            refetchCatalog?.();
+            onToast("Stock status updated");
+        } catch {
+            onToast("Failed to update stock", "error");
+        }
     };
-    const deleteItem = (id: string) => {
-        setCatalog((cs) => cs.filter((c) => c.id !== id));
-        onToast("Item removed", "error");
+
+    const deleteItem = async (id: string) => {
+        try {
+            await catalogApi.delete(id);
+            refetchCatalog?.();
+            onToast("Item removed", "error");
+        } catch {
+            onToast("Failed to remove item", "error");
+        }
     };
 
     const inStockCount = catalog.filter((c) => c.in_stock).length;
@@ -82,7 +115,6 @@ export function CatalogView({
         <div
             className={`flex-1 overflow-y-auto bg-stone-50 ${isMobile ? "p-4 pb-24" : "p-6"}`}
         >
-            {/* Header */}
             <div className="flex items-center justify-between mb-6">
                 <div>
                     <h1 className="text-xl font-bold text-stone-800 tracking-tight">
@@ -125,7 +157,6 @@ export function CatalogView({
                 </button>
             </div>
 
-            {/* Search + category filters */}
             <div className="flex flex-col sm:flex-row gap-2 mb-5">
                 <div className="relative flex-1">
                     <svg
@@ -158,13 +189,12 @@ export function CatalogView({
                         >
                             {cat === "all"
                                 ? "All"
-                                : `${catEmoji[cat] ?? "🍽"} ${cat}`}
+                                : `${catEmoji[cat] ?? "📦"} ${cat}`}
                         </button>
                     ))}
                 </div>
             </div>
 
-            {/* Product grid */}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                 {filtered.map((item) => {
                     const gradient =
@@ -175,13 +205,11 @@ export function CatalogView({
                             key={item.id}
                             className={`group bg-white rounded-xl border border-stone-100 overflow-hidden shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 ${!item.in_stock ? "opacity-60" : ""}`}
                         >
-                            {/* Thumbnail */}
                             <div
                                 className={`h-20 bg-gradient-to-br ${gradient} flex items-center justify-center text-3xl`}
                             >
-                                {catEmoji[item.category] ?? "🍽"}
+                                {catEmoji[item.category] ?? "📦"}
                             </div>
-
                             <div className="p-3">
                                 <div className="flex items-start justify-between gap-1 mb-1">
                                     <span className="text-sm font-semibold text-stone-800 leading-tight">
@@ -199,15 +227,12 @@ export function CatalogView({
                                 <div className="text-sm font-bold text-green-800 mb-3">
                                     {fmtCurrency(item.price)}
                                 </div>
-
                                 <div className="flex items-center gap-1.5">
                                     <button
-                                        onClick={() => toggleStock(item.id)}
-                                        className={`flex-1 h-7 rounded-md text-xs font-medium transition-colors ${
-                                            item.in_stock
-                                                ? "bg-stone-100 text-stone-600 hover:bg-stone-200"
-                                                : "bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100"
-                                        }`}
+                                        onClick={() =>
+                                            toggleStock(item.id, item.in_stock)
+                                        }
+                                        className={`flex-1 h-7 rounded-md text-xs font-medium transition-colors ${item.in_stock ? "bg-stone-100 text-stone-600 hover:bg-stone-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100"}`}
                                     >
                                         {item.in_stock
                                             ? "Mark Out"
@@ -232,7 +257,6 @@ export function CatalogView({
                                         </svg>
                                     </button>
                                 </div>
-
                                 <div className="text-[10px] text-stone-300 font-mono mt-2">
                                     {item.sku}
                                 </div>
@@ -240,16 +264,14 @@ export function CatalogView({
                         </div>
                     );
                 })}
-
                 {filtered.length === 0 && (
                     <div className="col-span-full py-16 text-center">
-                        <span className="text-3xl mb-3 block">🍽</span>
+                        <span className="text-3xl mb-3 block">📦</span>
                         <p className="text-sm text-stone-400">No items found</p>
                     </div>
                 )}
             </div>
 
-            {/* Add item modal */}
             <Modal
                 show={modal}
                 onClose={() => setModal(false)}
@@ -259,27 +281,27 @@ export function CatalogView({
                     label="SKU"
                     value={form.sku}
                     onChange={(v) => setForm((f) => ({ ...f, sku: v }))}
-                    placeholder="JRC-001"
+                    placeholder="BH-001"
                 />
                 <InputField
                     label="Name"
                     value={form.name}
                     onChange={(v) => setForm((f) => ({ ...f, name: v }))}
-                    placeholder="Jollof Rice Combo"
+                    placeholder="Altar Wine 750ml"
                     required
                 />
                 <InputField
                     label="Category"
                     value={form.category}
                     onChange={(v) => setForm((f) => ({ ...f, category: v }))}
-                    placeholder="Mains"
+                    placeholder="wine"
                 />
                 <InputField
                     label="Price (KES)"
                     value={form.price}
                     onChange={(v) => setForm((f) => ({ ...f, price: v }))}
                     type="number"
-                    placeholder="400"
+                    placeholder="1800"
                     required
                 />
                 <InputField
@@ -289,8 +311,12 @@ export function CatalogView({
                     placeholder="Short product description"
                 />
                 <div className="flex gap-2">
-                    <Btn onClick={createItem} variant="primary">
-                        Add Item
+                    <Btn
+                        onClick={createItem}
+                        variant="primary"
+                        disabled={saving}
+                    >
+                        {saving ? "Adding…" : "Add Item"}
                     </Btn>
                     <Btn onClick={() => setModal(false)} variant="outline">
                         Cancel

@@ -1,5 +1,13 @@
 import axios from 'axios';
 import { getSession } from 'next-auth/react';
+import type {
+    Conversation,
+    Message,
+    Agent,
+    Order,
+    CatalogItem,
+    MessagesMap,
+} from "@/types";
 
 export const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL,
@@ -15,41 +23,321 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
-// ── Typed API helpers ─────────────────────────────────────
 
+// ── Base ──────────────────────────────────────────────────────────────────────
+ 
+const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
+ 
+async function authHeaders(): Promise<HeadersInit> {
+    const session = await getSession();
+    const token = (session as any)?.accessToken;
+    return {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+}
+ 
+async function req<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+): Promise<T> {
+    const headers = await authHeaders();
+    const res = await fetch(`${BASE}${path}`, {
+        method,
+        headers,
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    });
+    if (!res.ok) {
+        const err = await res.text();
+        throw new Error(`${method} ${path} → ${res.status}: ${err}`);
+    }
+    // 204 No Content
+    if (res.status === 204) return undefined as T;
+    return res.json();
+}
+ 
+const get = <T>(path: string) => req<T>("GET", path);
+const post = <T>(path: string, body: unknown) => req<T>("POST", path, body);
+const patch = <T>(path: string, body: unknown) => req<T>("PATCH", path, body);
+const del = <T>(path: string) => req<T>("DELETE", path);
+ 
+// ── Conversations ─────────────────────────────────────────────────────────────
+ 
+export interface ApiConversation {
+    id: string;
+    wa_id: string;
+    intercept_mode: "ai" | "human" | "paused";
+    assigned_agent_id: string | null;
+    intercept_since: string | null;
+    last_message_at: string | null;
+    last_message_preview: string | null;
+    status: "open" | "closed";
+    created_at: string;
+    updated_at: string;
+    // joined from agent
+    assigned_agent_name?: string;
+    // unread count from messages
+    unread?: number;
+    // contact name from user table
+    name?: string;
+    channel?: string;
+}
+ 
 export const conversationsApi = {
-  list: (params?: Record<string, string>) =>
-    api.get('/admin/conversations', { params }),
-
-  getThread: (id: string) =>
-    api.get(`/admin/conversations/${id}/messages`),
-
-  intercept: (id: string) =>
-    api.post(`/admin/conversations/${id}/intercept`),
-
-  reply: (id: string, text: string) =>
-    api.post(`/admin/conversations/${id}/reply`, { text }),
-
-  approveDraft: (id: string, text?: string) =>
-    api.post(`/admin/conversations/${id}/approve-draft`, { text }),
-
-  release: (id: string) =>
-    api.post(`/admin/conversations/${id}/release`),
-
-  transfer: (id: string, agentId: string) =>
-    api.post(`/admin/conversations/${id}/transfer`, { agentId }),
+    list: (params?: { mode?: string; status?: string }) => {
+        const q = params
+            ? "?" + new URLSearchParams(params as Record<string, string>).toString()
+            : "";
+        return get<ApiConversation[]>(`/admin/conversations${q}`);
+    },
+    get: (id: string) => get<ApiConversation>(`/admin/conversations/${id}`),
+    messages: (id: string) =>
+        get<Message[]>(`/admin/conversations/${id}/messages`),
+    intercept: (id: string) =>
+        post<ApiConversation>(`/admin/conversations/${id}/intercept`, {}),
+    release: (id: string) =>
+        post<ApiConversation>(`/admin/conversations/${id}/release`, {}),
+    transfer: (id: string, agentId: string) =>
+        post<ApiConversation>(`/admin/conversations/${id}/transfer`, {
+            agent_id: agentId,
+        }),
+    sendReply: (id: string, text: string) =>
+        post<Message>(`/admin/conversations/${id}/reply`, { text }),
+    approveDraft: (id: string) =>
+        post<{ ok: boolean }>(`/admin/conversations/${id}/approve-draft`, {}),
+    close: (id: string) =>
+        post<ApiConversation>(`/admin/conversations/${id}/close`, {}),
 };
-
+ 
+// ── Agents ────────────────────────────────────────────────────────────────────
+ 
+export interface ApiAgent {
+    id: string;
+    name: string;
+    email: string;
+    role: "admin" | "agent" | "readonly";
+    is_available: boolean;
+    is_superuser: boolean;
+    active_convs: number;
+    avatar_url: string | null;
+    created_at: string;
+    last_seen_at: string | null;
+}
+ 
+export interface CreateAgentPayload {
+    name: string;
+    email: string;
+    password: string;
+    role: "admin" | "agent" | "readonly";
+}
+ 
 export const agentsApi = {
-  list:   ()                          => api.get('/admin/agents'),
-  update: (id: string, data: object) => api.patch(`/admin/agents/${id}`, data),
+    list: () => get<ApiAgent[]>("/admin/agents"),
+    get: (id: string) => get<ApiAgent>(`/admin/agents/${id}`),
+    create: (payload: CreateAgentPayload) =>
+        post<ApiAgent>("/admin/agents", payload),
+    update: (
+        id: string,
+        payload: Partial<ApiAgent & { password?: string }>,
+    ) => patch<ApiAgent>(`/admin/agents/${id}`, payload),
+    delete: (id: string) => del<void>(`/admin/agents/${id}`),
+    toggleAvailable: (id: string, is_available: boolean) =>
+        patch<ApiAgent>(`/admin/agents/${id}`, { is_available }),
 };
-
-export const ordersApi = {
-  list: (params?: object) => api.get('/admin/orders', { params }),
-};
-
+ 
+// ── Catalog ───────────────────────────────────────────────────────────────────
+ 
+export interface ApiCatalogItem {
+    id: string;
+    sku: string;
+    name: string;
+    aliases: string[];
+    price: number;
+    unit: string | null;
+    category: string | null;
+    description: string | null;
+    in_stock: boolean;
+    updated_at: string;
+}
+ 
+export interface CreateCatalogPayload {
+    sku: string;
+    name: string;
+    price: number;
+    unit?: string;
+    category?: string;
+    description?: string;
+    aliases?: string[];
+    in_stock?: boolean;
+}
+ 
 export const catalogApi = {
-  list:   ()                          => api.get('/admin/catalog'),
-  update: (id: string, data: object) => api.patch(`/admin/catalog/${id}`, data),
+    list: (params?: { category?: string; search?: string }) => {
+        const q = params
+            ? "?" + new URLSearchParams(params as Record<string, string>).toString()
+            : "";
+        return get<ApiCatalogItem[]>(`/admin/catalog${q}`);
+    },
+    create: (payload: CreateCatalogPayload) =>
+        post<ApiCatalogItem>("/admin/catalog", payload),
+    update: (id: string, payload: Partial<CreateCatalogPayload>) =>
+        patch<ApiCatalogItem>(`/admin/catalog/${id}`, payload),
+    toggleStock: (id: string, in_stock: boolean) =>
+        patch<ApiCatalogItem>(`/admin/catalog/${id}`, { in_stock }),
+    delete: (id: string) => del<void>(`/admin/catalog/${id}`),
 };
+ 
+// ── Orders ────────────────────────────────────────────────────────────────────
+ 
+export interface ApiOrder {
+    id: string;
+    wa_id: string;
+    session_id: string | null;
+    event_type: string | null;
+    items: OrderItem[];
+    subtotal: number;
+    currency: string;
+    status: "open" | "pending" | "confirmed" | "delivered" | "cancelled";
+    payment_status: string;
+    fulfillment_status: string;
+    reply_text: string | null;
+    channel: string;
+    state: Record<string, unknown>;
+    created_at: string;
+    updated_at: string;
+    // joined
+    contact_name?: string;
+    contact_phone?: string;
+}
+ 
+export interface OrderItem {
+    name: string;
+    qty: number;
+    unit: number;
+    total: number;
+    sku?: string;
+}
+ 
+export const ordersApi = {
+    list: (params?: { status?: string; wa_id?: string }) => {
+        const q = params
+            ? "?" + new URLSearchParams(params as Record<string, string>).toString()
+            : "";
+        return get<ApiOrder[]>(`/admin/orders${q}`);
+    },
+    get: (id: string) => get<ApiOrder>(`/admin/orders/${id}`),
+    updateStatus: (
+        id: string,
+        status: string,
+        payment_status?: string,
+        fulfillment_status?: string,
+    ) =>
+        patch<ApiOrder>(`/admin/orders/${id}`, {
+            status,
+            payment_status,
+            fulfillment_status,
+        }),
+};
+ 
+// ── Stats (for Overview) ──────────────────────────────────────────────────────
+ 
+export interface ApiStats {
+    open_conversations: number;
+    human_conversations: number;
+    ai_conversations: number;
+    active_agents: number;
+    total_agents: number;
+    total_revenue: number;
+    total_orders: number;
+    pending_orders: number;
+    delivered_orders: number;
+    confirmed_orders: number;
+    cancelled_orders: number;
+    in_stock_items: number;
+    total_items: number;
+    channel_breakdown: { channel: string; count: number; open: number }[];
+}
+ 
+export const statsApi = {
+    overview: () => get<ApiStats>("/admin/stats"),
+};
+ 
+// ── Profile ───────────────────────────────────────────────────────────────────
+ 
+export const profileApi = {
+    me: () => get<ApiAgent>("/admin/me"),
+    update: (payload: { name?: string; email?: string; password?: string }) =>
+        patch<ApiAgent>("/admin/me", payload),
+};
+ 
+// ── Data mappers (API → UI types) ─────────────────────────────────────────────
+ 
+export function mapConversation(c: ApiConversation): Conversation {
+    return {
+        id: c.id,
+        wa_id: c.wa_id,
+        contact_name: c.name ?? c.wa_id,
+        contact_phone: c.wa_id,
+        last_message: c.last_message_preview ?? "",
+        last_message_at: c.last_message_at ?? c.created_at,
+        intercept_mode: c.intercept_mode,
+        status: c.status,
+        unread_count: c.unread ?? 0,
+        assigned_agent_id: c.assigned_agent_id,
+        channel: (c.channel as any) ?? "whatsapp",
+        // UI extras
+        name: c.name ?? c.wa_id,
+        unread: c.unread ?? 0,
+    } as any;
+}
+ 
+export function mapAgent(a: ApiAgent): Agent {
+    return {
+        id: a.id,
+        name: a.name,
+        email: a.email,
+        role: a.role,
+        is_available: a.is_available,
+        active_convs: a.active_convs,
+        avatar_url: a.avatar_url,
+        created_at: a.created_at,
+        last_seen_at: a.last_seen_at,
+        is_superuser: a.is_superuser,
+        permissions: [],
+    } as any;
+}
+ 
+export function mapCatalogItem(c: ApiCatalogItem): CatalogItem {
+    return {
+        id: c.id,
+        sku: c.sku,
+        name: c.name,
+        aliases: c.aliases,
+        price: c.price,
+        unit: c.unit ?? "",
+        category: c.category ?? "General",
+        description: c.description ?? "",
+        in_stock: c.in_stock,
+    };
+}
+ 
+export function mapOrder(o: ApiOrder): Order {
+    return {
+        id: o.id,
+        contact_name: o.contact_name ?? o.wa_id,
+        contact_phone: o.wa_id,
+        items: (o.items ?? []).map((i) => ({
+            catalog_item_id: i.sku ?? "",
+            name: i.name,
+            quantity: i.qty,
+            unit_price: i.unit,
+        })),
+        total: o.subtotal,
+        subtotal: o.subtotal,
+        status: (o.status === "open" ? "pending" : o.status) as any,
+        created_at: o.created_at,
+        notes: o.reply_text ?? undefined,
+        currency: o.currency,
+    } as any;
+}

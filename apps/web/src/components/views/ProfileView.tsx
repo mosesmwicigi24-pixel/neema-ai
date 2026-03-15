@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Avatar } from "@/components/ui/Avatar";
 import { RoleBadge } from "@/components/ui/Badges";
 import { Btn } from "@/components/ui/Btn";
@@ -6,6 +6,7 @@ import { Toggle } from "@/components/ui/Layout";
 import { InputField } from "@/components/ui/FormFields";
 import { fmtDate } from "@/lib/utils";
 import { ALL_PERMISSIONS } from "@/lib/mockData";
+import { profileApi, agentsApi } from "@/lib/api";
 import type { Agent, Session, ThemeMode, SharedViewProps } from "@/types";
 
 interface ProfileViewProps extends SharedViewProps {
@@ -14,6 +15,7 @@ interface ProfileViewProps extends SharedViewProps {
     setAgents: React.Dispatch<React.SetStateAction<Agent[]>>;
     theme: ThemeMode;
     setTheme: React.Dispatch<React.SetStateAction<ThemeMode>>;
+    refetchAgents?: () => void;
 }
 
 interface NotifSettings {
@@ -31,14 +33,22 @@ export function ProfileView({
     theme,
     setTheme,
     isMobile,
+    refetchAgents,
 }: ProfileViewProps): React.ReactElement {
     const agent =
-        agents.find((a) => a.email === session.user.email) ?? agents[2];
+        agents.find((a) => a.email === session.user.email) ?? agents[0];
     const [editMode, setEditMode] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [changingPassword, setChangingPassword] = useState(false);
     const [form, setForm] = useState({
-        name: agent.name,
-        email: agent.email,
-        department: agent.department ?? "",
+        name: agent?.name ?? "",
+        email: agent?.email ?? "",
+        department: (agent as any)?.department ?? "",
+    });
+    const [passwordForm, setPasswordForm] = useState({
+        current: "",
+        new_: "",
+        confirm: "",
     });
     const [notifs, setNotifs] = useState<NotifSettings>({
         new_conv: true,
@@ -47,314 +57,323 @@ export function ProfileView({
         daily_summary: true,
     });
 
-    const save = () => {
-        setAgents((as) =>
-            as.map((a) => (a.id === agent.id ? { ...a, ...form } : a)),
-        );
-        setEditMode(false);
-        onToast("Profile updated");
+    // Sync form when agent data loads
+    useEffect(() => {
+        if (agent) {
+            setForm({
+                name: agent.name,
+                email: agent.email,
+                department: (agent as any).department ?? "",
+            });
+        }
+    }, [agent?.id]);
+
+    const save = async () => {
+        if (!agent) return;
+        setSaving(true);
+        try {
+            await profileApi.update({ name: form.name, email: form.email });
+            refetchAgents?.();
+            setEditMode(false);
+            onToast("Profile updated");
+        } catch (e: any) {
+            onToast(e.message ?? "Failed to update profile", "error");
+        } finally {
+            setSaving(false);
+        }
     };
 
-    const permKeys = agent.permissions.includes("all")
-        ? ALL_PERMISSIONS.map((p) => p.key)
-        : agent.permissions;
+    const changePassword = async () => {
+        if (passwordForm.new_ !== passwordForm.confirm) {
+            onToast("Passwords don't match", "error");
+            return;
+        }
+        if (passwordForm.new_.length < 8) {
+            onToast("Password must be at least 8 characters", "error");
+            return;
+        }
+        setSaving(true);
+        try {
+            await profileApi.update({ password: passwordForm.new_ });
+            setChangingPassword(false);
+            setPasswordForm({ current: "", new_: "", confirm: "" });
+            onToast("Password changed successfully");
+        } catch (e: any) {
+            onToast(e.message ?? "Failed to change password", "error");
+        } finally {
+            setSaving(false);
+        }
+    };
 
-    const notifItems = [
-        {
-            key: "new_conv" as keyof NotifSettings,
-            label: "New conversation assigned",
-            desc: "When assigned to you",
-        },
-        {
-            key: "human_transfer" as keyof NotifSettings,
-            label: "Human takeover requests",
-            desc: "When AI flags for you",
-        },
-        {
-            key: "order_updates" as keyof NotifSettings,
-            label: "Order status changes",
-            desc: "Confirmations and deliveries",
-        },
-        {
-            key: "daily_summary" as keyof NotifSettings,
-            label: "Daily digest",
-            desc: "End-of-day performance report",
-        },
-    ];
+    const permKeys = agent
+        ? ((agent as any).permissions ?? []).includes("all")
+            ? ALL_PERMISSIONS.map((p) => p.key)
+            : ((agent as any).permissions ?? [])
+        : [];
+
+    if (!agent) {
+        return (
+            <div className="flex-1 flex items-center justify-center">
+                <p className="text-sm text-stone-400">Loading profile…</p>
+            </div>
+        );
+    }
 
     return (
         <div
             className={`flex-1 overflow-y-auto bg-stone-50 ${isMobile ? "p-4 pb-24" : "p-6"}`}
         >
-            {/* Page header */}
             <div className="mb-6">
                 <h1 className="text-xl font-bold text-stone-800 tracking-tight">
-                    My Profile
+                    Profile
                 </h1>
                 <p className="text-sm text-stone-400 mt-0.5">
-                    Manage account, preferences and security
+                    Manage your account and preferences
                 </p>
             </div>
 
-            <div
-                className={`grid gap-5 ${isMobile ? "grid-cols-1" : "grid-cols-[300px_1fr]"}`}
-            >
-                {/* ── Left column ──────────────────────────────────────────── */}
-                <div className="space-y-4">
-                    {/* Profile card */}
-                    <div className="bg-white rounded-xl border border-stone-100 shadow-sm p-5 text-center">
-                        <div className="flex justify-center mb-4">
-                            <div className="relative">
-                                <Avatar name={agent.name} size="xl" />
-                                <div
-                                    className={`absolute bottom-1 right-1 w-3.5 h-3.5 rounded-full ring-2 ring-white ${agent.is_available ? "bg-emerald-500" : "bg-stone-300"}`}
-                                />
-                            </div>
-                        </div>
-                        <h3 className="text-base font-bold text-stone-800 mb-0.5">
-                            {agent.name}
-                        </h3>
-                        <p className="text-sm text-stone-400 mb-3">
-                            {agent.email}
-                        </p>
-                        <div className="flex justify-center gap-2 mb-4">
-                            <RoleBadge role={agent.role} />
-                            {agent.department && (
-                                <span className="text-xs bg-stone-100 text-stone-500 px-2 py-0.5 rounded-md">
-                                    {agent.department}
-                                </span>
-                            )}
-                        </div>
-                        <div className="border-t border-stone-100 pt-4 grid grid-cols-2 gap-2">
-                            {(
-                                [
-                                    ["Active convs", agent.active_convs],
-                                    [
-                                        "Member since",
-                                        agent.joined_at
-                                            ? fmtDate(agent.joined_at)
-                                            : "—",
-                                    ],
-                                ] as [string, string | number][]
-                            ).map(([k, v]) => (
-                                <div
-                                    key={k}
-                                    className="bg-stone-50 rounded-lg p-3"
+            <div className="space-y-4 max-w-2xl">
+                {/* Profile card */}
+                <div className="bg-white rounded-xl border border-stone-100 shadow-sm p-5">
+                    <div className="flex items-start gap-4 mb-5">
+                        <Avatar name={agent.name} size={56} />
+                        <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                                <h2 className="text-base font-bold text-stone-800">
+                                    {agent.name}
+                                </h2>
+                                <span
+                                    className={`text-xs px-2 py-0.5 rounded-full font-semibold capitalize border ${
+                                        agent.role === "admin"
+                                            ? "bg-purple-100 text-purple-700 border-purple-200"
+                                            : "bg-stone-100 text-stone-600 border-stone-200"
+                                    }`}
                                 >
-                                    <div className="text-xs text-stone-400 mb-1">
-                                        {k}
-                                    </div>
-                                    <div className="text-sm font-bold text-stone-800">
-                                        {v}
-                                    </div>
-                                </div>
-                            ))}
+                                    {agent.role}
+                                </span>
+                            </div>
+                            <p className="text-sm text-stone-400">
+                                {agent.email}
+                            </p>
+                            <p className="text-xs text-stone-400 mt-1">
+                                Joined{" "}
+                                {agent.created_at
+                                    ? fmtDate(agent.created_at)
+                                    : "—"}
+                                {agent.last_seen_at && (
+                                    <>
+                                        {" "}
+                                        · Last active{" "}
+                                        {fmtDate(agent.last_seen_at)}
+                                    </>
+                                )}
+                            </p>
                         </div>
+                        <Btn
+                            onClick={() => setEditMode(!editMode)}
+                            variant={editMode ? "outline" : "secondary"}
+                            small
+                        >
+                            {editMode ? "Cancel" : "Edit"}
+                        </Btn>
                     </div>
 
-                    {/* Permissions */}
-                    <div className="bg-white rounded-xl border border-stone-100 shadow-sm p-5">
-                        <h4 className="text-xs font-semibold text-stone-400 uppercase tracking-wider mb-3">
-                            Your Permissions
-                        </h4>
-                        <div className="space-y-1">
-                            {permKeys.map((perm) => (
-                                <div
-                                    key={perm}
-                                    className="flex items-center gap-2 py-1"
+                    {editMode && (
+                        <div className="border-t border-stone-100 pt-4 space-y-3">
+                            <InputField
+                                label="Full Name"
+                                value={form.name}
+                                onChange={(v) =>
+                                    setForm((f) => ({ ...f, name: v }))
+                                }
+                            />
+                            <InputField
+                                label="Email"
+                                value={form.email}
+                                onChange={(v) =>
+                                    setForm((f) => ({ ...f, email: v }))
+                                }
+                            />
+                            <InputField
+                                label="Department"
+                                value={form.department}
+                                onChange={(v) =>
+                                    setForm((f) => ({ ...f, department: v }))
+                                }
+                                placeholder="Sales, Support…"
+                            />
+                            <div className="flex gap-2">
+                                <Btn
+                                    onClick={save}
+                                    variant="primary"
+                                    disabled={saving}
                                 >
-                                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
-                                    <span className="text-xs text-stone-500">
-                                        {ALL_PERMISSIONS.find(
-                                            (p) => p.key === perm,
-                                        )?.label ?? perm}
-                                    </span>
-                                </div>
-                            ))}
+                                    {saving ? "Saving…" : "Save Changes"}
+                                </Btn>
+                                <Btn
+                                    onClick={() => setEditMode(false)}
+                                    variant="outline"
+                                >
+                                    Cancel
+                                </Btn>
+                            </div>
                         </div>
+                    )}
+                </div>
+
+                {/* Change password */}
+                <div className="bg-white rounded-xl border border-stone-100 shadow-sm p-5">
+                    <div className="flex items-center justify-between mb-4">
+                        <div>
+                            <h3 className="text-sm font-semibold text-stone-800">
+                                Password
+                            </h3>
+                            <p className="text-xs text-stone-400 mt-0.5">
+                                Change your login password
+                            </p>
+                        </div>
+                        <Btn
+                            onClick={() =>
+                                setChangingPassword(!changingPassword)
+                            }
+                            variant="secondary"
+                            small
+                        >
+                            {changingPassword ? "Cancel" : "Change"}
+                        </Btn>
+                    </div>
+                    {changingPassword && (
+                        <div className="space-y-3">
+                            <InputField
+                                label="New Password"
+                                value={passwordForm.new_}
+                                onChange={(v) =>
+                                    setPasswordForm((f) => ({ ...f, new_: v }))
+                                }
+                                type="password"
+                                placeholder="Minimum 8 characters"
+                            />
+                            <InputField
+                                label="Confirm Password"
+                                value={passwordForm.confirm}
+                                onChange={(v) =>
+                                    setPasswordForm((f) => ({
+                                        ...f,
+                                        confirm: v,
+                                    }))
+                                }
+                                type="password"
+                            />
+                            <Btn
+                                onClick={changePassword}
+                                variant="primary"
+                                disabled={saving}
+                            >
+                                {saving ? "Changing…" : "Change Password"}
+                            </Btn>
+                        </div>
+                    )}
+                </div>
+
+                {/* Appearance */}
+                <div className="bg-white rounded-xl border border-stone-100 shadow-sm p-5">
+                    <h3 className="text-sm font-semibold text-stone-800 mb-4">
+                        Appearance
+                    </h3>
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <div className="text-sm font-medium text-stone-800">
+                                Dark Mode
+                            </div>
+                            <div className="text-xs text-stone-400 mt-0.5">
+                                Switch to dark theme
+                            </div>
+                        </div>
+                        <Toggle
+                            checked={theme === "dark"}
+                            onChange={() =>
+                                setTheme(theme === "dark" ? "light" : "dark")
+                            }
+                        />
                     </div>
                 </div>
 
-                {/* ── Right column ─────────────────────────────────────────── */}
-                <div className="space-y-4">
-                    {/* Account info */}
-                    <div className="bg-white rounded-xl border border-stone-100 shadow-sm p-5">
-                        <div className="flex items-center justify-between mb-4">
-                            <h4 className="text-sm font-semibold text-stone-800">
-                                Account Information
-                            </h4>
-                            {!editMode && (
-                                <button
-                                    onClick={() => setEditMode(true)}
-                                    className="h-7 px-3 rounded-md text-xs font-medium text-stone-600 bg-stone-100 hover:bg-stone-200 transition-colors"
-                                >
-                                    Edit
-                                </button>
-                            )}
-                        </div>
-
-                        {editMode ? (
-                            <>
-                                <InputField
-                                    label="Full Name"
-                                    value={form.name}
-                                    onChange={(v) =>
-                                        setForm((f) => ({ ...f, name: v }))
-                                    }
-                                />
-                                <InputField
-                                    label="Email"
-                                    value={form.email}
-                                    onChange={(v) =>
-                                        setForm((f) => ({ ...f, email: v }))
-                                    }
-                                    type="email"
-                                />
-                                <InputField
-                                    label="Department"
-                                    value={form.department}
-                                    onChange={(v) =>
-                                        setForm((f) => ({
-                                            ...f,
-                                            department: v,
+                {/* Notifications */}
+                <div className="bg-white rounded-xl border border-stone-100 shadow-sm p-5">
+                    <h3 className="text-sm font-semibold text-stone-800 mb-4">
+                        Notifications
+                    </h3>
+                    <div className="space-y-4">
+                        {(
+                            [
+                                {
+                                    key: "new_conv",
+                                    label: "New conversations",
+                                    desc: "Alert when a new chat arrives",
+                                },
+                                {
+                                    key: "human_transfer",
+                                    label: "Human transfers",
+                                    desc: "Alert when a conversation is transferred to you",
+                                },
+                                {
+                                    key: "order_updates",
+                                    label: "Order updates",
+                                    desc: "Notify on order status changes",
+                                },
+                                {
+                                    key: "daily_summary",
+                                    label: "Daily summary",
+                                    desc: "Morning digest of activity",
+                                },
+                            ] as const
+                        ).map((item) => (
+                            <div
+                                key={item.key}
+                                className="flex items-center justify-between"
+                            >
+                                <div>
+                                    <div className="text-sm font-medium text-stone-800">
+                                        {item.label}
+                                    </div>
+                                    <div className="text-xs text-stone-400 mt-0.5">
+                                        {item.desc}
+                                    </div>
+                                </div>
+                                <Toggle
+                                    checked={notifs[item.key]}
+                                    onChange={() =>
+                                        setNotifs((n) => ({
+                                            ...n,
+                                            [item.key]: !n[item.key],
                                         }))
                                     }
-                                    placeholder="e.g. Support"
                                 />
-                                <div className="flex gap-2">
-                                    <Btn
-                                        onClick={save}
-                                        variant="primary"
-                                        size="sm"
-                                    >
-                                        Save Changes
-                                    </Btn>
-                                    <Btn
-                                        onClick={() => setEditMode(false)}
-                                        variant="outline"
-                                        size="sm"
-                                    >
-                                        Cancel
-                                    </Btn>
-                                </div>
-                            </>
-                        ) : (
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                                {(
-                                    [
-                                        ["Name", agent.name],
-                                        ["Email", agent.email],
-                                        ["Department", agent.department || "—"],
-                                    ] as [string, string][]
-                                ).map(([k, v]) => (
-                                    <div
-                                        key={k}
-                                        className="bg-stone-50 rounded-lg p-3"
-                                    >
-                                        <div className="text-xs text-stone-400 mb-1">
-                                            {k}
-                                        </div>
-                                        <div className="text-sm text-stone-800 font-medium truncate">
-                                            {v}
-                                        </div>
-                                    </div>
-                                ))}
                             </div>
-                        )}
+                        ))}
                     </div>
+                </div>
 
-                    {/* Appearance */}
-                    <div className="bg-white rounded-xl border border-stone-100 shadow-sm p-5">
-                        <h4 className="text-sm font-semibold text-stone-800 mb-4">
-                            Appearance
-                        </h4>
-                        <div className="grid grid-cols-2 gap-3">
-                            {(["light", "dark"] as ThemeMode[]).map((t) => (
-                                <button
-                                    key={t}
-                                    onClick={() => setTheme(t)}
-                                    className={`p-4 rounded-xl border-2 transition-all text-left ${theme === t ? "border-green-600 bg-green-50 shadow-sm" : "border-stone-200 hover:border-stone-300"}`}
-                                >
-                                    {/* Preview */}
-                                    <div
-                                        className={`w-full h-10 rounded-lg mb-3 flex items-start gap-1.5 p-2 overflow-hidden ${t === "light" ? "bg-white border border-stone-200" : "bg-stone-900 border border-stone-700"}`}
-                                    >
-                                        <div
-                                            className={`w-12 h-1.5 rounded-full mt-0.5 ${t === "light" ? "bg-stone-200" : "bg-stone-700"}`}
-                                        />
-                                        <div
-                                            className={`w-7 h-1.5 rounded-full mt-0.5 ${t === "light" ? "bg-green-500" : "bg-green-700"}`}
-                                        />
-                                    </div>
-                                    <div
-                                        className={`text-sm font-semibold capitalize ${theme === t ? "text-green-900" : "text-stone-500"}`}
-                                    >
-                                        {t}{" "}
-                                        {theme === t && (
-                                            <span className="text-green-700">
-                                                ✓
-                                            </span>
-                                        )}
-                                    </div>
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* Notifications */}
-                    <div className="bg-white rounded-xl border border-stone-100 shadow-sm p-5">
-                        <h4 className="text-sm font-semibold text-stone-800 mb-4">
-                            Notifications
-                        </h4>
-                        <div className="divide-y divide-stone-100">
-                            {notifItems.map((item) => (
+                {/* Permissions */}
+                <div className="bg-white rounded-xl border border-stone-100 shadow-sm p-5">
+                    <h3 className="text-sm font-semibold text-stone-800 mb-4">
+                        Your Permissions
+                    </h3>
+                    <div className="grid grid-cols-2 gap-2">
+                        {ALL_PERMISSIONS.map((p) => {
+                            const has = permKeys.includes(p.key);
+                            return (
                                 <div
-                                    key={item.key}
-                                    className="flex items-center justify-between py-3 gap-3"
+                                    key={p.key}
+                                    className={`flex items-center gap-2 p-2.5 rounded-lg border text-xs ${has ? "bg-green-50 border-green-200 text-green-800" : "bg-stone-50 border-stone-200 text-stone-400"}`}
                                 >
-                                    <div>
-                                        <div className="text-sm font-medium text-stone-700">
-                                            {item.label}
-                                        </div>
-                                        <div className="text-xs text-stone-400 mt-0.5">
-                                            {item.desc}
-                                        </div>
-                                    </div>
-                                    <Toggle
-                                        checked={notifs[item.key]}
-                                        onChange={() =>
-                                            setNotifs((s) => ({
-                                                ...s,
-                                                [item.key]: !s[item.key],
-                                            }))
-                                        }
+                                    <div
+                                        className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${has ? "bg-green-500" : "bg-stone-300"}`}
                                     />
+                                    {p.label}
                                 </div>
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* Security */}
-                    <div className="bg-white rounded-xl border border-stone-100 shadow-sm p-5">
-                        <h4 className="text-sm font-semibold text-stone-800 mb-4">
-                            Security
-                        </h4>
-                        <div className="flex gap-2 flex-wrap">
-                            <button
-                                onClick={() =>
-                                    onToast("Password reset email sent")
-                                }
-                                className="h-9 px-4 rounded-lg text-sm font-medium text-stone-700 bg-stone-100 hover:bg-stone-200 transition-colors border border-stone-200"
-                            >
-                                Change Password
-                            </button>
-                            <button
-                                onClick={() => onToast("2FA setup initiated")}
-                                className="h-9 px-4 rounded-lg text-sm font-medium text-white bg-stone-800 hover:bg-stone-700 transition-colors shadow-sm"
-                            >
-                                Enable 2FA
-                            </button>
-                        </div>
+                            );
+                        })}
                     </div>
                 </div>
             </div>
