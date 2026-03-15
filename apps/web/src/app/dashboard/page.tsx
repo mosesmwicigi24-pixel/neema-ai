@@ -81,6 +81,8 @@ export default function NeemaDashboard(): React.ReactElement {
     const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
     const isMobile = useIsMobile();
 
+    const isAuthenticated = authStatus === "authenticated";
+
     // ── Redirect if unauthenticated ───────────────────────────────────────────
     useEffect(() => {
         if (authStatus === "unauthenticated") router.push("/login");
@@ -93,23 +95,43 @@ export default function NeemaDashboard(): React.ReactElement {
         else root.classList.remove("dark");
     }, [theme]);
 
-    // ── Live data polling (8s interval for real-time feel) ───────────────────
+    // ── Store token on window so api.ts reads it without calling getSession() ─
+    useEffect(() => {
+        if (isAuthenticated) {
+            const token = (nextAuthSession as any)?.accessToken;
+            if (token && typeof window !== "undefined") {
+                (window as any).__neema_token = token;
+            }
+        }
+    }, [isAuthenticated, nextAuthSession]);
+
+    // ── Live data polling — gated behind authentication ───────────────────────
     const { data: rawConversations, refetch: refetchConversations } =
-        usePolling(() => conversationsApi.list(), 8000);
+        usePolling(
+            () =>
+                isAuthenticated
+                    ? conversationsApi.list()
+                    : Promise.resolve(null),
+            8000,
+            [isAuthenticated],
+        );
 
     const { data: rawAgents, refetch: refetchAgents } = usePolling(
-        () => agentsApi.list(),
+        () => (isAuthenticated ? agentsApi.list() : Promise.resolve(null)),
         15000,
+        [isAuthenticated],
     );
 
     const { data: rawCatalog, refetch: refetchCatalog } = usePolling(
-        () => catalogApi.list(),
+        () => (isAuthenticated ? catalogApi.list() : Promise.resolve(null)),
         30000,
+        [isAuthenticated],
     );
 
     const { data: rawOrders, refetch: refetchOrders } = usePolling(
-        () => ordersApi.list(),
+        () => (isAuthenticated ? ordersApi.list() : Promise.resolve(null)),
         10000,
+        [isAuthenticated],
     );
 
     // ── Map API data to UI types ──────────────────────────────────────────────
@@ -120,31 +142,27 @@ export default function NeemaDashboard(): React.ReactElement {
     const catalog: CatalogItem[] = (rawCatalog ?? []).map(mapCatalogItem);
     const orders: Order[] = (rawOrders ?? []).map(mapOrder);
 
-    // ── Optimistic setters (update UI immediately, API call in background) ────
+    // ── Optimistic setters ────────────────────────────────────────────────────
     const setConversations = useCallback(
-        (updater: React.SetStateAction<Conversation[]>) => {
-            // For optimistic updates — refetch shortly after
+        (_updater: React.SetStateAction<Conversation[]>) => {
             setTimeout(refetchConversations, 1000);
         },
         [refetchConversations],
     );
-
     const setAgents = useCallback(
-        (updater: React.SetStateAction<Agent[]>) => {
+        (_updater: React.SetStateAction<Agent[]>) => {
             setTimeout(refetchAgents, 1000);
         },
         [refetchAgents],
     );
-
     const setCatalog = useCallback(
-        (updater: React.SetStateAction<CatalogItem[]>) => {
+        (_updater: React.SetStateAction<CatalogItem[]>) => {
             setTimeout(refetchCatalog, 1000);
         },
         [refetchCatalog],
     );
-
     const setOrders = useCallback(
-        (updater: React.SetStateAction<Order[]>) => {
+        (_updater: React.SetStateAction<Order[]>) => {
             setTimeout(refetchOrders, 1000);
         },
         [refetchOrders],
@@ -169,6 +187,7 @@ export default function NeemaDashboard(): React.ReactElement {
                 | "agent",
         },
     };
+
     const isAdmin =
         session.user.role === "admin" ||
         agents.find((a) => a.email === session.user.email)?.role === "admin";
@@ -181,7 +200,7 @@ export default function NeemaDashboard(): React.ReactElement {
 
     if (authStatus === "loading") return <LoadingScreen />;
 
-    // ── Nav items ─────────────────────────────────────────────────────────────
+    // ── Nav ───────────────────────────────────────────────────────────────────
     const baseNavItems: NavItem[] = [
         {
             id: "conversations",
@@ -313,22 +332,11 @@ export default function NeemaDashboard(): React.ReactElement {
             <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&display=swap');
         * { font-family: 'Geist', system-ui, sans-serif; }
-        :root {
-          --accent: #15803d;
-          --accent-hover: #16a34a;
-          --surface: #ffffff;
-          --border: #f1f0ef;
-          --text: #1c1917;
-          --text-muted: #a8a29e;
-        }
+        :root { --accent: #15803d; --accent-hover: #16a34a; --surface: #ffffff; --border: #f1f0ef; --text: #1c1917; --text-muted: #a8a29e; }
         .scrollbar-none::-webkit-scrollbar { display: none; }
         .scrollbar-none { scrollbar-width: none; }
         .h-dvh { height: 100dvh; }
         .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
-        @keyframes slideInDown {
-          from { opacity: 0; transform: translateY(-8px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         .animate-in { animation: fadeIn 0.18s ease; }
         *:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
@@ -360,14 +368,12 @@ export default function NeemaDashboard(): React.ReactElement {
                         setTheme={setTheme}
                     />
                 )}
-
                 <main
                     className="flex flex-1 overflow-hidden"
                     style={{ marginTop: isMobile ? 56 : 0 }}
                 >
                     {viewComponents[view]}
                 </main>
-
                 {isMobile && (
                     <MobileBottomNav
                         navItems={baseNavItems}

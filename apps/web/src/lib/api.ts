@@ -1,5 +1,5 @@
-import axios from 'axios';
-import { getSession } from 'next-auth/react';
+import axios from "axios";
+import { getSession } from "next-auth/react";
 import type {
     Conversation,
     Message,
@@ -10,33 +10,53 @@ import type {
 } from "@/types";
 
 export const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL,
-  withCredentials: true,
+    baseURL: process.env.NEXT_PUBLIC_API_URL,
+    withCredentials: true,
 });
 
 // Auto-attach JWT from NextAuth session
-api.interceptors.request.use(async (config) => {
-  const session = await getSession();
-  if (session?.accessToken) {
-    config.headers.Authorization = `Bearer ${session.accessToken}`;
-  }
-  return config;
-});
-
+// api.interceptors.request.use(async (config) => {
+//   const session = await getSession();
+//   if (session?.accessToken) {
+//     config.headers.Authorization = `Bearer ${session.accessToken}`;
+//   }
+//   return config;
+// });
 
 // ── Base ──────────────────────────────────────────────────────────────────────
- 
+
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
- 
+
 async function authHeaders(): Promise<HeadersInit> {
-    const session = await getSession();
-    const token = (session as any)?.accessToken;
+    let token: string | undefined;
+
+    // Read token stored on window by page.tsx after auth
+    // This avoids calling getSession() outside React context which causes CLIENT_FETCH_ERROR
+    if (typeof window !== "undefined") {
+        token = (window as any).__neema_token;
+    }
+
+    // Fallback: try getSession if token not yet on window
+    if (!token) {
+        try {
+            const { getSession } = await import("next-auth/react");
+            const session = await getSession();
+            token = (session as any)?.accessToken;
+            // Cache it for subsequent calls
+            if (token && typeof window !== "undefined") {
+                (window as any).__neema_token = token;
+            }
+        } catch {
+            // Not in browser context — proceed without token
+        }
+    }
+
     return {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
     };
 }
- 
+
 async function req<T>(
     method: string,
     path: string,
@@ -46,24 +66,24 @@ async function req<T>(
     const res = await fetch(`${BASE}${path}`, {
         method,
         headers,
+        credentials: "include",   // ← add this
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
     if (!res.ok) {
         const err = await res.text();
         throw new Error(`${method} ${path} → ${res.status}: ${err}`);
     }
-    // 204 No Content
     if (res.status === 204) return undefined as T;
     return res.json();
 }
- 
+
 const get = <T>(path: string) => req<T>("GET", path);
 const post = <T>(path: string, body: unknown) => req<T>("POST", path, body);
 const patch = <T>(path: string, body: unknown) => req<T>("PATCH", path, body);
 const del = <T>(path: string) => req<T>("DELETE", path);
- 
+
 // ── Conversations ─────────────────────────────────────────────────────────────
- 
+
 export interface ApiConversation {
     id: string;
     wa_id: string;
@@ -83,11 +103,12 @@ export interface ApiConversation {
     name?: string;
     channel?: string;
 }
- 
+
 export const conversationsApi = {
     list: (params?: { mode?: string; status?: string }) => {
         const q = params
-            ? "?" + new URLSearchParams(params as Record<string, string>).toString()
+            ? "?" +
+              new URLSearchParams(params as Record<string, string>).toString()
             : "";
         return get<ApiConversation[]>(`/admin/conversations${q}`);
     },
@@ -109,9 +130,9 @@ export const conversationsApi = {
     close: (id: string) =>
         post<ApiConversation>(`/admin/conversations/${id}/close`, {}),
 };
- 
+
 // ── Agents ────────────────────────────────────────────────────────────────────
- 
+
 export interface ApiAgent {
     id: string;
     name: string;
@@ -124,30 +145,28 @@ export interface ApiAgent {
     created_at: string;
     last_seen_at: string | null;
 }
- 
+
 export interface CreateAgentPayload {
     name: string;
     email: string;
     password: string;
     role: "admin" | "agent" | "readonly";
 }
- 
+
 export const agentsApi = {
     list: () => get<ApiAgent[]>("/admin/agents"),
     get: (id: string) => get<ApiAgent>(`/admin/agents/${id}`),
     create: (payload: CreateAgentPayload) =>
         post<ApiAgent>("/admin/agents", payload),
-    update: (
-        id: string,
-        payload: Partial<ApiAgent & { password?: string }>,
-    ) => patch<ApiAgent>(`/admin/agents/${id}`, payload),
+    update: (id: string, payload: Partial<ApiAgent & { password?: string }>) =>
+        patch<ApiAgent>(`/admin/agents/${id}`, payload),
     delete: (id: string) => del<void>(`/admin/agents/${id}`),
     toggleAvailable: (id: string, is_available: boolean) =>
         patch<ApiAgent>(`/admin/agents/${id}`, { is_available }),
 };
- 
+
 // ── Catalog ───────────────────────────────────────────────────────────────────
- 
+
 export interface ApiCatalogItem {
     id: string;
     sku: string;
@@ -160,7 +179,7 @@ export interface ApiCatalogItem {
     in_stock: boolean;
     updated_at: string;
 }
- 
+
 export interface CreateCatalogPayload {
     sku: string;
     name: string;
@@ -171,11 +190,12 @@ export interface CreateCatalogPayload {
     aliases?: string[];
     in_stock?: boolean;
 }
- 
+
 export const catalogApi = {
     list: (params?: { category?: string; search?: string }) => {
         const q = params
-            ? "?" + new URLSearchParams(params as Record<string, string>).toString()
+            ? "?" +
+              new URLSearchParams(params as Record<string, string>).toString()
             : "";
         return get<ApiCatalogItem[]>(`/admin/catalog${q}`);
     },
@@ -187,9 +207,9 @@ export const catalogApi = {
         patch<ApiCatalogItem>(`/admin/catalog/${id}`, { in_stock }),
     delete: (id: string) => del<void>(`/admin/catalog/${id}`),
 };
- 
+
 // ── Orders ────────────────────────────────────────────────────────────────────
- 
+
 export interface ApiOrder {
     id: string;
     wa_id: string;
@@ -210,7 +230,7 @@ export interface ApiOrder {
     contact_name?: string;
     contact_phone?: string;
 }
- 
+
 export interface OrderItem {
     name: string;
     qty: number;
@@ -218,11 +238,12 @@ export interface OrderItem {
     total: number;
     sku?: string;
 }
- 
+
 export const ordersApi = {
     list: (params?: { status?: string; wa_id?: string }) => {
         const q = params
-            ? "?" + new URLSearchParams(params as Record<string, string>).toString()
+            ? "?" +
+              new URLSearchParams(params as Record<string, string>).toString()
             : "";
         return get<ApiOrder[]>(`/admin/orders${q}`);
     },
@@ -239,9 +260,9 @@ export const ordersApi = {
             fulfillment_status,
         }),
 };
- 
+
 // ── Stats (for Overview) ──────────────────────────────────────────────────────
- 
+
 export interface ApiStats {
     open_conversations: number;
     human_conversations: number;
@@ -258,21 +279,21 @@ export interface ApiStats {
     total_items: number;
     channel_breakdown: { channel: string; count: number; open: number }[];
 }
- 
+
 export const statsApi = {
     overview: () => get<ApiStats>("/admin/stats"),
 };
- 
+
 // ── Profile ───────────────────────────────────────────────────────────────────
- 
+
 export const profileApi = {
     me: () => get<ApiAgent>("/admin/me"),
     update: (payload: { name?: string; email?: string; password?: string }) =>
         patch<ApiAgent>("/admin/me", payload),
 };
- 
+
 // ── Data mappers (API → UI types) ─────────────────────────────────────────────
- 
+
 export function mapConversation(c: ApiConversation): Conversation {
     return {
         id: c.id,
@@ -291,7 +312,7 @@ export function mapConversation(c: ApiConversation): Conversation {
         unread: c.unread ?? 0,
     } as any;
 }
- 
+
 export function mapAgent(a: ApiAgent): Agent {
     return {
         id: a.id,
@@ -307,7 +328,7 @@ export function mapAgent(a: ApiAgent): Agent {
         permissions: [],
     } as any;
 }
- 
+
 export function mapCatalogItem(c: ApiCatalogItem): CatalogItem {
     return {
         id: c.id,
@@ -321,7 +342,7 @@ export function mapCatalogItem(c: ApiCatalogItem): CatalogItem {
         in_stock: c.in_stock,
     };
 }
- 
+
 export function mapOrder(o: ApiOrder): Order {
     return {
         id: o.id,
