@@ -110,6 +110,22 @@ async def get_context(db: AsyncSession, redis, wa_id: str) -> dict:
     await redis.setex(cache_key, 3600, json.dumps(ctx))
     return ctx
 
+# ── Get User ──────────────────────────────────────────────
+
+async def get_user(db: AsyncSession, wa_id: str) -> dict:
+    result = await db.execute(select(User).where(User.wa_id == wa_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        return {"found": False, "wa_id": wa_id}
+    return {
+        "found": True,
+        "id": str(user.id),
+        "wa_id": user.wa_id,
+        "phone": user.phone,
+        "last_text": user.last_text,
+        "last_direction": user.last_direction,
+        "state": user.state,
+    }
 
 # ── Upsert User ───────────────────────────────────────────
 

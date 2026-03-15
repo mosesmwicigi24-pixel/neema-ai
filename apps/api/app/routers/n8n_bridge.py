@@ -55,6 +55,10 @@ async def upsert_user(body: UserDto, db: AsyncSession = Depends(get_db)):
 async def save_user_facts(body: UserFactsDto, db: AsyncSession = Depends(get_db)):
     return await svc.save_user_facts(db, body)
 
+@router.get("/user/{wa_id}", dependencies=[Depends(verify_n8n_secret)])
+async def get_user(wa_id: str, db: AsyncSession = Depends(get_db)):
+    return await svc.get_user(db, wa_id)
+
 
 # ── Orders ────────────────────────────────────────────────
 @router.post("/order-event", dependencies=[Depends(verify_n8n_secret)])
