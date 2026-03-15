@@ -185,20 +185,46 @@ async def upsert_message(db: AsyncSession, body) -> dict:
 # ── Patch Message ─────────────────────────────────────────
 
 async def patch_message(db: AsyncSession, docid: str, body) -> dict:
-    result = await db.execute(
-        select(Message).where(Message.id == docid)
-    )
+    from sqlalchemy import and_
+
+    # Try UUID lookup first
+    try:
+        import uuid
+        uuid.UUID(docid)
+        result = await db.execute(
+            select(Message).where(Message.id == docid)
+        )
+    except ValueError:
+        # docid is not a UUID — it's a Firestore-style ID like {wa_id}_{ts_ms}
+        # Extract wa_id and ts_ms from the docid
+        parts = docid.rsplit("_", 1)
+        if len(parts) == 2:
+            wa_id, ts_ms = parts[0], parts[1]
+            result = await db.execute(
+                select(Message).where(
+                    and_(
+                        Message.wa_id == wa_id,
+                        Message.ts_ms == int(ts_ms),
+                    )
+                )
+            )
+        else:
+            return {"ok": False, "error": f"Invalid docid format: {docid}"}
+
     msg = result.scalar_one_or_none()
     if not msg:
-        return {"ok": False, "error": f"Message {docid} not found"}
+        # Message not found — not an error, just skip
+        return {"ok": True, "skipped": True, "docid": docid}
+
     if body.inbound_text is not None:
         msg.text = body.inbound_text
     if body.outbound_text is not None:
         msg.text = body.outbound_text
     if body.direction is not None:
         msg.direction = body.direction
+
     await db.commit()
-    return {"ok": True, "message_id": docid}
+    return {"ok": True, "message_id": str(msg.id)}
 
 
 # ── Touch Session ─────────────────────────────────────────
