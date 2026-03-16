@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
+import { signOut } from "next-auth/react";
 import { Avatar } from "@/components/ui/Avatar";
 import { cn } from "@/lib/utils";
 import type { NavItem, Session, ThemeMode, ViewId } from "@/types";
@@ -15,6 +16,68 @@ interface SidebarProps {
     onLogout?: () => void;
 }
 
+// ── Keyboard trap for dropdown ────────────────────────────────────────────────
+function useClickOutside(
+    ref: React.RefObject<HTMLElement>,
+    handler: () => void,
+) {
+    useEffect(() => {
+        const listener = (e: MouseEvent | TouchEvent) => {
+            if (!ref.current || ref.current.contains(e.target as Node)) return;
+            handler();
+        };
+        document.addEventListener("mousedown", listener);
+        document.addEventListener("touchstart", listener);
+        return () => {
+            document.removeEventListener("mousedown", listener);
+            document.removeEventListener("touchstart", listener);
+        };
+    }, [ref, handler]);
+}
+
+// ── Menu item ─────────────────────────────────────────────────────────────────
+function MenuItem({
+    icon,
+    label,
+    onClick,
+    danger = false,
+    shortcut,
+}: {
+    icon: React.ReactNode;
+    label: string;
+    onClick: () => void;
+    danger?: boolean;
+    shortcut?: string;
+}) {
+    return (
+        <button
+            onClick={onClick}
+            className={cn(
+                "w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-100 group",
+                danger
+                    ? "text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                    : "text-gray-300 hover:bg-gray-700/60 hover:text-white",
+            )}
+        >
+            <span
+                className={cn(
+                    "flex-shrink-0 opacity-60 group-hover:opacity-100 transition-opacity",
+                    danger ? "text-red-400" : "",
+                )}
+            >
+                {icon}
+            </span>
+            <span className="flex-1 text-left">{label}</span>
+            {shortcut && (
+                <kbd className="text-[9px] text-gray-600 bg-gray-800 border border-gray-700 px-1 py-0.5 rounded font-mono">
+                    {shortcut}
+                </kbd>
+            )}
+        </button>
+    );
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
 export function Sidebar({
     navItems,
     view,
@@ -26,24 +89,59 @@ export function Sidebar({
     setTheme,
     onLogout,
 }: SidebarProps): React.ReactElement {
-    const [confirmLogout, setConfirmLogout] = useState(false);
+    const [menuOpen, setMenuOpen] = useState(false);
+    const [loggingOut, setLoggingOut] = useState(false);
+    const menuRef = useRef<HTMLDivElement>(null);
+
+    useClickOutside(menuRef as React.RefObject<HTMLElement>, () =>
+        setMenuOpen(false),
+    );
+
+    const handleLogout = async () => {
+        setLoggingOut(true);
+        setMenuOpen(false);
+        try {
+            if (onLogout) {
+                onLogout();
+            } else {
+                await signOut({ callbackUrl: "/login" });
+            }
+        } catch {
+            setLoggingOut(false);
+        }
+    };
+
+    const handleProfileClick = () => {
+        setView("profile" as ViewId);
+        setMenuOpen(false);
+    };
+
+    const handleSettingsClick = () => {
+        setView("settings" as ViewId);
+        setMenuOpen(false);
+    };
+
+    const handleThemeToggle = () => {
+        setTheme((t) => (t === "light" ? "dark" : "light"));
+    };
+
     return (
         <aside
             className={cn(
-                "flex flex-col h-full bg-gray-950 border-r border-gray-800 flex-shrink-0 transition-all duration-300 overflow-hidden",
+                "flex flex-col h-full bg-gray-950 border-r border-gray-800/60 flex-shrink-0 transition-all duration-300 overflow-hidden relative",
                 collapsed ? "w-16" : "w-56",
             )}
         >
             {/* Logo */}
             <div
                 className={cn(
-                    "flex items-center border-b border-gray-800 h-14 flex-shrink-0",
+                    "flex items-center border-b border-gray-800/60 h-14 flex-shrink-0",
                     collapsed ? "justify-center px-3" : "px-4 gap-3",
                 )}
             >
                 {!collapsed && (
                     <div className="flex items-center gap-2 flex-1 min-w-0">
-                        <div className="w-7 h-7 rounded-lg bg-green-700 flex items-center justify-center flex-shrink-0">
+                        <div className="w-7 h-7 rounded-lg bg-green-700 flex items-center justify-center flex-shrink-0 shadow-lg shadow-green-900/40">
                             <svg
                                 className="w-4 h-4 text-white"
                                 fill="none"
@@ -58,17 +156,22 @@ export function Sidebar({
                                 />
                             </svg>
                         </div>
-                        <span className="text-white font-semibold text-base leading-none tracking-tight">
-                            Neema
-                        </span>
+                        <div className="min-w-0">
+                            <div className="text-white font-semibold text-sm leading-none tracking-tight">
+                                Neema
+                            </div>
+                            <div className="text-[9px] text-green-500/70 uppercase tracking-widest font-medium mt-0.5">
+                                Admin
+                            </div>
+                        </div>
                     </div>
                 )}
                 <button
                     onClick={() => setCollapsed((c) => !c)}
-                    className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 transition-all flex-shrink-0"
+                    className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-500 hover:text-white hover:bg-gray-800 transition-all flex-shrink-0"
                 >
                     <svg
-                        className="w-4 h-4"
+                        className="w-3.5 h-3.5"
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"
@@ -93,7 +196,7 @@ export function Sidebar({
             </div>
 
             {/* Nav */}
-            <nav className="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto">
+            <nav className="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto scrollbar-none">
                 {navItems.map((item) => {
                     const isActive = view === item.id;
                     return (
@@ -107,8 +210,8 @@ export function Sidebar({
                                     ? "justify-center h-10 px-0"
                                     : "gap-2.5 px-3 h-10",
                                 isActive
-                                    ? "bg-green-700 text-white shadow-sm"
-                                    : "text-gray-400 hover:text-white hover:bg-gray-800",
+                                    ? "bg-green-700/90 text-white shadow-sm shadow-green-900/30"
+                                    : "text-gray-400 hover:text-white hover:bg-gray-800/70",
                             )}
                         >
                             <span className="flex-shrink-0 text-base leading-none">
@@ -120,14 +223,14 @@ export function Sidebar({
                                         {item.label}
                                     </span>
                                     {item.badge != null && (
-                                        <span className="ml-auto flex-shrink-0 bg-green-600 text-gray-900 text-xs font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
+                                        <span className="ml-auto flex-shrink-0 bg-green-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
                                             {item.badge}
                                         </span>
                                     )}
                                 </>
                             )}
                             {collapsed && item.badge != null && (
-                                <span className="absolute top-1 right-1 w-4 h-4 bg-green-600 text-gray-900 text-[9px] font-bold rounded-full flex items-center justify-center">
+                                <span className="absolute top-1 right-1 w-3.5 h-3.5 bg-green-500 text-white text-[8px] font-bold rounded-full flex items-center justify-center">
                                     {item.badge}
                                 </span>
                             )}
@@ -136,72 +239,242 @@ export function Sidebar({
                 })}
             </nav>
 
-            {/* Footer */}
+            {/* Footer with user menu */}
             <div
                 className={cn(
-                    "border-t border-gray-800 p-2 flex-shrink-0",
+                    "border-t border-gray-800/60 p-2 flex-shrink-0 relative",
                     collapsed ? "flex justify-center" : "",
                 )}
+                ref={menuRef}
             >
+                {/* Dropdown menu — renders above the footer */}
+                {menuOpen && (
+                    <div
+                        className={cn(
+                            "absolute bottom-full mb-2 z-50 bg-gray-900 border border-gray-700/60 rounded-xl shadow-2xl shadow-black/60 overflow-hidden",
+                            collapsed
+                                ? "left-full ml-2 w-52"
+                                : "left-2 right-2",
+                        )}
+                        style={{ animation: "menuSlideUp 0.15s ease" }}
+                    >
+                        <style>{`
+                            @keyframes menuSlideUp {
+                                from { opacity: 0; transform: translateY(6px); }
+                                to   { opacity: 1; transform: translateY(0); }
+                            }
+                        `}</style>
+
+                        {/* User info header */}
+                        <div className="px-3 py-3 border-b border-gray-700/40">
+                            <div className="flex items-center gap-2.5">
+                                <Avatar name={session.user.name} size="sm" />
+                                <div className="min-w-0 flex-1">
+                                    <div className="text-xs font-semibold text-white truncate">
+                                        {session.user.name}
+                                    </div>
+                                    <div className="text-[10px] text-gray-500 truncate">
+                                        {session.user.email}
+                                    </div>
+                                </div>
+                                <span className="flex-shrink-0 text-[9px] bg-green-700/30 text-green-400 border border-green-700/30 px-1.5 py-0.5 rounded-full font-semibold uppercase tracking-wide">
+                                    {session.user.role}
+                                </span>
+                            </div>
+                        </div>
+
+                        {/* Menu items */}
+                        <div className="p-1.5 space-y-0.5">
+                            <MenuItem
+                                icon={
+                                    <svg
+                                        className="w-3.5 h-3.5"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        viewBox="0 0 24 24"
+                                    >
+                                        <path
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            strokeWidth={2}
+                                            d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+                                        />
+                                    </svg>
+                                }
+                                label="View Profile"
+                                onClick={handleProfileClick}
+                            />
+                            <MenuItem
+                                icon={
+                                    <svg
+                                        className="w-3.5 h-3.5"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        viewBox="0 0 24 24"
+                                    >
+                                        <path
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            strokeWidth={2}
+                                            d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                                        />
+                                    </svg>
+                                }
+                                label="Settings"
+                                onClick={handleSettingsClick}
+                            />
+                        </div>
+
+                        {/* Preferences */}
+                        <div className="px-1.5 pb-1.5">
+                            <div className="text-[9px] text-gray-600 uppercase tracking-widest font-semibold px-2 pb-1 pt-0.5">
+                                Preferences
+                            </div>
+                            {/* Theme toggle */}
+                            <div className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-gray-800/60 transition-colors">
+                                <div className="flex items-center gap-2.5">
+                                    <span className="text-gray-500">
+                                        {theme === "light" ? (
+                                            <svg
+                                                className="w-3.5 h-3.5"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                viewBox="0 0 24 24"
+                                            >
+                                                <path
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                    strokeWidth={2}
+                                                    d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"
+                                                />
+                                            </svg>
+                                        ) : (
+                                            <svg
+                                                className="w-3.5 h-3.5"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                viewBox="0 0 24 24"
+                                            >
+                                                <path
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                    strokeWidth={2}
+                                                    d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"
+                                                />
+                                            </svg>
+                                        )}
+                                    </span>
+                                    <span className="text-xs text-gray-300 font-medium">
+                                        {theme === "light"
+                                            ? "Dark mode"
+                                            : "Light mode"}
+                                    </span>
+                                </div>
+                                <button
+                                    onClick={handleThemeToggle}
+                                    className={cn(
+                                        "relative w-8 h-4.5 rounded-full transition-colors duration-200 flex-shrink-0",
+                                        theme === "dark"
+                                            ? "bg-green-600"
+                                            : "bg-gray-700",
+                                    )}
+                                    style={{ height: 18, width: 32 }}
+                                >
+                                    <span
+                                        className={cn(
+                                            "absolute top-0.5 w-3.5 h-3.5 bg-white rounded-full shadow-sm transition-transform duration-200",
+                                            theme === "dark"
+                                                ? "translate-x-4"
+                                                : "translate-x-0.5",
+                                        )}
+                                    />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Divider + logout */}
+                        <div className="px-1.5 pb-1.5 border-t border-gray-800/60 pt-1.5">
+                            <MenuItem
+                                icon={
+                                    <svg
+                                        className="w-3.5 h-3.5"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        viewBox="0 0 24 24"
+                                    >
+                                        <path
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            strokeWidth={2}
+                                            d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+                                        />
+                                    </svg>
+                                }
+                                label={loggingOut ? "Signing out…" : "Sign out"}
+                                onClick={handleLogout}
+                                danger
+                            />
+                        </div>
+                    </div>
+                )}
+
+                {/* Collapsed state — just avatar button */}
                 {collapsed ? (
-                    <div className="py-1">
+                    <button
+                        onClick={() => setMenuOpen((o) => !o)}
+                        className="py-1 rounded-lg hover:bg-gray-800 transition-colors relative"
+                        title="Account menu"
+                    >
                         <Avatar
                             name={session.user.name}
                             size="sm"
-                            className="ring-2 ring-gray-700"
+                            className="ring-2 ring-gray-700 hover:ring-green-700 transition-all"
                         />
-                    </div>
+                        {loggingOut && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-gray-950/80 rounded-lg">
+                                <div className="w-3 h-3 border-2 border-green-500 border-t-transparent rounded-full animate-spin" />
+                            </div>
+                        )}
+                    </button>
                 ) : (
-                    <div className="flex items-center gap-2 p-2 rounded-lg hover:bg-gray-800 transition-colors">
+                    /* Expanded state — full user row */
+                    <button
+                        onClick={() => setMenuOpen((o) => !o)}
+                        className={cn(
+                            "w-full flex items-center gap-2 p-2 rounded-lg transition-all duration-150 group",
+                            menuOpen
+                                ? "bg-gray-800 text-white"
+                                : "hover:bg-gray-800/70 text-gray-300 hover:text-white",
+                        )}
+                    >
                         <Avatar name={session.user.name} size="sm" />
-                        <div className="flex-1 min-w-0">
-                            <div className="text-xs font-semibold text-white truncate">
+                        <div className="flex-1 min-w-0 text-left">
+                            <div className="text-xs font-semibold text-white truncate leading-tight">
                                 {session.user.name}
                             </div>
-                            <div className="text-[10px] text-green-400 uppercase tracking-wider font-medium">
+                            <div className="text-[10px] text-green-500/70 uppercase tracking-wider font-medium leading-tight">
                                 {session.user.role}
                             </div>
                         </div>
-                        <button
-                            onClick={() =>
-                                setTheme((t) =>
-                                    t === "light" ? "dark" : "light",
-                                )
-                            }
-                            className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-400 hover:text-white hover:bg-gray-700 transition-all flex-shrink-0"
-                            title="Toggle theme"
-                        >
-                            {theme === "light" ? (
-                                <svg
-                                    className="w-4 h-4"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    viewBox="0 0 24 24"
-                                >
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={2}
-                                        d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"
-                                    />
-                                </svg>
-                            ) : (
-                                <svg
-                                    className="w-4 h-4"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    viewBox="0 0 24 24"
-                                >
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={2}
-                                        d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"
-                                    />
-                                </svg>
+                        <svg
+                            className={cn(
+                                "w-3.5 h-3.5 text-gray-500 flex-shrink-0 transition-transform duration-200",
+                                menuOpen
+                                    ? "rotate-180 text-gray-300"
+                                    : "group-hover:text-gray-300",
                             )}
-                        </button>
-                    </div>
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                        >
+                            <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M5 15l7-7 7 7"
+                            />
+                        </svg>
+                    </button>
                 )}
             </div>
         </aside>
