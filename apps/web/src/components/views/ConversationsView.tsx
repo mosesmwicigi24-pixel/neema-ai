@@ -322,7 +322,7 @@ export function ConversationsView({
                                 {s}
                             </button>
                         ))}
-                        <div className="w-full" />
+                        <div key="filter-divider" className="w-full" />
                         {(["all", "ai", "human", "paused"] as const).map(
                             (m) => (
                                 <button
