@@ -322,7 +322,7 @@ export function ConversationsView({
                                 {s}
                             </button>
                         ))}
-                        <div key="filter-divider" className="w-full" />
+                        <div className="w-full" />
                         {(["all", "ai", "human", "paused"] as const).map(
                             (m) => (
                                 <button
@@ -475,6 +475,7 @@ export function ConversationsView({
                         <div className="flex items-center gap-1.5">
                             {activeConv.intercept_mode === "ai" && (
                                 <Btn
+                                    key="intercept"
                                     small
                                     onClick={() => intercept(activeConv.id)}
                                     variant="primary"
@@ -484,6 +485,7 @@ export function ConversationsView({
                             )}
                             {activeConv.intercept_mode === "human" && (
                                 <Btn
+                                    key="release"
                                     small
                                     onClick={() => release(activeConv.id)}
                                     variant="secondary"
@@ -493,6 +495,7 @@ export function ConversationsView({
                             )}
                             {activeConv.intercept_mode !== "paused" && (
                                 <Btn
+                                    key="pause"
                                     small
                                     onClick={() => release(activeConv.id)}
                                     variant="secondary"
@@ -502,6 +505,7 @@ export function ConversationsView({
                             )}
                             {activeConv.intercept_mode === "paused" && (
                                 <Btn
+                                    key="resume"
                                     small
                                     onClick={() => release(activeConv.id)}
                                     variant="primary"
@@ -510,6 +514,7 @@ export function ConversationsView({
                                 </Btn>
                             )}
                             <Btn
+                                key="transfer"
                                 small
                                 onClick={() => setTransferModal(true)}
                                 variant="secondary"
@@ -517,6 +522,7 @@ export function ConversationsView({
                                 ⇄
                             </Btn>
                             <Btn
+                                key="note"
                                 small
                                 onClick={() => setNoteModal(true)}
                                 variant="secondary"
@@ -525,6 +531,7 @@ export function ConversationsView({
                             </Btn>
                             {activeConv.status === "open" && (
                                 <Btn
+                                    key="close"
                                     small
                                     onClick={() => closeConv(activeConv.id)}
                                     variant="danger"
