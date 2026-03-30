@@ -3,8 +3,6 @@ import React, { useState, useEffect } from "react";
 import { signIn, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 
-export const metadata = { title: "Sign in" };
-
 export default function LoginPage(): React.ReactElement {
     const { status } = useSession();
     const router = useRouter();
