@@ -13,11 +13,13 @@ import { timeAgo } from "@/lib/utils";
 import { CHANNEL_CONFIG, ALL_CHANNELS } from "@/lib/channels";
 import { conversationsApi } from "@/lib/api";
 import { useConversationEvents } from "@/lib/websocket";
+import { CustomerSidebar } from "@/components/ui/CustomerSidebar";
 import type {
     Conversation,
     Message,
     MessagesMap,
     Agent,
+    Order,
     Channel,
     SharedViewProps,
 } from "@/types";
@@ -30,6 +32,7 @@ interface ConversationsViewProps extends SharedViewProps {
     messages: MessagesMap;
     setMessages: React.Dispatch<React.SetStateAction<MessagesMap>>;
     agents: Agent[];
+    orders: Order[];
     refetchConversations?: () => void;
 }
 
@@ -48,6 +51,7 @@ export function ConversationsView({
     messages,
     setMessages,
     agents,
+    orders,
     onToast,
     isMobile,
     refetchConversations,
@@ -55,12 +59,8 @@ export function ConversationsView({
     const [activeConvId, setActiveConvId] = useState<string>("");
     const [mobilePanel, setMobilePanel] = useState<MobilePanel>("list");
     const [channelTab, setChannelTab] = useState<"all" | Channel>("all");
-    const [statusFilter, setStatusFilter] = useState<"all" | "open" | "closed">(
-        "all",
-    );
-    const [interceptFilter, setInterceptFilter] = useState<
-        "all" | "human" | "ai" | "paused"
-    >("all");
+    const [statusFilter, setStatusFilter] = useState<"all" | "open" | "closed">("all");
+    const [interceptFilter, setInterceptFilter] = useState<"all" | "human" | "ai" | "paused">("all");
     const [searchQ, setSearchQ] = useState<string>("");
     const [replyText, setReplyText] = useState<string>("");
     const [draftVisible, setDraftVisible] = useState<boolean>(false);
@@ -73,6 +73,7 @@ export function ConversationsView({
     const [showFilters, setShowFilters] = useState<boolean>(false);
     const [threadLoading, setThreadLoading] = useState(false);
     const [sending, setSending] = useState(false);
+    const [crmOpen, setCrmOpen] = useState<boolean>(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     // Set first conversation as active when data loads
@@ -475,7 +476,8 @@ export function ConversationsView({
     );
 
     const ThreadPanel = (
-        <div className="flex flex-col flex-1 overflow-hidden bg-white">
+        <div className="flex flex-1 overflow-hidden">
+            <div className="flex flex-col flex-1 overflow-hidden bg-white">
             {!activeConv ? (
                 <div className="flex-1 flex items-center justify-center text-stone-400">
                     <div className="text-center">
@@ -600,6 +602,18 @@ export function ConversationsView({
                                     ✓
                                 </Btn>
                             )}
+                            <button
+                                key="crm"
+                                onClick={() => setCrmOpen((o) => !o)}
+                                title="Customer profile"
+                                className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors text-sm ${
+                                    crmOpen
+                                        ? "bg-green-700 text-white"
+                                        : "bg-stone-100 text-stone-500 hover:bg-stone-200"
+                                }`}
+                            >
+                                👤
+                            </button>
                         </div>
                     </div>
 
@@ -829,6 +843,16 @@ export function ConversationsView({
                     )}
                 </>
             )}
+        </div>
+        {/* CRM Sidebar — shown when crmOpen and a conversation is active */}
+        {crmOpen && activeConv && !isMobile && (
+            <CustomerSidebar
+                conversation={activeConv}
+                orders={orders}
+                onToast={onToast}
+                onClose={() => setCrmOpen(false)}
+            />
+        )}
         </div>
     );
 

@@ -138,6 +138,7 @@ export interface NavItem {
 export type ViewId =
     | "conversations"
     | "orders"
+    | "leads"
     | "agents"
     | "catalog"
     | "overview"
