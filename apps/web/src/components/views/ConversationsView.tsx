@@ -75,22 +75,67 @@ export function ConversationsView({
     const [sending, setSending] = useState(false);
     const [crmOpen, setCrmOpen] = useState<boolean>(true);
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    // Track the last message count to only scroll when new messages arrive
+    const prevMessageCount = useRef<number>(0);
 
-    // Set first conversation as active when data loads
+    // ── Load messages for a conversation (always fetches fresh) ───────────────
+    const loadMessages = useCallback(
+        async (convId: string, silent = false) => {
+            if (!convId) return;
+            if (!silent) setThreadLoading(true);
+            try {
+                const msgs = await conversationsApi.messages(convId);
+                setMessages((m) => ({ ...m, [convId]: msgs }));
+            } catch {
+                if (!silent) onToast("Failed to load messages", "error");
+            } finally {
+                if (!silent) setThreadLoading(false);
+            }
+        },
+        [setMessages, onToast],
+    );
+
+    // ── Auto-select & load the first conversation on initial data load ────────
     useEffect(() => {
         if (conversations.length > 0 && !activeConvId) {
-            setActiveConvId(conversations[0].id);
+            const firstId = conversations[0].id;
+            setActiveConvId(firstId);
+            loadMessages(firstId);
         }
-    }, [conversations, activeConvId]);
+    // Only run when conversations first populate or activeConvId resets
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [conversations.length > 0, activeConvId]);
 
     const activeConv = conversations.find((c) => c.id === activeConvId);
     const activeMessages: Message[] = messages[activeConvId] ?? [];
 
+    // ── Scroll to bottom only when new messages arrive ────────────────────────
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, [activeConvId, messages]);
+        const count = activeMessages.length;
+        if (count > prevMessageCount.current) {
+            messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        }
+        prevMessageCount.current = count;
+    }, [activeMessages.length]);
 
-    // Reset draft when switching conversations, then fetch any existing held draft
+    // Also scroll when switching conversations
+    useEffect(() => {
+        prevMessageCount.current = 0;
+        setTimeout(() => {
+            messagesEndRef.current?.scrollIntoView({ behavior: "instant" });
+        }, 50);
+    }, [activeConvId]);
+
+    // ── Poll active thread every 10s as a WebSocket fallback ─────────────────
+    useEffect(() => {
+        if (!activeConvId) return;
+        const timer = setInterval(() => {
+            loadMessages(activeConvId, true); // silent = no loading spinner
+        }, 10000);
+        return () => clearInterval(timer);
+    }, [activeConvId, loadMessages]);
+
+    // ── Reset draft when switching conversations ───────────────────────────────
     useEffect(() => {
         setDraftVisible(false);
         setDraftText("");
@@ -107,7 +152,7 @@ export function ConversationsView({
         }
     }, [activeConvId]);
 
-    // WebSocket: live events for the active conversation
+    // ── WebSocket: live events for the active conversation ────────────────────
     useConversationEvents(activeConvId, (event) => {
         if (event.type === "ai_draft_ready" && event.conversationId === activeConvId) {
             setDraftText(event.draft ?? "");
@@ -116,39 +161,24 @@ export function ConversationsView({
         }
         if (event.type === "new_message" && event.conversationId === activeConvId) {
             const msg: Message = {
-                id: event.id ?? crypto.randomUUID(),
-                direction: "outbound",
-                sender: event.sender ?? "ai",
-                text: event.text,
+                id:         event.id ?? crypto.randomUUID(),
+                direction:  event.direction ?? "outbound",
+                sender:     event.sender ?? "ai",
+                text:       event.text,
                 created_at: event.created_at ?? new Date().toISOString(),
             };
-            setMessages((m) => ({
-                ...m,
-                [activeConvId]: [...(m[activeConvId] ?? []), msg],
-            }));
+            setMessages((m) => {
+                const existing = m[activeConvId] ?? [];
+                // Deduplicate by id to avoid doubles from polling + WS
+                if (existing.some((x) => x.id === msg.id)) return m;
+                return { ...m, [activeConvId]: [...existing, msg] };
+            });
         }
     });
 
-    // Load messages when switching conversations
-    const loadMessages = useCallback(
-        async (convId: string) => {
-            if (messages[convId]) return; // already loaded
-            setThreadLoading(true);
-            try {
-                const msgs = await conversationsApi.messages(convId);
-                setMessages((m) => ({ ...m, [convId]: msgs }));
-            } catch {
-                onToast("Failed to load messages", "error");
-            } finally {
-                setThreadLoading(false);
-            }
-        },
-        [messages, setMessages, onToast],
-    );
-
     const handleSelectConv = (id: string) => {
         setActiveConvId(id);
-        loadMessages(id);
+        loadMessages(id); // always fetch fresh on explicit selection
         if (isMobile) setMobilePanel("thread");
     };
 
@@ -190,17 +220,37 @@ export function ConversationsView({
     const sendReply = async () => {
         if (!replyText.trim() || !activeConvId) return;
         setSending(true);
-        const text = replyText;
-        setReplyText("");
+        const text = replyText; // snapshot before clearing
         try {
+            // Optimistically append to thread so message appears instantly
+            const optimisticMsg: Message = {
+                id:         `optimistic-${Date.now()}`,
+                direction:  "outbound",
+                sender:     "human_agent",
+                text,
+                created_at: new Date().toISOString(),
+            };
+            setMessages((m) => ({
+                ...m,
+                [activeConvId]: [...(m[activeConvId] ?? []), optimisticMsg],
+            }));
+            setReplyText("");
+
             await conversationsApi.sendReply(activeConvId, text);
-            // Reload thread from server to get the persisted message with correct shape
+
+            // Replace optimistic message with server-confirmed messages
             const msgs = await conversationsApi.messages(activeConvId);
             setMessages((m) => ({ ...m, [activeConvId]: msgs }));
             refetchConversations?.();
-            onToast("Message sent");
         } catch {
-            setReplyText(text); // restore on failure
+            // Rollback: remove optimistic message and restore text
+            setMessages((m) => ({
+                ...m,
+                [activeConvId]: (m[activeConvId] ?? []).filter(
+                    (msg) => !msg.id?.startsWith("optimistic-"),
+                ),
+            }));
+            setReplyText(text);
             onToast("Failed to send message", "error");
         } finally {
             setSending(false);
@@ -209,14 +259,41 @@ export function ConversationsView({
 
     const approveDraft = async () => {
         if (!activeConvId) return;
+        const textToSend = draftText;
         try {
-            await conversationsApi.approveDraft(activeConvId, draftText || undefined);
+            // Optimistically append the approved draft as an outbound message
+            const optimisticMsg: Message = {
+                id:         `optimistic-${Date.now()}`,
+                direction:  "outbound",
+                sender:     "ai",
+                text:       textToSend,
+                created_at: new Date().toISOString(),
+            };
+            setMessages((m) => ({
+                ...m,
+                [activeConvId]: [...(m[activeConvId] ?? []), optimisticMsg],
+            }));
             setDraftVisible(false);
             setDraftText("");
             setDraftEditing(false);
+
+            await conversationsApi.approveDraft(activeConvId, textToSend || undefined);
+
+            // Sync with server to replace optimistic message
+            const msgs = await conversationsApi.messages(activeConvId);
+            setMessages((m) => ({ ...m, [activeConvId]: msgs }));
             refetchConversations?.();
             onToast("AI draft approved & sent");
         } catch {
+            // Rollback
+            setMessages((m) => ({
+                ...m,
+                [activeConvId]: (m[activeConvId] ?? []).filter(
+                    (msg) => !msg.id?.startsWith("optimistic-"),
+                ),
+            }));
+            setDraftVisible(true);
+            setDraftText(textToSend);
             onToast("Failed to approve draft", "error");
         }
     };
@@ -929,16 +1006,39 @@ export function ConversationsView({
                 <Btn
                     onClick={async () => {
                         if (!noteText.trim() || !activeConvId) return;
+                        const text = noteText.trim();
                         try {
-                            const msg = await conversationsApi.addNote(activeConvId, noteText.trim());
+                            // Optimistically append
+                            const optimistic: Message = {
+                                id:         `optimistic-note-${Date.now()}`,
+                                direction:  "outbound",
+                                sender:     "human_agent",
+                                text,
+                                isNote:     true,
+                                created_at: new Date().toISOString(),
+                            };
                             setMessages((m) => ({
                                 ...m,
-                                [activeConvId]: [...(m[activeConvId] ?? []), msg],
+                                [activeConvId]: [...(m[activeConvId] ?? []), optimistic],
                             }));
-                            onToast("Note saved");
                             setNoteModal(false);
                             setNoteText("");
+                            onToast("Note saved");
+
+                            // Save to server and replace with confirmed message
+                            await conversationsApi.addNote(activeConvId, text);
+                            const msgs = await conversationsApi.messages(activeConvId);
+                            setMessages((m) => ({ ...m, [activeConvId]: msgs }));
                         } catch {
+                            // Rollback optimistic note
+                            setMessages((m) => ({
+                                ...m,
+                                [activeConvId]: (m[activeConvId] ?? []).filter(
+                                    (msg) => !msg.id?.startsWith("optimistic-note-"),
+                                ),
+                            }));
+                            setNoteText(text);
+                            setNoteModal(true);
                             onToast("Failed to save note", "error");
                         }
                     }}
