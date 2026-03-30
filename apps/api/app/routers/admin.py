@@ -73,12 +73,12 @@ async def intercept(conv_id: str, db: AsyncSession = Depends(get_db),
 
 
 @router.post("/conversations/{conv_id}/reply")
-async def reply(conv_id: str, body: dict, db: AsyncSession = Depends(get_db),
+async def reply(conv_id: str, request: Request, body: dict, db: AsyncSession = Depends(get_db),
                 agent: Agent = Depends(get_current_agent)):
     text = body.get("text", "")
     if not text:
         raise HTTPException(status_code=422, detail="text is required")
-    return await send_agent_reply(db, conv_id, agent, text)
+    return await send_agent_reply(db, conv_id, agent, text, request.app.state.redis)
 
 
 @router.post("/conversations/{conv_id}/approve-draft")
