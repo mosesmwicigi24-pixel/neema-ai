@@ -63,13 +63,157 @@ async def get_thread(
         .where(Message.conversation_id == conv_id)
         .order_by(Message.created_at.asc())
     )
-    return result.scalars().all()
+    msgs = result.scalars().all()
+    return [
+        {
+            "id": str(m.id),
+            "direction": m.direction,
+            "sender": m.sender,
+            "text": m.text,
+            "isNote": m.media_type == "note",
+            "created_at": m.created_at.isoformat() if m.created_at else None,
+        }
+        for m in msgs
+    ]
+
+
+@router.get("/conversations/{conv_id}/latest-draft")
+async def get_latest_draft(
+    conv_id: str,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Return the most recent held AI draft for this conversation, if any."""
+    result = await db.execute(
+        select(Intercept)
+        .where(Intercept.conversation_id == conv_id)
+        .where(Intercept.ai_reply_held.isnot(None))
+        .order_by(Intercept.created_at.desc())
+        .limit(1)
+    )
+    intercept = result.scalar_one_or_none()
+    return {"draft": intercept.ai_reply_held if intercept else None}
+
+
+@router.post("/conversations/{conv_id}/generate-draft")
+async def generate_draft(
+    conv_id: str,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """
+    Generate a fresh AI draft reply based on the last 10 messages
+    in the conversation. Uses the OpenAI API directly.
+    """
+    from openai import OpenAI
+    from app.core.config import settings
+
+    # Fetch conversation and recent messages
+    conv_result = await db.execute(
+        select(Conversation).where(Conversation.id == conv_id)
+    )
+    conv = conv_result.scalar_one_or_none()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    msg_result = await db.execute(
+        select(Message)
+        .where(Message.conversation_id == conv_id)
+        .order_by(Message.created_at.desc())
+        .limit(10)
+    )
+    recent = list(reversed(msg_result.scalars().all()))
+
+    if not recent:
+        raise HTTPException(status_code=422, detail="No messages to draft from")
+
+    # Build conversation history for the prompt
+    history_lines = []
+    for m in recent:
+        role = "Customer" if m.direction == "inbound" else "Agent/AI"
+        history_lines.append(f"{role}: {m.text}")
+    history = "\n".join(history_lines)
+
+    # Call OpenAI to generate a suggested reply
+    try:
+        client = OpenAI(api_key=settings.openai_api_key)
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            max_tokens=500,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are assisting a human support agent at Bethany House, "
+                        "a Catholic goods supplier in Nairobi. "
+                        "Based on the conversation history below, draft a helpful, "
+                        "warm, and concise WhatsApp reply the agent can send to the customer. "
+                        "Write only the reply text — no preamble, no labels, no explanation. "
+                        "UK spelling. Max 300 characters."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"Conversation so far:\n\n{history}\n\nDraft a reply for the agent to send next.",
+                },
+            ],
+        )
+        draft = response.choices[0].message.content.strip()
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Draft generation failed: {str(e)}"
+        )
+
+    return {"draft": draft}
+
+
+@router.post("/conversations/{conv_id}/note")
+async def add_note(
+    conv_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Save an internal agent note against the conversation thread."""
+    text = body.get("text", "").strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="text is required")
+
+    result = await db.execute(select(Conversation).where(Conversation.id == conv_id))
+    conv = result.scalar_one_or_none()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # Store as an outbound message with media_type="note" so it stays
+    # in the message stream but is never sent to the customer
+    msg = Message(
+        wa_id=conv.wa_id,
+        conversation_id=conv.id,
+        direction="outbound",
+        sender="human_agent",
+        text=text,
+        media_type="note",
+        agent_id=agent.id,
+    )
+    db.add(msg)
+    await db.commit()
+    await db.refresh(msg)
+
+    return {
+        "id": str(msg.id),
+        "direction": "outbound",
+        "sender": "human_agent",
+        "text": text,
+        "isNote": True,
+        "created_at": msg.created_at.isoformat() if msg.created_at else None,
+    }
 
 
 @router.post("/conversations/{conv_id}/intercept")
-async def intercept(conv_id: str, db: AsyncSession = Depends(get_db),
+async def intercept(conv_id: str, request: Request, db: AsyncSession = Depends(get_db),
                     agent: Agent = Depends(get_current_agent)):
-    return await intercept_conversation(db, conv_id, agent)
+    return await intercept_conversation(db, conv_id, agent, request.app.state.redis)
 
 
 @router.post("/conversations/{conv_id}/reply")
@@ -88,13 +232,13 @@ async def approve(conv_id: str, request: Request, db: AsyncSession = Depends(get
         body = await request.json()
     except Exception:
         body = {}
-    return await approve_draft(db, conv_id, agent, body.get("text") if isinstance(body, dict) else None)
+    return await approve_draft(db, conv_id, agent, body.get("text") if isinstance(body, dict) else None, request.app.state.redis)
 
 
 @router.post("/conversations/{conv_id}/release")
-async def release(conv_id: str, db: AsyncSession = Depends(get_db),
+async def release(conv_id: str, request: Request, db: AsyncSession = Depends(get_db),
                   agent: Agent = Depends(get_current_agent)):
-    return await release_conversation(db, conv_id, agent)
+    return await release_conversation(db, conv_id, agent, request.app.state.redis)
 
 
 @router.post("/conversations/{conv_id}/close")
@@ -111,12 +255,12 @@ async def close_conv(conv_id: str, db: AsyncSession = Depends(get_db),
 
 
 @router.post("/conversations/{conv_id}/transfer")
-async def transfer(conv_id: str, body: dict, db: AsyncSession = Depends(get_db),
+async def transfer(conv_id: str, request: Request, body: dict, db: AsyncSession = Depends(get_db),
                    agent: Agent = Depends(get_current_agent)):
     agent_id = body.get("agentId") or body.get("agent_id")
     if not agent_id:
         raise HTTPException(status_code=422, detail="agentId or agent_id required")
-    return await transfer_conversation(db, conv_id, agent, agent_id)
+    return await transfer_conversation(db, conv_id, agent, agent_id, request.app.state.redis)
 
 
 # ── Agents ────────────────────────────────────────────────

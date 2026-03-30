@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     waba_phone_number_id: str = ""
     waba_api_version: str = "v21.0"
     n8n_api_secret: str = ""
+    openai_api_key: str = ""
     environment: str = "production"
 
     @field_validator("cors_origins", mode="before")

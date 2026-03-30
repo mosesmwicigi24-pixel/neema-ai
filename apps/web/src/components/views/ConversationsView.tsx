@@ -65,6 +65,8 @@ export function ConversationsView({
     const [replyText, setReplyText] = useState<string>("");
     const [draftVisible, setDraftVisible] = useState<boolean>(false);
     const [draftText, setDraftText] = useState<string>("");
+    const [draftEditing, setDraftEditing] = useState<boolean>(false);
+    const [generatingDraft, setGeneratingDraft] = useState<boolean>(false);
     const [transferModal, setTransferModal] = useState<boolean>(false);
     const [noteModal, setNoteModal] = useState<boolean>(false);
     const [noteText, setNoteText] = useState<string>("");
@@ -87,10 +89,21 @@ export function ConversationsView({
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [activeConvId, messages]);
 
-    // Reset draft when switching conversations
+    // Reset draft when switching conversations, then fetch any existing held draft
     useEffect(() => {
         setDraftVisible(false);
         setDraftText("");
+        setDraftEditing(false);
+        if (!activeConvId) return;
+        const conv = conversations.find((c) => c.id === activeConvId);
+        if (conv?.intercept_mode === "human") {
+            conversationsApi.latestDraft(activeConvId).then((res) => {
+                if (res.draft) {
+                    setDraftText(res.draft);
+                    setDraftVisible(true);
+                }
+            }).catch(() => {});
+        }
     }, [activeConvId]);
 
     // WebSocket: live events for the active conversation
@@ -98,6 +111,7 @@ export function ConversationsView({
         if (event.type === "ai_draft_ready" && event.conversationId === activeConvId) {
             setDraftText(event.draft ?? "");
             setDraftVisible(true);
+            setDraftEditing(false);
         }
         if (event.type === "new_message" && event.conversationId === activeConvId) {
             const msg: Message = {
@@ -198,10 +212,29 @@ export function ConversationsView({
             await conversationsApi.approveDraft(activeConvId, draftText || undefined);
             setDraftVisible(false);
             setDraftText("");
+            setDraftEditing(false);
             refetchConversations?.();
             onToast("AI draft approved & sent");
         } catch {
             onToast("Failed to approve draft", "error");
+        }
+    };
+
+    const generateDraft = async () => {
+        if (!activeConvId) return;
+        setGeneratingDraft(true);
+        try {
+            const res = await conversationsApi.generateDraft(activeConvId);
+            if (res.draft) {
+                setDraftText(res.draft);
+                setDraftVisible(true);
+                setDraftEditing(false);
+                onToast("Draft generated");
+            }
+        } catch {
+            onToast("Failed to generate draft", "error");
+        } finally {
+            setGeneratingDraft(false);
         }
     };
 
@@ -584,6 +617,33 @@ export function ConversationsView({
                         )}
                         {activeMessages.map((msg, idx) => {
                             const isInbound = msg.direction === "inbound";
+                            const isNote = msg.isNote;
+
+                            // Notes render as a full-width internal banner
+                            if (isNote) {
+                                return (
+                                    <div
+                                        key={msg.id ?? `msg-${idx}`}
+                                        className="flex justify-center"
+                                    >
+                                        <div className="max-w-[85%] w-full rounded-xl px-3 py-2 bg-amber-50 border border-amber-200 border-dashed">
+                                            <div className="flex items-center gap-1.5 mb-1">
+                                                <span className="text-amber-500 text-xs">📝</span>
+                                                <span className="text-[10px] font-semibold text-amber-600 uppercase tracking-wide">
+                                                    Internal Note
+                                                </span>
+                                            </div>
+                                            <p className="text-xs text-amber-800 leading-relaxed whitespace-pre-wrap">
+                                                {msg.text}
+                                            </p>
+                                            <div className="text-[10px] text-amber-400 mt-1">
+                                                {msg.created_at ? timeAgo(msg.created_at) : ""}
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            }
+
                             return (
                                 <div
                                     key={msg.id ?? `msg-${idx}`}
@@ -627,47 +687,104 @@ export function ConversationsView({
                         <div className="border-t border-stone-100 px-4 py-3 bg-white">
                             {draftVisible &&
                                 activeConv.intercept_mode === "human" && (
-                                    <div className="mb-2 p-3 rounded-xl bg-blue-50 border border-blue-200 flex items-start gap-2">
-                                        <span className="text-blue-500 text-sm mt-0.5">
-                                            🤖
-                                        </span>
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-xs font-semibold text-blue-700 mb-1">
-                                                AI Draft
-                                            </p>
-                                            <p className="text-xs text-blue-700 whitespace-pre-wrap leading-relaxed">
-                                                {draftText || "AI has a reply ready — approve or write your own."}
-                                            </p>
-                                            {draftText && (
+                                    <div className="mb-2 rounded-xl bg-blue-50 border border-blue-200 overflow-hidden">
+                                        {/* Header */}
+                                        <div className="flex items-center justify-between px-3 py-2 border-b border-blue-100">
+                                            <div className="flex items-center gap-1.5">
+                                                <span className="text-blue-500 text-sm">🤖</span>
+                                                <p className="text-xs font-semibold text-blue-700">
+                                                    AI Draft
+                                                </p>
+                                            </div>
+                                            <div className="flex items-center gap-1">
                                                 <button
-                                                    onClick={() => setReplyText(draftText)}
-                                                    className="mt-1.5 text-[10px] text-blue-500 hover:text-blue-700 underline"
+                                                    onClick={() => setDraftEditing((e) => !e)}
+                                                    className="text-[10px] text-blue-500 hover:text-blue-700 px-2 py-0.5 rounded border border-blue-200 hover:border-blue-400 transition-colors"
                                                 >
-                                                    Edit before sending
+                                                    {draftEditing ? "Preview" : "Edit"}
                                                 </button>
+                                                <button
+                                                    onClick={() => {
+                                                        setDraftVisible(false);
+                                                        setDraftText("");
+                                                        setDraftEditing(false);
+                                                    }}
+                                                    className="text-[10px] text-blue-400 hover:text-blue-600 px-1.5 py-0.5"
+                                                >
+                                                    ✕
+                                                </button>
+                                            </div>
+                                        </div>
+                                        {/* Body */}
+                                        <div className="px-3 py-2">
+                                            {draftEditing ? (
+                                                <textarea
+                                                    value={draftText}
+                                                    onChange={(e) => setDraftText(e.target.value)}
+                                                    rows={4}
+                                                    className="w-full text-xs text-blue-800 bg-white border border-blue-200 rounded-lg px-2.5 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                                    placeholder="Edit the draft…"
+                                                />
+                                            ) : (
+                                                <p className="text-xs text-blue-700 whitespace-pre-wrap leading-relaxed">
+                                                    {draftText || "AI has a reply ready."}
+                                                </p>
                                             )}
                                         </div>
-                                        <div className="flex flex-col gap-1 flex-shrink-0">
+                                        {/* Actions */}
+                                        <div className="flex items-center gap-2 px-3 pb-2.5">
                                             <Btn
                                                 small
                                                 onClick={approveDraft}
                                                 variant="primary"
                                             >
-                                                Approve
+                                                ✓ Send
+                                            </Btn>
+                                            <Btn
+                                                small
+                                                onClick={() => {
+                                                    setReplyText(draftText);
+                                                    setDraftVisible(false);
+                                                    setDraftText("");
+                                                    setDraftEditing(false);
+                                                }}
+                                                variant="secondary"
+                                            >
+                                                Edit & send manually
                                             </Btn>
                                             <Btn
                                                 small
                                                 onClick={() => {
                                                     setDraftVisible(false);
                                                     setDraftText("");
+                                                    setDraftEditing(false);
                                                 }}
-                                                variant="secondary"
+                                                variant="ghost"
                                             >
                                                 Dismiss
                                             </Btn>
                                         </div>
                                     </div>
                                 )}
+                            {/* Generate draft button — shown when in human mode but no draft visible */}
+                            {!draftVisible && activeConv.intercept_mode === "human" && (
+                                <div className="mb-2 flex justify-end">
+                                    <button
+                                        onClick={generateDraft}
+                                        disabled={generatingDraft}
+                                        className="flex items-center gap-1.5 h-7 px-3 rounded-lg text-xs font-medium text-blue-600 border border-blue-200 bg-blue-50 hover:bg-blue-100 disabled:opacity-50 transition-colors"
+                                    >
+                                        {generatingDraft ? (
+                                            <>
+                                                <div className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                                                Generating…
+                                            </>
+                                        ) : (
+                                            <>🤖 Generate AI draft</>
+                                        )}
+                                    </button>
+                                </div>
+                            )}
                             <div className="flex gap-2 items-end">
                                 <textarea
                                     value={replyText}
@@ -773,10 +890,20 @@ export function ConversationsView({
             />
             <div className="flex gap-2">
                 <Btn
-                    onClick={() => {
-                        onToast("Note saved");
-                        setNoteModal(false);
-                        setNoteText("");
+                    onClick={async () => {
+                        if (!noteText.trim() || !activeConvId) return;
+                        try {
+                            const msg = await conversationsApi.addNote(activeConvId, noteText.trim());
+                            setMessages((m) => ({
+                                ...m,
+                                [activeConvId]: [...(m[activeConvId] ?? []), msg],
+                            }));
+                            onToast("Note saved");
+                            setNoteModal(false);
+                            setNoteText("");
+                        } catch {
+                            onToast("Failed to save note", "error");
+                        }
                     }}
                     variant="primary"
                 >

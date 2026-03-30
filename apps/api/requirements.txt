@@ -25,3 +25,6 @@ httpx==0.27.2
 
 # Utilities
 python-multipart==0.0.12   # file uploads
+
+# OpenAI API client
+openai

@@ -130,6 +130,12 @@ export const conversationsApi = {
         post<Message>(`/admin/conversations/${id}/reply`, { text }),
     approveDraft: (id: string, text?: string) =>
         post<{ ok: boolean }>(`/admin/conversations/${id}/approve-draft`, { text: text ?? null }),
+    latestDraft: (id: string) =>
+        get<{ draft: string | null }>(`/admin/conversations/${id}/latest-draft`),
+    generateDraft: (id: string) =>
+        post<{ draft: string }>(`/admin/conversations/${id}/generate-draft`, {}),
+    addNote: (id: string, text: string) =>
+        post<Message>(`/admin/conversations/${id}/note`, { text }),
     close: (id: string) =>
         post<{ ok: boolean }>(`/admin/conversations/${id}/release`, {}),
 };
