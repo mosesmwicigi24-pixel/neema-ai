@@ -516,7 +516,7 @@ export function CustomerSidebar({
                             {(profile.channels || []).map((ch) => (
                                 <div key={ch.channel + ch.identifier}
                                     className="flex items-center gap-2 py-1.5 border-b border-stone-50 last:border-0">
-                                    <span className="text-sm">{CHANNEL_ICONS[ch.channel] || "🔗"}</span>
+                                    <ChannelBadge channel={ch.channel} />
                                     <div className="flex-1 min-w-0">
                                         <div className="text-[10px] font-semibold text-stone-700 capitalize">{ch.channel}</div>
                                         <div className="text-[10px] text-stone-400 truncate font-mono">{ch.identifier}</div>
