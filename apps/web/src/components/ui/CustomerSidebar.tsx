@@ -79,9 +79,42 @@ const STAGE_ORDER: LeadStage[] = [
     "new", "contacted", "qualified", "proposal", "negotiation", "won", "lost",
 ];
 
-const CHANNEL_ICONS: Record<string, string> = {
-    whatsapp: "📱", messenger: "💙", instagram: "📸", email: "📧", sms: "💬",
+// SVG channel icons
+const CHANNEL_ICON_SVG: Record<string, { svg: string; bg: string }> = {
+    whatsapp:  {
+        bg: "#25D366",
+        svg: '<path d="M16 2C8.28 2 2 8.28 2 16c0 2.44.64 4.73 1.76 6.72L2 30l7.44-1.72A13.92 13.92 0 0016 30c7.72 0 14-6.28 14-14S23.72 2 16 2zm0 25.6a11.56 11.56 0 01-5.88-1.6l-.42-.26-4.42 1.02.98-4.3-.28-.44A11.6 11.6 0 014.4 16C4.4 9.6 9.6 4.4 16 4.4S27.6 9.6 27.6 16 22.4 27.6 16 27.6zm6.36-8.68c-.34-.18-2.02-.98-2.34-1.1-.32-.1-.54-.18-.78.18-.22.34-.88 1.1-1.08 1.32-.2.24-.4.26-.74.08-.34-.18-1.44-.52-2.74-1.66a10.3 10.3 0 01-1.9-2.32c-.2-.34-.02-.52.14-.7.16-.16.34-.42.52-.62.16-.22.22-.36.34-.6.1-.24.06-.44-.02-.62-.08-.18-.78-1.86-1.06-2.54-.28-.68-.56-.58-.78-.6-.2-.02-.42-.02-.66-.02s-.6.08-.92.44c-.32.34-1.2 1.16-1.2 2.84 0 1.66 1.22 3.28 1.4 3.5.16.22 2.42 3.7 5.86 5.18.82.36 1.46.56 1.96.72.82.26 1.56.22 2.16.14.66-.1 2.02-.82 2.3-1.62.28-.78.28-1.46.2-1.62-.1-.14-.32-.22-.66-.4z"/>',
+    },
+    messenger: {
+        bg: "#0099FF",
+        svg: '<path d="M16 2C8.27 2 2 7.93 2 15.2c0 3.82 1.6 7.25 4.2 9.72V30l4.88-2.68A14.5 14.5 0 0016 28.4c7.73 0 14-5.93 14-13.2S23.73 2 16 2zm1.38 17.78l-3.56-3.8-6.96 3.8L13.2 12l3.66 3.8L23.72 12l-6.34 7.78z"/>',
+    },
+    instagram: {
+        bg: "linear-gradient(45deg,#f09433,#e6683c,#dc2743,#cc2366,#bc1888)",
+        svg: '<path d="M16 5.8c3.36 0 3.76.01 5.08.07 1.22.06 1.9.27 2.34.44.59.23 1.01.5 1.45.94.44.44.71.86.94 1.45.17.44.38 1.12.44 2.34.06 1.32.07 1.72.07 5.08s-.01 3.76-.07 5.08c-.06 1.22-.27 1.9-.44 2.34-.23.59-.5 1.01-.94 1.45-.44.44-.86.71-1.45.94-.44.17-1.12.38-2.34.44-1.32.06-1.72.07-5.08.07s-3.76-.01-5.08-.07c-1.22-.06-1.9-.27-2.34-.44-.59-.23-1.01-.5-1.45-.94-.44-.44-.71-.86-.94-1.45-.17-.44-.38-1.12-.44-2.34C5.81 19.76 5.8 19.36 5.8 16s.01-3.76.07-5.08c.06-1.22.27-1.9.44-2.34.23-.59.5-1.01.94-1.45.44-.44.86-.71 1.45-.94.44-.17 1.12-.38 2.34-.44C12.24 5.81 12.64 5.8 16 5.8m0-2.3c-3.42 0-3.85.01-5.19.08-1.34.06-2.25.28-3.05.6-.82.32-1.52.75-2.21 1.44-.69.69-1.12 1.39-1.44 2.21-.32.8-.54 1.71-.6 3.05C3.51 12.15 3.5 12.58 3.5 16s.01 3.85.08 5.19c.06 1.34.28 2.25.6 3.05.32.82.75 1.52 1.44 2.21.69.69 1.39 1.12 2.21 1.44.8.32 1.71.54 3.05.6 1.34.06 1.77.08 5.19.08s3.85-.01 5.19-.08c1.34-.06 2.25-.28 3.05-.6.82-.32 1.52-.75 2.21-1.44.69-.69 1.12-1.39 1.44-2.21.32-.8.54-1.71.6-3.05.06-1.34.08-1.77.08-5.19s-.01-3.85-.08-5.19c-.06-1.34-.28-2.25-.6-3.05-.32-.82-.75-1.52-1.44-2.21-.69-.69-1.39-1.12-2.21-1.44-.8-.32-1.71-.54-3.05-.6C19.85 3.51 19.42 3.5 16 3.5zm0 6.19a6.31 6.31 0 100 12.62A6.31 6.31 0 0016 9.69zm0 10.4a4.09 4.09 0 110-8.18 4.09 4.09 0 010 8.18zm8.01-10.65a1.47 1.47 0 100 2.94 1.47 1.47 0 000-2.94z"/>',
+    },
+    email: {
+        bg: "#4d66b3",
+        svg: '<rect x="3" y="6" width="18" height="14" rx="2" stroke="white" strokeWidth="1.5" fill="none"/><path d="M3 9l9 6 9-6" stroke="white" strokeWidth="1.5"/>',
+    },
+    sms: {
+        bg: "#2c4e18",
+        svg: '<path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" stroke="white" strokeWidth="1.5" fill="none"/>',
+    },
 };
+
+function ChannelBadge({ channel }: { channel: string }) {
+    const meta = CHANNEL_ICON_SVG[channel] ?? CHANNEL_ICON_SVG.sms;
+    return (
+        <span
+            className="inline-flex items-center justify-center w-5 h-5 rounded-full flex-shrink-0"
+            style={{ background: meta.bg }}
+            title={channel}
+        >
+            <svg viewBox="0 0 24 24" className="w-3 h-3" fill="white" dangerouslySetInnerHTML={{ __html: meta.svg }} />
+        </span>
+    );
+}
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 
@@ -360,7 +393,7 @@ export function CustomerSidebar({
                         <span key={ch.channel + ch.identifier}
                             title={`${ch.channel}: ${ch.identifier} · ${ch.conversation_count} conv`}
                             className="inline-flex items-center gap-0.5 text-[10px] bg-stone-50 border border-stone-200 rounded px-1.5 py-0.5 text-stone-600">
-                            {CHANNEL_ICONS[ch.channel] || "🔗"} {ch.channel}
+                            <ChannelBadge channel={ch.channel} /> {ch.channel}
                         </span>
                     ))}
                     {profile.merged_ids.length > 0 && (
@@ -505,25 +538,62 @@ export function CustomerSidebar({
                                 </div>
                             )}
                             {showMerge && (
-                                <div className="mt-2 p-2.5 bg-amber-50 rounded-lg border border-amber-200">
-                                    <div className="text-[10px] font-semibold text-amber-700 mb-1.5">Merge with another profile</div>
-                                    <input value={mergeQuery} onChange={(e) => setMergeQuery(e.target.value)}
-                                        placeholder="Phone / wa_id to merge…"
-                                        className="w-full text-xs bg-white border border-amber-200 rounded px-2 py-1 mb-2 focus:outline-none focus:ring-1 focus:ring-amber-400 text-stone-700" />
-                                    <Btn small variant="primary" onClick={async () => {
-                                        if (!mergeQuery.trim()) return;
-                                        try {
-                                            await crmReq("POST", `/admin/customers/${profile.wa_id}/merge`, {
-                                                merge_with: mergeQuery.trim(),
-                                            });
-                                            onToast("Profiles merged");
-                                            setShowMerge(false);
-                                            setMergeQuery("");
-                                            loadProfile();
-                                        } catch {
-                                            onToast("Failed to merge", "error");
-                                        }
-                                    }}>Merge</Btn>
+                                <div className="mt-3 rounded-xl border-2 border-dashed overflow-hidden"
+                                    style={{ borderColor: "#bcc13e", backgroundColor: "#f8f9ec" }}>
+                                    <div className="px-3 pt-3 pb-2">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <div className="w-7 h-7 rounded-lg flex items-center justify-center text-sm flex-shrink-0"
+                                                style={{ backgroundColor: "#e4e6b2", color: "#717425" }}>⊕</div>
+                                            <div>
+                                                <div className="text-xs font-bold" style={{ color: "#717425" }}>Merge Profiles</div>
+                                                <div className="text-[10px]" style={{ color: "#979a32" }}>Combine duplicate customer records</div>
+                                            </div>
+                                        </div>
+                                        <p className="text-[10px] mb-2.5 leading-relaxed" style={{ color: "#717425" }}>
+                                            Enter the phone / wa_id of the profile to merge <em>into this one</em>. Their orders and channels will be combined here.
+                                        </p>
+                                        <input value={mergeQuery} onChange={(e) => setMergeQuery(e.target.value)}
+                                            placeholder="e.g. 254700123456"
+                                            className="w-full text-xs rounded-lg px-2.5 py-2 mb-2.5 focus:outline-none focus:ring-2"
+                                            style={{
+                                                backgroundColor: "white",
+                                                border: "1.5px solid #cacd65",
+                                                color: "#16270c",
+                                                fontSize: 12,
+                                            }}
+                                            onFocus={(e) => { (e.target as HTMLInputElement).style.borderColor = "#589b31"; }}
+                                            onBlur={(e)  => { (e.target as HTMLInputElement).style.borderColor = "#cacd65"; }}
+                                        />
+                                        <div className="flex gap-1.5">
+                                            <button
+                                                onClick={async () => {
+                                                    if (!mergeQuery.trim()) return;
+                                                    try {
+                                                        await crmReq("POST", `/admin/customers/${profile.wa_id}/merge`, {
+                                                            merge_with: mergeQuery.trim(),
+                                                        });
+                                                        onToast("Profiles merged successfully");
+                                                        setShowMerge(false);
+                                                        setMergeQuery("");
+                                                        loadProfile();
+                                                    } catch {
+                                                        onToast("Failed to merge profiles", "error");
+                                                    }
+                                                }}
+                                                className="flex-1 text-[10px] font-bold py-1.5 rounded-lg text-white transition-colors"
+                                                style={{ backgroundColor: "#589b31" }}
+                                            >
+                                                ⊕ Merge now
+                                            </button>
+                                            <button
+                                                onClick={() => { setShowMerge(false); setMergeQuery(""); }}
+                                                className="text-[10px] font-semibold px-3 py-1.5 rounded-lg border transition-colors"
+                                                style={{ borderColor: "#cacd65", color: "#717425", backgroundColor: "white" }}
+                                            >
+                                                Cancel
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
                             )}
                         </Section>
@@ -630,7 +700,7 @@ export function CustomerSidebar({
                             {(profile.channels || []).map((ch) => (
                                 <div key={ch.channel + ch.identifier}
                                     className="flex items-start gap-2 py-2 border-b border-stone-50 last:border-0">
-                                    <span className="text-base">{CHANNEL_ICONS[ch.channel]}</span>
+                                    <span className="text-base"><ChannelBadge channel={ch.channel} /></span>
                                     <div className="flex-1 min-w-0">
                                         <div className="text-xs font-semibold text-stone-700 capitalize">{ch.channel}</div>
                                         <div className="text-[10px] text-stone-400">

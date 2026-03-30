@@ -3,22 +3,26 @@ import React, { useState, useEffect } from "react";
 import { signIn, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 
+export const metadata = { title: "Sign in" };
+
 export default function LoginPage(): React.ReactElement {
-    const { data: session, status } = useSession();
+    const { status } = useSession();
     const router = useRouter();
 
-    const [email,    setEmail]    = useState("");
+    const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
-    const [error,    setError]    = useState("");
-    const [loading,  setLoading]  = useState(false);
+    const [error, setError] = useState("");
+    const [loading, setLoading] = useState(false);
     const [showPass, setShowPass] = useState(false);
 
-    // Redirect if already authenticated
     useEffect(() => {
-        if (status === "authenticated") {
-            router.replace("/dashboard");
-        }
+        if (status === "authenticated") router.replace("/dashboard");
     }, [status, router]);
+
+    // Update browser tab title
+    useEffect(() => {
+        document.title = "Sign in | Neema";
+    }, []);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -34,11 +38,9 @@ export default function LoginPage(): React.ReactElement {
                 password,
                 redirect: false,
             });
-            if (result?.error) {
+            if (result?.error)
                 setError("Invalid email or password. Please try again.");
-            } else {
-                router.push("/dashboard");
-            }
+            else router.push("/dashboard");
         } catch {
             setError("Something went wrong. Please try again.");
         } finally {
@@ -48,33 +50,72 @@ export default function LoginPage(): React.ReactElement {
 
     if (status === "loading" || status === "authenticated") {
         return (
-            <div className="flex h-screen items-center justify-center bg-gray-950">
-                <div className="w-6 h-6 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
+            <div
+                className="flex h-screen items-center justify-center"
+                style={{ backgroundColor: "#0f1b09" }}
+            >
+                <div
+                    className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin"
+                    style={{
+                        borderColor: "#589b31",
+                        borderTopColor: "transparent",
+                    }}
+                />
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen bg-gray-950 flex">
-
-            {/* Left panel — branding */}
-            <div className="hidden lg:flex lg:w-[420px] xl:w-[480px] flex-col justify-between p-10 bg-gray-900 border-r border-gray-800/60 relative overflow-hidden flex-shrink-0">
-                {/* Background texture */}
-                <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,_var(--tw-gradient-stops))] from-green-900/20 via-transparent to-transparent pointer-events-none" />
-                <div className="absolute bottom-0 right-0 w-64 h-64 bg-green-800/5 rounded-full translate-x-1/2 translate-y-1/2 pointer-events-none" />
+        <div
+            className="min-h-screen flex"
+            style={{ backgroundColor: "#0f1b09" }}
+        >
+            {/* Left branding panel */}
+            <div
+                className="hidden lg:flex lg:w-[420px] xl:w-[480px] flex-col justify-between p-10 border-r relative overflow-hidden flex-shrink-0"
+                style={{ backgroundColor: "#16270c", borderColor: "#2c4e18" }}
+            >
+                {/* Radial glow */}
+                <div
+                    className="absolute inset-0 pointer-events-none"
+                    style={{
+                        background:
+                            "radial-gradient(ellipse at top left, rgba(88,155,49,0.15) 0%, transparent 60%)",
+                    }}
+                />
 
                 {/* Logo */}
                 <div className="relative flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-green-700 flex items-center justify-center shadow-lg shadow-green-900/50 flex-shrink-0">
-                        <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2}
-                                d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                    <div
+                        className="w-10 h-10 rounded-xl flex items-center justify-center shadow-lg flex-shrink-0"
+                        style={{
+                            backgroundColor: "#589b31",
+                            boxShadow: "0 4px 20px rgba(88,155,49,0.4)",
+                        }}
+                    >
+                        <svg
+                            className="w-6 h-6 text-white"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                        >
+                            <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2.2}
+                                d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+                            />
                         </svg>
                     </div>
                     <div>
-                        <div className="text-white font-bold text-lg leading-none tracking-tight">Neema</div>
-                        <div className="text-[10px] text-green-500/70 uppercase tracking-widest font-medium mt-0.5">
-                            Admin Dashboard
+                        <div className="text-white font-bold text-lg leading-none tracking-tight">
+                            Neema
+                        </div>
+                        <div
+                            className="text-[10px] uppercase tracking-widest font-medium mt-0.5"
+                            style={{ color: "#699a32" }}
+                        >
+                            Bethany House · Admin
                         </div>
                     </div>
                 </div>
@@ -82,140 +123,276 @@ export default function LoginPage(): React.ReactElement {
                 {/* Feature list */}
                 <div className="relative space-y-6">
                     <div>
-                        <h2 className="text-2xl font-bold text-white leading-snug mb-2">
-                            Manage conversations,<br />
-                            <span className="text-green-400">grow your business.</span>
+                        <h2
+                            className="text-2xl font-bold leading-snug mb-2"
+                            style={{ color: "#f3f9ec" }}
+                        >
+                            Manage conversations,
+                            <br />
+                            <span style={{ color: "#9ccd65" }}>
+                                grow your business.
+                            </span>
                         </h2>
-                        <p className="text-sm text-gray-400 leading-relaxed">
-                            Your AI-powered WhatsApp assistant for Bethany House — handling orders, customer queries, and sales around the clock.
+                        <p
+                            className="text-sm leading-relaxed"
+                            style={{ color: "#699a32" }}
+                        >
+                            AI-powered WhatsApp assistant for Bethany House —
+                            handling orders, queries, and sales around the
+                            clock.
                         </p>
                     </div>
                     <div className="space-y-3">
                         {[
-                            { icon: "💬", label: "Live conversation monitoring" },
-                            { icon: "🤖", label: "AI-assisted replies & drafts"  },
-                            { icon: "📦", label: "Order & catalog management"    },
-                            { icon: "📊", label: "Customer insights & CRM"       },
+                            {
+                                icon: "💬",
+                                label: "Live conversation monitoring",
+                            },
+                            {
+                                icon: "🤖",
+                                label: "AI-assisted replies & drafts",
+                            },
+                            { icon: "📦", label: "Order & catalog management" },
+                            { icon: "📊", label: "Customer insights & CRM" },
                         ].map(({ icon, label }) => (
-                            <div key={label} className="flex items-center gap-3">
-                                <div className="w-8 h-8 rounded-lg bg-gray-800 border border-gray-700/60 flex items-center justify-center text-base flex-shrink-0">
+                            <div
+                                key={label}
+                                className="flex items-center gap-3"
+                            >
+                                <div
+                                    className="w-8 h-8 rounded-lg flex items-center justify-center text-sm flex-shrink-0 border"
+                                    style={{
+                                        backgroundColor: "#2c4e18",
+                                        borderColor: "#427425",
+                                    }}
+                                >
                                     {icon}
                                 </div>
-                                <span className="text-sm text-gray-300">{label}</span>
+                                <span
+                                    className="text-sm"
+                                    style={{ color: "#b5da8b" }}
+                                >
+                                    {label}
+                                </span>
                             </div>
                         ))}
                     </div>
                 </div>
 
-                {/* Footer */}
-                <div className="relative text-[11px] text-gray-600">
+                <div className="relative text-xs" style={{ color: "#427425" }}>
                     © {new Date().getFullYear()} Bethany House · Nairobi, Kenya
                 </div>
             </div>
 
-            {/* Right panel — form */}
+            {/* Right form panel */}
             <div className="flex-1 flex items-center justify-center p-6">
                 <div className="w-full max-w-sm">
-
                     {/* Mobile logo */}
                     <div className="lg:hidden flex items-center gap-2.5 mb-8">
-                        <div className="w-8 h-8 rounded-lg bg-green-700 flex items-center justify-center shadow-lg shadow-green-900/50">
-                            <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2}
-                                    d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                        <div
+                            className="w-9 h-9 rounded-xl flex items-center justify-center shadow-lg"
+                            style={{ backgroundColor: "#589b31" }}
+                        >
+                            <svg
+                                className="w-5 h-5 text-white"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                            >
+                                <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2.2}
+                                    d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+                                />
                             </svg>
                         </div>
                         <div>
-                            <div className="text-white font-bold text-base leading-none">Neema</div>
-                            <div className="text-[10px] text-green-500/70 uppercase tracking-widest mt-0.5">Admin</div>
+                            <div className="text-white font-bold text-base">
+                                Neema
+                            </div>
+                            <div
+                                className="text-[10px] uppercase tracking-widest mt-0.5"
+                                style={{ color: "#699a32" }}
+                            >
+                                Admin
+                            </div>
                         </div>
                     </div>
 
-                    {/* Heading */}
                     <div className="mb-8">
-                        <h1 className="text-2xl font-bold text-white tracking-tight mb-1">
+                        <h1
+                            className="text-2xl font-bold tracking-tight mb-1"
+                            style={{ color: "#f3f9ec" }}
+                        >
                             Sign in
                         </h1>
-                        <p className="text-sm text-gray-500">
+                        <p className="text-sm" style={{ color: "#699a32" }}>
                             Enter your credentials to access the dashboard
                         </p>
                     </div>
 
-                    {/* Form */}
                     <form onSubmit={handleSubmit} className="space-y-4">
-
-                        {/* Email */}
                         <div>
-                            <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                            <label
+                                className="block text-xs font-semibold uppercase tracking-wider mb-2"
+                                style={{ color: "#699a32" }}
+                            >
                                 Email address
                             </label>
                             <input
                                 type="email"
                                 value={email}
-                                onChange={(e) => { setEmail(e.target.value); setError(""); }}
-                                placeholder="admin@bethanyhouse.com"
                                 autoComplete="email"
                                 required
-                                className="w-full h-11 px-4 bg-gray-900 border border-gray-700 rounded-xl text-white text-sm placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-green-600 focus:border-transparent transition-all"
-                                style={{ fontSize: 16 }}
+                                onChange={(e) => {
+                                    setEmail(e.target.value);
+                                    setError("");
+                                }}
+                                placeholder="admin@bethanyhouse.com"
+                                className="w-full h-11 px-4 rounded-xl text-sm placeholder-[#427425] focus:outline-none focus:ring-2 transition-all"
+                                style={{
+                                    backgroundColor: "#16270c",
+                                    border: "1px solid #2c4e18",
+                                    color: "#f3f9ec",
+                                    fontSize: 14,
+                                    boxShadow: "none",
+                                }}
+                                onFocus={(e) => {
+                                    e.target.style.borderColor = "#589b31";
+                                    e.target.style.boxShadow =
+                                        "0 0 0 3px rgba(88,155,49,0.2)";
+                                }}
+                                onBlur={(e) => {
+                                    e.target.style.borderColor = "#2c4e18";
+                                    e.target.style.boxShadow = "none";
+                                }}
                             />
                         </div>
 
-                        {/* Password */}
                         <div>
-                            <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                            <label
+                                className="block text-xs font-semibold uppercase tracking-wider mb-2"
+                                style={{ color: "#699a32" }}
+                            >
                                 Password
                             </label>
                             <div className="relative">
                                 <input
                                     type={showPass ? "text" : "password"}
                                     value={password}
-                                    onChange={(e) => { setPassword(e.target.value); setError(""); }}
-                                    placeholder="••••••••"
                                     autoComplete="current-password"
                                     required
-                                    className="w-full h-11 px-4 pr-11 bg-gray-900 border border-gray-700 rounded-xl text-white text-sm placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-green-600 focus:border-transparent transition-all"
-                                    style={{ fontSize: 16 }}
+                                    onChange={(e) => {
+                                        setPassword(e.target.value);
+                                        setError("");
+                                    }}
+                                    placeholder="••••••••"
+                                    className="w-full h-11 px-4 pr-11 rounded-xl text-sm focus:outline-none transition-all"
+                                    style={{
+                                        backgroundColor: "#16270c",
+                                        border: "1px solid #2c4e18",
+                                        color: "#f3f9ec",
+                                        fontSize: 14,
+                                    }}
+                                    onFocus={(e) => {
+                                        e.target.style.borderColor = "#589b31";
+                                        e.target.style.boxShadow =
+                                            "0 0 0 3px rgba(88,155,49,0.2)";
+                                    }}
+                                    onBlur={(e) => {
+                                        e.target.style.borderColor = "#2c4e18";
+                                        e.target.style.boxShadow = "none";
+                                    }}
                                 />
                                 <button
                                     type="button"
-                                    onClick={() => setShowPass((s) => !s)}
-                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors"
                                     tabIndex={-1}
+                                    onClick={() => setShowPass((s) => !s)}
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 transition-colors"
+                                    style={{ color: "#699a32" }}
                                 >
                                     {showPass ? (
-                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                                d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                                        <svg
+                                            className="w-4 h-4"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            viewBox="0 0 24 24"
+                                        >
+                                            <path
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                                strokeWidth={2}
+                                                d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"
+                                            />
                                         </svg>
                                     ) : (
-                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                                d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                        <svg
+                                            className="w-4 h-4"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            viewBox="0 0 24 24"
+                                        >
+                                            <path
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                                strokeWidth={2}
+                                                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                                            />
+                                            <path
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                                strokeWidth={2}
+                                                d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                                            />
                                         </svg>
                                     )}
                                 </button>
                             </div>
                         </div>
 
-                        {/* Error */}
                         {error && (
-                            <div className="flex items-start gap-2.5 p-3 bg-red-950/60 border border-red-800/60 rounded-lg">
-                                <svg className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                        d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            <div
+                                className="flex items-start gap-2.5 p-3 rounded-lg border border-red-800/60"
+                                style={{
+                                    backgroundColor: "rgba(192,57,43,0.15)",
+                                }}
+                            >
+                                <svg
+                                    className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                >
+                                    <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                                    />
                                 </svg>
                                 <p className="text-xs text-red-300">{error}</p>
                             </div>
                         )}
 
-                        {/* Submit */}
                         <button
                             type="submit"
                             disabled={loading}
-                            className="w-full h-11 rounded-xl bg-green-700 hover:bg-green-600 disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors shadow-lg shadow-green-900/30 flex items-center justify-center gap-2 mt-2"
+                            className="w-full h-11 rounded-xl text-sm font-semibold text-white transition-all mt-2 flex items-center justify-center gap-2 disabled:opacity-60"
+                            style={{
+                                backgroundColor: "#589b31",
+                                boxShadow: "0 4px 20px rgba(88,155,49,0.3)",
+                            }}
+                            onMouseEnter={(e) => {
+                                (
+                                    e.currentTarget as HTMLElement
+                                ).style.backgroundColor = "#427425";
+                            }}
+                            onMouseLeave={(e) => {
+                                (
+                                    e.currentTarget as HTMLElement
+                                ).style.backgroundColor = "#589b31";
+                            }}
                         >
                             {loading ? (
                                 <>
@@ -228,11 +405,17 @@ export default function LoginPage(): React.ReactElement {
                         </button>
                     </form>
 
-                    {/* Divider */}
-                    <div className="mt-8 pt-6 border-t border-gray-800/60">
-                        <p className="text-center text-xs text-gray-600">
+                    <div
+                        className="mt-8 pt-6 border-t"
+                        style={{ borderColor: "#2c4e18" }}
+                    >
+                        <p
+                            className="text-center text-xs"
+                            style={{ color: "#427425" }}
+                        >
                             Access restricted to Bethany House staff.
-                            <br />Contact your administrator if you need access.
+                            <br />
+                            Contact your administrator if you need access.
                         </p>
                     </div>
                 </div>

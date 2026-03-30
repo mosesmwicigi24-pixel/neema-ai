@@ -140,6 +140,7 @@ export type ViewId =
     | "conversations"
     | "orders"
     | "leads"
+    | "reports"
     | "agents"
     | "catalog"
     | "overview"

@@ -27,6 +27,7 @@ import { AgentsView } from "@/components/views/AgentsView";
 import { CatalogView } from "@/components/views/CatalogView";
 import { OverviewView } from "@/components/views/OverviewView";
 import { LeadsView } from "@/components/views/LeadsView";
+import { ReportsView } from "@/components/views/ReportsView";
 import { ProfileView } from "@/components/views/ProfileView";
 import { SettingsView } from "@/components/views/SettingsView";
 
@@ -83,6 +84,16 @@ export default function NeemaDashboard(): React.ReactElement {
     // Local conversations state so CustomerSidebar name updates reflect immediately
     const [localConversations, setLocalConversations] = useState<Conversation[]>([]);
     const isMobile = useIsMobile();
+
+    // Update page title
+    useEffect(() => {
+        const labels: Record<string, string> = {
+            conversations: "Inbox", orders: "Orders", leads: "Leads",
+            overview: "Analytics", catalog: "Catalog", agents: "Team",
+            profile: "Profile", settings: "Settings", reports: "Reports",
+        };
+        document.title = `${labels[view] ?? view} | Neema`;
+    }, [view]);
 
     const isAuthenticated = authStatus === "authenticated";
 
@@ -242,6 +253,14 @@ export default function NeemaDashboard(): React.ReactElement {
         ...(isAdmin
             ? [
                   {
+                      id: "reports" as ViewId,
+                      icon: (
+                          <Icon d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      ),
+                      label: "Reports",
+                      badge: null,
+                  },
+                  {
                       id: "leads" as ViewId,
                       icon: (
                           <Icon d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9" />
@@ -320,6 +339,14 @@ export default function NeemaDashboard(): React.ReactElement {
         ),
         leads: (
             <LeadsView
+                {...viewProps}
+            />
+        ),
+        reports: (
+            <ReportsView
+                conversations={conversations}
+                agents={agents}
+                orders={orders}
                 {...viewProps}
             />
         ),

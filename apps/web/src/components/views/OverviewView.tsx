@@ -23,23 +23,55 @@ interface StatCardProps {
     loading?: boolean;
 }
 
+// Flat SVG icons for stat cards
+const STAT_ICONS: Record<string, string> = {
+    "💬": "M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z",
+    "👥": "M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z",
+    "💰": "M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
+    "📦": "M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4",
+    "🤖": "M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z",
+};
+
+const STAT_COLORS: Record<string, { bg: string; icon: string; accent: string }> = {
+    "border-t-green-600":  { bg: "#f0f9ec", icon: "#589b31", accent: "#589b31" },
+    "border-t-emerald-400":{ bg: "#f0fdf4", icon: "#427425", accent: "#427425" },
+    "border-t-blue-400":   { bg: "#ebeefa", icon: "#2a48a2", accent: "#2a48a2" },
+    "border-t-orange-400": { bg: "#fff7ed", icon: "#bcc13e", accent: "#bcc13e" },
+    "border-t-violet-400": { bg: "#f5f3ff", icon: "#4d66b3", accent: "#4d66b3" },
+};
+
 function StatCard({ label, value, sub, icon, accent, trend, loading }: StatCardProps) {
+    const colorMeta = STAT_COLORS[accent] ?? STAT_COLORS["border-t-green-600"];
+    const iconPath  = STAT_ICONS[icon];
     return (
-        <div className={`bg-white rounded-xl border border-stone-100 shadow-sm p-5 border-t-2 ${accent}`}>
+        <div className="bg-white rounded-xl border border-[#cee6b2] shadow-sm p-4 relative overflow-hidden">
+            {/* Colored accent strip */}
+            <div className="absolute top-0 left-0 right-0 h-0.5 rounded-t-xl"
+                style={{ backgroundColor: colorMeta.accent }} />
             <div className="flex items-start justify-between mb-3">
-                <span className="text-xl">{icon}</span>
+                {/* Flat icon in colored circle */}
+                <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                    style={{ backgroundColor: colorMeta.bg }}>
+                    {iconPath ? (
+                        <svg className="w-5 h-5" fill="none" stroke={colorMeta.icon} viewBox="0 0 24 24" strokeWidth={1.8}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d={iconPath} />
+                        </svg>
+                    ) : (
+                        <span className="text-lg">{icon}</span>
+                    )}
+                </div>
                 {trend && (
-                    <span className={`text-xs font-semibold flex items-center gap-0.5 ${trend.positive ? "text-emerald-600" : "text-red-500"}`}>
+                    <span className={`text-xs font-semibold flex items-center gap-0.5 ${trend.positive ? "text-[#589b31]" : "text-red-500"}`}>
                         {trend.positive ? "↑" : "↓"} {trend.value}%
                     </span>
                 )}
             </div>
             {loading ? (
-                <div className="h-8 w-16 bg-stone-100 rounded animate-pulse mb-1" />
+                <div className="h-7 w-14 bg-[#e6f3d8] rounded animate-pulse mb-1" />
             ) : (
-                <div className="text-2xl font-bold text-stone-800 mb-0.5 tabular-nums">{value}</div>
+                <div className="text-2xl font-bold text-[#16270c] mb-0.5 tabular-nums">{value}</div>
             )}
-            <div className="text-xs font-semibold text-stone-500">{label}</div>
+            <div className="text-xs font-semibold" style={{ color: colorMeta.accent }}>{label}</div>
             <div className="text-xs text-stone-400 mt-0.5">{sub}</div>
         </div>
     );
@@ -179,7 +211,7 @@ export function OverviewView({
         .slice(0, 5);
 
     return (
-        <div className={`flex-1 overflow-y-auto bg-stone-50 ${isMobile ? "p-4 pb-24" : "p-6"}`}>
+        <div className={`flex-1 overflow-y-auto bg-[#f3f9ec] ${isMobile ? "p-4 pb-24" : "p-6"}`}>
 
             {/* Header */}
             <div className="flex items-center justify-between mb-6">
@@ -221,7 +253,7 @@ export function OverviewView({
             <div className={`grid gap-4 mb-4 ${isMobile ? "grid-cols-1" : "grid-cols-5"}`}>
 
                 {/* Revenue bar chart — real 7-day data */}
-                <div className={`bg-white rounded-xl border border-stone-100 shadow-sm p-5 ${isMobile ? "" : "col-span-3"}`}>
+                <div className={`bg-white rounded-xl border border-[#cee6b2] shadow-sm p-5 ${isMobile ? "" : "col-span-3"}`}>
                     <div className="flex items-center justify-between mb-4">
                         <div className="text-xs font-semibold text-stone-400 uppercase tracking-wider">
                             7-Day Revenue (KES)
@@ -252,7 +284,7 @@ export function OverviewView({
                 </div>
 
                 {/* Order status breakdown */}
-                <div className={`bg-white rounded-xl border border-stone-100 shadow-sm p-5 ${isMobile ? "" : "col-span-2"}`}>
+                <div className={`bg-white rounded-xl border border-[#cee6b2] shadow-sm p-5 ${isMobile ? "" : "col-span-2"}`}>
                     <div className="text-xs font-semibold text-stone-400 uppercase tracking-wider mb-4">Order Status</div>
                     <div className="space-y-3.5">
                         {orderStatusItems.map((item) => (
@@ -277,7 +309,7 @@ export function OverviewView({
             <div className={`grid gap-4 mb-4 ${isMobile ? "grid-cols-1" : "grid-cols-5"}`}>
 
                 {/* Channel breakdown */}
-                <div className={`bg-white rounded-xl border border-stone-100 shadow-sm p-5 ${isMobile ? "" : "col-span-2"}`}>
+                <div className={`bg-white rounded-xl border border-[#cee6b2] shadow-sm p-5 ${isMobile ? "" : "col-span-2"}`}>
                     <div className="text-xs font-semibold text-stone-400 uppercase tracking-wider mb-4">By Channel</div>
                     {channelBreakdown.length === 0 ? (
                         <p className="text-xs text-stone-400 text-center py-6">No channel data yet</p>
@@ -310,7 +342,7 @@ export function OverviewView({
                 </div>
 
                 {/* Activity feed — real data */}
-                <div className={`bg-white rounded-xl border border-stone-100 shadow-sm p-5 ${isMobile ? "" : "col-span-3"}`}>
+                <div className={`bg-white rounded-xl border border-[#cee6b2] shadow-sm p-5 ${isMobile ? "" : "col-span-3"}`}>
                     <div className="text-xs font-semibold text-stone-400 uppercase tracking-wider mb-4">Recent Activity</div>
                     {activityFeed.length === 0 ? (
                         <p className="text-xs text-stone-400 text-center py-6">No activity yet</p>
@@ -318,7 +350,7 @@ export function OverviewView({
                         <div className="space-y-0 divide-y divide-stone-50">
                             {activityFeed.map((entry) => (
                                 <div key={entry.id} className="flex items-center gap-3 py-2.5">
-                                    <div className="w-7 h-7 rounded-lg bg-stone-50 border border-stone-100 flex items-center justify-center text-sm flex-shrink-0">
+                                    <div className="w-7 h-7 rounded-lg bg-[#f3f9ec] border border-stone-100 flex items-center justify-center text-sm flex-shrink-0">
                                         {entry.icon}
                                     </div>
                                     <div className="flex-1 min-w-0">
@@ -340,7 +372,7 @@ export function OverviewView({
 
             {/* Top products — real data */}
             {topProducts.length > 0 && (
-                <div className="bg-white rounded-xl border border-stone-100 shadow-sm p-5">
+                <div className="bg-white rounded-xl border border-[#cee6b2] shadow-sm p-5">
                     <div className="text-xs font-semibold text-stone-400 uppercase tracking-wider mb-4">Top Products by Revenue</div>
                     <div className="space-y-2">
                         {topProducts.map((p, i) => {

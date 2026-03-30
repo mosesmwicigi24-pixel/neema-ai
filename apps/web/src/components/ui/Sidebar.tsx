@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { signOut } from "next-auth/react";
 import { Avatar } from "@/components/ui/Avatar";
+import { Notifications } from "@/components/ui/Notifications";
 import { cn } from "@/lib/utils";
 import type { NavItem, Session, ThemeMode, ViewId } from "@/types";
 
@@ -128,71 +129,53 @@ export function Sidebar({
     return (
         <aside
             className={cn(
-                "flex flex-col h-full bg-gray-950 border-r border-gray-800/60 flex-shrink-0 transition-all duration-300 overflow-hidden relative",
+                "flex flex-col h-full border-r border-[#2c4e18]/60 flex-shrink-0 transition-all duration-300 overflow-hidden relative",
                 collapsed ? "w-16" : "w-56",
             )}
+            style={{ backgroundColor: "#0f1b09" }}
         >
             {/* Logo */}
             <div
                 className={cn(
-                    "flex items-center border-b border-gray-800/60 h-14 flex-shrink-0",
+                    "flex items-center border-b border-[#2c4e18]/60 h-14 flex-shrink-0",
                     collapsed ? "justify-center px-3" : "px-4 gap-3",
                 )}
             >
                 {!collapsed && (
                     <div className="flex items-center gap-2 flex-1 min-w-0">
-                        <div className="w-7 h-7 rounded-lg bg-green-700 flex items-center justify-center flex-shrink-0 shadow-lg shadow-green-900/40">
-                            <svg
-                                className="w-4 h-4 text-white"
-                                fill="none"
-                                stroke="currentColor"
-                                viewBox="0 0 24 24"
-                            >
-                                <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2.5}
-                                    d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-                                />
+                        <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 shadow-lg"
+                            style={{ backgroundColor: "#589b31", boxShadow: "0 2px 12px rgba(88,155,49,0.4)" }}>
+                            <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
+                                    d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                             </svg>
                         </div>
                         <div className="min-w-0">
-                            <div className="text-white font-semibold text-sm leading-none tracking-tight">
-                                Neema
-                            </div>
-                            <div className="text-[9px] text-green-500/70 uppercase tracking-widest font-medium mt-0.5">
+                            <div className="text-white font-semibold text-sm leading-none tracking-tight">Neema</div>
+                            <div className="text-[9px] uppercase tracking-widest font-medium mt-0.5" style={{ color: "#699a32" }}>
                                 Admin
                             </div>
                         </div>
                     </div>
                 )}
-                <button
-                    onClick={() => setCollapsed((c) => !c)}
-                    className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-500 hover:text-white hover:bg-gray-800 transition-all flex-shrink-0"
-                >
-                    <svg
-                        className="w-3.5 h-3.5"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
+                <div className="flex items-center gap-1">
+                    {!collapsed && <Notifications />}
+                    <button
+                        onClick={() => setCollapsed((c) => !c)}
+                        className="w-7 h-7 flex items-center justify-center rounded-lg transition-all flex-shrink-0"
+                        style={{ color: "#699a32" }}
+                        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#2c4e18"; (e.currentTarget as HTMLElement).style.color = "#f3f9ec"; }}
+                        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = ""; (e.currentTarget as HTMLElement).style.color = "#699a32"; }}
                     >
-                        {collapsed ? (
-                            <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M13 5l7 7-7 7M5 5l7 7-7 7"
-                            />
-                        ) : (
-                            <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M11 19l-7-7 7-7m8 14l-7-7 7-7"
-                            />
-                        )}
-                    </svg>
-                </button>
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            {collapsed ? (
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                            ) : (
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+                            )}
+                        </svg>
+                    </button>
+                </div>
             </div>
 
             {/* Nav */}
@@ -206,31 +189,34 @@ export function Sidebar({
                             title={collapsed ? item.label : undefined}
                             className={cn(
                                 "w-full flex items-center rounded-lg text-sm font-medium transition-all duration-150 touch-manipulation group relative",
-                                collapsed
-                                    ? "justify-center h-10 px-0"
-                                    : "gap-2.5 px-3 h-10",
-                                isActive
-                                    ? "bg-green-700/90 text-white shadow-sm shadow-green-900/30"
-                                    : "text-gray-400 hover:text-white hover:bg-gray-800/70",
+                                collapsed ? "justify-center h-10 px-0" : "gap-2.5 px-3 h-10",
                             )}
+                            style={{
+                                backgroundColor: isActive ? "#589b31" : "",
+                                color: isActive ? "#ffffff" : "#699a32",
+                            }}
+                            onMouseEnter={(e) => {
+                                if (!isActive) (e.currentTarget as HTMLElement).style.backgroundColor = "#2c4e18";
+                                if (!isActive) (e.currentTarget as HTMLElement).style.color = "#f3f9ec";
+                            }}
+                            onMouseLeave={(e) => {
+                                if (!isActive) (e.currentTarget as HTMLElement).style.backgroundColor = "";
+                                if (!isActive) (e.currentTarget as HTMLElement).style.color = "#699a32";
+                            }}
                         >
-                            <span className="flex-shrink-0 text-base leading-none">
-                                {item.icon}
-                            </span>
+                            <span className="flex-shrink-0 text-base leading-none">{item.icon}</span>
                             {!collapsed && (
                                 <>
-                                    <span className="flex-1 text-left truncate">
-                                        {item.label}
-                                    </span>
+                                    <span className="flex-1 text-left truncate">{item.label}</span>
                                     {item.badge != null && (
-                                        <span className="ml-auto flex-shrink-0 bg-green-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
+                                        <span className="ml-auto flex-shrink-0 bg-[#589b31] text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
                                             {item.badge}
                                         </span>
                                     )}
                                 </>
                             )}
                             {collapsed && item.badge != null && (
-                                <span className="absolute top-1 right-1 w-3.5 h-3.5 bg-green-500 text-white text-[8px] font-bold rounded-full flex items-center justify-center">
+                                <span className="absolute top-1 right-1 w-3.5 h-3.5 bg-[#589b31] text-white text-[8px] font-bold rounded-full flex items-center justify-center">
                                     {item.badge}
                                 </span>
                             )}
@@ -242,7 +228,7 @@ export function Sidebar({
             {/* Footer with user menu */}
             <div
                 className={cn(
-                    "border-t border-gray-800/60 p-2 flex-shrink-0 relative",
+                    "border-t border-[#2c4e18]/60 p-2 flex-shrink-0 relative",
                     collapsed ? "flex justify-center" : "",
                 )}
                 ref={menuRef}
@@ -251,12 +237,10 @@ export function Sidebar({
                 {menuOpen && (
                     <div
                         className={cn(
-                            "absolute bottom-full mb-2 z-50 bg-gray-900 border border-gray-700/60 rounded-xl shadow-2xl shadow-black/60 overflow-hidden",
-                            collapsed
-                                ? "left-full ml-2 w-52"
-                                : "left-2 right-2",
+                            "absolute bottom-full mb-2 z-50 border rounded-xl shadow-2xl shadow-black/60 overflow-hidden",
+                            collapsed ? "left-full ml-2 w-52" : "left-2 right-2",
                         )}
-                        style={{ animation: "menuSlideUp 0.15s ease" }}
+                        style={{ backgroundColor: "#16270c", borderColor: "#2c4e18", animation: "menuSlideUp 0.15s ease" }}
                     >
                         <style>{`
                             @keyframes menuSlideUp {
@@ -266,18 +250,19 @@ export function Sidebar({
                         `}</style>
 
                         {/* User info header */}
-                        <div className="px-3 py-3 border-b border-gray-700/40">
+                        <div className="px-3 py-3 border-b" style={{ borderColor: "#2c4e18" }}>
                             <div className="flex items-center gap-2.5">
                                 <Avatar name={session.user.name} size="sm" />
                                 <div className="min-w-0 flex-1">
                                     <div className="text-xs font-semibold text-white truncate">
                                         {session.user.name}
                                     </div>
-                                    <div className="text-[10px] text-gray-500 truncate">
+                                    <div className="text-[10px] truncate" style={{ color: "#699a32" }}>
                                         {session.user.email}
                                     </div>
                                 </div>
-                                <span className="flex-shrink-0 text-[9px] bg-green-700/30 text-green-400 border border-green-700/30 px-1.5 py-0.5 rounded-full font-semibold uppercase tracking-wide">
+                                <span className="flex-shrink-0 text-[9px] border px-1.5 py-0.5 rounded-full font-semibold uppercase tracking-wide"
+                                    style={{ backgroundColor: "rgba(88,155,49,0.2)", color: "#9ccd65", borderColor: "rgba(88,155,49,0.3)" }}>
                                     {session.user.role}
                                 </span>
                             </div>
