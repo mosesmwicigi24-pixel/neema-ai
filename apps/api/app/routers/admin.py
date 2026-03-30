@@ -313,9 +313,24 @@ async def list_agents(db: AsyncSession = Depends(get_db),
 async def update_agent(agent_id: str, body: dict,
                        db: AsyncSession = Depends(get_db),
                        current: Agent = Depends(get_current_agent)):
-    allowed = {"name", "is_available", "role", "avatar_url"}
-    updates = {k: v for k, v in body.items() if k in allowed}
-    await db.execute(update(Agent).where(Agent.id == agent_id).values(**updates))
+    from app.core.security import hash_password
+    result = await db.execute(select(Agent).where(Agent.id == agent_id))
+    agent = result.scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if "name" in body and body["name"]:
+        agent.name = body["name"]
+    if "email" in body and body["email"]:
+        agent.email = body["email"]
+    if "role" in body and body["role"]:
+        agent.role = body["role"]
+    if "is_available" in body:
+        agent.is_available = bool(body["is_available"])
+    if "password" in body and body["password"]:
+        if len(body["password"]) < 8:
+            raise HTTPException(status_code=422, detail="Password must be at least 8 characters")
+        agent.password_hash = hash_password(body["password"])
+    await db.commit()
     return {"ok": True}
 
 # ── Orders ────────────────────────────────────────────────────────────────────

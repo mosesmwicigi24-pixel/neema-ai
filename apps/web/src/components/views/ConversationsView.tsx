@@ -293,8 +293,8 @@ export function ConversationsView({
         <div
             className="flex flex-col h-full border-r border-stone-100 bg-white"
             style={{
-                width: isMobile ? "100%" : 320,
-                minWidth: isMobile ? "100%" : 280,
+                width: isMobile ? "100%" : 288,
+                minWidth: isMobile ? "100%" : 288,
             }}
         >
             {/* Header */}
@@ -496,54 +496,33 @@ export function ConversationsView({
             ) : (
                 <>
                     {/* Thread header */}
-                    <div className="px-5 py-3 border-b border-stone-100 bg-white flex items-center gap-3">
+                    <div className="px-4 py-3 border-b border-stone-100 bg-white flex items-center gap-2 flex-wrap">
                         {isMobile && (
                             <button
                                 onClick={() => setMobilePanel("list")}
-                                className="text-stone-500 hover:text-stone-800 mr-1"
+                                className="text-stone-500 hover:text-stone-800 mr-1 flex-shrink-0"
                             >
-                                <svg
-                                    className="w-5 h-5"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    viewBox="0 0 24 24"
-                                >
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={2}
-                                        d="M15 19l-7-7 7-7"
-                                    />
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                                 </svg>
                             </button>
                         )}
-                        <Avatar
-                            name={activeConv.name ?? activeConv.wa_id}
-                            size={36}
-                        />
+                        <Avatar name={activeConv.name ?? activeConv.wa_id} size={32} />
                         <div className="flex-1 min-w-0">
-                            <div className="text-sm font-semibold text-stone-800">
+                            <div className="text-sm font-semibold text-stone-800 truncate">
                                 {activeConv.name ?? activeConv.wa_id}
                             </div>
-                            <div className="text-xs text-stone-400 font-mono">
+                            <div className="text-xs text-stone-400 font-mono truncate">
                                 +{activeConv.wa_id}
                             </div>
                         </div>
-                        <InterceptBadge mode={activeConv.intercept_mode} />
-                        {activeConv.assigned_agent_id && (
-                            <span className="text-xs text-stone-400 hidden sm:block">
-                                →{" "}
-                                {
-                                    agents.find(
-                                        (a) =>
-                                            a.id ===
-                                            activeConv.assigned_agent_id,
-                                    )?.name
-                                }
-                            </span>
-                        )}
-                        {/* Action buttons */}
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap">
+                            <InterceptBadge mode={activeConv.intercept_mode} />
+                            {activeConv.assigned_agent_id && activeConv.assigned_agent_name && (
+                                <span className="text-xs text-stone-400 hidden lg:block">
+                                    → {activeConv.assigned_agent_name}
+                                </span>
+                            )}
                             {activeConv.intercept_mode === "ai" && (
                                 <Btn
                                     key="intercept"

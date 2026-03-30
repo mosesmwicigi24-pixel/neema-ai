@@ -26,6 +26,7 @@ import { OrdersView } from "@/components/views/OrdersView";
 import { AgentsView } from "@/components/views/AgentsView";
 import { CatalogView } from "@/components/views/CatalogView";
 import { OverviewView } from "@/components/views/OverviewView";
+import { LeadsView } from "@/components/views/LeadsView";
 import { ProfileView } from "@/components/views/ProfileView";
 import { SettingsView } from "@/components/views/SettingsView";
 
@@ -79,6 +80,8 @@ export default function NeemaDashboard(): React.ReactElement {
     const [messages, setMessages] = useState<MessagesMap>({});
     const [toast, setToast] = useState<ToastState | null>(null);
     const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
+    // Local conversations state so CustomerSidebar name updates reflect immediately
+    const [localConversations, setLocalConversations] = useState<Conversation[]>([]);
     const isMobile = useIsMobile();
 
     const isAuthenticated = authStatus === "authenticated";
@@ -135,20 +138,38 @@ export default function NeemaDashboard(): React.ReactElement {
     );
 
     // ── Map API data to UI types ──────────────────────────────────────────────
-    const conversations: Conversation[] = (rawConversations ?? []).map(
-        mapConversation,
-    );
-    const agents: Agent[] = (rawAgents ?? []).map(mapAgent);
+    const mappedConversations: Conversation[] = (rawConversations ?? []).map(mapConversation);
+    const agents: Agent[]       = (rawAgents ?? []).map(mapAgent);
     const catalog: CatalogItem[] = (rawCatalog ?? []).map(mapCatalogItem);
-    const orders: Order[] = (rawOrders ?? []).map(mapOrder);
+    const orders: Order[]       = (rawOrders ?? []).map(mapOrder);
 
-    // ── Optimistic setters ────────────────────────────────────────────────────
+    // Sync local conversations whenever polling brings fresh data
+    useEffect(() => {
+        if (mappedConversations.length > 0) {
+            setLocalConversations(mappedConversations);
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [rawConversations]);
+
+    // Use localConversations so optimistic name changes are visible immediately
+    const conversations = localConversations.length > 0
+        ? localConversations
+        : mappedConversations;
+
+    // ── Setters ───────────────────────────────────────────────────────────────
+    // setConversations supports both React updater functions and direct values,
+    // enabling CustomerSidebar's onNameChange to update the list instantly.
     const setConversations = useCallback(
-        (_updater: React.SetStateAction<Conversation[]>) => {
-            setTimeout(refetchConversations, 1000);
+        (updater: React.SetStateAction<Conversation[]>) => {
+            setLocalConversations((prev) =>
+                typeof updater === "function" ? updater(prev) : updater,
+            );
+            // Also schedule a server refetch so stale data doesn't persist
+            setTimeout(refetchConversations, 2000);
         },
         [refetchConversations],
     );
+
     const setAgents = useCallback(
         (_updater: React.SetStateAction<Agent[]>) => {
             setTimeout(refetchAgents, 1000);
@@ -221,6 +242,14 @@ export default function NeemaDashboard(): React.ReactElement {
         ...(isAdmin
             ? [
                   {
+                      id: "leads" as ViewId,
+                      icon: (
+                          <Icon d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9" />
+                      ),
+                      label: "Leads",
+                      badge: null,
+                  },
+                  {
                       id: "overview" as ViewId,
                       icon: (
                           <Icon d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
@@ -276,6 +305,7 @@ export default function NeemaDashboard(): React.ReactElement {
                 messages={messages}
                 setMessages={setMessages}
                 agents={agents}
+                orders={orders}
                 refetchConversations={refetchConversations}
                 {...viewProps}
             />
@@ -285,6 +315,11 @@ export default function NeemaDashboard(): React.ReactElement {
                 orders={orders}
                 setOrders={setOrders}
                 refetchOrders={refetchOrders}
+                {...viewProps}
+            />
+        ),
+        leads: (
+            <LeadsView
                 {...viewProps}
             />
         ),
