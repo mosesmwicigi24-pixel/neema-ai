@@ -21,6 +21,7 @@ export interface Conversation {
     last_message: string;
     last_message_at: string;
     assigned_agent_id: string | null;
+    assigned_agent_name?: string | null;
     unread: number;
     unread_count: number;
     contact_name: string;

@@ -92,6 +92,7 @@ export interface ApiConversation {
     wa_id: string;
     intercept_mode: "ai" | "human" | "paused";
     assigned_agent_id: string | null;
+    assigned_agent_name?: string | null;
     intercept_since: string | null;
     last_message_at: string | null;
     last_message_preview: string | null;
@@ -99,12 +100,9 @@ export interface ApiConversation {
     created_at: string;
     updated_at: string;
     // joined from agent
-    assigned_agent_name?: string;
-    // unread count from messages
-    unread?: number;
-    // contact name from user table
     name?: string;
     channel?: string;
+    unread?: number;
 }
 
 export const conversationsApi = {
@@ -317,6 +315,7 @@ export function mapConversation(c: ApiConversation): Conversation {
         last_message: c.last_message_preview ?? "",
         last_message_at: c.last_message_at ?? c.created_at,
         assigned_agent_id: c.assigned_agent_id,
+        assigned_agent_name: c.assigned_agent_name ?? null,
         unread: c.unread ?? 0,
         unread_count: c.unread ?? 0,
     };

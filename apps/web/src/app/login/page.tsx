@@ -1,217 +1,239 @@
 "use client";
-
-import { useState, useEffect } from "react";
-import { signIn } from "next-auth/react";
+import React, { useState, useEffect } from "react";
+import { signIn, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import {
-    Eye,
-    EyeOff,
-    Lock,
-    Mail,
-    ChevronRight,
-    Loader2,
-    ShieldCheck,
-} from "lucide-react"; // Using Lucide for cleaner icons
 
-export default function LoginPage() {
-    const [email, setEmail] = useState("");
-    const [password, setPassword] = useState("");
-    const [error, setError] = useState("");
-    const [loading, setLoading] = useState(false);
-    const [showPass, setShowPass] = useState(false);
-    const [mounted, setMounted] = useState(false);
+export default function LoginPage(): React.ReactElement {
+    const { data: session, status } = useSession();
     const router = useRouter();
 
-    useEffect(() => {
-        setMounted(true);
-    }, []);
+    const [email,    setEmail]    = useState("");
+    const [password, setPassword] = useState("");
+    const [error,    setError]    = useState("");
+    const [loading,  setLoading]  = useState(false);
+    const [showPass, setShowPass] = useState(false);
 
-    async function handleSubmit(e: React.FormEvent) {
+    // Redirect if already authenticated
+    useEffect(() => {
+        if (status === "authenticated") {
+            router.replace("/dashboard");
+        }
+    }, [status, router]);
+
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (!email || !password) {
+            setError("Please enter your email and password.");
+            return;
+        }
         setLoading(true);
         setError("");
-
-        const res = await signIn("credentials", {
-            email,
-            password,
-            redirect: false,
-        });
-
-        setLoading(false);
-        if (res?.ok) {
-            router.push("/dashboard");
-        } else {
-            setError("Invalid email or password. Please try again.");
+        try {
+            const result = await signIn("credentials", {
+                email,
+                password,
+                redirect: false,
+            });
+            if (result?.error) {
+                setError("Invalid email or password. Please try again.");
+            } else {
+                router.push("/dashboard");
+            }
+        } catch {
+            setError("Something went wrong. Please try again.");
+        } finally {
+            setLoading(false);
         }
+    };
+
+    if (status === "loading" || status === "authenticated") {
+        return (
+            <div className="flex h-screen items-center justify-center bg-gray-950">
+                <div className="w-6 h-6 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
+            </div>
+        );
     }
 
-    if (!mounted) return null;
-
     return (
-        <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8 font-sans">
-            {/* Background Decorative Element */}
-            <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
-                <div className="absolute -top-[10%] -left-[10%] w-[40%] h-[40%] rounded-full bg-indigo-50/50 blur-3xl" />
-                <div className="absolute -bottom-[10%] -right-[10%] w-[40%] h-[40%] rounded-full bg-slate-100 blur-3xl" />
-            </div>
+        <div className="min-h-screen bg-gray-950 flex">
 
-            <div className="sm:mx-auto sm:w-full sm:max-w-md z-10">
-                {/* Logo Section */}
-                <div className="flex justify-center items-center gap-3 mb-6">
-                    <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-200">
-                        <ShieldCheck className="text-white w-6 h-6" />
+            {/* Left panel — branding */}
+            <div className="hidden lg:flex lg:w-[420px] xl:w-[480px] flex-col justify-between p-10 bg-gray-900 border-r border-gray-800/60 relative overflow-hidden flex-shrink-0">
+                {/* Background texture */}
+                <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,_var(--tw-gradient-stops))] from-green-900/20 via-transparent to-transparent pointer-events-none" />
+                <div className="absolute bottom-0 right-0 w-64 h-64 bg-green-800/5 rounded-full translate-x-1/2 translate-y-1/2 pointer-events-none" />
+
+                {/* Logo */}
+                <div className="relative flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-green-700 flex items-center justify-center shadow-lg shadow-green-900/50 flex-shrink-0">
+                        <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2}
+                                d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                        </svg>
                     </div>
-                    <span className="text-2xl font-bold tracking-tight text-slate-900">
-                        Neema
-                    </span>
+                    <div>
+                        <div className="text-white font-bold text-lg leading-none tracking-tight">Neema</div>
+                        <div className="text-[10px] text-green-500/70 uppercase tracking-widest font-medium mt-0.5">
+                            Admin Dashboard
+                        </div>
+                    </div>
                 </div>
 
-                <h2 className="text-center text-3xl font-extrabold text-slate-900 tracking-tight">
-                    Welcome back
-                </h2>
-                <p className="mt-2 text-center text-sm text-slate-600">
-                    Bethany House Agent Console
-                </p>
+                {/* Feature list */}
+                <div className="relative space-y-6">
+                    <div>
+                        <h2 className="text-2xl font-bold text-white leading-snug mb-2">
+                            Manage conversations,<br />
+                            <span className="text-green-400">grow your business.</span>
+                        </h2>
+                        <p className="text-sm text-gray-400 leading-relaxed">
+                            Your AI-powered WhatsApp assistant for Bethany House — handling orders, customer queries, and sales around the clock.
+                        </p>
+                    </div>
+                    <div className="space-y-3">
+                        {[
+                            { icon: "💬", label: "Live conversation monitoring" },
+                            { icon: "🤖", label: "AI-assisted replies & drafts"  },
+                            { icon: "📦", label: "Order & catalog management"    },
+                            { icon: "📊", label: "Customer insights & CRM"       },
+                        ].map(({ icon, label }) => (
+                            <div key={label} className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-lg bg-gray-800 border border-gray-700/60 flex items-center justify-center text-base flex-shrink-0">
+                                    {icon}
+                                </div>
+                                <span className="text-sm text-gray-300">{label}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Footer */}
+                <div className="relative text-[11px] text-gray-600">
+                    © {new Date().getFullYear()} Bethany House · Nairobi, Kenya
+                </div>
             </div>
 
-            <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md z-10 px-4">
-                <div className="bg-white py-10 px-6 shadow-xl shadow-slate-200/50 sm:rounded-2xl border border-slate-100">
-                    <form className="space-y-5" onSubmit={handleSubmit}>
-                        {/* Email Field */}
+            {/* Right panel — form */}
+            <div className="flex-1 flex items-center justify-center p-6">
+                <div className="w-full max-w-sm">
+
+                    {/* Mobile logo */}
+                    <div className="lg:hidden flex items-center gap-2.5 mb-8">
+                        <div className="w-8 h-8 rounded-lg bg-green-700 flex items-center justify-center shadow-lg shadow-green-900/50">
+                            <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2}
+                                    d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                            </svg>
+                        </div>
                         <div>
-                            <label
-                                htmlFor="email"
-                                className="block text-sm font-medium text-slate-700 mb-1"
-                            >
-                                Email Address
+                            <div className="text-white font-bold text-base leading-none">Neema</div>
+                            <div className="text-[10px] text-green-500/70 uppercase tracking-widest mt-0.5">Admin</div>
+                        </div>
+                    </div>
+
+                    {/* Heading */}
+                    <div className="mb-8">
+                        <h1 className="text-2xl font-bold text-white tracking-tight mb-1">
+                            Sign in
+                        </h1>
+                        <p className="text-sm text-gray-500">
+                            Enter your credentials to access the dashboard
+                        </p>
+                    </div>
+
+                    {/* Form */}
+                    <form onSubmit={handleSubmit} className="space-y-4">
+
+                        {/* Email */}
+                        <div>
+                            <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                                Email address
                             </label>
-                            <div className="relative group">
-                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                    <Mail className="h-5 w-5 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
-                                </div>
-                                <input
-                                    id="email"
-                                    name="email"
-                                    type="email"
-                                    required
-                                    value={email}
-                                    onChange={(e) => setEmail(e.target.value)}
-                                    className="block w-full pl-10 pr-3 py-2.5 border border-slate-200 rounded-xl leading-5 bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition-all shadow-sm"
-                                    placeholder="name@bethanyhouse.co"
-                                />
-                            </div>
+                            <input
+                                type="email"
+                                value={email}
+                                onChange={(e) => { setEmail(e.target.value); setError(""); }}
+                                placeholder="admin@bethanyhouse.com"
+                                autoComplete="email"
+                                required
+                                className="w-full h-11 px-4 bg-gray-900 border border-gray-700 rounded-xl text-white text-sm placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-green-600 focus:border-transparent transition-all"
+                                style={{ fontSize: 16 }}
+                            />
                         </div>
 
-                        {/* Password Field */}
+                        {/* Password */}
                         <div>
-                            <div className="flex items-center justify-between mb-1">
-                                <label
-                                    htmlFor="password"
-                                    className="block text-sm font-medium text-slate-700"
-                                >
-                                    Password
-                                </label>
-                                <div className="text-sm">
-                                    <a
-                                        href="#"
-                                        className="font-semibold text-indigo-600 hover:text-indigo-500 transition-colors"
-                                    >
-                                        Forgot password?
-                                    </a>
-                                </div>
-                            </div>
-                            <div className="relative group">
-                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                    <Lock className="h-5 w-5 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
-                                </div>
+                            <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                                Password
+                            </label>
+                            <div className="relative">
                                 <input
-                                    id="password"
-                                    name="password"
                                     type={showPass ? "text" : "password"}
-                                    required
                                     value={password}
-                                    onChange={(e) =>
-                                        setPassword(e.target.value)
-                                    }
-                                    className="block w-full pl-10 pr-10 py-2.5 border border-slate-200 rounded-xl leading-5 bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition-all shadow-sm"
+                                    onChange={(e) => { setPassword(e.target.value); setError(""); }}
                                     placeholder="••••••••"
+                                    autoComplete="current-password"
+                                    required
+                                    className="w-full h-11 px-4 pr-11 bg-gray-900 border border-gray-700 rounded-xl text-white text-sm placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-green-600 focus:border-transparent transition-all"
+                                    style={{ fontSize: 16 }}
                                 />
                                 <button
                                     type="button"
-                                    onClick={() => setShowPass(!showPass)}
-                                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 transition-colors"
+                                    onClick={() => setShowPass((s) => !s)}
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors"
+                                    tabIndex={-1}
                                 >
                                     {showPass ? (
-                                        <EyeOff className="h-5 w-5" />
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                                d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                                        </svg>
                                     ) : (
-                                        <Eye className="h-5 w-5" />
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                                d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                        </svg>
                                     )}
                                 </button>
                             </div>
                         </div>
 
-                        {/* Error Message */}
+                        {/* Error */}
                         {error && (
-                            <div className="rounded-xl bg-red-50 p-4 border border-red-100 flex gap-3 items-center animate-in fade-in slide-in-from-top-1">
-                                <div className="flex-shrink-0">
-                                    <svg
-                                        className="h-5 w-5 text-red-400"
-                                        viewBox="0 0 20 20"
-                                        fill="currentColor"
-                                    >
-                                        <path
-                                            fillRule="evenodd"
-                                            d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-                                            clipRule="evenodd"
-                                        />
-                                    </svg>
-                                </div>
-                                <div className="text-sm text-red-700 font-medium">
-                                    {error}
-                                </div>
+                            <div className="flex items-start gap-2.5 p-3 bg-red-950/60 border border-red-800/60 rounded-lg">
+                                <svg className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                        d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                <p className="text-xs text-red-300">{error}</p>
                             </div>
                         )}
 
-                        {/* Submit Button */}
-                        <div>
-                            <button
-                                type="submit"
-                                disabled={loading}
-                                className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-bold rounded-xl text-white bg-slate-900 hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-900 transition-all disabled:opacity-70 disabled:cursor-not-allowed shadow-md shadow-slate-200"
-                            >
-                                {loading ? (
-                                    <Loader2 className="animate-spin h-5 w-5" />
-                                ) : (
-                                    <span className="flex items-center gap-2">
-                                        Sign in to Console
-                                        <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                                    </span>
-                                )}
-                            </button>
-                        </div>
+                        {/* Submit */}
+                        <button
+                            type="submit"
+                            disabled={loading}
+                            className="w-full h-11 rounded-xl bg-green-700 hover:bg-green-600 disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors shadow-lg shadow-green-900/30 flex items-center justify-center gap-2 mt-2"
+                        >
+                            {loading ? (
+                                <>
+                                    <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                                    Signing in…
+                                </>
+                            ) : (
+                                "Sign in"
+                            )}
+                        </button>
                     </form>
 
-                    {/* Social / Support Footer */}
-                    <div className="mt-8">
-                        <div className="relative">
-                            <div className="absolute inset-0 flex items-center">
-                                <div className="w-full border-t border-slate-100"></div>
-                            </div>
-                            <div className="relative flex justify-center text-xs uppercase tracking-widest">
-                                <span className="px-3 bg-white text-slate-400 font-semibold">
-                                    Security Verified
-                                </span>
-                            </div>
-                        </div>
-
-                        <div className="mt-6 flex justify-center gap-6 text-xs text-slate-400 font-medium">
-                            <span className="flex items-center gap-1.5">
-                                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                                SSL Encrypted
-                            </span>
-                            <span>•</span>
-                            <span>SOC2 Compliant</span>
-                        </div>
+                    {/* Divider */}
+                    <div className="mt-8 pt-6 border-t border-gray-800/60">
+                        <p className="text-center text-xs text-gray-600">
+                            Access restricted to Bethany House staff.
+                            <br />Contact your administrator if you need access.
+                        </p>
                     </div>
                 </div>
             </div>

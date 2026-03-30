@@ -73,7 +73,7 @@ export function ConversationsView({
     const [showFilters, setShowFilters] = useState<boolean>(false);
     const [threadLoading, setThreadLoading] = useState(false);
     const [sending, setSending] = useState(false);
-    const [crmOpen, setCrmOpen] = useState<boolean>(false);
+    const [crmOpen, setCrmOpen] = useState<boolean>(true);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     // Set first conversation as active when data loads
@@ -455,9 +455,17 @@ export function ConversationsView({
                                         </p>
                                         <div className="flex items-center gap-1 ml-2 flex-shrink-0">
                                             {conv.intercept_mode !== "ai" && (
-                                                <InterceptBadge
-                                                    mode={conv.intercept_mode}
-                                                />
+                                                <div className="flex items-center gap-1">
+                                                    <InterceptBadge
+                                                        mode={conv.intercept_mode}
+                                                    />
+                                                    {conv.intercept_mode === "human" &&
+                                                        conv.assigned_agent_name && (
+                                                        <span className="text-[10px] text-stone-500 font-medium truncate max-w-[56px]">
+                                                            {conv.assigned_agent_name.split(" ")[0]}
+                                                        </span>
+                                                    )}
+                                                </div>
                                             )}
                                             {conv.unread > 0 && (
                                                 <span className="w-4 h-4 bg-green-700 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
@@ -664,7 +672,7 @@ export function ConversationsView({
                                     className={`flex ${isInbound ? "justify-start" : "justify-end"}`}
                                 >
                                     <div
-                                        className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-sm ${
+                                        className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-xs ${
                                             isInbound
                                                 ? "bg-white border border-stone-200 text-stone-800 rounded-tl-sm"
                                                 : msg.sender === "ai"
@@ -844,14 +852,40 @@ export function ConversationsView({
                 </>
             )}
         </div>
-        {/* CRM Sidebar — shown when crmOpen and a conversation is active */}
-        {crmOpen && activeConv && !isMobile && (
-            <CustomerSidebar
-                conversation={activeConv}
-                orders={orders}
-                onToast={onToast}
-                onClose={() => setCrmOpen(false)}
-            />
+        {/* CRM Sidebar — open by default, collapsible */}
+        {activeConv && !isMobile && (
+            crmOpen ? (
+                <CustomerSidebar
+                    conversation={activeConv}
+                    orders={orders}
+                    onToast={onToast}
+                    onClose={() => setCrmOpen(false)}
+                    onNameChange={(wa_id, newName) => {
+                        setConversations((prev) =>
+                            prev.map((c) =>
+                                c.wa_id === wa_id
+                                    ? { ...c, name: newName, contact_name: newName }
+                                    : c
+                            )
+                        );
+                    }}
+                />
+            ) : (
+                /* Collapsed tab — click to re-open */
+                <button
+                    onClick={() => setCrmOpen(true)}
+                    title="Show customer profile"
+                    className="flex-shrink-0 w-8 border-l border-stone-100 bg-white flex flex-col items-center justify-center gap-1 hover:bg-stone-50 transition-colors"
+                >
+                    <svg className="w-4 h-4 text-stone-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                    </svg>
+                    <span className="text-[9px] text-stone-400 font-semibold uppercase tracking-widest"
+                        style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}>
+                        Customer
+                    </span>
+                </button>
+            )
         )}
         </div>
     );

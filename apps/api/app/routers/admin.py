@@ -5,6 +5,7 @@ from app.database import get_db
 from app.models.conversation import Conversation, InterceptMode
 from app.models.message import Message
 from app.models.agent import Agent
+from app.models.user import User
 from app.models.intercept import Intercept, InterceptAction
 from app.schemas.conversation import ConversationListItem, InterceptRequest
 from app.services.conversation import (
@@ -49,7 +50,43 @@ async def list_conversations(
     if mode:
         q = q.where(Conversation.intercept_mode == mode)
     result = await db.execute(q)
-    return result.scalars().all()
+    conversations = result.scalars().all()
+
+    # Batch-load User names and Agent names to avoid N+1
+    wa_ids     = [c.wa_id for c in conversations]
+    agent_ids  = [c.assigned_agent_id for c in conversations if c.assigned_agent_id]
+
+    user_map: dict[str, str] = {}
+    if wa_ids:
+        u_res = await db.execute(select(User).where(User.wa_id.in_(wa_ids)))
+        for u in u_res.scalars().all():
+            user_map[u.wa_id] = u.name or ""
+
+    agent_map: dict[str, str] = {}
+    if agent_ids:
+        a_res = await db.execute(select(Agent).where(Agent.id.in_(agent_ids)))
+        for a in a_res.scalars().all():
+            agent_map[str(a.id)] = a.name or ""
+
+    return [
+        {
+            "id":                   str(c.id),
+            "wa_id":                c.wa_id,
+            "intercept_mode":       c.intercept_mode,
+            "assigned_agent_id":    str(c.assigned_agent_id) if c.assigned_agent_id else None,
+            "assigned_agent_name":  agent_map.get(str(c.assigned_agent_id), "") if c.assigned_agent_id else None,
+            "intercept_since":      c.intercept_since.isoformat() if c.intercept_since else None,
+            "last_message_at":      c.last_message_at.isoformat() if c.last_message_at else None,
+            "last_message_preview": c.last_message_preview,
+            "status":               c.status,
+            "created_at":           c.created_at.isoformat() if c.created_at else None,
+            "updated_at":           c.updated_at.isoformat() if c.updated_at else None,
+            "name":                 user_map.get(c.wa_id) or None,
+            "channel":              getattr(c, "channel", "whatsapp") or "whatsapp",
+            "unread":               0,
+        }
+        for c in conversations
+    ]
 
 
 @router.get("/conversations/{conv_id}/messages")
