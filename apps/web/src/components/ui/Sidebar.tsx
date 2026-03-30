@@ -129,15 +129,15 @@ export function Sidebar({
     return (
         <aside
             className={cn(
-                "flex flex-col h-full border-r border-[#2c4e18]/60 flex-shrink-0 transition-all duration-300 overflow-hidden relative",
+                "flex flex-col h-full border-r border-[#152451]/60 flex-shrink-0 transition-all duration-300 overflow-hidden relative",
                 collapsed ? "w-16" : "w-56",
             )}
-            style={{ backgroundColor: "#0f1b09" }}
+            style={{ backgroundColor: "#070d1c" }}
         >
             {/* Logo */}
             <div
                 className={cn(
-                    "flex items-center border-b border-[#2c4e18]/60 h-14 flex-shrink-0",
+                    "flex items-center border-b border-[#152451]/60 h-14 flex-shrink-0",
                     collapsed ? "justify-center px-3" : "px-4 gap-3",
                 )}
             >
@@ -164,7 +164,7 @@ export function Sidebar({
                         onClick={() => setCollapsed((c) => !c)}
                         className="w-7 h-7 flex items-center justify-center rounded-lg transition-all flex-shrink-0"
                         style={{ color: "#699a32" }}
-                        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#2c4e18"; (e.currentTarget as HTMLElement).style.color = "#f3f9ec"; }}
+                        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#152451"; (e.currentTarget as HTMLElement).style.color = "#f3f9ec"; }}
                         onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = ""; (e.currentTarget as HTMLElement).style.color = "#699a32"; }}
                     >
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -228,7 +228,7 @@ export function Sidebar({
             {/* Footer with user menu */}
             <div
                 className={cn(
-                    "border-t border-[#2c4e18]/60 p-2 flex-shrink-0 relative",
+                    "border-t border-[#152451]/60 p-2 flex-shrink-0 relative",
                     collapsed ? "flex justify-center" : "",
                 )}
                 ref={menuRef}
@@ -240,7 +240,7 @@ export function Sidebar({
                             "absolute bottom-full mb-2 z-50 border rounded-xl shadow-2xl shadow-black/60 overflow-hidden",
                             collapsed ? "left-full ml-2 w-52" : "left-2 right-2",
                         )}
-                        style={{ backgroundColor: "#16270c", borderColor: "#2c4e18", animation: "menuSlideUp 0.15s ease" }}
+                        style={{ backgroundColor: "#0a1229", borderColor: "#152451", animation: "menuSlideUp 0.15s ease" }}
                     >
                         <style>{`
                             @keyframes menuSlideUp {
@@ -250,7 +250,7 @@ export function Sidebar({
                         `}</style>
 
                         {/* User info header */}
-                        <div className="px-3 py-3 border-b" style={{ borderColor: "#2c4e18" }}>
+                        <div className="px-3 py-3 border-b" style={{ borderColor: "#152451" }}>
                             <div className="flex items-center gap-2.5">
                                 <Avatar name={session.user.name} size="sm" />
                                 <div className="min-w-0 flex-1">

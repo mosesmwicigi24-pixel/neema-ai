@@ -50,7 +50,7 @@ export default function LoginPage(): React.ReactElement {
         return (
             <div
                 className="flex h-screen items-center justify-center"
-                style={{ backgroundColor: "#0f1b09" }}
+                style={{ backgroundColor: "#070d1c" }}
             >
                 <div
                     className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin"
@@ -66,12 +66,12 @@ export default function LoginPage(): React.ReactElement {
     return (
         <div
             className="min-h-screen flex"
-            style={{ backgroundColor: "#0f1b09" }}
+            style={{ backgroundColor: "#070d1c" }}
         >
             {/* Left branding panel */}
             <div
                 className="hidden lg:flex lg:w-[420px] xl:w-[480px] flex-col justify-between p-10 border-r relative overflow-hidden flex-shrink-0"
-                style={{ backgroundColor: "#16270c", borderColor: "#2c4e18" }}
+                style={{ backgroundColor: "#0a1229", borderColor: "#152451" }}
             >
                 {/* Radial glow */}
                 <div
@@ -250,8 +250,8 @@ export default function LoginPage(): React.ReactElement {
                                 placeholder="admin@bethanyhouse.com"
                                 className="w-full h-11 px-4 rounded-xl text-sm placeholder-[#427425] focus:outline-none focus:ring-2 transition-all"
                                 style={{
-                                    backgroundColor: "#16270c",
-                                    border: "1px solid #2c4e18",
+                                    backgroundColor: "#0a1229",
+                                    border: "1px solid #152451",
                                     color: "#f3f9ec",
                                     fontSize: 14,
                                     boxShadow: "none",
@@ -262,7 +262,7 @@ export default function LoginPage(): React.ReactElement {
                                         "0 0 0 3px rgba(88,155,49,0.2)";
                                 }}
                                 onBlur={(e) => {
-                                    e.target.style.borderColor = "#2c4e18";
+                                    e.target.style.borderColor = "#152451";
                                     e.target.style.boxShadow = "none";
                                 }}
                             />
@@ -288,8 +288,8 @@ export default function LoginPage(): React.ReactElement {
                                     placeholder="••••••••"
                                     className="w-full h-11 px-4 pr-11 rounded-xl text-sm focus:outline-none transition-all"
                                     style={{
-                                        backgroundColor: "#16270c",
-                                        border: "1px solid #2c4e18",
+                                        backgroundColor: "#0a1229",
+                                        border: "1px solid #152451",
                                         color: "#f3f9ec",
                                         fontSize: 14,
                                     }}
@@ -299,7 +299,7 @@ export default function LoginPage(): React.ReactElement {
                                             "0 0 0 3px rgba(88,155,49,0.2)";
                                     }}
                                     onBlur={(e) => {
-                                        e.target.style.borderColor = "#2c4e18";
+                                        e.target.style.borderColor = "#152451";
                                         e.target.style.boxShadow = "none";
                                     }}
                                 />
@@ -405,7 +405,7 @@ export default function LoginPage(): React.ReactElement {
 
                     <div
                         className="mt-8 pt-6 border-t"
-                        style={{ borderColor: "#2c4e18" }}
+                        style={{ borderColor: "#152451" }}
                     >
                         <p
                             className="text-center text-xs"
