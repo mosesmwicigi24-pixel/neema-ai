@@ -47,7 +47,8 @@ interface SelectFieldProps {
     label: string;
     value: string;
     onChange: (v: string) => void;
-    children: React.ReactNode;
+    children?: React.ReactNode;
+    options?: { value: string; label: string }[];
     hint?: string;
 }
 
@@ -56,6 +57,7 @@ export function SelectField({
     value,
     onChange,
     children,
+    options,
     hint,
 }: SelectFieldProps): React.ReactElement {
     return (
@@ -69,7 +71,13 @@ export function SelectField({
                 className="w-full h-10 px-3 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all cursor-pointer"
                 style={{ fontSize: 16 }}
             >
-                {children}
+                {options
+                    ? options.map((o) => (
+                          <option key={o.value} value={o.value}>
+                              {o.label}
+                          </option>
+                      ))
+                    : children}
             </select>
             {hint && (
                 <p className="mt-1.5 text-xs text-gray-400 dark:text-gray-500">

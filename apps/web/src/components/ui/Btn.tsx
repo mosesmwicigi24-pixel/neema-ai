@@ -29,6 +29,7 @@ interface BtnProps {
     children: React.ReactNode;
     variant?: BtnVariant;
     size?: "xs" | "sm" | "md";
+    small?: boolean;
     disabled?: boolean;
     full?: boolean;
     className?: string;
@@ -40,16 +41,18 @@ export function Btn({
     children,
     variant = "primary",
     size = "md",
+    small,
     disabled = false,
     full = false,
     className = "",
     type = "button",
 }: BtnProps): React.ReactElement {
+    const resolvedSize = small ? "sm" : size;
     const sizeCls = {
         xs: "px-2 py-1 text-xs rounded-md h-7",
         sm: "px-3 py-1.5 text-xs rounded-lg h-8",
         md: "px-4 py-2 text-sm rounded-lg h-9",
-    }[size];
+    }[resolvedSize];
 
     return (
         <button

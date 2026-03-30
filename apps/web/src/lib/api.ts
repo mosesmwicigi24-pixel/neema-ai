@@ -2,11 +2,14 @@ import axios from "axios";
 import { getSession } from "next-auth/react";
 import type {
     Conversation,
+    Channel,
     Message,
     Agent,
     Order,
+    OrderStatus,
     CatalogItem,
     MessagesMap,
+    PaymentMethod,
 } from "@/types";
 
 export const api = axios.create({
@@ -125,10 +128,10 @@ export const conversationsApi = {
         }),
     sendReply: (id: string, text: string) =>
         post<Message>(`/admin/conversations/${id}/reply`, { text }),
-    approveDraft: (id: string) =>
-        post<{ ok: boolean }>(`/admin/conversations/${id}/approve-draft`, {}),
+    approveDraft: (id: string, text?: string) =>
+        post<{ ok: boolean }>(`/admin/conversations/${id}/approve-draft`, { text: text ?? null }),
     close: (id: string) =>
-        post<ApiConversation>(`/admin/conversations/${id}/close`, {}),
+        post<{ ok: boolean }>(`/admin/conversations/${id}/release`, {}),
 };
 
 // ── Agents ────────────────────────────────────────────────────────────────────
@@ -277,7 +280,7 @@ export interface ApiStats {
     cancelled_orders: number;
     in_stock_items: number;
     total_items: number;
-    channel_breakdown: { channel: string; count: number; open: number }[];
+    channel_breakdown: { channel: Channel; count: number; open: number }[];
 }
 
 export const statsApi = {
@@ -298,19 +301,19 @@ export function mapConversation(c: ApiConversation): Conversation {
     return {
         id: c.id,
         wa_id: c.wa_id,
+        name: c.name ?? c.wa_id,
         contact_name: c.name ?? c.wa_id,
         contact_phone: c.wa_id,
-        last_message: c.last_message_preview ?? "",
-        last_message_at: c.last_message_at ?? c.created_at,
+        channel: (c.channel ?? "whatsapp") as Channel,
         intercept_mode: c.intercept_mode,
         status: c.status,
-        unread_count: c.unread ?? 0,
+        last_message_preview: c.last_message_preview ?? "",
+        last_message: c.last_message_preview ?? "",
+        last_message_at: c.last_message_at ?? c.created_at,
         assigned_agent_id: c.assigned_agent_id,
-        channel: (c.channel as any) ?? "whatsapp",
-        // UI extras
-        name: c.name ?? c.wa_id,
         unread: c.unread ?? 0,
-    } as any;
+        unread_count: c.unread ?? 0,
+    };
 }
 
 export function mapAgent(a: ApiAgent): Agent {
@@ -320,13 +323,15 @@ export function mapAgent(a: ApiAgent): Agent {
         email: a.email,
         role: a.role,
         is_available: a.is_available,
+        is_superuser: a.is_superuser,
         active_convs: a.active_convs,
         avatar_url: a.avatar_url,
         created_at: a.created_at,
+        joined_at: a.created_at,
         last_seen_at: a.last_seen_at,
-        is_superuser: a.is_superuser,
         permissions: [],
-    } as any;
+        department: "",
+    };
 }
 
 export function mapCatalogItem(c: ApiCatalogItem): CatalogItem {
@@ -346,19 +351,26 @@ export function mapCatalogItem(c: ApiCatalogItem): CatalogItem {
 export function mapOrder(o: ApiOrder): Order {
     return {
         id: o.id,
+        wa_id: o.wa_id,
+        customer_name: o.contact_name ?? o.wa_id,
         contact_name: o.contact_name ?? o.wa_id,
         contact_phone: o.wa_id,
         items: (o.items ?? []).map((i) => ({
             catalog_item_id: i.sku ?? "",
+            sku: i.sku ?? "",
             name: i.name,
+            qty: i.qty,
             quantity: i.qty,
+            unit: i.unit,
             unit_price: i.unit,
+            total: i.total,
         })),
         total: o.subtotal,
         subtotal: o.subtotal,
-        status: (o.status === "open" ? "pending" : o.status) as any,
+        status: (o.status === "open" ? "pending" : o.status) as OrderStatus,
+        payment: "mpesa" as PaymentMethod,
+        currency: o.currency,
         created_at: o.created_at,
         notes: o.reply_text ?? undefined,
-        currency: o.currency,
-    } as any;
+    };
 }

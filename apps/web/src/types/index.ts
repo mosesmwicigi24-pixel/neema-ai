@@ -7,7 +7,7 @@ export type ConversationStatus = "open" | "closed";
 export type OrderStatus = "pending" | "confirmed" | "delivered" | "cancelled";
 export type PaymentMethod = "mpesa" | "cod";
 export type AgentRole = "admin" | "agent" | "readonly" | "supervisor";
-export type ToastType = "success" | "error";
+export type ToastType = "success" | "error" | "warning";
 export type ThemeMode = "light" | "dark";
 
 export interface Conversation {
@@ -18,9 +18,13 @@ export interface Conversation {
     intercept_mode: InterceptMode;
     status: ConversationStatus;
     last_message_preview: string;
+    last_message: string;
     last_message_at: string;
     assigned_agent_id: string | null;
     unread: number;
+    unread_count: number;
+    contact_name: string;
+    contact_phone: string;
 }
 
 export interface Message {
@@ -37,17 +41,27 @@ export type MessagesMap = Record<string, Message[]>;
 export interface OrderItem {
     name: string;
     qty: number;
+    quantity: number;
+    unit: number;
+    unit_price: number;
     total: number;
+    catalog_item_id?: string;
+    sku?: string;
 }
 
 export interface Order {
     id: string;
     wa_id: string;
     customer_name: string;
+    contact_name: string;
+    contact_phone: string;
     items: OrderItem[];
     subtotal: number;
+    total: number;
     status: OrderStatus;
     payment: PaymentMethod;
+    currency: string;
+    notes?: string;
     created_at: string;
 }
 
@@ -56,12 +70,15 @@ export interface Agent {
     name: string;
     email: string;
     role: AgentRole;
-    permissions: string[];
+    permissions?: string[];
     is_available: boolean;
+    is_superuser: boolean;
     active_convs: number;
+    avatar_url: string | null;
     last_seen_at: string | null;
+    created_at: string;
     joined_at: string;
-    department: string;
+    department?: string;
 }
 
 export interface CatalogItem {

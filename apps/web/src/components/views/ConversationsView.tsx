@@ -194,14 +194,14 @@ export function ConversationsView({
             acc[tab.id] =
                 tab.id === "all"
                     ? conversations
-                          .filter((c) => (c as any).unread > 0)
-                          .reduce((s, c) => s + ((c as any).unread ?? 0), 0)
+                          .filter((c) => c.unread > 0)
+                          .reduce((s, c) => s + (c.unread ?? 0), 0)
                     : conversations
                           .filter(
                               (c) =>
-                                  c.channel === tab.id && (c as any).unread > 0,
+                                  c.channel === tab.id && c.unread > 0,
                           )
-                          .reduce((s, c) => s + ((c as any).unread ?? 0), 0);
+                          .reduce((s, c) => s + (c.unread ?? 0), 0);
             return acc;
         },
         {},
@@ -214,7 +214,7 @@ export function ConversationsView({
             return false;
         if (
             searchQ &&
-            !(c as any).name?.toLowerCase().includes(searchQ.toLowerCase()) &&
+            !c.name?.toLowerCase().includes(searchQ.toLowerCase()) &&
             !c.last_message?.toLowerCase().includes(searchQ.toLowerCase())
         )
             return false;
@@ -361,7 +361,7 @@ export function ConversationsView({
                             <div className="flex items-start gap-3">
                                 <div className="relative flex-shrink-0">
                                     <Avatar
-                                        name={(conv as any).name ?? conv.wa_id}
+                                        name={conv.name ?? conv.wa_id}
                                         size={38}
                                     />
                                     {cfg && (
@@ -378,7 +378,7 @@ export function ConversationsView({
                                 <div className="flex-1 min-w-0">
                                     <div className="flex items-center justify-between mb-0.5">
                                         <span className="text-sm font-semibold text-stone-800 truncate">
-                                            {(conv as any).name ?? conv.wa_id}
+                                            {conv.name ?? conv.wa_id}
                                         </span>
                                         <span className="text-[10px] text-stone-400 flex-shrink-0 ml-2">
                                             {conv.last_message_at
@@ -397,9 +397,9 @@ export function ConversationsView({
                                                     mode={conv.intercept_mode}
                                                 />
                                             )}
-                                            {(conv as any).unread > 0 && (
+                                            {conv.unread > 0 && (
                                                 <span className="w-4 h-4 bg-green-700 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
-                                                    {(conv as any).unread}
+                                                    {conv.unread}
                                                 </span>
                                             )}
                                         </div>
@@ -447,12 +447,12 @@ export function ConversationsView({
                             </button>
                         )}
                         <Avatar
-                            name={(activeConv as any).name ?? activeConv.wa_id}
+                            name={activeConv.name ?? activeConv.wa_id}
                             size={36}
                         />
                         <div className="flex-1 min-w-0">
                             <div className="text-sm font-semibold text-stone-800">
-                                {(activeConv as any).name ?? activeConv.wa_id}
+                                {activeConv.name ?? activeConv.wa_id}
                             </div>
                             <div className="text-xs text-stone-400 font-mono">
                                 +{activeConv.wa_id}

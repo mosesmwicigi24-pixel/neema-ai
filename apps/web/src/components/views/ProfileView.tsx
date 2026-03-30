@@ -43,7 +43,7 @@ export function ProfileView({
     const [form, setForm] = useState({
         name: agent?.name ?? "",
         email: agent?.email ?? "",
-        department: (agent as any)?.department ?? "",
+        department: agent?.department ?? "",
     });
     const [passwordForm, setPasswordForm] = useState({
         current: "",
@@ -63,7 +63,7 @@ export function ProfileView({
             setForm({
                 name: agent.name,
                 email: agent.email,
-                department: (agent as any).department ?? "",
+                department: agent.department ?? "",
             });
         }
     }, [agent?.id]);
@@ -106,9 +106,9 @@ export function ProfileView({
     };
 
     const permKeys = agent
-        ? ((agent as any).permissions ?? []).includes("all")
+        ? (agent.permissions ?? []).includes("all")
             ? ALL_PERMISSIONS.map((p) => p.key)
-            : ((agent as any).permissions ?? [])
+            : (agent.permissions ?? [])
         : [];
 
     if (!agent) {

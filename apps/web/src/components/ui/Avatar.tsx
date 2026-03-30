@@ -12,12 +12,6 @@ const COLORS = [
     "bg-pink-500",
 ];
 
-interface AvatarProps {
-    name?: string;
-    size?: "xs" | "sm" | "md" | "lg" | "xl";
-    className?: string;
-}
-
 const SIZE_CLS: Record<string, string> = {
     xs: "w-6 h-6 text-xs",
     sm: "w-8 h-8 text-xs",
@@ -26,15 +20,34 @@ const SIZE_CLS: Record<string, string> = {
     xl: "w-16 h-16 text-xl",
 };
 
+interface AvatarProps {
+    name?: string;
+    size?: "xs" | "sm" | "md" | "lg" | "xl" | number;
+    className?: string;
+}
+
 export function Avatar({
     name,
     size = "md",
     className = "",
 }: AvatarProps): React.ReactElement {
     const color = COLORS[(name?.charCodeAt(0) ?? 0) % COLORS.length];
+
+    // Numeric size: render with inline style
+    if (typeof size === "number") {
+        return (
+            <div
+                style={{ width: size, height: size, fontSize: size * 0.36 }}
+                className={`${color} rounded-full flex items-center justify-center font-semibold text-white flex-shrink-0 ${className}`}
+            >
+                {initials(name)}
+            </div>
+        );
+    }
+
     return (
         <div
-            className={`${SIZE_CLS[size]} ${color} rounded-full flex items-center justify-center font-semibold text-white flex-shrink-0 ${className}`}
+            className={`${SIZE_CLS[size] ?? SIZE_CLS.md} ${color} rounded-full flex items-center justify-center font-semibold text-white flex-shrink-0 ${className}`}
         >
             {initials(name)}
         </div>

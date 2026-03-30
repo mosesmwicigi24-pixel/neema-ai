@@ -351,7 +351,7 @@ export function SettingsView({
                                 onClick={() =>
                                     onToast(
                                         "This action requires confirmation — coming soon",
-                                        "warning" as any,
+                                        "warning",
                                     )
                                 }
                                 className="flex-shrink-0 h-8 px-3 rounded-lg text-xs font-semibold bg-red-100 text-red-700 border border-red-200 hover:bg-red-200 transition-colors"
@@ -372,7 +372,7 @@ export function SettingsView({
                                 onClick={() =>
                                     onToast(
                                         "This action requires confirmation — coming soon",
-                                        "warning" as any,
+                                        "warning",
                                     )
                                 }
                                 className="flex-shrink-0 h-8 px-3 rounded-lg text-xs font-semibold bg-red-100 text-red-700 border border-red-200 hover:bg-red-200 transition-colors"

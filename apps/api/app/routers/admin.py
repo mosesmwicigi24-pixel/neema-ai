@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from app.database import get_db
@@ -75,13 +75,20 @@ async def intercept(conv_id: str, db: AsyncSession = Depends(get_db),
 @router.post("/conversations/{conv_id}/reply")
 async def reply(conv_id: str, body: dict, db: AsyncSession = Depends(get_db),
                 agent: Agent = Depends(get_current_agent)):
-    return await send_agent_reply(db, conv_id, agent, body["text"])
+    text = body.get("text", "")
+    if not text:
+        raise HTTPException(status_code=422, detail="text is required")
+    return await send_agent_reply(db, conv_id, agent, text)
 
 
 @router.post("/conversations/{conv_id}/approve-draft")
-async def approve(conv_id: str, body: dict = {}, db: AsyncSession = Depends(get_db),
+async def approve(conv_id: str, request: Request, db: AsyncSession = Depends(get_db),
                   agent: Agent = Depends(get_current_agent)):
-    return await approve_draft(db, conv_id, agent, body.get("text"))
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    return await approve_draft(db, conv_id, agent, body.get("text") if isinstance(body, dict) else None)
 
 
 @router.post("/conversations/{conv_id}/release")
@@ -90,10 +97,26 @@ async def release(conv_id: str, db: AsyncSession = Depends(get_db),
     return await release_conversation(db, conv_id, agent)
 
 
+@router.post("/conversations/{conv_id}/close")
+async def close_conv(conv_id: str, db: AsyncSession = Depends(get_db),
+                     agent: Agent = Depends(get_current_agent)):
+    from app.models.conversation import ConvStatus
+    result = await db.execute(select(Conversation).where(Conversation.id == conv_id))
+    conv = result.scalar_one_or_none()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    conv.status = ConvStatus.closed
+    await db.commit()
+    return {"ok": True, "status": "closed"}
+
+
 @router.post("/conversations/{conv_id}/transfer")
 async def transfer(conv_id: str, body: dict, db: AsyncSession = Depends(get_db),
                    agent: Agent = Depends(get_current_agent)):
-    return await transfer_conversation(db, conv_id, agent, body["agentId"])
+    agent_id = body.get("agentId") or body.get("agent_id")
+    if not agent_id:
+        raise HTTPException(status_code=422, detail="agentId or agent_id required")
+    return await transfer_conversation(db, conv_id, agent, agent_id)
 
 
 # ── Agents ────────────────────────────────────────────────
@@ -197,11 +220,17 @@ async def create_catalog_item(
     agent: Agent = Depends(get_current_agent),
 ):
     from app.models.catalog import Catalog
-    from decimal import Decimal
+    from decimal import Decimal, InvalidOperation
+    if not body.get("name"):
+        raise HTTPException(status_code=422, detail="name is required")
+    try:
+        price = Decimal(str(body["price"])) if "price" in body else Decimal("0")
+    except (InvalidOperation, KeyError):
+        raise HTTPException(status_code=422, detail="price must be a valid number")
     item = Catalog(
         sku=body.get("sku", ""),
         name=body["name"],
-        price=Decimal(str(body["price"])),
+        price=price,
         unit=body.get("unit"),
         category=body.get("category"),
         description=body.get("description"),
@@ -222,7 +251,7 @@ async def update_catalog_item(
     agent: Agent = Depends(get_current_agent),
 ):
     from app.models.catalog import Catalog
-    from decimal import Decimal
+    from decimal import Decimal, InvalidOperation
     result = await db.execute(
         select(Catalog).where(Catalog.id == item_id)
     )
@@ -232,7 +261,13 @@ async def update_catalog_item(
     allowed = {"name", "price", "unit", "category", "description", "aliases", "in_stock", "sku"}
     for k, v in body.items():
         if k in allowed:
-            setattr(item, k, Decimal(str(v)) if k == "price" else v)
+            if k == "price":
+                try:
+                    setattr(item, k, Decimal(str(v)))
+                except (InvalidOperation, ValueError):
+                    raise HTTPException(status_code=422, detail="price must be a valid number")
+            else:
+                setattr(item, k, v)
     await db.commit()
     await db.refresh(item)
     return item
@@ -278,15 +313,24 @@ async def overview_stats(
         "ai_conversations":     sum(1 for c in convs if c.intercept_mode == "ai"),
         "active_agents":        sum(1 for a in agents if a.is_available),
         "total_agents":         len(agents),
-        "total_revenue":        float(sum(o.subtotal or 0 for o in orders if o.status != "cancelled")),
+        "total_revenue":        float(sum(o.subtotal or 0 for o in orders if o.status not in ("cancelled",))),
         "total_orders":         len(orders),
-        "pending_orders":       sum(1 for o in orders if o.status == "pending"),
+        "pending_orders":       sum(1 for o in orders if o.status in ("open", "pending")),
         "delivered_orders":     sum(1 for o in orders if o.status == "delivered"),
         "confirmed_orders":     sum(1 for o in orders if o.status == "confirmed"),
         "cancelled_orders":     sum(1 for o in orders if o.status == "cancelled"),
         "in_stock_items":       sum(1 for c in catalog if c.in_stock),
         "total_items":          len(catalog),
-        "channel_breakdown":    [],
+        "channel_breakdown":    [
+            {"channel": ch, "count": cnt, "open": opn}
+            for ch, cnt, opn in (
+                (ch,
+                 sum(1 for c in convs if getattr(c, "channel", None) == ch),
+                 sum(1 for c in convs if getattr(c, "channel", None) == ch and c.status == "open"))
+                for ch in ("whatsapp", "messenger", "instagram", "email", "sms")
+            )
+            if cnt > 0
+        ],
     }
 
 
@@ -323,6 +367,9 @@ async def create_agent(
     current: Agent = Depends(get_current_agent),
 ):
     from app.core.security import hash_password
+    missing = [f for f in ("name", "email", "password") if not body.get(f)]
+    if missing:
+        raise HTTPException(status_code=422, detail=f"Missing required fields: {', '.join(missing)}")
     agent = Agent(
         name=body["name"],
         email=body["email"],

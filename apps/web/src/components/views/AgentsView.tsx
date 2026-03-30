@@ -305,7 +305,7 @@ export function AgentsView({
                 <div className="grid grid-cols-2 gap-2">
                     {ALL_PERMISSIONS.map((p) => {
                         const perms: string[] =
-                            (permAgent as any)?.permissions ?? [];
+                            permAgent?.permissions ?? [];
                         const hasAll = perms.includes("all");
                         const hasThis = hasAll || perms.includes(p.key);
                         return (

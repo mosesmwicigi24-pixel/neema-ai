@@ -126,7 +126,7 @@ export function OverviewView({
             apiStats?.total_revenue ??
             orders
                 .filter((o) => o.status !== "cancelled")
-                .reduce((s, o) => s + (o as any).subtotal, 0),
+                .reduce((s, o) => s + (o.subtotal ?? 0), 0),
         totalOrders: apiStats?.total_orders ?? orders.length,
         pendingOrders:
             apiStats?.pending_orders ??
@@ -151,7 +151,7 @@ export function OverviewView({
         ? apiStats.channel_breakdown
               .filter((x) => x.count > 0)
               .map((x) => ({
-                  ch: x.channel as any,
+                  ch: x.channel,
                   count: x.count,
                   open: x.open,
               }))
