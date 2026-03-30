@@ -53,7 +53,7 @@ export interface CustomerProfile {
 
 interface Props {
     conversation: Conversation;
-    orders: Order[];
+    orders?: Order[];
     onToast: (msg: string, type?: "success" | "error" | "warning") => void;
     onClose: () => void;
 }
@@ -178,7 +178,7 @@ function EditableField({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export function CustomerSidebar({ conversation, orders, onToast, onClose }: Props) {
+export function CustomerSidebar({ conversation, orders = [], onToast, onClose }: Props) {
     const [activeTab, setActiveTab] = useState<"profile" | "insights" | "activity">("profile");
     const [profile, setProfile]     = useState<CustomerProfile | null>(null);
     const [loading, setLoading]     = useState(true);

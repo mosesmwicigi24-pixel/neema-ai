@@ -32,7 +32,7 @@ interface ConversationsViewProps extends SharedViewProps {
     messages: MessagesMap;
     setMessages: React.Dispatch<React.SetStateAction<MessagesMap>>;
     agents: Agent[];
-    orders: Order[];
+    orders?: Order[];
     refetchConversations?: () => void;
 }
 
@@ -51,7 +51,7 @@ export function ConversationsView({
     messages,
     setMessages,
     agents,
-    orders,
+    orders = [],
     onToast,
     isMobile,
     refetchConversations,
