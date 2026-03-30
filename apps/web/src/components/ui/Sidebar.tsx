@@ -193,7 +193,7 @@ export function Sidebar({
                             )}
                             style={{
                                 backgroundColor: isActive ? "#589b31" : "",
-                                color: isActive ? "#ffffff" : "#699a32",
+                                color: isActive ? "#ffffff" : "#ffffff",
                             }}
                             onMouseEnter={(e) => {
                                 if (!isActive) (e.currentTarget as HTMLElement).style.backgroundColor = "#2c4e18";
@@ -201,7 +201,7 @@ export function Sidebar({
                             }}
                             onMouseLeave={(e) => {
                                 if (!isActive) (e.currentTarget as HTMLElement).style.backgroundColor = "";
-                                if (!isActive) (e.currentTarget as HTMLElement).style.color = "#699a32";
+                                if (!isActive) (e.currentTarget as HTMLElement).style.color = "#ffffff";
                             }}
                         >
                             <span className="flex-shrink-0 text-base leading-none">{item.icon}</span>
