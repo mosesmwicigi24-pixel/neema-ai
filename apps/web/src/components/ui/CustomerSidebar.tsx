@@ -171,7 +171,7 @@ function ScoreBar({ score }: { score: number }) {
     const color = score >= 70 ? "bg-emerald-500" : score >= 40 ? "bg-amber-500" : "bg-stone-300";
     return (
         <div className="flex items-center gap-2">
-            <div className="flex-1 h-1.5 bg-stone-100 rounded-full overflow-hidden">
+            <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{backgroundColor:"#e6f3d8"}}>
                 <div className={`h-full rounded-full transition-all duration-500 ${color}`}
                     style={{ width: `${score}%` }} />
             </div>
@@ -186,7 +186,7 @@ function Section({ title, children, action }: {
     return (
         <div className="mb-5">
             <div className="flex items-center justify-between mb-2">
-                <span className="text-[10px] font-bold text-stone-400 uppercase tracking-widest">{title}</span>
+                <span className="text-[10px] font-bold uppercase tracking-widest" style={{color:"#699a32"}}>{title}</span>
                 {action}
             </div>
             {children}
@@ -203,8 +203,8 @@ function EditableField({ label, value, onChange, placeholder, type = "text" }: {
     useEffect(() => { setDraft(value); }, [value]);
 
     return (
-        <div className="group flex items-start gap-2 py-1.5 border-b border-stone-50 last:border-0">
-            <span className="text-[10px] text-stone-400 w-16 flex-shrink-0 pt-0.5">{label}</span>
+        <div className="group flex items-start gap-2 py-1.5 border-b last:border-0" style={{borderColor:"#e6f3d8"}}>
+            <span className="text-[10px] w-16 flex-shrink-0 pt-0.5" style={{color:"#699a32"}}>{label}</span>
             {editing ? (
                 <div className="flex-1 flex items-center gap-1">
                     <input type={type} value={draft} autoFocus
@@ -213,7 +213,7 @@ function EditableField({ label, value, onChange, placeholder, type = "text" }: {
                             if (e.key === "Enter")  { onChange(draft); setEditing(false); }
                             if (e.key === "Escape") { setDraft(value); setEditing(false); }
                         }}
-                        className="flex-1 text-xs bg-stone-50 border border-stone-200 rounded px-2 py-1 text-stone-800 focus:outline-none focus:ring-1 focus:ring-green-600"
+                        className="flex-1 text-xs rounded px-2 py-1 focus:outline-none focus:ring-1" style={{backgroundColor:"white",border:"1px solid #b5da8b",color:"#16270c"}}
                         placeholder={placeholder} />
                     <button onClick={() => { onChange(draft); setEditing(false); }}
                         className="text-[10px] text-emerald-600 font-semibold hover:text-emerald-700">✓</button>
@@ -222,7 +222,7 @@ function EditableField({ label, value, onChange, placeholder, type = "text" }: {
                 </div>
             ) : (
                 <button onClick={() => setEditing(true)}
-                    className="flex-1 text-xs text-stone-700 text-left hover:text-green-700 transition-colors truncate">
+                    className="flex-1 text-xs text-left transition-colors truncate" style={{color:"#16270c"}}>
                     {value || <span className="text-stone-300 italic">{placeholder || "—"}</span>}
                 </button>
             )}
@@ -334,8 +334,8 @@ export function CustomerSidebar({
 
     if (loading) {
         return (
-            <div className="w-72 flex-shrink-0 border-l border-stone-100 bg-white flex items-center justify-center">
-                <div className="w-5 h-5 border-2 border-green-700 border-t-transparent rounded-full animate-spin" />
+            <div className="w-72 flex-shrink-0 flex items-center justify-center" style={{backgroundColor:"#f3f9ec",borderLeft:"1px solid #cee6b2"}}>
+                <div className="w-5 h-5 border-2 border-t-transparent rounded-full animate-spin" style={{borderColor:"#589b31",borderTopColor:"transparent"}} />
             </div>
         );
     }
@@ -345,11 +345,11 @@ export function CustomerSidebar({
     const stageMeta = STAGE_META[profile.lead_stage] ?? STAGE_META.new;
 
     return (
-        <div className="w-72 flex-shrink-0 border-l border-stone-100 bg-white flex flex-col overflow-hidden">
+        <div className="w-72 flex-shrink-0 flex flex-col overflow-hidden" style={{ backgroundColor:"#ffffff", borderLeft:"1px solid #cee6b2" }}>
 
             {/* Header */}
-            <div className="px-4 py-3 border-b border-stone-100 flex items-center justify-between">
-                <span className="text-xs font-bold text-stone-700 uppercase tracking-widest">Customer</span>
+            <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom:"1px solid #cee6b2" }}>
+                <span className="text-xs font-bold uppercase tracking-widest" style={{color:"#427425"}}>Customer</span>
                 <button onClick={onClose} title="Collapse sidebar"
                     className="text-stone-400 hover:text-stone-600 transition-colors">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -359,11 +359,11 @@ export function CustomerSidebar({
             </div>
 
             {/* Profile hero */}
-            <div className="px-4 pt-4 pb-3 border-b border-stone-100">
+            <div className="px-4 pt-4 pb-3" style={{ borderBottom:"1px solid #cee6b2" }}>
                 <div className="flex items-start gap-3 mb-3">
                     <Avatar name={profile.name ?? profile.wa_id} size={44} />
                     <div className="flex-1 min-w-0">
-                        <div className="text-sm font-bold text-stone-800 truncate">
+                        <div className="text-sm font-bold truncate" style={{color:"#16270c"}}>
                             {profile.name || <span className="text-stone-400 italic font-normal">Unknown</span>}
                             {profile.name_confirmed && (
                                 <span className="ml-1 text-[9px] text-emerald-600 font-bold">✓</span>
@@ -392,7 +392,7 @@ export function CustomerSidebar({
                     {(profile.channels || []).map((ch) => (
                         <span key={ch.channel + ch.identifier}
                             title={`${ch.channel}: ${ch.identifier} · ${ch.conversation_count} conv`}
-                            className="inline-flex items-center gap-0.5 text-[10px] bg-stone-50 border border-stone-200 rounded px-1.5 py-0.5 text-stone-600">
+                            className="inline-flex items-center gap-0.5 text-[10px] rounded px-1.5 py-0.5 capitalize" style={{backgroundColor:"#e6f3d8",border:"1px solid #b5da8b",color:"#427425"}}>
                             <ChannelBadge channel={ch.channel} /> {ch.channel}
                         </span>
                     ))}
@@ -405,35 +405,35 @@ export function CustomerSidebar({
             </div>
 
             {/* Quick stats */}
-            <div className="grid grid-cols-3 border-b border-stone-100">
+            <div className="grid grid-cols-3" style={{ borderBottom:"1px solid #cee6b2" }}>
                 {[
                     { label: "Orders", value: customerOrders.length || profile.total_orders },
                     { label: "Spent",  value: fmtCurrency(totalSpent || profile.total_spent) },
                     { label: "Convs",  value: (profile.channels || []).reduce((s, c) => s + c.conversation_count, 0) || 1 },
                 ].map((s) => (
-                    <div key={s.label} className="px-3 py-2.5 text-center border-r border-stone-100 last:border-0">
-                        <div className="text-sm font-bold text-stone-800">{s.value}</div>
-                        <div className="text-[10px] text-stone-400">{s.label}</div>
+                    <div key={s.label} className="px-3 py-2.5 text-center last:border-0" style={{ borderRight:"1px solid #cee6b2" }}>
+                        <div className="text-sm font-bold" style={{color:"#16270c"}}>{s.value}</div>
+                        <div className="text-[10px]" style={{color:"#699a32"}}>{s.label}</div>
                     </div>
                 ))}
             </div>
 
             {/* Tabs */}
-            <div className="flex border-b border-stone-100">
+            <div className="flex" style={{borderBottom:"1px solid #cee6b2"}}>
                 {(["profile", "insights", "activity"] as const).map((tab) => (
                     <button key={tab} onClick={() => setActiveTab(tab)}
-                        className={`flex-1 py-2 text-[10px] font-semibold uppercase tracking-wider transition-colors ${
-                            activeTab === tab
-                                ? "text-green-700 border-b-2 border-green-700"
-                                : "text-stone-400 hover:text-stone-600"
-                        }`}>
+                        className={`flex-1 py-2 text-[10px] font-semibold uppercase tracking-wider transition-colors border-b-2 ${
+                            activeTab === tab ? "" : "border-transparent text-[#9ccd65]"
+                        }`}
+                        style={activeTab === tab ? { color:"#427425", borderColor:"#589b31" } : undefined}
+                    >
                         {tab}
                     </button>
                 ))}
             </div>
 
             {/* Tab content */}
-            <div className="flex-1 overflow-y-auto px-4 py-4">
+            <div className="flex-1 overflow-y-auto px-4 py-4" style={{backgroundColor:"#f3f9ec"}}>
 
                 {activeTab === "profile" && (
                     <>
@@ -467,7 +467,7 @@ export function CustomerSidebar({
                         <Section title="Tags">
                             <div className="flex flex-wrap gap-1 mb-2">
                                 {(profile.tags || []).map((tag) => (
-                                    <span key={tag} className="inline-flex items-center gap-1 text-[10px] bg-stone-100 text-stone-700 rounded px-1.5 py-0.5">
+                                    <span key={tag} className="inline-flex items-center gap-1 text-[10px] rounded px-1.5 py-0.5" style={{backgroundColor:"#e6f3d8",color:"#427425"}}>
                                         {tag}
                                         <button onClick={() => removeTag(tag)}
                                             className="text-stone-400 hover:text-red-500 ml-0.5">×</button>
@@ -478,9 +478,9 @@ export function CustomerSidebar({
                                 <input value={tagInput} onChange={(e) => setTagInput(e.target.value)}
                                     onKeyDown={(e) => e.key === "Enter" && addTag()}
                                     placeholder="Add tag…"
-                                    className="flex-1 text-xs bg-stone-50 border border-stone-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-green-600 text-stone-700" />
+                                    className="flex-1 text-xs rounded px-2 py-1 focus:outline-none" style={{backgroundColor:"white",border:"1px solid #b5da8b",color:"#16270c"}} />
                                 <button onClick={addTag}
-                                    className="text-xs text-green-700 font-semibold px-2 py-1 bg-green-50 border border-green-200 rounded hover:bg-green-100">+</button>
+                                    className="text-xs font-semibold px-2 py-1 rounded transition-colors" style={{backgroundColor:"#f0f9ec",color:"#589b31",border:"1px solid #b5da8b"}}>+</button>
                             </div>
                         </Section>
 
@@ -489,7 +489,7 @@ export function CustomerSidebar({
                                 <div>
                                     <textarea value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)}
                                         rows={4}
-                                        className="w-full text-xs bg-stone-50 border border-stone-200 rounded-lg px-2.5 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-green-600 text-stone-700"
+                                        className="w-full text-xs rounded-lg px-2.5 py-2 resize-none focus:outline-none" style={{backgroundColor:"white",border:"1px solid #b5da8b",color:"#16270c"}}
                                         placeholder="Internal notes about this customer…" />
                                     <div className="flex gap-2 mt-1.5">
                                         <button onClick={() => { patch({ notes: noteDraft }); setEditNotes(false); }}
@@ -500,7 +500,7 @@ export function CustomerSidebar({
                                 </div>
                             ) : (
                                 <button onClick={() => setEditNotes(true)}
-                                    className="w-full text-left text-xs text-stone-600 bg-stone-50 rounded-lg px-2.5 py-2 hover:bg-stone-100 transition-colors min-h-[40px]">
+                                    className="w-full text-left text-xs rounded-lg px-2.5 py-2 transition-colors min-h-[40px]" style={{backgroundColor:"white",border:"1px solid #e6f3d8",color:"#16270c"}}>
                                     {profile.notes || <span className="text-stone-300 italic">Click to add notes…</span>}
                                 </button>
                             )}
@@ -509,8 +509,15 @@ export function CustomerSidebar({
                         <Section title="Cross-channel Identity"
                             action={
                                 <button onClick={() => setShowMerge(!showMerge)}
-                                    className="text-[10px] text-green-700 font-semibold hover:text-green-600">
-                                    {showMerge ? "Cancel" : "+ Merge"}
+                                    className="flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-lg transition-colors"
+                                    style={showMerge
+                                        ? { backgroundColor:"#e4e6b2", color:"#717425", border:"1px solid #cacd65" }
+                                        : { backgroundColor:"#f0f9ec", color:"#589b31", border:"1px solid #b5da8b" }}>
+                                    <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
+                                            d={showMerge ? "M6 18L18 6M6 6l12 12" : "M12 4v16m8-8H4"} />
+                                    </svg>
+                                    {showMerge ? "Cancel" : "Merge"}
                                 </button>
                             }>
                             {(profile.channels || []).map((ch) => (
@@ -614,8 +621,8 @@ export function CustomerSidebar({
                                     { label: "Customer since", value: profile.first_seen_at ? fmtDate(profile.first_seen_at) : "—" },
                                 ].map((row) => (
                                     <div key={row.label} className="flex items-center justify-between">
-                                        <span className="text-xs text-stone-500">{row.label}</span>
-                                        <span className="text-xs font-semibold text-stone-800">{row.value}</span>
+                                        <span className="text-xs" style={{color:"#699a32"}}>{row.label}</span>
+                                        <span className="text-xs font-semibold" style={{color:"#16270c"}}>{row.value}</span>
                                     </div>
                                 ))}
                             </div>
@@ -676,7 +683,7 @@ export function CustomerSidebar({
                             ) : (
                                 <div className="space-y-2">
                                     {customerOrders.slice(0, 5).map((o) => (
-                                        <div key={o.id} className="p-2.5 bg-stone-50 rounded-lg border border-stone-100">
+                                        <div key={o.id} className="p-2.5 rounded-lg" style={{backgroundColor:"white",border:"1px solid #e6f3d8"}}>
                                             <div className="flex items-center justify-between mb-1">
                                                 <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
                                                     o.status === "delivered" ? "bg-emerald-50 text-emerald-700" :
@@ -686,8 +693,8 @@ export function CustomerSidebar({
                                                 }`}>{o.status}</span>
                                                 <span className="text-[10px] text-stone-400">{timeAgo(o.created_at)}</span>
                                             </div>
-                                            <div className="text-xs font-semibold text-stone-800">{fmtCurrency(o.total || o.subtotal)}</div>
-                                            <div className="text-[10px] text-stone-500 mt-0.5 truncate">
+                                            <div className="text-xs font-semibold" style={{color:"#16270c"}}>{fmtCurrency(o.total || o.subtotal)}</div>
+                                            <div className="text-[10px] mt-0.5 truncate" style={{color:"#699a32"}}>
                                                 {(o.items || []).map((i) => i.name).join(", ") || "—"}
                                             </div>
                                         </div>
@@ -702,7 +709,7 @@ export function CustomerSidebar({
                                     className="flex items-start gap-2 py-2 border-b border-stone-50 last:border-0">
                                     <span className="text-base"><ChannelBadge channel={ch.channel} /></span>
                                     <div className="flex-1 min-w-0">
-                                        <div className="text-xs font-semibold text-stone-700 capitalize">{ch.channel}</div>
+                                        <div className="text-xs font-semibold capitalize" style={{color:"#16270c"}}>{ch.channel}</div>
                                         <div className="text-[10px] text-stone-400">
                                             {ch.conversation_count} conversation{ch.conversation_count !== 1 ? "s" : ""}
                                         </div>
@@ -718,8 +725,8 @@ export function CustomerSidebar({
             </div>
 
             {/* Quick actions */}
-            <div className="px-4 py-3 border-t border-stone-100 bg-white">
-                <div className="text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-2">Quick Actions</div>
+            <div className="px-4 py-3 bg-white" style={{borderTop:"1px solid #cee6b2"}}>
+                <div className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{color:"#699a32"}}>Quick Actions</div>
                 <div className="flex flex-wrap gap-1.5">
                     <button onClick={() => patch({ lead_stage: "won" })}
                         className="flex-1 text-[10px] font-semibold py-1.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors">
@@ -734,7 +741,7 @@ export function CustomerSidebar({
                         const next = STAGE_ORDER[Math.min(idx + 1, STAGE_ORDER.indexOf("won"))];
                         if (next !== profile.lead_stage) patch({ lead_stage: next });
                     }}
-                        className="w-full text-[10px] font-semibold py-1.5 rounded-lg bg-stone-50 text-stone-700 border border-stone-200 hover:bg-stone-100 transition-colors">
+                        className="w-full text-[10px] font-semibold py-1.5 rounded-lg transition-colors" style={{backgroundColor:"#f0f9ec",color:"#427425",border:"1px solid #b5da8b"}}>
                         → Advance Stage
                     </button>
                 </div>

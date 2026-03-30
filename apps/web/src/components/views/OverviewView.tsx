@@ -72,7 +72,7 @@ function StatCard({ label, value, sub, icon, accent, trend, loading }: StatCardP
                 <div className="text-2xl font-bold text-[#16270c] mb-0.5 tabular-nums">{value}</div>
             )}
             <div className="text-xs font-semibold" style={{ color: colorMeta.accent }}>{label}</div>
-            <div className="text-xs text-stone-400 mt-0.5">{sub}</div>
+            <div className="text-xs text-[#9ccd65] mt-0.5">{sub}</div>
         </div>
     );
 }
@@ -216,11 +216,11 @@ export function OverviewView({
             {/* Header */}
             <div className="flex items-center justify-between mb-6">
                 <div>
-                    <h1 className="text-xl font-bold text-stone-800 tracking-tight">Overview</h1>
-                    <p className="text-sm text-stone-400 mt-0.5">Real-time metrics and platform performance</p>
+                    <h1 className="text-xl font-bold text-[#16270c] tracking-tight">Overview</h1>
+                    <p className="text-sm text-[#9ccd65] mt-0.5">Real-time metrics and platform performance</p>
                 </div>
                 {statsLoading && (
-                    <div className="flex items-center gap-1.5 text-xs text-stone-400">
+                    <div className="flex items-center gap-1.5 text-xs text-[#9ccd65]">
                         <div className="w-3 h-3 border-2 border-stone-300 border-t-green-600 rounded-full animate-spin" />
                         Refreshing…
                     </div>
@@ -255,10 +255,10 @@ export function OverviewView({
                 {/* Revenue bar chart — real 7-day data */}
                 <div className={`bg-white rounded-xl border border-[#cee6b2] shadow-sm p-5 ${isMobile ? "" : "col-span-3"}`}>
                     <div className="flex items-center justify-between mb-4">
-                        <div className="text-xs font-semibold text-stone-400 uppercase tracking-wider">
+                        <div className="text-xs font-semibold text-[#9ccd65] uppercase tracking-wider">
                             7-Day Revenue (KES)
                         </div>
-                        <div className="text-xs font-bold text-green-800">
+                        <div className="text-xs font-bold text-[#2c4e18]">
                             {fmtCurrency(barData.reduce((s, d) => s + d.value, 0))}
                         </div>
                     </div>
@@ -267,33 +267,33 @@ export function OverviewView({
                             <div key={i} className="flex-1 flex flex-col items-center gap-1.5 h-full group">
                                 <div className="flex-1 flex items-end w-full">
                                     <div
-                                        className={`w-full rounded-t-md transition-all duration-700 ${d.isToday ? "bg-green-700" : "bg-stone-200 group-hover:bg-green-400"}`}
+                                        className={`w-full rounded-t-md transition-all duration-700 ${d.isToday ? "bg-[#427425]" : "bg-[#cee6b2] group-hover:bg-green-400"}`}
                                         style={{ height: `${(d.value / maxBar) * 100}%`, minHeight: d.value > 0 ? 4 : 0 }}
                                         title={fmtCurrency(d.value)}
                                     />
                                 </div>
-                                <span className={`text-[10px] font-medium ${d.isToday ? "text-green-800" : "text-stone-400"}`}>
+                                <span className={`text-[10px] font-medium ${d.isToday ? "text-[#2c4e18]" : "text-[#9ccd65]"}`}>
                                     {d.label}
                                 </span>
                             </div>
                         ))}
                     </div>
                     {barData.every((d) => d.value === 0) && (
-                        <p className="text-xs text-stone-400 text-center mt-2">No orders in the last 7 days</p>
+                        <p className="text-xs text-[#9ccd65] text-center mt-2">No orders in the last 7 days</p>
                     )}
                 </div>
 
                 {/* Order status breakdown */}
                 <div className={`bg-white rounded-xl border border-[#cee6b2] shadow-sm p-5 ${isMobile ? "" : "col-span-2"}`}>
-                    <div className="text-xs font-semibold text-stone-400 uppercase tracking-wider mb-4">Order Status</div>
+                    <div className="text-xs font-semibold text-[#9ccd65] uppercase tracking-wider mb-4">Order Status</div>
                     <div className="space-y-3.5">
                         {orderStatusItems.map((item) => (
                             <div key={item.label}>
                                 <div className="flex justify-between mb-1.5">
-                                    <span className="text-xs font-medium text-stone-500">{item.label}</span>
+                                    <span className="text-xs font-medium text-[#699a32]">{item.label}</span>
                                     <span className={`text-xs font-bold ${item.text}`}>{item.count}</span>
                                 </div>
-                                <div className="h-1.5 bg-stone-100 rounded-full overflow-hidden">
+                                <div className="h-1.5 bg-[#e6f3d8] rounded-full overflow-hidden">
                                     <div
                                         className={`h-full ${item.color} rounded-full transition-all duration-700`}
                                         style={{ width: `${stats.totalOrders ? (item.count / stats.totalOrders) * 100 : 0}%` }}
@@ -310,9 +310,9 @@ export function OverviewView({
 
                 {/* Channel breakdown */}
                 <div className={`bg-white rounded-xl border border-[#cee6b2] shadow-sm p-5 ${isMobile ? "" : "col-span-2"}`}>
-                    <div className="text-xs font-semibold text-stone-400 uppercase tracking-wider mb-4">By Channel</div>
+                    <div className="text-xs font-semibold text-[#9ccd65] uppercase tracking-wider mb-4">By Channel</div>
                     {channelBreakdown.length === 0 ? (
-                        <p className="text-xs text-stone-400 text-center py-6">No channel data yet</p>
+                        <p className="text-xs text-[#9ccd65] text-center py-6">No channel data yet</p>
                     ) : (
                         <div className="space-y-3.5">
                             {channelBreakdown.map(({ ch, count, open }) => {
@@ -326,10 +326,10 @@ export function OverviewView({
                                         </div>
                                         <div className="flex-1 min-w-0">
                                             <div className="flex justify-between mb-1.5">
-                                                <span className="text-xs font-semibold text-stone-600">{cfg.label}</span>
-                                                <span className="text-xs text-stone-400">{count} · {open} open</span>
+                                                <span className="text-xs font-semibold text-[#427425]">{cfg.label}</span>
+                                                <span className="text-xs text-[#9ccd65]">{count} · {open} open</span>
                                             </div>
-                                            <div className="h-1.5 bg-stone-100 rounded-full overflow-hidden">
+                                            <div className="h-1.5 bg-[#e6f3d8] rounded-full overflow-hidden">
                                                 <div className="h-full rounded-full transition-all duration-700"
                                                     style={{ width: `${(count / totalConvs) * 100}%`, backgroundColor: cfg.color }} />
                                             </div>
@@ -343,26 +343,26 @@ export function OverviewView({
 
                 {/* Activity feed — real data */}
                 <div className={`bg-white rounded-xl border border-[#cee6b2] shadow-sm p-5 ${isMobile ? "" : "col-span-3"}`}>
-                    <div className="text-xs font-semibold text-stone-400 uppercase tracking-wider mb-4">Recent Activity</div>
+                    <div className="text-xs font-semibold text-[#9ccd65] uppercase tracking-wider mb-4">Recent Activity</div>
                     {activityFeed.length === 0 ? (
-                        <p className="text-xs text-stone-400 text-center py-6">No activity yet</p>
+                        <p className="text-xs text-[#9ccd65] text-center py-6">No activity yet</p>
                     ) : (
-                        <div className="space-y-0 divide-y divide-stone-50">
+                        <div className="space-y-0 divide-y divide-[#f0f9ec]">
                             {activityFeed.map((entry) => (
                                 <div key={entry.id} className="flex items-center gap-3 py-2.5">
-                                    <div className="w-7 h-7 rounded-lg bg-[#f3f9ec] border border-stone-100 flex items-center justify-center text-sm flex-shrink-0">
+                                    <div className="w-7 h-7 rounded-lg bg-[#f3f9ec] border border-[#e6f3d8] flex items-center justify-center text-sm flex-shrink-0">
                                         {entry.icon}
                                     </div>
                                     <div className="flex-1 min-w-0">
-                                        <p className="text-xs text-stone-600 truncate">
-                                            <span className="font-semibold text-stone-800">{entry.user}</span>{" "}
+                                        <p className="text-xs text-[#427425] truncate">
+                                            <span className="font-semibold text-[#16270c]">{entry.user}</span>{" "}
                                             {entry.action}
                                             {entry.target && (
-                                                <span className="text-green-700"> · {entry.target}</span>
+                                                <span className="text-[#427425]"> · {entry.target}</span>
                                             )}
                                         </p>
                                     </div>
-                                    <span className="text-[10px] text-stone-400 flex-shrink-0">{timeAgo(entry.at)}</span>
+                                    <span className="text-[10px] text-[#9ccd65] flex-shrink-0">{timeAgo(entry.at)}</span>
                                 </div>
                             ))}
                         </div>
@@ -373,24 +373,24 @@ export function OverviewView({
             {/* Top products — real data */}
             {topProducts.length > 0 && (
                 <div className="bg-white rounded-xl border border-[#cee6b2] shadow-sm p-5">
-                    <div className="text-xs font-semibold text-stone-400 uppercase tracking-wider mb-4">Top Products by Revenue</div>
+                    <div className="text-xs font-semibold text-[#9ccd65] uppercase tracking-wider mb-4">Top Products by Revenue</div>
                     <div className="space-y-2">
                         {topProducts.map((p, i) => {
                             const maxRev = topProducts[0].revenue || 1;
                             return (
                                 <div key={p.name} className="flex items-center gap-3">
-                                    <span className="text-xs font-bold text-stone-300 w-4 flex-shrink-0">{i + 1}</span>
+                                    <span className="text-xs font-bold text-[#b5da8b] w-4 flex-shrink-0">{i + 1}</span>
                                     <div className="flex-1 min-w-0">
                                         <div className="flex justify-between mb-1">
-                                            <span className="text-xs font-semibold text-stone-700 truncate">{p.name}</span>
-                                            <span className="text-xs font-bold text-green-800 ml-2 flex-shrink-0">{fmtCurrency(p.revenue)}</span>
+                                            <span className="text-xs font-semibold text-[#16270c] truncate">{p.name}</span>
+                                            <span className="text-xs font-bold text-[#2c4e18] ml-2 flex-shrink-0">{fmtCurrency(p.revenue)}</span>
                                         </div>
-                                        <div className="h-1.5 bg-stone-100 rounded-full overflow-hidden">
-                                            <div className="h-full bg-green-600 rounded-full"
+                                        <div className="h-1.5 bg-[#e6f3d8] rounded-full overflow-hidden">
+                                            <div className="h-full bg-[#589b31] rounded-full"
                                                 style={{ width: `${(p.revenue / maxRev) * 100}%` }} />
                                         </div>
                                     </div>
-                                    <span className="text-[10px] text-stone-400 flex-shrink-0 w-10 text-right">×{p.qty}</span>
+                                    <span className="text-[10px] text-[#9ccd65] flex-shrink-0 w-10 text-right">×{p.qty}</span>
                                 </div>
                             );
                         })}

@@ -114,48 +114,48 @@ export function ProfileView({
     if (!agent) {
         return (
             <div className="flex-1 flex items-center justify-center">
-                <p className="text-sm text-stone-400">Loading profile…</p>
+                <p className="text-sm text-[#9ccd65]">Loading profile…</p>
             </div>
         );
     }
 
     return (
         <div
-            className={`flex-1 overflow-y-auto bg-stone-50 ${isMobile ? "p-4 pb-24" : "p-6"}`}
+            className={`flex-1 overflow-y-auto bg-[#f3f9ec] ${isMobile ? "p-4 pb-24" : "p-6"}`}
         >
             <div className="mb-6">
-                <h1 className="text-xl font-bold text-stone-800 tracking-tight">
+                <h1 className="text-xl font-bold text-[#16270c] tracking-tight">
                     Profile
                 </h1>
-                <p className="text-sm text-stone-400 mt-0.5">
+                <p className="text-sm text-[#9ccd65] mt-0.5">
                     Manage your account and preferences
                 </p>
             </div>
 
             <div className="space-y-4 max-w-2xl">
                 {/* Profile card */}
-                <div className="bg-white rounded-xl border border-stone-100 shadow-sm p-5">
+                <div className="bg-white rounded-xl border border-[#e6f3d8] shadow-sm p-5">
                     <div className="flex items-start gap-4 mb-5">
                         <Avatar name={agent.name} size={56} />
                         <div className="flex-1">
                             <div className="flex items-center gap-2 mb-1">
-                                <h2 className="text-base font-bold text-stone-800">
+                                <h2 className="text-base font-bold text-[#16270c]">
                                     {agent.name}
                                 </h2>
                                 <span
                                     className={`text-xs px-2 py-0.5 rounded-full font-semibold capitalize border ${
                                         agent.role === "admin"
                                             ? "bg-purple-100 text-purple-700 border-purple-200"
-                                            : "bg-stone-100 text-stone-600 border-stone-200"
+                                            : "bg-[#e6f3d8] text-[#427425] border-[#cee6b2]"
                                     }`}
                                 >
                                     {agent.role}
                                 </span>
                             </div>
-                            <p className="text-sm text-stone-400">
+                            <p className="text-sm text-[#9ccd65]">
                                 {agent.email}
                             </p>
-                            <p className="text-xs text-stone-400 mt-1">
+                            <p className="text-xs text-[#9ccd65] mt-1">
                                 Joined{" "}
                                 {agent.created_at
                                     ? fmtDate(agent.created_at)
@@ -179,7 +179,7 @@ export function ProfileView({
                     </div>
 
                     {editMode && (
-                        <div className="border-t border-stone-100 pt-4 space-y-3">
+                        <div className="border-t border-[#e6f3d8] pt-4 space-y-3">
                             <InputField
                                 label="Full Name"
                                 value={form.name}
@@ -222,13 +222,13 @@ export function ProfileView({
                 </div>
 
                 {/* Change password */}
-                <div className="bg-white rounded-xl border border-stone-100 shadow-sm p-5">
+                <div className="bg-white rounded-xl border border-[#e6f3d8] shadow-sm p-5">
                     <div className="flex items-center justify-between mb-4">
                         <div>
-                            <h3 className="text-sm font-semibold text-stone-800">
+                            <h3 className="text-sm font-semibold text-[#16270c]">
                                 Password
                             </h3>
-                            <p className="text-xs text-stone-400 mt-0.5">
+                            <p className="text-xs text-[#9ccd65] mt-0.5">
                                 Change your login password
                             </p>
                         </div>
@@ -276,16 +276,16 @@ export function ProfileView({
                 </div>
 
                 {/* Appearance */}
-                <div className="bg-white rounded-xl border border-stone-100 shadow-sm p-5">
-                    <h3 className="text-sm font-semibold text-stone-800 mb-4">
+                <div className="bg-white rounded-xl border border-[#e6f3d8] shadow-sm p-5">
+                    <h3 className="text-sm font-semibold text-[#16270c] mb-4">
                         Appearance
                     </h3>
                     <div className="flex items-center justify-between">
                         <div>
-                            <div className="text-sm font-medium text-stone-800">
+                            <div className="text-sm font-medium text-[#16270c]">
                                 Dark Mode
                             </div>
-                            <div className="text-xs text-stone-400 mt-0.5">
+                            <div className="text-xs text-[#9ccd65] mt-0.5">
                                 Switch to dark theme
                             </div>
                         </div>
@@ -299,8 +299,8 @@ export function ProfileView({
                 </div>
 
                 {/* Notifications */}
-                <div className="bg-white rounded-xl border border-stone-100 shadow-sm p-5">
-                    <h3 className="text-sm font-semibold text-stone-800 mb-4">
+                <div className="bg-white rounded-xl border border-[#e6f3d8] shadow-sm p-5">
+                    <h3 className="text-sm font-semibold text-[#16270c] mb-4">
                         Notifications
                     </h3>
                     <div className="space-y-4">
@@ -333,10 +333,10 @@ export function ProfileView({
                                 className="flex items-center justify-between"
                             >
                                 <div>
-                                    <div className="text-sm font-medium text-stone-800">
+                                    <div className="text-sm font-medium text-[#16270c]">
                                         {item.label}
                                     </div>
-                                    <div className="text-xs text-stone-400 mt-0.5">
+                                    <div className="text-xs text-[#9ccd65] mt-0.5">
                                         {item.desc}
                                     </div>
                                 </div>
@@ -355,8 +355,8 @@ export function ProfileView({
                 </div>
 
                 {/* Permissions */}
-                <div className="bg-white rounded-xl border border-stone-100 shadow-sm p-5">
-                    <h3 className="text-sm font-semibold text-stone-800 mb-4">
+                <div className="bg-white rounded-xl border border-[#e6f3d8] shadow-sm p-5">
+                    <h3 className="text-sm font-semibold text-[#16270c] mb-4">
                         Your Permissions
                     </h3>
                     <div className="grid grid-cols-2 gap-2">
@@ -365,10 +365,10 @@ export function ProfileView({
                             return (
                                 <div
                                     key={p.key}
-                                    className={`flex items-center gap-2 p-2.5 rounded-lg border text-xs ${has ? "bg-green-50 border-green-200 text-green-800" : "bg-stone-50 border-stone-200 text-stone-400"}`}
+                                    className={`flex items-center gap-2 p-2.5 rounded-lg border text-xs ${has ? "bg-[#f0f9ec] border-[#b5da8b] text-[#2c4e18]" : "bg-[#f3f9ec] border-[#cee6b2] text-[#9ccd65]"}`}
                                 >
                                     <div
-                                        className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${has ? "bg-green-500" : "bg-stone-300"}`}
+                                        className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${has ? "bg-[#f0f9ec]0" : "bg-stone-300"}`}
                                     />
                                     {p.label}
                                 </div>

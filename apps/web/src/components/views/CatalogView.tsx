@@ -213,13 +213,13 @@ export function CatalogView({
                     placeholder="WAFER-500"
                 />
                 <div>
-                    <label className="block text-xs font-semibold text-stone-600 mb-1.5">
+                    <label className="block text-xs font-semibold text-[#427425] mb-1.5">
                         Category
                     </label>
                     <select
                         value={form.category}
                         onChange={(e) => f("category", e.target.value)}
-                        className="w-full h-9 px-2.5 text-sm bg-white border border-stone-200 rounded-lg text-stone-800 focus:outline-none focus:ring-2 focus:ring-green-600 focus:border-transparent"
+                        className="w-full h-9 px-2.5 text-sm bg-white border border-[#cee6b2] rounded-lg text-[#16270c] focus:outline-none focus:ring-2 focus:ring-[#589b31] focus:border-transparent"
                     >
                         <option value="">— select —</option>
                         {categories.map((cat) => (
@@ -229,7 +229,7 @@ export function CatalogView({
                     </select>
                     {form.category === "__new__" && (
                         <input
-                            className="mt-1.5 w-full h-9 px-2.5 text-sm bg-white border border-stone-200 rounded-lg text-stone-800 focus:outline-none focus:ring-2 focus:ring-green-600"
+                            className="mt-1.5 w-full h-9 px-2.5 text-sm bg-white border border-[#cee6b2] rounded-lg text-[#16270c] focus:outline-none focus:ring-2 focus:ring-[#589b31]"
                             placeholder="New category name"
                             autoFocus
                             onChange={(e) => f("category", e.target.value)}
@@ -257,11 +257,11 @@ export function CatalogView({
                     <label className="flex items-center gap-2 cursor-pointer">
                         <div
                             onClick={() => f("in_stock", !form.in_stock)}
-                            className={`w-9 h-5 rounded-full transition-colors flex-shrink-0 ${form.in_stock ? "bg-green-600" : "bg-stone-300"}`}
+                            className={`w-9 h-5 rounded-full transition-colors flex-shrink-0 ${form.in_stock ? "bg-[#589b31]" : "bg-stone-300"}`}
                         >
                             <div className={`w-4 h-4 rounded-full bg-white shadow mt-0.5 transition-transform ${form.in_stock ? "translate-x-4.5 ml-4" : "ml-0.5"}`} />
                         </div>
-                        <span className="text-xs text-stone-600 font-medium">In stock</span>
+                        <span className="text-xs text-[#427425] font-medium">In stock</span>
                     </label>
                 </div>
             </div>
@@ -281,13 +281,13 @@ export function CatalogView({
     );
 
     return (
-        <div className={`flex-1 overflow-y-auto bg-stone-50 ${isMobile ? "p-4 pb-24" : "p-6"}`}>
+        <div className={`flex-1 overflow-y-auto bg-[#f3f9ec] ${isMobile ? "p-4 pb-24" : "p-6"}`}>
 
             {/* Header */}
             <div className="flex items-center justify-between mb-6">
                 <div>
-                    <h1 className="text-xl font-bold text-stone-800 tracking-tight">Catalog</h1>
-                    <p className="text-sm text-stone-400 mt-0.5">
+                    <h1 className="text-xl font-bold text-[#16270c] tracking-tight">Catalog</h1>
+                    <p className="text-sm text-[#9ccd65] mt-0.5">
                         {catalog.length} items
                         <span className="mx-1.5 text-stone-200">·</span>
                         <span className="text-emerald-600">{inStockCount} in stock</span>
@@ -301,7 +301,7 @@ export function CatalogView({
                 </div>
                 <button
                     onClick={() => { setForm({ ...EMPTY_FORM }); setAddModal(true); }}
-                    className="flex items-center gap-2 h-9 px-4 rounded-lg bg-green-700 hover:bg-green-600 text-white text-sm font-semibold transition-colors shadow-sm"
+                    className="flex items-center gap-2 h-9 px-4 rounded-lg bg-[#427425] hover:bg-[#589b31] text-white text-sm font-semibold transition-colors shadow-sm"
                 >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -313,7 +313,7 @@ export function CatalogView({
             {/* Search + category dropdown */}
             <div className="flex flex-col sm:flex-row gap-2 mb-5">
                 <div className="relative flex-1">
-                    <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-300"
+                    <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#b5da8b]"
                         fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                             d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -322,7 +322,7 @@ export function CatalogView({
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                         placeholder="Search items…"
-                        className="w-full h-10 pl-9 pr-3 text-sm bg-white border border-stone-200 rounded-xl text-stone-800 placeholder-stone-300 focus:outline-none focus:ring-2 focus:ring-green-600 focus:border-transparent transition-all"
+                        className="w-full h-10 pl-9 pr-3 text-sm bg-white border border-[#cee6b2] rounded-xl text-[#16270c] placeholder-stone-300 focus:outline-none focus:ring-2 focus:ring-[#589b31] focus:border-transparent transition-all"
                         style={{ fontSize: 16 }}
                     />
                 </div>
@@ -332,7 +332,7 @@ export function CatalogView({
                     <select
                         value={filter}
                         onChange={(e) => setFilter(e.target.value)}
-                        className="h-10 pl-3 pr-8 text-sm bg-white border border-stone-200 rounded-xl text-stone-700 font-medium focus:outline-none focus:ring-2 focus:ring-green-600 focus:border-transparent appearance-none cursor-pointer min-w-[160px]"
+                        className="h-10 pl-3 pr-8 text-sm bg-white border border-[#cee6b2] rounded-xl text-[#16270c] font-medium focus:outline-none focus:ring-2 focus:ring-[#589b31] focus:border-transparent appearance-none cursor-pointer min-w-[160px]"
                     >
                         <option value="all">All categories</option>
                         {categories.map((cat) => (
@@ -341,7 +341,7 @@ export function CatalogView({
                             </option>
                         ))}
                     </select>
-                    <svg className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400 pointer-events-none"
+                    <svg className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9ccd65] pointer-events-none"
                         fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                     </svg>
@@ -355,14 +355,14 @@ export function CatalogView({
                     return (
                         <div
                             key={item.id}
-                            className={`group bg-white rounded-xl border border-stone-100 overflow-hidden shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 ${!item.in_stock ? "opacity-60" : ""}`}
+                            className={`group bg-white rounded-xl border border-[#e6f3d8] overflow-hidden shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 ${!item.in_stock ? "opacity-60" : ""}`}
                         >
                             <div className={`h-20 bg-gradient-to-br ${gradient} flex items-center justify-center text-3xl`}>
                                 {catEmoji[item.category ?? ""] ?? "📦"}
                             </div>
                             <div className="p-3">
                                 <div className="flex items-start justify-between gap-1 mb-1">
-                                    <span className="text-xs font-semibold text-stone-800 leading-tight">
+                                    <span className="text-xs font-semibold text-[#16270c] leading-tight">
                                         {item.name}
                                     </span>
                                     {!item.in_stock && (
@@ -372,11 +372,11 @@ export function CatalogView({
                                     )}
                                 </div>
                                 {item.description && (
-                                    <p className="text-xs text-stone-400 mb-2 leading-snug line-clamp-2">
+                                    <p className="text-xs text-[#9ccd65] mb-2 leading-snug line-clamp-2">
                                         {item.description}
                                     </p>
                                 )}
-                                <div className="text-sm font-bold text-green-800 mb-2.5">
+                                <div className="text-sm font-bold text-[#2c4e18] mb-2.5">
                                     {fmtCurrency(item.price)}
                                 </div>
                                 {/* Actions */}
@@ -386,7 +386,7 @@ export function CatalogView({
                                         onClick={() => toggleStock(item.id, item.in_stock)}
                                         className={`flex-1 h-7 rounded-md text-xs font-medium transition-colors ${
                                             item.in_stock
-                                                ? "bg-stone-100 text-stone-600 hover:bg-stone-200"
+                                                ? "bg-[#e6f3d8] text-[#427425] hover:bg-[#cee6b2]"
                                                 : "bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100"
                                         }`}
                                     >
@@ -396,7 +396,7 @@ export function CatalogView({
                                     <button
                                         onClick={() => openEdit(item)}
                                         title="Edit"
-                                        className="w-7 h-7 rounded-md bg-stone-50 text-stone-500 hover:bg-stone-100 hover:text-stone-700 transition-colors flex items-center justify-center border border-stone-200"
+                                        className="w-7 h-7 rounded-md bg-[#f3f9ec] text-[#699a32] hover:bg-[#e6f3d8] hover:text-[#16270c] transition-colors flex items-center justify-center border border-[#cee6b2]"
                                     >
                                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -415,7 +415,7 @@ export function CatalogView({
                                         </svg>
                                     </button>
                                 </div>
-                                <div className="text-[10px] text-stone-300 font-mono mt-2">{item.sku}</div>
+                                <div className="text-[10px] text-[#b5da8b] font-mono mt-2">{item.sku}</div>
                             </div>
                         </div>
                     );
@@ -423,7 +423,7 @@ export function CatalogView({
                 {filtered.length === 0 && (
                     <div className="col-span-full py-16 text-center">
                         <span className="text-3xl mb-3 block">📦</span>
-                        <p className="text-sm text-stone-400">No items found</p>
+                        <p className="text-sm text-[#9ccd65]">No items found</p>
                     </div>
                 )}
             </div>
@@ -453,11 +453,11 @@ export function CatalogView({
 
             {/* ── Delete confirm modal ──────────────────────────────────────── */}
             <Modal show={delModal} onClose={() => setDelModal(false)} title="Remove Item">
-                <p className="text-sm text-stone-600 mb-1">
+                <p className="text-sm text-[#427425] mb-1">
                     Are you sure you want to remove{" "}
-                    <span className="font-semibold text-stone-800">{delItem?.name}</span>?
+                    <span className="font-semibold text-[#16270c]">{delItem?.name}</span>?
                 </p>
-                <p className="text-xs text-stone-400 mb-5">This action cannot be undone.</p>
+                <p className="text-xs text-[#9ccd65] mb-5">This action cannot be undone.</p>
                 <div className="flex gap-2">
                     <Btn onClick={confirmDelete} variant="danger" disabled={deleting} full>
                         {deleting ? "Removing…" : "Remove"}

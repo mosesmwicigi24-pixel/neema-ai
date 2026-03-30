@@ -34,9 +34,9 @@ function StatBox({ label, value, sub, accent }: {
 }) {
     return (
         <div className={`bg-white rounded-xl border shadow-sm p-4 border-l-4 ${accent ?? "border-l-[#589b31]"}`}>
-            <div className="text-xs font-semibold text-stone-400 uppercase tracking-wider mb-2">{label}</div>
+            <div className="text-xs font-semibold text-[#9ccd65] uppercase tracking-wider mb-2">{label}</div>
             <div className="text-2xl font-bold text-[#16270c] tabular-nums">{value}</div>
-            {sub && <div className="text-xs text-stone-400 mt-0.5">{sub}</div>}
+            {sub && <div className="text-xs text-[#9ccd65] mt-0.5">{sub}</div>}
         </div>
     );
 }
@@ -53,7 +53,7 @@ function MiniBar({ data, color = "#589b31" }: { data: { label: string; value: nu
                         backgroundColor: color,
                         opacity: 0.7 + (d.value / max) * 0.3,
                     }} title={`${d.label}: ${d.value}`} />
-                    <span className="text-[9px] text-stone-400">{d.label}</span>
+                    <span className="text-[9px] text-[#9ccd65]">{d.label}</span>
                 </div>
             ))}
         </div>
@@ -71,7 +71,7 @@ function Table({ cols, rows, emptyText = "No data" }: {
                 <thead>
                     <tr className="border-b border-[#e6f3d8]">
                         {cols.map((c) => (
-                            <th key={c} className="text-left py-2.5 px-3 text-[10px] font-bold text-stone-400 uppercase tracking-wider whitespace-nowrap">
+                            <th key={c} className="text-left py-2.5 px-3 text-[10px] font-bold text-[#9ccd65] uppercase tracking-wider whitespace-nowrap">
                                 {c}
                             </th>
                         ))}
@@ -79,12 +79,12 @@ function Table({ cols, rows, emptyText = "No data" }: {
                 </thead>
                 <tbody>
                     {rows.length === 0 ? (
-                        <tr><td colSpan={cols.length} className="py-8 text-center text-stone-400">{emptyText}</td></tr>
+                        <tr><td colSpan={cols.length} className="py-8 text-center text-[#9ccd65]">{emptyText}</td></tr>
                     ) : (
                         rows.map((row, i) => (
                             <tr key={i} className="border-b border-[#f3f9ec] hover:bg-[#f3f9ec] transition-colors">
                                 {row.map((cell, j) => (
-                                    <td key={j} className="py-2.5 px-3 text-stone-700 whitespace-nowrap">{cell}</td>
+                                    <td key={j} className="py-2.5 px-3 text-[#16270c] whitespace-nowrap">{cell}</td>
                                 ))}
                             </tr>
                         ))
@@ -194,7 +194,7 @@ export function ReportsView({ conversations, agents, orders, onToast, isMobile }
                     <select
                         value={range}
                         onChange={(e) => setRange(e.target.value as Range)}
-                        className="h-9 px-3 text-xs bg-white border border-[#b5da8b] rounded-lg text-stone-700 font-medium focus:outline-none focus:ring-2 focus:ring-[#589b31] appearance-none cursor-pointer"
+                        className="h-9 px-3 text-xs bg-white border border-[#b5da8b] rounded-lg text-[#16270c] font-medium focus:outline-none focus:ring-2 focus:ring-[#589b31] appearance-none cursor-pointer"
                         style={{ fontSize: 13 }}
                     >
                         <option value="7d">Last 7 days</option>
@@ -205,10 +205,10 @@ export function ReportsView({ conversations, agents, orders, onToast, isMobile }
                     {range === "custom" && (
                         <>
                             <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)}
-                                className="h-9 px-2 text-xs bg-white border border-[#b5da8b] rounded-lg text-stone-700" />
-                            <span className="text-stone-400 text-xs">to</span>
+                                className="h-9 px-2 text-xs bg-white border border-[#b5da8b] rounded-lg text-[#16270c]" />
+                            <span className="text-[#9ccd65] text-xs">to</span>
                             <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)}
-                                className="h-9 px-2 text-xs bg-white border border-[#b5da8b] rounded-lg text-stone-700" />
+                                className="h-9 px-2 text-xs bg-white border border-[#b5da8b] rounded-lg text-[#16270c]" />
                         </>
                     )}
                     <button
@@ -231,7 +231,7 @@ export function ReportsView({ conversations, agents, orders, onToast, isMobile }
                         className={`px-4 py-2 text-xs font-semibold capitalize transition-colors border-b-2 -mb-px ${
                             tab === t
                                 ? "text-[#427425] border-[#427425]"
-                                : "text-stone-400 border-transparent hover:text-stone-600"
+                                : "text-[#9ccd65] border-transparent hover:text-[#427425]"
                         }`}
                     >{t}</button>
                 ))}
@@ -254,13 +254,13 @@ export function ReportsView({ conversations, agents, orders, onToast, isMobile }
 
                     <div className={`grid gap-4 ${isMobile ? "grid-cols-1" : "grid-cols-2"}`}>
                         <div className="bg-white rounded-xl border border-[#cee6b2] shadow-sm p-5">
-                            <div className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-3">
+                            <div className="text-xs font-bold text-[#9ccd65] uppercase tracking-wider mb-3">
                                 Conversations over time
                             </div>
                             <MiniBar data={convByDay} color="#589b31" />
                         </div>
                         <div className="bg-white rounded-xl border border-[#cee6b2] shadow-sm p-5">
-                            <div className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-3">
+                            <div className="text-xs font-bold text-[#9ccd65] uppercase tracking-wider mb-3">
                                 Revenue over time (KES)
                             </div>
                             <MiniBar data={orderByDay} color="#2a48a2" />
@@ -268,7 +268,7 @@ export function ReportsView({ conversations, agents, orders, onToast, isMobile }
                     </div>
 
                     <div className="bg-white rounded-xl border border-[#cee6b2] shadow-sm p-5">
-                        <div className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-4">Order Status Breakdown</div>
+                        <div className="text-xs font-bold text-[#9ccd65] uppercase tracking-wider mb-4">Order Status Breakdown</div>
                         <div className="grid grid-cols-4 gap-3">
                             {[
                                 { label: "Pending",   color: "#bcc13e", count: filteredOrders.filter((o) => o.status === "pending").length },
@@ -278,8 +278,8 @@ export function ReportsView({ conversations, agents, orders, onToast, isMobile }
                             ].map((item) => (
                                 <div key={item.label} className="text-center">
                                     <div className="text-xl font-bold tabular-nums" style={{ color: item.color }}>{item.count}</div>
-                                    <div className="text-xs text-stone-400 mt-0.5">{item.label}</div>
-                                    <div className="h-1 rounded-full mt-2 bg-stone-100 overflow-hidden">
+                                    <div className="text-xs text-[#9ccd65] mt-0.5">{item.label}</div>
+                                    <div className="h-1 rounded-full mt-2 bg-[#e6f3d8] overflow-hidden">
                                         <div className="h-full rounded-full" style={{
                                             width: `${filteredOrders.length ? (item.count / filteredOrders.length) * 100 : 0}%`,
                                             backgroundColor: item.color,
@@ -296,7 +296,7 @@ export function ReportsView({ conversations, agents, orders, onToast, isMobile }
             {tab === "conversations" && (
                 <div className="bg-white rounded-xl border border-[#cee6b2] shadow-sm overflow-hidden">
                     <div className="px-4 py-3 border-b border-[#e6f3d8] flex items-center justify-between">
-                        <span className="text-xs font-bold text-stone-500 uppercase tracking-wider">
+                        <span className="text-xs font-bold text-[#699a32] uppercase tracking-wider">
                             {filteredConvs.length} conversations in period
                         </span>
                     </div>
@@ -305,8 +305,8 @@ export function ReportsView({ conversations, agents, orders, onToast, isMobile }
                         rows={filteredConvs.slice(0, 50).map((c) => [
                             c.name || c.wa_id,
                             <span className="capitalize">{c.channel || "whatsapp"}</span>,
-                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${c.status === "open" ? "bg-[#f0f9ec] text-[#427425]" : "bg-stone-100 text-stone-500"}`}>{c.status}</span>,
-                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${c.intercept_mode === "human" ? "bg-amber-50 text-amber-700" : c.intercept_mode === "ai" ? "bg-blue-50 text-blue-700" : "bg-stone-100 text-stone-500"}`}>{c.intercept_mode}</span>,
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${c.status === "open" ? "bg-[#f0f9ec] text-[#427425]" : "bg-[#e6f3d8] text-[#699a32]"}`}>{c.status}</span>,
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${c.intercept_mode === "human" ? "bg-amber-50 text-amber-700" : c.intercept_mode === "ai" ? "bg-blue-50 text-blue-700" : "bg-[#e6f3d8] text-[#699a32]"}`}>{c.intercept_mode}</span>,
                             timeAgo(c.last_message_at),
                             agents.find((a) => a.id === c.assigned_agent_id)?.name || "—",
                         ])}
@@ -318,7 +318,7 @@ export function ReportsView({ conversations, agents, orders, onToast, isMobile }
             {tab === "orders" && (
                 <div className="bg-white rounded-xl border border-[#cee6b2] shadow-sm overflow-hidden">
                     <div className="px-4 py-3 border-b border-[#e6f3d8] flex items-center justify-between">
-                        <span className="text-xs font-bold text-stone-500 uppercase tracking-wider">
+                        <span className="text-xs font-bold text-[#699a32] uppercase tracking-wider">
                             {filteredOrders.length} orders · {fmtCurrency(totalRevenue)} total
                         </span>
                     </div>
@@ -330,7 +330,7 @@ export function ReportsView({ conversations, agents, orders, onToast, isMobile }
             {tab === "agents" && (
                 <div className="bg-white rounded-xl border border-[#cee6b2] shadow-sm overflow-hidden">
                     <div className="px-4 py-3 border-b border-[#e6f3d8]">
-                        <span className="text-xs font-bold text-stone-500 uppercase tracking-wider">Agent Performance</span>
+                        <span className="text-xs font-bold text-[#699a32] uppercase tracking-wider">Agent Performance</span>
                     </div>
                     <Table
                         cols={["Agent", "Role", "Conversations", "Revenue", "Status"]}
@@ -339,7 +339,7 @@ export function ReportsView({ conversations, agents, orders, onToast, isMobile }
                             <span className="capitalize text-[10px] px-1.5 py-0.5 bg-[#f0f9ec] text-[#427425] border border-[#b5da8b] rounded font-semibold">{a.role}</span>,
                             a.handled,
                             fmtCurrency(a.revenue),
-                            <span className={`flex items-center gap-1 text-[10px] font-medium ${a.is_available ? "text-[#589b31]" : "text-stone-400"}`}>
+                            <span className={`flex items-center gap-1 text-[10px] font-medium ${a.is_available ? "text-[#589b31]" : "text-[#9ccd65]"}`}>
                                 <span className={`w-1.5 h-1.5 rounded-full ${a.is_available ? "bg-[#589b31]" : "bg-stone-300"}`} />
                                 {a.is_available ? "Online" : "Offline"}
                             </span>,
