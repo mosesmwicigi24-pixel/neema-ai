@@ -140,7 +140,7 @@ export default function LoginPage(): React.ReactElement {
                             clock.
                         </p>
                     </div>
-                    <div className="space-y-3">
+                    {/* <div className="space-y-3">
                         {[
                             {
                                 icon: "💬",
@@ -174,7 +174,7 @@ export default function LoginPage(): React.ReactElement {
                                 </span>
                             </div>
                         ))}
-                    </div>
+                    </div> */}
                 </div>
 
                 <div className="relative text-xs" style={{ color: "#427425" }}>
