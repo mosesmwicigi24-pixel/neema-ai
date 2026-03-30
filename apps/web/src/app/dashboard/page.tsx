@@ -109,43 +109,46 @@ export default function NeemaDashboard(): React.ReactElement {
         else root.classList.remove("dark");
     }, [theme]);
 
-    // ── Store token on window so api.ts reads it without calling getSession() ─
-    useEffect(() => {
-        if (isAuthenticated) {
-            const token = (nextAuthSession as any)?.accessToken;
-            if (token && typeof window !== "undefined") {
-                (window as any).__neema_token = token;
-            }
-        }
-    }, [isAuthenticated, nextAuthSession]);
+    // ── Write token synchronously in render body ─────────────────────────────
+    // Must happen BEFORE usePolling hooks so authHeaders() always finds it.
+    // useEffect fires AFTER render + child effects, which is too late for the
+    // first poll triggered by isAuthenticated flipping true.
+    const accessToken = (nextAuthSession as any)?.accessToken as string | undefined;
+    if (accessToken && typeof window !== "undefined") {
+        (window as any).__neema_token = accessToken;
+    }
 
     // ── Live data polling — gated behind authentication ───────────────────────
+    // Gate on accessToken (written synchronously above) so no request fires
+    // before the Authorization header can be set.
+    const hasToken = Boolean(accessToken);
+
     const { data: rawConversations, refetch: refetchConversations } =
         usePolling(
             () =>
-                isAuthenticated
+                hasToken
                     ? conversationsApi.list()
                     : Promise.resolve(null),
             8000,
-            [isAuthenticated],
+            [hasToken],
         );
 
     const { data: rawAgents, refetch: refetchAgents } = usePolling(
-        () => (isAuthenticated ? agentsApi.list() : Promise.resolve(null)),
+        () => (hasToken ? agentsApi.list() : Promise.resolve(null)),
         15000,
-        [isAuthenticated],
+        [hasToken],
     );
 
     const { data: rawCatalog, refetch: refetchCatalog } = usePolling(
-        () => (isAuthenticated ? catalogApi.list() : Promise.resolve(null)),
+        () => (hasToken ? catalogApi.list() : Promise.resolve(null)),
         30000,
-        [isAuthenticated],
+        [hasToken],
     );
 
     const { data: rawOrders, refetch: refetchOrders } = usePolling(
-        () => (isAuthenticated ? ordersApi.list() : Promise.resolve(null)),
+        () => (hasToken ? ordersApi.list() : Promise.resolve(null)),
         10000,
-        [isAuthenticated],
+        [hasToken],
     );
 
     // ── Map API data to UI types ──────────────────────────────────────────────

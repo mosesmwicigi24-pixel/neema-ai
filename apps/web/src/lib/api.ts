@@ -1,5 +1,4 @@
 import axios from "axios";
-import { getSession } from "next-auth/react";
 import type {
     Conversation,
     Channel,
@@ -17,40 +16,38 @@ export const api = axios.create({
     withCredentials: true,
 });
 
-// Auto-attach JWT from NextAuth session
-// api.interceptors.request.use(async (config) => {
-//   const session = await getSession();
-//   if (session?.accessToken) {
-//     config.headers.Authorization = `Bearer ${session.accessToken}`;
-//   }
-//   return config;
-// });
-
 // ── Base ──────────────────────────────────────────────────────────────────────
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
 
+/**
+ * Build auth headers.
+ *
+ * Token resolution order:
+ *  1. window.__neema_token  (set synchronously in page.tsx render body)
+ *  2. getSession() fallback (for edge cases where window cache is cold)
+ *
+ * The window cache is written in the render body of NeemaDashboard — before
+ * any useEffect fires — so by the time usePolling calls authHeaders() the
+ * token is always present when the user is authenticated.
+ */
 async function authHeaders(): Promise<HeadersInit> {
     let token: string | undefined;
 
-    // Read token stored on window by page.tsx after auth
-    // This avoids calling getSession() outside React context which causes CLIENT_FETCH_ERROR
     if (typeof window !== "undefined") {
         token = (window as any).__neema_token;
     }
 
-    // Fallback: try getSession if token not yet on window
     if (!token) {
         try {
             const { getSession } = await import("next-auth/react");
             const session = await getSession();
             token = (session as any)?.accessToken;
-            // Cache it for subsequent calls
             if (token && typeof window !== "undefined") {
                 (window as any).__neema_token = token;
             }
         } catch {
-            // Not in browser context — proceed without token
+            // Not in browser context — proceed unauthenticated
         }
     }
 
@@ -69,7 +66,7 @@ async function req<T>(
     const res = await fetch(`${BASE}${path}`, {
         method,
         headers,
-        credentials: "include",   // ← add this
+        credentials: "include",
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
     if (!res.ok) {
@@ -99,7 +96,6 @@ export interface ApiConversation {
     status: "open" | "closed";
     created_at: string;
     updated_at: string;
-    // joined from agent
     name?: string;
     channel?: string;
     unread?: number;
@@ -127,11 +123,18 @@ export const conversationsApi = {
     sendReply: (id: string, text: string) =>
         post<Message>(`/admin/conversations/${id}/reply`, { text }),
     approveDraft: (id: string, text?: string) =>
-        post<{ ok: boolean }>(`/admin/conversations/${id}/approve-draft`, { text: text ?? null }),
+        post<{ ok: boolean }>(`/admin/conversations/${id}/approve-draft`, {
+            text: text ?? null,
+        }),
     latestDraft: (id: string) =>
-        get<{ draft: string | null }>(`/admin/conversations/${id}/latest-draft`),
+        get<{ draft: string | null }>(
+            `/admin/conversations/${id}/latest-draft`,
+        ),
     generateDraft: (id: string) =>
-        post<{ draft: string }>(`/admin/conversations/${id}/generate-draft`, {}),
+        post<{ draft: string }>(
+            `/admin/conversations/${id}/generate-draft`,
+            {},
+        ),
     addNote: (id: string, text: string) =>
         post<Message>(`/admin/conversations/${id}/note`, { text }),
     close: (id: string) =>
@@ -163,10 +166,9 @@ export interface CreateAgentPayload {
 export const agentsApi = {
     list: () => get<ApiAgent[]>("/admin/agents"),
     get: (id: string) => get<ApiAgent>(`/admin/agents/${id}`),
-    create: (payload: CreateAgentPayload) =>
-        post<ApiAgent>("/admin/agents", payload),
-    update: (id: string, payload: Partial<ApiAgent & { password?: string }>) =>
-        patch<ApiAgent>(`/admin/agents/${id}`, payload),
+    create: (p: CreateAgentPayload) => post<ApiAgent>("/admin/agents", p),
+    update: (id: string, p: Partial<ApiAgent & { password?: string }>) =>
+        patch<ApiAgent>(`/admin/agents/${id}`, p),
     delete: (id: string) => del<void>(`/admin/agents/${id}`),
     toggleAvailable: (id: string, is_available: boolean) =>
         patch<ApiAgent>(`/admin/agents/${id}`, { is_available }),
@@ -206,10 +208,10 @@ export const catalogApi = {
             : "";
         return get<ApiCatalogItem[]>(`/admin/catalog${q}`);
     },
-    create: (payload: CreateCatalogPayload) =>
-        post<ApiCatalogItem>("/admin/catalog", payload),
-    update: (id: string, payload: Partial<CreateCatalogPayload>) =>
-        patch<ApiCatalogItem>(`/admin/catalog/${id}`, payload),
+    create: (p: CreateCatalogPayload) =>
+        post<ApiCatalogItem>("/admin/catalog", p),
+    update: (id: string, p: Partial<CreateCatalogPayload>) =>
+        patch<ApiCatalogItem>(`/admin/catalog/${id}`, p),
     toggleStock: (id: string, in_stock: boolean) =>
         patch<ApiCatalogItem>(`/admin/catalog/${id}`, { in_stock }),
     delete: (id: string) => del<void>(`/admin/catalog/${id}`),
@@ -233,7 +235,6 @@ export interface ApiOrder {
     state: Record<string, unknown>;
     created_at: string;
     updated_at: string;
-    // joined
     contact_name?: string;
     contact_phone?: string;
 }
@@ -268,7 +269,7 @@ export const ordersApi = {
         }),
 };
 
-// ── Stats (for Overview) ──────────────────────────────────────────────────────
+// ── Stats ─────────────────────────────────────────────────────────────────────
 
 export interface ApiStats {
     open_conversations: number;
@@ -295,8 +296,8 @@ export const statsApi = {
 
 export const profileApi = {
     me: () => get<ApiAgent>("/admin/me"),
-    update: (payload: { name?: string; email?: string; password?: string }) =>
-        patch<ApiAgent>("/admin/me", payload),
+    update: (p: { name?: string; email?: string; password?: string }) =>
+        patch<ApiAgent>("/admin/me", p),
 };
 
 // ── Data mappers (API → UI types) ─────────────────────────────────────────────
@@ -360,6 +361,7 @@ export function mapOrder(o: ApiOrder): Order {
         customer_name: o.contact_name ?? o.wa_id,
         contact_name: o.contact_name ?? o.wa_id,
         contact_phone: o.wa_id,
+        channel: o.channel,
         items: (o.items ?? []).map((i) => ({
             catalog_item_id: i.sku ?? "",
             sku: i.sku ?? "",
