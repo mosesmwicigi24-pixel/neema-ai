@@ -554,11 +554,11 @@ export function ConversationsView({
                                 <p className="text-sm">No messages yet</p>
                             </div>
                         )}
-                        {activeMessages.map((msg) => {
+                        {activeMessages.map((msg, idx) => {
                             const isInbound = msg.direction === "inbound";
                             return (
                                 <div
-                                    key={msg.id}
+                                    key={msg.id ?? `msg-${idx}`}
                                     className={`flex ${isInbound ? "justify-start" : "justify-end"}`}
                                 >
                                     <div
