@@ -46,13 +46,13 @@ export const THEMES: Record<ThemeMode, ThemeVars> = {
         "--shadow-md":"0 4px 16px rgba(22,39,12,0.10)",
     },
     dark: {
-        "--bg":       "#0f1b09",   // moss-green-950
-        "--bg2":      "#16270c",   // moss-green-900
-        "--bg3":      "#121b09",   // willow-green-950
-        "--bg4":      "#1a270c",   // willow-green-900
+        "--bg":       "#070d1c",   // prussian-950
+        "--bg2":      "#0a1229",   // prussian-900
+        "--bg3":      "#0b0e19",   // indigo-950
+        "--bg4":      "#0f1424",   // indigo-900
 
-        "--border":   "#2c4e18",   // moss-green-800
-        "--border2":  "#427425",   // moss-green-700
+        "--border":   "#152451",   // prussian-800
+        "--border2":  "#1f367a",   // prussian-700
 
         "--gold":     "#84c13e",   // willow-green-500
         "--gold2":    "#9ccd65",   // willow-green-400
@@ -78,7 +78,7 @@ export const THEMES: Record<ThemeMode, ThemeVars> = {
         "--indigo":   "#7085c2",   // space-indigo-400
         "--indigo-dim":"rgba(112,133,194,0.10)",
 
-        "--shadow":   "0 1px 4px rgba(0,0,0,0.3), 0 4px 20px rgba(0,0,0,0.2)",
-        "--shadow-md":"0 4px 16px rgba(0,0,0,0.35)",
+        "--shadow":   "0 1px 4px rgba(0,0,0,0.4), 0 4px 20px rgba(0,0,0,0.3)",
+        "--shadow-md":"0 4px 16px rgba(0,0,0,0.45)",
     },
 };

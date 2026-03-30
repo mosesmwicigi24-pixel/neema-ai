@@ -81,33 +81,33 @@
 }
 
 .dark {
-    --background:  var(--moss-950);
+    --background:  var(--prussian-950);
     --foreground:  var(--willow-50);
-    --card:        var(--moss-900);
+    --card:        var(--prussian-900);
     --card-foreground: var(--willow-50);
-    --popover:     var(--moss-900);
+    --popover:     var(--prussian-900);
     --popover-foreground: var(--willow-50);
     --primary:     var(--moss-500);
     --primary-foreground: #ffffff;
-    --secondary:   var(--moss-800);
+    --secondary:   var(--indigo-900);
     --secondary-foreground: var(--willow-200);
-    --muted:       var(--moss-800);
+    --muted:       var(--indigo-900);
     --muted-foreground: var(--willow-600);
     --accent:      var(--moss-500);
     --accent-foreground: #ffffff;
     --destructive: oklch(0.704 0.191 22.216);
-    --border:      var(--moss-800);
-    --input:       var(--moss-800);
+    --border:      var(--prussian-800);
+    --input:       var(--prussian-800);
     --ring:        var(--moss-500);
     --chart-1:     var(--moss-400);
     --chart-2:     var(--prussian-400);
     --chart-3:     var(--amber-300);
     --chart-4:     var(--indigo-400);
     --chart-5:     var(--willow-300);
-    --sidebar:           var(--moss-950);
+    --sidebar:           var(--prussian-950);
     --sidebar-foreground: var(--willow-100);
     --sidebar-primary:   var(--moss-500);
-    --sidebar-border:    var(--moss-800);
+    --sidebar-border:    var(--prussian-800);
     --sidebar-ring:      var(--moss-400);
 }
 
