@@ -12,6 +12,7 @@ import { Toggle } from "@/components/ui/Layout";
 import { timeAgo } from "@/lib/utils";
 import { CHANNEL_CONFIG, ALL_CHANNELS } from "@/lib/channels";
 import { conversationsApi } from "@/lib/api";
+import { useConversationEvents } from "@/lib/websocket";
 import type {
     Conversation,
     Message,
@@ -62,7 +63,8 @@ export function ConversationsView({
     >("all");
     const [searchQ, setSearchQ] = useState<string>("");
     const [replyText, setReplyText] = useState<string>("");
-    const [draftVisible, setDraftVisible] = useState<boolean>(true);
+    const [draftVisible, setDraftVisible] = useState<boolean>(false);
+    const [draftText, setDraftText] = useState<string>("");
     const [transferModal, setTransferModal] = useState<boolean>(false);
     const [noteModal, setNoteModal] = useState<boolean>(false);
     const [noteText, setNoteText] = useState<string>("");
@@ -84,6 +86,33 @@ export function ConversationsView({
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [activeConvId, messages]);
+
+    // Reset draft when switching conversations
+    useEffect(() => {
+        setDraftVisible(false);
+        setDraftText("");
+    }, [activeConvId]);
+
+    // WebSocket: live events for the active conversation
+    useConversationEvents(activeConvId, (event) => {
+        if (event.type === "ai_draft_ready" && event.conversationId === activeConvId) {
+            setDraftText(event.draft ?? "");
+            setDraftVisible(true);
+        }
+        if (event.type === "new_message" && event.conversationId === activeConvId) {
+            const msg: Message = {
+                id: event.id ?? crypto.randomUUID(),
+                direction: "outbound",
+                sender: event.sender ?? "ai",
+                text: event.text,
+                created_at: event.created_at ?? new Date().toISOString(),
+            };
+            setMessages((m) => ({
+                ...m,
+                [activeConvId]: [...(m[activeConvId] ?? []), msg],
+            }));
+        }
+    });
 
     // Load messages when switching conversations
     const loadMessages = useCallback(
@@ -146,19 +175,17 @@ export function ConversationsView({
     const sendReply = async () => {
         if (!replyText.trim() || !activeConvId) return;
         setSending(true);
+        const text = replyText;
+        setReplyText("");
         try {
-            const msg = await conversationsApi.sendReply(
-                activeConvId,
-                replyText,
-            );
-            setMessages((m) => ({
-                ...m,
-                [activeConvId]: [...(m[activeConvId] ?? []), msg],
-            }));
-            setReplyText("");
+            await conversationsApi.sendReply(activeConvId, text);
+            // Reload thread from server to get the persisted message with correct shape
+            const msgs = await conversationsApi.messages(activeConvId);
+            setMessages((m) => ({ ...m, [activeConvId]: msgs }));
             refetchConversations?.();
             onToast("Message sent");
         } catch {
+            setReplyText(text); // restore on failure
             onToast("Failed to send message", "error");
         } finally {
             setSending(false);
@@ -168,8 +195,9 @@ export function ConversationsView({
     const approveDraft = async () => {
         if (!activeConvId) return;
         try {
-            await conversationsApi.approveDraft(activeConvId);
+            await conversationsApi.approveDraft(activeConvId, draftText || undefined);
             setDraftVisible(false);
+            setDraftText("");
             refetchConversations?.();
             onToast("AI draft approved & sent");
         } catch {
@@ -607,27 +635,37 @@ export function ConversationsView({
                                             <p className="text-xs font-semibold text-blue-700 mb-1">
                                                 AI Draft
                                             </p>
-                                            <p className="text-xs text-blue-700">
-                                                AI has a reply ready — approve
-                                                or write your own.
+                                            <p className="text-xs text-blue-700 whitespace-pre-wrap leading-relaxed">
+                                                {draftText || "AI has a reply ready — approve or write your own."}
                                             </p>
+                                            {draftText && (
+                                                <button
+                                                    onClick={() => setReplyText(draftText)}
+                                                    className="mt-1.5 text-[10px] text-blue-500 hover:text-blue-700 underline"
+                                                >
+                                                    Edit before sending
+                                                </button>
+                                            )}
                                         </div>
-                                        <Btn
-                                            small
-                                            onClick={approveDraft}
-                                            variant="primary"
-                                        >
-                                            Approve
-                                        </Btn>
-                                        <Btn
-                                            small
-                                            onClick={() =>
-                                                setDraftVisible(false)
-                                            }
-                                            variant="secondary"
-                                        >
-                                            Dismiss
-                                        </Btn>
+                                        <div className="flex flex-col gap-1 flex-shrink-0">
+                                            <Btn
+                                                small
+                                                onClick={approveDraft}
+                                                variant="primary"
+                                            >
+                                                Approve
+                                            </Btn>
+                                            <Btn
+                                                small
+                                                onClick={() => {
+                                                    setDraftVisible(false);
+                                                    setDraftText("");
+                                                }}
+                                                variant="secondary"
+                                            >
+                                                Dismiss
+                                            </Btn>
+                                        </div>
                                     </div>
                                 )}
                             <div className="flex gap-2 items-end">
