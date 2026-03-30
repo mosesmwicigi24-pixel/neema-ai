@@ -123,6 +123,7 @@ async def approve_draft(
             .where(Intercept.conversation_id == conv_id)
             .where(Intercept.ai_reply_held.isnot(None))
             .order_by(Intercept.created_at.desc())
+            .limit(1)
         )
         intercept = dr.scalar_one_or_none()
         text = intercept.ai_reply_held if intercept else ""
