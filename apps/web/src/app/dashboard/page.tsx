@@ -82,7 +82,7 @@ export default function NeemaDashboard(): React.ReactElement {
     const [toast, setToast] = useState<ToastState | null>(null);
     const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
     // Local conversations state so CustomerSidebar name updates reflect immediately
-    const [sessionExpired, setSessionExpired]       = useState(false);
+    const [sessionExpired,      setSessionExpired]      = useState(false);
     const [localConversations, setLocalConversations] = useState<Conversation[]>([]);
     const isMobile = useIsMobile();
 
@@ -98,20 +98,6 @@ export default function NeemaDashboard(): React.ReactElement {
 
     const isAuthenticated = authStatus === "authenticated";
 
-    // ── Write tokens synchronously so authHeaders() always finds them ─────────
-    // Must happen before usePolling hooks. useEffect fires after render —
-    // too late for the first polling call triggered by hasToken flipping true.
-    const accessToken  = (nextAuthSession as any)?.accessToken  as string | undefined;
-    const refreshToken = (nextAuthSession as any)?.refreshToken as string | undefined;
-    if (typeof window !== "undefined") {
-        if (accessToken)  (window as any).__neema_token         = accessToken;
-        if (refreshToken) (window as any).__neema_refresh_token = refreshToken;
-    }
-
-    // Gate polling on token existence so no request fires before the
-    // Authorization header can be set.
-    const hasToken = Boolean(accessToken);
-
     // ── Redirect if unauthenticated ───────────────────────────────────────────
     useEffect(() => {
         if (authStatus === "unauthenticated") router.push("/login");
@@ -124,14 +110,29 @@ export default function NeemaDashboard(): React.ReactElement {
         else root.classList.remove("dark");
     }, [theme]);
 
-    // ── Listen for session-expired events emitted by api.ts ──────────────────
+    // ── Write BOTH tokens synchronously in the render body ───────────────────
+    // This must happen before any hook callbacks fire (useEffect is too late —
+    // it runs after the render, so the first polling tick would be tokenless).
+    const accessToken  = (nextAuthSession as any)?.accessToken  as string | undefined;
+    const refreshToken = (nextAuthSession as any)?.refreshToken as string | undefined;
+    if (typeof window !== "undefined") {
+        if (accessToken)  (window as any).__neema_token         = accessToken;
+        if (refreshToken) (window as any).__neema_refresh_token = refreshToken;
+    }
+    // Gate polling on token presence, not just auth status, so no request
+    // fires before the Authorization header can be populated.
+    const hasToken = Boolean(accessToken);
+
+    // ── Listen for session-expired events dispatched by api.ts ───────────────
     useEffect(() => {
-        const handler = () => setSessionExpired(true);
+        const handler = () => {
+            setSessionExpired(true);
+        };
         window.addEventListener("neema:session-expired", handler);
         return () => window.removeEventListener("neema:session-expired", handler);
     }, []);
 
-    // Detect NextAuth refresh failures propagated through session.error
+    // Detect when NextAuth's jwt() callback signals a refresh failure
     useEffect(() => {
         const err = (nextAuthSession as any)?.error;
         if (err === "RefreshTokenExpired" || err === "RefreshTokenMissing") {
@@ -139,7 +140,7 @@ export default function NeemaDashboard(): React.ReactElement {
         }
     }, [nextAuthSession]);
 
-    // ── Live data polling — gated behind hasToken ─────────────────────────────
+    // ── Live data polling — gated on hasToken ─────────────────────────────────
     const { data: rawConversations, refetch: refetchConversations } =
         usePolling(
             () =>
@@ -412,10 +413,11 @@ export default function NeemaDashboard(): React.ReactElement {
     // ── Session-expired overlay ───────────────────────────────────────────────
     if (sessionExpired) {
         return (
-            <div className="flex h-screen items-center justify-center" style={{ backgroundColor: "#070d1c" }}>
+            <div className="flex h-screen items-center justify-center"
+                style={{ backgroundColor: "#070d1c" }}>
                 <div className="text-center px-6 max-w-sm">
-                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-lg"
-                        style={{ backgroundColor: "#589b31", boxShadow: "0 4px 24px rgba(88,155,49,0.35)" }}>
+                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-5"
+                        style={{ backgroundColor: "#589b31", boxShadow: "0 4px 24px rgba(88,155,49,0.4)" }}>
                         <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                                 d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
@@ -434,7 +436,8 @@ export default function NeemaDashboard(): React.ReactElement {
                             router.push("/login");
                         }}
                         className="w-full h-11 rounded-xl text-sm font-semibold text-white transition-all"
-                        style={{ backgroundColor: "#589b31", boxShadow: "0 4px 20px rgba(88,155,49,0.3)" }}
+                        style={{ backgroundColor: "#589b31",
+                                 boxShadow: "0 4px 20px rgba(88,155,49,0.35)" }}
                     >
                         Sign in again
                     </button>

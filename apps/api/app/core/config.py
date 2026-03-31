@@ -9,10 +9,10 @@ class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379/0"
     secret_key: str
     algorithm: str = "HS256"
-    # Raised from 15m → 480m (8h) so agents aren't kicked out mid-shift.
-    # The refresh token (7d) handles re-authentication transparently.
+    # 8-hour access token — covers a full working shift.
+    # Refresh token (30 days) silently renews it when needed.
     access_token_expire_minutes: int = 480
-    refresh_token_expire_days: int = 30
+    refresh_token_expire_days:   int = 30
     cors_origins: list[str] = ["http://localhost:3000"]
     waba_token: str = ""
     waba_phone_number_id: str = ""
