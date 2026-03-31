@@ -20,47 +20,103 @@ export const api = axios.create({
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
 
-/**
- * Build auth headers.
- *
- * Token resolution order:
- *  1. window.__neema_token  (set synchronously in page.tsx render body)
- *  2. getSession() fallback (for edge cases where window cache is cold)
- *
- * The window cache is written in the render body of NeemaDashboard — before
- * any useEffect fires — so by the time usePolling calls authHeaders() the
- * token is always present when the user is authenticated.
- */
-async function authHeaders(): Promise<HeadersInit> {
-    let token: string | undefined;
+// ── Token helpers ─────────────────────────────────────────────────────────────
 
+function getStoredToken(): string | undefined {
+    if (typeof window === "undefined") return undefined;
+    return (window as any).__neema_token as string | undefined;
+}
+function setStoredToken(t: string) {
+    if (typeof window !== "undefined") (window as any).__neema_token = t;
+}
+function getStoredRefreshToken(): string | undefined {
+    if (typeof window === "undefined") return undefined;
+    return (window as any).__neema_refresh_token as string | undefined;
+}
+function setStoredRefreshToken(t: string) {
+    if (typeof window !== "undefined") (window as any).__neema_refresh_token = t;
+}
+
+/** Dispatch a DOM event so the UI can show a "session expired" screen. */
+function emitSessionExpired() {
     if (typeof window !== "undefined") {
-        token = (window as any).__neema_token;
+        window.dispatchEvent(new CustomEvent("neema:session-expired"));
     }
+}
 
-    if (!token) {
+// ── Silent token refresh ──────────────────────────────────────────────────────
+
+// Shared promise so concurrent 401s only trigger one refresh request
+let refreshPromise: Promise<string | null> | null = null;
+
+async function silentRefresh(): Promise<string | null> {
+    if (refreshPromise) return refreshPromise;
+
+    refreshPromise = (async () => {
+        const refreshToken = getStoredRefreshToken();
+        if (!refreshToken) return null;
+        try {
+            const res = await fetch(`${BASE}/auth/refresh`, {
+                method:  "POST",
+                headers: { "Content-Type": "application/json" },
+                body:    JSON.stringify({ refresh_token: refreshToken }),
+            });
+            if (!res.ok) return null;
+            const data = await res.json();
+            setStoredToken(data.access_token);
+            setStoredRefreshToken(data.refresh_token);
+            // Nudge NextAuth so useSession() reflects the new token too
+            try {
+                const { getSession } = await import("next-auth/react");
+                await getSession();
+            } catch { /* fine — window tokens already updated */ }
+            return data.access_token as string;
+        } catch {
+            return null;
+        } finally {
+            refreshPromise = null;
+        }
+    })();
+
+    return refreshPromise;
+}
+
+// ── Auth headers ──────────────────────────────────────────────────────────────
+
+async function authHeaders(token?: string): Promise<HeadersInit> {
+    const t = token ?? getStoredToken();
+
+    // Fallback: call getSession() if window cache is cold (e.g. hard refresh)
+    if (!t) {
         try {
             const { getSession } = await import("next-auth/react");
             const session = await getSession();
-            token = (session as any)?.accessToken;
-            if (token && typeof window !== "undefined") {
-                (window as any).__neema_token = token;
+            const sessionToken = (session as any)?.accessToken as string | undefined;
+            if (sessionToken) {
+                setStoredToken(sessionToken);
+                const refresh = (session as any)?.refreshToken as string | undefined;
+                if (refresh) setStoredRefreshToken(refresh);
+                return {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${sessionToken}`,
+                };
             }
-        } catch {
-            // Not in browser context — proceed unauthenticated
-        }
+        } catch { /* not in browser context */ }
     }
 
     return {
         "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(t ? { Authorization: `Bearer ${t}` } : {}),
     };
 }
+
+// ── Core request ──────────────────────────────────────────────────────────────
 
 async function req<T>(
     method: string,
     path: string,
     body?: unknown,
+    _retrying = false,
 ): Promise<T> {
     const headers = await authHeaders();
     const res = await fetch(`${BASE}${path}`, {
@@ -69,10 +125,38 @@ async function req<T>(
         credentials: "include",
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
-    if (!res.ok) {
-        const err = await res.text();
-        throw new Error(`${method} ${path} → ${res.status}: ${err}`);
+
+    // On 401: attempt a silent token refresh, then retry once
+    if (res.status === 401 && !_retrying) {
+        const newToken = await silentRefresh();
+        if (newToken) {
+            const retryRes = await fetch(`${BASE}${path}`, {
+                method,
+                headers: await authHeaders(newToken),
+                credentials: "include",
+                ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+            });
+            if (retryRes.ok) {
+                if (retryRes.status === 204) return undefined as T;
+                return retryRes.json();
+            }
+        }
+        // Refresh failed — session is truly dead
+        emitSessionExpired();
+        throw new Error("Session expired. Please sign in again.");
     }
+
+    if (!res.ok) {
+        const err = await res.text().catch(() => String(res.status));
+        let detail = err;
+        try { detail = JSON.parse(err)?.detail ?? err; } catch {}
+        if (detail === "Token expired" || res.status === 401) {
+            emitSessionExpired();
+            throw new Error("Session expired. Please sign in again.");
+        }
+        throw new Error(`${method} ${path} → ${res.status}: ${detail}`);
+    }
+
     if (res.status === 204) return undefined as T;
     return res.json();
 }

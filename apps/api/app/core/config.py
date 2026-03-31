@@ -9,8 +9,10 @@ class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379/0"
     secret_key: str
     algorithm: str = "HS256"
-    access_token_expire_minutes: int = 15
-    refresh_token_expire_days: int = 7
+    # Raised from 15m → 480m (8h) so agents aren't kicked out mid-shift.
+    # The refresh token (7d) handles re-authentication transparently.
+    access_token_expire_minutes: int = 480
+    refresh_token_expire_days: int = 30
     cors_origins: list[str] = ["http://localhost:3000"]
     waba_token: str = ""
     waba_phone_number_id: str = ""
@@ -31,7 +33,6 @@ class Settings(BaseSettings):
             if v.startswith("["):
                 import json
                 return json.loads(v)
-            # comma-separated fallback: http://a.com,http://b.com
             return [o.strip() for o in v.split(",") if o.strip()]
         return v
 
