@@ -81,8 +81,8 @@ export default function NeemaDashboard(): React.ReactElement {
     const [messages, setMessages] = useState<MessagesMap>({});
     const [toast, setToast] = useState<ToastState | null>(null);
     const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
-    const [sessionExpired, setSessionExpired]       = useState(false);
     // Local conversations state so CustomerSidebar name updates reflect immediately
+    const [sessionExpired, setSessionExpired]       = useState(false);
     const [localConversations, setLocalConversations] = useState<Conversation[]>([]);
     const isMobile = useIsMobile();
 
@@ -97,7 +97,20 @@ export default function NeemaDashboard(): React.ReactElement {
     }, [view]);
 
     const isAuthenticated = authStatus === "authenticated";
-    const hasToken = Boolean(accessToken); // true only once the token is in hand
+
+    // ── Write tokens synchronously so authHeaders() always finds them ─────────
+    // Must happen before usePolling hooks. useEffect fires after render —
+    // too late for the first polling call triggered by hasToken flipping true.
+    const accessToken  = (nextAuthSession as any)?.accessToken  as string | undefined;
+    const refreshToken = (nextAuthSession as any)?.refreshToken as string | undefined;
+    if (typeof window !== "undefined") {
+        if (accessToken)  (window as any).__neema_token         = accessToken;
+        if (refreshToken) (window as any).__neema_refresh_token = refreshToken;
+    }
+
+    // Gate polling on token existence so no request fires before the
+    // Authorization header can be set.
+    const hasToken = Boolean(accessToken);
 
     // ── Redirect if unauthenticated ───────────────────────────────────────────
     useEffect(() => {
@@ -110,15 +123,6 @@ export default function NeemaDashboard(): React.ReactElement {
         if (theme === "dark") root.classList.add("dark");
         else root.classList.remove("dark");
     }, [theme]);
-
-    // ── Write tokens synchronously so authHeaders() always finds them ─────────
-    // useEffect fires after render — too late for the first polling call.
-    const accessToken  = (nextAuthSession as any)?.accessToken  as string | undefined;
-    const refreshToken = (nextAuthSession as any)?.refreshToken as string | undefined;
-    if (typeof window !== "undefined") {
-        if (accessToken)  (window as any).__neema_token         = accessToken;
-        if (refreshToken) (window as any).__neema_refresh_token = refreshToken;
-    }
 
     // ── Listen for session-expired events emitted by api.ts ──────────────────
     useEffect(() => {
@@ -135,7 +139,7 @@ export default function NeemaDashboard(): React.ReactElement {
         }
     }, [nextAuthSession]);
 
-    // ── Live data polling — gated behind authentication ───────────────────────
+    // ── Live data polling — gated behind hasToken ─────────────────────────────
     const { data: rawConversations, refetch: refetchConversations } =
         usePolling(
             () =>
