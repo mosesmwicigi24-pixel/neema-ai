@@ -42,7 +42,7 @@ async def create_role(
 
     await db.execute(text("""
         INSERT INTO custom_roles (id, name, description, color, permissions, protected)
-        VALUES (:id, :name, :desc, :color, :perms::jsonb, FALSE)
+        VALUES (:id, :name, :desc, :color, CAST(:perms AS jsonb), FALSE)
         ON CONFLICT (id) DO UPDATE
             SET name        = EXCLUDED.name,
                 description = EXCLUDED.description,
@@ -87,7 +87,7 @@ async def update_role(
     if "name"        in body: sets.append("name = :name");                params["name"]  = body["name"]
     if "description" in body: sets.append("description = :desc");          params["desc"]  = body["description"]
     if "color"       in body: sets.append("color = :color");               params["color"] = body["color"]
-    if "permissions" in body: sets.append("permissions = :perms::jsonb");  params["perms"] = json.dumps(body["permissions"])
+    if "permissions" in body: sets.append("permissions = CAST(:perms AS jsonb)");  params["perms"] = json.dumps(body["permissions"])
 
     if sets:
         await db.execute(
@@ -160,7 +160,7 @@ async def assign_agent_role(
 
     await db.execute(
         text("UPDATE agents "
-             "SET custom_role_id = :role_id, custom_permissions = :perms::jsonb "
+             "SET custom_role_id = :role_id, custom_permissions = CAST(:perms AS jsonb) "
              "WHERE id = :agent_id"),
         {"role_id": role_id, "perms": json.dumps(permissions), "agent_id": agent_id},
     )
