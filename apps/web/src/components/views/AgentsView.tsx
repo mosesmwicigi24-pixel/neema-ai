@@ -93,6 +93,20 @@ const ROLE_COLORS = [
     "#717425","#979a32","#7c3aed","#0891b2","#0f766e","#b45309",
 ];
 
+// ── DB role mapping ───────────────────────────────────────────────────────────
+// The Postgres `agentrole` enum only has: admin | agent | readonly.
+// Custom UI roles are mapped to the closest DB value before any API call.
+// "super_admin" → "admin", "viewer" → "readonly", anything else → "agent".
+const DB_ROLES = ["admin", "agent", "readonly"] as const;
+type DbRole = typeof DB_ROLES[number];
+
+function toDbRole(roleId: string): DbRole {
+    if (DB_ROLES.includes(roleId as DbRole)) return roleId as DbRole;
+    if (roleId === "super_admin") return "admin";
+    if (roleId === "viewer")      return "readonly";
+    return "agent";
+}
+
 // ── Shared small components ───────────────────────────────────────────────────
 
 function SBtn({ children, onClick, variant = "default", small, disabled }: {
@@ -173,7 +187,7 @@ export function AgentsView({ agents, setAgents, onToast, isMobile, refetchAgents
         setSaving(true);
         try {
             await agentsApi.create({ name:createForm.name, email:createForm.email,
-                password:createForm.password, role:createForm.roleId as any });
+                password:createForm.password, role:toDbRole(createForm.roleId) });
             refetchAgents?.();
             setCreateModal(false);
             setCreateForm({ name:"", email:"", password:"", roleId:"agent" });
@@ -186,7 +200,7 @@ export function AgentsView({ agents, setAgents, onToast, isMobile, refetchAgents
         if (!editAgent || !editForm.name || !editForm.email) return onToast("Name and email required","error");
         setSaving(true);
         try {
-            await agentsApi.update(editAgent.id, { name:editForm.name, email:editForm.email, role:editForm.roleId as any });
+            await agentsApi.update(editAgent.id, { name:editForm.name, email:editForm.email, role:toDbRole(editForm.roleId) });
             refetchAgents?.(); setEditAgent(null); onToast("Agent updated");
         } catch (e:any) { onToast(e.message??"Failed","error"); }
         finally { setSaving(false); }
@@ -432,7 +446,9 @@ export function AgentsView({ agents, setAgents, onToast, isMobile, refetchAgents
                     <label className="block text-xs font-semibold mb-1.5" style={{color:"#699a32"}}>Role</label>
                     <select value={createForm.roleId} onChange={e=>setCreateForm(f=>({...f,roleId:e.target.value}))}
                         className="w-full h-8 px-2.5 text-xs rounded-lg" style={{backgroundColor:"#f3f9ec",border:"1px solid #b5da8b",color:"#16270c",fontSize:12}}>
-                        {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                        {roles.filter(r => !r.protected).map(r => (
+                            <option key={r.id} value={r.id}>{r.name} ({toDbRole(r.id)})</option>
+                        ))}
                     </select>
                 </div>
                 <div className="flex gap-2 mt-4">
@@ -449,7 +465,9 @@ export function AgentsView({ agents, setAgents, onToast, isMobile, refetchAgents
                     <label className="block text-xs font-semibold mb-1.5" style={{color:"#699a32"}}>Role</label>
                     <select value={editForm.roleId} onChange={e=>setEditForm(f=>({...f,roleId:e.target.value}))}
                         className="w-full h-8 px-2.5 text-xs rounded-lg" style={{backgroundColor:"#f3f9ec",border:"1px solid #b5da8b",color:"#16270c",fontSize:12}}>
-                        {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                        {roles.filter(r => !r.protected).map(r => (
+                            <option key={r.id} value={r.id}>{r.name} ({toDbRole(r.id)})</option>
+                        ))}
                     </select>
                 </div>
                 <div className="flex gap-2 mt-4">
