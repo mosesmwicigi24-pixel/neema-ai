@@ -5,7 +5,7 @@ import redis.asyncio as aioredis
 import asyncio
 
 from app.core.config import settings
-from app.routers import auth, admin, n8n_bridge, websocket, health, crm
+from app.routers import auth, admin, n8n_bridge, websocket, health, crm, roles
 from app.seeds import run_seeds
 
 
@@ -41,6 +41,7 @@ app.include_router(health.router,     prefix="/api",        tags=["Health"])
 app.include_router(auth.router,       prefix="/api/auth",   tags=["Auth"])
 app.include_router(admin.router,      prefix="/api/admin",  tags=["Admin"])
 app.include_router(crm.router,        prefix="/api/admin",  tags=["CRM"])
+app.include_router(roles.router,      prefix="/api/admin",  tags=["Roles"])
 app.include_router(n8n_bridge.router, prefix="/api/n8n",    tags=["n8n Bridge"])
 app.include_router(websocket.router,  prefix="",            tags=["WebSocket"])
 
