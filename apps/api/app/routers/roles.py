@@ -134,35 +134,5 @@ async def delete_role(
     return {"ok": True}
 
 
-# ── Assign role to agent ──────────────────────────────────────────────────────
-
-@router.patch("/agents/{agent_id}/role")
-async def assign_agent_role(
-    agent_id: str,
-    body:     dict,
-    db:       AsyncSession = Depends(get_db),
-    current:  Agent        = Depends(get_current_agent),
-):
-    """Assign a custom role and snapshot its permissions onto the agent."""
-    role_id = body.get("custom_role_id")
-    if not role_id:
-        raise HTTPException(status_code=422, detail="custom_role_id is required")
-
-    row = await db.execute(
-        text("SELECT permissions FROM custom_roles WHERE id = :id"),
-        {"id": role_id},
-    )
-    role_row = row.fetchone()
-    if not role_row:
-        raise HTTPException(status_code=404, detail="Role not found")
-
-    permissions = role_row[0]   # list from JSONB
-
-    await db.execute(
-        text("UPDATE agents "
-             "SET custom_role_id = :role_id, custom_permissions = CAST(:perms AS jsonb) "
-             "WHERE id = :agent_id"),
-        {"role_id": role_id, "perms": json.dumps(permissions), "agent_id": agent_id},
-    )
-    await db.commit()
-    return {"ok": True, "custom_role_id": role_id, "permissions": permissions}
+# Note: PATCH /agents/{agent_id}/role is defined in admin.py
+# (it must appear before the catch-all PATCH /agents/{agent_id} route)
