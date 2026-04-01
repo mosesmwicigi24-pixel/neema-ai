@@ -309,6 +309,67 @@ async def list_agents(db: AsyncSession = Depends(get_db),
     return result.scalars().all()
 
 
+@router.patch("/agents/{agent_id}/role")
+async def assign_agent_role(
+    agent_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    current: Agent = Depends(get_current_agent),
+):
+    """Assign a custom role (and optional permission overrides) to an agent."""
+    from sqlalchemy import text
+    import json
+
+    custom_role_id = body.get("custom_role_id")
+    if not custom_role_id:
+        raise HTTPException(status_code=422, detail="custom_role_id is required")
+
+    # Verify the role exists
+    role_row = await db.execute(
+        text("SELECT id FROM custom_roles WHERE id = :id"),
+        {"id": custom_role_id},
+    )
+    if not role_row.fetchone():
+        raise HTTPException(status_code=404, detail="Role not found")
+
+    # Verify the agent exists
+    result = await db.execute(select(Agent).where(Agent.id == agent_id))
+    agent = result.scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    custom_permissions = body.get("custom_permissions")
+    perms_json = json.dumps(custom_permissions) if custom_permissions is not None else None
+
+    await db.execute(
+        text("""
+            UPDATE agents
+            SET custom_role_id     = :role_id,
+                custom_permissions = CAST(:perms AS jsonb)
+            WHERE id = :agent_id
+        """),
+        {"role_id": custom_role_id, "perms": perms_json, "agent_id": agent_id},
+    )
+    await db.commit()
+
+    # Return the updated agent row
+    row = await db.execute(
+        text("""
+            SELECT a.id, a.name, a.email, a.role, a.is_available,
+                   a.custom_role_id, a.custom_permissions,
+                   r.name  AS role_name,
+                   r.color AS role_color
+            FROM agents a
+            LEFT JOIN custom_roles r ON r.id = a.custom_role_id
+            WHERE a.id = :id
+        """),
+        {"id": agent_id},
+    )
+    keys = row.keys()
+    data = row.fetchone()
+    return dict(zip(keys, data))
+
+
 @router.patch("/agents/{agent_id}")
 async def update_agent(agent_id: str, body: dict,
                        db: AsyncSession = Depends(get_db),
