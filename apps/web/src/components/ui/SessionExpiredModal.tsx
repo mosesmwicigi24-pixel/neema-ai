@@ -3,52 +3,35 @@ import React, { useState } from "react";
 import { signIn, getSession } from "next-auth/react";
 
 interface Props {
-    /** The email of the currently logged-in user — pre-filled in the form. */
     email: string;
-    /** Called after a successful silent re-auth so the parent can resume. */
-    onSuccess: () => void;
+    onSuccess: (freshToken: string) => void | Promise<void>;
 }
 
 /**
  * SessionExpiredModal
  *
- * Shows a password-only prompt when the session token has expired.
- * - Pre-fills the known email so the user just types their password.
- * - Calls NextAuth's signIn() with redirect:false so we stay on the page.
- * - Polls getSession() until the fresh token appears, writes it to
- *   window.__neema_token, THEN calls onSuccess() — so refetches never
- *   fire before the token is actually available.
+ * After signIn() succeeds, polls getSession() until the NEW token is
+ * confirmed, then passes it directly to onSuccess() so the parent can
+ * write it to window.__neema_token BEFORE clearing sessionExpired and
+ * triggering any refetches.
  */
 export function SessionExpiredModal({ email, onSuccess }: Props) {
     const [password, setPassword] = useState("");
     const [loading, setLoading]   = useState(false);
     const [error, setError]       = useState("");
 
-    /**
-     * Poll getSession() until we see a fresh accessToken.
-     * NextAuth updates useSession() asynchronously after signIn(),
-     * so a fixed setTimeout is unreliable — we confirm the token is
-     * present before handing control back to the parent.
-     */
-    async function waitForFreshToken(maxWaitMs = 8000): Promise<void> {
-        const interval = 200;
+    async function pollForFreshToken(maxWaitMs = 8000): Promise<string | null> {
+        const interval = 250;
         const deadline = Date.now() + maxWaitMs;
         while (Date.now() < deadline) {
             await new Promise<void>(r => setTimeout(r, interval));
             const session = await getSession();
             const token = (session as any)?.accessToken as string | undefined;
-            if (token) {
-                // Write directly to the window cache so api.ts picks it up
-                // immediately without waiting for page.tsx's render-body sync.
-                if (typeof window !== "undefined") {
-                    (window as any).__neema_token = token;
-                    const refresh = (session as any)?.refreshToken;
-                    if (refresh) (window as any).__neema_refresh_token = refresh;
-                }
-                return;
-            }
+            // Make sure it's not the same stale token — check it has no error flag
+            const hasError = (session as any)?.error;
+            if (token && !hasError) return token;
         }
-        // Timed out — proceed anyway rather than hanging forever
+        return null;
     }
 
     async function handleSubmit(e: React.FormEvent) {
@@ -68,12 +51,23 @@ export function SessionExpiredModal({ email, onSuccess }: Props) {
             if (result?.error) {
                 setError("Incorrect password. Please try again.");
                 setLoading(false);
-            } else {
-                // Wait for the token to land in the session before resuming.
-                // Don't call setLoading(false) here — the modal unmounts via onSuccess.
-                await waitForFreshToken();
-                onSuccess();
+                return;
             }
+
+            // signIn() succeeded server-side. Now wait for useSession() to
+            // propagate the new token — poll until we see it.
+            const freshToken = await pollForFreshToken();
+
+            if (!freshToken) {
+                setError("Signed in but session didn't update. Please try again.");
+                setLoading(false);
+                return;
+            }
+
+            // Hand the confirmed token to the parent — it writes to window
+            // and clears the modal. Don't setLoading(false), modal will unmount.
+            onSuccess(freshToken);
+
         } catch {
             setError("Something went wrong. Please try again.");
             setLoading(false);
@@ -81,16 +75,10 @@ export function SessionExpiredModal({ email, onSuccess }: Props) {
     }
 
     return (
-        /* Backdrop */
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-            {/* Card */}
             <div className="relative w-full max-w-sm mx-4 bg-white rounded-2xl shadow-2xl overflow-hidden">
-
-                {/* Top accent bar */}
                 <div className="h-1 w-full bg-gradient-to-r from-green-600 to-emerald-400" />
-
                 <div className="px-8 py-8">
-                    {/* Icon */}
                     <div className="flex justify-center mb-5">
                         <div className="w-14 h-14 rounded-full bg-amber-50 border border-amber-200 flex items-center justify-center">
                             <svg className="w-7 h-7 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -99,28 +87,17 @@ export function SessionExpiredModal({ email, onSuccess }: Props) {
                             </svg>
                         </div>
                     </div>
-
-                    {/* Heading */}
-                    <h2 className="text-center text-xl font-semibold text-stone-900 mb-1">
-                        Session expired
-                    </h2>
+                    <h2 className="text-center text-xl font-semibold text-stone-900 mb-1">Session expired</h2>
                     <p className="text-center text-sm text-stone-500 mb-6">
                         Please enter your password to continue where you left off.
                     </p>
-
-                    {/* Form */}
                     <form onSubmit={handleSubmit} className="space-y-4">
-                        {/* Email — read-only, just for context */}
                         <div>
-                            <label className="block text-xs font-medium text-stone-500 mb-1.5">
-                                Signed in as
-                            </label>
+                            <label className="block text-xs font-medium text-stone-500 mb-1.5">Signed in as</label>
                             <div className="w-full px-3.5 py-2.5 rounded-xl bg-stone-100 border border-stone-200 text-sm text-stone-600 select-none">
                                 {email}
                             </div>
                         </div>
-
-                        {/* Password */}
                         <div>
                             <label className="block text-xs font-medium text-stone-500 mb-1.5" htmlFor="session-password">
                                 Password
@@ -136,15 +113,11 @@ export function SessionExpiredModal({ email, onSuccess }: Props) {
                                 className="w-full px-3.5 py-2.5 rounded-xl border border-stone-200 bg-white text-sm text-stone-900 placeholder-stone-300 focus:outline-none focus:ring-2 focus:ring-green-500/40 focus:border-green-500 transition"
                             />
                         </div>
-
-                        {/* Error */}
                         {error && (
                             <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3.5 py-2.5">
                                 {error}
                             </p>
                         )}
-
-                        {/* Submit */}
                         <button
                             type="submit"
                             disabled={loading || !password}
@@ -158,9 +131,7 @@ export function SessionExpiredModal({ email, onSuccess }: Props) {
                                     </svg>
                                     Signing in…
                                 </>
-                            ) : (
-                                "Continue"
-                            )}
+                            ) : "Continue"}
                         </button>
                     </form>
                 </div>
