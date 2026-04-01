@@ -250,10 +250,10 @@ async def patch_message(db: AsyncSession, docid: str, body) -> dict:
 
 # ── Touch Session ─────────────────────────────────────────
 
-async def touch_session(db: AsyncSession, body) -> dict:
+async def touch_session(db: AsyncSession, body) -> list:
     from app.models.session import Session as SessionModel
     from sqlalchemy.dialects.postgresql import insert as pg_insert
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     def parse_dt(val):
         if not val:
@@ -279,7 +279,38 @@ async def touch_session(db: AsyncSession, body) -> dict:
     )
     await db.execute(stmt)
     await db.commit()
-    return {"ok": True, "session_id": session_id}
+
+    # Re-fetch the persisted row so timestamps come from the DB
+    result = await db.execute(select(SessionModel).where(SessionModel.id == session_id))
+    row = result.scalar_one()
+
+    def fmt_ts(dt) -> str:
+        """Format a datetime as a Firestore timestampValue string (UTC, no microseconds)."""
+        if dt is None:
+            return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def fmt_ts_precise(dt) -> str:
+        """Format a datetime with microseconds for createTime / updateTime."""
+        if dt is None:
+            return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+    now_precise = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+    return [
+        {
+            "name": f"projects/neema-6037c/databases/(default)/documents/sessions/{session_id}",
+            "fields": {
+                "turns":   {"integerValue": str(row.turns)},
+                "lastTs":  {"timestampValue": fmt_ts(row.last_ts)},
+                "wa_id":   {"stringValue": row.wa_id},
+                "startTs": {"timestampValue": fmt_ts(row.start_ts)},
+            },
+            "createTime": fmt_ts_precise(row.start_ts),
+            "updateTime": now_precise,
+        }
+    ]
 
 
 # ── Get Messages ──────────────────────────────────────────
