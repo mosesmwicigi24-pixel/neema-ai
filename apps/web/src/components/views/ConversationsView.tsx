@@ -9,7 +9,7 @@ import { Btn } from "@/components/ui/Btn";
 import { Modal } from "@/components/ui/Modal";
 import { TextareaField, InputField } from "@/components/ui/FormFields";
 import { Toggle } from "@/components/ui/Layout";
-import { timeAgo, formatPhone } from "@/lib/utils";
+import { timeAgo, formatPhone, displayName } from "@/lib/utils";
 import { CHANNEL_CONFIG, ALL_CHANNELS } from "@/lib/channels";
 import { conversationsApi } from "@/lib/api";
 import { useConversationEvents } from "@/lib/websocket";
@@ -502,7 +502,7 @@ export function ConversationsView({
                             <div className="flex items-start gap-3">
                                 <div className="relative flex-shrink-0">
                                     <Avatar
-                                        name={conv.name ?? conv.wa_id}
+                                        name={displayName(conv.name, conv.wa_id)}
                                         size={38}
                                     />
                                     {cfg && (
@@ -519,7 +519,7 @@ export function ConversationsView({
                                 <div className="flex-1 min-w-0">
                                     <div className="flex items-center justify-between mb-0.5">
                                         <span className="text-sm font-semibold text-[#16270c] truncate">
-                                            {conv.name ?? conv.wa_id}
+                                            {displayName(conv.name, conv.wa_id)}
                                         </span>
                                         <span className="text-[10px] text-[#9ccd65] flex-shrink-0 ml-2">
                                             {conv.last_message_at
@@ -586,10 +586,10 @@ export function ConversationsView({
                                 </svg>
                             </button>
                         )}
-                        <Avatar name={activeConv.name ?? activeConv.wa_id} size={32} />
+                        <Avatar name={displayName(activeConv.name, activeConv.wa_id)} size={32} />
                         <div className="flex-1 min-w-0">
                             <div className="text-sm font-semibold text-[#16270c] truncate">
-                                {activeConv.name ?? activeConv.wa_id}
+                                {displayName(activeConv.name, activeConv.wa_id)}
                             </div>
                             <div className="text-xs text-[#9ccd65] font-mono truncate">
                                 {formatPhone(activeConv.wa_id)}

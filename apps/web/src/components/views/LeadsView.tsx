@@ -4,7 +4,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Btn } from "@/components/ui/Btn";
-import { fmtCurrency, timeAgo, formatPhone } from "@/lib/utils";
+import { fmtCurrency, timeAgo, formatPhone, displayName } from "@/lib/utils";
 import type { SharedViewProps } from "@/types";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -97,7 +97,7 @@ function LeadCard({
             className="rounded-xl shadow-sm p-3 mb-2 cursor-pointer transition-all group" style={{backgroundColor:"white",border:"1px solid #e6f3d8"}}
         >
             <div className="flex items-start gap-2 mb-2">
-                <Avatar name={lead.name ?? lead.wa_id} size={32} />
+                <Avatar name={displayName(lead.name, lead.wa_id)} size={32} />
                 <div className="flex-1 min-w-0">
                     <div className="text-sm font-semibold truncate" style={{color:"#16270c"}}>
                         {lead.name || <span className="text-stone-400 italic font-normal text-xs">Unknown</span>}
@@ -184,7 +184,7 @@ function LeadModal({ lead, onClose, onSave }: {
             >
                 <div className="flex items-start justify-between mb-4">
                     <div className="flex items-center gap-3">
-                        <Avatar name={lead.name ?? lead.wa_id} size={44} />
+                        <Avatar name={displayName(lead.name, lead.wa_id)} size={44} />
                         <div>
                             <div className="text-sm font-bold" style={{color:"#16270c"}}>
                                 {lead.name || "Unknown customer"}

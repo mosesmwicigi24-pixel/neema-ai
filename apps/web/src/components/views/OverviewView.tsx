@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Avatar } from "@/components/ui/Avatar";
-import { timeAgo, fmtCurrency, fmtDate } from "@/lib/utils";
+import { timeAgo, fmtCurrency, fmtDate, formatPhone, displayName } from "@/lib/utils";
 import { ALL_CHANNELS, CHANNEL_CONFIG } from "@/lib/channels";
 import { statsApi } from "@/lib/api";
 import type { Conversation, Agent, Order, CatalogItem, SharedViewProps } from "@/types";
@@ -150,7 +150,7 @@ export function OverviewView({
         .forEach((o) => {
             recentActivity.push({
                 id:     `order-${o.id}`,
-                user:   o.contact_name || o.contact_phone,
+                user:   displayName(o.contact_name, o.contact_phone),
                 action: `placed an order`,
                 target: fmtCurrency(o.total || o.subtotal),
                 at:     o.created_at,
@@ -169,7 +169,7 @@ export function OverviewView({
                 id:     `conv-${c.id}`,
                 user:   agentName,
                 action: "intercepted conversation with",
-                target: c.name ?? c.wa_id,
+                target: displayName(c.name, c.wa_id),
                 at:     c.last_message_at,
                 icon:   "⚡",
             });

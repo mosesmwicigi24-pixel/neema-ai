@@ -2,7 +2,7 @@
 // Admin reports: conversations, transfers, orders, agent performance.
 
 import React, { useState, useEffect, useCallback } from "react";
-import { fmtCurrency, fmtDate, timeAgo, formatPhone } from "@/lib/utils";
+import { fmtCurrency, fmtDate, timeAgo, formatPhone, displayName } from "@/lib/utils";
 import type { Conversation, Agent, Order, SharedViewProps } from "@/types";
 
 interface ReportsViewProps extends SharedViewProps {
@@ -155,7 +155,7 @@ export function ReportsView({ conversations, agents, orders, onToast, isMobile }
 
     // ── Order breakdown ───────────────────────────────────────────────────────
     const orderRows = filteredOrders.slice(0, 20).map((o) => [
-        o.contact_name || o.wa_id,
+        displayName(o.contact_name, o.contact_phone || o.wa_id),
         formatPhone(o.contact_phone || o.wa_id),
         fmtCurrency(o.total || o.subtotal),
         <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
@@ -170,7 +170,7 @@ export function ReportsView({ conversations, agents, orders, onToast, isMobile }
     const exportCSV = () => {
         const header = "Date,Customer,Amount,Status\n";
         const rows = filteredOrders.map((o) =>
-            `${fmtDate(o.created_at)},${o.contact_name || o.wa_id},${o.total || o.subtotal},${o.status}`
+            `${fmtDate(o.created_at)},${displayName(o.contact_name, o.contact_phone || o.wa_id)},${o.total || o.subtotal},${o.status}`
         ).join("\n");
         const blob = new Blob([header + rows], { type: "text/csv" });
         const url = URL.createObjectURL(blob);
@@ -303,7 +303,7 @@ export function ReportsView({ conversations, agents, orders, onToast, isMobile }
                     <Table
                         cols={["Customer", "Channel", "Status", "Mode", "Last Activity", "Agent"]}
                         rows={filteredConvs.slice(0, 50).map((c) => [
-                            c.name || c.wa_id,
+                            displayName(c.name, c.wa_id),
                             <span className="capitalize">{c.channel || "whatsapp"}</span>,
                             <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${c.status === "open" ? "bg-[#f0f9ec] text-[#427425]" : "bg-[#e6f3d8] text-[#699a32]"}`}>{c.status}</span>,
                             <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${c.intercept_mode === "human" ? "bg-amber-50 text-amber-700" : c.intercept_mode === "ai" ? "bg-blue-50 text-blue-700" : "bg-[#e6f3d8] text-[#699a32]"}`}>{c.intercept_mode}</span>,

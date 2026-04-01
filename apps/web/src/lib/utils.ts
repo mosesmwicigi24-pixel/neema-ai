@@ -1,3 +1,20 @@
+/**
+ * Returns a human-readable display name for a contact.
+ * If no real name is available, formats the phone/wa_id instead of
+ * showing a raw digit string.
+ *
+ * Usage:
+ *   displayName(conv.name, conv.wa_id)         → "John Doe" or "+254 712 345 678"
+ *   displayName(order.contact_name, order.contact_phone)
+ */
+export function displayName(
+    name: string | null | undefined,
+    phoneOrId: string | null | undefined,
+): string {
+    if (name && name.trim()) return name.trim();
+    return formatPhone(phoneOrId) || "Unknown";
+}
+
 export const timeAgo = (iso: string): string => {
     const d = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
     if (d < 60) return `${d}s ago`;
