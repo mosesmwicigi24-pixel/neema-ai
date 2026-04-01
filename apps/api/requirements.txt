@@ -28,3 +28,6 @@ python-multipart==0.0.12   # file uploads
 
 # OpenAI API client
 openai
+
+# Async file handling (for media uploads/downloads)
+aiofiles
