@@ -1,6 +1,6 @@
 "use client";
 import React, { useState } from "react";
-import { signIn } from "next-auth/react";
+import { signIn, getSession } from "next-auth/react";
 
 interface Props {
     /** The email of the currently logged-in user — pre-filled in the form. */
@@ -15,13 +15,41 @@ interface Props {
  * Shows a password-only prompt when the session token has expired.
  * - Pre-fills the known email so the user just types their password.
  * - Calls NextAuth's signIn() with redirect:false so we stay on the page.
- * - On success calls onSuccess() so the parent clears the expired state and
- *   the next API poll will use the fresh token.
+ * - Polls getSession() until the fresh token appears, writes it to
+ *   window.__neema_token, THEN calls onSuccess() — so refetches never
+ *   fire before the token is actually available.
  */
 export function SessionExpiredModal({ email, onSuccess }: Props) {
     const [password, setPassword] = useState("");
     const [loading, setLoading]   = useState(false);
     const [error, setError]       = useState("");
+
+    /**
+     * Poll getSession() until we see a fresh accessToken.
+     * NextAuth updates useSession() asynchronously after signIn(),
+     * so a fixed setTimeout is unreliable — we confirm the token is
+     * present before handing control back to the parent.
+     */
+    async function waitForFreshToken(maxWaitMs = 8000): Promise<void> {
+        const interval = 200;
+        const deadline = Date.now() + maxWaitMs;
+        while (Date.now() < deadline) {
+            await new Promise<void>(r => setTimeout(r, interval));
+            const session = await getSession();
+            const token = (session as any)?.accessToken as string | undefined;
+            if (token) {
+                // Write directly to the window cache so api.ts picks it up
+                // immediately without waiting for page.tsx's render-body sync.
+                if (typeof window !== "undefined") {
+                    (window as any).__neema_token = token;
+                    const refresh = (session as any)?.refreshToken;
+                    if (refresh) (window as any).__neema_refresh_token = refresh;
+                }
+                return;
+            }
+        }
+        // Timed out — proceed anyway rather than hanging forever
+    }
 
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
@@ -39,14 +67,15 @@ export function SessionExpiredModal({ email, onSuccess }: Props) {
 
             if (result?.error) {
                 setError("Incorrect password. Please try again.");
+                setLoading(false);
             } else {
-                // NextAuth jwt() callback will refresh the token.
-                // Give it a tick to propagate then tell the parent we're good.
-                setTimeout(onSuccess, 300);
+                // Wait for the token to land in the session before resuming.
+                // Don't call setLoading(false) here — the modal unmounts via onSuccess.
+                await waitForFreshToken();
+                onSuccess();
             }
         } catch {
             setError("Something went wrong. Please try again.");
-        } finally {
             setLoading(false);
         }
     }
