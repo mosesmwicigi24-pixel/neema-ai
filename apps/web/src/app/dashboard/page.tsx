@@ -31,6 +31,8 @@ import { ReportsView } from "@/components/views/ReportsView";
 import { ProfileView } from "@/components/views/ProfileView";
 import { SettingsView } from "@/components/views/SettingsView";
 
+import { getAgentPermissions, PERMS } from "@/lib/permissions";
+
 import type {
     Conversation,
     MessagesMap,
@@ -241,9 +243,20 @@ export default function NeemaDashboard(): React.ReactElement {
         },
     };
 
+    // The current logged-in agent (with resolved permissions from custom role)
+    const currentAgent = agents.find((a) => a.email === session.user.email);
+
+    // Permission helper — checks the agent's live permission array
+    const can = (perm: string): boolean =>
+        currentAgent ? getAgentPermissions(currentAgent as any).includes(perm) : false;
+
+    // isAdmin: true when the agent has permission to manage agents/settings
+    // This covers: legacy role="admin", superusers, and any custom role with manage_agents
     const isAdmin =
         session.user.role === "admin" ||
-        agents.find((a) => a.email === session.user.email)?.role === "admin";
+        currentAgent?.role === "admin" ||
+        (currentAgent as any)?.is_superuser === true ||
+        can(PERMS.MANAGE_AGENTS);
 
     // ── Badges ────────────────────────────────────────────────────────────────
     const humanConvs = conversations.filter(
@@ -271,7 +284,7 @@ export default function NeemaDashboard(): React.ReactElement {
             label: "Orders",
             badge: pendingOrders || null,
         },
-        ...(isAdmin
+        ...(can(PERMS.VIEW_REPORTS)
             ? [
                   {
                       id: "reports" as ViewId,
@@ -281,6 +294,10 @@ export default function NeemaDashboard(): React.ReactElement {
                       label: "Reports",
                       badge: null,
                   },
+              ]
+            : []),
+        ...(can(PERMS.VIEW_LEADS)
+            ? [
                   {
                       id: "leads" as ViewId,
                       icon: (
@@ -289,6 +306,10 @@ export default function NeemaDashboard(): React.ReactElement {
                       label: "Leads",
                       badge: null,
                   },
+              ]
+            : []),
+        ...(can(PERMS.VIEW_ANALYTICS)
+            ? [
                   {
                       id: "overview" as ViewId,
                       icon: (
@@ -296,11 +317,19 @@ export default function NeemaDashboard(): React.ReactElement {
                       ),
                       label: "Analytics",
                   },
+              ]
+            : []),
+        ...(can(PERMS.VIEW_CATALOG)
+            ? [
                   {
                       id: "catalog" as ViewId,
                       icon: <Icon d="M4 6h16M4 10h16M4 14h16M4 18h16" />,
                       label: "Catalog",
                   },
+              ]
+            : []),
+        ...(can(PERMS.MANAGE_AGENTS)
+            ? [
                   {
                       id: "agents" as ViewId,
                       icon: (
@@ -321,7 +350,7 @@ export default function NeemaDashboard(): React.ReactElement {
 
     const desktopNavItems: NavItem[] = [
         ...baseNavItems.slice(0, -1),
-        ...(isAdmin
+        ...(can(PERMS.MANAGE_SETTINGS)
             ? [
                   {
                       id: "settings" as ViewId,

@@ -5,8 +5,8 @@ import { Btn } from "@/components/ui/Btn";
 import { Toggle } from "@/components/ui/Layout";
 import { InputField } from "@/components/ui/FormFields";
 import { fmtDate } from "@/lib/utils";
-import { ALL_PERMISSIONS } from "@/lib/mockData";
 import { profileApi, agentsApi } from "@/lib/api";
+import { PERMS, getAgentPermissions } from "@/lib/permissions";
 import type { Agent, Session, ThemeMode, SharedViewProps } from "@/types";
 
 interface ProfileViewProps extends SharedViewProps {
@@ -105,11 +105,32 @@ export function ProfileView({
         }
     };
 
-    const permKeys = agent
-        ? (agent.permissions ?? []).includes("all")
-            ? ALL_PERMISSIONS.map((p) => p.key)
-            : (agent.permissions ?? [])
-        : [];
+    // Permission list with DB-matched keys (same keys stored in custom_roles.permissions)
+    const ALL_PERMISSIONS = [
+        { key: PERMS.VIEW_CONVERSATIONS,     label: "View conversations"      },
+        { key: PERMS.REPLY_CONVERSATIONS,    label: "Send replies"            },
+        { key: PERMS.INTERCEPT_RELEASE,      label: "Intercept / Release AI"  },
+        { key: PERMS.CLOSE_CONVERSATIONS,    label: "Close conversations"     },
+        { key: PERMS.TRANSFER_CONVERSATIONS, label: "Transfer conversations"  },
+        { key: PERMS.ADD_NOTES,              label: "Add internal notes"      },
+        { key: PERMS.VIEW_ORDERS,            label: "View orders"             },
+        { key: PERMS.MANAGE_ORDERS,          label: "Update order status"     },
+        { key: PERMS.VIEW_CATALOG,           label: "View catalog"            },
+        { key: PERMS.MANAGE_CATALOG,         label: "Edit catalog"            },
+        { key: PERMS.VIEW_LEADS,             label: "View leads"              },
+        { key: PERMS.MANAGE_LEADS,           label: "Manage leads"            },
+        { key: PERMS.VIEW_CRM,               label: "View CRM profile"        },
+        { key: PERMS.EDIT_CRM,               label: "Edit CRM profile"        },
+        { key: PERMS.VIEW_ANALYTICS,         label: "View analytics"          },
+        { key: PERMS.VIEW_REPORTS,           label: "View reports"            },
+        { key: PERMS.EXPORT_REPORTS,         label: "Export reports"          },
+        { key: PERMS.MANAGE_AGENTS,          label: "Manage agents"           },
+        { key: PERMS.MANAGE_ROLES,           label: "Manage roles"            },
+        { key: PERMS.MANAGE_SETTINGS,        label: "Manage settings"         },
+    ];
+
+    // getAgentPermissions handles superusers, custom role permissions, and legacy fallbacks
+    const permKeys = agent ? getAgentPermissions(agent as any) : [];
 
     if (!agent) {
         return (
