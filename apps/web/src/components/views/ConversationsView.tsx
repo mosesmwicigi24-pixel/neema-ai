@@ -59,8 +59,12 @@ export function ConversationsView({
     const [activeConvId, setActiveConvId] = useState<string>("");
     const [mobilePanel, setMobilePanel] = useState<MobilePanel>("list");
     const [channelTab, setChannelTab] = useState<"all" | Channel>("all");
-    const [statusFilter, setStatusFilter] = useState<"all" | "open" | "closed">("all");
-    const [interceptFilter, setInterceptFilter] = useState<"all" | "human" | "ai" | "paused">("all");
+    const [statusFilter, setStatusFilter] = useState<"all" | "open" | "closed">(
+        "all",
+    );
+    const [interceptFilter, setInterceptFilter] = useState<
+        "all" | "human" | "ai" | "paused"
+    >("all");
     const [searchQ, setSearchQ] = useState<string>("");
     const [replyText, setReplyText] = useState<string>("");
     const [draftVisible, setDraftVisible] = useState<boolean>(false);
@@ -102,8 +106,8 @@ export function ConversationsView({
             setActiveConvId(firstId);
             loadMessages(firstId);
         }
-    // Only run when conversations first populate or activeConvId resets
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // Only run when conversations first populate or activeConvId resets
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [conversations.length > 0, activeConvId]);
 
     const activeConv = conversations.find((c) => c.id === activeConvId);
@@ -143,28 +147,37 @@ export function ConversationsView({
         if (!activeConvId) return;
         const conv = conversations.find((c) => c.id === activeConvId);
         if (conv?.intercept_mode === "human") {
-            conversationsApi.latestDraft(activeConvId).then((res) => {
-                if (res.draft) {
-                    setDraftText(res.draft);
-                    setDraftVisible(true);
-                }
-            }).catch(() => {});
+            conversationsApi
+                .latestDraft(activeConvId)
+                .then((res) => {
+                    if (res.draft) {
+                        setDraftText(res.draft);
+                        setDraftVisible(true);
+                    }
+                })
+                .catch(() => {});
         }
     }, [activeConvId]);
 
     // ── WebSocket: live events for the active conversation ────────────────────
     useConversationEvents(activeConvId, (event) => {
-        if (event.type === "ai_draft_ready" && event.conversationId === activeConvId) {
+        if (
+            event.type === "ai_draft_ready" &&
+            event.conversationId === activeConvId
+        ) {
             setDraftText(event.draft ?? "");
             setDraftVisible(true);
             setDraftEditing(false);
         }
-        if (event.type === "new_message" && event.conversationId === activeConvId) {
+        if (
+            event.type === "new_message" &&
+            event.conversationId === activeConvId
+        ) {
             const msg: Message = {
-                id:         event.id ?? crypto.randomUUID(),
-                direction:  event.direction ?? "outbound",
-                sender:     event.sender ?? "ai",
-                text:       event.text,
+                id: event.id ?? crypto.randomUUID(),
+                direction: event.direction ?? "outbound",
+                sender: event.sender ?? "ai",
+                text: event.text,
                 created_at: event.created_at ?? new Date().toISOString(),
             };
             setMessages((m) => {
@@ -224,9 +237,9 @@ export function ConversationsView({
         try {
             // Optimistically append to thread so message appears instantly
             const optimisticMsg: Message = {
-                id:         `optimistic-${Date.now()}`,
-                direction:  "outbound",
-                sender:     "human_agent",
+                id: `optimistic-${Date.now()}`,
+                direction: "outbound",
+                sender: "human_agent",
                 text,
                 created_at: new Date().toISOString(),
             };
@@ -263,10 +276,10 @@ export function ConversationsView({
         try {
             // Optimistically append the approved draft as an outbound message
             const optimisticMsg: Message = {
-                id:         `optimistic-${Date.now()}`,
-                direction:  "outbound",
-                sender:     "ai",
-                text:       textToSend,
+                id: `optimistic-${Date.now()}`,
+                direction: "outbound",
+                sender: "ai",
+                text: textToSend,
                 created_at: new Date().toISOString(),
             };
             setMessages((m) => ({
@@ -277,7 +290,10 @@ export function ConversationsView({
             setDraftText("");
             setDraftEditing(false);
 
-            await conversationsApi.approveDraft(activeConvId, textToSend || undefined);
+            await conversationsApi.approveDraft(
+                activeConvId,
+                textToSend || undefined,
+            );
 
             // Sync with server to replace optimistic message
             const msgs = await conversationsApi.messages(activeConvId);
@@ -336,10 +352,7 @@ export function ConversationsView({
                           .filter((c) => c.unread > 0)
                           .reduce((s, c) => s + (c.unread ?? 0), 0)
                     : conversations
-                          .filter(
-                              (c) =>
-                                  c.channel === tab.id && c.unread > 0,
-                          )
+                          .filter((c) => c.channel === tab.id && c.unread > 0)
                           .reduce((s, c) => s + (c.unread ?? 0), 0);
             return acc;
         },
@@ -457,7 +470,11 @@ export function ConversationsView({
                                 key={s}
                                 onClick={() => setStatusFilter(s)}
                                 className={`h-6 px-2.5 rounded-md text-xs font-medium capitalize transition-colors ${statusFilter === s ? "text-white" : "bg-[#e6f3d8] text-[#699a32]"}`}
-                                style={statusFilter === s ? { backgroundColor: "#589b31" } : undefined}
+                                style={
+                                    statusFilter === s
+                                        ? { backgroundColor: "#589b31" }
+                                        : undefined
+                                }
                             >
                                 {s}
                             </button>
@@ -469,7 +486,11 @@ export function ConversationsView({
                                     key={m}
                                     onClick={() => setInterceptFilter(m)}
                                     className={`h-6 px-2.5 rounded-md text-xs font-medium capitalize transition-colors ${interceptFilter === m ? "text-white" : "bg-[#e6f3d8] text-[#699a32]"}`}
-                                    style={interceptFilter === m ? { backgroundColor: "#589b31" } : undefined}
+                                    style={
+                                        interceptFilter === m
+                                            ? { backgroundColor: "#589b31" }
+                                            : undefined
+                                    }
                                 >
                                     {m}
                                 </button>
@@ -502,7 +523,10 @@ export function ConversationsView({
                             <div className="flex items-start gap-3">
                                 <div className="relative flex-shrink-0">
                                     <Avatar
-                                        name={displayName(conv.name, conv.wa_id)}
+                                        name={displayName(
+                                            conv.name,
+                                            conv.wa_id,
+                                        )}
                                         size={38}
                                     />
                                     {cfg && (
@@ -519,7 +543,8 @@ export function ConversationsView({
                                 <div className="flex-1 min-w-0">
                                     <div className="flex items-center justify-between mb-0.5">
                                         <span className="text-sm font-semibold text-[#16270c] truncate">
-                                            {displayName(conv.name, conv.wa_id)}
+                                            {conv.name ??
+                                                formatPhone(conv.wa_id)}
                                         </span>
                                         <span className="text-[10px] text-[#9ccd65] flex-shrink-0 ml-2">
                                             {conv.last_message_at
@@ -536,14 +561,21 @@ export function ConversationsView({
                                             {conv.intercept_mode !== "ai" && (
                                                 <div className="flex items-center gap-1">
                                                     <InterceptBadge
-                                                        mode={conv.intercept_mode}
+                                                        mode={
+                                                            conv.intercept_mode
+                                                        }
                                                     />
-                                                    {conv.intercept_mode === "human" &&
+                                                    {conv.intercept_mode ===
+                                                        "human" &&
                                                         conv.assigned_agent_name && (
-                                                        <span className="text-[10px] text-[#699a32] font-medium truncate max-w-[56px]">
-                                                            {conv.assigned_agent_name.split(" ")[0]}
-                                                        </span>
-                                                    )}
+                                                            <span className="text-[10px] text-[#699a32] font-medium truncate max-w-[56px]">
+                                                                {
+                                                                    conv.assigned_agent_name.split(
+                                                                        " ",
+                                                                    )[0]
+                                                                }
+                                                            </span>
+                                                        )}
                                                 </div>
                                             )}
                                             {conv.unread > 0 && (
@@ -565,387 +597,460 @@ export function ConversationsView({
     const ThreadPanel = (
         <div className="flex flex-1 overflow-hidden">
             <div className="flex flex-col flex-1 overflow-hidden bg-white">
-            {!activeConv ? (
-                <div className="flex-1 flex items-center justify-center text-[#9ccd65]">
-                    <div className="text-center">
-                        <div className="text-4xl mb-2">💬</div>
-                        <p className="text-sm">Select a conversation</p>
-                    </div>
-                </div>
-            ) : (
-                <>
-                    {/* Thread header */}
-                    <div className="px-4 py-3 border-b border-[#e6f3d8] bg-white flex items-center gap-2 flex-wrap">
-                        {isMobile && (
-                            <button
-                                onClick={() => setMobilePanel("list")}
-                                className="text-[#699a32] hover:text-[#16270c] mr-1 flex-shrink-0"
-                            >
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                                </svg>
-                            </button>
-                        )}
-                        <Avatar name={displayName(activeConv.name, activeConv.wa_id)} size={32} />
-                        <div className="flex-1 min-w-0">
-                            <div className="text-sm font-semibold text-[#16270c] truncate">
-                                {displayName(activeConv.name, activeConv.wa_id)}
-                            </div>
-                            <div className="text-xs text-[#9ccd65] font-mono truncate">
-                                {formatPhone(activeConv.wa_id)}
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap">
-                            <InterceptBadge mode={activeConv.intercept_mode} />
-                            {activeConv.assigned_agent_id && activeConv.assigned_agent_name && (
-                                <span className="text-xs text-[#9ccd65] hidden lg:block">
-                                    → {activeConv.assigned_agent_name}
-                                </span>
-                            )}
-                            {activeConv.intercept_mode === "ai" && (
-                                <Btn
-                                    key="intercept"
-                                    small
-                                    onClick={() => intercept(activeConv.id)}
-                                    variant="primary"
-                                >
-                                    ⚡ Intercept
-                                </Btn>
-                            )}
-                            {activeConv.intercept_mode === "human" && (
-                                <Btn
-                                    key="release"
-                                    small
-                                    onClick={() => release(activeConv.id)}
-                                    variant="secondary"
-                                >
-                                    ↩ Release
-                                </Btn>
-                            )}
-                            {activeConv.intercept_mode !== "paused" && (
-                                <Btn
-                                    key="pause"
-                                    small
-                                    onClick={() => release(activeConv.id)}
-                                    variant="secondary"
-                                >
-                                    ⏸ Pause
-                                </Btn>
-                            )}
-                            {activeConv.intercept_mode === "paused" && (
-                                <Btn
-                                    key="resume"
-                                    small
-                                    onClick={() => release(activeConv.id)}
-                                    variant="primary"
-                                >
-                                    ▶ Resume
-                                </Btn>
-                            )}
-                            <Btn
-                                key="transfer"
-                                small
-                                onClick={() => setTransferModal(true)}
-                                variant="secondary"
-                            >
-                                ⇄
-                            </Btn>
-                            <Btn
-                                key="note"
-                                small
-                                onClick={() => setNoteModal(true)}
-                                variant="secondary"
-                            >
-                                📝
-                            </Btn>
-                            {activeConv.status === "open" && (
-                                <Btn
-                                    key="close"
-                                    small
-                                    onClick={() => closeConv(activeConv.id)}
-                                    variant="danger"
-                                >
-                                    ✓
-                                </Btn>
-                            )}
-                            <button
-                                key="crm"
-                                onClick={() => setCrmOpen((o) => !o)}
-                                title="Customer profile"
-                                className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors text-sm ${
-                                    crmOpen
-                                        ? "text-white"
-                                        : "bg-[#e6f3d8] text-[#699a32] hover:bg-[#cee6b2]"
-                                }`}
-                                style={crmOpen ? { backgroundColor: "#589b31" } : undefined}
-                            >
-                                👤
-                            </button>
+                {!activeConv ? (
+                    <div className="flex-1 flex items-center justify-center text-[#9ccd65]">
+                        <div className="text-center">
+                            <div className="text-4xl mb-2">💬</div>
+                            <p className="text-sm">Select a conversation</p>
                         </div>
                     </div>
-
-                    {/* Messages */}
-                    <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3" style={{backgroundColor:"#f8fbf4"}}>
-                        {threadLoading && (
-                            <div className="flex justify-center py-8">
-                                <div className="w-5 h-5 border-2 border-[#427425] border-t-transparent rounded-full animate-spin" />
+                ) : (
+                    <>
+                        {/* Thread header */}
+                        <div className="px-4 py-3 border-b border-[#e6f3d8] bg-white flex items-center gap-2 flex-wrap">
+                            {isMobile && (
+                                <button
+                                    onClick={() => setMobilePanel("list")}
+                                    className="text-[#699a32] hover:text-[#16270c] mr-1 flex-shrink-0"
+                                >
+                                    <svg
+                                        className="w-5 h-5"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        viewBox="0 0 24 24"
+                                    >
+                                        <path
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            strokeWidth={2}
+                                            d="M15 19l-7-7 7-7"
+                                        />
+                                    </svg>
+                                </button>
+                            )}
+                            <Avatar
+                                name={displayName(
+                                    activeConv.name,
+                                    activeConv.wa_id,
+                                )}
+                                size={32}
+                            />
+                            <div className="flex-1 min-w-0">
+                                <div className="text-sm font-semibold text-[#16270c] truncate">
+                                    {activeConv.name ??
+                                        formatPhone(activeConv.wa_id)}
+                                </div>
+                                <div className="text-xs text-[#9ccd65] font-mono truncate">
+                                    {formatPhone(activeConv.wa_id)}
+                                </div>
                             </div>
-                        )}
-                        {!threadLoading && activeMessages.length === 0 && (
-                            <div className="text-center py-12 text-[#9ccd65]">
-                                <p className="text-sm">No messages yet</p>
+                            <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap">
+                                <InterceptBadge
+                                    mode={activeConv.intercept_mode}
+                                />
+                                {activeConv.assigned_agent_id &&
+                                    activeConv.assigned_agent_name && (
+                                        <span className="text-xs text-[#9ccd65] hidden lg:block">
+                                            → {activeConv.assigned_agent_name}
+                                        </span>
+                                    )}
+                                {activeConv.intercept_mode === "ai" && (
+                                    <Btn
+                                        key="intercept"
+                                        small
+                                        onClick={() => intercept(activeConv.id)}
+                                        variant="primary"
+                                    >
+                                        ⚡ Intercept
+                                    </Btn>
+                                )}
+                                {activeConv.intercept_mode === "human" && (
+                                    <Btn
+                                        key="release"
+                                        small
+                                        onClick={() => release(activeConv.id)}
+                                        variant="secondary"
+                                    >
+                                        ↩ Release
+                                    </Btn>
+                                )}
+                                {activeConv.intercept_mode !== "paused" && (
+                                    <Btn
+                                        key="pause"
+                                        small
+                                        onClick={() => release(activeConv.id)}
+                                        variant="secondary"
+                                    >
+                                        ⏸ Pause
+                                    </Btn>
+                                )}
+                                {activeConv.intercept_mode === "paused" && (
+                                    <Btn
+                                        key="resume"
+                                        small
+                                        onClick={() => release(activeConv.id)}
+                                        variant="primary"
+                                    >
+                                        ▶ Resume
+                                    </Btn>
+                                )}
+                                <Btn
+                                    key="transfer"
+                                    small
+                                    onClick={() => setTransferModal(true)}
+                                    variant="secondary"
+                                >
+                                    ⇄
+                                </Btn>
+                                <Btn
+                                    key="note"
+                                    small
+                                    onClick={() => setNoteModal(true)}
+                                    variant="secondary"
+                                >
+                                    📝
+                                </Btn>
+                                {activeConv.status === "open" && (
+                                    <Btn
+                                        key="close"
+                                        small
+                                        onClick={() => closeConv(activeConv.id)}
+                                        variant="danger"
+                                    >
+                                        ✓
+                                    </Btn>
+                                )}
+                                <button
+                                    key="crm"
+                                    onClick={() => setCrmOpen((o) => !o)}
+                                    title="Customer profile"
+                                    className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors text-sm ${
+                                        crmOpen
+                                            ? "text-white"
+                                            : "bg-[#e6f3d8] text-[#699a32] hover:bg-[#cee6b2]"
+                                    }`}
+                                    style={
+                                        crmOpen
+                                            ? { backgroundColor: "#589b31" }
+                                            : undefined
+                                    }
+                                >
+                                    👤
+                                </button>
                             </div>
-                        )}
-                        {activeMessages.map((msg, idx) => {
-                            const isInbound = msg.direction === "inbound";
-                            const isNote = msg.isNote;
+                        </div>
 
-                            // Notes render as a full-width internal banner
-                            if (isNote) {
+                        {/* Messages */}
+                        <div
+                            className="flex-1 overflow-y-auto px-5 py-4 space-y-3"
+                            style={{ backgroundColor: "#f8fbf4" }}
+                        >
+                            {threadLoading && (
+                                <div className="flex justify-center py-8">
+                                    <div className="w-5 h-5 border-2 border-[#427425] border-t-transparent rounded-full animate-spin" />
+                                </div>
+                            )}
+                            {!threadLoading && activeMessages.length === 0 && (
+                                <div className="text-center py-12 text-[#9ccd65]">
+                                    <p className="text-sm">No messages yet</p>
+                                </div>
+                            )}
+                            {activeMessages.map((msg, idx) => {
+                                const isInbound = msg.direction === "inbound";
+                                const isNote = msg.isNote;
+
+                                // Notes render as a full-width internal banner
+                                if (isNote) {
+                                    return (
+                                        <div
+                                            key={msg.id ?? `msg-${idx}`}
+                                            className="flex justify-center"
+                                        >
+                                            <div className="max-w-[85%] w-full rounded-xl px-3 py-2 bg-amber-50 border border-amber-200 border-dashed">
+                                                <div className="flex items-center gap-1.5 mb-1">
+                                                    <span className="text-amber-500 text-xs">
+                                                        📝
+                                                    </span>
+                                                    <span className="text-[10px] font-semibold text-amber-600 uppercase tracking-wide">
+                                                        Internal Note
+                                                    </span>
+                                                </div>
+                                                <p className="text-xs text-amber-800 leading-relaxed whitespace-pre-wrap">
+                                                    {msg.text}
+                                                </p>
+                                                <div className="text-[10px] text-amber-400 mt-1">
+                                                    {msg.created_at
+                                                        ? timeAgo(
+                                                              msg.created_at,
+                                                          )
+                                                        : ""}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                }
+
                                 return (
                                     <div
                                         key={msg.id ?? `msg-${idx}`}
-                                        className="flex justify-center"
+                                        className={`flex ${isInbound ? "justify-start" : "justify-end"}`}
                                     >
-                                        <div className="max-w-[85%] w-full rounded-xl px-3 py-2 bg-amber-50 border border-amber-200 border-dashed">
-                                            <div className="flex items-center gap-1.5 mb-1">
-                                                <span className="text-amber-500 text-xs">📝</span>
-                                                <span className="text-[10px] font-semibold text-amber-600 uppercase tracking-wide">
-                                                    Internal Note
-                                                </span>
-                                            </div>
-                                            <p className="text-xs text-amber-800 leading-relaxed whitespace-pre-wrap">
+                                        <div
+                                            className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-xs ${
+                                                isInbound
+                                                    ? "bg-white border border-[#cee6b2] text-[#16270c] rounded-tl-sm"
+                                                    : msg.sender === "ai"
+                                                      ? "bg-blue-600 text-white rounded-tr-sm"
+                                                      : "bg-[#427425] text-white rounded-tr-sm"
+                                            }`}
+                                        >
+                                            {!isInbound && (
+                                                <div className="text-[10px] opacity-70 mb-1 font-medium uppercase tracking-wide">
+                                                    {msg.sender === "ai"
+                                                        ? "AI"
+                                                        : "Agent"}
+                                                </div>
+                                            )}
+                                            <p className="leading-relaxed whitespace-pre-wrap">
                                                 {msg.text}
                                             </p>
-                                            <div className="text-[10px] text-amber-400 mt-1">
-                                                {msg.created_at ? timeAgo(msg.created_at) : ""}
+                                            <div
+                                                className={`text-[10px] mt-1 ${isInbound ? "text-[#9ccd65]" : "opacity-60"}`}
+                                            >
+                                                {msg.created_at
+                                                    ? timeAgo(msg.created_at)
+                                                    : ""}
                                             </div>
                                         </div>
                                     </div>
                                 );
-                            }
+                            })}
+                            <div ref={messagesEndRef} />
+                        </div>
 
-                            return (
-                                <div
-                                    key={msg.id ?? `msg-${idx}`}
-                                    className={`flex ${isInbound ? "justify-start" : "justify-end"}`}
-                                >
-                                    <div
-                                        className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-xs ${
-                                            isInbound
-                                                ? "bg-white border border-[#cee6b2] text-[#16270c] rounded-tl-sm"
-                                                : msg.sender === "ai"
-                                                  ? "bg-blue-600 text-white rounded-tr-sm"
-                                                  : "bg-[#427425] text-white rounded-tr-sm"
-                                        }`}
-                                    >
-                                        {!isInbound && (
-                                            <div className="text-[10px] opacity-70 mb-1 font-medium uppercase tracking-wide">
-                                                {msg.sender === "ai"
-                                                    ? "AI"
-                                                    : "Agent"}
+                        {/* Reply box — only shown when agent is in control */}
+                        {activeConv.intercept_mode === "human" && (
+                            <div className="border-t border-[#e6f3d8] px-4 py-3 bg-white">
+                                {draftVisible &&
+                                    activeConv.intercept_mode === "human" && (
+                                        <div className="mb-2 rounded-xl bg-blue-50 border border-blue-200 overflow-hidden">
+                                            {/* Header */}
+                                            <div className="flex items-center justify-between px-3 py-2 border-b border-blue-100">
+                                                <div className="flex items-center gap-1.5">
+                                                    <span className="text-blue-500 text-sm">
+                                                        🤖
+                                                    </span>
+                                                    <p className="text-xs font-semibold text-blue-700">
+                                                        AI Draft
+                                                    </p>
+                                                </div>
+                                                <div className="flex items-center gap-1">
+                                                    <button
+                                                        onClick={() =>
+                                                            setDraftEditing(
+                                                                (e) => !e,
+                                                            )
+                                                        }
+                                                        className="text-[10px] text-blue-500 hover:text-blue-700 px-2 py-0.5 rounded border border-blue-200 hover:border-blue-400 transition-colors"
+                                                    >
+                                                        {draftEditing
+                                                            ? "Preview"
+                                                            : "Edit"}
+                                                    </button>
+                                                    <button
+                                                        onClick={() => {
+                                                            setDraftVisible(
+                                                                false,
+                                                            );
+                                                            setDraftText("");
+                                                            setDraftEditing(
+                                                                false,
+                                                            );
+                                                        }}
+                                                        className="text-[10px] text-blue-400 hover:text-blue-600 px-1.5 py-0.5"
+                                                    >
+                                                        ✕
+                                                    </button>
+                                                </div>
                                             </div>
-                                        )}
-                                        <p className="leading-relaxed whitespace-pre-wrap">
-                                            {msg.text}
-                                        </p>
-                                        <div
-                                            className={`text-[10px] mt-1 ${isInbound ? "text-[#9ccd65]" : "opacity-60"}`}
-                                        >
-                                            {msg.created_at
-                                                ? timeAgo(msg.created_at)
-                                                : ""}
-                                        </div>
-                                    </div>
-                                </div>
-                            );
-                        })}
-                        <div ref={messagesEndRef} />
-                    </div>
-
-                    {/* Reply box — only shown when agent is in control */}
-                    {activeConv.intercept_mode === "human" && (
-                        <div className="border-t border-[#e6f3d8] px-4 py-3 bg-white">
-                            {draftVisible &&
-                                activeConv.intercept_mode === "human" && (
-                                    <div className="mb-2 rounded-xl bg-blue-50 border border-blue-200 overflow-hidden">
-                                        {/* Header */}
-                                        <div className="flex items-center justify-between px-3 py-2 border-b border-blue-100">
-                                            <div className="flex items-center gap-1.5">
-                                                <span className="text-blue-500 text-sm">🤖</span>
-                                                <p className="text-xs font-semibold text-blue-700">
-                                                    AI Draft
-                                                </p>
+                                            {/* Body */}
+                                            <div className="px-3 py-2">
+                                                {draftEditing ? (
+                                                    <textarea
+                                                        value={draftText}
+                                                        onChange={(e) =>
+                                                            setDraftText(
+                                                                e.target.value,
+                                                            )
+                                                        }
+                                                        rows={4}
+                                                        className="w-full text-xs text-blue-800 bg-white border border-blue-200 rounded-lg px-2.5 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                                        placeholder="Edit the draft…"
+                                                    />
+                                                ) : (
+                                                    <p className="text-xs text-blue-700 whitespace-pre-wrap leading-relaxed">
+                                                        {draftText ||
+                                                            "AI has a reply ready."}
+                                                    </p>
+                                                )}
                                             </div>
-                                            <div className="flex items-center gap-1">
-                                                <button
-                                                    onClick={() => setDraftEditing((e) => !e)}
-                                                    className="text-[10px] text-blue-500 hover:text-blue-700 px-2 py-0.5 rounded border border-blue-200 hover:border-blue-400 transition-colors"
+                                            {/* Actions */}
+                                            <div className="flex items-center gap-2 px-3 pb-2.5">
+                                                <Btn
+                                                    small
+                                                    onClick={approveDraft}
+                                                    variant="primary"
                                                 >
-                                                    {draftEditing ? "Preview" : "Edit"}
-                                                </button>
-                                                <button
+                                                    ✓ Send
+                                                </Btn>
+                                                <Btn
+                                                    small
+                                                    onClick={() => {
+                                                        setReplyText(draftText);
+                                                        setDraftVisible(false);
+                                                        setDraftText("");
+                                                        setDraftEditing(false);
+                                                    }}
+                                                    variant="secondary"
+                                                >
+                                                    Edit & send manually
+                                                </Btn>
+                                                <Btn
+                                                    small
                                                     onClick={() => {
                                                         setDraftVisible(false);
                                                         setDraftText("");
                                                         setDraftEditing(false);
                                                     }}
-                                                    className="text-[10px] text-blue-400 hover:text-blue-600 px-1.5 py-0.5"
+                                                    variant="ghost"
                                                 >
-                                                    ✕
-                                                </button>
+                                                    Dismiss
+                                                </Btn>
                                             </div>
                                         </div>
-                                        {/* Body */}
-                                        <div className="px-3 py-2">
-                                            {draftEditing ? (
-                                                <textarea
-                                                    value={draftText}
-                                                    onChange={(e) => setDraftText(e.target.value)}
-                                                    rows={4}
-                                                    className="w-full text-xs text-blue-800 bg-white border border-blue-200 rounded-lg px-2.5 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-blue-400"
-                                                    placeholder="Edit the draft…"
-                                                />
-                                            ) : (
-                                                <p className="text-xs text-blue-700 whitespace-pre-wrap leading-relaxed">
-                                                    {draftText || "AI has a reply ready."}
-                                                </p>
-                                            )}
+                                    )}
+                                {/* Generate draft button — shown when in human mode but no draft visible */}
+                                {!draftVisible &&
+                                    activeConv.intercept_mode === "human" && (
+                                        <div className="mb-2 flex justify-end">
+                                            <button
+                                                onClick={generateDraft}
+                                                disabled={generatingDraft}
+                                                className="flex items-center gap-1.5 h-7 px-3 rounded-lg text-xs font-medium text-blue-600 border border-blue-200 bg-blue-50 hover:bg-blue-100 disabled:opacity-50 transition-colors"
+                                            >
+                                                {generatingDraft ? (
+                                                    <>
+                                                        <div className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                                                        Generating…
+                                                    </>
+                                                ) : (
+                                                    <>🤖 Generate AI draft</>
+                                                )}
+                                            </button>
                                         </div>
-                                        {/* Actions */}
-                                        <div className="flex items-center gap-2 px-3 pb-2.5">
-                                            <Btn
-                                                small
-                                                onClick={approveDraft}
-                                                variant="primary"
-                                            >
-                                                ✓ Send
-                                            </Btn>
-                                            <Btn
-                                                small
-                                                onClick={() => {
-                                                    setReplyText(draftText);
-                                                    setDraftVisible(false);
-                                                    setDraftText("");
-                                                    setDraftEditing(false);
-                                                }}
-                                                variant="secondary"
-                                            >
-                                                Edit & send manually
-                                            </Btn>
-                                            <Btn
-                                                small
-                                                onClick={() => {
-                                                    setDraftVisible(false);
-                                                    setDraftText("");
-                                                    setDraftEditing(false);
-                                                }}
-                                                variant="ghost"
-                                            >
-                                                Dismiss
-                                            </Btn>
-                                        </div>
-                                    </div>
-                                )}
-                            {/* Generate draft button — shown when in human mode but no draft visible */}
-                            {!draftVisible && activeConv.intercept_mode === "human" && (
-                                <div className="mb-2 flex justify-end">
+                                    )}
+                                <div className="flex gap-2 items-end">
+                                    <textarea
+                                        value={replyText}
+                                        onChange={(e) =>
+                                            setReplyText(e.target.value)
+                                        }
+                                        onKeyDown={(e) => {
+                                            if (
+                                                e.key === "Enter" &&
+                                                !e.shiftKey
+                                            ) {
+                                                e.preventDefault();
+                                                sendReply();
+                                            }
+                                        }}
+                                        placeholder="Type a reply… (Enter to send)"
+                                        rows={2}
+                                        className="flex-1 resize-none px-3 py-2 text-sm bg-[#f3f9ec] border border-[#cee6b2] rounded-xl text-[#16270c] placeholder-stone-300 focus:outline-none focus:ring-2 focus:ring-[#589b31] focus:border-transparent"
+                                    />
                                     <button
-                                        onClick={generateDraft}
-                                        disabled={generatingDraft}
-                                        className="flex items-center gap-1.5 h-7 px-3 rounded-lg text-xs font-medium text-blue-600 border border-blue-200 bg-blue-50 hover:bg-blue-100 disabled:opacity-50 transition-colors"
+                                        onClick={sendReply}
+                                        disabled={!replyText.trim() || sending}
+                                        className="h-10 w-10 rounded-xl bg-[#427425] hover:bg-[#589b31] disabled:opacity-50 flex items-center justify-center text-white transition-colors"
                                     >
-                                        {generatingDraft ? (
-                                            <>
-                                                <div className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-                                                Generating…
-                                            </>
+                                        {sending ? (
+                                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                                         ) : (
-                                            <>🤖 Generate AI draft</>
+                                            <svg
+                                                className="w-4 h-4"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                viewBox="0 0 24 24"
+                                            >
+                                                <path
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                    strokeWidth={2}
+                                                    d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
+                                                />
+                                            </svg>
                                         )}
                                     </button>
                                 </div>
-                            )}
-                            <div className="flex gap-2 items-end">
-                                <textarea
-                                    value={replyText}
-                                    onChange={(e) =>
-                                        setReplyText(e.target.value)
-                                    }
-                                    onKeyDown={(e) => {
-                                        if (e.key === "Enter" && !e.shiftKey) {
-                                            e.preventDefault();
-                                            sendReply();
-                                        }
-                                    }}
-                                    placeholder="Type a reply… (Enter to send)"
-                                    rows={2}
-                                    className="flex-1 resize-none px-3 py-2 text-sm bg-[#f3f9ec] border border-[#cee6b2] rounded-xl text-[#16270c] placeholder-stone-300 focus:outline-none focus:ring-2 focus:ring-[#589b31] focus:border-transparent"
-                                />
-                                <button
-                                    onClick={sendReply}
-                                    disabled={!replyText.trim() || sending}
-                                    className="h-10 w-10 rounded-xl bg-[#427425] hover:bg-[#589b31] disabled:opacity-50 flex items-center justify-center text-white transition-colors"
-                                >
-                                    {sending ? (
-                                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                    ) : (
-                                        <svg
-                                            className="w-4 h-4"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            viewBox="0 0 24 24"
-                                        >
-                                            <path
-                                                strokeLinecap="round"
-                                                strokeLinejoin="round"
-                                                strokeWidth={2}
-                                                d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-                                            />
-                                        </svg>
-                                    )}
-                                </button>
                             </div>
-                        </div>
-                    )}
-                </>
-            )}
-        </div>
-        {/* CRM Sidebar — open by default, collapsible */}
-        {activeConv && !isMobile && (
-            crmOpen ? (
-                <CustomerSidebar
-                    conversation={activeConv}
-                    orders={orders}
-                    onToast={onToast}
-                    onClose={() => setCrmOpen(false)}
-                    onNameChange={(wa_id, newName) => {
-                        setConversations((prev) =>
-                            prev.map((c) =>
-                                c.wa_id === wa_id
-                                    ? { ...c, name: newName, contact_name: newName }
-                                    : c
-                            )
-                        );
-                    }}
-                />
-            ) : (
-                /* Collapsed tab — click to re-open */
-                <button
-                    onClick={() => setCrmOpen(true)}
-                    title="Show customer profile"
-                    className="flex-shrink-0 w-8 border-l border-[#e6f3d8] bg-white flex flex-col items-center justify-center gap-1 hover:bg-[#f3f9ec] transition-colors"
-                >
-                    <svg className="w-4 h-4 text-[#9ccd65]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                    </svg>
-                    <span className="text-[9px] text-[#9ccd65] font-semibold uppercase tracking-widest"
-                        style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}>
-                        Customer
-                    </span>
-                </button>
-            )
-        )}
+                        )}
+                    </>
+                )}
+            </div>
+            {/* CRM Sidebar — open by default, collapsible */}
+            {activeConv &&
+                !isMobile &&
+                (crmOpen ? (
+                    <CustomerSidebar
+                        conversation={activeConv}
+                        orders={orders}
+                        onToast={onToast}
+                        onClose={() => setCrmOpen(false)}
+                        onNameChange={(wa_id, newName) => {
+                            setConversations((prev) =>
+                                prev.map((c) =>
+                                    c.wa_id === wa_id
+                                        ? {
+                                              ...c,
+                                              name: newName,
+                                              contact_name: newName,
+                                          }
+                                        : c,
+                                ),
+                            );
+                        }}
+                    />
+                ) : (
+                    /* Collapsed tab — click to re-open */
+                    <button
+                        onClick={() => setCrmOpen(true)}
+                        title="Show customer profile"
+                        className="flex-shrink-0 w-8 border-l border-[#e6f3d8] bg-white flex flex-col items-center justify-center gap-1 hover:bg-[#f3f9ec] transition-colors"
+                    >
+                        <svg
+                            className="w-4 h-4 text-[#9ccd65]"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                        >
+                            <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M15 19l-7-7 7-7"
+                            />
+                        </svg>
+                        <span
+                            className="text-[9px] text-[#9ccd65] font-semibold uppercase tracking-widest"
+                            style={{
+                                writingMode: "vertical-rl",
+                                transform: "rotate(180deg)",
+                            }}
+                        >
+                            Customer
+                        </span>
+                    </button>
+                ))}
         </div>
     );
 
@@ -1013,16 +1118,19 @@ export function ConversationsView({
                         try {
                             // Optimistically append
                             const optimistic: Message = {
-                                id:         `optimistic-note-${Date.now()}`,
-                                direction:  "outbound",
-                                sender:     "human_agent",
+                                id: `optimistic-note-${Date.now()}`,
+                                direction: "outbound",
+                                sender: "human_agent",
                                 text,
-                                isNote:     true,
+                                isNote: true,
                                 created_at: new Date().toISOString(),
                             };
                             setMessages((m) => ({
                                 ...m,
-                                [activeConvId]: [...(m[activeConvId] ?? []), optimistic],
+                                [activeConvId]: [
+                                    ...(m[activeConvId] ?? []),
+                                    optimistic,
+                                ],
                             }));
                             setNoteModal(false);
                             setNoteText("");
@@ -1030,14 +1138,19 @@ export function ConversationsView({
 
                             // Save to server and replace with confirmed message
                             await conversationsApi.addNote(activeConvId, text);
-                            const msgs = await conversationsApi.messages(activeConvId);
-                            setMessages((m) => ({ ...m, [activeConvId]: msgs }));
+                            const msgs =
+                                await conversationsApi.messages(activeConvId);
+                            setMessages((m) => ({
+                                ...m,
+                                [activeConvId]: msgs,
+                            }));
                         } catch {
                             // Rollback optimistic note
                             setMessages((m) => ({
                                 ...m,
                                 [activeConvId]: (m[activeConvId] ?? []).filter(
-                                    (msg) => !msg.id?.startsWith("optimistic-note-"),
+                                    (msg) =>
+                                        !msg.id?.startsWith("optimistic-note-"),
                                 ),
                             }));
                             setNoteText(text);
