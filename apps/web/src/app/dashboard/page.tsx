@@ -46,6 +46,7 @@ import type {
     ThemeMode,
     ToastType,
 } from "@/types";
+import { SessionExpiredModal } from "@/components/ui/SessionExpiredModal";
 
 const Icon = ({ d }: { d: string }) => (
     <svg
@@ -84,16 +85,24 @@ export default function NeemaDashboard(): React.ReactElement {
     const [toast, setToast] = useState<ToastState | null>(null);
     const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
     // Local conversations state so CustomerSidebar name updates reflect immediately
-    const [sessionExpired,      setSessionExpired]      = useState(false);
-    const [localConversations, setLocalConversations] = useState<Conversation[]>([]);
+    const [sessionExpired, setSessionExpired] = useState(false);
+    const [localConversations, setLocalConversations] = useState<
+        Conversation[]
+    >([]);
     const isMobile = useIsMobile();
 
     // Update page title
     useEffect(() => {
         const labels: Record<string, string> = {
-            conversations: "Inbox", orders: "Orders", leads: "Leads",
-            overview: "Analytics", catalog: "Catalog", agents: "Team",
-            profile: "Profile", settings: "Settings", reports: "Reports",
+            conversations: "Inbox",
+            orders: "Orders",
+            leads: "Leads",
+            overview: "Analytics",
+            catalog: "Catalog",
+            agents: "Team",
+            profile: "Profile",
+            settings: "Settings",
+            reports: "Reports",
         };
         document.title = `${labels[view] ?? view} | Neema`;
     }, [view]);
@@ -115,10 +124,14 @@ export default function NeemaDashboard(): React.ReactElement {
     // ── Write BOTH tokens synchronously in the render body ───────────────────
     // This must happen before any hook callbacks fire (useEffect is too late —
     // it runs after the render, so the first polling tick would be tokenless).
-    const accessToken  = (nextAuthSession as any)?.accessToken  as string | undefined;
-    const refreshToken = (nextAuthSession as any)?.refreshToken as string | undefined;
+    const accessToken = (nextAuthSession as any)?.accessToken as
+        | string
+        | undefined;
+    const refreshToken = (nextAuthSession as any)?.refreshToken as
+        | string
+        | undefined;
     if (typeof window !== "undefined") {
-        if (accessToken)  (window as any).__neema_token         = accessToken;
+        if (accessToken) (window as any).__neema_token = accessToken;
         if (refreshToken) (window as any).__neema_refresh_token = refreshToken;
     }
     // Gate polling on token presence, not just auth status, so no request
@@ -131,7 +144,8 @@ export default function NeemaDashboard(): React.ReactElement {
             setSessionExpired(true);
         };
         window.addEventListener("neema:session-expired", handler);
-        return () => window.removeEventListener("neema:session-expired", handler);
+        return () =>
+            window.removeEventListener("neema:session-expired", handler);
     }, []);
 
     // Detect when NextAuth's jwt() callback signals a refresh failure
@@ -145,10 +159,7 @@ export default function NeemaDashboard(): React.ReactElement {
     // ── Live data polling — gated on hasToken ─────────────────────────────────
     const { data: rawConversations, refetch: refetchConversations } =
         usePolling(
-            () =>
-                hasToken
-                    ? conversationsApi.list()
-                    : Promise.resolve(null),
+            () => (hasToken ? conversationsApi.list() : Promise.resolve(null)),
             8000,
             [hasToken],
         );
@@ -172,23 +183,26 @@ export default function NeemaDashboard(): React.ReactElement {
     );
 
     // ── Map API data to UI types ──────────────────────────────────────────────
-    const mappedConversations: Conversation[] = (rawConversations ?? []).map(mapConversation);
-    const agents: Agent[]       = (rawAgents ?? []).map(mapAgent);
+    const mappedConversations: Conversation[] = (rawConversations ?? []).map(
+        mapConversation,
+    );
+    const agents: Agent[] = (rawAgents ?? []).map(mapAgent);
     const catalog: CatalogItem[] = (rawCatalog ?? []).map(mapCatalogItem);
-    const orders: Order[]       = (rawOrders ?? []).map(mapOrder);
+    const orders: Order[] = (rawOrders ?? []).map(mapOrder);
 
     // Sync local conversations whenever polling brings fresh data
     useEffect(() => {
         if (mappedConversations.length > 0) {
             setLocalConversations(mappedConversations);
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [rawConversations]);
 
     // Use localConversations so optimistic name changes are visible immediately
-    const conversations = localConversations.length > 0
-        ? localConversations
-        : mappedConversations;
+    const conversations =
+        localConversations.length > 0
+            ? localConversations
+            : mappedConversations;
 
     // ── Setters ───────────────────────────────────────────────────────────────
     // setConversations supports both React updater functions and direct values,
@@ -232,6 +246,16 @@ export default function NeemaDashboard(): React.ReactElement {
         [],
     );
 
+    const handleReauthSuccess = useCallback(() => {
+        setSessionExpired(false);
+        // The fresh token was written back to window by page.tsx's render-body sync.
+        // Kick all pollers so they immediately retry with the new token.
+        refetchConversations();
+        refetchAgents();
+        refetchOrders();
+        refetchCatalog();
+    }, [refetchConversations, refetchAgents, refetchOrders, refetchCatalog]);
+
     // ── Session ───────────────────────────────────────────────────────────────
     const session: Session = {
         user: {
@@ -248,7 +272,9 @@ export default function NeemaDashboard(): React.ReactElement {
 
     // Permission helper — checks the agent's live permission array
     const can = (perm: string): boolean =>
-        currentAgent ? getAgentPermissions(currentAgent as any).includes(perm) : false;
+        currentAgent
+            ? getAgentPermissions(currentAgent as any).includes(perm)
+            : false;
 
     // isAdmin: true when the agent has permission to manage agents/settings
     // This covers: legacy role="admin", superusers, and any custom role with manage_agents
@@ -387,11 +413,7 @@ export default function NeemaDashboard(): React.ReactElement {
                 {...viewProps}
             />
         ),
-        leads: (
-            <LeadsView
-                {...viewProps}
-            />
-        ),
+        leads: <LeadsView {...viewProps} />,
         reports: (
             <ReportsView
                 conversations={conversations}
@@ -442,19 +464,38 @@ export default function NeemaDashboard(): React.ReactElement {
     // ── Session-expired overlay ───────────────────────────────────────────────
     if (sessionExpired) {
         return (
-            <div className="flex h-screen items-center justify-center"
-                style={{ backgroundColor: "#070d1c" }}>
+            <div
+                className="flex h-screen items-center justify-center"
+                style={{ backgroundColor: "#070d1c" }}
+            >
                 <div className="text-center px-6 max-w-sm">
-                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-5"
-                        style={{ backgroundColor: "#589b31", boxShadow: "0 4px 24px rgba(88,155,49,0.4)" }}>
-                        <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    <div
+                        className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-5"
+                        style={{
+                            backgroundColor: "#589b31",
+                            boxShadow: "0 4px 24px rgba(88,155,49,0.4)",
+                        }}
+                    >
+                        <svg
+                            className="w-7 h-7 text-white"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                        >
+                            <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+                            />
                         </svg>
                     </div>
-                    <h2 className="text-xl font-bold text-white mb-2">Session Expired</h2>
+                    <h2 className="text-xl font-bold text-white mb-2">
+                        Session Expired
+                    </h2>
                     <p className="text-sm mb-6" style={{ color: "#699a32" }}>
-                        Your session has timed out. Please sign in again to continue.
+                        Your session has timed out. Please sign in again to
+                        continue.
                     </p>
                     <button
                         onClick={() => {
@@ -465,8 +506,10 @@ export default function NeemaDashboard(): React.ReactElement {
                             router.push("/login");
                         }}
                         className="w-full h-11 rounded-xl text-sm font-semibold text-white transition-all"
-                        style={{ backgroundColor: "#589b31",
-                                 boxShadow: "0 4px 20px rgba(88,155,49,0.35)" }}
+                        style={{
+                            backgroundColor: "#589b31",
+                            boxShadow: "0 4px 20px rgba(88,155,49,0.35)",
+                        }}
                     >
                         Sign in again
                     </button>
@@ -493,6 +536,12 @@ export default function NeemaDashboard(): React.ReactElement {
       `}</style>
 
             <Toast toast={toast} isMobile={isMobile} />
+            {sessionExpired && (
+                <SessionExpiredModal
+                    email={(nextAuthSession?.user?.email as string) ?? ""}
+                    onSuccess={handleReauthSuccess}
+                />
+            )}
 
             {!isMobile && (
                 <Sidebar

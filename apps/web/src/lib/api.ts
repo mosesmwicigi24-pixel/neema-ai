@@ -69,6 +69,19 @@ async function req<T>(
         credentials: "include",
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
+ 
+    // ── 401 → fire session-expired event instead of throwing generically ──────
+    if (res.status === 401) {
+        if (typeof window !== "undefined") {
+            // Clear the stale cached token so the next authHeaders() call
+            // is forced to go back to getSession() after re-auth.
+            delete (window as any).__neema_token;
+            delete (window as any).__neema_refresh_token;
+            window.dispatchEvent(new CustomEvent("neema:session-expired"));
+        }
+        throw new Error(`${method} ${path} → 401: Session expired`);
+    }
+ 
     if (!res.ok) {
         const err = await res.text();
         throw new Error(`${method} ${path} → ${res.status}: ${err}`);
