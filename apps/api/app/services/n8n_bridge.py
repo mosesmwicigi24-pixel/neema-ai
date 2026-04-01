@@ -381,19 +381,41 @@ async def get_messages(db: AsyncSession, wa_id: str) -> list:
         .limit(50)
     )
     msgs = result.scalars().all()
-    return [
-        {
-            "id": str(m.id),
-            "wa_id": m.wa_id,
-            "direction": m.direction,
-            "sender": m.sender,
-            "text": m.text,
+
+    rows = []
+    for m in msgs:
+        created_at = m.created_at
+
+        # ts_ms: prefer the stored ts_ms column; fall back to created_at
+        if m.ts_ms is not None:
+            ts_ms = m.ts_ms
+        elif created_at:
+            ts_ms = int(created_at.astimezone(timezone.utc).timestamp() * 1000)
+        else:
+            ts_ms = None
+
+        # ts_iso: millisecond-precision ISO string for sorting consistency
+        if ts_ms is not None:
+            ts_iso = _fmt_ts_ms(datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc))
+        elif created_at:
+            ts_iso = _fmt_ts_ms(created_at.astimezone(timezone.utc))
+        else:
+            ts_iso = None
+
+        rows.append({
+            "id":         str(m.id),
+            "wa_id":      m.wa_id,
+            "direction":  m.direction,
+            "sender":     m.sender,
+            "text":       m.text,
             "media_type": m.media_type,
-            "media_url": m.media_url,
-            "created_at": m.created_at.isoformat() if m.created_at else None,
-        }
-        for m in msgs
-    ]
+            "media_url":  m.media_url,
+            "ts_ms":      ts_ms,       # integer ms — used by Bundle messages for sort
+            "ts_iso":     ts_iso,      # ISO string with ms precision
+            "created_at": created_at.isoformat() if created_at else None,
+        })
+
+    return rows
 
 
 # ── Save User Facts ───────────────────────────────────────
