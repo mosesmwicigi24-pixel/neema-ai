@@ -4,32 +4,34 @@ import { signIn, getSession } from "next-auth/react";
 
 interface Props {
     email: string;
+    /** Receives the confirmed fresh token so the parent can write it to window before resuming. */
     onSuccess: (freshToken: string) => void | Promise<void>;
+    /** The stale/expired token — used to detect when a genuinely NEW token has arrived. */
+    expiredToken?: string;
 }
 
-/**
- * SessionExpiredModal
- *
- * After signIn() succeeds, polls getSession() until the NEW token is
- * confirmed, then passes it directly to onSuccess() so the parent can
- * write it to window.__neema_token BEFORE clearing sessionExpired and
- * triggering any refetches.
- */
-export function SessionExpiredModal({ email, onSuccess }: Props) {
+export function SessionExpiredModal({ email, onSuccess, expiredToken }: Props) {
     const [password, setPassword] = useState("");
     const [loading, setLoading]   = useState(false);
     const [error, setError]       = useState("");
 
-    async function pollForFreshToken(maxWaitMs = 8000): Promise<string | null> {
-        const interval = 250;
+    /**
+     * Poll getSession() until we see a token that is:
+     *   1. Present
+     *   2. Different from the expired one (so we're not just reading the stale cache)
+     *   3. Has no error flag
+     */
+    async function pollForFreshToken(maxWaitMs = 10000): Promise<string | null> {
+        const interval = 300;
         const deadline = Date.now() + maxWaitMs;
         while (Date.now() < deadline) {
             await new Promise<void>(r => setTimeout(r, interval));
             const session = await getSession();
-            const token = (session as any)?.accessToken as string | undefined;
-            // Make sure it's not the same stale token — check it has no error flag
-            const hasError = (session as any)?.error;
-            if (token && !hasError) return token;
+            const token   = (session as any)?.accessToken as string | undefined;
+            const hasError = !!(session as any)?.error;
+            if (token && !hasError && token !== expiredToken) {
+                return token;
+            }
         }
         return null;
     }
@@ -54,18 +56,14 @@ export function SessionExpiredModal({ email, onSuccess }: Props) {
                 return;
             }
 
-            // signIn() succeeded server-side. Now wait for useSession() to
-            // propagate the new token — poll until we see it.
             const freshToken = await pollForFreshToken();
 
             if (!freshToken) {
-                setError("Signed in but session didn't update. Please try again.");
+                setError("Session didn't update in time. Please try again.");
                 setLoading(false);
                 return;
             }
 
-            // Hand the confirmed token to the parent — it writes to window
-            // and clears the modal. Don't setLoading(false), modal will unmount.
             onSuccess(freshToken);
 
         } catch {

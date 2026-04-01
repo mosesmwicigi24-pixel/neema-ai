@@ -88,8 +88,10 @@ export default function NeemaDashboard(): React.ReactElement {
     const [localConversations, setLocalConversations] = useState<Conversation[]>([]);
     const isMobile = useIsMobile();
 
-    // Ref-based guard so multiple simultaneous 401s only trigger the modal once
+    // Ref guard — prevents parallel 401s from re-triggering the modal
     const sessionExpiredRef = useRef(false);
+    // Snapshot of the expired token so the modal can detect when a genuinely new one arrives
+    const expiredTokenRef = useRef<string | undefined>(undefined);
 
     // Update page title
     useEffect(() => {
@@ -100,8 +102,6 @@ export default function NeemaDashboard(): React.ReactElement {
         };
         document.title = `${labels[view] ?? view} | Neema`;
     }, [view]);
-
-    const isAuthenticated = authStatus === "authenticated";
 
     // ── Redirect if unauthenticated ───────────────────────────────────────────
     useEffect(() => {
@@ -116,24 +116,25 @@ export default function NeemaDashboard(): React.ReactElement {
     }, [theme]);
 
     // ── Write BOTH tokens synchronously in the render body ───────────────────
-    // This must happen before any hook callbacks fire (useEffect is too late —
-    // it runs after the render, so the first polling tick would be tokenless).
+    // Must happen before any hook callbacks fire — useEffect is too late.
     const accessToken  = (nextAuthSession as any)?.accessToken  as string | undefined;
     const refreshToken = (nextAuthSession as any)?.refreshToken as string | undefined;
     if (typeof window !== "undefined") {
         if (accessToken)  (window as any).__neema_token         = accessToken;
         if (refreshToken) (window as any).__neema_refresh_token = refreshToken;
     }
-    // Gate polling on token presence, not just auth status, so no request
-    // fires before the Authorization header can be populated.
     const hasToken = Boolean(accessToken);
 
     // ── Listen for session-expired events dispatched by api.ts ───────────────
-    // Guard via ref so parallel 401s from multiple pollers only open the modal once.
     useEffect(() => {
         const handler = () => {
             if (!sessionExpiredRef.current) {
                 sessionExpiredRef.current = true;
+                // Snapshot the current (expired) token so the modal can tell
+                // when getSession() finally returns a different one
+                expiredTokenRef.current = typeof window !== "undefined"
+                    ? (window as any).__neema_token
+                    : undefined;
                 setSessionExpired(true);
             }
         };
@@ -141,24 +142,22 @@ export default function NeemaDashboard(): React.ReactElement {
         return () => window.removeEventListener("neema:session-expired", handler);
     }, []);
 
-    // Detect when NextAuth's jwt() callback signals a refresh failure
+    // ── Detect NextAuth-level refresh failures ────────────────────────────────
     useEffect(() => {
         const err = (nextAuthSession as any)?.error;
         if (err === "RefreshTokenExpired" || err === "RefreshTokenMissing") {
             if (!sessionExpiredRef.current) {
                 sessionExpiredRef.current = true;
+                expiredTokenRef.current = accessToken;
                 setSessionExpired(true);
             }
         }
-    }, [nextAuthSession]);
+    }, [nextAuthSession, accessToken]);
 
     // ── Live data polling — gated on hasToken ─────────────────────────────────
     const { data: rawConversations, refetch: refetchConversations } =
         usePolling(
-            () =>
-                hasToken
-                    ? conversationsApi.list()
-                    : Promise.resolve(null),
+            () => hasToken ? conversationsApi.list() : Promise.resolve(null),
             8000,
             [hasToken],
         );
@@ -195,7 +194,6 @@ export default function NeemaDashboard(): React.ReactElement {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [rawConversations]);
 
-    // Use localConversations so optimistic name changes are visible immediately
     const conversations = localConversations.length > 0
         ? localConversations
         : mappedConversations;
@@ -239,21 +237,21 @@ export default function NeemaDashboard(): React.ReactElement {
         [],
     );
 
-    // ── Re-auth success handler ───────────────────────────────────────────────
-    // Called by SessionExpiredModal after it confirms the fresh token.
-    // Order matters: write token → update session → reset guard → close modal → refetch.
+    // ── Re-auth success ───────────────────────────────────────────────────────
     const handleReauthSuccess = useCallback(async (freshToken: string) => {
-        // 1. Write the confirmed token immediately so the next api call uses it
+        // 1. Write the confirmed fresh token to window immediately
         if (typeof window !== "undefined") {
             (window as any).__neema_token = freshToken;
         }
-        // 2. Tell NextAuth to re-fetch the session so nextAuthSession.accessToken
-        //    updates and the render-body sync above stops overwriting with stale data
+        // 2. Force NextAuth to re-fetch the session so nextAuthSession.accessToken
+        //    updates — without this the render-body sync would overwrite the fresh
+        //    token back to the stale one on the next render
         await updateSession();
-        // 3. Reset the guard so future expirations can show the modal again
+        // 3. Clear the expired token snapshot and reset the guard
+        expiredTokenRef.current = undefined;
         sessionExpiredRef.current = false;
         setSessionExpired(false);
-        // 4. Kick all pollers — token is confirmed, requests will succeed
+        // 4. Kick pollers — token is confirmed on window
         refetchConversations();
         refetchAgents();
         refetchOrders();
@@ -264,21 +262,16 @@ export default function NeemaDashboard(): React.ReactElement {
     const session: Session = {
         user: {
             email: (nextAuthSession?.user?.email as string) ?? "",
-            name: (nextAuthSession?.user?.name as string) ?? "",
-            role: ((nextAuthSession as any)?.role ?? "agent") as
-                | "admin"
-                | "agent",
+            name:  (nextAuthSession?.user?.name  as string) ?? "",
+            role:  ((nextAuthSession as any)?.role ?? "agent") as "admin" | "agent",
         },
     };
 
-    // The current logged-in agent (with resolved permissions from custom role)
     const currentAgent = agents.find((a) => a.email === session.user.email);
 
-    // Permission helper — checks the agent's live permission array
     const can = (perm: string): boolean =>
         currentAgent ? getAgentPermissions(currentAgent as any).includes(perm) : false;
 
-    // isAdmin: true when the agent has permission to manage agents/settings
     const isAdmin =
         session.user.role === "admin" ||
         currentAgent?.role === "admin" ||
@@ -286,9 +279,7 @@ export default function NeemaDashboard(): React.ReactElement {
         can(PERMS.MANAGE_AGENTS);
 
     // ── Badges ────────────────────────────────────────────────────────────────
-    const humanConvs = conversations.filter(
-        (c) => c.intercept_mode === "human",
-    ).length;
+    const humanConvs    = conversations.filter((c) => c.intercept_mode === "human").length;
     const pendingOrders = orders.filter((o) => o.status === "pending").length;
 
     if (authStatus === "loading") return <LoadingScreen />;
@@ -297,80 +288,51 @@ export default function NeemaDashboard(): React.ReactElement {
     const baseNavItems: NavItem[] = [
         {
             id: "conversations",
-            icon: (
-                <Icon d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-            ),
+            icon: <Icon d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />,
             label: "Inbox",
             badge: humanConvs || null,
         },
         {
             id: "orders",
-            icon: (
-                <Icon d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-            ),
+            icon: <Icon d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />,
             label: "Orders",
             badge: pendingOrders || null,
         },
         ...(can(PERMS.VIEW_REPORTS)
-            ? [
-                  {
-                      id: "reports" as ViewId,
-                      icon: (
-                          <Icon d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                      ),
-                      label: "Reports",
-                      badge: null,
-                  },
-              ]
-            : []),
+            ? [{
+                id: "reports" as ViewId,
+                icon: <Icon d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />,
+                label: "Reports",
+                badge: null,
+            }] : []),
         ...(can(PERMS.VIEW_LEADS)
-            ? [
-                  {
-                      id: "leads" as ViewId,
-                      icon: (
-                          <Icon d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9" />
-                      ),
-                      label: "Leads",
-                      badge: null,
-                  },
-              ]
-            : []),
+            ? [{
+                id: "leads" as ViewId,
+                icon: <Icon d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9" />,
+                label: "Leads",
+                badge: null,
+            }] : []),
         ...(can(PERMS.VIEW_ANALYTICS)
-            ? [
-                  {
-                      id: "overview" as ViewId,
-                      icon: (
-                          <Icon d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                      ),
-                      label: "Analytics",
-                  },
-              ]
-            : []),
+            ? [{
+                id: "overview" as ViewId,
+                icon: <Icon d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />,
+                label: "Analytics",
+            }] : []),
         ...(can(PERMS.VIEW_CATALOG)
-            ? [
-                  {
-                      id: "catalog" as ViewId,
-                      icon: <Icon d="M4 6h16M4 10h16M4 14h16M4 18h16" />,
-                      label: "Catalog",
-                  },
-              ]
-            : []),
+            ? [{
+                id: "catalog" as ViewId,
+                icon: <Icon d="M4 6h16M4 10h16M4 14h16M4 18h16" />,
+                label: "Catalog",
+            }] : []),
         ...(can(PERMS.MANAGE_AGENTS)
-            ? [
-                  {
-                      id: "agents" as ViewId,
-                      icon: (
-                          <Icon d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-                      ),
-                      label: "Team",
-                  },
-              ]
-            : []),
+            ? [{
+                id: "agents" as ViewId,
+                icon: <Icon d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />,
+                label: "Team",
+            }] : []),
         {
             id: "profile",
-            icon: (
-                <Icon d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-            ),
+            icon: <Icon d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />,
             label: "Profile",
         },
     ];
@@ -378,16 +340,11 @@ export default function NeemaDashboard(): React.ReactElement {
     const desktopNavItems: NavItem[] = [
         ...baseNavItems.slice(0, -1),
         ...(can(PERMS.MANAGE_SETTINGS)
-            ? [
-                  {
-                      id: "settings" as ViewId,
-                      icon: (
-                          <Icon d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                      ),
-                      label: "Settings",
-                  },
-              ]
-            : []),
+            ? [{
+                id: "settings" as ViewId,
+                icon: <Icon d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z" />,
+                label: "Settings",
+            }] : []),
         baseNavItems[baseNavItems.length - 1],
     ];
 
@@ -414,11 +371,7 @@ export default function NeemaDashboard(): React.ReactElement {
                 {...viewProps}
             />
         ),
-        leads: (
-            <LeadsView
-                {...viewProps}
-            />
-        ),
+        leads: <LeadsView {...viewProps} />,
         reports: (
             <ReportsView
                 conversations={conversations}
@@ -522,11 +475,12 @@ export default function NeemaDashboard(): React.ReactElement {
                 )}
             </div>
 
-            {/* Session-expired modal — renders as overlay, dashboard stays mounted */}
+            {/* Session-expired modal — overlay on live dashboard, no redirect */}
             {sessionExpired && (
                 <SessionExpiredModal
                     email={(nextAuthSession?.user?.email as string) ?? ""}
                     onSuccess={handleReauthSuccess}
+                    expiredToken={expiredTokenRef.current}
                 />
             )}
         </div>
