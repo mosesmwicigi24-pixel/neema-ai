@@ -356,8 +356,16 @@ async def upload_media(
         content = await file.read()
         await f.write(content)
 
-    base_url   = getattr(settings, "media_public_url", str(request.base_url).rstrip("/"))
-    public_url = f"{base_url}/media/{saved_name}"
+    # Always use the configured public URL — never fall back to request.base_url
+    # because that returns the internal Docker/proxy address (http://...) which
+    # is wrong for both WhatsApp media downloads and browser display.
+    public_base = getattr(settings, "media_public_url", "").rstrip("/")
+    if not public_base:
+        raise HTTPException(
+            status_code=500,
+            detail="MEDIA_PUBLIC_URL is not configured. Set it in your .env file.",
+        )
+    public_url = f"{public_base}/api/admin/media/{saved_name}"
 
     return await send_agent_media(
         db=db,
@@ -400,10 +408,12 @@ async def reply_media(
     )
 
 
-# ── Serve uploaded media files (auth-protected) ───────────────────────────────
+# ── Serve uploaded media files (public — no auth required) ───────────────────
+# Must be public: WhatsApp servers download the file when sending media messages,
+# and browser <img> / <video> / <audio> tags cannot attach Bearer tokens.
 
 @router.get("/media/{filename}")
-async def serve_media(filename: str, agent: Agent = Depends(get_current_agent)):
+async def serve_media(filename: str):
     from fastapi.responses import FileResponse
     from app.core.config import settings
     import os

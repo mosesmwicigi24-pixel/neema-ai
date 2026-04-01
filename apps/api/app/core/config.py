@@ -9,17 +9,17 @@ class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379/0"
     secret_key: str
     algorithm: str = "HS256"
-    # 8-hour access token — covers a full working shift.
-    # Refresh token (30 days) silently renews it when needed.
-    access_token_expire_minutes: int = 480
-    refresh_token_expire_days:   int = 30
+    access_token_expire_minutes: int = 15
+    refresh_token_expire_days: int = 7
     cors_origins: list[str] = ["http://localhost:3000"]
     waba_token: str = ""
     waba_phone_number_id: str = ""
     waba_api_version: str = "v21.0"
     n8n_api_secret: str = ""
-    openai_api_key: str = ""
     environment: str = "production"
+    # Media file serving
+    media_public_url: str = ""      # e.g. https://neema.bethanyhouse.co.ke
+    media_storage_path: str = "/tmp/neema_media"
 
     @field_validator("cors_origins", mode="before")
     @classmethod
@@ -33,6 +33,7 @@ class Settings(BaseSettings):
             if v.startswith("["):
                 import json
                 return json.loads(v)
+            # comma-separated fallback: http://a.com,http://b.com
             return [o.strip() for o in v.split(",") if o.strip()]
         return v
 
