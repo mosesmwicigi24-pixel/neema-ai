@@ -8,7 +8,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Btn } from "@/components/ui/Btn";
-import { timeAgo, fmtCurrency, fmtDate } from "@/lib/utils";
+import { timeAgo, fmtCurrency, fmtDate, formatPhone, displayName } from "@/lib/utils";
 import type { Conversation, Order } from "@/types";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -361,7 +361,7 @@ export function CustomerSidebar({
             {/* Profile hero */}
             <div className="px-4 pt-4 pb-3" style={{ borderBottom:"1px solid #cee6b2" }}>
                 <div className="flex items-start gap-3 mb-3">
-                    <Avatar name={profile.name ?? profile.wa_id} size={44} />
+                    <Avatar name={displayName(profile.name, profile.wa_id)} size={44} />
                     <div className="flex-1 min-w-0">
                         <div className="text-sm font-bold truncate" style={{color:"#16270c"}}>
                             {profile.name || <span className="text-stone-400 italic font-normal">Unknown</span>}
@@ -369,7 +369,7 @@ export function CustomerSidebar({
                                 <span className="ml-1 text-[9px] text-emerald-600 font-bold">✓</span>
                             )}
                         </div>
-                        <div className="text-xs text-stone-400 font-mono">+{profile.wa_id}</div>
+                        <div className="text-xs text-stone-400 font-mono">{formatPhone(profile.wa_id)}</div>
                         <div className="flex items-center gap-1.5 mt-1.5">
                             <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${stageMeta.bg} ${stageMeta.color}`}>
                                 <span className={`w-1.5 h-1.5 rounded-full ${stageMeta.dot}`} />
@@ -526,7 +526,7 @@ export function CustomerSidebar({
                                     <ChannelBadge channel={ch.channel} />
                                     <div className="flex-1 min-w-0">
                                         <div className="text-[10px] font-semibold text-stone-700 capitalize">{ch.channel}</div>
-                                        <div className="text-[10px] text-stone-400 truncate font-mono">{ch.identifier}</div>
+                                        <div className="text-[10px] text-stone-400 truncate font-mono">{formatPhone(ch.identifier)}</div>
                                     </div>
                                     <div className="text-[10px] text-stone-400 text-right flex-shrink-0">
                                         <div>{ch.conversation_count} conv</div>
@@ -540,7 +540,7 @@ export function CustomerSidebar({
                                         Merged ({profile.merged_ids.length})
                                     </div>
                                     {profile.merged_ids.map((mid) => (
-                                        <div key={mid} className="text-[10px] text-violet-600 font-mono">{mid}</div>
+                                        <div key={mid} className="text-[10px] text-violet-600 font-mono">{formatPhone(mid)}</div>
                                     ))}
                                 </div>
                             )}
