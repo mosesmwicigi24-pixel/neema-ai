@@ -419,19 +419,33 @@ export function ConversationsView({
         {},
     );
 
-    const filteredConvs = conversations.filter((c) => {
-        if (channelTab !== "all" && c.channel !== channelTab) return false;
-        if (statusFilter !== "all" && c.status !== statusFilter) return false;
-        if (interceptFilter !== "all" && c.intercept_mode !== interceptFilter)
-            return false;
-        if (
-            searchQ &&
-            !c.name?.toLowerCase().includes(searchQ.toLowerCase()) &&
-            !c.last_message?.toLowerCase().includes(searchQ.toLowerCase())
-        )
-            return false;
-        return true;
-    });
+    const filteredConvs = conversations
+        .filter((c) => {
+            if (channelTab !== "all" && c.channel !== channelTab) return false;
+            if (statusFilter !== "all" && c.status !== statusFilter)
+                return false;
+            if (
+                interceptFilter !== "all" &&
+                c.intercept_mode !== interceptFilter
+            )
+                return false;
+            if (
+                searchQ &&
+                !c.name?.toLowerCase().includes(searchQ.toLowerCase()) &&
+                !c.last_message?.toLowerCase().includes(searchQ.toLowerCase())
+            )
+                return false;
+            return true;
+        })
+        .sort((a, b) => {
+            const aTime = a.last_message_at
+                ? new Date(a.last_message_at).getTime()
+                : new Date(a.created_at).getTime();
+            const bTime = b.last_message_at
+                ? new Date(b.last_message_at).getTime()
+                : new Date(b.created_at).getTime();
+            return bTime - aTime;
+        });
 
     const humanCount = conversations.filter(
         (c) => c.intercept_mode === "human",
