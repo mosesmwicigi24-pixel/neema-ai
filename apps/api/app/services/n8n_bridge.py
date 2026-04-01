@@ -126,12 +126,25 @@ async def get_context(db: AsyncSession, redis, wa_id: str) -> dict:
     result = await db.execute(select(User).where(User.wa_id == wa_id))
     user = result.scalar_one_or_none()
 
+    last_message_at: datetime | None = user.last_message_at if user else None
+    last_message_ts: int | None = (
+        int(last_message_at.astimezone(timezone.utc).timestamp() * 1000)
+        if last_message_at else None
+    )
+    last_message_at_iso: str | None = (
+        last_message_at.astimezone(timezone.utc).isoformat()
+        if last_message_at else None
+    )
+
     ctx = {
         "wa_id": wa_id,
+        # Full state preserved — including lead_stage and any other keys
         "state": user.state if user else {"active": "active", "cart": {"items": [], "subtotal": 0}},
-        "lastText": user.last_text if user else "",
-        "lastDirection": user.last_direction if user else "inbound",
-        "lastMessageAt": user.last_message_at.isoformat() if user and user.last_message_at else None,
+        # snake_case so n8n normalize node can read apiResp.last_text etc.
+        "last_text":       user.last_text      if user else "",
+        "last_direction":  user.last_direction if user else "inbound",
+        "last_message_ts": last_message_ts,       # integer ms — used by normalize node
+        "last_message_at": last_message_at_iso,   # ISO string — human-readable backup
     }
     await redis.setex(cache_key, 3600, json.dumps(ctx))
     return ctx
