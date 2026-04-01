@@ -19,7 +19,6 @@ from app.schemas.n8n import OutboundDto
 
 async def outbound_gate(db: AsyncSession, redis, body: OutboundDto) -> dict:
     """Core logic: AI mode sends immediately; human mode holds the reply."""
-    # Get or create conversation record
     result = await db.execute(
         select(Conversation).where(Conversation.wa_id == body.wa_id)
     )
@@ -31,7 +30,6 @@ async def outbound_gate(db: AsyncSession, redis, body: OutboundDto) -> dict:
         await db.flush()
 
     if conv.intercept_mode == InterceptMode.human:
-        # Hold — store draft, push WebSocket event to assigned agent
         intercept = Intercept(
             conversation_id=conv.id,
             agent_id=conv.assigned_agent_id,
@@ -47,10 +45,8 @@ async def outbound_gate(db: AsyncSession, redis, body: OutboundDto) -> dict:
         })
         return {"action": "hold"}
 
-    # AI mode — send directly via WABA
     await _send_waba(body.wa_id, body.ai_reply)
 
-    # Store as outbound message
     msg = Message(
         wa_id=body.wa_id,
         conversation_id=conv.id,
@@ -117,6 +113,7 @@ async def get_context(db: AsyncSession, redis, wa_id: str) -> dict:
     await redis.setex(cache_key, 3600, json.dumps(ctx))
     return ctx
 
+
 # ── Get User ──────────────────────────────────────────────
 
 async def get_user(db: AsyncSession, wa_id: str) -> dict:
@@ -133,6 +130,7 @@ async def get_user(db: AsyncSession, wa_id: str) -> dict:
         "last_direction": user.last_direction,
         "state": user.state,
     }
+
 
 # ── Upsert User ───────────────────────────────────────────
 
@@ -155,7 +153,11 @@ async def upsert_user(db: AsyncSession, body) -> dict:
     user = result.scalar_one()
     return {"id": str(user.id), "wa_id": user.wa_id}
 
+
 # ── Upsert Message ────────────────────────────────────────
+# Stores media_type / media_url when present.
+# Inbound media messages are automatically escalated to human mode so an
+# agent can view the attachment and respond appropriately.
 
 async def upsert_message(db: AsyncSession, body) -> dict:
     result = await db.execute(
@@ -168,8 +170,11 @@ async def upsert_message(db: AsyncSession, body) -> dict:
         db.add(conv)
         await db.flush()
 
-    sender = MsgSender.user if body.direction == "inbound" else MsgSender.ai
+    sender    = MsgSender.user    if body.direction == "inbound"  else MsgSender.ai
     direction = MsgDirection.inbound if body.direction == "inbound" else MsgDirection.outbound
+
+    media_type = getattr(body, "media_type", None)
+    media_url  = getattr(body, "media_url",  None)
 
     msg = Message(
         conversation_id=conv.id,
@@ -177,8 +182,20 @@ async def upsert_message(db: AsyncSession, body) -> dict:
         direction=direction,
         sender=sender,
         text=body.text,
+        media_type=media_type,
+        media_url=media_url,
     )
     db.add(msg)
+
+    # ── Auto-escalate inbound media to human ──────────────────────────────────
+    escalated = False
+    if direction == MsgDirection.inbound and media_type:
+        if conv.intercept_mode != InterceptMode.human:
+            from datetime import datetime, timezone
+            conv.intercept_mode  = InterceptMode.human
+            conv.intercept_since = datetime.now(timezone.utc)
+            escalated = True
+
     await db.commit()
     await db.refresh(msg)
 
@@ -186,6 +203,7 @@ async def upsert_message(db: AsyncSession, body) -> dict:
         "ok": True,
         "conversation_id": str(conv.id),
         "message_id": str(msg.id),
+        "media_escalated": escalated,
     }
 
 
@@ -194,7 +212,6 @@ async def upsert_message(db: AsyncSession, body) -> dict:
 async def patch_message(db: AsyncSession, docid: str, body) -> dict:
     from sqlalchemy import and_
 
-    # Try UUID lookup first
     try:
         import uuid
         uuid.UUID(docid)
@@ -202,8 +219,6 @@ async def patch_message(db: AsyncSession, docid: str, body) -> dict:
             select(Message).where(Message.id == docid)
         )
     except ValueError:
-        # docid is not a UUID — it's a Firestore-style ID like {wa_id}_{ts_ms}
-        # Extract wa_id and ts_ms from the docid
         parts = docid.rsplit("_", 1)
         if len(parts) == 2:
             wa_id, ts_ms = parts[0], parts[1]
@@ -220,7 +235,6 @@ async def patch_message(db: AsyncSession, docid: str, body) -> dict:
 
     msg = result.scalar_one_or_none()
     if not msg:
-        # Message not found — not an error, just skip
         return {"ok": True, "skipped": True, "docid": docid}
 
     if body.inbound_text is not None:
@@ -285,6 +299,8 @@ async def get_messages(db: AsyncSession, wa_id: str) -> list:
             "direction": m.direction,
             "sender": m.sender,
             "text": m.text,
+            "media_type": m.media_type,
+            "media_url": m.media_url,
             "created_at": m.created_at.isoformat() if m.created_at else None,
         }
         for m in msgs
@@ -298,7 +314,6 @@ async def save_user_facts(db: AsyncSession, body) -> dict:
     user = result.scalar_one_or_none()
     if not user:
         return {"ok": False, "error": "User not found"}
-    # Map known fields onto user
     for field in ("name", "email", "phone", "location", "age"):
         val = getattr(body, field, None)
         if val is not None:
@@ -345,6 +360,7 @@ async def upsert_order_event(db: AsyncSession, body) -> dict:
     await db.execute(stmt)
     await db.commit()
     return {"ok": True, "event_id": event_id}
+
 
 # ── Upsert Customer History ───────────────────────────────
 

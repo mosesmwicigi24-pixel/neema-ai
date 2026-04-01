@@ -57,6 +57,20 @@ async function authHeaders(): Promise<HeadersInit> {
     };
 }
 
+/** Token only — no Content-Type header, for multipart FormData requests. */
+async function authToken(): Promise<string | undefined> {
+    if (typeof window !== "undefined" && (window as any).__neema_token) {
+        return (window as any).__neema_token;
+    }
+    try {
+        const { getSession } = await import("next-auth/react");
+        const session = await getSession();
+        return (session as any)?.accessToken;
+    } catch {
+        return undefined;
+    }
+}
+
 async function req<T>(
     method: string,
     path: string,
@@ -152,6 +166,62 @@ export const conversationsApi = {
         post<Message>(`/admin/conversations/${id}/note`, { text }),
     close: (id: string) =>
         post<{ ok: boolean }>(`/admin/conversations/${id}/release`, {}),
+
+    /**
+     * Upload a file (image / document / video / audio) from the agent's
+     * device and send it to the customer via WABA.
+     * Uses multipart/form-data — bypasses the JSON req() helper.
+     */
+    uploadMedia: async (
+        convId: string,
+        file: File,
+        caption?: string,
+    ): Promise<Message> => {
+        const token = await authToken();
+        const form  = new FormData();
+        form.append("file", file);
+        if (caption) form.append("caption", caption);
+
+        const res = await fetch(
+            `${BASE}/admin/conversations/${convId}/upload-media`,
+            {
+                method: "POST",
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+                credentials: "include",
+                body: form,
+            },
+        );
+        if (res.status === 401) {
+            if (typeof window !== "undefined") {
+                delete (window as any).__neema_token;
+                window.dispatchEvent(new CustomEvent("neema:session-expired"));
+            }
+            throw new Error("upload-media → 401: Session expired");
+        }
+        if (!res.ok) {
+            const err = await res.text();
+            throw new Error(`upload-media → ${res.status}: ${err}`);
+        }
+        return res.json();
+    },
+
+    /**
+     * Send a media message by supplying an existing public URL
+     * (e.g. already on S3 / CDN).
+     */
+    sendMediaUrl: (
+        convId: string,
+        media_url: string,
+        media_type: "image" | "document" | "video" | "audio",
+        caption?: string,
+        filename?: string,
+    ) =>
+        post<Message>(`/admin/conversations/${convId}/reply-media`, {
+            media_url,
+            media_type,
+            caption,
+            filename,
+        }),
 };
 
 // ── Agents ────────────────────────────────────────────────────────────────────

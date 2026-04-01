@@ -137,7 +137,6 @@ async def transfer_conversation(
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # Look up the target agent's name for the notification
     target_result = await db.execute(
         select(Agent).where(Agent.id == target_agent_id)
     )
@@ -152,7 +151,6 @@ async def transfer_conversation(
     db.add(log)
     await db.commit()
 
-    # Notify customer of the transfer
     if target_agent:
         wa_id = conv.wa_id.lstrip("+")
         notification = (
@@ -201,7 +199,6 @@ async def send_agent_reply(
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # Meta WABA requires number without leading +
     wa_id = conv.wa_id.lstrip("+")
     await _send_waba(wa_id, text)
 
@@ -251,7 +248,6 @@ async def approve_draft(
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # Fall back to the latest held draft if no text was passed in
     if not text:
         dr = await db.execute(
             select(Intercept)
@@ -309,3 +305,104 @@ async def approve_draft(
         "text": text,
         "created_at": msg.created_at.isoformat() if msg.created_at else None,
     }
+
+
+# ── Media ──────────────────────────────────────────────────────────────────────
+
+async def send_agent_media(
+    db: AsyncSession,
+    conv_id: str,
+    agent: Agent,
+    media_url: str,
+    media_type: str,       # "image" | "document" | "video" | "audio"
+    caption: str | None,
+    filename: str | None,
+    redis=None,
+) -> dict:
+    """Send an image / document / video / audio to the customer via WABA."""
+    result = await db.execute(select(Conversation).where(Conversation.id == conv_id))
+    conv = result.scalar_one_or_none()
+    if not conv:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    wa_id = conv.wa_id.lstrip("+")
+    await _send_waba_media(wa_id, media_type, media_url, caption, filename)
+
+    preview = caption or filename or f"[{media_type}]"
+    msg = Message(
+        wa_id=conv.wa_id,
+        conversation_id=conv.id,
+        direction=MsgDirection.outbound,
+        sender=MsgSender.human_agent,
+        text=preview,
+        media_type=media_type,
+        media_url=media_url,
+        agent_id=agent.id,
+    )
+    db.add(msg)
+    conv.last_message_at = datetime.now(timezone.utc)
+    conv.last_message_preview = preview[:100]
+    await db.commit()
+    await db.refresh(msg)
+
+    if redis:
+        await _broadcast(redis, str(conv.id), {
+            "type": "new_message",
+            "conversationId": str(conv.id),
+            "sender": "human_agent",
+            "text": preview,
+            "mediaType": media_type,
+            "mediaUrl": media_url,
+        })
+
+    return {
+        "id": str(msg.id),
+        "direction": "outbound",
+        "sender": "human_agent",
+        "media_type": media_type,
+        "media_url": media_url,
+        "text": caption,
+        "created_at": msg.created_at.isoformat() if msg.created_at else None,
+    }
+
+
+async def _send_waba_media(
+    wa_id: str,
+    media_type: str,
+    media_url: str,
+    caption: str | None,
+    filename: str | None,
+) -> None:
+    """Send a media message via the WhatsApp Business API using a public link URL."""
+    import httpx, logging
+    from app.core.config import settings
+
+    url = (
+        f"https://graph.facebook.com/{settings.waba_api_version}"
+        f"/{settings.waba_phone_number_id}/messages"
+    )
+
+    media_obj: dict = {"link": media_url}
+    if caption:
+        media_obj["caption"] = caption
+    if filename and media_type == "document":
+        media_obj["filename"] = filename
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": wa_id,
+        "type": media_type,
+        media_type: media_obj,
+    }
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            url,
+            headers={"Authorization": f"Bearer {settings.waba_token}"},
+            json=payload,
+            timeout=30.0,
+        )
+        if not resp.is_success:
+            logging.error(f"WABA media error {resp.status_code}: {resp.text}")
+            resp.raise_for_status()

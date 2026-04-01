@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from app.database import get_db
@@ -10,7 +10,7 @@ from app.models.intercept import Intercept, InterceptAction
 from app.schemas.conversation import ConversationListItem, InterceptRequest
 from app.services.conversation import (
     intercept_conversation, release_conversation,
-    transfer_conversation, send_agent_reply, approve_draft
+    transfer_conversation, send_agent_reply, approve_draft, send_agent_media,
 )
 import jwt
 from app.core.security import decode_token
@@ -107,6 +107,8 @@ async def get_thread(
             "direction": m.direction,
             "sender": m.sender,
             "text": m.text,
+            "media_type": m.media_type if m.media_type != "note" else None,
+            "media_url": m.media_url,
             "isNote": m.media_type == "note",
             "created_at": m.created_at.isoformat() if m.created_at else None,
         }
@@ -298,6 +300,120 @@ async def transfer(conv_id: str, request: Request, body: dict, db: AsyncSession 
     if not agent_id:
         raise HTTPException(status_code=422, detail="agentId or agent_id required")
     return await transfer_conversation(db, conv_id, agent, agent_id, request.app.state.redis)
+
+
+# ── Media upload + send ───────────────────────────────────────────────────────
+
+@router.post("/conversations/{conv_id}/upload-media")
+async def upload_media(
+    conv_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+    caption: str | None = Form(None),
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """
+    Upload a file from the agent's browser (multipart/form-data),
+    store it on disk, then send it to the customer via WABA.
+    Accepted types: images (jpeg/png/webp/gif), PDF, Word, Excel,
+                    MP4/3GP video, OGG/AAC/MP3 audio.
+    """
+    import aiofiles, os, uuid, mimetypes
+    from app.core.config import settings
+
+    ALLOWED_MIME = {
+        "image/jpeg", "image/png", "image/webp", "image/gif",
+        "application/pdf", "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "video/mp4", "video/3gpp",
+        "audio/ogg", "audio/aac", "audio/mpeg",
+    }
+
+    ct = file.content_type or mimetypes.guess_type(file.filename or "")[0] or ""
+    if ct not in ALLOWED_MIME:
+        raise HTTPException(status_code=415, detail=f"Unsupported media type: {ct}")
+
+    if ct.startswith("image/"):
+        waba_type = "image"
+    elif ct.startswith("video/"):
+        waba_type = "video"
+    elif ct.startswith("audio/"):
+        waba_type = "audio"
+    else:
+        waba_type = "document"
+
+    media_dir = getattr(settings, "media_storage_path", "/tmp/neema_media")
+    os.makedirs(media_dir, exist_ok=True)
+
+    ext = os.path.splitext(file.filename or "file")[1] or (mimetypes.guess_extension(ct) or "")
+    saved_name = f"{uuid.uuid4().hex}{ext}"
+    file_path  = os.path.join(media_dir, saved_name)
+
+    async with aiofiles.open(file_path, "wb") as f:
+        content = await file.read()
+        await f.write(content)
+
+    base_url   = getattr(settings, "media_public_url", str(request.base_url).rstrip("/"))
+    public_url = f"{base_url}/media/{saved_name}"
+
+    return await send_agent_media(
+        db=db,
+        conv_id=conv_id,
+        agent=agent,
+        media_url=public_url,
+        media_type=waba_type,
+        caption=caption,
+        filename=file.filename,
+        redis=request.app.state.redis,
+    )
+
+
+@router.post("/conversations/{conv_id}/reply-media")
+async def reply_media(
+    conv_id: str,
+    body: dict,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """
+    Send a media message using an already-hosted public URL.
+    Body: { media_url, media_type, caption?, filename? }
+    """
+    media_url  = body.get("media_url")
+    media_type = body.get("media_type", "image")
+    if not media_url:
+        raise HTTPException(status_code=422, detail="media_url is required")
+
+    return await send_agent_media(
+        db=db,
+        conv_id=conv_id,
+        agent=agent,
+        media_url=media_url,
+        media_type=media_type,
+        caption=body.get("caption"),
+        filename=body.get("filename"),
+        redis=request.app.state.redis,
+    )
+
+
+# ── Serve uploaded media files (auth-protected) ───────────────────────────────
+
+@router.get("/media/{filename}")
+async def serve_media(filename: str, agent: Agent = Depends(get_current_agent)):
+    from fastapi.responses import FileResponse
+    from app.core.config import settings
+    import os
+
+    media_dir = getattr(settings, "media_storage_path", "/tmp/neema_media")
+    file_path = os.path.join(media_dir, filename)
+    # Prevent path traversal
+    if not os.path.isfile(file_path) or not os.path.abspath(file_path).startswith(os.path.abspath(media_dir)):
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(file_path)
 
 
 # ── Agents ────────────────────────────────────────────────

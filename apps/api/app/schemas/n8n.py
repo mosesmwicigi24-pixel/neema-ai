@@ -20,6 +20,9 @@ class MessageDto(BaseModel):
     ts_ms: int | None = None
     ts_iso: str | None = None
     docid: str | None = None
+    # Media fields — populated when n8n forwards an image/document/video/audio message
+    media_type: str | None = None   # "image" | "document" | "video" | "audio"
+    media_url:  str | None = None   # publicly reachable download URL
 
 class UpsertMessagePatchDto(BaseModel):
     inbound_text: str | None = None
