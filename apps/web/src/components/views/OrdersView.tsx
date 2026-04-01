@@ -380,7 +380,6 @@ export function OrdersView({
                                     />
                                     <div className="flex-1 min-w-0">
                                         {/* Row 1: name + status + channel */}
-                                        ```tsx
                                         <div className="flex items-center gap-2 mb-0.5 flex-wrap">
                                             <span
                                                 className="text-sm font-semibold truncate"
@@ -402,7 +401,7 @@ export function OrdersView({
                                                 {meta.label}
                                             </span>
                                         </div>
-                                        ```
+                                        
                                         {/* Row 2: order ID + phone + item summary */}
                                         <div className="flex items-center gap-1.5 flex-wrap">
                                             <span
