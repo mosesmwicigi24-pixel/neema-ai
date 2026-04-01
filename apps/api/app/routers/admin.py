@@ -303,10 +303,34 @@ async def transfer(conv_id: str, request: Request, body: dict, db: AsyncSession 
 # ── Agents ────────────────────────────────────────────────
 
 @router.get("/agents")
-async def list_agents(db: AsyncSession = Depends(get_db),
-                      agent: Agent = Depends(get_current_agent)):
-    result = await db.execute(select(Agent).order_by(Agent.name))
-    return result.scalars().all()
+async def list_agents(
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    from sqlalchemy import text
+    rows = await db.execute(text("""
+        SELECT
+            a.id,
+            a.name,
+            a.email,
+            a.role,
+            a.is_available,
+            a.is_superuser,
+            a.avatar_url,
+            a.created_at,
+            a.last_seen_at,
+            COALESCE(a.active_convs, 0)  AS active_convs,
+            a.custom_role_id,
+            a.custom_permissions,
+            r.name        AS role_name,
+            r.color       AS role_color,
+            r.permissions AS role_permissions
+        FROM agents a
+        LEFT JOIN custom_roles r ON r.id = a.custom_role_id
+        ORDER BY a.name
+    """))
+    keys = rows.keys()
+    return [dict(zip(keys, row)) for row in rows.fetchall()]
 
 
 @router.patch("/agents/{agent_id}/role")

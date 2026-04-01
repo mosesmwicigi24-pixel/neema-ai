@@ -154,8 +154,12 @@ export interface ApiAgent {
     avatar_url: string | null;
     created_at: string;
     last_seen_at: string | null;
-    custom_role_id?: string | null;
-    custom_permissions?: string[] | null;
+    // Custom role fields (populated by the joined list_agents query)
+    custom_role_id:    string | null;
+    custom_permissions: string[] | null;
+    role_name:         string | null;
+    role_color:        string | null;
+    role_permissions:  string[] | null;
 }
 
 export interface CreateAgentPayload {
@@ -351,6 +355,11 @@ export function mapConversation(c: ApiConversation): Conversation {
 }
 
 export function mapAgent(a: ApiAgent): Agent {
+    // Effective permissions: custom_permissions (per-agent overrides) take
+    // priority, then fall back to the assigned role's permissions array.
+    const permissions: string[] =
+        a.custom_permissions ?? a.role_permissions ?? [];
+
     return {
         id: a.id,
         name: a.name,
@@ -363,8 +372,12 @@ export function mapAgent(a: ApiAgent): Agent {
         created_at: a.created_at,
         joined_at: a.created_at,
         last_seen_at: a.last_seen_at,
-        permissions:       a.custom_permissions ?? [],
-        custom_role_id:    a.custom_role_id    ?? null,
+        permissions,
+        custom_role_id:   a.custom_role_id   ?? null,
+        custom_permissions: a.custom_permissions ?? null,
+        role_name:        a.role_name        ?? null,
+        role_color:       a.role_color       ?? null,
+        role_permissions: a.role_permissions ?? null,
         department: "",
     };
 }
