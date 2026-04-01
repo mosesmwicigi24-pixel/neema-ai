@@ -9,7 +9,7 @@ import { Btn } from "@/components/ui/Btn";
 import { Modal } from "@/components/ui/Modal";
 import { TextareaField, InputField } from "@/components/ui/FormFields";
 import { Toggle } from "@/components/ui/Layout";
-import { timeAgo } from "@/lib/utils";
+import { timeAgo, formatPhone } from "@/lib/utils";
 import { CHANNEL_CONFIG, ALL_CHANNELS } from "@/lib/channels";
 import { conversationsApi } from "@/lib/api";
 import { useConversationEvents } from "@/lib/websocket";
@@ -592,7 +592,7 @@ export function ConversationsView({
                                 {activeConv.name ?? activeConv.wa_id}
                             </div>
                             <div className="text-xs text-[#9ccd65] font-mono truncate">
-                                +{activeConv.wa_id}
+                                {formatPhone(activeConv.wa_id)}
                             </div>
                         </div>
                         <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap">

@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Btn } from "@/components/ui/Btn";
 import { Modal } from "@/components/ui/Modal";
-import { timeAgo, fmtCurrency, fmtDate } from "@/lib/utils";
+import { timeAgo, fmtCurrency, fmtDate, formatPhone } from "@/lib/utils";
 import { ordersApi } from "@/lib/api";
 import type { Order, OrderStatus, SharedViewProps } from "@/types";
 
@@ -233,7 +233,7 @@ export function OrdersView({
                                                 #{(order.id||"").slice(-6).toUpperCase()}
                                             </span>
                                             <span className="text-xs font-mono" style={{color:"#699a32"}}>
-                                                +{order.contact_phone}
+                                                {formatPhone(order.contact_phone)}
                                             </span>
                                             {itemSummary && (
                                                 <>
@@ -313,7 +313,7 @@ export function OrdersView({
                                 <Avatar name={selected.contact_name} size={40} />
                                 <div className="flex-1 min-w-0">
                                     <div className="text-sm font-bold" style={{color:"#16270c"}}>{selected.contact_name}</div>
-                                    <div className="text-xs font-mono" style={{color:"#699a32"}}>+{selected.contact_phone}</div>
+                                    <div className="text-xs font-mono" style={{color:"#699a32"}}>{formatPhone(selected.contact_phone)}</div>
                                 </div>
                                 <span className={`text-xs px-2 py-1 rounded-lg font-semibold border ${meta.bg} ${meta.text} ${meta.border}`}>
                                     {meta.label}

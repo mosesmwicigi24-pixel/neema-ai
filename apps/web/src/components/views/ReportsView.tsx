@@ -2,7 +2,7 @@
 // Admin reports: conversations, transfers, orders, agent performance.
 
 import React, { useState, useEffect, useCallback } from "react";
-import { fmtCurrency, fmtDate, timeAgo } from "@/lib/utils";
+import { fmtCurrency, fmtDate, timeAgo, formatPhone } from "@/lib/utils";
 import type { Conversation, Agent, Order, SharedViewProps } from "@/types";
 
 interface ReportsViewProps extends SharedViewProps {
@@ -156,7 +156,7 @@ export function ReportsView({ conversations, agents, orders, onToast, isMobile }
     // ── Order breakdown ───────────────────────────────────────────────────────
     const orderRows = filteredOrders.slice(0, 20).map((o) => [
         o.contact_name || o.wa_id,
-        `+${o.contact_phone || o.wa_id}`,
+        formatPhone(o.contact_phone || o.wa_id),
         fmtCurrency(o.total || o.subtotal),
         <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
             o.status === "delivered" ? "bg-emerald-50 text-emerald-700" :

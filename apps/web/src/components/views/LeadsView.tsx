@@ -4,7 +4,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Btn } from "@/components/ui/Btn";
-import { fmtCurrency, timeAgo } from "@/lib/utils";
+import { fmtCurrency, timeAgo, formatPhone } from "@/lib/utils";
 import type { SharedViewProps } from "@/types";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -102,7 +102,7 @@ function LeadCard({
                     <div className="text-sm font-semibold truncate" style={{color:"#16270c"}}>
                         {lead.name || <span className="text-stone-400 italic font-normal text-xs">Unknown</span>}
                     </div>
-                    <div className="text-[10px] font-mono truncate" style={{color:"#699a32"}}>+{lead.wa_id}</div>
+                    <div className="text-[10px] font-mono truncate" style={{color:"#699a32"}}>{formatPhone(lead.wa_id)}</div>
                 </div>
                 <div className="text-[10px] font-bold flex-shrink-0" style={{color:"#699a32"}}>
                     {lead.lead_score}/100
@@ -189,7 +189,7 @@ function LeadModal({ lead, onClose, onSave }: {
                             <div className="text-sm font-bold" style={{color:"#16270c"}}>
                                 {lead.name || "Unknown customer"}
                             </div>
-                            <div className="text-xs font-mono" style={{color:"#699a32"}}>+{lead.wa_id}</div>
+                            <div className="text-xs font-mono" style={{color:"#699a32"}}>{formatPhone(lead.wa_id)}</div>
                         </div>
                     </div>
                     <button onClick={onClose} className="text-stone-400 hover:text-stone-600 text-lg">✕</button>
