@@ -25,6 +25,7 @@ async def intercept_conversation(
         conv.intercept_mode == InterceptMode.human
         and conv.assigned_agent_id is not None
         and conv.assigned_agent_id != agent.id
+        and not agent.is_superuser
     ):
         owner = await db.get(Agent, conv.assigned_agent_id)
         owner_name = owner.name if owner else "another agent"
@@ -219,6 +220,7 @@ async def send_agent_reply(
         conv.intercept_mode == InterceptMode.human
         and conv.assigned_agent_id is not None
         and conv.assigned_agent_id != agent.id
+        and not agent.is_superuser
     ):
         owner = await db.get(Agent, conv.assigned_agent_id)
         owner_name = owner.name if owner else "another agent"

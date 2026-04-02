@@ -81,6 +81,9 @@ export function ConversationsView({
     const [crmOpen, setCrmOpen] = useState<boolean>(true);
     const { data: session } = useSession();
     const currentAgentId = (session as any)?.user?.id as string | undefined;
+    const currentRole = (session as any)?.user?.role as string | undefined;
+    const isSuperuser = (session as any)?.user?.isSuperuser as boolean ?? false;
+    const canHandleConversations = isSuperuser || currentRole === "admin" || currentRole === "agent";
 
     // ── Media attachment state ────────────────────────────────────────────────
     const [mediaFile, setMediaFile] = useState<File | null>(null);
@@ -122,6 +125,14 @@ export function ConversationsView({
 
     const activeConv = conversations.find((c) => c.id === activeConvId);
     const activeMessages: Message[] = messages[activeConvId] ?? [];
+
+    const isOwner = !!activeConv && activeConv.assigned_agent_id === currentAgentId;
+    const convOwnedByOther = !!activeConv &&
+        activeConv.intercept_mode === "human" &&
+        !!activeConv.assigned_agent_id &&
+        activeConv.assigned_agent_id !== currentAgentId;
+    const canActOnThisConv = canHandleConversations &&
+        (isOwner || isSuperuser || activeConv?.intercept_mode !== "human");
 
     // ── Scroll to bottom only when new messages arrive ────────────────────────
     useEffect(() => {
@@ -721,16 +732,19 @@ export function ConversationsView({
                                 </div>
                             </div>
                             <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap">
-                                <InterceptBadge
-                                    mode={activeConv.intercept_mode}
-                                />
-                                {activeConv.assigned_agent_id &&
-                                    activeConv.assigned_agent_name && (
-                                        <span className="text-xs text-[#9ccd65] hidden lg:block">
-                                            → {activeConv.assigned_agent_name}
-                                        </span>
-                                    )}
-                                {activeConv.intercept_mode === "ai" && (
+                            <InterceptBadge mode={activeConv.intercept_mode} />
+
+                            {/* Assigned agent name */}
+                            {activeConv.assigned_agent_id &&
+                                activeConv.assigned_agent_name && (
+                                    <span className="text-xs text-[#9ccd65] hidden lg:block">
+                                        → {activeConv.assigned_agent_name}
+                                    </span>
+                                )}
+
+                            {/* ── Intercept — AI mode only, agents/admins only */}
+                            {activeConv.intercept_mode === "ai" &&
+                                canHandleConversations && (
                                     <Btn
                                         small
                                         onClick={() => intercept(activeConv.id)}
@@ -739,8 +753,10 @@ export function ConversationsView({
                                         ⚡ Intercept
                                     </Btn>
                                 )}
-                                {activeConv.intercept_mode === "human" &&
-                                    activeConv.assigned_agent_id === currentAgentId && (
+
+                            {/* ── Release — owner or superuser only */}
+                            {activeConv.intercept_mode === "human" &&
+                                (isOwner || isSuperuser) && (
                                     <Btn
                                         key="release"
                                         small
@@ -750,18 +766,21 @@ export function ConversationsView({
                                         ↩ Release
                                     </Btn>
                                 )}
-                                {activeConv.intercept_mode === "human" &&
-                                    activeConv.assigned_agent_id &&
-                                    activeConv.assigned_agent_id !== currentAgentId && (
-                                    <span
-                                        className="text-xs px-2 py-1 rounded-md bg-stone-100 text-stone-400 cursor-not-allowed"
-                                        title={`Handled by ${activeConv.assigned_agent_name ?? "another agent"} — they must release or transfer it first`}
-                                    >
-                                        🔒{" "}
-                                        {activeConv.assigned_agent_name?.split(" ")[0] ?? "Locked"}
-                                    </span>
-                                )}
-                                {activeConv.intercept_mode !== "paused" && (
+
+                            {/* ── Locked badge — someone else owns it and we're not superuser */}
+                            {convOwnedByOther && !isSuperuser && (
+                                <span
+                                    className="text-xs px-2 py-1 rounded-md bg-stone-100 text-stone-400 cursor-not-allowed"
+                                    title={`Handled by ${activeConv.assigned_agent_name ?? "another agent"} — they must release or transfer it first`}
+                                >
+                                    🔒{" "}
+                                    {activeConv.assigned_agent_name?.split(" ")[0] ?? "Locked"}
+                                </span>
+                            )}
+
+                            {/* ── Pause — owner or superuser, not already paused */}
+                            {activeConv.intercept_mode !== "paused" &&
+                                canActOnThisConv && (
                                     <Btn
                                         key="pause"
                                         small
@@ -771,7 +790,10 @@ export function ConversationsView({
                                         ⏸ Pause
                                     </Btn>
                                 )}
-                                {activeConv.intercept_mode === "paused" && (
+
+                            {/* ── Resume — owner or superuser only */}
+                            {activeConv.intercept_mode === "paused" &&
+                                canActOnThisConv && (
                                     <Btn
                                         key="resume"
                                         small
@@ -781,6 +803,9 @@ export function ConversationsView({
                                         ▶ Resume
                                     </Btn>
                                 )}
+
+                            {/* ── Transfer — owner or superuser only */}
+                            {canActOnThisConv && (
                                 <Btn
                                     key="transfer"
                                     small
@@ -789,6 +814,10 @@ export function ConversationsView({
                                 >
                                     ⇄
                                 </Btn>
+                            )}
+
+                            {/* ── Note — any agent who can handle conversations */}
+                            {canHandleConversations && (
                                 <Btn
                                     key="note"
                                     small
@@ -797,34 +826,19 @@ export function ConversationsView({
                                 >
                                     📝
                                 </Btn>
-                                {/* {activeConv.status === "open" && (
-                                    <Btn
-                                        key="close"
-                                        small
-                                        onClick={() => closeConv(activeConv.id)}
-                                        variant="danger"
-                                    >
-                                        ✓
-                                    </Btn>
-                                )} */}
-                                {/* <button
-                                    key="crm"
-                                    onClick={() => setCrmOpen((o) => !o)}
-                                    title="Customer profile"
-                                    className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors text-sm ${
-                                        crmOpen
-                                            ? "text-white"
-                                            : "bg-[#e6f3d8] text-[#699a32] hover:bg-[#cee6b2]"
-                                    }`}
-                                    style={
-                                        crmOpen
-                                            ? { backgroundColor: "#589b31" }
-                                            : undefined
-                                    }
+                            )}
+
+                            {/* ── Close — any agent who can handle conversations */}
+                            {/* {activeConv.status === "open" && canHandleConversations && (
+                                <Btn
+                                    key="close"
+                                    small
+                                    onClick={() => closeConv(activeConv.id)}
+                                    variant="danger"
                                 >
-                                    👤
-                                </button> */}
-                            </div>
+                                    ✓
+                                </Btn>
+                            )} */}
                         </div>
 
                         {/* Media escalation notice */}

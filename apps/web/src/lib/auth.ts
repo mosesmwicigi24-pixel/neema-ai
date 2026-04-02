@@ -51,6 +51,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                     accessToken:  data.access_token,
                     refreshToken: data.refresh_token,
                     role:         data.role ?? "agent",
+                    isSuperuser: data.is_superuser,
                 };
             },
         }),
@@ -65,6 +66,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                 token.accessTokenExpiry = jwtExpiry((user as any).accessToken);
                 token.id                = user.id;
                 token.role              = (user as any).role ?? "agent";
+                token.isSuperuser       = (user as any).isSuperuser;
                 return token;
             }
 
@@ -96,7 +98,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             (session as any).refreshToken = token.refreshToken;
             (session as any).role         = token.role;
             (session as any).error        = token.error;      // propagated to client
-            session.user.id = token.id as string;
+            session.user.id               = token.id as string;
+            session.user.role             = token.role as string;           
+            session.user.isSuperuser      = token.isSuperuser as boolean;
             return session;
         },
     },
