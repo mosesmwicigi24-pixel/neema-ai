@@ -19,6 +19,21 @@ async def intercept_conversation(
     if not conv:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Conversation not found")
+    
+    # ── Ownership lock ────────────────────────────────────────────────────────
+    if (
+        conv.intercept_mode == InterceptMode.human
+        and conv.assigned_agent_id is not None
+        and conv.assigned_agent_id != agent.id
+    ):
+        owner = await db.get(Agent, conv.assigned_agent_id)
+        owner_name = owner.name if owner else "another agent"
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=409,
+            detail=f"Already handled by {owner_name}. They must release or transfer it first.",
+        )
+    # ─────────────────────────────────────────────────────────────────────────
 
     conv.intercept_mode = InterceptMode.human
     conv.assigned_agent_id = agent.id
@@ -198,6 +213,21 @@ async def send_agent_reply(
     if not conv:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Conversation not found")
+    
+    # ── Ownership lock ────────────────────────────────────────────────────────
+    if (
+        conv.intercept_mode == InterceptMode.human
+        and conv.assigned_agent_id is not None
+        and conv.assigned_agent_id != agent.id
+    ):
+        owner = await db.get(Agent, conv.assigned_agent_id)
+        owner_name = owner.name if owner else "another agent"
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=409,
+            detail=f"Conversation is handled by {owner_name}.",
+        )
+    # ─────────────────────────────────────────────────────────────────────────
 
     wa_id = conv.wa_id.lstrip("+")
     await _send_waba(wa_id, text)

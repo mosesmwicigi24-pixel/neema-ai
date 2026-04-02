@@ -23,6 +23,7 @@ import type {
     Channel,
     SharedViewProps,
 } from "@/types";
+import { useSession } from "next-auth/react";
 
 type MobilePanel = "list" | "thread";
 
@@ -78,10 +79,12 @@ export function ConversationsView({
     const [threadLoading, setThreadLoading] = useState(false);
     const [sending, setSending] = useState(false);
     const [crmOpen, setCrmOpen] = useState<boolean>(true);
+    const { data: session } = useSession();
+    const currentAgentId = (session as any)?.user?.id as string | undefined;
 
     // ── Media attachment state ────────────────────────────────────────────────
-    const [mediaFile, setMediaFile]           = useState<File | null>(null);
-    const [mediaCaption, setMediaCaption]     = useState<string>("");
+    const [mediaFile, setMediaFile] = useState<File | null>(null);
+    const [mediaCaption, setMediaCaption] = useState<string>("");
     const [mediaPreviewUrl, setMediaPreviewUrl] = useState<string | null>(null);
     const [uploadingMedia, setUploadingMedia] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -729,7 +732,6 @@ export function ConversationsView({
                                     )}
                                 {activeConv.intercept_mode === "ai" && (
                                     <Btn
-                                        key="intercept"
                                         small
                                         onClick={() => intercept(activeConv.id)}
                                         variant="primary"
@@ -737,16 +739,20 @@ export function ConversationsView({
                                         ⚡ Intercept
                                     </Btn>
                                 )}
-                                {activeConv.intercept_mode === "human" && (
-                                    <Btn
-                                        key="release"
-                                        small
-                                        onClick={() => release(activeConv.id)}
-                                        variant="secondary"
-                                    >
-                                        ↩ Release
-                                    </Btn>
-                                )}
+                                {activeConv.intercept_mode === "human" &&
+                                    activeConv.assigned_agent_id &&
+                                    activeConv.assigned_agent_id !==
+                                        currentAgentId && (
+                                        <span
+                                            className="text-xs px-2 py-1 rounded-md bg-stone-100 text-stone-400 cursor-not-allowed"
+                                            title={`Handled by ${activeConv.assigned_agent_name ?? "another agent"} — they must release or transfer it first`}
+                                        >
+                                            🔒{" "}
+                                            {activeConv.assigned_agent_name?.split(
+                                                " ",
+                                            )[0] ?? "Locked"}
+                                        </span>
+                                    )}
                                 {activeConv.intercept_mode !== "paused" && (
                                     <Btn
                                         key="pause"
@@ -822,9 +828,12 @@ export function ConversationsView({
                                     m.direction === "inbound",
                             ) && (
                                 <div className="mx-4 mt-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 flex items-center gap-2">
-                                    <span className="text-amber-500 text-sm flex-shrink-0">📎</span>
+                                    <span className="text-amber-500 text-sm flex-shrink-0">
+                                        📎
+                                    </span>
                                     <p className="text-xs font-medium text-amber-700">
-                                        Customer sent media — conversation was auto-escalated for your review.
+                                        Customer sent media — conversation was
+                                        auto-escalated for your review.
                                     </p>
                                 </div>
                             )}
@@ -886,7 +895,14 @@ export function ConversationsView({
                                     >
                                         <div
                                             className={`rounded-2xl text-xs ${
-                                                (msg as any).media_type && (msg as any).media_type !== "note" && (msg as any).media_url && (msg as any).media_type.startsWith ? "p-1.5 max-w-[65%]" : "px-4 py-2.5 max-w-[75%]"
+                                                (msg as any).media_type &&
+                                                (msg as any).media_type !==
+                                                    "note" &&
+                                                (msg as any).media_url &&
+                                                (msg as any).media_type
+                                                    .startsWith
+                                                    ? "p-1.5 max-w-[65%]"
+                                                    : "px-4 py-2.5 max-w-[75%]"
                                             } ${
                                                 isInbound
                                                     ? "bg-white border border-[#cee6b2] text-[#16270c] rounded-tl-sm"
@@ -899,63 +915,153 @@ export function ConversationsView({
                                                 <div className="text-[10px] opacity-70 mb-1 font-medium uppercase tracking-wide">
                                                     {msg.sender === "ai"
                                                         ? "AI"
-                                                        : "Agent"}
+                                                        : (msg as any)
+                                                                .agent_name
+                                                          ? (msg as any)
+                                                                .agent_name
+                                                          : "Agent"}
                                                 </div>
                                             )}
                                             {/* Media or plain text */}
                                             {(() => {
-                                                const mt = (msg as any).media_type as string | null | undefined;
-                                                const mu = (msg as any).media_url as string | null | undefined;
+                                                const mt = (msg as any)
+                                                    .media_type as
+                                                    | string
+                                                    | null
+                                                    | undefined;
+                                                const mu = (msg as any)
+                                                    .media_url as
+                                                    | string
+                                                    | null
+                                                    | undefined;
                                                 if (!mt || !mu) {
-                                                    return <p className="leading-relaxed whitespace-pre-wrap">{msg.text}</p>;
+                                                    return (
+                                                        <p className="leading-relaxed whitespace-pre-wrap">
+                                                            {msg.text}
+                                                        </p>
+                                                    );
                                                 }
-                                                if (mt === "image" || mt.startsWith?.("image/")) {
+                                                if (
+                                                    mt === "image" ||
+                                                    mt.startsWith?.("image/")
+                                                ) {
                                                     return (
                                                         <div className="space-y-1">
-                                                            <a href={mu} target="_blank" rel="noopener noreferrer">
+                                                            <a
+                                                                href={mu}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                            >
                                                                 <img
                                                                     src={mu}
-                                                                    alt={msg.text || "image"}
+                                                                    alt={
+                                                                        msg.text ||
+                                                                        "image"
+                                                                    }
                                                                     className="max-w-full rounded-xl border border-black/10 object-cover"
-                                                                    style={{ maxHeight: 240 }}
+                                                                    style={{
+                                                                        maxHeight: 240,
+                                                                    }}
                                                                 />
                                                             </a>
-                                                            {msg.text && !msg.text.startsWith("[") && (
-                                                                <p className="text-xs px-1 leading-relaxed">{msg.text}</p>
-                                                            )}
+                                                            {msg.text &&
+                                                                !msg.text.startsWith(
+                                                                    "[",
+                                                                ) && (
+                                                                    <p className="text-xs px-1 leading-relaxed">
+                                                                        {
+                                                                            msg.text
+                                                                        }
+                                                                    </p>
+                                                                )}
                                                         </div>
                                                     );
                                                 }
-                                                if (mt === "video" || mt.startsWith?.("video/")) {
+                                                if (
+                                                    mt === "video" ||
+                                                    mt.startsWith?.("video/")
+                                                ) {
                                                     return (
                                                         <div className="space-y-1">
-                                                            <video src={mu} controls className="max-w-full rounded-xl border border-black/10" style={{ maxHeight: 200 }} />
-                                                            {msg.text && !msg.text.startsWith("[") && (
-                                                                <p className="text-xs px-1 leading-relaxed">{msg.text}</p>
-                                                            )}
+                                                            <video
+                                                                src={mu}
+                                                                controls
+                                                                className="max-w-full rounded-xl border border-black/10"
+                                                                style={{
+                                                                    maxHeight: 200,
+                                                                }}
+                                                            />
+                                                            {msg.text &&
+                                                                !msg.text.startsWith(
+                                                                    "[",
+                                                                ) && (
+                                                                    <p className="text-xs px-1 leading-relaxed">
+                                                                        {
+                                                                            msg.text
+                                                                        }
+                                                                    </p>
+                                                                )}
                                                         </div>
                                                     );
                                                 }
-                                                if (mt === "audio" || mt.startsWith?.("audio/")) {
-                                                    return <audio src={mu} controls className="w-full" />;
+                                                if (
+                                                    mt === "audio" ||
+                                                    mt.startsWith?.("audio/")
+                                                ) {
+                                                    return (
+                                                        <audio
+                                                            src={mu}
+                                                            controls
+                                                            className="w-full"
+                                                        />
+                                                    );
                                                 }
                                                 // document / other
-                                                const fileName = msg.text || mu.split("/").pop() || "file";
+                                                const fileName =
+                                                    msg.text ||
+                                                    mu.split("/").pop() ||
+                                                    "file";
                                                 return (
                                                     <a
                                                         href={mu}
                                                         target="_blank"
                                                         rel="noopener noreferrer"
                                                         className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-opacity hover:opacity-80 ${
-                                                            isInbound ? "bg-[#f3f9ec] border-[#cee6b2] text-[#16270c]" : "bg-white/20 border-white/30 text-white"
+                                                            isInbound
+                                                                ? "bg-[#f3f9ec] border-[#cee6b2] text-[#16270c]"
+                                                                : "bg-white/20 border-white/30 text-white"
                                                         }`}
                                                     >
-                                                        <svg className="w-5 h-5 flex-shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                                                        <svg
+                                                            className="w-5 h-5 flex-shrink-0 opacity-70"
+                                                            fill="none"
+                                                            stroke="currentColor"
+                                                            viewBox="0 0 24 24"
+                                                        >
+                                                            <path
+                                                                strokeLinecap="round"
+                                                                strokeLinejoin="round"
+                                                                strokeWidth={
+                                                                    1.5
+                                                                }
+                                                                d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"
+                                                            />
                                                         </svg>
-                                                        <span className="text-xs font-medium truncate max-w-[160px]">{fileName}</span>
-                                                        <svg className="w-4 h-4 flex-shrink-0 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                                        <span className="text-xs font-medium truncate max-w-[160px]">
+                                                            {fileName}
+                                                        </span>
+                                                        <svg
+                                                            className="w-4 h-4 flex-shrink-0 opacity-60"
+                                                            fill="none"
+                                                            stroke="currentColor"
+                                                            viewBox="0 0 24 24"
+                                                        >
+                                                            <path
+                                                                strokeLinecap="round"
+                                                                strokeLinejoin="round"
+                                                                strokeWidth={2}
+                                                                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                                                            />
                                                         </svg>
                                                     </a>
                                                 );
@@ -975,35 +1081,106 @@ export function ConversationsView({
                         </div>
 
                         {/* Reply box — only shown when agent is in control */}
-                        {activeConv.intercept_mode === "human" && (
-                            <div className="border-t border-[#e6f3d8] px-4 py-3 bg-white">
-                                {draftVisible &&
-                                    activeConv.intercept_mode === "human" && (
-                                        <div className="mb-2 rounded-xl bg-blue-50 border border-blue-200 overflow-hidden">
-                                            {/* Header */}
-                                            <div className="flex items-center justify-between px-3 py-2 border-b border-blue-100">
-                                                <div className="flex items-center gap-1.5">
-                                                    <span className="text-blue-500 text-sm">
-                                                        🤖
-                                                    </span>
-                                                    <p className="text-xs font-semibold text-blue-700">
-                                                        AI Draft
-                                                    </p>
+                        {/* Reply box — only shown when this agent owns the conversation */}
+                        {activeConv.intercept_mode === "human" &&
+                            activeConv.assigned_agent_id === currentAgentId && (
+                                <div className="border-t border-[#e6f3d8] px-4 py-3 bg-white">
+                                    {draftVisible &&
+                                        activeConv.intercept_mode ===
+                                            "human" && (
+                                            <div className="mb-2 rounded-xl bg-blue-50 border border-blue-200 overflow-hidden">
+                                                {/* Header */}
+                                                <div className="flex items-center justify-between px-3 py-2 border-b border-blue-100">
+                                                    <div className="flex items-center gap-1.5">
+                                                        <span className="text-blue-500 text-sm">
+                                                            🤖
+                                                        </span>
+                                                        <p className="text-xs font-semibold text-blue-700">
+                                                            AI Draft
+                                                        </p>
+                                                    </div>
+                                                    <div className="flex items-center gap-1">
+                                                        <button
+                                                            onClick={() =>
+                                                                setDraftEditing(
+                                                                    (e) => !e,
+                                                                )
+                                                            }
+                                                            className="text-[10px] text-blue-500 hover:text-blue-700 px-2 py-0.5 rounded border border-blue-200 hover:border-blue-400 transition-colors"
+                                                        >
+                                                            {draftEditing
+                                                                ? "Preview"
+                                                                : "Edit"}
+                                                        </button>
+                                                        <button
+                                                            onClick={() => {
+                                                                setDraftVisible(
+                                                                    false,
+                                                                );
+                                                                setDraftText(
+                                                                    "",
+                                                                );
+                                                                setDraftEditing(
+                                                                    false,
+                                                                );
+                                                            }}
+                                                            className="text-[10px] text-blue-400 hover:text-blue-600 px-1.5 py-0.5"
+                                                        >
+                                                            ✕
+                                                        </button>
+                                                    </div>
                                                 </div>
-                                                <div className="flex items-center gap-1">
-                                                    <button
-                                                        onClick={() =>
-                                                            setDraftEditing(
-                                                                (e) => !e,
-                                                            )
-                                                        }
-                                                        className="text-[10px] text-blue-500 hover:text-blue-700 px-2 py-0.5 rounded border border-blue-200 hover:border-blue-400 transition-colors"
+                                                {/* Body */}
+                                                <div className="px-3 py-2">
+                                                    {draftEditing ? (
+                                                        <textarea
+                                                            value={draftText}
+                                                            onChange={(e) =>
+                                                                setDraftText(
+                                                                    e.target
+                                                                        .value,
+                                                                )
+                                                            }
+                                                            rows={4}
+                                                            className="w-full text-xs text-blue-800 bg-white border border-blue-200 rounded-lg px-2.5 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                                            placeholder="Edit the draft…"
+                                                        />
+                                                    ) : (
+                                                        <p className="text-xs text-blue-700 whitespace-pre-wrap leading-relaxed">
+                                                            {draftText ||
+                                                                "AI has a reply ready."}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                                {/* Actions */}
+                                                <div className="flex items-center gap-2 px-3 pb-2.5">
+                                                    <Btn
+                                                        small
+                                                        onClick={approveDraft}
+                                                        variant="primary"
                                                     >
-                                                        {draftEditing
-                                                            ? "Preview"
-                                                            : "Edit"}
-                                                    </button>
-                                                    <button
+                                                        ✓ Send
+                                                    </Btn>
+                                                    <Btn
+                                                        small
+                                                        onClick={() => {
+                                                            setReplyText(
+                                                                draftText,
+                                                            );
+                                                            setDraftVisible(
+                                                                false,
+                                                            );
+                                                            setDraftText("");
+                                                            setDraftEditing(
+                                                                false,
+                                                            );
+                                                        }}
+                                                        variant="secondary"
+                                                    >
+                                                        Edit & send manually
+                                                    </Btn>
+                                                    <Btn
+                                                        small
                                                         onClick={() => {
                                                             setDraftVisible(
                                                                 false,
@@ -1013,133 +1190,53 @@ export function ConversationsView({
                                                                 false,
                                                             );
                                                         }}
-                                                        className="text-[10px] text-blue-400 hover:text-blue-600 px-1.5 py-0.5"
+                                                        variant="ghost"
                                                     >
-                                                        ✕
-                                                    </button>
+                                                        Dismiss
+                                                    </Btn>
                                                 </div>
                                             </div>
-                                            {/* Body */}
-                                            <div className="px-3 py-2">
-                                                {draftEditing ? (
-                                                    <textarea
-                                                        value={draftText}
-                                                        onChange={(e) =>
-                                                            setDraftText(
-                                                                e.target.value,
-                                                            )
-                                                        }
-                                                        rows={4}
-                                                        className="w-full text-xs text-blue-800 bg-white border border-blue-200 rounded-lg px-2.5 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-blue-400"
-                                                        placeholder="Edit the draft…"
-                                                    />
-                                                ) : (
-                                                    <p className="text-xs text-blue-700 whitespace-pre-wrap leading-relaxed">
-                                                        {draftText ||
-                                                            "AI has a reply ready."}
-                                                    </p>
-                                                )}
+                                        )}
+                                    {/* Generate draft button — shown when in human mode but no draft visible */}
+                                    {!draftVisible &&
+                                        activeConv.intercept_mode ===
+                                            "human" && (
+                                            <div className="mb-2 flex justify-end">
+                                                <button
+                                                    onClick={generateDraft}
+                                                    disabled={generatingDraft}
+                                                    className="flex items-center gap-1.5 h-7 px-3 text-xs font-medium rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50 disabled:opacity-50 transition-colors"
+                                                >
+                                                    {generatingDraft ? (
+                                                        <>
+                                                            <div className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                                                            Generating…
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            🤖 Generate AI draft
+                                                        </>
+                                                    )}
+                                                </button>
                                             </div>
-                                            {/* Actions */}
-                                            <div className="flex items-center gap-2 px-3 pb-2.5">
-                                                <Btn
-                                                    small
-                                                    onClick={approveDraft}
-                                                    variant="primary"
-                                                >
-                                                    ✓ Send
-                                                </Btn>
-                                                <Btn
-                                                    small
-                                                    onClick={() => {
-                                                        setReplyText(draftText);
-                                                        setDraftVisible(false);
-                                                        setDraftText("");
-                                                        setDraftEditing(false);
-                                                    }}
-                                                    variant="secondary"
-                                                >
-                                                    Edit & send manually
-                                                </Btn>
-                                                <Btn
-                                                    small
-                                                    onClick={() => {
-                                                        setDraftVisible(false);
-                                                        setDraftText("");
-                                                        setDraftEditing(false);
-                                                    }}
-                                                    variant="ghost"
-                                                >
-                                                    Dismiss
-                                                </Btn>
-                                            </div>
-                                        </div>
-                                    )}
-                                {/* Generate draft button — shown when in human mode but no draft visible */}
-                                {!draftVisible &&
-                                    activeConv.intercept_mode === "human" && (
-                                        <div className="mb-2 flex justify-end">
-                                            <button
-                                                onClick={generateDraft}
-                                                disabled={generatingDraft}
-                                                className="flex items-center gap-1.5 h-7 px-3 rounded-lg text-xs font-medium text-blue-600 border border-blue-200 bg-blue-50 hover:bg-blue-100 disabled:opacity-50 transition-colors"
-                                            >
-                                                {generatingDraft ? (
-                                                    <>
-                                                        <div className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-                                                        Generating…
-                                                    </>
-                                                ) : (
-                                                    <>🤖 Generate AI draft</>
-                                                )}
-                                            </button>
-                                        </div>
-                                    )}
-                                <div className="flex gap-2 items-end">
-                                    {/* Hidden file input */}
-                                    <input
-                                        ref={fileInputRef}
-                                        type="file"
-                                        accept={ACCEPT_TYPES}
-                                        className="hidden"
-                                        onChange={handleFileSelect}
-                                    />
-                                    {/* Paperclip attach button */}
-                                    <button
-                                        onClick={() => fileInputRef.current?.click()}
-                                        title="Attach image or file"
-                                        className="h-10 w-10 rounded-xl bg-[#e6f3d8] hover:bg-[#cee6b2] flex items-center justify-center text-[#427425] transition-colors flex-shrink-0"
-                                    >
-                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                                        </svg>
-                                    </button>
-                                    <textarea
-                                        value={replyText}
-                                        onChange={(e) =>
-                                            setReplyText(e.target.value)
-                                        }
-                                        onKeyDown={(e) => {
-                                            if (
-                                                e.key === "Enter" &&
-                                                !e.shiftKey
-                                            ) {
-                                                e.preventDefault();
-                                                sendReply();
+                                        )}
+                                    <div className="flex gap-2 items-end">
+                                        {/* Hidden file input */}
+                                        <input
+                                            ref={fileInputRef}
+                                            type="file"
+                                            accept={ACCEPT_TYPES}
+                                            className="hidden"
+                                            onChange={handleFileSelect}
+                                        />
+                                        {/* Paperclip attach button */}
+                                        <button
+                                            onClick={() =>
+                                                fileInputRef.current?.click()
                                             }
-                                        }}
-                                        placeholder="Type a reply… (Enter to send)"
-                                        rows={2}
-                                        className="flex-1 resize-none px-3 py-2 text-sm bg-[#f3f9ec] border border-[#cee6b2] rounded-xl text-[#16270c] placeholder-stone-300 focus:outline-none focus:ring-2 focus:ring-[#589b31] focus:border-transparent"
-                                    />
-                                    <button
-                                        onClick={sendReply}
-                                        disabled={!replyText.trim() || sending}
-                                        className="h-10 w-10 rounded-xl bg-[#427425] hover:bg-[#589b31] disabled:opacity-50 flex items-center justify-center text-white transition-colors"
-                                    >
-                                        {sending ? (
-                                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                        ) : (
+                                            title="Attach image or file"
+                                            className="h-10 w-10 rounded-xl bg-[#e6f3d8] hover:bg-[#cee6b2] flex items-center justify-center text-[#427425] transition-colors flex-shrink-0"
+                                        >
                                             <svg
                                                 className="w-4 h-4"
                                                 fill="none"
@@ -1150,65 +1247,157 @@ export function ConversationsView({
                                                     strokeLinecap="round"
                                                     strokeLinejoin="round"
                                                     strokeWidth={2}
-                                                    d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
+                                                    d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"
                                                 />
                                             </svg>
-                                        )}
-                                    </button>
-                                </div>
-                                {/* Media attachment preview panel */}
-                                {mediaFile && (
-                                    <div className="mt-2 p-2.5 rounded-xl bg-[#f3f9ec] border border-[#cee6b2] flex items-start gap-2">
-                                        {mediaPreviewUrl ? (
-                                            <img
-                                                src={mediaPreviewUrl}
-                                                alt="preview"
-                                                className="w-14 h-14 rounded-lg object-cover border border-[#cee6b2] flex-shrink-0"
-                                            />
-                                        ) : (
-                                            <div className="w-14 h-14 rounded-lg bg-[#e6f3d8] flex items-center justify-center flex-shrink-0">
-                                                <svg className="w-6 h-6 text-[#699a32]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                                        </button>
+                                        <textarea
+                                            value={replyText}
+                                            onChange={(e) =>
+                                                setReplyText(e.target.value)
+                                            }
+                                            onKeyDown={(e) => {
+                                                if (
+                                                    e.key === "Enter" &&
+                                                    !e.shiftKey
+                                                ) {
+                                                    e.preventDefault();
+                                                    sendReply();
+                                                }
+                                            }}
+                                            placeholder="Type a reply… (Enter to send)"
+                                            rows={2}
+                                            className="flex-1 resize-none px-3 py-2 text-sm bg-[#f3f9ec] border border-[#cee6b2] rounded-xl text-[#16270c] placeholder-stone-300 focus:outline-none focus:ring-2 focus:ring-[#589b31] focus:border-transparent"
+                                        />
+                                        <button
+                                            onClick={sendReply}
+                                            disabled={
+                                                !replyText.trim() || sending
+                                            }
+                                            className="h-10 w-10 rounded-xl bg-[#427425] hover:bg-[#589b31] disabled:opacity-50 flex items-center justify-center text-white transition-colors"
+                                        >
+                                            {sending ? (
+                                                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                            ) : (
+                                                <svg
+                                                    className="w-4 h-4"
+                                                    fill="none"
+                                                    stroke="currentColor"
+                                                    viewBox="0 0 24 24"
+                                                >
+                                                    <path
+                                                        strokeLinecap="round"
+                                                        strokeLinejoin="round"
+                                                        strokeWidth={2}
+                                                        d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
+                                                    />
                                                 </svg>
-                                            </div>
-                                        )}
-                                        <div className="flex-1 min-w-0 space-y-1.5">
-                                            <p className="text-xs font-medium text-[#16270c] truncate">{mediaFile.name}</p>
-                                            <input
-                                                value={mediaCaption}
-                                                onChange={(e) => setMediaCaption(e.target.value)}
-                                                placeholder="Add a caption (optional)…"
-                                                className="w-full px-2 py-1 text-xs bg-white border border-[#cee6b2] rounded-lg text-[#16270c] placeholder-stone-300 focus:outline-none focus:ring-1 focus:ring-[#589b31]"
-                                            />
-                                            <div className="flex gap-1.5">
-                                                <button
-                                                    onClick={sendMedia}
-                                                    disabled={uploadingMedia}
-                                                    className="flex items-center gap-1 h-7 px-3 bg-[#427425] hover:bg-[#589b31] disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors"
-                                                >
-                                                    {uploadingMedia ? (
-                                                        <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                                    ) : (
-                                                        <>
-                                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                                                            </svg>
-                                                            Send
-                                                        </>
-                                                    )}
-                                                </button>
-                                                <button
-                                                    onClick={clearMediaAttachment}
-                                                    className="h-7 px-3 text-xs text-[#699a32] hover:text-[#16270c] rounded-lg border border-[#cee6b2] transition-colors"
-                                                >
-                                                    Cancel
-                                                </button>
+                                            )}
+                                        </button>
+                                    </div>
+                                    {/* Media attachment preview panel */}
+                                    {mediaFile && (
+                                        <div className="mt-2 p-2.5 rounded-xl bg-[#f3f9ec] border border-[#cee6b2] flex items-start gap-2">
+                                            {mediaPreviewUrl ? (
+                                                <img
+                                                    src={mediaPreviewUrl}
+                                                    alt="preview"
+                                                    className="w-14 h-14 rounded-lg object-cover border border-[#cee6b2] flex-shrink-0"
+                                                />
+                                            ) : (
+                                                <div className="w-14 h-14 rounded-lg bg-[#e6f3d8] flex items-center justify-center flex-shrink-0">
+                                                    <svg
+                                                        className="w-6 h-6 text-[#699a32]"
+                                                        fill="none"
+                                                        stroke="currentColor"
+                                                        viewBox="0 0 24 24"
+                                                    >
+                                                        <path
+                                                            strokeLinecap="round"
+                                                            strokeLinejoin="round"
+                                                            strokeWidth={1.5}
+                                                            d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"
+                                                        />
+                                                    </svg>
+                                                </div>
+                                            )}
+                                            <div className="flex-1 min-w-0 space-y-1.5">
+                                                <p className="text-xs font-medium text-[#16270c] truncate">
+                                                    {mediaFile.name}
+                                                </p>
+                                                <input
+                                                    value={mediaCaption}
+                                                    onChange={(e) =>
+                                                        setMediaCaption(
+                                                            e.target.value,
+                                                        )
+                                                    }
+                                                    placeholder="Add a caption (optional)…"
+                                                    className="w-full px-2 py-1 text-xs bg-white border border-[#cee6b2] rounded-lg text-[#16270c] placeholder-stone-300 focus:outline-none focus:ring-1 focus:ring-[#589b31]"
+                                                />
+                                                <div className="flex gap-1.5">
+                                                    <button
+                                                        onClick={sendMedia}
+                                                        disabled={
+                                                            uploadingMedia
+                                                        }
+                                                        className="flex items-center gap-1 h-7 px-3 bg-[#427425] hover:bg-[#589b31] disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors"
+                                                    >
+                                                        {uploadingMedia ? (
+                                                            <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                                        ) : (
+                                                            <>
+                                                                <svg
+                                                                    className="w-3 h-3"
+                                                                    fill="none"
+                                                                    stroke="currentColor"
+                                                                    viewBox="0 0 24 24"
+                                                                >
+                                                                    <path
+                                                                        strokeLinecap="round"
+                                                                        strokeLinejoin="round"
+                                                                        strokeWidth={
+                                                                            2
+                                                                        }
+                                                                        d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
+                                                                    />
+                                                                </svg>
+                                                                Send
+                                                            </>
+                                                        )}
+                                                    </button>
+                                                    <button
+                                                        onClick={
+                                                            clearMediaAttachment
+                                                        }
+                                                        className="h-7 px-3 text-xs text-[#699a32] hover:text-[#16270c] rounded-lg border border-[#cee6b2] transition-colors"
+                                                    >
+                                                        Cancel
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
-                                )}
-                            </div>
-                        )}
+                                    )}
+                                </div>
+                            )}
+
+                        {/* Lock banner — conversation owned by another agent */}
+                        {activeConv.intercept_mode === "human" &&
+                            activeConv.assigned_agent_id &&
+                            activeConv.assigned_agent_id !== currentAgentId && (
+                                <div className="border-t border-[#e6f3d8] px-4 py-4 bg-[#f3f9ec] flex items-center justify-center gap-2">
+                                    <span className="text-base">🔒</span>
+                                    <p className="text-xs text-[#699a32]">
+                                        Handled by{" "}
+                                        <strong className="text-[#427425]">
+                                            {activeConv.assigned_agent_name ??
+                                                "another agent"}
+                                        </strong>{" "}
+                                        — ask them to release or transfer it to
+                                        you
+                                    </p>
+                                </div>
+                            )}
                     </>
                 )}
             </div>

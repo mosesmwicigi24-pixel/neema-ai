@@ -119,6 +119,15 @@ async def get_thread(
         .order_by(Message.created_at.asc())
     )
     msgs = result.scalars().all()
+
+    # Batch-load agent names to avoid N+1
+    agent_ids = [m.agent_id for m in msgs if m.agent_id]
+    agent_name_map: dict[str, str] = {}
+    if agent_ids:
+        a_res = await db.execute(select(Agent).where(Agent.id.in_(agent_ids)))
+        for a in a_res.scalars().all():
+            agent_name_map[str(a.id)] = a.name
+
     return [
         {
             "id": str(m.id),
@@ -128,11 +137,11 @@ async def get_thread(
             "media_type": m.media_type if m.media_type != "note" else None,
             "media_url": m.media_url,
             "isNote": m.media_type == "note",
+            "agent_name": agent_name_map.get(str(m.agent_id)) if m.agent_id else None,
             "created_at": m.created_at.isoformat() if m.created_at else None,
         }
         for m in msgs
     ]
-
 
 @router.get("/conversations/{conv_id}/latest-draft")
 async def get_latest_draft(
