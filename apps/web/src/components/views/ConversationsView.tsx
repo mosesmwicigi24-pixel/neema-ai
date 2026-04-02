@@ -876,7 +876,7 @@ export function ConversationsView({
                                 )}
 
                                 {/* ── Close — any agent/admin, no ownership restriction */}
-                                {activeConv.status === "open" &&
+                                {/* {activeConv.status === "open" &&
                                     canHandleConversations && (
                                         <Btn
                                             key="close"
@@ -888,7 +888,7 @@ export function ConversationsView({
                                         >
                                             ✓
                                         </Btn>
-                                    )}
+                                    )} */}
                             </div>
                         </div>
 
