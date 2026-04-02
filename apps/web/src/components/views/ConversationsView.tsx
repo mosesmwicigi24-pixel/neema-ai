@@ -84,7 +84,8 @@ export function ConversationsView({
     const { data: session } = useSession();
     const currentAgentId = (session as any)?.user?.id as string | undefined;
     const currentRole = (session as any)?.user?.role as string | undefined;
-    const isSuperuser = ((session as any)?.user?.isSuperuser as boolean) ?? false;
+    const isSuperuser =
+        ((session as any)?.user?.isSuperuser as boolean) ?? false;
 
     // Admin role is treated the same as superuser for UI permission purposes.
     // This ensures buttons work correctly even if isSuperuser isn't in the session yet.
@@ -735,14 +736,19 @@ export function ConversationsView({
                             />
                             <div className="flex-1 min-w-0">
                                 <div className="text-sm font-semibold text-[#16270c] truncate">
-                                    {displayName(activeConv.name, activeConv.wa_id)}
+                                    {displayName(
+                                        activeConv.name,
+                                        activeConv.wa_id,
+                                    )}
                                 </div>
                                 <div className="text-xs text-[#9ccd65] font-mono truncate">
                                     {formatPhone(activeConv.wa_id)}
                                 </div>
                             </div>
                             <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap">
-                                <InterceptBadge mode={activeConv.intercept_mode} />
+                                <InterceptBadge
+                                    mode={activeConv.intercept_mode}
+                                />
 
                                 {/* Assigned agent name */}
                                 {activeConv.assigned_agent_id &&
@@ -930,7 +936,9 @@ export function ConversationsView({
                                                 </p>
                                                 <div className="text-[10px] text-amber-400 mt-1">
                                                     {msg.created_at
-                                                        ? timeAgo(msg.created_at)
+                                                        ? timeAgo(
+                                                              msg.created_at,
+                                                          )
                                                         : ""}
                                                 </div>
                                             </div>
@@ -1130,8 +1138,7 @@ export function ConversationsView({
 
                         {/* Reply box — shown when agent owns the conv, or is admin/superuser */}
                         {activeConv.intercept_mode === "human" &&
-                            (activeConv.assigned_agent_id ===
-                                currentAgentId ||
+                            (activeConv.assigned_agent_id === currentAgentId ||
                                 isAdminOrSuper) && (
                                 <div className="border-t border-[#e6f3d8] px-4 py-3 bg-white">
                                     {/* ── AI Draft pill — shown when a draft exists but panel is collapsed */}
@@ -1286,7 +1293,9 @@ export function ConversationsView({
                                                             Generating…
                                                         </>
                                                     ) : (
-                                                        <>🤖 Generate AI draft</>
+                                                        <>
+                                                            🤖 Generate AI draft
+                                                        </>
                                                     )}
                                                 </button>
                                             </div>
@@ -1622,13 +1631,9 @@ export function ConversationsView({
                         } catch {
                             setMessages((m) => ({
                                 ...m,
-                                [activeConvId]: (
-                                    m[activeConvId] ?? []
-                                ).filter(
+                                [activeConvId]: (m[activeConvId] ?? []).filter(
                                     (msg) =>
-                                        !msg.id?.startsWith(
-                                            "optimistic-note-",
-                                        ),
+                                        !msg.id?.startsWith("optimistic-note-"),
                                 ),
                             }));
                             setNoteText(text);
@@ -1663,6 +1668,26 @@ export function ConversationsView({
             {ThreadPanel}
             {TransferModalEl}
             {NoteModalEl}
+
+            {typeof window !== "undefined" && (
+                <div
+                    style={{
+                        background: "red",
+                        color: "white",
+                        fontSize: 11,
+                        padding: "4px 8px",
+                        position: "fixed",
+                        bottom: 0,
+                        left: 0,
+                        zIndex: 9999,
+                    }}
+                >
+                    id={currentAgentId ?? "none"} | role={currentRole ?? "none"}{" "}
+                    | super={String(isSuperuser)} | canHandle=
+                    {String(canHandleConversations)} | session=
+                    {JSON.stringify((session as any)?.user ?? null)}
+                </div>
+            )}
         </div>
     );
 }
