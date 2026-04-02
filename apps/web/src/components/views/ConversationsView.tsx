@@ -740,19 +740,27 @@ export function ConversationsView({
                                     </Btn>
                                 )}
                                 {activeConv.intercept_mode === "human" &&
+                                    activeConv.assigned_agent_id === currentAgentId && (
+                                    <Btn
+                                        key="release"
+                                        small
+                                        onClick={() => release(activeConv.id)}
+                                        variant="secondary"
+                                    >
+                                        ↩ Release
+                                    </Btn>
+                                )}
+                                {activeConv.intercept_mode === "human" &&
                                     activeConv.assigned_agent_id &&
-                                    activeConv.assigned_agent_id !==
-                                        currentAgentId && (
-                                        <span
-                                            className="text-xs px-2 py-1 rounded-md bg-stone-100 text-stone-400 cursor-not-allowed"
-                                            title={`Handled by ${activeConv.assigned_agent_name ?? "another agent"} — they must release or transfer it first`}
-                                        >
-                                            🔒{" "}
-                                            {activeConv.assigned_agent_name?.split(
-                                                " ",
-                                            )[0] ?? "Locked"}
-                                        </span>
-                                    )}
+                                    activeConv.assigned_agent_id !== currentAgentId && (
+                                    <span
+                                        className="text-xs px-2 py-1 rounded-md bg-stone-100 text-stone-400 cursor-not-allowed"
+                                        title={`Handled by ${activeConv.assigned_agent_name ?? "another agent"} — they must release or transfer it first`}
+                                    >
+                                        🔒{" "}
+                                        {activeConv.assigned_agent_name?.split(" ")[0] ?? "Locked"}
+                                    </span>
+                                )}
                                 {activeConv.intercept_mode !== "paused" && (
                                     <Btn
                                         key="pause"
