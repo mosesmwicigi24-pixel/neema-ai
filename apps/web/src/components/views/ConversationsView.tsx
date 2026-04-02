@@ -617,8 +617,7 @@ export function ConversationsView({
                                 <div className="flex-1 min-w-0">
                                     <div className="flex items-center justify-between mb-0.5">
                                         <span className="text-sm font-semibold text-[#16270c] truncate">
-                                            {conv.name ??
-                                                formatPhone(conv.wa_id)}
+                                            {conv.name?.trim() || formatPhone(conv.wa_id)}
                                         </span>
                                         <span className="text-[10px] text-[#9ccd65] flex-shrink-0 ml-2">
                                             {conv.last_message_at
