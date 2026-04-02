@@ -44,6 +44,10 @@ class UserFactsDto(BaseModel):
     phone: str | None = None
     location: str | None = None
     age: int | None = None
+    country: str | None = None           
+    country_iso: str | None = None       
+    flag_url: str | None = None          
+    only_if_empty: list[str] = [] 
 
 class OrderEventDto(BaseModel):
     wa_id: str

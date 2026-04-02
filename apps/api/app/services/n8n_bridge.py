@@ -162,6 +162,7 @@ async def get_user(db: AsyncSession, wa_id: str) -> dict:
         "id": str(user.id),
         "wa_id": user.wa_id,
         "phone": user.phone,
+        "name": user.name,
         "last_text": user.last_text,
         "last_direction": user.last_direction,
         "state": user.state,
@@ -421,14 +422,23 @@ async def get_messages(db: AsyncSession, wa_id: str) -> list:
 # ── Save User Facts ───────────────────────────────────────
 
 async def save_user_facts(db: AsyncSession, body) -> dict:
-    result = await db.execute(select(User).where(User.wa_id == body.wa_id))
+    # Normalize wa_id — strip leading + to match how it's stored
+    wa_id = (body.wa_id or "").lstrip("+").strip()
+    
+    result = await db.execute(select(User).where(User.wa_id == wa_id))
     user = result.scalar_one_or_none()
     if not user:
         return {"ok": False, "error": "User not found"}
-    for field in ("name", "email", "phone", "location", "age"):
+
+    only_if_empty = getattr(body, 'only_if_empty', [])
+    for field in ("name", "email", "phone", "location", "age", "country", "country_iso", "flag_url"):
         val = getattr(body, field, None)
-        if val is not None:
-            setattr(user, field, val)
+        if val is None:
+            continue
+        if field in only_if_empty and getattr(user, field, None):
+            continue
+        setattr(user, field, val)
+
     await db.commit()
     return {"ok": True}
 
