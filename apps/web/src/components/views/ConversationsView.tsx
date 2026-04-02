@@ -797,7 +797,7 @@ export function ConversationsView({
                                 >
                                     📝
                                 </Btn>
-                                {activeConv.status === "open" && (
+                                {/* {activeConv.status === "open" && (
                                     <Btn
                                         key="close"
                                         small
@@ -806,8 +806,8 @@ export function ConversationsView({
                                     >
                                         ✓
                                     </Btn>
-                                )}
-                                <button
+                                )} */}
+                                {/* <button
                                     key="crm"
                                     onClick={() => setCrmOpen((o) => !o)}
                                     title="Customer profile"
@@ -823,7 +823,7 @@ export function ConversationsView({
                                     }
                                 >
                                     👤
-                                </button>
+                                </button> */}
                             </div>
                         </div>
 
