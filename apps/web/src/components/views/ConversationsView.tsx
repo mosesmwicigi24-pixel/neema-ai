@@ -67,7 +67,7 @@ export function ConversationsView({
         "all" | "human" | "ai" | "paused"
     >("all");
     const [searchQ, setSearchQ] = useState<string>("");
-    const [replyText, setReplyText] = useState<string>("");    
+    const [replyText, setReplyText] = useState<string>("");
     const [draftVisible, setDraftVisible] = useState<boolean>(false);
     const [draftExpanded, setDraftExpanded] = useState<boolean>(false);
     const [draftText, setDraftText] = useState<string>("");
@@ -80,11 +80,13 @@ export function ConversationsView({
     const [threadLoading, setThreadLoading] = useState(false);
     const [sending, setSending] = useState(false);
     const [crmOpen, setCrmOpen] = useState<boolean>(true);
+
     const { data: session } = useSession();
     const currentAgentId = (session as any)?.user?.id as string | undefined;
     const currentRole = (session as any)?.user?.role as string | undefined;
-    const isSuperuser = (session as any)?.user?.isSuperuser as boolean ?? false;
-    const canHandleConversations = isSuperuser || currentRole === "admin" || currentRole === "agent";
+    const isSuperuser = ((session as any)?.user?.isSuperuser as boolean) ?? false;
+    const canHandleConversations =
+        isSuperuser || currentRole === "admin" || currentRole === "agent";
 
     // ── Media attachment state ────────────────────────────────────────────────
     const [mediaFile, setMediaFile] = useState<File | null>(null);
@@ -120,20 +122,26 @@ export function ConversationsView({
             setActiveConvId(firstId);
             loadMessages(firstId);
         }
-        // Only run when conversations first populate or activeConvId resets
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [conversations.length > 0, activeConvId]);
 
     const activeConv = conversations.find((c) => c.id === activeConvId);
     const activeMessages: Message[] = messages[activeConvId] ?? [];
 
-    const isOwner = !!activeConv && activeConv.assigned_agent_id === currentAgentId;
-    const convOwnedByOther = !!activeConv &&
+    // ── Ownership / permission helpers (depend on activeConv) ─────────────────
+    const isOwner =
+        !!activeConv && activeConv.assigned_agent_id === currentAgentId;
+    const convOwnedByOther =
+        !!activeConv &&
         activeConv.intercept_mode === "human" &&
         !!activeConv.assigned_agent_id &&
         activeConv.assigned_agent_id !== currentAgentId;
-    const canActOnThisConv = canHandleConversations &&
-        (isOwner || isSuperuser || activeConv?.intercept_mode !== "human");
+    const canActOnThisConv =
+        canHandleConversations &&
+        (isOwner ||
+            isSuperuser ||
+            activeConv?.intercept_mode !== "human" ||
+            !activeConv?.assigned_agent_id);
 
     // ── Scroll to bottom only when new messages arrive ────────────────────────
     useEffect(() => {
@@ -156,14 +164,15 @@ export function ConversationsView({
     useEffect(() => {
         if (!activeConvId) return;
         const timer = setInterval(() => {
-            loadMessages(activeConvId, true); // silent = no loading spinner
+            loadMessages(activeConvId, true);
         }, 10000);
         return () => clearInterval(timer);
     }, [activeConvId, loadMessages]);
 
-    // ── Reset draft when switching conversations ───────────────────────────────
+    // ── Reset draft when switching conversations ──────────────────────────────
     useEffect(() => {
         setDraftVisible(false);
+        setDraftExpanded(false);
         setDraftText("");
         setDraftEditing(false);
         if (!activeConvId) return;
@@ -175,6 +184,7 @@ export function ConversationsView({
                     if (res.draft) {
                         setDraftText(res.draft);
                         setDraftVisible(true);
+                        // Don't auto-expand — show pill only
                     }
                 })
                 .catch(() => {});
@@ -189,7 +199,7 @@ export function ConversationsView({
         ) {
             setDraftText(event.draft ?? "");
             setDraftVisible(true);
-            setDraftExpanded(false);
+            setDraftExpanded(false); // notify but don't auto-open
             setDraftEditing(false);
         }
         if (
@@ -205,7 +215,6 @@ export function ConversationsView({
             };
             setMessages((m) => {
                 const existing = m[activeConvId] ?? [];
-                // Deduplicate by id to avoid doubles from polling + WS
                 if (existing.some((x) => x.id === msg.id)) return m;
                 return { ...m, [activeConvId]: [...existing, msg] };
             });
@@ -214,7 +223,7 @@ export function ConversationsView({
 
     const handleSelectConv = (id: string) => {
         setActiveConvId(id);
-        loadMessages(id); // always fetch fresh on explicit selection
+        loadMessages(id);
         if (isMobile) setMobilePanel("thread");
     };
 
@@ -256,9 +265,8 @@ export function ConversationsView({
     const sendReply = async () => {
         if (!replyText.trim() || !activeConvId) return;
         setSending(true);
-        const text = replyText; // snapshot before clearing
+        const text = replyText;
         try {
-            // Optimistically append to thread so message appears instantly
             const optimisticMsg: Message = {
                 id: `optimistic-${Date.now()}`,
                 direction: "outbound",
@@ -274,12 +282,10 @@ export function ConversationsView({
 
             await conversationsApi.sendReply(activeConvId, text);
 
-            // Replace optimistic message with server-confirmed messages
             const msgs = await conversationsApi.messages(activeConvId);
             setMessages((m) => ({ ...m, [activeConvId]: msgs }));
             refetchConversations?.();
         } catch {
-            // Rollback: remove optimistic message and restore text
             setMessages((m) => ({
                 ...m,
                 [activeConvId]: (m[activeConvId] ?? []).filter(
@@ -297,7 +303,6 @@ export function ConversationsView({
         if (!activeConvId) return;
         const textToSend = draftText;
         try {
-            // Optimistically append the approved draft as an outbound message
             const optimisticMsg: Message = {
                 id: `optimistic-${Date.now()}`,
                 direction: "outbound",
@@ -319,13 +324,11 @@ export function ConversationsView({
                 textToSend || undefined,
             );
 
-            // Sync with server to replace optimistic message
             const msgs = await conversationsApi.messages(activeConvId);
             setMessages((m) => ({ ...m, [activeConvId]: msgs }));
             refetchConversations?.();
             onToast("AI draft approved & sent");
         } catch {
-            // Rollback
             setMessages((m) => ({
                 ...m,
                 [activeConvId]: (m[activeConvId] ?? []).filter(
@@ -347,7 +350,7 @@ export function ConversationsView({
             if (res.draft) {
                 setDraftText(res.draft);
                 setDraftVisible(true);
-                setDraftExpanded(true);
+                setDraftExpanded(true); // agent requested it — open immediately
                 setDraftEditing(false);
                 onToast("Draft generated");
             }
@@ -729,121 +732,134 @@ export function ConversationsView({
                             />
                             <div className="flex-1 min-w-0">
                                 <div className="text-sm font-semibold text-[#16270c] truncate">
-                                    {activeConv.name ??
-                                        formatPhone(activeConv.wa_id)}
+                                    {displayName(activeConv.name, activeConv.wa_id)}
                                 </div>
                                 <div className="text-xs text-[#9ccd65] font-mono truncate">
                                     {formatPhone(activeConv.wa_id)}
                                 </div>
                             </div>
                             <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap">
-                            <InterceptBadge mode={activeConv.intercept_mode} />
+                                <InterceptBadge mode={activeConv.intercept_mode} />
 
-                            {/* Assigned agent name */}
-                            {activeConv.assigned_agent_id &&
-                                activeConv.assigned_agent_name && (
-                                    <span className="text-xs text-[#9ccd65] hidden lg:block">
-                                        → {activeConv.assigned_agent_name}
+                                {/* Assigned agent name */}
+                                {activeConv.assigned_agent_id &&
+                                    activeConv.assigned_agent_name && (
+                                        <span className="text-xs text-[#9ccd65] hidden lg:block">
+                                            → {activeConv.assigned_agent_name}
+                                        </span>
+                                    )}
+
+                                {/* ── Intercept — AI mode only, agents/admins only */}
+                                {activeConv.intercept_mode === "ai" &&
+                                    canHandleConversations && (
+                                        <Btn
+                                            small
+                                            onClick={() =>
+                                                intercept(activeConv.id)
+                                            }
+                                            variant="primary"
+                                        >
+                                            ⚡ Intercept
+                                        </Btn>
+                                    )}
+
+                                {/* ── Release — owner or superuser only */}
+                                {activeConv.intercept_mode === "human" &&
+                                    (isOwner || isSuperuser) && (
+                                        <Btn
+                                            key="release"
+                                            small
+                                            onClick={() =>
+                                                release(activeConv.id)
+                                            }
+                                            variant="secondary"
+                                        >
+                                            ↩ Release
+                                        </Btn>
+                                    )}
+
+                                {/* ── Locked badge — someone else owns it and we're not superuser */}
+                                {convOwnedByOther && !isSuperuser && (
+                                    <span
+                                        className="text-xs px-2 py-1 rounded-md bg-stone-100 text-stone-400 cursor-not-allowed"
+                                        title={`Handled by ${activeConv.assigned_agent_name ?? "another agent"} — they must release or transfer it first`}
+                                    >
+                                        🔒{" "}
+                                        {activeConv.assigned_agent_name?.split(
+                                            " ",
+                                        )[0] ?? "Locked"}
                                     </span>
                                 )}
 
-                            {/* ── Intercept — AI mode only, agents/admins only */}
-                            {activeConv.intercept_mode === "ai" &&
-                                canHandleConversations && (
-                                    <Btn
-                                        small
-                                        onClick={() => intercept(activeConv.id)}
-                                        variant="primary"
-                                    >
-                                        ⚡ Intercept
-                                    </Btn>
-                                )}
+                                {/* ── Pause — owner or superuser, not already paused */}
+                                {activeConv.intercept_mode !== "paused" &&
+                                    canActOnThisConv && (
+                                        <Btn
+                                            key="pause"
+                                            small
+                                            onClick={() =>
+                                                release(activeConv.id)
+                                            }
+                                            variant="secondary"
+                                        >
+                                            ⏸ Pause
+                                        </Btn>
+                                    )}
 
-                            {/* ── Release — owner or superuser only */}
-                            {activeConv.intercept_mode === "human" &&
-                                (isOwner || isSuperuser) && (
+                                {/* ── Resume — owner or superuser only */}
+                                {activeConv.intercept_mode === "paused" &&
+                                    canActOnThisConv && (
+                                        <Btn
+                                            key="resume"
+                                            small
+                                            onClick={() =>
+                                                release(activeConv.id)
+                                            }
+                                            variant="primary"
+                                        >
+                                            ▶ Resume
+                                        </Btn>
+                                    )}
+
+                                {/* ── Transfer — owner or superuser only */}
+                                {canActOnThisConv && (
                                     <Btn
-                                        key="release"
+                                        key="transfer"
                                         small
-                                        onClick={() => release(activeConv.id)}
+                                        onClick={() => setTransferModal(true)}
                                         variant="secondary"
                                     >
-                                        ↩ Release
+                                        ⇄
                                     </Btn>
                                 )}
 
-                            {/* ── Locked badge — someone else owns it and we're not superuser */}
-                            {convOwnedByOther && !isSuperuser && (
-                                <span
-                                    className="text-xs px-2 py-1 rounded-md bg-stone-100 text-stone-400 cursor-not-allowed"
-                                    title={`Handled by ${activeConv.assigned_agent_name ?? "another agent"} — they must release or transfer it first`}
-                                >
-                                    🔒{" "}
-                                    {activeConv.assigned_agent_name?.split(" ")[0] ?? "Locked"}
-                                </span>
-                            )}
-
-                            {/* ── Pause — owner or superuser, not already paused */}
-                            {activeConv.intercept_mode !== "paused" &&
-                                canActOnThisConv && (
+                                {/* ── Note — any agent who can handle conversations */}
+                                {canHandleConversations && (
                                     <Btn
-                                        key="pause"
+                                        key="note"
                                         small
-                                        onClick={() => release(activeConv.id)}
+                                        onClick={() => setNoteModal(true)}
                                         variant="secondary"
                                     >
-                                        ⏸ Pause
+                                        📝
                                     </Btn>
                                 )}
 
-                            {/* ── Resume — owner or superuser only */}
-                            {activeConv.intercept_mode === "paused" &&
-                                canActOnThisConv && (
-                                    <Btn
-                                        key="resume"
-                                        small
-                                        onClick={() => release(activeConv.id)}
-                                        variant="primary"
-                                    >
-                                        ▶ Resume
-                                    </Btn>
-                                )}
-
-                            {/* ── Transfer — owner or superuser only */}
-                            {canActOnThisConv && (
-                                <Btn
-                                    key="transfer"
-                                    small
-                                    onClick={() => setTransferModal(true)}
-                                    variant="secondary"
-                                >
-                                    ⇄
-                                </Btn>
-                            )}
-
-                            {/* ── Note — any agent who can handle conversations */}
-                            {canHandleConversations && (
-                                <Btn
-                                    key="note"
-                                    small
-                                    onClick={() => setNoteModal(true)}
-                                    variant="secondary"
-                                >
-                                    📝
-                                </Btn>
-                            )}
-
-                            {/* ── Close — any agent who can handle conversations */}
-                            {/* {activeConv.status === "open" && canHandleConversations && (
-                                <Btn
-                                    key="close"
-                                    small
-                                    onClick={() => closeConv(activeConv.id)}
-                                    variant="danger"
-                                >
-                                    ✓
-                                </Btn>
-                            )} */}
+                                {/* ── Close — any agent who can handle conversations */}
+                                {activeConv.status === "open" &&
+                                    canHandleConversations && (
+                                        <Btn
+                                            key="close"
+                                            small
+                                            onClick={() =>
+                                                closeConv(activeConv.id)
+                                            }
+                                            variant="danger"
+                                        >
+                                            ✓
+                                        </Btn>
+                                    )}
+                            </div>
                         </div>
 
                         {/* Media escalation notice */}
@@ -884,7 +900,6 @@ export function ConversationsView({
                                 const isInbound = msg.direction === "inbound";
                                 const isNote = msg.isNote;
 
-                                // Notes render as a full-width internal banner
                                 if (isNote) {
                                     return (
                                         <div
@@ -905,9 +920,7 @@ export function ConversationsView({
                                                 </p>
                                                 <div className="text-[10px] text-amber-400 mt-1">
                                                     {msg.created_at
-                                                        ? timeAgo(
-                                                              msg.created_at,
-                                                          )
+                                                        ? timeAgo(msg.created_at)
                                                         : ""}
                                                 </div>
                                             </div>
@@ -926,8 +939,7 @@ export function ConversationsView({
                                                 (msg as any).media_type !==
                                                     "note" &&
                                                 (msg as any).media_url &&
-                                                (msg as any).media_type
-                                                    .startsWith
+                                                (msg as any).media_type.startsWith
                                                     ? "p-1.5 max-w-[65%]"
                                                     : "px-4 py-2.5 max-w-[75%]"
                                             } ${
@@ -942,14 +954,11 @@ export function ConversationsView({
                                                 <div className="text-[10px] opacity-70 mb-1 font-medium uppercase tracking-wide">
                                                     {msg.sender === "ai"
                                                         ? "AI"
-                                                        : (msg as any)
-                                                                .agent_name
-                                                          ? (msg as any)
-                                                                .agent_name
+                                                        : (msg as any).agent_name
+                                                          ? (msg as any).agent_name
                                                           : "Agent"}
                                                 </div>
                                             )}
-                                            {/* Media or plain text */}
                                             {(() => {
                                                 const mt = (msg as any)
                                                     .media_type as
@@ -996,9 +1005,7 @@ export function ConversationsView({
                                                                     "[",
                                                                 ) && (
                                                                     <p className="text-xs px-1 leading-relaxed">
-                                                                        {
-                                                                            msg.text
-                                                                        }
+                                                                        {msg.text}
                                                                     </p>
                                                                 )}
                                                         </div>
@@ -1023,9 +1030,7 @@ export function ConversationsView({
                                                                     "[",
                                                                 ) && (
                                                                     <p className="text-xs px-1 leading-relaxed">
-                                                                        {
-                                                                            msg.text
-                                                                        }
+                                                                        {msg.text}
                                                                     </p>
                                                                 )}
                                                         </div>
@@ -1043,7 +1048,6 @@ export function ConversationsView({
                                                         />
                                                     );
                                                 }
-                                                // document / other
                                                 const fileName =
                                                     msg.text ||
                                                     mu.split("/").pop() ||
@@ -1068,9 +1072,7 @@ export function ConversationsView({
                                                             <path
                                                                 strokeLinecap="round"
                                                                 strokeLinejoin="round"
-                                                                strokeWidth={
-                                                                    1.5
-                                                                }
+                                                                strokeWidth={1.5}
                                                                 d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"
                                                             />
                                                         </svg>
@@ -1107,18 +1109,22 @@ export function ConversationsView({
                             <div ref={messagesEndRef} />
                         </div>
 
-                        {/* Reply box — only shown when agent is in control */}
                         {/* Reply box — only shown when this agent owns the conversation */}
                         {activeConv.intercept_mode === "human" &&
-                            activeConv.assigned_agent_id === currentAgentId && (
+                            (activeConv.assigned_agent_id === currentAgentId ||
+                                isSuperuser) && (
                                 <div className="border-t border-[#e6f3d8] px-4 py-3 bg-white">
                                     {/* ── AI Draft pill — shown when a draft exists but panel is collapsed */}
                                     {draftVisible && !draftExpanded && (
                                         <button
-                                            onClick={() => setDraftExpanded(true)}
+                                            onClick={() =>
+                                                setDraftExpanded(true)
+                                            }
                                             className="mb-2 w-full flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-50 border border-blue-200 hover:bg-blue-100 transition-colors text-left"
                                         >
-                                            <span className="text-blue-500 text-sm flex-shrink-0">🤖</span>
+                                            <span className="text-blue-500 text-sm flex-shrink-0">
+                                                🤖
+                                            </span>
                                             <span className="text-xs font-semibold text-blue-700 flex-1">
                                                 AI has a draft ready
                                             </span>
@@ -1134,18 +1140,32 @@ export function ConversationsView({
                                             {/* Header */}
                                             <div className="flex items-center justify-between px-3 py-2 border-b border-blue-100">
                                                 <div className="flex items-center gap-1.5">
-                                                    <span className="text-blue-500 text-sm">🤖</span>
-                                                    <p className="text-xs font-semibold text-blue-700">AI Draft</p>
+                                                    <span className="text-blue-500 text-sm">
+                                                        🤖
+                                                    </span>
+                                                    <p className="text-xs font-semibold text-blue-700">
+                                                        AI Draft
+                                                    </p>
                                                 </div>
                                                 <div className="flex items-center gap-1">
                                                     <button
-                                                        onClick={() => setDraftEditing((e) => !e)}
+                                                        onClick={() =>
+                                                            setDraftEditing(
+                                                                (e) => !e,
+                                                            )
+                                                        }
                                                         className="text-[10px] text-blue-500 hover:text-blue-700 px-2 py-0.5 rounded border border-blue-200 hover:border-blue-400 transition-colors"
                                                     >
-                                                        {draftEditing ? "Preview" : "Edit"}
+                                                        {draftEditing
+                                                            ? "Preview"
+                                                            : "Edit"}
                                                     </button>
                                                     <button
-                                                        onClick={() => setDraftExpanded(false)}
+                                                        onClick={() =>
+                                                            setDraftExpanded(
+                                                                false,
+                                                            )
+                                                        }
                                                         className="text-[10px] text-blue-400 hover:text-blue-600 px-1.5 py-0.5"
                                                         title="Collapse"
                                                     >
@@ -1153,10 +1173,16 @@ export function ConversationsView({
                                                     </button>
                                                     <button
                                                         onClick={() => {
-                                                            setDraftVisible(false);
-                                                            setDraftExpanded(false);
+                                                            setDraftVisible(
+                                                                false,
+                                                            );
+                                                            setDraftExpanded(
+                                                                false,
+                                                            );
                                                             setDraftText("");
-                                                            setDraftEditing(false);
+                                                            setDraftEditing(
+                                                                false,
+                                                            );
                                                         }}
                                                         className="text-[10px] text-blue-400 hover:text-blue-600 px-1.5 py-0.5"
                                                         title="Dismiss"
@@ -1170,20 +1196,29 @@ export function ConversationsView({
                                                 {draftEditing ? (
                                                     <textarea
                                                         value={draftText}
-                                                        onChange={(e) => setDraftText(e.target.value)}
+                                                        onChange={(e) =>
+                                                            setDraftText(
+                                                                e.target.value,
+                                                            )
+                                                        }
                                                         rows={4}
                                                         className="w-full text-xs text-blue-800 bg-white border border-blue-200 rounded-lg px-2.5 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-blue-400"
                                                         placeholder="Edit the draft…"
                                                     />
                                                 ) : (
                                                     <p className="text-xs text-blue-700 whitespace-pre-wrap leading-relaxed">
-                                                        {draftText || "AI has a reply ready."}
+                                                        {draftText ||
+                                                            "AI has a reply ready."}
                                                     </p>
                                                 )}
                                             </div>
                                             {/* Actions */}
                                             <div className="flex items-center gap-2 px-3 pb-2.5">
-                                                <Btn small onClick={approveDraft} variant="primary">
+                                                <Btn
+                                                    small
+                                                    onClick={approveDraft}
+                                                    variant="primary"
+                                                >
                                                     ✓ Send
                                                 </Btn>
                                                 <Btn
@@ -1216,24 +1251,27 @@ export function ConversationsView({
                                     )}
 
                                     {/* ── Generate draft button — shown when no draft exists */}
-                                    {!draftVisible && activeConv.intercept_mode === "human" && (
-                                        <div className="mb-2 flex justify-end">
-                                            <button
-                                                onClick={generateDraft}
-                                                disabled={generatingDraft}
-                                                className="flex items-center gap-1.5 h-7 px-3 text-xs font-medium rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50 disabled:opacity-50 transition-colors"
-                                            >
-                                                {generatingDraft ? (
-                                                    <>
-                                                        <div className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-                                                        Generating…
-                                                    </>
-                                                ) : (
-                                                    <>🤖 Generate AI draft</>
-                                                )}
-                                            </button>
-                                        </div>
-                                    )}
+                                    {!draftVisible &&
+                                        activeConv.intercept_mode ===
+                                            "human" && (
+                                            <div className="mb-2 flex justify-end">
+                                                <button
+                                                    onClick={generateDraft}
+                                                    disabled={generatingDraft}
+                                                    className="flex items-center gap-1.5 h-7 px-3 text-xs font-medium rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50 disabled:opacity-50 transition-colors"
+                                                >
+                                                    {generatingDraft ? (
+                                                        <>
+                                                            <div className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                                                            Generating…
+                                                        </>
+                                                    ) : (
+                                                        <>🤖 Generate AI draft</>
+                                                    )}
+                                                </button>
+                                            </div>
+                                        )}
+
                                     <div className="flex gap-2 items-end">
                                         {/* Hidden file input */}
                                         <input
@@ -1309,6 +1347,7 @@ export function ConversationsView({
                                             )}
                                         </button>
                                     </div>
+
                                     {/* Media attachment preview panel */}
                                     {mediaFile && (
                                         <div className="mt-2 p-2.5 rounded-xl bg-[#f3f9ec] border border-[#cee6b2] flex items-start gap-2">
@@ -1352,9 +1391,7 @@ export function ConversationsView({
                                                 <div className="flex gap-1.5">
                                                     <button
                                                         onClick={sendMedia}
-                                                        disabled={
-                                                            uploadingMedia
-                                                        }
+                                                        disabled={uploadingMedia}
                                                         className="flex items-center gap-1 h-7 px-3 bg-[#427425] hover:bg-[#589b31] disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors"
                                                     >
                                                         {uploadingMedia ? (
@@ -1397,21 +1434,21 @@ export function ConversationsView({
 
                         {/* Lock banner — conversation owned by another agent */}
                         {activeConv.intercept_mode === "human" &&
-                            activeConv.assigned_agent_id &&
-                            activeConv.assigned_agent_id !== currentAgentId && (
-                                <div className="border-t border-[#e6f3d8] px-4 py-4 bg-[#f3f9ec] flex items-center justify-center gap-2">
-                                    <span className="text-base">🔒</span>
-                                    <p className="text-xs text-[#699a32]">
-                                        Handled by{" "}
-                                        <strong className="text-[#427425]">
-                                            {activeConv.assigned_agent_name ??
-                                                "another agent"}
-                                        </strong>{" "}
-                                        — ask them to release or transfer it to
-                                        you
-                                    </p>
-                                </div>
-                            )}
+                        activeConv.assigned_agent_id &&
+                        activeConv.assigned_agent_id !== currentAgentId &&
+                        !isSuperuser ? (
+                            <div className="border-t border-[#e6f3d8] px-4 py-4 bg-[#f3f9ec] flex items-center justify-center gap-2">
+                                <span className="text-base">🔒</span>
+                                <p className="text-xs text-[#699a32]">
+                                    Handled by{" "}
+                                    <strong className="text-[#427425]">
+                                        {activeConv.assigned_agent_name ??
+                                            "another agent"}
+                                    </strong>{" "}
+                                    — ask them to release or transfer it to you
+                                </p>
+                            </div>
+                        ) : null}
                     </>
                 )}
             </div>
@@ -1439,7 +1476,6 @@ export function ConversationsView({
                         }}
                     />
                 ) : (
-                    /* Collapsed tab — click to re-open */
                     <button
                         onClick={() => setCrmOpen(true)}
                         title="Show customer profile"
@@ -1534,7 +1570,6 @@ export function ConversationsView({
                         if (!noteText.trim() || !activeConvId) return;
                         const text = noteText.trim();
                         try {
-                            // Optimistically append
                             const optimistic: Message = {
                                 id: `optimistic-note-${Date.now()}`,
                                 direction: "outbound",
@@ -1554,7 +1589,6 @@ export function ConversationsView({
                             setNoteText("");
                             onToast("Note saved");
 
-                            // Save to server and replace with confirmed message
                             await conversationsApi.addNote(activeConvId, text);
                             const msgs =
                                 await conversationsApi.messages(activeConvId);
@@ -1563,12 +1597,15 @@ export function ConversationsView({
                                 [activeConvId]: msgs,
                             }));
                         } catch {
-                            // Rollback optimistic note
                             setMessages((m) => ({
                                 ...m,
-                                [activeConvId]: (m[activeConvId] ?? []).filter(
+                                [activeConvId]: (
+                                    m[activeConvId] ?? []
+                                ).filter(
                                     (msg) =>
-                                        !msg.id?.startsWith("optimistic-note-"),
+                                        !msg.id?.startsWith(
+                                            "optimistic-note-",
+                                        ),
                                 ),
                             }));
                             setNoteText(text);
