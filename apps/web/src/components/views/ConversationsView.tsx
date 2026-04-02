@@ -83,18 +83,33 @@ export function ConversationsView({
 
     const { data: session } = useSession();
     const currentAgentId = (session as any)?.user?.id as string | undefined;
-    const currentRole =
-        ((session as any)?.user?.role as string | undefined) ??
-        ((session as any)?.role as string | undefined);
-    const isSuperuser = ((session as any)?.user?.isSuperuser ??
-        (session as any)?.isSuperuser ??
-        false) as boolean;
 
-    // Admin role is treated the same as superuser for UI permission purposes.
-    // This ensures buttons work correctly even if isSuperuser isn't in the session yet.
+    // ── Fetch current agent profile to get role/permissions ──────────────────
+    const [currentAgent, setCurrentAgent] = useState<{
+        role: string;
+        is_superuser: boolean;
+    } | null>(null);
+
+    useEffect(() => {
+        if (!currentAgentId) return;
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/admin/me`, {
+            headers: {
+                Authorization: `Bearer ${(session as any)?.accessToken}`,
+            },
+        })
+            .then((r) => r.json())
+            .then((data) =>
+                setCurrentAgent({
+                    role: data.role,
+                    is_superuser: data.is_superuser,
+                }),
+            )
+            .catch(() => {});
+    }, [currentAgentId]);
+
+    const currentRole = currentAgent?.role;
+    const isSuperuser = currentAgent?.is_superuser ?? false;
     const isAdminOrSuper = isSuperuser || currentRole === "admin";
-
-    // Any agent/admin/superuser can handle conversations
     const canHandleConversations = isAdminOrSuper || currentRole === "agent";
 
     // ── Media attachment state ────────────────────────────────────────────────
