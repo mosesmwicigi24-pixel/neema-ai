@@ -83,9 +83,12 @@ export function ConversationsView({
 
     const { data: session } = useSession();
     const currentAgentId = (session as any)?.user?.id as string | undefined;
-    const currentRole = (session as any)?.user?.role as string | undefined;
-    const isSuperuser =
-        ((session as any)?.user?.isSuperuser as boolean) ?? false;
+    const currentRole =
+        ((session as any)?.user?.role as string | undefined) ??
+        ((session as any)?.role as string | undefined);
+    const isSuperuser = ((session as any)?.user?.isSuperuser ??
+        (session as any)?.isSuperuser ??
+        false) as boolean;
 
     // Admin role is treated the same as superuser for UI permission purposes.
     // This ensures buttons work correctly even if isSuperuser isn't in the session yet.
