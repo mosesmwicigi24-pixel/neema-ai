@@ -91,19 +91,19 @@ export function ConversationsView({
     } | null>(null);
 
     useEffect(() => {
-        if (!currentAgentId) return;
-        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/admin/me`, {
-            headers: {
-                Authorization: `Bearer ${(session as any)?.accessToken}`,
-            },
+        const token = (window as any).__neema_token;
+        if (!token) return;
+        const BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
+        fetch(`${BASE}/api/admin/me`, {
+            headers: { Authorization: `Bearer ${token}` },
         })
             .then((r) => r.json())
-            .then((data) =>
+            .then((data) => {
                 setCurrentAgent({
                     role: data.role,
                     is_superuser: data.is_superuser,
-                }),
-            )
+                });
+            })
             .catch(() => {});
     }, [currentAgentId]);
 
@@ -1698,12 +1698,14 @@ export function ConversationsView({
                         bottom: 0,
                         left: 0,
                         zIndex: 9999,
+                        maxWidth: "100vw",
+                        wordBreak: "break-all",
                     }}
                 >
                     id={currentAgentId ?? "none"} | role={currentRole ?? "none"}{" "}
                     | super={String(isSuperuser)} | canHandle=
-                    {String(canHandleConversations)} | session=
-                    {JSON.stringify((session as any)?.user ?? null)}
+                    {String(canHandleConversations)} | agent=
+                    {JSON.stringify(currentAgent)}
                 </div>
             )}
         </div>
