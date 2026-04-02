@@ -37,6 +37,7 @@ services:
                    uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
         volumes:
             - ./apps/api:/app
+            - neema_media:/var/neema/media
         environment:
             ENVIRONMENT: development
         ports:
@@ -73,3 +74,4 @@ services:
 
 volumes:
     web_node_modules:
+    neema_media:

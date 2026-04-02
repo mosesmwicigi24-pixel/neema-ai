@@ -92,6 +92,8 @@ services:
             timeout: 5s
             retries: 5
             start_period: 40s # allow time for alembic upgrade head to run
+        volumes:
+            - neema_media:/var/neema/media
 
     # ─── Next.js Admin UI ───────────────────────────────────
     web:
@@ -175,6 +177,7 @@ volumes:
     redis_data:
     pgadmin_data:
     # n8n_data:
+    neema_media:
 
 # ─── Bridge Network ───────────────────────────────────────
 networks:
