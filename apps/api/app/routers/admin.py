@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import select, update, func
 from app.database import get_db
 from app.models.conversation import Conversation, InterceptMode
 from app.models.message import Message
@@ -53,8 +53,8 @@ async def list_conversations(
     conversations = result.scalars().all()
 
     # Batch-load User names and Agent names to avoid N+1
-    wa_ids     = [c.wa_id for c in conversations]
-    agent_ids  = [c.assigned_agent_id for c in conversations if c.assigned_agent_id]
+    wa_ids    = [c.wa_id for c in conversations]
+    agent_ids = [c.assigned_agent_id for c in conversations if c.assigned_agent_id]
 
     user_map: dict[str, str] = {}
     if wa_ids:
@@ -68,6 +68,24 @@ async def list_conversations(
         for a in a_res.scalars().all():
             agent_map[str(a.id)] = a.name or ""
 
+    # Batch-load latest message per conversation (inbound or outbound)
+    preview_map: dict[str, str] = {}
+    if wa_ids:
+        conv_ids = [c.id for c in conversations]
+        sub = (
+            select(Message.conversation_id, func.max(Message.created_at).label("max_at"))
+            .where(Message.conversation_id.in_(conv_ids))
+            .group_by(Message.conversation_id)
+            .subquery()
+        )
+        latest_q = select(Message).join(
+            sub,
+            (Message.conversation_id == sub.c.conversation_id) &
+            (Message.created_at == sub.c.max_at),
+        )
+        for m in (await db.execute(latest_q)).scalars().all():
+            preview_map[str(m.conversation_id)] = m.text
+
     return [
         {
             "id":                   str(c.id),
@@ -77,7 +95,7 @@ async def list_conversations(
             "assigned_agent_name":  agent_map.get(str(c.assigned_agent_id), "") if c.assigned_agent_id else None,
             "intercept_since":      c.intercept_since.isoformat() if c.intercept_since else None,
             "last_message_at":      c.last_message_at.isoformat() if c.last_message_at else None,
-            "last_message_preview": c.last_message_preview,
+            "last_message_preview": preview_map.get(str(c.id)) or c.last_message_preview,
             "status":               c.status,
             "created_at":           c.created_at.isoformat() if c.created_at else None,
             "updated_at":           c.updated_at.isoformat() if c.updated_at else None,
