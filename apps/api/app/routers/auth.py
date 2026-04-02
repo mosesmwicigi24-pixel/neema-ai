@@ -38,11 +38,15 @@ async def refresh(body: dict, db: AsyncSession = Depends(get_db)):
 
     agent_id = payload["sub"]
     result = await db.execute(select(Agent).where(Agent.id == agent_id))
-    if not result.scalar_one_or_none():
+    agent = result.scalar_one_or_none()
+    if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
     return {
         "access_token": create_access_token(agent_id),
         "refresh_token": create_refresh_token(agent_id),
         "token_type": "bearer",
+        "agent_id": agent_id,          
+        "role": agent.role,            
+        "is_superuser": agent.is_superuser, 
     }

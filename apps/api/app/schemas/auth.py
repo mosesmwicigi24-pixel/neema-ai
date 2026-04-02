@@ -9,3 +9,5 @@ class TokenResponse(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
     agent_id: str
+    role: str
+    is_superuser: bool
