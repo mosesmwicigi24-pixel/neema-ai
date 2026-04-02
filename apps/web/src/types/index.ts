@@ -13,7 +13,7 @@ export type ThemeMode = "light" | "dark";
 export interface Conversation {
     id: string;
     wa_id: string;
-    name: string;
+    name: string | null;
     channel: Channel;
     intercept_mode: InterceptMode;
     status: ConversationStatus;
@@ -24,7 +24,7 @@ export interface Conversation {
     assigned_agent_name?: string | null;
     unread: number;
     unread_count: number;
-    contact_name: string;
+    contact_name: string | null;
     contact_phone: string;
 }
 

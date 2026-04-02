@@ -421,8 +421,8 @@ export function mapConversation(c: ApiConversation): Conversation {
     return {
         id: c.id,
         wa_id: c.wa_id,
-        name: c.name ?? c.wa_id,
-        contact_name: c.name ?? c.wa_id,
+        name: c.name ?? null,
+        contact_name: c.name ?? null,
         contact_phone: c.wa_id,
         channel: (c.channel ?? "whatsapp") as Channel,
         intercept_mode: c.intercept_mode,
