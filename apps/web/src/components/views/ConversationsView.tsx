@@ -85,8 +85,13 @@ export function ConversationsView({
     const currentAgentId = (session as any)?.user?.id as string | undefined;
     const currentRole = (session as any)?.user?.role as string | undefined;
     const isSuperuser = ((session as any)?.user?.isSuperuser as boolean) ?? false;
-    const canHandleConversations =
-        isSuperuser || currentRole === "admin" || currentRole === "agent";
+
+    // Admin role is treated the same as superuser for UI permission purposes.
+    // This ensures buttons work correctly even if isSuperuser isn't in the session yet.
+    const isAdminOrSuper = isSuperuser || currentRole === "admin";
+
+    // Any agent/admin/superuser can handle conversations
+    const canHandleConversations = isAdminOrSuper || currentRole === "agent";
 
     // ── Media attachment state ────────────────────────────────────────────────
     const [mediaFile, setMediaFile] = useState<File | null>(null);
@@ -95,7 +100,6 @@ export function ConversationsView({
     const [uploadingMedia, setUploadingMedia] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
-    // Track the last message count to only scroll when new messages arrive
     const prevMessageCount = useRef<number>(0);
 
     // ── Load messages for a conversation (always fetches fresh) ───────────────
@@ -128,20 +132,24 @@ export function ConversationsView({
     const activeConv = conversations.find((c) => c.id === activeConvId);
     const activeMessages: Message[] = messages[activeConvId] ?? [];
 
-    // ── Ownership / permission helpers (depend on activeConv) ─────────────────
+    // ── Ownership helpers (depend on activeConv) ──────────────────────────────
+    // isOwner: current agent is the one who intercepted this conversation
     const isOwner =
         !!activeConv && activeConv.assigned_agent_id === currentAgentId;
+
+    // convOwnedByOther: conv is human-intercepted by a different agent
     const convOwnedByOther =
         !!activeConv &&
         activeConv.intercept_mode === "human" &&
         !!activeConv.assigned_agent_id &&
         activeConv.assigned_agent_id !== currentAgentId;
+
+    // canActOnThisConv: can perform Pause/Resume/Transfer.
+    // True when agent has permissions AND (owns the conv, OR is admin/super,
+    // OR the conv isn't currently human-intercepted by someone else).
     const canActOnThisConv =
         canHandleConversations &&
-        (isOwner ||
-            isSuperuser ||
-            activeConv?.intercept_mode !== "human" ||
-            !activeConv?.assigned_agent_id);
+        (isOwner || isAdminOrSuper || activeConv?.intercept_mode !== "human");
 
     // ── Scroll to bottom only when new messages arrive ────────────────────────
     useEffect(() => {
@@ -152,7 +160,6 @@ export function ConversationsView({
         prevMessageCount.current = count;
     }, [activeMessages.length]);
 
-    // Also scroll when switching conversations
     useEffect(() => {
         prevMessageCount.current = 0;
         setTimeout(() => {
@@ -279,9 +286,7 @@ export function ConversationsView({
                 [activeConvId]: [...(m[activeConvId] ?? []), optimisticMsg],
             }));
             setReplyText("");
-
             await conversationsApi.sendReply(activeConvId, text);
-
             const msgs = await conversationsApi.messages(activeConvId);
             setMessages((m) => ({ ...m, [activeConvId]: msgs }));
             refetchConversations?.();
@@ -318,12 +323,10 @@ export function ConversationsView({
             setDraftExpanded(false);
             setDraftText("");
             setDraftEditing(false);
-
             await conversationsApi.approveDraft(
                 activeConvId,
                 textToSend || undefined,
             );
-
             const msgs = await conversationsApi.messages(activeConvId);
             setMessages((m) => ({ ...m, [activeConvId]: msgs }));
             refetchConversations?.();
@@ -749,7 +752,9 @@ export function ConversationsView({
                                         </span>
                                     )}
 
-                                {/* ── Intercept — AI mode only, agents/admins only */}
+                                {/* ── Intercept ──
+                                    Any agent/admin can intercept an AI conv.
+                                    Not ownership-restricted — whoever picks it up owns it. */}
                                 {activeConv.intercept_mode === "ai" &&
                                     canHandleConversations && (
                                         <Btn
@@ -763,9 +768,10 @@ export function ConversationsView({
                                         </Btn>
                                     )}
 
-                                {/* ── Release — owner or superuser only */}
+                                {/* ── Release ──
+                                    Owner-restricted: only the intercepting agent or admin/super can release. */}
                                 {activeConv.intercept_mode === "human" &&
-                                    (isOwner || isSuperuser) && (
+                                    (isOwner || isAdminOrSuper) && (
                                         <Btn
                                             key="release"
                                             small
@@ -778,8 +784,10 @@ export function ConversationsView({
                                         </Btn>
                                     )}
 
-                                {/* ── Locked badge — someone else owns it and we're not superuser */}
-                                {convOwnedByOther && !isSuperuser && (
+                                {/* ── Locked badge ──
+                                    Regular agents see this when another agent owns the conv.
+                                    Admin/superuser never see this badge. */}
+                                {convOwnedByOther && !isAdminOrSuper && (
                                     <span
                                         className="text-xs px-2 py-1 rounded-md bg-stone-100 text-stone-400 cursor-not-allowed"
                                         title={`Handled by ${activeConv.assigned_agent_name ?? "another agent"} — they must release or transfer it first`}
@@ -791,7 +799,9 @@ export function ConversationsView({
                                     </span>
                                 )}
 
-                                {/* ── Pause — owner or superuser, not already paused */}
+                                {/* ── Pause ──
+                                    Any agent/admin can pause unless another agent owns
+                                    it (regular agents blocked; admin/super can override). */}
                                 {activeConv.intercept_mode !== "paused" &&
                                     canActOnThisConv && (
                                         <Btn
@@ -806,7 +816,7 @@ export function ConversationsView({
                                         </Btn>
                                     )}
 
-                                {/* ── Resume — owner or superuser only */}
+                                {/* ── Resume — same rules as Pause */}
                                 {activeConv.intercept_mode === "paused" &&
                                     canActOnThisConv && (
                                         <Btn
@@ -821,7 +831,7 @@ export function ConversationsView({
                                         </Btn>
                                     )}
 
-                                {/* ── Transfer — owner or superuser only */}
+                                {/* ── Transfer — same rules as Pause/Resume */}
                                 {canActOnThisConv && (
                                     <Btn
                                         key="transfer"
@@ -833,7 +843,7 @@ export function ConversationsView({
                                     </Btn>
                                 )}
 
-                                {/* ── Note — any agent who can handle conversations */}
+                                {/* ── Note — any agent/admin, no ownership restriction */}
                                 {canHandleConversations && (
                                     <Btn
                                         key="note"
@@ -845,7 +855,7 @@ export function ConversationsView({
                                     </Btn>
                                 )}
 
-                                {/* ── Close — any agent who can handle conversations */}
+                                {/* ── Close — any agent/admin, no ownership restriction */}
                                 {activeConv.status === "open" &&
                                     canHandleConversations && (
                                         <Btn
@@ -939,7 +949,8 @@ export function ConversationsView({
                                                 (msg as any).media_type !==
                                                     "note" &&
                                                 (msg as any).media_url &&
-                                                (msg as any).media_type.startsWith
+                                                (msg as any).media_type
+                                                    .startsWith
                                                     ? "p-1.5 max-w-[65%]"
                                                     : "px-4 py-2.5 max-w-[75%]"
                                             } ${
@@ -954,8 +965,10 @@ export function ConversationsView({
                                                 <div className="text-[10px] opacity-70 mb-1 font-medium uppercase tracking-wide">
                                                     {msg.sender === "ai"
                                                         ? "AI"
-                                                        : (msg as any).agent_name
-                                                          ? (msg as any).agent_name
+                                                        : (msg as any)
+                                                                .agent_name
+                                                          ? (msg as any)
+                                                                .agent_name
                                                           : "Agent"}
                                                 </div>
                                             )}
@@ -1005,7 +1018,9 @@ export function ConversationsView({
                                                                     "[",
                                                                 ) && (
                                                                     <p className="text-xs px-1 leading-relaxed">
-                                                                        {msg.text}
+                                                                        {
+                                                                            msg.text
+                                                                        }
                                                                     </p>
                                                                 )}
                                                         </div>
@@ -1030,7 +1045,9 @@ export function ConversationsView({
                                                                     "[",
                                                                 ) && (
                                                                     <p className="text-xs px-1 leading-relaxed">
-                                                                        {msg.text}
+                                                                        {
+                                                                            msg.text
+                                                                        }
                                                                     </p>
                                                                 )}
                                                         </div>
@@ -1072,7 +1089,9 @@ export function ConversationsView({
                                                             <path
                                                                 strokeLinecap="round"
                                                                 strokeLinejoin="round"
-                                                                strokeWidth={1.5}
+                                                                strokeWidth={
+                                                                    1.5
+                                                                }
                                                                 d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"
                                                             />
                                                         </svg>
@@ -1109,10 +1128,11 @@ export function ConversationsView({
                             <div ref={messagesEndRef} />
                         </div>
 
-                        {/* Reply box — only shown when this agent owns the conversation */}
+                        {/* Reply box — shown when agent owns the conv, or is admin/superuser */}
                         {activeConv.intercept_mode === "human" &&
-                            (activeConv.assigned_agent_id === currentAgentId ||
-                                isSuperuser) && (
+                            (activeConv.assigned_agent_id ===
+                                currentAgentId ||
+                                isAdminOrSuper) && (
                                 <div className="border-t border-[#e6f3d8] px-4 py-3 bg-white">
                                     {/* ── AI Draft pill — shown when a draft exists but panel is collapsed */}
                                     {draftVisible && !draftExpanded && (
@@ -1391,7 +1411,9 @@ export function ConversationsView({
                                                 <div className="flex gap-1.5">
                                                     <button
                                                         onClick={sendMedia}
-                                                        disabled={uploadingMedia}
+                                                        disabled={
+                                                            uploadingMedia
+                                                        }
                                                         className="flex items-center gap-1 h-7 px-3 bg-[#427425] hover:bg-[#589b31] disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors"
                                                     >
                                                         {uploadingMedia ? (
@@ -1432,11 +1454,12 @@ export function ConversationsView({
                                 </div>
                             )}
 
-                        {/* Lock banner — conversation owned by another agent */}
+                        {/* Lock banner — shown to regular agents when another agent owns the conv.
+                            Admin/superuser never see this banner. */}
                         {activeConv.intercept_mode === "human" &&
                         activeConv.assigned_agent_id &&
                         activeConv.assigned_agent_id !== currentAgentId &&
-                        !isSuperuser ? (
+                        !isAdminOrSuper ? (
                             <div className="border-t border-[#e6f3d8] px-4 py-4 bg-[#f3f9ec] flex items-center justify-center gap-2">
                                 <span className="text-base">🔒</span>
                                 <p className="text-xs text-[#699a32]">
