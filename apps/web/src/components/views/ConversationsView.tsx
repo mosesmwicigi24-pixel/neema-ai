@@ -1683,7 +1683,7 @@ export function ConversationsView({
             {TransferModalEl}
             {NoteModalEl}
 
-            {typeof window !== "undefined" && (
+            {/* {typeof window !== "undefined" && (
                 <div
                     style={{
                         background: "red",
@@ -1714,7 +1714,7 @@ export function ConversationsView({
                         return "check console";
                     })()}
                 </div>
-            )}
+            )} */}
         </div>
     );
 }
