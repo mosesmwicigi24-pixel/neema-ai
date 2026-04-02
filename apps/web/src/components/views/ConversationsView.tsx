@@ -67,8 +67,9 @@ export function ConversationsView({
         "all" | "human" | "ai" | "paused"
     >("all");
     const [searchQ, setSearchQ] = useState<string>("");
-    const [replyText, setReplyText] = useState<string>("");
+    const [replyText, setReplyText] = useState<string>("");    
     const [draftVisible, setDraftVisible] = useState<boolean>(false);
+    const [draftExpanded, setDraftExpanded] = useState<boolean>(false);
     const [draftText, setDraftText] = useState<string>("");
     const [draftEditing, setDraftEditing] = useState<boolean>(false);
     const [generatingDraft, setGeneratingDraft] = useState<boolean>(false);
@@ -188,6 +189,7 @@ export function ConversationsView({
         ) {
             setDraftText(event.draft ?? "");
             setDraftVisible(true);
+            setDraftExpanded(false);
             setDraftEditing(false);
         }
         if (
@@ -308,6 +310,7 @@ export function ConversationsView({
                 [activeConvId]: [...(m[activeConvId] ?? []), optimisticMsg],
             }));
             setDraftVisible(false);
+            setDraftExpanded(false);
             setDraftText("");
             setDraftEditing(false);
 
@@ -330,6 +333,7 @@ export function ConversationsView({
                 ),
             }));
             setDraftVisible(true);
+            setDraftExpanded(true);
             setDraftText(textToSend);
             onToast("Failed to approve draft", "error");
         }
@@ -343,6 +347,7 @@ export function ConversationsView({
             if (res.draft) {
                 setDraftText(res.draft);
                 setDraftVisible(true);
+                setDraftExpanded(true);
                 setDraftEditing(false);
                 onToast("Draft generated");
             }
@@ -1107,141 +1112,128 @@ export function ConversationsView({
                         {activeConv.intercept_mode === "human" &&
                             activeConv.assigned_agent_id === currentAgentId && (
                                 <div className="border-t border-[#e6f3d8] px-4 py-3 bg-white">
-                                    {draftVisible &&
-                                        activeConv.intercept_mode ===
-                                            "human" && (
-                                            <div className="mb-2 rounded-xl bg-blue-50 border border-blue-200 overflow-hidden">
-                                                {/* Header */}
-                                                <div className="flex items-center justify-between px-3 py-2 border-b border-blue-100">
-                                                    <div className="flex items-center gap-1.5">
-                                                        <span className="text-blue-500 text-sm">
-                                                            🤖
-                                                        </span>
-                                                        <p className="text-xs font-semibold text-blue-700">
-                                                            AI Draft
-                                                        </p>
-                                                    </div>
-                                                    <div className="flex items-center gap-1">
-                                                        <button
-                                                            onClick={() =>
-                                                                setDraftEditing(
-                                                                    (e) => !e,
-                                                                )
-                                                            }
-                                                            className="text-[10px] text-blue-500 hover:text-blue-700 px-2 py-0.5 rounded border border-blue-200 hover:border-blue-400 transition-colors"
-                                                        >
-                                                            {draftEditing
-                                                                ? "Preview"
-                                                                : "Edit"}
-                                                        </button>
-                                                        <button
-                                                            onClick={() => {
-                                                                setDraftVisible(
-                                                                    false,
-                                                                );
-                                                                setDraftText(
-                                                                    "",
-                                                                );
-                                                                setDraftEditing(
-                                                                    false,
-                                                                );
-                                                            }}
-                                                            className="text-[10px] text-blue-400 hover:text-blue-600 px-1.5 py-0.5"
-                                                        >
-                                                            ✕
-                                                        </button>
-                                                    </div>
+                                    {/* ── AI Draft pill — shown when a draft exists but panel is collapsed */}
+                                    {draftVisible && !draftExpanded && (
+                                        <button
+                                            onClick={() => setDraftExpanded(true)}
+                                            className="mb-2 w-full flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-50 border border-blue-200 hover:bg-blue-100 transition-colors text-left"
+                                        >
+                                            <span className="text-blue-500 text-sm flex-shrink-0">🤖</span>
+                                            <span className="text-xs font-semibold text-blue-700 flex-1">
+                                                AI has a draft ready
+                                            </span>
+                                            <span className="text-[10px] text-blue-400 flex-shrink-0">
+                                                Tap to review ↑
+                                            </span>
+                                        </button>
+                                    )}
+
+                                    {/* ── AI Draft panel — shown when expanded */}
+                                    {draftVisible && draftExpanded && (
+                                        <div className="mb-2 rounded-xl bg-blue-50 border border-blue-200 overflow-hidden">
+                                            {/* Header */}
+                                            <div className="flex items-center justify-between px-3 py-2 border-b border-blue-100">
+                                                <div className="flex items-center gap-1.5">
+                                                    <span className="text-blue-500 text-sm">🤖</span>
+                                                    <p className="text-xs font-semibold text-blue-700">AI Draft</p>
                                                 </div>
-                                                {/* Body */}
-                                                <div className="px-3 py-2">
-                                                    {draftEditing ? (
-                                                        <textarea
-                                                            value={draftText}
-                                                            onChange={(e) =>
-                                                                setDraftText(
-                                                                    e.target
-                                                                        .value,
-                                                                )
-                                                            }
-                                                            rows={4}
-                                                            className="w-full text-xs text-blue-800 bg-white border border-blue-200 rounded-lg px-2.5 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-blue-400"
-                                                            placeholder="Edit the draft…"
-                                                        />
-                                                    ) : (
-                                                        <p className="text-xs text-blue-700 whitespace-pre-wrap leading-relaxed">
-                                                            {draftText ||
-                                                                "AI has a reply ready."}
-                                                        </p>
-                                                    )}
-                                                </div>
-                                                {/* Actions */}
-                                                <div className="flex items-center gap-2 px-3 pb-2.5">
-                                                    <Btn
-                                                        small
-                                                        onClick={approveDraft}
-                                                        variant="primary"
+                                                <div className="flex items-center gap-1">
+                                                    <button
+                                                        onClick={() => setDraftEditing((e) => !e)}
+                                                        className="text-[10px] text-blue-500 hover:text-blue-700 px-2 py-0.5 rounded border border-blue-200 hover:border-blue-400 transition-colors"
                                                     >
-                                                        ✓ Send
-                                                    </Btn>
-                                                    <Btn
-                                                        small
+                                                        {draftEditing ? "Preview" : "Edit"}
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setDraftExpanded(false)}
+                                                        className="text-[10px] text-blue-400 hover:text-blue-600 px-1.5 py-0.5"
+                                                        title="Collapse"
+                                                    >
+                                                        ↓
+                                                    </button>
+                                                    <button
                                                         onClick={() => {
-                                                            setReplyText(
-                                                                draftText,
-                                                            );
-                                                            setDraftVisible(
-                                                                false,
-                                                            );
+                                                            setDraftVisible(false);
+                                                            setDraftExpanded(false);
                                                             setDraftText("");
-                                                            setDraftEditing(
-                                                                false,
-                                                            );
+                                                            setDraftEditing(false);
                                                         }}
-                                                        variant="secondary"
+                                                        className="text-[10px] text-blue-400 hover:text-blue-600 px-1.5 py-0.5"
+                                                        title="Dismiss"
                                                     >
-                                                        Edit & send manually
-                                                    </Btn>
-                                                    <Btn
-                                                        small
-                                                        onClick={() => {
-                                                            setDraftVisible(
-                                                                false,
-                                                            );
-                                                            setDraftText("");
-                                                            setDraftEditing(
-                                                                false,
-                                                            );
-                                                        }}
-                                                        variant="ghost"
-                                                    >
-                                                        Dismiss
-                                                    </Btn>
+                                                        ✕
+                                                    </button>
                                                 </div>
                                             </div>
-                                        )}
-                                    {/* Generate draft button — shown when in human mode but no draft visible */}
-                                    {!draftVisible &&
-                                        activeConv.intercept_mode ===
-                                            "human" && (
-                                            <div className="mb-2 flex justify-end">
-                                                <button
-                                                    onClick={generateDraft}
-                                                    disabled={generatingDraft}
-                                                    className="flex items-center gap-1.5 h-7 px-3 text-xs font-medium rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50 disabled:opacity-50 transition-colors"
+                                            {/* Body */}
+                                            <div className="px-3 py-2">
+                                                {draftEditing ? (
+                                                    <textarea
+                                                        value={draftText}
+                                                        onChange={(e) => setDraftText(e.target.value)}
+                                                        rows={4}
+                                                        className="w-full text-xs text-blue-800 bg-white border border-blue-200 rounded-lg px-2.5 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                                        placeholder="Edit the draft…"
+                                                    />
+                                                ) : (
+                                                    <p className="text-xs text-blue-700 whitespace-pre-wrap leading-relaxed">
+                                                        {draftText || "AI has a reply ready."}
+                                                    </p>
+                                                )}
+                                            </div>
+                                            {/* Actions */}
+                                            <div className="flex items-center gap-2 px-3 pb-2.5">
+                                                <Btn small onClick={approveDraft} variant="primary">
+                                                    ✓ Send
+                                                </Btn>
+                                                <Btn
+                                                    small
+                                                    onClick={() => {
+                                                        setReplyText(draftText);
+                                                        setDraftVisible(false);
+                                                        setDraftExpanded(false);
+                                                        setDraftText("");
+                                                        setDraftEditing(false);
+                                                    }}
+                                                    variant="secondary"
                                                 >
-                                                    {generatingDraft ? (
-                                                        <>
-                                                            <div className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-                                                            Generating…
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            🤖 Generate AI draft
-                                                        </>
-                                                    )}
-                                                </button>
+                                                    Edit & send manually
+                                                </Btn>
+                                                <Btn
+                                                    small
+                                                    onClick={() => {
+                                                        setDraftVisible(false);
+                                                        setDraftExpanded(false);
+                                                        setDraftText("");
+                                                        setDraftEditing(false);
+                                                    }}
+                                                    variant="ghost"
+                                                >
+                                                    Dismiss
+                                                </Btn>
                                             </div>
-                                        )}
+                                        </div>
+                                    )}
+
+                                    {/* ── Generate draft button — shown when no draft exists */}
+                                    {!draftVisible && activeConv.intercept_mode === "human" && (
+                                        <div className="mb-2 flex justify-end">
+                                            <button
+                                                onClick={generateDraft}
+                                                disabled={generatingDraft}
+                                                className="flex items-center gap-1.5 h-7 px-3 text-xs font-medium rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50 disabled:opacity-50 transition-colors"
+                                            >
+                                                {generatingDraft ? (
+                                                    <>
+                                                        <div className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                                                        Generating…
+                                                    </>
+                                                ) : (
+                                                    <>🤖 Generate AI draft</>
+                                                )}
+                                            </button>
+                                        </div>
+                                    )}
                                     <div className="flex gap-2 items-end">
                                         {/* Hidden file input */}
                                         <input
