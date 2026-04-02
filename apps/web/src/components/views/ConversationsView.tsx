@@ -11,7 +11,7 @@ import { TextareaField, InputField } from "@/components/ui/FormFields";
 import { Toggle } from "@/components/ui/Layout";
 import { timeAgo, formatPhone, displayName } from "@/lib/utils";
 import { CHANNEL_CONFIG, ALL_CHANNELS } from "@/lib/channels";
-import { conversationsApi } from "@/lib/api";
+import { conversationsApi, profileApi } from "@/lib/api";
 import { useConversationEvents } from "@/lib/websocket";
 import { CustomerSidebar } from "@/components/ui/CustomerSidebar";
 import type {
@@ -91,20 +91,16 @@ export function ConversationsView({
     } | null>(null);
 
     useEffect(() => {
-        const token = (window as any).__neema_token;
-        if (!token) return;
-        const BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
-        fetch(`${BASE}/api/admin/me`, {
-            headers: { Authorization: `Bearer ${token}` },
-        })
-            .then((r) => r.json())
+        profileApi
+            .me()
             .then((data) => {
+                console.log("profileApi.me() response:", data);
                 setCurrentAgent({
                     role: data.role,
                     is_superuser: data.is_superuser,
                 });
             })
-            .catch(() => {});
+            .catch((e) => console.error("profileApi.me() error:", e));
     }, [currentAgentId]);
 
     const currentRole = currentAgent?.role;
@@ -1705,7 +1701,18 @@ export function ConversationsView({
                     id={currentAgentId ?? "none"} | role={currentRole ?? "none"}{" "}
                     | super={String(isSuperuser)} | canHandle=
                     {String(canHandleConversations)} | agent=
-                    {JSON.stringify(currentAgent)}
+                    {JSON.stringify(currentAgent)} | me=
+                    {(() => {
+                        profileApi
+                            .me()
+                            .then((data) =>
+                                console.log("profileApi.me():", data),
+                            )
+                            .catch((e) =>
+                                console.error("profileApi.me() error:", e),
+                            );
+                        return "check console";
+                    })()}
                 </div>
             )}
         </div>
