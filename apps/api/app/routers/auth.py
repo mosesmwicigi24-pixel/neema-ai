@@ -20,6 +20,7 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
         "access_token": create_access_token(str(agent.id)),
         "refresh_token": create_refresh_token(str(agent.id)),
         "token_type": "bearer",
+        "agent_id": str(agent.id),
     }
 
 
