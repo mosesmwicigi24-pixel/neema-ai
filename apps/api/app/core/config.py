@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     waba_api_version: str = "v21.0"
     n8n_api_secret: str = ""
     environment: str = "production"
+    openai_api_key: str = ""
     # Media file serving
     media_public_url: str = ""      # e.g. https://neema.bethanyhouse.co.ke
     media_storage_path: str = "/tmp/neema_media"

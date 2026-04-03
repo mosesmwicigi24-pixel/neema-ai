@@ -379,9 +379,9 @@ async def upload_media(
     else:
         waba_type = "document"
 
-    media_dir = getattr(settings, "media_storage_path", "/tmp/neema_media")
+    from app.routers.media import MEDIA_DIR
+    media_dir = MEDIA_DIR
     os.makedirs(media_dir, exist_ok=True)
-
     ext = os.path.splitext(file.filename or "file")[1] or (mimetypes.guess_extension(ct) or "")
     saved_name = f"{uuid.uuid4().hex}{ext}"
     file_path  = os.path.join(media_dir, saved_name)
