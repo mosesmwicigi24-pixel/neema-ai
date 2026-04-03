@@ -179,6 +179,8 @@ async def n8n_download_media(body: dict, request: Request):
         "ok":         True,
         "filename":   filename,
         "media_id":   media_id,
-        "stable_url": f"{base}/api/media/serve/{filename}",
+        "stable_url": f"{base}/api/admin/media/{filename}",
         "mime_type":  mime_type,
     }
+
+    # f"{base}/api/media/serve/{filename}",

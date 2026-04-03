@@ -64,7 +64,8 @@ async def download_media(
     }
 
 
-@router.get("/media/serve/{filename}")
+# @router.get("/media/serve/{filename}")
+@router.get("/admin/media/{filename}")
 async def serve_media(filename: str):
     """Serve a stored media file."""
     filepath = os.path.join(MEDIA_DIR, filename)
