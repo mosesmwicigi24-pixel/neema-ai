@@ -1,11 +1,10 @@
 # app/routers/media.py
 import httpx
-import uuid
 import os
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
+from app.routers.admin import get_current_agent  # ← correct path
 from app.core.config import settings
-from app.auth import get_current_agent
 
 router = APIRouter()
 
