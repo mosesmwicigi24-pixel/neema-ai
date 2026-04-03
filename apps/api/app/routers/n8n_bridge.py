@@ -156,9 +156,9 @@ async def n8n_download_media(body: dict, request: Request):
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(
                 media_url,
-                headers={"Authorization": f"Bearer {settings.waba_token}"},
                 follow_redirects=True,
             )
+            # headers={"Authorization": f"Bearer {settings.waba_token}"},                
             if not resp.is_success:
                 return {"ok": False, "error": f"WhatsApp returned {resp.status_code}"}
             with open(filepath, "wb") as f:
