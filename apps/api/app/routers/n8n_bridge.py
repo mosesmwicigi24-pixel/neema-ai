@@ -7,6 +7,7 @@ from app.schemas.n8n import (
     OutboundDto, SessionDto, MessageDto, UpsertMessagePatchDto,
     UserDto, OrderEventDto, CustomerHistoryDto, UserFactsDto
 )
+import json
 
 router = APIRouter()
 
