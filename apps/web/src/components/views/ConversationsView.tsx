@@ -262,9 +262,13 @@ export function ConversationsView({
         try {
             await conversationsApi.intercept(convId);
             refetchConversations?.();
-            onToast("Conversation intercepted — you now control replies");
-        } catch {
-            onToast("Failed to intercept", "error");
+            onToast("Conversation claimed — you now control replies");
+        } catch (err: any) {
+            if (err?.message?.includes("409")) {
+                onToast("Already claimed by another agent", "error");
+            } else {
+                onToast("Failed to claim conversation", "error");
+            }
         }
     };
 
@@ -694,17 +698,17 @@ export function ConversationsView({
                                                             conv.intercept_mode
                                                         }
                                                     />
-                                                    {conv.intercept_mode ===
-                                                        "human" &&
-                                                        conv.assigned_agent_name && (
-                                                            <span className="text-[10px] text-[#699a32] font-medium truncate max-w-[56px]">
-                                                                {
-                                                                    conv.assigned_agent_name.split(
-                                                                        " ",
-                                                                    )[0]
-                                                                }
-                                                            </span>
-                                                        )}
+                                                    {conv.intercept_mode === "human" && conv.assigned_agent_id && (
+                                                        <span className={`text-[10px] font-medium truncate max-w-[64px] ${
+                                                            conv.assigned_agent_id === currentAgentId
+                                                                ? "text-[#427425]"
+                                                                : "text-amber-600"
+                                                        }`}>
+                                                            {conv.assigned_agent_id === currentAgentId
+                                                                ? "● Yours"
+                                                                : `🔒 ${conv.assigned_agent_name?.split(" ")[0] || "Agent"}`}
+                                                        </span>
+                                                    )}
                                                 </div>
                                             )}
                                             {conv.unread > 0 && (
@@ -801,6 +805,20 @@ export function ConversationsView({
                                             variant="primary"
                                         >
                                             ⚡ Intercept
+                                        </Btn>
+                                    )}
+                                {/* ── Pick up ──
+                                    Shown when conversation was auto-escalated (media received)
+                                    but not yet claimed by any agent. First one to click gets it. */}
+                                {activeConv.intercept_mode === "human" &&
+                                    !activeConv.assigned_agent_id &&
+                                    canHandleConversations && (
+                                        <Btn
+                                            small
+                                            onClick={() => intercept(activeConv.id)}
+                                            variant="primary"
+                                        >
+                                            🙋 Pick up
                                         </Btn>
                                     )}
 

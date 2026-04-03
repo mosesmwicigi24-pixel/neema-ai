@@ -19,13 +19,14 @@ async def intercept_conversation(
     if not conv:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Conversation not found")
-    
+
     # ── Ownership lock ────────────────────────────────────────────────────────
     if (
         conv.intercept_mode == InterceptMode.human
         and conv.assigned_agent_id is not None
         and conv.assigned_agent_id != agent.id
         and not agent.is_superuser
+        and agent.role != "admin"
     ):
         owner = await db.get(Agent, conv.assigned_agent_id)
         owner_name = owner.name if owner else "another agent"
@@ -34,11 +35,10 @@ async def intercept_conversation(
             status_code=409,
             detail=f"Already handled by {owner_name}. They must release or transfer it first.",
         )
-    # ─────────────────────────────────────────────────────────────────────────
 
-    conv.intercept_mode = InterceptMode.human
+    conv.intercept_mode    = InterceptMode.human
     conv.assigned_agent_id = agent.id
-    conv.intercept_since = datetime.now(timezone.utc)
+    conv.intercept_since   = datetime.now(timezone.utc)
 
     log = Intercept(
         conversation_id=conv.id,
@@ -48,39 +48,19 @@ async def intercept_conversation(
     db.add(log)
     await db.commit()
 
-    # Notify customer that a human agent has joined
-    wa_id = conv.wa_id.lstrip("+")
-    notification = (
-        f"👋 Hi! You're now chatting with *{agent.name}*, "
-        f"one of our team members. I'll be assisting you from here. "
-        f"Feel free to continue — I'm here to help! 😊"
-    )
-    try:
-        await _send_waba(wa_id, notification)
-        msg = Message(
-            wa_id=conv.wa_id,
-            conversation_id=conv.id,
-            direction=MsgDirection.outbound,
-            sender=MsgSender.human_agent,
-            text=notification,
-            agent_id=agent.id,
-        )
-        db.add(msg)
-        conv.last_message_at = datetime.now(timezone.utc)
-        conv.last_message_preview = notification[:100]
-        await db.commit()
+    # Broadcast to all agents so the conversation list updates immediately
+    # and other agents see it's now locked
+    if redis:
+        await redis.delete(f"context:{conv.wa_id}")  # Clear cached context to avoid confusion while the agent is working on it
+        await _broadcast(redis, str(conv.id), {
+            "type":              "intercept_changed",
+            "conversationId":    str(conv.id),
+            "mode":              "human",
+            "assignedAgentId":   str(agent.id),
+            "assignedAgentName": agent.name,
+        })
 
-        if redis:
-            await _broadcast(redis, str(conv.id), {
-                "type": "new_message",
-                "conversationId": str(conv.id),
-                "sender": "human_agent",
-                "text": notification,
-            })
-    except Exception:
-        pass  # don't block the intercept if WABA fails
-
-    return {"ok": True, "mode": "human"}
+    return {"ok": True, "mode": "human", "assigned_to": str(agent.id)}
 
 
 async def release_conversation(
@@ -95,9 +75,9 @@ async def release_conversation(
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    conv.intercept_mode = InterceptMode.ai
+    conv.intercept_mode    = InterceptMode.ai
     conv.assigned_agent_id = None
-    conv.intercept_since = None
+    conv.intercept_since   = None
 
     log = Intercept(
         conversation_id=conv.id,
@@ -107,35 +87,17 @@ async def release_conversation(
     db.add(log)
     await db.commit()
 
-    # Notify customer they're back with the AI assistant
-    wa_id = conv.wa_id.lstrip("+")
-    notification = (
-        f"🤖 You're now back with *Neema*, your AI assistant. "
-        f"How can I help you today?"
-    )
-    try:
-        await _send_waba(wa_id, notification)
-        msg = Message(
-            wa_id=conv.wa_id,
-            conversation_id=conv.id,
-            direction=MsgDirection.outbound,
-            sender=MsgSender.ai,
-            text=notification,
-        )
-        db.add(msg)
-        conv.last_message_at = datetime.now(timezone.utc)
-        conv.last_message_preview = notification[:100]
-        await db.commit()
+    # No message sent to customer — the AI will acknowledge the
+    # handover naturally in its next reply via handoverHint in context
 
-        if redis:
-            await _broadcast(redis, str(conv.id), {
-                "type": "new_message",
-                "conversationId": str(conv.id),
-                "sender": "ai",
-                "text": notification,
-            })
-    except Exception:
-        pass  # don't block the release if WABA fails
+    if redis:
+        await redis.delete(f"context:{conv.wa_id}")  # Clear cached context to avoid confusion when another agent takes over
+        await _broadcast(redis, str(conv.id), {
+            "type":            "intercept_changed",
+            "conversationId":  str(conv.id),
+            "mode":            "ai",
+            "assignedAgentId": None,
+        })
 
     return {"ok": True, "mode": "ai"}
 

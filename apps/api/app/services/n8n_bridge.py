@@ -136,19 +136,46 @@ async def get_context(db: AsyncSession, redis, wa_id: str) -> dict:
         if last_message_at else None
     )
 
+    # ── Intercept / handover context ──────────────────────────────────────────
+    conv_result = await db.execute(
+        select(Conversation).where(Conversation.wa_id == wa_id)
+    )
+    conv = conv_result.scalar_one_or_none()
+
+    recent_intercept = None
+    intercept_mode   = "ai"
+
+    if conv:
+        intercept_mode = conv.intercept_mode.value if conv.intercept_mode else "ai"
+
+        intercept_result = await db.execute(
+            select(Intercept)
+            .where(Intercept.conversation_id == conv.id)
+            .order_by(Intercept.created_at.desc())
+            .limit(1)
+        )
+        last_intercept = intercept_result.scalar_one_or_none()
+        if last_intercept:
+            recent_intercept = {
+                "action":   last_intercept.action.value,
+                "agent_id": str(last_intercept.agent_id) if last_intercept.agent_id else None,
+                "at":       last_intercept.created_at.isoformat() if last_intercept.created_at else None,
+            }
+
     ctx = {
-        "wa_id": wa_id,
-        # Full state preserved — including lead_stage and any other keys
-        "state": user.state if user else {"active": "active", "cart": {"items": [], "subtotal": 0}},
-        # snake_case so n8n normalize node can read apiResp.last_text etc.
+        "wa_id":           wa_id,
+        "state":           user.state if user else {"active": "active", "cart": {"items": [], "subtotal": 0}},
         "last_text":       user.last_text      if user else "",
         "last_direction":  user.last_direction if user else "inbound",
-        "last_message_ts": last_message_ts,       # integer ms — used by normalize node
-        "last_message_at": last_message_at_iso,   # ISO string — human-readable backup
+        "last_message_ts": last_message_ts,
+        "last_message_at": last_message_at_iso,
+        # ── Handover context — used by AI to acknowledge transitions ──────────
+        "intercept_mode":   intercept_mode,
+        "recent_intercept": recent_intercept,
     }
+
     await redis.setex(cache_key, 3600, json.dumps(ctx))
     return ctx
-
 
 # ── Get User ──────────────────────────────────────────────
 
