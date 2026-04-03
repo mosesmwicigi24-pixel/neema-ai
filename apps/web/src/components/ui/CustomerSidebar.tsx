@@ -370,11 +370,25 @@ export function CustomerSidebar({
                             )}
                         </div>
                         <div className="text-xs text-stone-400 font-mono">{formatPhone(profile.wa_id)}</div>
-                        <div className="flex items-center gap-1.5 mt-1.5">
+                        <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
                             <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${stageMeta.bg} ${stageMeta.color}`}>
                                 <span className={`w-1.5 h-1.5 rounded-full ${stageMeta.dot}`} />
                                 {stageMeta.label}
                             </span>
+                            {/* Country flag + ISO */}
+                            {(profile as any).country_iso && (
+                                <span
+                                    className="inline-flex items-center gap-1 text-[10px] font-mono text-stone-500 cursor-default select-none"
+                                    title={(profile as any).country_name ?? (profile as any).country_iso}
+                                >
+                                    <img
+                                        src={`https://flagcdn.com/w20/${((profile as any).country_iso as string).toLowerCase()}.png`}
+                                        alt={(profile as any).country_iso}
+                                        className="w-4 h-3 rounded-sm object-cover border border-stone-200 shadow-sm"
+                                    />
+                                    <span>{((profile as any).country_iso as string).toUpperCase()}</span>
+                                </span>
+                            )}
                             {saving && <span className="text-[10px] text-stone-400 animate-pulse">saving…</span>}
                         </div>
                     </div>

@@ -1,6 +1,6 @@
 "use client";
 import React, { useState } from "react";
-import { signIn, getSession } from "next-auth/react";
+import { signIn, signOut, getSession } from "next-auth/react";
 
 interface Props {
     email: string;
@@ -130,6 +130,13 @@ export function SessionExpiredModal({ email, onSuccess, expiredToken }: Props) {
                                     Signing in…
                                 </>
                             ) : "Continue"}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => signOut({ callbackUrl: "/login" })}
+                            className="w-full py-2 rounded-xl text-stone-400 hover:text-stone-700 text-sm transition text-center"
+                        >
+                            Sign out
                         </button>
                     </form>
                 </div>

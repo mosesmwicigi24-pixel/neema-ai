@@ -60,9 +60,7 @@ export function ConversationsView({
     const [activeConvId, setActiveConvId] = useState<string>("");
     const [mobilePanel, setMobilePanel] = useState<MobilePanel>("list");
     const [channelTab, setChannelTab] = useState<"all" | Channel>("all");
-    const [statusFilter, setStatusFilter] = useState<"all" | "open" | "closed">(
-        "all",
-    );
+    const [tagFilter, setTagFilter] = useState<string>("all");
     const [interceptFilter, setInterceptFilter] = useState<
         "all" | "human" | "ai" | "paused"
     >("all");
@@ -495,11 +493,21 @@ export function ConversationsView({
         {},
     );
 
+    // Collect all unique tags across all conversations for the tag filter UI
+    const allTags = Array.from(
+        new Set(
+            conversations.flatMap((c) => (c as any).tags ?? [])
+        )
+    ).sort() as string[];
+
     const filteredConvs = conversations
         .filter((c) => {
             if (channelTab !== "all" && c.channel !== channelTab) return false;
-            if (statusFilter !== "all" && c.status !== statusFilter)
-                return false;
+            // Tag filter: only show conversations whose customer has the selected tag
+            if (tagFilter !== "all") {
+                const convTags: string[] = (c as any).tags ?? [];
+                if (!convTags.includes(tagFilter)) return false;
+            }
             if (
                 interceptFilter !== "all" &&
                 c.intercept_mode !== interceptFilter
@@ -514,6 +522,8 @@ export function ConversationsView({
             return true;
         })
         .sort((a, b) => {
+            // Sort by the most recent activity — inbound OR outbound — falling
+            // back to created_at so brand-new conversations surface correctly.
             const aTime = a.last_message_at
                 ? new Date(a.last_message_at).getTime()
                 : new Date(a.created_at).getTime();
@@ -615,21 +625,30 @@ export function ConversationsView({
                 {/* Extra filters */}
                 {showFilters && (
                     <div className="mt-2 flex gap-1.5 flex-wrap">
-                        {(["all", "open", "closed"] as const).map((s) => (
-                            <button
-                                key={s}
-                                onClick={() => setStatusFilter(s)}
-                                className={`h-6 px-2.5 rounded-md text-xs font-medium capitalize transition-colors ${statusFilter === s ? "text-white" : "bg-[#e6f3d8] text-[#699a32]"}`}
-                                style={
-                                    statusFilter === s
-                                        ? { backgroundColor: "#589b31" }
-                                        : undefined
-                                }
-                            >
-                                {s}
-                            </button>
-                        ))}
-                        <div className="w-full" />
+                        {/* Tag filter */}
+                        {allTags.length > 0 && (
+                            <>
+                                <button
+                                    key="all-tags"
+                                    onClick={() => setTagFilter("all")}
+                                    className={`h-6 px-2.5 rounded-md text-xs font-medium transition-colors ${tagFilter === "all" ? "text-white" : "bg-[#e6f3d8] text-[#699a32]"}`}
+                                    style={tagFilter === "all" ? { backgroundColor: "#589b31" } : undefined}
+                                >
+                                    All tags
+                                </button>
+                                {allTags.map((tag) => (
+                                    <button
+                                        key={tag}
+                                        onClick={() => setTagFilter(tag === tagFilter ? "all" : tag)}
+                                        className={`h-6 px-2.5 rounded-md text-xs font-medium transition-colors ${tagFilter === tag ? "text-white" : "bg-[#e6f3d8] text-[#699a32]"}`}
+                                        style={tagFilter === tag ? { backgroundColor: "#589b31" } : undefined}
+                                    >
+                                        {tag}
+                                    </button>
+                                ))}
+                                <div className="w-full" />
+                            </>
+                        )}
                         {(["all", "ai", "human", "paused"] as const).map(
                             (m) => (
                                 <button
