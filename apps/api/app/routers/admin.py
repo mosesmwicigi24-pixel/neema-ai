@@ -448,50 +448,44 @@ async def clear_chat_history(
     db: AsyncSession = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
 ):
-    # Role check — only admin or superuser
     if agent.role != "admin" and not agent.is_superuser:
-        raise HTTPException(
-            status_code=403,
-            detail="Only admins can clear chat history"
-        )
+        raise HTTPException(status_code=403, detail="Only admins can clear chat history")
 
-    result = await db.execute(
-        select(Conversation).where(Conversation.id == conv_id)
-    )
+    result = await db.execute(select(Conversation).where(Conversation.id == conv_id))
     conv = result.scalar_one_or_none()
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # Delete all messages for this conversation
-    await db.execute(
-        delete(Message).where(Message.conversation_id == conv_id)
-    )
+    await db.execute(delete(Message).where(Message.conversation_id == conv_id))
 
-    # Reset conversation preview
     conv.last_message_preview = None
     conv.last_message_at      = None
 
-    # Log it as an intercept action for audit trail
     log = Intercept(
         conversation_id=conv.id,
         agent_id=agent.id,
-        action=InterceptAction.intercept,  # reuse existing enum or add 'clear'
+        action=InterceptAction.intercept,
     )
     db.add(log)
     await db.commit()
 
-    # Invalidate context cache
-    await request.app.state.redis.delete(f"context:{conv.wa_id}")
+    redis = request.app.state.redis
 
-    # Broadcast so the thread panel clears live
-    await _broadcast(request.app.state.redis, str(conv.id), {
-        "type":            "history_cleared",
-        "conversationId":  str(conv.id),
-        "clearedBy":       agent.name,
-    })
+    # Invalidate context cache
+    await redis.delete(f"context:{conv.wa_id}")
+
+    # Broadcast directly — no import needed
+    import json
+    await redis.publish(
+        f"ws:channel:{conv_id}",
+        json.dumps({
+            "type":           "history_cleared",
+            "conversationId": conv_id,
+            "clearedBy":      agent.name,
+        })
+    )
 
     return {"ok": True, "cleared": True, "conversation_id": conv_id}
-
 
 # ── Serve uploaded media files (public — no auth required) ───────────────────
 # Must be public: WhatsApp servers download the file when sending media messages,

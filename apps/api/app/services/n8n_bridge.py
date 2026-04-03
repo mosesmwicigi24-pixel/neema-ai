@@ -14,7 +14,6 @@ from app.models.session import Session
 from app.models.intercept import Intercept, InterceptAction
 from app.core.config import settings
 from app.schemas.n8n import OutboundDto
-from app.services.n8n_bridge import _broadcast
 
 
 # ── Shared timestamp helpers ──────────────────────────────
