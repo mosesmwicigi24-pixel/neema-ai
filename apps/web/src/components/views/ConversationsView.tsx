@@ -780,7 +780,7 @@ export function ConversationsView({
 
     const ThreadPanel = (
         <div className="flex flex-1 overflow-hidden">
-            <div className="flex flex-col flex-1 overflow-hidden bg-white">
+            <div className="flex flex-col flex-1 overflow-hidden bg-white relative">
                 {!activeConv ? (
                     <div className="flex-1 flex items-center justify-center text-[#9ccd65]">
                         <div className="text-center">
@@ -790,6 +790,18 @@ export function ConversationsView({
                     </div>
                 ) : (
                     <>
+                        {/* Floating profile FAB — mobile only */}
+                        {isMobile && (
+                            <button
+                                onClick={() => setMobileCrmOpen(true)}
+                                title="View customer profile"
+                                className="absolute top-3 right-3 z-20 w-8 h-8 rounded-full bg-white border border-[#cee6b2] shadow-sm flex items-center justify-center text-[#427425] hover:bg-[#f3f9ec] transition-colors"
+                            >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                </svg>
+                            </button>
+                        )}
                         {/* Thread header */}
                         <div className="px-4 py-3 border-b border-[#e6f3d8] bg-white flex items-center gap-2 flex-wrap">
                             {isMobile && (
@@ -989,20 +1001,6 @@ export function ConversationsView({
                                         </Btn>
                                     )} */}
 
-                                {/* ── Customer profile button — mobile only */}
-                                {isMobile && (
-                                    <button
-                                        key="crm"
-                                        onClick={() => setMobileCrmOpen(true)}
-                                        title="View customer profile"
-                                        className="h-7 px-2 rounded-lg bg-[#e6f3d8] hover:bg-[#cee6b2] text-[#427425] flex items-center gap-1 transition-colors flex-shrink-0"
-                                    >
-                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                                        </svg>
-                                        <span className="text-[10px] font-semibold">Profile</span>
-                                    </button>
-                                )}
                             </div>
                         </div>
 
@@ -1841,21 +1839,18 @@ export function ConversationsView({
                 {NoteModalEl}
                 {ClearHistoryModalEl}
 
-                {/* Mobile CRM drawer */}
+                {/* Mobile CRM drawer — slides in from the right */}
                 {mobileCrmOpen && activeConv && (
-                    <div className="fixed inset-0 z-50 flex flex-col justify-end">
+                    <div className="fixed inset-0 z-50 flex justify-end">
                         {/* Backdrop */}
                         <div
                             className="absolute inset-0 bg-black/40"
                             onClick={() => setMobileCrmOpen(false)}
                         />
                         {/* Drawer */}
-                        <div
-                            className="relative bg-white rounded-t-2xl overflow-hidden flex flex-col"
-                            style={{ maxHeight: "85vh" }}
-                        >
-                            {/* Drag handle */}
-                            <div className="flex items-center justify-between px-4 pt-3 pb-2 border-b border-[#e6f3d8]">
+                        <div className="relative bg-white w-full max-w-sm flex flex-col overflow-hidden shadow-xl">
+                            {/* Header */}
+                            <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-[#e6f3d8] flex-shrink-0">
                                 <h2 className="text-sm font-bold text-[#16270c]">Customer Profile</h2>
                                 <button
                                     onClick={() => setMobileCrmOpen(false)}
@@ -1866,7 +1861,7 @@ export function ConversationsView({
                                     </svg>
                                 </button>
                             </div>
-                            <div className="overflow-y-auto flex-1 pb-8">
+                            <div className="overflow-y-auto flex-1 w-full">
                                 <CustomerSidebar
                                     conversation={activeConv}
                                     orders={orders}
