@@ -26,8 +26,10 @@ export interface Conversation {
     unread_count: number;
     contact_name: string | null;
     contact_phone: string;
+    country?: string | null;
     country_iso?: string | null;
     flag_url?: string | null;
+    tags?: string[];
 }
 
 export interface Message {

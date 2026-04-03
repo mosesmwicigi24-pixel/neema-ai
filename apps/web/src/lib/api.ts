@@ -126,8 +126,10 @@ export interface ApiConversation {
     name?: string;
     channel?: string;
     unread?: number;
+    country?: string | null;
     country_iso?: string;
-    flag_url?: string;
+    flag_url?: string;    
+    tags?: string[];
 }
 
 export const conversationsApi = {
@@ -439,7 +441,9 @@ export function mapConversation(c: ApiConversation): Conversation {
         unread: c.unread ?? 0,
         unread_count: c.unread ?? 0,
         country_iso: c.country_iso,
-        flag_url:    c.flag_url,
+        country:     c.country     ?? null,
+        flag_url:    c.flag_url,        
+        tags:        c.tags        ?? [],
     };
 }
 

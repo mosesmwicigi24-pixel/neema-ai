@@ -104,6 +104,7 @@ async def list_conversations(
         "flag_url":             user_map[c.wa_id].flag_url if c.wa_id in user_map else None,
         "channel":              getattr(c, "channel", "whatsapp") or "whatsapp",
         "unread":               0,
+        "tags":                 (user_map[c.wa_id].state or {}).get("tags", []) if c.wa_id in user_map else [],
     }
     for c in conversations
 ]
