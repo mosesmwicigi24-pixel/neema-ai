@@ -46,68 +46,146 @@ async def list_conversations(
     db: AsyncSession = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
 ):
-    q = select(Conversation).order_by(Conversation.last_message_at.desc().nullslast())
+    from sqlalchemy import and_, case, literal
+
+    # ── Base conversation query (no ORDER BY yet — we sort after enrichment) ──
+    q = select(Conversation)
     if mode:
         q = q.where(Conversation.intercept_mode == mode)
     result = await db.execute(q)
     conversations = result.scalars().all()
 
-    # Batch-load User names and Agent names to avoid N+1
-    wa_ids    = [c.wa_id for c in conversations]
-    agent_ids = [c.assigned_agent_id for c in conversations if c.assigned_agent_id]
+    if not conversations:
+        return []
 
+    conv_ids = [c.id for c in conversations]
+    wa_ids   = [c.wa_id for c in conversations]
+
+    # ── Batch-load User names / metadata ─────────────────────────────────────
     user_map: dict[str, User] = {}
-    if wa_ids:
-        u_res = await db.execute(select(User).where(User.wa_id.in_(wa_ids)))
-        for u in u_res.scalars().all():
-            user_map[u.wa_id] = u
+    u_res = await db.execute(select(User).where(User.wa_id.in_(wa_ids)))
+    for u in u_res.scalars().all():
+        user_map[u.wa_id] = u
 
+    # ── Batch-load assigned agent names ──────────────────────────────────────
+    agent_ids = [c.assigned_agent_id for c in conversations if c.assigned_agent_id]
     agent_map: dict[str, str] = {}
     if agent_ids:
         a_res = await db.execute(select(Agent).where(Agent.id.in_(agent_ids)))
         for a in a_res.scalars().all():
             agent_map[str(a.id)] = a.name or ""
 
-    # Batch-load latest message per conversation (inbound or outbound)
-    preview_map: dict[str, str] = {}
-    if wa_ids:
-        conv_ids = [c.id for c in conversations]
-        sub = (
-            select(Message.conversation_id, func.max(Message.created_at).label("max_at"))
-            .where(Message.conversation_id.in_(conv_ids))
-            .group_by(Message.conversation_id)
-            .subquery()
+    # ── Batch-load latest message per conversation for preview + true sort ───
+    # We query the actual messages table so sort order reflects ALL activity
+    # (inbound customer messages, AI replies, human replies) — not just whatever
+    # last_message_at was written to the conversation row.
+    latest_sub = (
+        select(
+            Message.conversation_id,
+            func.max(Message.created_at).label("max_at"),
         )
-        latest_q = select(Message).join(
-            sub,
-            (Message.conversation_id == sub.c.conversation_id) &
-            (Message.created_at == sub.c.max_at),
+        .where(Message.conversation_id.in_(conv_ids))
+        # Exclude internal notes — they should not affect sort order or preview
+        .where(Message.media_type.is_(None) | (Message.media_type != "note"))
+        .group_by(Message.conversation_id)
+        .subquery()
+    )
+    latest_q = select(Message).join(
+        latest_sub,
+        (Message.conversation_id == latest_sub.c.conversation_id)
+        & (Message.created_at == latest_sub.c.max_at),
+    )
+    preview_map: dict[str, tuple[str, str]] = {}  # conv_id -> (text, iso_timestamp)
+    for m in (await db.execute(latest_q)).scalars().all():
+        cid = str(m.conversation_id)
+        ts  = m.created_at.isoformat() if m.created_at else None
+        preview_map[cid] = (m.text or "", ts)
+
+    # ── Compute unread per conversation ───────────────────────────────────────
+    # Definition: inbound messages that arrived AFTER the last outbound message.
+    # A conversation is "read" once any reply (AI or human) has been sent.
+    # Notes (media_type="note") are internal and never count as a reply here.
+    #
+    # Strategy:
+    #   1. Find the timestamp of the last real outbound message per conversation.
+    #   2. Count inbound messages that arrived strictly after that timestamp.
+    #   3. Conversations that have NEVER had an outbound message → all inbound = unread.
+
+    last_outbound_sub = (
+        select(
+            Message.conversation_id,
+            func.max(Message.created_at).label("last_out_at"),
         )
-        for m in (await db.execute(latest_q)).scalars().all():
-            preview_map[str(m.conversation_id)] = m.text
+        .where(Message.conversation_id.in_(conv_ids))
+        .where(Message.direction == "outbound")
+        # Exclude notes — they are not replies to the customer
+        .where(Message.media_type.is_(None) | (Message.media_type != "note"))
+        .group_by(Message.conversation_id)
+        .subquery()
+    )
+
+    # Count inbound messages after the last outbound (LEFT JOIN handles never-replied convs)
+    unread_q = (
+        select(
+            Message.conversation_id,
+            func.count().label("unread"),
+        )
+        .outerjoin(
+            last_outbound_sub,
+            Message.conversation_id == last_outbound_sub.c.conversation_id,
+        )
+        .where(Message.conversation_id.in_(conv_ids))
+        .where(Message.direction == "inbound")
+        .where(
+            # Either there has never been an outbound message (last_out_at IS NULL)
+            # or this inbound arrived after the last outbound
+            last_outbound_sub.c.last_out_at.is_(None)
+            | (Message.created_at > last_outbound_sub.c.last_out_at)
+        )
+        .group_by(Message.conversation_id)
+    )
+    unread_map: dict[str, int] = {}
+    for row in (await db.execute(unread_q)).all():
+        unread_map[str(row.conversation_id)] = row.unread
+
+    # ── Build response, sorted by true latest-message timestamp desc ──────────
+    def sort_key(c: Conversation):
+        entry = preview_map.get(str(c.id))
+        if entry and entry[1]:
+            return entry[1]
+        # Fall back to conversation.last_message_at, then created_at
+        if c.last_message_at:
+            return c.last_message_at.isoformat()
+        return c.created_at.isoformat() if c.created_at else ""
+
+    conversations.sort(key=sort_key, reverse=True)
 
     return [
-    {
-        "id":                   str(c.id),
-        "wa_id":                c.wa_id,
-        "intercept_mode":       c.intercept_mode,
-        "assigned_agent_id":    str(c.assigned_agent_id) if c.assigned_agent_id else None,
-        "assigned_agent_name":  agent_map.get(str(c.assigned_agent_id), "") if c.assigned_agent_id else None,
-        "intercept_since":      c.intercept_since.isoformat() if c.intercept_since else None,
-        "last_message_at":      c.last_message_at.isoformat() if c.last_message_at else None,
-        "last_message_preview": preview_map.get(str(c.id)) or c.last_message_preview,
-        "status":               c.status,
-        "created_at":           c.created_at.isoformat() if c.created_at else None,
-        "updated_at":           c.updated_at.isoformat() if c.updated_at else None,
-        "name":                 user_map[c.wa_id].name if c.wa_id in user_map else None,
-        "country_iso":          user_map[c.wa_id].country_iso if c.wa_id in user_map else None,
-        "flag_url":             user_map[c.wa_id].flag_url if c.wa_id in user_map else None,
-        "channel":              getattr(c, "channel", "whatsapp") or "whatsapp",
-        "unread":               0,
-        "tags":                 (user_map[c.wa_id].state or {}).get("tags", []) if c.wa_id in user_map else [],
-    }
-    for c in conversations
-]
+        {
+            "id":                   str(c.id),
+            "wa_id":                c.wa_id,
+            "intercept_mode":       c.intercept_mode,
+            "assigned_agent_id":    str(c.assigned_agent_id) if c.assigned_agent_id else None,
+            "assigned_agent_name":  agent_map.get(str(c.assigned_agent_id), "") if c.assigned_agent_id else None,
+            "intercept_since":      c.intercept_since.isoformat() if c.intercept_since else None,
+            # Use the true latest message timestamp for display — not the stale column
+            "last_message_at":      preview_map[str(c.id)][1] if str(c.id) in preview_map else (
+                                        c.last_message_at.isoformat() if c.last_message_at else None
+                                    ),
+            "last_message":         preview_map.get(str(c.id), (c.last_message_preview or "", None))[0],
+            "last_message_preview": preview_map.get(str(c.id), (c.last_message_preview or "", None))[0],
+            "status":               c.status,
+            "created_at":           c.created_at.isoformat() if c.created_at else None,
+            "updated_at":           c.updated_at.isoformat() if c.updated_at else None,
+            "name":                 user_map[c.wa_id].name if c.wa_id in user_map else None,
+            "country_iso":          user_map[c.wa_id].country_iso if c.wa_id in user_map else None,
+            "flag_url":             user_map[c.wa_id].flag_url if c.wa_id in user_map else None,
+            "channel":              getattr(c, "channel", "whatsapp") or "whatsapp",
+            "unread":               unread_map.get(str(c.id), 0),
+            "tags":                 (user_map[c.wa_id].state or {}).get("tags", []) if c.wa_id in user_map else [],
+        }
+        for c in conversations
+    ]
 
 
 @router.get("/conversations/{conv_id}/messages")
@@ -271,6 +349,8 @@ async def add_note(
         agent_id=agent.id,
     )
     db.add(msg)
+    # Notes do NOT update last_message_at — they are internal and should not
+    # affect conversation sort order or the unread counter.
     await db.commit()
     await db.refresh(msg)
 
