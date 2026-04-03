@@ -134,16 +134,11 @@ async def post_notify(body: dict, request: Request):
 # Add to app/routers/n8n_bridge.py router
 @router.post("/media/download", dependencies=[Depends(verify_n8n_secret)])
 async def n8n_download_media(body: dict, request: Request):
-    """
-    n8n-facing version — uses x-n8n-secret instead of Bearer token.
-    Downloads WhatsApp media and returns a stable internal URL.
-    """
-    media_url = body.get("media_url")
     media_id  = body.get("media_id")
     mime_type = body.get("mime_type", "application/octet-stream")
 
-    if not media_url or not media_id:
-        return {"ok": False, "error": "media_url and media_id required"}
+    if not media_id:
+        return {"ok": False, "error": "media_id required"}
 
     from app.routers.media import MEDIA_DIR, _mime_to_ext
     import os, httpx
@@ -154,15 +149,30 @@ async def n8n_download_media(body: dict, request: Request):
 
     if not os.path.exists(filepath):
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(
-                media_url,
+
+            # Step 1 — get the current download URL from Graph API using media_id
+            meta_resp = await client.get(
+                f"https://graph.facebook.com/v19.0/{media_id}",
+                headers={"Authorization": f"Bearer {settings.waba_token}"},
+            )
+            if not meta_resp.is_success:
+                return {"ok": False, "error": f"Graph API metadata failed: {meta_resp.status_code}"}
+
+            download_url = meta_resp.json().get("url")
+            if not download_url:
+                return {"ok": False, "error": "No URL in Graph API response"}
+
+            # Step 2 — download the actual file using the fresh URL + token
+            file_resp = await client.get(
+                download_url,
+                headers={"Authorization": f"Bearer {settings.waba_token}"},
                 follow_redirects=True,
             )
-            # headers={"Authorization": f"Bearer {settings.waba_token}"},                
-            if not resp.is_success:
-                return {"ok": False, "error": f"WhatsApp returned {resp.status_code}"}
+            if not file_resp.is_success:
+                return {"ok": False, "error": f"File download failed: {file_resp.status_code}"}
+
             with open(filepath, "wb") as f:
-                f.write(resp.content)
+                f.write(file_resp.content)
 
     base = str(request.base_url).rstrip("/")
     return {
