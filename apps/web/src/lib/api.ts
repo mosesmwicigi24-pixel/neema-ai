@@ -168,6 +168,8 @@ export const conversationsApi = {
         post<Message>(`/admin/conversations/${id}/note`, { text }),
     close: (id: string) =>
         post<{ ok: boolean }>(`/admin/conversations/${id}/release`, {}),
+    clearHistory: (id: string) =>
+        del<{ ok: boolean }>(`/admin/conversations/${id}/messages`),
 
     /**
      * Upload a file (image / document / video / audio) from the agent's

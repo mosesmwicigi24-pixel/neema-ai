@@ -29,6 +29,7 @@ export const PERMS = {
     MANAGE_AGENTS:          "manage_agents",
     MANAGE_ROLES:           "manage_roles",
     MANAGE_SETTINGS:        "manage_settings",
+    CLEAR_CHAT_HISTORY:     "clear_chat_history",
 } as const;
 
 export type Permission = (typeof PERMS)[keyof typeof PERMS];

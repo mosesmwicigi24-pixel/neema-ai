@@ -80,6 +80,8 @@ export function ConversationsView({
     const [threadLoading, setThreadLoading] = useState(false);
     const [sending, setSending] = useState(false);
     const [crmOpen, setCrmOpen] = useState<boolean>(true);
+    const [clearConfirm, setClearConfirm] = useState(false);
+    const [clearing, setClearing]         = useState(false);
 
     const { data: session } = useSession();
     const currentAgentId = (session as any)?.user?.id as string | undefined;
@@ -247,6 +249,13 @@ export function ConversationsView({
                 if (existing.some((x) => x.id === msg.id)) return m;
                 return { ...m, [activeConvId]: [...existing, msg] };
             });
+        }
+        if (
+            event.type === "history_cleared" &&
+            event.conversationId === activeConvId
+        ) {
+            setMessages((m) => ({ ...m, [activeConvId]: [] }));
+            onToast(`History cleared by ${event.clearedBy}`);
         }
     });
 
@@ -906,6 +915,18 @@ export function ConversationsView({
                                         variant="secondary"
                                     >
                                         📝
+                                    </Btn>
+                                )}
+
+                                {/* ── Clear history — admin/superuser only ── */}
+                                {isAdminOrSuper && (
+                                    <Btn
+                                        key="clear-history"
+                                        small
+                                        onClick={() => setClearConfirm(true)}
+                                        variant="danger"
+                                    >
+                                        🗑️
                                     </Btn>
                                 )}
 
@@ -1700,12 +1721,63 @@ export function ConversationsView({
         </Modal>
     );
 
+    const clearHistory = async () => {
+        if (!activeConvId) return;
+        setClearing(true);
+        try {
+            await conversationsApi.clearHistory(activeConvId);
+            setMessages((m) => ({ ...m, [activeConvId]: [] }));
+            setClearConfirm(false);
+            refetchConversations?.();
+            onToast("Chat history cleared");
+        } catch (err: any) {
+            onToast(
+                err?.message?.includes("403")
+                    ? "You don't have permission to clear chat history"
+                    : "Failed to clear history",
+                "error",
+            );
+        } finally {
+            setClearing(false);
+        }
+    };
+
+    const ClearHistoryModalEl = (
+        <Modal
+            show={clearConfirm}
+            onClose={() => setClearConfirm(false)}
+            title="Clear Chat History"
+        >
+            <p className="text-sm text-stone-600 mb-4">
+                This will permanently delete all messages in this conversation.
+                The conversation record and customer profile will be kept.
+                This cannot be undone.
+            </p>
+            <div className="flex gap-2">
+                <Btn
+                    onClick={clearHistory}
+                    variant="danger"
+                    disabled={clearing}
+                >
+                    {clearing ? "Clearing…" : "Yes, clear history"}
+                </Btn>
+                <Btn
+                    onClick={() => setClearConfirm(false)}
+                    variant="outline"
+                >
+                    Cancel
+                </Btn>
+            </div>
+        </Modal>
+    );
+
     if (isMobile) {
         return (
             <div className="flex-1 overflow-hidden flex flex-col">
                 {mobilePanel === "list" ? ConvList : ThreadPanel}
                 {TransferModalEl}
                 {NoteModalEl}
+                {ClearHistoryModalEl}
             </div>
         );
     }
@@ -1716,6 +1788,7 @@ export function ConversationsView({
             {ThreadPanel}
             {TransferModalEl}
             {NoteModalEl}
+            {ClearHistoryModalEl}
 
             {/* {typeof window !== "undefined" && (
                 <div

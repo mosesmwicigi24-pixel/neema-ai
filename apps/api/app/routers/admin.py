@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, func
+from sqlalchemy import select, update, func, delete
 from app.database import get_db
 from app.models.conversation import Conversation, InterceptMode
 from app.models.message import Message
@@ -440,6 +440,57 @@ async def reply_media(
         filename=body.get("filename"),
         redis=request.app.state.redis,
     )
+
+@router.delete("/conversations/{conv_id}/messages")
+async def clear_chat_history(
+    conv_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    # Role check — only admin or superuser
+    if agent.role != "admin" and not agent.is_superuser:
+        raise HTTPException(
+            status_code=403,
+            detail="Only admins can clear chat history"
+        )
+
+    result = await db.execute(
+        select(Conversation).where(Conversation.id == conv_id)
+    )
+    conv = result.scalar_one_or_none()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # Delete all messages for this conversation
+    await db.execute(
+        delete(Message).where(Message.conversation_id == conv_id)
+    )
+
+    # Reset conversation preview
+    conv.last_message_preview = None
+    conv.last_message_at      = None
+
+    # Log it as an intercept action for audit trail
+    log = Intercept(
+        conversation_id=conv.id,
+        agent_id=agent.id,
+        action=InterceptAction.intercept,  # reuse existing enum or add 'clear'
+    )
+    db.add(log)
+    await db.commit()
+
+    # Invalidate context cache
+    await request.app.state.redis.delete(f"context:{conv.wa_id}")
+
+    # Broadcast so the thread panel clears live
+    await _broadcast(request.app.state.redis, str(conv.id), {
+        "type":            "history_cleared",
+        "conversationId":  str(conv.id),
+        "clearedBy":       agent.name,
+    })
+
+    return {"ok": True, "cleared": True, "conversation_id": conv_id}
 
 
 # ── Serve uploaded media files (public — no auth required) ───────────────────
