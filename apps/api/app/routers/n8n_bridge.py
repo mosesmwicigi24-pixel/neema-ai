@@ -36,8 +36,12 @@ async def get_messages(wa_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/message", dependencies=[Depends(verify_n8n_secret)])
-async def upsert_message(body: MessageDto, db: AsyncSession = Depends(get_db)):
-    return await svc.upsert_message(db, body)
+async def upsert_message(
+    body: MessageDto,
+    request: Request,                    
+    db: AsyncSession = Depends(get_db)
+):
+    return await svc.upsert_message(db, request.app.state.redis, body)  
 
 
 @router.patch("/message/{docid}", dependencies=[Depends(verify_n8n_secret)])
@@ -108,3 +112,20 @@ async def get_catalog(db: AsyncSession = Depends(get_db)):
         }
         for i in items
     ]
+
+@router.post("/notify", dependencies=[Depends(verify_n8n_secret)])
+async def post_notify(body: dict, request: Request):
+    redis = request.app.state.redis
+    agent_id = body.get("agent_id")
+    # Broadcast to specific agent or all agents
+    channel = f"agents:{agent_id}" if agent_id else "agents:all"
+    await redis.publish(f"ws:channel:{channel}", json.dumps({
+        "event":  "notification",
+        "type":   body.get("type"),
+        "title":  body.get("title"),
+        "body":   body.get("body"),
+        "wa_id":  body.get("wa_id"),
+        "ts":     body.get("ts"),
+        "data":   body,
+    }))
+    return {"ok": True}

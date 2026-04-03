@@ -234,6 +234,13 @@ export function ConversationsView({
                 sender: event.sender ?? "ai",
                 text: event.text,
                 created_at: event.created_at ?? new Date().toISOString(),
+                // Media fields from WebSocket broadcast
+                media_type: event.mediaType ?? undefined,
+                media_id: event.mediaId ?? undefined,
+                media_url: event.mediaUrl ?? undefined,
+                media_caption: event.mediaCaption ?? undefined,
+                mime_type: event.mimeType ?? undefined,
+                filename: event.filename ?? undefined,
             };
             setMessages((m) => {
                 const existing = m[activeConvId] ?? [];
@@ -643,6 +650,15 @@ export function ConversationsView({
                                         )}
                                         size={38}
                                     />
+                                    {/* Country flag — top right */}
+                                    {(conv as any).country_iso && (
+                                        <img
+                                            src={`https://flagcdn.com/w20/${(conv as any).country_iso.toLowerCase()}.png`}
+                                            alt={(conv as any).country_iso}
+                                            className="absolute -top-0.5 -right-0.5 w-4 h-3 rounded-sm object-cover border border-white shadow-sm"
+                                        />
+                                    )}
+                                    {/* Channel badge — bottom right */}
                                     {cfg && (
                                         <div
                                             className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full flex items-center justify-center text-white text-[9px]"

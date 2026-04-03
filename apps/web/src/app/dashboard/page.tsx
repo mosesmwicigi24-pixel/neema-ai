@@ -34,6 +34,12 @@ import { SettingsView } from "@/components/views/SettingsView";
 
 import { getAgentPermissions, PERMS } from "@/lib/permissions";
 
+// ── Notification hook ─────────────────────────────────────────────────────────
+import {
+    useAgentNotifications,
+    type AgentNotification,
+} from "@/lib/websocket";
+
 import type {
     Conversation,
     MessagesMap,
@@ -88,6 +94,10 @@ export default function NeemaDashboard(): React.ReactElement {
     const [localConversations, setLocalConversations] = useState<Conversation[]>([]);
     const isMobile = useIsMobile();
 
+    // ── Notification state ────────────────────────────────────────────────────
+    const [notifications, setNotifications] = useState<AgentNotification[]>([]);
+    const [unreadCount, setUnreadCount] = useState(0);
+
     // Ref guard — prevents parallel 401s from re-triggering the modal
     const sessionExpiredRef = useRef(false);
     // Snapshot of the expired token so the modal can detect when a genuinely new one arrives
@@ -116,7 +126,6 @@ export default function NeemaDashboard(): React.ReactElement {
     }, [theme]);
 
     // ── Write BOTH tokens synchronously in the render body ───────────────────
-    // Must happen before any hook callbacks fire — useEffect is too late.
     const accessToken  = (nextAuthSession as any)?.accessToken  as string | undefined;
     const refreshToken = (nextAuthSession as any)?.refreshToken as string | undefined;
     if (typeof window !== "undefined") {
@@ -130,8 +139,6 @@ export default function NeemaDashboard(): React.ReactElement {
         const handler = () => {
             if (!sessionExpiredRef.current) {
                 sessionExpiredRef.current = true;
-                // Snapshot the current (expired) token so the modal can tell
-                // when getSession() finally returns a different one
                 expiredTokenRef.current = typeof window !== "undefined"
                     ? (window as any).__neema_token
                     : undefined;
@@ -237,21 +244,42 @@ export default function NeemaDashboard(): React.ReactElement {
         [],
     );
 
+    // ── Agent notifications via WebSocket ─────────────────────────────────────
+    useAgentNotifications(
+        useCallback(
+            (n: AgentNotification) => {
+                // Keep the last 50 notifications, newest first
+                setNotifications((prev) => [n, ...prev].slice(0, 50));
+                setUnreadCount((c) => c + 1);
+
+                // Show an in-app toast
+                showToast(`${n.title}: ${n.body}`, "info");
+
+                // Browser push notification (only if permission already granted —
+                // call Notification.requestPermission() elsewhere on first load)
+                if (
+                    typeof Notification !== "undefined" &&
+                    Notification.permission === "granted"
+                ) {
+                    new Notification(n.title, {
+                        body: n.body,
+                        icon: "/favicon.ico",
+                    });
+                }
+            },
+            [showToast],
+        ),
+    );
+
     // ── Re-auth success ───────────────────────────────────────────────────────
     const handleReauthSuccess = useCallback(async (freshToken: string) => {
-        // 1. Write the confirmed fresh token to window immediately
         if (typeof window !== "undefined") {
             (window as any).__neema_token = freshToken;
         }
-        // 2. Force NextAuth to re-fetch the session so nextAuthSession.accessToken
-        //    updates — without this the render-body sync would overwrite the fresh
-        //    token back to the stale one on the next render
         await updateSession();
-        // 3. Clear the expired token snapshot and reset the guard
         expiredTokenRef.current = undefined;
         sessionExpiredRef.current = false;
         setSessionExpired(false);
-        // 4. Kick pollers — token is confirmed on window
         refetchConversations();
         refetchAgents();
         refetchOrders();
@@ -448,6 +476,10 @@ export default function NeemaDashboard(): React.ReactElement {
                     session={session}
                     theme={theme}
                     setTheme={setTheme}
+                    // ── Notification bell props ───────────────────────────────
+                    notificationCount={unreadCount}
+                    notifications={notifications}
+                    onClearNotifications={() => setUnreadCount(0)}
                 />
             )}
 
@@ -458,6 +490,9 @@ export default function NeemaDashboard(): React.ReactElement {
                         view={view}
                         theme={theme}
                         setTheme={setTheme}
+                        // ── Notification bell props ───────────────────────────
+                        notificationCount={unreadCount}
+                        onClearNotifications={() => setUnreadCount(0)}
                     />
                 )}
                 <main

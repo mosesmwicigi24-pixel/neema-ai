@@ -197,12 +197,11 @@ async def upsert_user(db: AsyncSession, body) -> dict:
 # agent can view the attachment and respond appropriately.
 # Returns a Firestore-style document array so n8n can consume the output directly.
 
-async def upsert_message(db: AsyncSession, body) -> list:
+async def upsert_message(db: AsyncSession, redis, body) -> list:
     result = await db.execute(
         select(Conversation).where(Conversation.wa_id == body.wa_id)
     )
     conv = result.scalar_one_or_none()
-
     if not conv:
         conv = Conversation(wa_id=body.wa_id)
         db.add(conv)
@@ -211,13 +210,15 @@ async def upsert_message(db: AsyncSession, body) -> list:
     sender    = MsgSender.user       if body.direction == "inbound" else MsgSender.ai
     direction = MsgDirection.inbound if body.direction == "inbound" else MsgDirection.outbound
 
-    media_type = getattr(body, "media_type", None)
-    media_url  = getattr(body, "media_url",  None)
+    media_type    = getattr(body, "media_type",    None)
+    media_url     = getattr(body, "media_url",     None)
+    media_id      = getattr(body, "media_id",      None)
+    media_caption = getattr(body, "media_caption", None)
+    mime_type     = getattr(body, "mime_type",     None)
+    filename      = getattr(body, "filename",      None)
 
-    # ── Resolve ts_ms: body → ts_iso → now ───────────────────────────────────
     ts_ms: int | None = getattr(body, "ts_ms", None)
     ts_iso_raw: str | None = getattr(body, "ts_iso", None)
-
     if not ts_ms and ts_iso_raw:
         try:
             ts_ms = int(
@@ -226,7 +227,6 @@ async def upsert_message(db: AsyncSession, body) -> list:
             )
         except (ValueError, AttributeError):
             pass
-
     if not ts_ms:
         ts_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
 
@@ -235,14 +235,18 @@ async def upsert_message(db: AsyncSession, body) -> list:
         wa_id=body.wa_id,
         direction=direction,
         sender=sender,
-        text=body.text,
+        text=body.text or (media_caption or f"[{media_type} received]" if media_type else ""),
         media_type=media_type,
         media_url=media_url,
+        media_id=media_id,
+        media_caption=media_caption,
+        mime_type=mime_type,
+        filename=filename,
         ts_ms=ts_ms,
     )
     db.add(msg)
 
-    # ── Auto-escalate inbound media to human ─────────────────────────────────
+    # ── Auto-escalate inbound media to human + broadcast ─────────────────────
     escalated = False
     if direction == MsgDirection.inbound and media_type:
         if conv.intercept_mode != InterceptMode.human:
@@ -253,27 +257,75 @@ async def upsert_message(db: AsyncSession, body) -> list:
     await db.commit()
     await db.refresh(msg)
 
-    # ── Build Firestore-style response ───────────────────────────────────────
+    # ── Broadcast WebSocket events ────────────────────────────────────────────
+    await _broadcast(redis, str(conv.id), {
+        "type":           "new_message",
+        "conversationId": str(conv.id),
+        "waId":           body.wa_id,
+        "sender":         sender.value,
+        "text":           msg.text,
+        "mediaType":      media_type,
+        "mediaId":        media_id,
+        "mediaCaption":   media_caption,
+        "mimeType":       mime_type,
+        "filename":       filename,
+    })
+
+    if escalated:
+        # Broadcast to all agents — anyone can pick it up
+        await _broadcast(redis, "agents:all", {
+            "event":          "notification",
+            "type":           "human_transfer",
+            "title":          f"Media received — {media_type}",
+            "body":           f"{body.wa_id} sent a {media_type}{': ' + media_caption if media_caption else ''}",
+            "waId":           body.wa_id,
+            "conversationId": str(conv.id),
+            "mediaType":      media_type,
+        })
+        # Also broadcast intercept change so conversation list updates
+        await _broadcast(redis, str(conv.id), {
+            "type":           "intercept_changed",
+            "conversationId": str(conv.id),
+            "mode":           "human",
+        })
+
+    # ── Build response ────────────────────────────────────────────────────────
     doc_id        = f"{msg.wa_id}_{ts_ms}"
     created_at    = msg.created_at or datetime.now(timezone.utc)
     ttl_expire_at = created_at + timedelta(days=120)
-
     ts_dt    = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
-    ts_iso   = _fmt_ts_ms(ts_dt)           # e.g. "2026-03-04T16:01:03.000Z"
-    ttl_iso  = _fmt_ts_ms(ttl_expire_at)   # e.g. "2026-07-30T08:48:34.564Z"
-    now_str  = _fmt_precise(created_at)    # e.g. "2026-04-01T08:48:50.255219Z"
+    ts_iso   = _fmt_ts_ms(ts_dt)
+    ttl_iso  = _fmt_ts_ms(ttl_expire_at)
+    now_str  = _fmt_precise(created_at)
+
+    fields = {
+        "tsMs":        {"integerValue": str(ts_ms)},
+        "direction":   {"stringValue": str(direction.value)},
+        "ttlExpireAt": {"timestampValue": ttl_iso},
+        "text":        {"stringValue": msg.text or ""},
+        "tsIso":       {"stringValue": ts_iso},
+        "wa_id":       {"stringValue": body.wa_id},
+    }
+
+    if media_type:
+        fields["mediaType"]    = {"stringValue": media_type}
+    if media_id:
+        fields["mediaId"]      = {"stringValue": media_id}
+    if media_url:
+        fields["mediaUrl"]     = {"stringValue": media_url}
+    if media_caption:
+        fields["mediaCaption"] = {"stringValue": media_caption}
+    if mime_type:
+        fields["mimeType"]     = {"stringValue": mime_type}
+    if filename:
+        fields["filename"]     = {"stringValue": filename}
+    if escalated:
+        fields["escalated"]    = {"booleanValue": True}
 
     return [
         {
             "name": f"projects/neema-6037c/databases/(default)/documents/messages/{doc_id}",
-            "fields": {
-                "tsMs":        {"integerValue": str(ts_ms)},
-                "direction":   {"stringValue": str(direction.value)},
-                "ttlExpireAt": {"timestampValue": ttl_iso},
-                "text":        {"stringValue": body.text or ""},
-                "tsIso":       {"stringValue": ts_iso},
-                "wa_id":       {"stringValue": body.wa_id},
-            },
+            "fields": fields,
             "createTime": now_str,
             "updateTime": now_str,
         }

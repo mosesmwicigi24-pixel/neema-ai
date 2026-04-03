@@ -26,6 +26,8 @@ export interface Conversation {
     unread_count: number;
     contact_name: string | null;
     contact_phone: string;
+    country_iso?: string | null;
+    flag_url?: string | null;
 }
 
 export interface Message {
@@ -35,6 +37,14 @@ export interface Message {
     text: string;
     created_at: string;
     isNote?: boolean;
+    agent_name?: string;
+    // Media
+    media_type?: "image" | "document" | "video" | "audio" | null;
+    media_id?: string | null;
+    media_url?: string | null;
+    media_caption?: string | null;
+    mime_type?: string | null;
+    filename?: string | null;
 }
 
 export type MessagesMap = Record<string, Message[]>;

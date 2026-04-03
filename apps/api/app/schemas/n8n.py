@@ -15,14 +15,19 @@ class SessionDto(BaseModel):
 
 class MessageDto(BaseModel):
     wa_id: str
+    name: str | None = None
     direction: str = "inbound"
     text: str = ""
     ts_ms: int | None = None
     ts_iso: str | None = None
     docid: str | None = None
     # Media fields — populated when n8n forwards an image/document/video/audio message
-    media_type: str | None = None   # "image" | "document" | "video" | "audio"
-    media_url:  str | None = None   # publicly reachable download URL
+    media_type: str | None = None
+    media_url:  str | None = None
+    media_id:      str | None = None
+    media_caption: str | None = None
+    mime_type:     str | None = None
+    filename:      str | None = None
 
 class UpsertMessagePatchDto(BaseModel):
     inbound_text: str | None = None

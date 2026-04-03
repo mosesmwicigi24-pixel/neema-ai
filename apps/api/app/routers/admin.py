@@ -56,11 +56,11 @@ async def list_conversations(
     wa_ids    = [c.wa_id for c in conversations]
     agent_ids = [c.assigned_agent_id for c in conversations if c.assigned_agent_id]
 
-    user_map: dict[str, str] = {}
+    user_map: dict[str, User] = {}
     if wa_ids:
         u_res = await db.execute(select(User).where(User.wa_id.in_(wa_ids)))
         for u in u_res.scalars().all():
-            user_map[u.wa_id] = u.name or ""
+            user_map[u.wa_id] = u
 
     agent_map: dict[str, str] = {}
     if agent_ids:
@@ -87,24 +87,26 @@ async def list_conversations(
             preview_map[str(m.conversation_id)] = m.text
 
     return [
-        {
-            "id":                   str(c.id),
-            "wa_id":                c.wa_id,
-            "intercept_mode":       c.intercept_mode,
-            "assigned_agent_id":    str(c.assigned_agent_id) if c.assigned_agent_id else None,
-            "assigned_agent_name":  agent_map.get(str(c.assigned_agent_id), "") if c.assigned_agent_id else None,
-            "intercept_since":      c.intercept_since.isoformat() if c.intercept_since else None,
-            "last_message_at":      c.last_message_at.isoformat() if c.last_message_at else None,
-            "last_message_preview": preview_map.get(str(c.id)) or c.last_message_preview,
-            "status":               c.status,
-            "created_at":           c.created_at.isoformat() if c.created_at else None,
-            "updated_at":           c.updated_at.isoformat() if c.updated_at else None,
-            "name":                 user_map.get(c.wa_id) or None,
-            "channel":              getattr(c, "channel", "whatsapp") or "whatsapp",
-            "unread":               0,
-        }
-        for c in conversations
-    ]
+    {
+        "id":                   str(c.id),
+        "wa_id":                c.wa_id,
+        "intercept_mode":       c.intercept_mode,
+        "assigned_agent_id":    str(c.assigned_agent_id) if c.assigned_agent_id else None,
+        "assigned_agent_name":  agent_map.get(str(c.assigned_agent_id), "") if c.assigned_agent_id else None,
+        "intercept_since":      c.intercept_since.isoformat() if c.intercept_since else None,
+        "last_message_at":      c.last_message_at.isoformat() if c.last_message_at else None,
+        "last_message_preview": preview_map.get(str(c.id)) or c.last_message_preview,
+        "status":               c.status,
+        "created_at":           c.created_at.isoformat() if c.created_at else None,
+        "updated_at":           c.updated_at.isoformat() if c.updated_at else None,
+        "name":                 user_map[c.wa_id].name if c.wa_id in user_map else None,
+        "country_iso":          user_map[c.wa_id].country_iso if c.wa_id in user_map else None,
+        "flag_url":             user_map[c.wa_id].flag_url if c.wa_id in user_map else None,
+        "channel":              getattr(c, "channel", "whatsapp") or "whatsapp",
+        "unread":               0,
+    }
+    for c in conversations
+]
 
 
 @router.get("/conversations/{conv_id}/messages")
@@ -130,15 +132,20 @@ async def get_thread(
 
     return [
         {
-            "id": str(m.id),
-            "direction": m.direction,
-            "sender": m.sender,
-            "text": m.text,
-            "media_type": m.media_type if m.media_type != "note" else None,
-            "media_url": m.media_url,
-            "isNote": m.media_type == "note",
-            "agent_name": agent_name_map.get(str(m.agent_id)) if m.agent_id else None,
-            "created_at": m.created_at.isoformat() if m.created_at else None,
+            "id":            str(m.id),
+            "direction":     m.direction,
+            "sender":        m.sender,
+            "text":          m.text,
+            "isNote":        m.media_type == "note",
+            "agent_name":    agent_name_map.get(str(m.agent_id)) if m.agent_id else None,
+            "created_at":    m.created_at.isoformat() if m.created_at else None,
+            # ── Media ────────────────────────────────────────────────────────
+            "media_type":    m.media_type if m.media_type != "note" else None,
+            "media_id":      m.media_id,
+            "media_url":     m.media_url,
+            "media_caption": m.media_caption,
+            "mime_type":     m.mime_type,
+            "filename":      m.filename,
         }
         for m in msgs
     ]
