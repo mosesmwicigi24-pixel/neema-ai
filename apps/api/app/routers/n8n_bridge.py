@@ -130,3 +130,45 @@ async def post_notify(body: dict, request: Request):
         "data":   body,
     }))
     return {"ok": True}
+
+# Add to app/routers/n8n_bridge.py router
+@router.post("/media/download", dependencies=[Depends(verify_n8n_secret)])
+async def n8n_download_media(body: dict, request: Request):
+    """
+    n8n-facing version — uses x-n8n-secret instead of Bearer token.
+    Downloads WhatsApp media and returns a stable internal URL.
+    """
+    media_url = body.get("media_url")
+    media_id  = body.get("media_id")
+    mime_type = body.get("mime_type", "application/octet-stream")
+
+    if not media_url or not media_id:
+        return {"ok": False, "error": "media_url and media_id required"}
+
+    from app.routers.media import MEDIA_DIR, _mime_to_ext
+    import os, httpx
+
+    ext      = _mime_to_ext(mime_type)
+    filename = f"{media_id}{ext}"
+    filepath = os.path.join(MEDIA_DIR, filename)
+
+    if not os.path.exists(filepath):
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(
+                media_url,
+                headers={"Authorization": f"Bearer {settings.waba_token}"},
+                follow_redirects=True,
+            )
+            if not resp.is_success:
+                return {"ok": False, "error": f"WhatsApp returned {resp.status_code}"}
+            with open(filepath, "wb") as f:
+                f.write(resp.content)
+
+    base = str(request.base_url).rstrip("/")
+    return {
+        "ok":         True,
+        "filename":   filename,
+        "media_id":   media_id,
+        "stable_url": f"{base}/api/media/serve/{filename}",
+        "mime_type":  mime_type,
+    }
