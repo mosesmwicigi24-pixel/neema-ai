@@ -64,6 +64,7 @@ export function ConversationsView({
     const [interceptFilter, setInterceptFilter] = useState<
         "all" | "human" | "ai" | "paused"
     >("all");
+    const [readFilter, setReadFilter] = useState<"all" | "unread" | "read">("all");
     const [searchQ, setSearchQ] = useState<string>("");
     const [replyText, setReplyText] = useState<string>("");
     const [draftVisible, setDraftVisible] = useState<boolean>(false);
@@ -512,6 +513,8 @@ export function ConversationsView({
         )
     ).sort() as string[];
 
+    const unreadCount = conversations.filter((c) => c.unread > 0).length;
+
     const filteredConvs = conversations
         .filter((c) => {
             if (channelTab !== "all" && c.channel !== channelTab) return false;
@@ -525,6 +528,8 @@ export function ConversationsView({
                 c.intercept_mode !== interceptFilter
             )
                 return false;
+            if (readFilter === "unread" && !(c.unread > 0)) return false;
+            if (readFilter === "read" && c.unread > 0) return false;
             if (
                 searchQ &&
                 !c.name?.toLowerCase().includes(searchQ.toLowerCase()) &&
@@ -590,6 +595,36 @@ export function ConversationsView({
                             </svg>
                         </button>
                     </div>
+                </div>
+
+                {/* Read / Unread toggle — always visible, one-click filter */}
+                <div className="flex items-center gap-1 mb-2">
+                    {(["all", "unread", "read"] as const).map((f) => (
+                        <button
+                            key={f}
+                            onClick={() => setReadFilter(f)}
+                            className={`flex-1 h-7 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 ${
+                                readFilter === f
+                                    ? f === "unread"
+                                        ? "bg-[#427425] text-white"
+                                        : "bg-stone-800 text-white"
+                                    : "bg-[#f3f9ec] text-[#699a32] hover:bg-[#e6f3d8]"
+                            }`}
+                        >
+                            {f === "all" && "All"}
+                            {f === "unread" && (
+                                <>
+                                    Unread
+                                    {unreadCount > 0 && (
+                                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none ${readFilter === "unread" ? "bg-white/25 text-white" : "bg-[#427425] text-white"}`}>
+                                            {unreadCount}
+                                        </span>
+                                    )}
+                                </>
+                            )}
+                            {f === "read" && "Read"}
+                        </button>
+                    ))}
                 </div>
 
                 {/* Search */}
