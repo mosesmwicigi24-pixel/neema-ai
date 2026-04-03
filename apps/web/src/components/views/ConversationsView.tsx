@@ -81,6 +81,8 @@ export function ConversationsView({
     const [clearConfirm, setClearConfirm] = useState(false);
     const [clearing, setClearing] = useState(false);
     const [mobileCrmOpen, setMobileCrmOpen] = useState(false);
+    // Tracks unread count at the moment a thread is opened — used to place the "N new" divider
+    const [unreadSnapshot, setUnreadSnapshot] = useState<Record<string, number>>({});
 
     const { data: session } = useSession();
     const currentAgentId = (session as any)?.user?.id as string | undefined;
@@ -275,6 +277,15 @@ export function ConversationsView({
     });
 
     const handleSelectConv = (id: string) => {
+        // Snapshot the unread count before clearing it so we can show the divider
+        const conv = conversations.find((c) => c.id === id);
+        if (conv && conv.unread > 0) {
+            setUnreadSnapshot((prev) => ({ ...prev, [id]: conv.unread }));
+            // Optimistically clear the unread badge locally
+            setConversations((prev) =>
+                prev.map((c) => (c.id === id ? { ...c, unread: 0 } : c)),
+            );
+        }
         setActiveConvId(id);
         loadMessages(id);
         if (isMobile) setMobilePanel("thread");
@@ -681,6 +692,7 @@ export function ConversationsView({
                 )}
                 {filteredConvs.map((conv) => {
                     const isActive = conv.id === activeConvId;
+                    const hasUnread = conv.unread > 0;
                     const cfg = conv.channel
                         ? CHANNEL_CONFIG[conv.channel as Channel]
                         : null;
@@ -688,7 +700,13 @@ export function ConversationsView({
                         <button
                             key={conv.id}
                             onClick={() => handleSelectConv(conv.id)}
-                            className={`w-full text-left px-4 py-3 transition-colors hover:bg-[#f3f9ec] ${isActive ? "bg-[#f3f9ec] border-l-2 border-l-[#589b31]" : ""}`}
+                            className={`w-full text-left px-4 py-3 transition-colors border-l-2 ${
+                                isActive
+                                    ? "bg-[#f3f9ec] border-l-[#589b31]"
+                                    : hasUnread
+                                      ? "bg-[#f8fcf3] border-l-[#427425] hover:bg-[#f3f9ec]"
+                                      : "border-l-transparent hover:bg-[#f3f9ec]"
+                            }`}
                         >
                             <div className="flex items-start gap-3">
                                 <div className="relative flex-shrink-0">
@@ -718,20 +736,24 @@ export function ConversationsView({
                                             {cfg.icon}
                                         </div>
                                     )}
+                                    {/* Unread pulse dot on avatar */}
+                                    {hasUnread && (
+                                        <span className="absolute -top-0.5 -left-0.5 w-2.5 h-2.5 bg-[#427425] rounded-full border-2 border-white" />
+                                    )}
                                 </div>
                                 <div className="flex-1 min-w-0">
                                     <div className="flex items-center justify-between mb-0.5">
-                                        <span className="text-sm font-semibold text-[#16270c] truncate">
+                                        <span className={`text-sm truncate ${hasUnread ? "font-bold text-[#16270c]" : "font-semibold text-[#16270c]"}`}>
                                             {displayName(conv.name, conv.wa_id)}
                                         </span>
-                                        <span className="text-[10px] text-[#9ccd65] flex-shrink-0 ml-2">
+                                        <span className={`text-[10px] flex-shrink-0 ml-2 ${hasUnread ? "font-semibold text-[#427425]" : "text-[#9ccd65]"}`}>
                                             {conv.last_message_at
                                                 ? timeAgo(conv.last_message_at)
                                                 : ""}
                                         </span>
                                     </div>
                                     <div className="flex items-center justify-between">
-                                        <p className="text-xs text-[#699a32] truncate flex-1">
+                                        <p className={`text-xs truncate flex-1 ${hasUnread ? "text-[#16270c] font-medium" : "text-[#699a32]"}`}>
                                             {conv.last_message ??
                                                 "No messages yet"}
                                         </p>
@@ -762,9 +784,9 @@ export function ConversationsView({
                                                         )}
                                                 </div>
                                             )}
-                                            {conv.unread > 0 && (
-                                                <span className="w-4 h-4 bg-[#427425] text-white text-[9px] font-bold rounded-full flex items-center justify-center">
-                                                    {conv.unread}
+                                            {hasUnread && (
+                                                <span className="min-w-[20px] h-5 px-1.5 bg-[#427425] text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+                                                    {conv.unread > 99 ? "99+" : conv.unread}
                                                 </span>
                                             )}
                                         </div>
@@ -1038,16 +1060,31 @@ export function ConversationsView({
                                     <p className="text-sm">No messages yet</p>
                                 </div>
                             )}
-                            {activeMessages.map((msg, idx) => {
+                            {(() => {
+                                // How many messages were unread when this thread was opened
+                                const snap = unreadSnapshot[activeConvId] ?? 0;
+                                // The divider sits before the first unread message
+                                const dividerIdx = snap > 0 ? Math.max(0, activeMessages.length - snap) : -1;
+                                return activeMessages.map((msg, idx) => {
                                 const isInbound = msg.direction === "inbound";
                                 const isNote = msg.isNote;
+                                const showDivider = idx === dividerIdx && snap > 0;
 
                                 if (isNote) {
                                     return (
-                                        <div
-                                            key={msg.id ?? `msg-${idx}`}
-                                            className="flex justify-center"
-                                        >
+                                        <React.Fragment key={msg.id ?? `msg-${idx}`}>
+                                            {showDivider && (
+                                                <div className="flex items-center gap-2 my-1">
+                                                    <div className="flex-1 h-px bg-[#427425]/30" />
+                                                    <span className="text-[10px] font-semibold text-[#427425] bg-[#e6f3d8] px-2 py-0.5 rounded-full whitespace-nowrap">
+                                                        {snap} new {snap === 1 ? "message" : "messages"}
+                                                    </span>
+                                                    <div className="flex-1 h-px bg-[#427425]/30" />
+                                                </div>
+                                            )}
+                                            <div
+                                                className="flex justify-center"
+                                            >
                                             <div className="max-w-[85%] w-full rounded-xl px-3 py-2 bg-amber-50 border border-amber-200 border-dashed">
                                                 <div className="flex items-center gap-1.5 mb-1">
                                                     <span className="text-amber-500 text-xs">
@@ -1069,12 +1106,22 @@ export function ConversationsView({
                                                 </div>
                                             </div>
                                         </div>
+                                        </React.Fragment>
                                     );
                                 }
 
                                 return (
-                                    <div
-                                        key={msg.id ?? `msg-${idx}`}
+                                    <React.Fragment key={msg.id ?? `msg-${idx}`}>
+                                        {showDivider && (
+                                            <div className="flex items-center gap-2 my-1">
+                                                <div className="flex-1 h-px bg-[#427425]/30" />
+                                                <span className="text-[10px] font-semibold text-[#427425] bg-[#e6f3d8] px-2 py-0.5 rounded-full whitespace-nowrap">
+                                                    {snap} new {snap === 1 ? "message" : "messages"}
+                                                </span>
+                                                <div className="flex-1 h-px bg-[#427425]/30" />
+                                            </div>
+                                        )}
+                                        <div
                                         className={`flex ${isInbound ? "justify-start" : "justify-end"}`}
                                     >
                                         <div
@@ -1257,8 +1304,10 @@ export function ConversationsView({
                                             </div>
                                         </div>
                                     </div>
+                                    </React.Fragment>
                                 );
-                            })}
+                            });
+                            })()}
                             <div ref={messagesEndRef} />
                         </div>
 
