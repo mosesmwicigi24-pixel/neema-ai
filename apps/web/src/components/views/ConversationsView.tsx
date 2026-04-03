@@ -1867,6 +1867,8 @@ export function ConversationsView({
                                     orders={orders}
                                     onToast={onToast}
                                     onClose={() => setMobileCrmOpen(false)}
+                                    className="w-full flex flex-col overflow-hidden"
+                                    hideHeader
                                     onNameChange={(wa_id, newName) => {
                                         setConversations((prev) =>
                                             prev.map((c) =>

@@ -71,6 +71,10 @@ interface Props {
     onClose: () => void;
     /** Called after a successful name save so parent can update conv list */
     onNameChange?: (wa_id: string, newName: string) => void;
+    /** Override root container width — pass "w-full" when used inside mobile drawer */
+    className?: string;
+    /** Hide the built-in "Customer" header bar — useful when a parent drawer provides its own header */
+    hideHeader?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -386,6 +390,8 @@ export function CustomerSidebar({
     onToast,
     onClose,
     onNameChange,
+    className,
+    hideHeader,
 }: Props) {
     const [activeTab, setActiveTab] = useState<
         "profile" | "insights" | "activity"
@@ -545,13 +551,14 @@ export function CustomerSidebar({
 
     return (
         <div
-            className="w-72 flex-shrink-0 flex flex-col overflow-hidden"
+            className={className ?? "w-72 flex-shrink-0 flex flex-col overflow-hidden"}
             style={{
                 backgroundColor: "#ffffff",
-                borderLeft: "1px solid #cee6b2",
+                ...(className ? {} : { borderLeft: "1px solid #cee6b2" }),
             }}
         >
             {/* Header */}
+            {!hideHeader && (
             <div
                 className="px-4 py-3 flex items-center justify-between"
                 style={{ borderBottom: "1px solid #cee6b2" }}
@@ -582,6 +589,7 @@ export function CustomerSidebar({
                     </svg>
                 </button>
             </div>
+            )}
 
             {/* Profile hero */}
             <div
