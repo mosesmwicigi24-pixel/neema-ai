@@ -491,18 +491,18 @@ async def clear_chat_history(
 # Must be public: WhatsApp servers download the file when sending media messages,
 # and browser <img> / <video> / <audio> tags cannot attach Bearer tokens.
 
-@router.get("/media/{filename}")
-async def serve_media(filename: str):
-    from fastapi.responses import FileResponse
-    from app.core.config import settings
-    import os
+# @router.get("/media/{filename}")
+# async def serve_media(filename: str):
+#     from fastapi.responses import FileResponse
+#     from app.core.config import settings
+#     import os
 
-    media_dir = getattr(settings, "media_storage_path", "/tmp/neema_media")
-    file_path = os.path.join(media_dir, filename)
-    # Prevent path traversal
-    if not os.path.isfile(file_path) or not os.path.abspath(file_path).startswith(os.path.abspath(media_dir)):
-        raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(file_path)
+#     media_dir = getattr(settings, "media_storage_path", "/tmp/neema_media")
+#     file_path = os.path.join(media_dir, filename)
+#     # Prevent path traversal
+#     if not os.path.isfile(file_path) or not os.path.abspath(file_path).startswith(os.path.abspath(media_dir)):
+#         raise HTTPException(status_code=404, detail="File not found")
+#     return FileResponse(file_path)
 
 
 # ── Agents ────────────────────────────────────────────────
