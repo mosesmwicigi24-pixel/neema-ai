@@ -635,7 +635,7 @@ export function CustomerSidebar({
                                             `https://flagcdn.com/w20/${profile.country_iso.toLowerCase()}.png`
                                         }
                                         alt={profile.country_iso}
-                                        className="w-4 h-3 rounded-sm object-cover border border-stone-200 shadow-sm"
+                                        className="w-4 h-4 rounded-sm object-cover border border-stone-200 shadow-sm"
                                     />
                                     <span>
                                         {profile.country_iso.toUpperCase()}
