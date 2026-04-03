@@ -81,7 +81,7 @@ export function ConversationsView({
     const [sending, setSending] = useState(false);
     const [crmOpen, setCrmOpen] = useState<boolean>(true);
     const [clearConfirm, setClearConfirm] = useState(false);
-    const [clearing, setClearing]         = useState(false);
+    const [clearing, setClearing] = useState(false);
 
     const { data: session } = useSession();
     const currentAgentId = (session as any)?.user?.id as string | undefined;
@@ -93,16 +93,32 @@ export function ConversationsView({
     } | null>(null);
 
     useEffect(() => {
-        profileApi
-            .me()
-            .then((data) => {
-                console.log("profileApi.me() response:", data);
-                setCurrentAgent({
-                    role: data.role,
-                    is_superuser: data.is_superuser,
+        if (!currentAgentId) return;
+
+        // Retry up to 3 times with backoff — token may not be on window yet
+        // on the very first render if page.tsx hasn't flushed it
+        let attempts = 0;
+        const fetchMe = () => {
+            attempts++;
+            profileApi
+                .me()
+                .then((data) => {
+                    setCurrentAgent({
+                        role: data.role,
+                        is_superuser: data.is_superuser,
+                    });
+                })
+                .catch((e) => {
+                    // Retry on 401 up to 3 times with increasing delay
+                    if (attempts < 3 && String(e).includes("401")) {
+                        setTimeout(fetchMe, attempts * 400);
+                    } else {
+                        console.error("profileApi.me() error:", e);
+                    }
                 });
-            })
-            .catch((e) => console.error("profileApi.me() error:", e));
+        };
+
+        fetchMe();
     }, [currentAgentId]);
 
     const currentRole = currentAgent?.role;
@@ -707,17 +723,23 @@ export function ConversationsView({
                                                             conv.intercept_mode
                                                         }
                                                     />
-                                                    {conv.intercept_mode === "human" && conv.assigned_agent_id && (
-                                                        <span className={`text-[10px] font-medium truncate max-w-[64px] ${
-                                                            conv.assigned_agent_id === currentAgentId
-                                                                ? "text-[#427425]"
-                                                                : "text-amber-600"
-                                                        }`}>
-                                                            {conv.assigned_agent_id === currentAgentId
-                                                                ? "● Yours"
-                                                                : `🔒 ${conv.assigned_agent_name?.split(" ")[0] || "Agent"}`}
-                                                        </span>
-                                                    )}
+                                                    {conv.intercept_mode ===
+                                                        "human" &&
+                                                        conv.assigned_agent_id && (
+                                                            <span
+                                                                className={`text-[10px] font-medium truncate max-w-[64px] ${
+                                                                    conv.assigned_agent_id ===
+                                                                    currentAgentId
+                                                                        ? "text-[#427425]"
+                                                                        : "text-amber-600"
+                                                                }`}
+                                                            >
+                                                                {conv.assigned_agent_id ===
+                                                                currentAgentId
+                                                                    ? "● Yours"
+                                                                    : `🔒 ${conv.assigned_agent_name?.split(" ")[0] || "Agent"}`}
+                                                            </span>
+                                                        )}
                                                 </div>
                                             )}
                                             {conv.unread > 0 && (
@@ -824,7 +846,9 @@ export function ConversationsView({
                                     canHandleConversations && (
                                         <Btn
                                             small
-                                            onClick={() => intercept(activeConv.id)}
+                                            onClick={() =>
+                                                intercept(activeConv.id)
+                                            }
                                             variant="primary"
                                         >
                                             🙋 Pick up
@@ -1750,8 +1774,8 @@ export function ConversationsView({
         >
             <p className="text-sm text-stone-600 mb-4">
                 This will permanently delete all messages in this conversation.
-                The conversation record and customer profile will be kept.
-                This cannot be undone.
+                The conversation record and customer profile will be kept. This
+                cannot be undone.
             </p>
             <div className="flex gap-2">
                 <Btn
@@ -1761,10 +1785,7 @@ export function ConversationsView({
                 >
                     {clearing ? "Clearing…" : "Yes, clear history"}
                 </Btn>
-                <Btn
-                    onClick={() => setClearConfirm(false)}
-                    variant="outline"
-                >
+                <Btn onClick={() => setClearConfirm(false)} variant="outline">
                     Cancel
                 </Btn>
             </div>
