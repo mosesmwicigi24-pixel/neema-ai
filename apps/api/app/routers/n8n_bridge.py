@@ -185,26 +185,32 @@ async def n8n_download_media(body: dict, request: Request):
 
     # f"{base}/api/media/serve/{filename}",
 
-    # ── Media Escalation (system-triggered intercept by wa_id) ───────────────────
+# ── Media Escalation (system-triggered intercept by wa_id) ───────────────────
 @router.post("/escalate", dependencies=[Depends(verify_n8n_secret)])
 async def escalate_to_human(body: dict, request: Request, db: AsyncSession = Depends(get_db)):
     """
     Called by n8n when a media request is detected.
-    Looks up the conversation by wa_id and switches it to human mode.
-    Reuses the existing intercept_conversation service — no duplicate logic.
+
+    1. Saves the customer's inbound message so agents can see what was written.
+    2. If conversation is already in human mode → leave it as-is (keep current agent).
+    3. If conversation is in AI mode → switch to human, unassigned so any agent can pick it up.
+    4. Broadcasts a notification to all agents.
     No message is sent to the customer.
     """
     from sqlalchemy import select
-    from app.models.conversation import Conversation
-    from app.services.conversation import intercept_conversation
+    from app.models.conversation import Conversation, InterceptMode
+    from app.models.message import Message, MsgDirection, MsgSender
+    from app.models.intercept import Intercept, InterceptAction
+    from datetime import datetime, timezone
 
-    wa_id  = str(body.get("wa_id", "")).strip()
-    reason = str(body.get("reason", "Media request — customer asked for images or files"))
+    wa_id      = str(body.get("wa_id", "")).strip()
+    msg_text   = str(body.get("msg_text", "")).strip()
+    reason     = str(body.get("reason", "Customer requested images or files"))
 
     if not wa_id:
         raise HTTPException(status_code=400, detail="wa_id required")
 
-    # Look up the conversation by wa_id
+    # ── Find conversation ─────────────────────────────────────────────────────
     result = await db.execute(
         select(Conversation).where(Conversation.wa_id == wa_id)
     )
@@ -212,59 +218,81 @@ async def escalate_to_human(body: dict, request: Request, db: AsyncSession = Dep
     if not conv:
         raise HTTPException(status_code=404, detail=f"No conversation found for wa_id={wa_id}")
 
-    # Find any available admin agent to assign ownership,
-    # since this is a system-triggered intercept with no human initiator.
-    # Falls back to the first agent if no admin exists.
-    from app.models.agent import Agent
-    admin_result = await db.execute(
-        select(Agent)
-        .where(Agent.role == "admin")
-        .where(Agent.is_available == True)
-        .limit(1)
-    )
-    system_agent = admin_result.scalar_one_or_none()
-
-    if not system_agent:
-        # Fall back to any available agent
-        any_result = await db.execute(
-            select(Agent).where(Agent.is_available == True).limit(1)
-        )
-        system_agent = any_result.scalar_one_or_none()
-
-    if not system_agent:
-        raise HTTPException(
-            status_code=503,
-            detail="No available agents to assign this escalation to"
-        )
-
     redis = request.app.state.redis
 
-    # Delegate entirely to the existing service — handles locking,
-    # logging, Redis broadcast, and cache clearing.
-    result = await intercept_conversation(
-        db=db,
-        conv_id=str(conv.id),
-        agent=system_agent,
-        redis=redis,
+    # ── 1. Save the customer's inbound message ────────────────────────────────
+    # This ensures the agent can see exactly what the customer wrote
+    # before the escalation happened.
+    if msg_text:
+        inbound_msg = Message(
+            wa_id=conv.wa_id,
+            conversation_id=conv.id,
+            direction=MsgDirection.inbound,
+            sender=MsgSender.customer,
+            text=msg_text,
+        )
+        db.add(inbound_msg)
+        conv.last_message_at      = datetime.now(timezone.utc)
+        conv.last_message_preview = msg_text[:100]
+
+    # ── 2. Intercept only if not already in human mode ────────────────────────
+    already_human = conv.intercept_mode == InterceptMode.human
+
+    if not already_human:
+        # Switch to human mode, but leave assigned_agent_id as NULL so
+        # any available agent can freely pick up the conversation.
+        conv.intercept_mode    = InterceptMode.human
+        conv.assigned_agent_id = None
+        conv.intercept_since   = datetime.now(timezone.utc)
+
+        # Log the system-triggered intercept (no agent_id — system action)
+        log = Intercept(
+            conversation_id=conv.id,
+            agent_id=None,           # system-triggered, not by a human agent
+            action=InterceptAction.intercept,
+        )
+        db.add(log)
+
+        # Clear cached context so the next agent pick-up gets a fresh state
+        await redis.delete(f"context:{wa_id}")
+
+    await db.commit()
+
+    # ── 3. Broadcast to agents ────────────────────────────────────────────────
+    # Always broadcast regardless of prior intercept state —
+    # the agent needs to see the notification even if already assigned.
+    notification_body = (
+        f"📎 {reason}"
+        if already_human
+        else f"📎 {reason} — conversation is ready for pickup"
     )
 
-    # Additionally publish a media-specific notification so agents
-    # see a descriptive alert rather than a generic intercept event.
     await redis.publish("ws:channel:agents:all", json.dumps({
-        "event":   "notification",
-        "type":    "media_escalation",
-        "title":   "📎 Media Request",
-        "body":    reason,
-        "wa_id":   wa_id,
-        "conv_id": str(conv.id),
+        "event":          "notification",
+        "type":           "media_escalation",
+        "title":          "📎 Media Request",
+        "body":           notification_body,
+        "wa_id":          wa_id,
+        "conv_id":        str(conv.id),
+        "already_human":  already_human,
     }))
 
+    # Also broadcast intercept_changed so the conversation list
+    # updates its mode indicator in the agent UI immediately.
+    if not already_human:
+        await _broadcast(redis, str(conv.id), {
+            "type":            "intercept_changed",
+            "conversationId":  str(conv.id),
+            "mode":            "human",
+            "assignedAgentId": None,
+        })
+
     return {
-        "ok":          True,
-        "wa_id":       wa_id,
-        "conv_id":     str(conv.id),
-        "assigned_to": str(system_agent.id),
-        "agent_name":  system_agent.name,
-        "mode":        "human",
-        "reason":      reason,
+        "ok":            True,
+        "wa_id":         wa_id,
+        "conv_id":       str(conv.id),
+        "mode":          "human",
+        "already_human": already_human,
+        "msg_saved":     bool(msg_text),
+        "reason":        reason,
     }
