@@ -202,6 +202,7 @@ async def upsert_user(db: AsyncSession, body) -> dict:
     stmt = pg_insert(User).values(
         wa_id=body.wa_id,
         phone=body.phone or body.wa_id,
+        name=body.name or "",
         last_text=body.last_text or "",
         last_direction=body.last_direction or "inbound",
         state=body.state or {"active": "active", "cart": {"items": [], "subtotal": 0}},
