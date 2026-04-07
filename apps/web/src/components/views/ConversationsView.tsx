@@ -64,7 +64,9 @@ export function ConversationsView({
     const [interceptFilter, setInterceptFilter] = useState<
         "all" | "human" | "ai" | "paused"
     >("all");
-    const [readFilter, setReadFilter] = useState<"all" | "unread" | "read">("all");
+    const [readFilter, setReadFilter] = useState<"all" | "unread" | "read">(
+        "all",
+    );
     const [searchQ, setSearchQ] = useState<string>("");
     const [replyText, setReplyText] = useState<string>("");
     const [draftVisible, setDraftVisible] = useState<boolean>(false);
@@ -83,7 +85,9 @@ export function ConversationsView({
     const [clearing, setClearing] = useState(false);
     const [mobileCrmOpen, setMobileCrmOpen] = useState(false);
     // Tracks unread count at the moment a thread is opened — used to place the "N new" divider
-    const [unreadSnapshot, setUnreadSnapshot] = useState<Record<string, number>>({});
+    const [unreadSnapshot, setUnreadSnapshot] = useState<
+        Record<string, number>
+    >({});
 
     const { data: session } = useSession();
     const currentAgentId = (session as any)?.user?.id as string | undefined;
@@ -508,9 +512,7 @@ export function ConversationsView({
 
     // Collect all unique tags across all conversations for the tag filter UI
     const allTags = Array.from(
-        new Set(
-            conversations.flatMap((c) => (c as any).tags ?? [])
-        )
+        new Set(conversations.flatMap((c) => (c as any).tags ?? [])),
     ).sort() as string[];
 
     const unreadCount = conversations.filter((c) => c.unread > 0).length;
@@ -616,7 +618,9 @@ export function ConversationsView({
                                 <>
                                     Unread
                                     {unreadCount > 0 && (
-                                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none ${readFilter === "unread" ? "bg-white/25 text-white" : "bg-[#427425] text-white"}`}>
+                                        <span
+                                            className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none ${readFilter === "unread" ? "bg-white/25 text-white" : "bg-[#427425] text-white"}`}
+                                        >
                                             {unreadCount}
                                         </span>
                                     )}
@@ -679,16 +683,28 @@ export function ConversationsView({
                                     key="all-tags"
                                     onClick={() => setTagFilter("all")}
                                     className={`h-6 px-2.5 rounded-md text-xs font-medium transition-colors ${tagFilter === "all" ? "text-white" : "bg-[#e6f3d8] text-[#699a32]"}`}
-                                    style={tagFilter === "all" ? { backgroundColor: "#589b31" } : undefined}
+                                    style={
+                                        tagFilter === "all"
+                                            ? { backgroundColor: "#589b31" }
+                                            : undefined
+                                    }
                                 >
                                     All tags
                                 </button>
                                 {allTags.map((tag) => (
                                     <button
                                         key={tag}
-                                        onClick={() => setTagFilter(tag === tagFilter ? "all" : tag)}
+                                        onClick={() =>
+                                            setTagFilter(
+                                                tag === tagFilter ? "all" : tag,
+                                            )
+                                        }
                                         className={`h-6 px-2.5 rounded-md text-xs font-medium transition-colors ${tagFilter === tag ? "text-white" : "bg-[#e6f3d8] text-[#699a32]"}`}
-                                        style={tagFilter === tag ? { backgroundColor: "#589b31" } : undefined}
+                                        style={
+                                            tagFilter === tag
+                                                ? { backgroundColor: "#589b31" }
+                                                : undefined
+                                        }
                                     >
                                         {tag}
                                     </button>
@@ -717,7 +733,9 @@ export function ConversationsView({
             </div>
 
             {/* Conversation list */}
-            <div className={`flex-1 overflow-y-auto scrollbar-none divide-y divide-[#f0f9ec] ${isMobile ? "pb-16" : ""}`}>
+            <div
+                className={`flex-1 overflow-y-auto scrollbar-none divide-y divide-[#f0f9ec] ${isMobile ? "pb-16" : ""}`}
+            >
                 {filteredConvs.length === 0 && (
                     <div className="py-16 text-center">
                         <p className="text-sm text-[#9ccd65]">
@@ -778,17 +796,23 @@ export function ConversationsView({
                                 </div>
                                 <div className="flex-1 min-w-0">
                                     <div className="flex items-center justify-between mb-0.5">
-                                        <span className={`text-sm truncate ${hasUnread ? "font-bold text-[#16270c]" : "font-semibold text-[#16270c]"}`}>
+                                        <span
+                                            className={`text-sm truncate ${hasUnread ? "font-bold text-[#16270c]" : "font-semibold text-[#16270c]"}`}
+                                        >
                                             {displayName(conv.name, conv.wa_id)}
                                         </span>
-                                        <span className={`text-[10px] flex-shrink-0 ml-2 ${hasUnread ? "font-semibold text-[#427425]" : "text-[#9ccd65]"}`}>
+                                        <span
+                                            className={`text-[10px] flex-shrink-0 ml-2 ${hasUnread ? "font-semibold text-[#427425]" : "text-[#9ccd65]"}`}
+                                        >
                                             {conv.last_message_at
                                                 ? timeAgo(conv.last_message_at)
                                                 : ""}
                                         </span>
                                     </div>
                                     <div className="flex items-center justify-between">
-                                        <p className={`text-xs truncate flex-1 ${hasUnread ? "text-[#16270c] font-medium" : "text-[#699a32]"}`}>
+                                        <p
+                                            className={`text-xs truncate flex-1 ${hasUnread ? "text-[#16270c] font-medium" : "text-[#699a32]"}`}
+                                        >
                                             {conv.last_message ??
                                                 "No messages yet"}
                                         </p>
@@ -821,7 +845,9 @@ export function ConversationsView({
                                             )}
                                             {hasUnread && (
                                                 <span className="min-w-[20px] h-5 px-1.5 bg-[#427425] text-white text-[10px] font-bold rounded-full flex items-center justify-center">
-                                                    {conv.unread > 99 ? "99+" : conv.unread}
+                                                    {conv.unread > 99
+                                                        ? "99+"
+                                                        : conv.unread}
                                                 </span>
                                             )}
                                         </div>
@@ -854,8 +880,18 @@ export function ConversationsView({
                                 title="View customer profile"
                                 className="absolute top-3 right-3 z-20 w-8 h-8 rounded-full bg-white border border-[#cee6b2] shadow-sm flex items-center justify-center text-[#427425] hover:bg-[#f3f9ec] transition-colors"
                             >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                <svg
+                                    className="w-4 h-4"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                >
+                                    <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+                                    />
                                 </svg>
                             </button>
                         )}
@@ -1057,28 +1093,39 @@ export function ConversationsView({
                                             ✓
                                         </Btn>
                                     )} */}
-
                             </div>
                         </div>
 
-                        {/* Media escalation notice */}
+                        {/* Media escalation notice — shown for received media OR media requests */}
                         {activeConv.intercept_mode === "human" &&
-                            activeMessages.some(
-                                (m) =>
-                                    (m as any).media_type &&
-                                    (m as any).media_type !== "note" &&
-                                    m.direction === "inbound",
-                            ) && (
-                                <div className="mx-4 mt-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 flex items-center gap-2">
-                                    <span className="text-amber-500 text-sm flex-shrink-0">
-                                        📎
-                                    </span>
-                                    <p className="text-xs font-medium text-amber-700">
-                                        Customer sent media — conversation was
-                                        auto-escalated for your review.
-                                    </p>
-                                </div>
-                            )}
+                            (() => {
+                                const hasInboundMedia = activeMessages.some(
+                                    (m) =>
+                                        m.direction === "inbound" &&
+                                        (m as any).media_type &&
+                                        (m as any).media_type !== "note",
+                                );
+                                const isUnclaimedEscalation =
+                                    !activeConv.assigned_agent_id;
+
+                                if (!hasInboundMedia && !isUnclaimedEscalation)
+                                    return null;
+
+                                const message = hasInboundMedia
+                                    ? "Customer sent a media file — please review and respond."
+                                    : "Customer requested images or files — pick up this conversation to respond.";
+
+                                return (
+                                    <div className="mx-4 mt-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 flex items-center gap-2">
+                                        <span className="text-amber-500 text-sm flex-shrink-0">
+                                            📎
+                                        </span>
+                                        <p className="text-xs font-medium text-amber-700">
+                                            {message}
+                                        </p>
+                                    </div>
+                                );
+                            })()}
 
                         {/* Messages */}
                         <div
@@ -1099,249 +1146,285 @@ export function ConversationsView({
                                 // How many messages were unread when this thread was opened
                                 const snap = unreadSnapshot[activeConvId] ?? 0;
                                 // The divider sits before the first unread message
-                                const dividerIdx = snap > 0 ? Math.max(0, activeMessages.length - snap) : -1;
+                                const dividerIdx =
+                                    snap > 0
+                                        ? Math.max(
+                                              0,
+                                              activeMessages.length - snap,
+                                          )
+                                        : -1;
                                 return activeMessages.map((msg, idx) => {
-                                const isInbound = msg.direction === "inbound";
-                                const isNote = msg.isNote;
-                                const showDivider = idx === dividerIdx && snap > 0;
+                                    const isInbound =
+                                        msg.direction === "inbound";
+                                    const isNote = msg.isNote;
+                                    const showDivider =
+                                        idx === dividerIdx && snap > 0;
 
-                                if (isNote) {
+                                    if (isNote) {
+                                        return (
+                                            <React.Fragment
+                                                key={msg.id ?? `msg-${idx}`}
+                                            >
+                                                {showDivider && (
+                                                    <div className="flex items-center gap-2 my-1">
+                                                        <div className="flex-1 h-px bg-[#427425]/30" />
+                                                        <span className="text-[10px] font-semibold text-[#427425] bg-[#e6f3d8] px-2 py-0.5 rounded-full whitespace-nowrap">
+                                                            {snap} new{" "}
+                                                            {snap === 1
+                                                                ? "message"
+                                                                : "messages"}
+                                                        </span>
+                                                        <div className="flex-1 h-px bg-[#427425]/30" />
+                                                    </div>
+                                                )}
+                                                <div className="flex justify-center">
+                                                    <div className="max-w-[85%] w-full rounded-xl px-3 py-2 bg-amber-50 border border-amber-200 border-dashed">
+                                                        <div className="flex items-center gap-1.5 mb-1">
+                                                            <span className="text-amber-500 text-xs">
+                                                                📝
+                                                            </span>
+                                                            <span className="text-[10px] font-semibold text-amber-600 uppercase tracking-wide">
+                                                                Internal Note
+                                                            </span>
+                                                        </div>
+                                                        <p className="text-xs text-amber-800 leading-relaxed whitespace-pre-wrap">
+                                                            {msg.text}
+                                                        </p>
+                                                        <div className="text-[10px] text-amber-400 mt-1">
+                                                            {msg.created_at
+                                                                ? timeAgo(
+                                                                      msg.created_at,
+                                                                  )
+                                                                : ""}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </React.Fragment>
+                                        );
+                                    }
+
                                     return (
-                                        <React.Fragment key={msg.id ?? `msg-${idx}`}>
+                                        <React.Fragment
+                                            key={msg.id ?? `msg-${idx}`}
+                                        >
                                             {showDivider && (
                                                 <div className="flex items-center gap-2 my-1">
                                                     <div className="flex-1 h-px bg-[#427425]/30" />
                                                     <span className="text-[10px] font-semibold text-[#427425] bg-[#e6f3d8] px-2 py-0.5 rounded-full whitespace-nowrap">
-                                                        {snap} new {snap === 1 ? "message" : "messages"}
+                                                        {snap} new{" "}
+                                                        {snap === 1
+                                                            ? "message"
+                                                            : "messages"}
                                                     </span>
                                                     <div className="flex-1 h-px bg-[#427425]/30" />
                                                 </div>
                                             )}
                                             <div
-                                                className="flex justify-center"
+                                                className={`flex ${isInbound ? "justify-start" : "justify-end"}`}
                                             >
-                                            <div className="max-w-[85%] w-full rounded-xl px-3 py-2 bg-amber-50 border border-amber-200 border-dashed">
-                                                <div className="flex items-center gap-1.5 mb-1">
-                                                    <span className="text-amber-500 text-xs">
-                                                        📝
-                                                    </span>
-                                                    <span className="text-[10px] font-semibold text-amber-600 uppercase tracking-wide">
-                                                        Internal Note
-                                                    </span>
-                                                </div>
-                                                <p className="text-xs text-amber-800 leading-relaxed whitespace-pre-wrap">
-                                                    {msg.text}
-                                                </p>
-                                                <div className="text-[10px] text-amber-400 mt-1">
-                                                    {msg.created_at
-                                                        ? timeAgo(
-                                                              msg.created_at,
-                                                          )
-                                                        : ""}
-                                                </div>
-                                            </div>
-                                        </div>
-                                        </React.Fragment>
-                                    );
-                                }
-
-                                return (
-                                    <React.Fragment key={msg.id ?? `msg-${idx}`}>
-                                        {showDivider && (
-                                            <div className="flex items-center gap-2 my-1">
-                                                <div className="flex-1 h-px bg-[#427425]/30" />
-                                                <span className="text-[10px] font-semibold text-[#427425] bg-[#e6f3d8] px-2 py-0.5 rounded-full whitespace-nowrap">
-                                                    {snap} new {snap === 1 ? "message" : "messages"}
-                                                </span>
-                                                <div className="flex-1 h-px bg-[#427425]/30" />
-                                            </div>
-                                        )}
-                                        <div
-                                        className={`flex ${isInbound ? "justify-start" : "justify-end"}`}
-                                    >
-                                        <div
-                                            className={`rounded-2xl text-xs ${
-                                                (msg as any).media_type &&
-                                                (msg as any).media_type !==
-                                                    "note" &&
-                                                (msg as any).media_url &&
-                                                (msg as any).media_type
-                                                    .startsWith
-                                                    ? "p-1.5 max-w-[65%]"
-                                                    : "px-4 py-2.5 max-w-[75%]"
-                                            } ${
-                                                isInbound
-                                                    ? "bg-white border border-[#cee6b2] text-[#16270c] rounded-tl-sm"
-                                                    : msg.sender === "ai"
-                                                      ? "bg-blue-600 text-white rounded-tr-sm"
-                                                      : "bg-[#427425] text-white rounded-tr-sm"
-                                            }`}
-                                        >
-                                            {!isInbound && (
-                                                <div className="text-[10px] opacity-70 mb-1 font-medium uppercase tracking-wide">
-                                                    {msg.sender === "ai"
-                                                        ? "AI"
-                                                        : (msg as any)
-                                                                .agent_name
-                                                          ? (msg as any)
-                                                                .agent_name
-                                                          : "Agent"}
-                                                </div>
-                                            )}
-                                            {(() => {
-                                                const mt = (msg as any)
-                                                    .media_type as
-                                                    | string
-                                                    | null
-                                                    | undefined;
-                                                const mu = (msg as any)
-                                                    .media_url as
-                                                    | string
-                                                    | null
-                                                    | undefined;
-                                                if (!mt || !mu) {
-                                                    return (
-                                                        <p className="leading-relaxed whitespace-pre-wrap">
-                                                            {msg.text}
-                                                        </p>
-                                                    );
-                                                }
-                                                if (
-                                                    mt === "image" ||
-                                                    mt.startsWith?.("image/")
-                                                ) {
-                                                    return (
-                                                        <div className="space-y-1">
+                                                <div
+                                                    className={`rounded-2xl text-xs ${
+                                                        (msg as any)
+                                                            .media_type &&
+                                                        (msg as any)
+                                                            .media_type !==
+                                                            "note" &&
+                                                        (msg as any)
+                                                            .media_url &&
+                                                        (msg as any).media_type
+                                                            .startsWith
+                                                            ? "p-1.5 max-w-[65%]"
+                                                            : "px-4 py-2.5 max-w-[75%]"
+                                                    } ${
+                                                        isInbound
+                                                            ? "bg-white border border-[#cee6b2] text-[#16270c] rounded-tl-sm"
+                                                            : msg.sender ===
+                                                                "ai"
+                                                              ? "bg-blue-600 text-white rounded-tr-sm"
+                                                              : "bg-[#427425] text-white rounded-tr-sm"
+                                                    }`}
+                                                >
+                                                    {!isInbound && (
+                                                        <div className="text-[10px] opacity-70 mb-1 font-medium uppercase tracking-wide">
+                                                            {msg.sender === "ai"
+                                                                ? "AI"
+                                                                : (msg as any)
+                                                                        .agent_name
+                                                                  ? (msg as any)
+                                                                        .agent_name
+                                                                  : "Agent"}
+                                                        </div>
+                                                    )}
+                                                    {(() => {
+                                                        const mt = (msg as any)
+                                                            .media_type as
+                                                            | string
+                                                            | null
+                                                            | undefined;
+                                                        const mu = (msg as any)
+                                                            .media_url as
+                                                            | string
+                                                            | null
+                                                            | undefined;
+                                                        if (!mt || !mu) {
+                                                            return (
+                                                                <p className="leading-relaxed whitespace-pre-wrap">
+                                                                    {msg.text}
+                                                                </p>
+                                                            );
+                                                        }
+                                                        if (
+                                                            mt === "image" ||
+                                                            mt.startsWith?.(
+                                                                "image/",
+                                                            )
+                                                        ) {
+                                                            return (
+                                                                <div className="space-y-1">
+                                                                    <a
+                                                                        href={
+                                                                            mu
+                                                                        }
+                                                                        target="_blank"
+                                                                        rel="noopener noreferrer"
+                                                                    >
+                                                                        <img
+                                                                            src={
+                                                                                mu
+                                                                            }
+                                                                            alt={
+                                                                                msg.text ||
+                                                                                "image"
+                                                                            }
+                                                                            className="max-w-full rounded-xl border border-black/10 object-cover"
+                                                                            style={{
+                                                                                maxHeight: 240,
+                                                                            }}
+                                                                        />
+                                                                    </a>
+                                                                    {msg.text &&
+                                                                        !msg.text.startsWith(
+                                                                            "[",
+                                                                        ) && (
+                                                                            <p className="text-xs px-1 leading-relaxed">
+                                                                                {
+                                                                                    msg.text
+                                                                                }
+                                                                            </p>
+                                                                        )}
+                                                                </div>
+                                                            );
+                                                        }
+                                                        if (
+                                                            mt === "video" ||
+                                                            mt.startsWith?.(
+                                                                "video/",
+                                                            )
+                                                        ) {
+                                                            return (
+                                                                <div className="space-y-1">
+                                                                    <video
+                                                                        src={mu}
+                                                                        controls
+                                                                        className="max-w-full rounded-xl border border-black/10"
+                                                                        style={{
+                                                                            maxHeight: 200,
+                                                                        }}
+                                                                    />
+                                                                    {msg.text &&
+                                                                        !msg.text.startsWith(
+                                                                            "[",
+                                                                        ) && (
+                                                                            <p className="text-xs px-1 leading-relaxed">
+                                                                                {
+                                                                                    msg.text
+                                                                                }
+                                                                            </p>
+                                                                        )}
+                                                                </div>
+                                                            );
+                                                        }
+                                                        if (
+                                                            mt === "audio" ||
+                                                            mt.startsWith?.(
+                                                                "audio/",
+                                                            )
+                                                        ) {
+                                                            return (
+                                                                <audio
+                                                                    src={mu}
+                                                                    controls
+                                                                    className="w-full"
+                                                                />
+                                                            );
+                                                        }
+                                                        const fileName =
+                                                            msg.text ||
+                                                            mu
+                                                                .split("/")
+                                                                .pop() ||
+                                                            "file";
+                                                        return (
                                                             <a
                                                                 href={mu}
                                                                 target="_blank"
                                                                 rel="noopener noreferrer"
+                                                                className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-opacity hover:opacity-80 ${
+                                                                    isInbound
+                                                                        ? "bg-[#f3f9ec] border-[#cee6b2] text-[#16270c]"
+                                                                        : "bg-white/20 border-white/30 text-white"
+                                                                }`}
                                                             >
-                                                                <img
-                                                                    src={mu}
-                                                                    alt={
-                                                                        msg.text ||
-                                                                        "image"
-                                                                    }
-                                                                    className="max-w-full rounded-xl border border-black/10 object-cover"
-                                                                    style={{
-                                                                        maxHeight: 240,
-                                                                    }}
-                                                                />
+                                                                <svg
+                                                                    className="w-5 h-5 flex-shrink-0 opacity-70"
+                                                                    fill="none"
+                                                                    stroke="currentColor"
+                                                                    viewBox="0 0 24 24"
+                                                                >
+                                                                    <path
+                                                                        strokeLinecap="round"
+                                                                        strokeLinejoin="round"
+                                                                        strokeWidth={
+                                                                            1.5
+                                                                        }
+                                                                        d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"
+                                                                    />
+                                                                </svg>
+                                                                <span className="text-xs font-medium truncate max-w-[160px]">
+                                                                    {fileName}
+                                                                </span>
+                                                                <svg
+                                                                    className="w-4 h-4 flex-shrink-0 opacity-60"
+                                                                    fill="none"
+                                                                    stroke="currentColor"
+                                                                    viewBox="0 0 24 24"
+                                                                >
+                                                                    <path
+                                                                        strokeLinecap="round"
+                                                                        strokeLinejoin="round"
+                                                                        strokeWidth={
+                                                                            2
+                                                                        }
+                                                                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                                                                    />
+                                                                </svg>
                                                             </a>
-                                                            {msg.text &&
-                                                                !msg.text.startsWith(
-                                                                    "[",
-                                                                ) && (
-                                                                    <p className="text-xs px-1 leading-relaxed">
-                                                                        {
-                                                                            msg.text
-                                                                        }
-                                                                    </p>
-                                                                )}
-                                                        </div>
-                                                    );
-                                                }
-                                                if (
-                                                    mt === "video" ||
-                                                    mt.startsWith?.("video/")
-                                                ) {
-                                                    return (
-                                                        <div className="space-y-1">
-                                                            <video
-                                                                src={mu}
-                                                                controls
-                                                                className="max-w-full rounded-xl border border-black/10"
-                                                                style={{
-                                                                    maxHeight: 200,
-                                                                }}
-                                                            />
-                                                            {msg.text &&
-                                                                !msg.text.startsWith(
-                                                                    "[",
-                                                                ) && (
-                                                                    <p className="text-xs px-1 leading-relaxed">
-                                                                        {
-                                                                            msg.text
-                                                                        }
-                                                                    </p>
-                                                                )}
-                                                        </div>
-                                                    );
-                                                }
-                                                if (
-                                                    mt === "audio" ||
-                                                    mt.startsWith?.("audio/")
-                                                ) {
-                                                    return (
-                                                        <audio
-                                                            src={mu}
-                                                            controls
-                                                            className="w-full"
-                                                        />
-                                                    );
-                                                }
-                                                const fileName =
-                                                    msg.text ||
-                                                    mu.split("/").pop() ||
-                                                    "file";
-                                                return (
-                                                    <a
-                                                        href={mu}
-                                                        target="_blank"
-                                                        rel="noopener noreferrer"
-                                                        className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-opacity hover:opacity-80 ${
-                                                            isInbound
-                                                                ? "bg-[#f3f9ec] border-[#cee6b2] text-[#16270c]"
-                                                                : "bg-white/20 border-white/30 text-white"
-                                                        }`}
+                                                        );
+                                                    })()}
+                                                    <div
+                                                        className={`text-[10px] mt-1 ${isInbound ? "text-[#9ccd65]" : "opacity-60"}`}
                                                     >
-                                                        <svg
-                                                            className="w-5 h-5 flex-shrink-0 opacity-70"
-                                                            fill="none"
-                                                            stroke="currentColor"
-                                                            viewBox="0 0 24 24"
-                                                        >
-                                                            <path
-                                                                strokeLinecap="round"
-                                                                strokeLinejoin="round"
-                                                                strokeWidth={
-                                                                    1.5
-                                                                }
-                                                                d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"
-                                                            />
-                                                        </svg>
-                                                        <span className="text-xs font-medium truncate max-w-[160px]">
-                                                            {fileName}
-                                                        </span>
-                                                        <svg
-                                                            className="w-4 h-4 flex-shrink-0 opacity-60"
-                                                            fill="none"
-                                                            stroke="currentColor"
-                                                            viewBox="0 0 24 24"
-                                                        >
-                                                            <path
-                                                                strokeLinecap="round"
-                                                                strokeLinejoin="round"
-                                                                strokeWidth={2}
-                                                                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-                                                            />
-                                                        </svg>
-                                                    </a>
-                                                );
-                                            })()}
-                                            <div
-                                                className={`text-[10px] mt-1 ${isInbound ? "text-[#9ccd65]" : "opacity-60"}`}
-                                            >
-                                                {msg.created_at
-                                                    ? timeAgo(msg.created_at)
-                                                    : ""}
+                                                        {msg.created_at
+                                                            ? timeAgo(
+                                                                  msg.created_at,
+                                                              )
+                                                            : ""}
+                                                    </div>
+                                                </div>
                                             </div>
-                                        </div>
-                                    </div>
-                                    </React.Fragment>
-                                );
-                            });
+                                        </React.Fragment>
+                                    );
+                                });
                             })()}
                             <div ref={messagesEndRef} />
                         </div>
@@ -1912,8 +1995,13 @@ export function ConversationsView({
     if (isMobile) {
         return (
             <div className="flex-1 overflow-hidden flex flex-col">
-                <div className="flex flex-col flex-1 overflow-hidden" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
-                    {mobilePanel === "list" ? ConvList : (
+                <div
+                    className="flex flex-col flex-1 overflow-hidden"
+                    style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+                >
+                    {mobilePanel === "list" ? (
+                        ConvList
+                    ) : (
                         <div className="flex flex-col flex-1 overflow-hidden pb-16">
                             {ThreadPanel}
                         </div>
@@ -1935,13 +2023,25 @@ export function ConversationsView({
                         <div className="relative bg-white w-full max-w-sm flex flex-col overflow-hidden shadow-xl">
                             {/* Header */}
                             <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-[#e6f3d8] flex-shrink-0">
-                                <h2 className="text-sm font-bold text-[#16270c]">Customer Profile</h2>
+                                <h2 className="text-sm font-bold text-[#16270c]">
+                                    Customer Profile
+                                </h2>
                                 <button
                                     onClick={() => setMobileCrmOpen(false)}
                                     className="w-7 h-7 rounded-full bg-[#f3f9ec] flex items-center justify-center text-[#699a32] hover:bg-[#e6f3d8]"
                                 >
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    <svg
+                                        className="w-4 h-4"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        viewBox="0 0 24 24"
+                                    >
+                                        <path
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            strokeWidth={2}
+                                            d="M6 18L18 6M6 6l12 12"
+                                        />
                                     </svg>
                                 </button>
                             </div>
@@ -1957,7 +2057,11 @@ export function ConversationsView({
                                         setConversations((prev) =>
                                             prev.map((c) =>
                                                 c.wa_id === wa_id
-                                                    ? { ...c, name: newName, contact_name: newName }
+                                                    ? {
+                                                          ...c,
+                                                          name: newName,
+                                                          contact_name: newName,
+                                                      }
                                                     : c,
                                             ),
                                         );
