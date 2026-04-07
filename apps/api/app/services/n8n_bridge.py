@@ -457,7 +457,7 @@ async def get_messages(db: AsyncSession, wa_id: str) -> list:
     result = await db.execute(
         select(Message)
         .where(Message.wa_id == wa_id)
-        .order_by(Message.created_at.asc())
+        .order_by(Message.created_at.desc())
         .limit(50)
     )
     msgs = result.scalars().all()
