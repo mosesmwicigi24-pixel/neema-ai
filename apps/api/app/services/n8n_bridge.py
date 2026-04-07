@@ -585,3 +585,88 @@ async def upsert_customer_history(db: AsyncSession, body) -> dict:
     await db.execute(stmt)
     await db.commit()
     return {"ok": True}
+
+
+# ── Media Escalation (system-triggered intercept by wa_id) ───────────────────
+@router.post("/escalate", dependencies=[Depends(verify_n8n_secret)])
+async def escalate_to_human(body: dict, request: Request, db: AsyncSession = Depends(get_db)):
+    """
+    Called by n8n when a media request is detected.
+    Looks up the conversation by wa_id and switches it to human mode.
+    Reuses the existing intercept_conversation service — no duplicate logic.
+    No message is sent to the customer.
+    """
+    from sqlalchemy import select
+    from app.models.conversation import Conversation
+    from app.services.conversation import intercept_conversation
+
+    wa_id  = str(body.get("wa_id", "")).strip()
+    reason = str(body.get("reason", "Media request — customer asked for images or files"))
+
+    if not wa_id:
+        raise HTTPException(status_code=400, detail="wa_id required")
+
+    # Look up the conversation by wa_id
+    result = await db.execute(
+        select(Conversation).where(Conversation.wa_id == wa_id)
+    )
+    conv = result.scalar_one_or_none()
+    if not conv:
+        raise HTTPException(status_code=404, detail=f"No conversation found for wa_id={wa_id}")
+
+    # Find any available admin agent to assign ownership,
+    # since this is a system-triggered intercept with no human initiator.
+    # Falls back to the first agent if no admin exists.
+    from app.models.agent import Agent
+    admin_result = await db.execute(
+        select(Agent)
+        .where(Agent.role == "admin")
+        .where(Agent.is_available == True)
+        .limit(1)
+    )
+    system_agent = admin_result.scalar_one_or_none()
+
+    if not system_agent:
+        # Fall back to any available agent
+        any_result = await db.execute(
+            select(Agent).where(Agent.is_available == True).limit(1)
+        )
+        system_agent = any_result.scalar_one_or_none()
+
+    if not system_agent:
+        raise HTTPException(
+            status_code=503,
+            detail="No available agents to assign this escalation to"
+        )
+
+    redis = request.app.state.redis
+
+    # Delegate entirely to the existing service — handles locking,
+    # logging, Redis broadcast, and cache clearing.
+    result = await intercept_conversation(
+        db=db,
+        conv_id=str(conv.id),
+        agent=system_agent,
+        redis=redis,
+    )
+
+    # Additionally publish a media-specific notification so agents
+    # see a descriptive alert rather than a generic intercept event.
+    await redis.publish("ws:channel:agents:all", json.dumps({
+        "event":   "notification",
+        "type":    "media_escalation",
+        "title":   "📎 Media Request",
+        "body":    reason,
+        "wa_id":   wa_id,
+        "conv_id": str(conv.id),
+    }))
+
+    return {
+        "ok":          True,
+        "wa_id":       wa_id,
+        "conv_id":     str(conv.id),
+        "assigned_to": str(system_agent.id),
+        "agent_name":  system_agent.name,
+        "mode":        "human",
+        "reason":      reason,
+    }
