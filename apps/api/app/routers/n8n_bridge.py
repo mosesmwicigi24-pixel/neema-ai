@@ -228,7 +228,7 @@ async def escalate_to_human(body: dict, request: Request, db: AsyncSession = Dep
             wa_id=conv.wa_id,
             conversation_id=conv.id,
             direction=MsgDirection.inbound,
-            sender=MsgSender.customer,
+            sender=MsgSender.user,
             text=msg_text,
         )
         db.add(inbound_msg)
