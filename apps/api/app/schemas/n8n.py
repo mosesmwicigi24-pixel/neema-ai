@@ -38,6 +38,7 @@ class UpsertMessagePatchDto(BaseModel):
 class UserDto(BaseModel):
     wa_id: str
     phone: str | None = None
+    name: str | None = None
     last_text: str | None = None
     last_direction: str | None = None
     state: dict | None = None
