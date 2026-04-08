@@ -65,6 +65,27 @@ interface CatalogFormProps {
 }
 
 function CatalogForm({ form, f, categories }: CatalogFormProps) {
+    // Tracks the draft text while the user is typing a new category name.
+    // We only commit it to form.category onBlur so that form.category never
+    // leaves "__new__" mid-typing (which would hide the input immediately).
+    const [newCatDraft, setNewCatDraft] = useState("");
+
+    const isNewCat = form.category === "__new__";
+
+    const handleSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+        setNewCatDraft("");
+        f("category", e.target.value);
+    };
+
+    const handleNewCatBlur = () => {
+        const trimmed = newCatDraft.trim();
+        if (trimmed) {
+            f("category", trimmed);   // commit the real value on blur
+        } else {
+            f("category", "");        // user cleared it — reset to unselected
+        }
+    };
+
     return (
         <>
             <div className="grid grid-cols-2 gap-3 mb-1">
@@ -79,8 +100,8 @@ function CatalogForm({ form, f, categories }: CatalogFormProps) {
                         Category
                     </label>
                     <select
-                        value={form.category}
-                        onChange={(e) => f("category", e.target.value)}
+                        value={isNewCat ? "__new__" : form.category}
+                        onChange={handleSelectChange}
                         className="w-full h-9 px-2.5 text-sm bg-white border border-[#cee6b2] rounded-lg text-[#16270c] focus:outline-none focus:ring-2 focus:ring-[#589b31] focus:border-transparent"
                     >
                         <option value="">— select —</option>
@@ -89,12 +110,14 @@ function CatalogForm({ form, f, categories }: CatalogFormProps) {
                         ))}
                         <option value="__new__">+ New category…</option>
                     </select>
-                    {form.category === "__new__" && (
+                    {isNewCat && (
                         <input
                             className="mt-1.5 w-full h-9 px-2.5 text-sm bg-white border border-[#cee6b2] rounded-lg text-[#16270c] focus:outline-none focus:ring-2 focus:ring-[#589b31]"
                             placeholder="New category name"
                             autoFocus
-                            onChange={(e) => f("category", e.target.value)}
+                            value={newCatDraft}
+                            onChange={(e) => setNewCatDraft(e.target.value)}
+                            onBlur={handleNewCatBlur}
                         />
                     )}
                 </div>
