@@ -56,6 +56,95 @@ const EMPTY_FORM = {
 
 type FormState = typeof EMPTY_FORM;
 
+// ── CatalogForm (moved outside CatalogView to preserve stable identity) ───────
+
+interface CatalogFormProps {
+    form: FormState;
+    f: (key: keyof FormState, v: string | boolean) => void;
+    categories: string[];
+}
+
+function CatalogForm({ form, f, categories }: CatalogFormProps) {
+    return (
+        <>
+            <div className="grid grid-cols-2 gap-3 mb-1">
+                <InputField
+                    label="SKU"
+                    value={form.sku}
+                    onChange={(v) => f("sku", v)}
+                    placeholder="WAFER-500"
+                />
+                <div>
+                    <label className="block text-xs font-semibold text-[#427425] mb-1.5">
+                        Category
+                    </label>
+                    <select
+                        value={form.category}
+                        onChange={(e) => f("category", e.target.value)}
+                        className="w-full h-9 px-2.5 text-sm bg-white border border-[#cee6b2] rounded-lg text-[#16270c] focus:outline-none focus:ring-2 focus:ring-[#589b31] focus:border-transparent"
+                    >
+                        <option value="">— select —</option>
+                        {categories.map((cat) => (
+                            <option key={cat} value={cat}>{cat}</option>
+                        ))}
+                        <option value="__new__">+ New category…</option>
+                    </select>
+                    {form.category === "__new__" && (
+                        <input
+                            className="mt-1.5 w-full h-9 px-2.5 text-sm bg-white border border-[#cee6b2] rounded-lg text-[#16270c] focus:outline-none focus:ring-2 focus:ring-[#589b31]"
+                            placeholder="New category name"
+                            autoFocus
+                            onChange={(e) => f("category", e.target.value)}
+                        />
+                    )}
+                </div>
+            </div>
+            <InputField
+                label="Name *"
+                value={form.name}
+                onChange={(v) => f("name", v)}
+                placeholder="Holy Communion Wafers (500 pcs)"
+                required
+            />
+            <div className="grid grid-cols-2 gap-3">
+                <InputField
+                    label="Price (KES) *"
+                    value={form.price}
+                    onChange={(v) => f("price", v)}
+                    type="number"
+                    placeholder="850"
+                    required
+                />
+                <div className="flex flex-col justify-end pb-0.5">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                        <div
+                            onClick={() => f("in_stock", !form.in_stock)}
+                            className={`w-9 h-5 rounded-full transition-colors flex-shrink-0 ${form.in_stock ? "bg-[#589b31]" : "bg-stone-300"}`}
+                        >
+                            <div className={`w-4 h-4 rounded-full bg-white shadow mt-0.5 transition-transform ${form.in_stock ? "translate-x-4.5 ml-4" : "ml-0.5"}`} />
+                        </div>
+                        <span className="text-xs text-[#427425] font-medium">In stock</span>
+                    </label>
+                </div>
+            </div>
+            <InputField
+                label="Description"
+                value={form.description}
+                onChange={(v) => f("description", v)}
+                placeholder="Short product description"
+            />
+            <InputField
+                label="Aliases (comma-separated)"
+                value={form.aliases}
+                onChange={(v) => f("aliases", v)}
+                placeholder="wafers, hosts, eucharist wafers"
+            />
+        </>
+    );
+}
+
+// ── CatalogView ───────────────────────────────────────────────────────────────
+
 export function CatalogView({
     catalog,
     setCatalog,
@@ -200,85 +289,6 @@ export function CatalogView({
 
     const inStockCount  = catalog.filter((c) => c.in_stock).length;
     const outStockCount = catalog.filter((c) => !c.in_stock).length;
-
-    // ── Shared form fields ────────────────────────────────────────────────────
-
-    const CatalogForm = () => (
-        <>
-            <div className="grid grid-cols-2 gap-3 mb-1">
-                <InputField
-                    label="SKU"
-                    value={form.sku}
-                    onChange={(v) => f("sku", v)}
-                    placeholder="WAFER-500"
-                />
-                <div>
-                    <label className="block text-xs font-semibold text-[#427425] mb-1.5">
-                        Category
-                    </label>
-                    <select
-                        value={form.category}
-                        onChange={(e) => f("category", e.target.value)}
-                        className="w-full h-9 px-2.5 text-sm bg-white border border-[#cee6b2] rounded-lg text-[#16270c] focus:outline-none focus:ring-2 focus:ring-[#589b31] focus:border-transparent"
-                    >
-                        <option value="">— select —</option>
-                        {categories.map((cat) => (
-                            <option key={cat} value={cat}>{cat}</option>
-                        ))}
-                        <option value="__new__">+ New category…</option>
-                    </select>
-                    {form.category === "__new__" && (
-                        <input
-                            className="mt-1.5 w-full h-9 px-2.5 text-sm bg-white border border-[#cee6b2] rounded-lg text-[#16270c] focus:outline-none focus:ring-2 focus:ring-[#589b31]"
-                            placeholder="New category name"
-                            autoFocus
-                            onChange={(e) => f("category", e.target.value)}
-                        />
-                    )}
-                </div>
-            </div>
-            <InputField
-                label="Name *"
-                value={form.name}
-                onChange={(v) => f("name", v)}
-                placeholder="Holy Communion Wafers (500 pcs)"
-                required
-            />
-            <div className="grid grid-cols-2 gap-3">
-                <InputField
-                    label="Price (KES) *"
-                    value={form.price}
-                    onChange={(v) => f("price", v)}
-                    type="number"
-                    placeholder="850"
-                    required
-                />
-                <div className="flex flex-col justify-end pb-0.5">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                        <div
-                            onClick={() => f("in_stock", !form.in_stock)}
-                            className={`w-9 h-5 rounded-full transition-colors flex-shrink-0 ${form.in_stock ? "bg-[#589b31]" : "bg-stone-300"}`}
-                        >
-                            <div className={`w-4 h-4 rounded-full bg-white shadow mt-0.5 transition-transform ${form.in_stock ? "translate-x-4.5 ml-4" : "ml-0.5"}`} />
-                        </div>
-                        <span className="text-xs text-[#427425] font-medium">In stock</span>
-                    </label>
-                </div>
-            </div>
-            <InputField
-                label="Description"
-                value={form.description}
-                onChange={(v) => f("description", v)}
-                placeholder="Short product description"
-            />
-            <InputField
-                label="Aliases (comma-separated)"
-                value={form.aliases}
-                onChange={(v) => f("aliases", v)}
-                placeholder="wafers, hosts, eucharist wafers"
-            />
-        </>
-    );
 
     return (
         <div className={`flex-1 overflow-y-auto bg-[#f3f9ec] ${isMobile ? "p-4 pb-24" : "p-6"}`}>
@@ -430,7 +440,7 @@ export function CatalogView({
 
             {/* ── Add modal ─────────────────────────────────────────────────── */}
             <Modal show={addModal} onClose={() => setAddModal(false)} title="Add Catalog Item">
-                <CatalogForm />
+                <CatalogForm form={form} f={f} categories={categories} />
                 <div className="flex gap-2 mt-4">
                     <Btn onClick={createItem} variant="primary" disabled={saving} full>
                         {saving ? "Adding…" : "Add Item"}
@@ -442,7 +452,7 @@ export function CatalogView({
             {/* ── Edit modal ────────────────────────────────────────────────── */}
             <Modal show={editModal} onClose={() => setEditModal(false)}
                 title={`Edit — ${editItem?.name ?? ""}`}>
-                <CatalogForm />
+                <CatalogForm form={form} f={f} categories={categories} />
                 <div className="flex gap-2 mt-4">
                     <Btn onClick={saveEdit} variant="primary" disabled={saving} full>
                         {saving ? "Saving…" : "Save Changes"}
