@@ -81,7 +81,7 @@ export function ConversationsView({
     const [threadLoading, setThreadLoading] = useState(false);
     const [sending, setSending] = useState(false);
     const [crmOpen, setCrmOpen] = useState<boolean>(true);
-    const [activityLogOpen, setActivityLogOpen] = useState<boolean>(true);
+    const [activityLogOpen, setActivityLogOpen] = useState<boolean>(false);
     const [clearConfirm, setClearConfirm] = useState(false);
     const [clearing, setClearing] = useState(false);
     const [mobileCrmOpen, setMobileCrmOpen] = useState(false);
@@ -1233,10 +1233,78 @@ export function ConversationsView({
                                         }
 
                                         // ── Intercept card ───────────────────
-                                        // Shows exactly who picked up the conv
-                                        // with their avatar initials.
+                                        // Two cases:
+                                        //  1. agent_name is null  → system auto-escalated
+                                        //     (customer sent media, or requested media).
+                                        //     Render the amber escalation card so agents
+                                        //     understand WHY the conv is now human-mode.
+                                        //  2. agent_name is set   → a real agent picked up.
+                                        //     Render the named purple pickup pill.
                                         if (kind === "intercept") {
-                                            const agentInitials = (msg.agent_name ?? "?")
+                                            // ── Case 1: system / media escalation ──
+                                            if (!msg.agent_name) {
+                                                // Derive a human-readable reason from
+                                                // event_reason if the backend wrote one,
+                                                // otherwise fall back to context from the
+                                                // surrounding messages.
+                                                const hasInboundMedia = activeMessages
+                                                    .slice(0, idx)
+                                                    .some(
+                                                        (m) =>
+                                                            m.direction === "inbound" &&
+                                                            m.media_type &&
+                                                            m.media_type !== "note",
+                                                    );
+                                                const reasonText =
+                                                    msg.event_reason ||
+                                                    (hasInboundMedia
+                                                        ? "Customer sent a media file that the AI cannot process. An agent needs to review and respond."
+                                                        : "Customer requested media or the AI could not continue. An agent needs to take over.");
+
+                                                return (
+                                                    <React.Fragment key={msg.id}>
+                                                        {showDivider && (
+                                                            <div className="flex items-center gap-2 my-1">
+                                                                <div className="flex-1 h-px bg-[#427425]/30" />
+                                                                <span className="text-[10px] font-semibold text-[#427425] bg-[#e6f3d8] px-2 py-0.5 rounded-full whitespace-nowrap">
+                                                                    {snap} new {snap === 1 ? "message" : "messages"}
+                                                                </span>
+                                                                <div className="flex-1 h-px bg-[#427425]/30" />
+                                                            </div>
+                                                        )}
+                                                        <div className="flex justify-center my-3">
+                                                            <div className="w-full max-w-[88%] rounded-2xl overflow-hidden border border-amber-200 bg-amber-50">
+                                                                <div className="flex items-center gap-2 px-3 py-2 bg-amber-100 border-b border-amber-200">
+                                                                    <span className="text-amber-600 text-sm leading-none">⚠</span>
+                                                                    <span className="text-[11px] font-semibold text-amber-800 uppercase tracking-wide">
+                                                                        Escalated — awaiting agent
+                                                                    </span>
+                                                                    <span className="ml-auto text-[10px] text-amber-500">
+                                                                        {msg.created_at ? timeAgo(msg.created_at) : ""}
+                                                                    </span>
+                                                                </div>
+                                                                <div className="px-3 py-2">
+                                                                    <p className="text-[10px] font-semibold text-amber-700 uppercase tracking-wide mb-1">
+                                                                        Reason
+                                                                    </p>
+                                                                    <p className="text-xs text-amber-900 leading-relaxed">
+                                                                        {reasonText}
+                                                                    </p>
+                                                                </div>
+                                                                <div className="flex items-center gap-1.5 px-3 py-2 border-t border-amber-100">
+                                                                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                                                                    <span className="text-[10px] text-amber-600">
+                                                                        Waiting for an agent to pick up
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </React.Fragment>
+                                                );
+                                            }
+
+                                            // ── Case 2: named agent pickup ──────
+                                            const agentInitials = msg.agent_name
                                                 .split(" ")
                                                 .map((w: string) => w[0])
                                                 .join("")
@@ -1256,14 +1324,11 @@ export function ConversationsView({
                                                     <div className="flex items-center gap-2 my-3">
                                                         <div className="flex-1 h-px bg-purple-100" />
                                                         <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-purple-50 border border-purple-200">
-                                                            {/* Mini avatar */}
                                                             <div className="w-4 h-4 rounded-full bg-purple-200 flex items-center justify-center text-[8px] font-bold text-purple-800 flex-shrink-0">
                                                                 {agentInitials}
                                                             </div>
                                                             <span className="text-[10px] font-semibold text-purple-800 whitespace-nowrap">
-                                                                {msg.agent_name
-                                                                    ? `${msg.agent_name} picked up`
-                                                                    : "Agent picked up"}
+                                                                {msg.agent_name} picked up
                                                             </span>
                                                         </div>
                                                         <div className="flex-1 h-px bg-purple-100" />

@@ -259,10 +259,13 @@ async def get_thread(
         InterceptAction.transfer:  "Transferred",
     }
 
+    # Build a quick lookup: messages that arrived before each event timestamp
+    # so we can auto-detect the escalation cause for agentless intercepts.
+    msg_list = sorted(msgs, key=lambda m: m.created_at or "")
+
     for e in events:
         agent_name = agent_name_map.get(str(e.agent_id)) if e.agent_id else None
 
-        # Build a human-readable label, including the agent name where relevant
         label = ACTION_LABEL.get(e.action, e.action)
         if e.action == InterceptAction.intercept and agent_name:
             label = f"Picked up by {agent_name}"
@@ -271,19 +274,46 @@ async def get_thread(
         elif e.action == InterceptAction.transfer and e.note:
             label = f"Transferred — {e.note}"
 
+        # ── Auto-derive reason for agentless intercepts (media escalations) ──
+        # When no agent triggered the intercept it was auto-escalated by the
+        # system because of inbound media or a media request.  Look at messages
+        # that arrived just before this event to identify which case it is.
+        auto_reason: str | None = None
+        if e.action == InterceptAction.intercept and not e.agent_id:
+            evt_ts = e.created_at
+            preceding = [
+                m for m in msg_list
+                if m.created_at and evt_ts and m.created_at <= evt_ts
+            ]
+            has_inbound_media = any(
+                m.direction == "inbound" and m.media_type and m.media_type != "note"
+                for m in preceding[-10:]  # check last 10 messages before event
+            )
+            if has_inbound_media:
+                auto_reason = (
+                    "Customer sent a media file (image, document, or audio) "
+                    "that the AI cannot process. An agent needs to review and respond."
+                )
+            else:
+                auto_reason = (
+                    "Customer requested media or files that the AI cannot send. "
+                    "An agent needs to take over to fulfil this request."
+                )
+
         thread.append({
             "id":           f"evt-{e.id}",
             "type":         "system_event",
-            # Give system events neutral direction/sender fields so the
-            # frontend doesn't need to guard every field access
             "direction":    "outbound",
             "sender":       "ai",
             "text":         label,
             "created_at":   e.created_at.isoformat() if e.created_at else None,
             # ── Timeline-specific fields ──────────────────────────────────
             "event_kind":   e.action.value,
-            # For escalated rows the `note` column holds the reason text
-            "event_reason": e.note if e.action == InterceptAction.escalated else None,
+            # For escalated rows: use note. For agentless intercepts: use auto_reason.
+            "event_reason": (
+                e.note if e.action == InterceptAction.escalated
+                else auto_reason
+            ),
             "agent_name":   agent_name,
         })
 
