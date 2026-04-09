@@ -2,6 +2,7 @@
 import { createContext, useContext, useEffect, useRef, ReactNode } from "react";
 import { io, Socket } from "socket.io-client";
 import { useSession } from "next-auth/react";
+import type { Message, SystemEventKind } from "@/types";
 
 const WsContext = createContext<Socket | null>(null);
 
@@ -52,6 +53,49 @@ export function useConversationEvents(
             socket.off("event", onEvent);
         };
     }, [socket, conversationId, onEvent]);
+}
+
+/**
+ * Build a synthetic `system_event` Message from an `intercept_changed`
+ * WebSocket broadcast.  This lets ConversationsView inject a live divider
+ * pill into the thread without waiting for the next full thread reload.
+ *
+ * Returns `null` for broadcasts that don't need a visual event bubble
+ * (e.g. simple mode changes with no eventKind payload).
+ */
+export function buildSystemEventFromWs(wsEvent: any): Message | null {
+    const kind = wsEvent.eventKind as SystemEventKind | undefined;
+    if (!kind) return null;
+
+    // Human-readable pill text — mirrors the backend ACTION_LABEL map
+    const labelMap: Record<SystemEventKind, string> = {
+        escalated:     "Escalated — needs human",
+        flag:          "Flagged: Needs Attention",
+        intercept:     wsEvent.eventAgentName
+                           ? `Picked up by ${wsEvent.eventAgentName}`
+                           : "Picked up by agent",
+        release:       wsEvent.eventAgentName
+                           ? `Released to AI by ${wsEvent.eventAgentName}`
+                           : "Released to AI",
+        transfer:      wsEvent.eventNote
+                           ? `Transferred — ${wsEvent.eventNote}`
+                           : "Transferred",
+        approve_draft: "AI draft approved",
+    };
+
+    return {
+        // Prefix with "live-" so the thread dedup check ignores it until a
+        // real reload confirms the persisted DB id
+        id:           `live-evt-${Date.now()}`,
+        type:         "system_event",
+        direction:    "outbound",
+        sender:       "ai",
+        text:         labelMap[kind] ?? kind,
+        created_at:   new Date().toISOString(),
+        event_kind:   kind,
+        event_reason: wsEvent.eventReason ?? null,
+        agent_name:   wsEvent.eventAgentName ?? null,
+    };
 }
 
 // ── Agent notification type ───────────────────────────────────────────────────

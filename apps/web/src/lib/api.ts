@@ -3,6 +3,7 @@ import type {
     Conversation,
     Channel,
     Message,
+    SystemEventKind,
     Agent,
     Order,
     OrderStatus,
@@ -26,10 +27,6 @@ const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
  * Token resolution order:
  *  1. window.__neema_token  (set synchronously in page.tsx render body)
  *  2. getSession() fallback (for edge cases where window cache is cold)
- *
- * The window cache is written in the render body of NeemaDashboard — before
- * any useEffect fires — so by the time usePolling calls authHeaders() the
- * token is always present when the user is authenticated.
  */
 async function authHeaders(): Promise<HeadersInit> {
     let token: string | undefined;
@@ -83,19 +80,17 @@ async function req<T>(
         credentials: "include",
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
- 
+
     // ── 401 → fire session-expired event instead of throwing generically ──────
     if (res.status === 401) {
         if (typeof window !== "undefined") {
-            // Clear the stale cached token so the next authHeaders() call
-            // is forced to go back to getSession() after re-auth.
             delete (window as any).__neema_token;
             delete (window as any).__neema_refresh_token;
             window.dispatchEvent(new CustomEvent("neema:session-expired"));
         }
         throw new Error(`${method} ${path} → 401: Session expired`);
     }
- 
+
     if (!res.ok) {
         const err = await res.text();
         throw new Error(`${method} ${path} → ${res.status}: ${err}`);
@@ -128,8 +123,58 @@ export interface ApiConversation {
     unread?: number;
     country?: string | null;
     country_iso?: string;
-    flag_url?: string;    
+    flag_url?: string;
     tags?: string[];
+}
+
+/**
+ * Raw shape returned by GET /admin/conversations/{id}/messages.
+ * The backend merges regular messages and system-event rows into one
+ * sorted list, distinguished by the `type` field.
+ */
+export interface ApiThreadItem {
+    id: string;
+    type: "message" | "system_event";
+    direction: "inbound" | "outbound";
+    sender: "user" | "ai" | "human_agent";
+    text: string;
+    created_at: string;
+    // Message-specific
+    isNote?: boolean;
+    agent_name?: string | null;
+    media_type?: string | null;
+    media_id?: string | null;
+    media_url?: string | null;
+    media_caption?: string | null;
+    mime_type?: string | null;
+    filename?: string | null;
+    // System-event-specific
+    event_kind?: SystemEventKind | null;
+    event_reason?: string | null;
+}
+
+/** Map a raw thread item from the API to the shared Message type. */
+function mapThreadItem(raw: ApiThreadItem): Message {
+    return {
+        id:            raw.id,
+        type:          raw.type ?? "message",
+        direction:     raw.direction,
+        sender:        raw.sender,
+        text:          raw.text ?? "",
+        created_at:    raw.created_at,
+        isNote:        raw.isNote ?? false,
+        agent_name:    raw.agent_name ?? undefined,
+        // System event fields — undefined for regular messages
+        event_kind:    raw.event_kind ?? undefined,
+        event_reason:  raw.event_reason ?? undefined,
+        // Media
+        media_type:    (raw.media_type as Message["media_type"]) ?? null,
+        media_id:      raw.media_id ?? null,
+        media_url:     raw.media_url ?? null,
+        media_caption: raw.media_caption ?? null,
+        mime_type:     raw.mime_type ?? null,
+        filename:      raw.filename ?? null,
+    };
 }
 
 export const conversationsApi = {
@@ -141,8 +186,15 @@ export const conversationsApi = {
         return get<ApiConversation[]>(`/admin/conversations${q}`);
     },
     get: (id: string) => get<ApiConversation>(`/admin/conversations/${id}`),
-    messages: (id: string) =>
-        get<Message[]>(`/admin/conversations/${id}/messages`),
+
+    /** Fetch the merged message + system-event timeline for a conversation. */
+    messages: async (id: string): Promise<Message[]> => {
+        const raw = await get<ApiThreadItem[]>(
+            `/admin/conversations/${id}/messages`,
+        );
+        return raw.map(mapThreadItem);
+    },
+
     intercept: (id: string) =>
         post<ApiConversation>(`/admin/conversations/${id}/intercept`, {}),
     release: (id: string) =>
@@ -243,7 +295,6 @@ export interface ApiAgent {
     avatar_url: string | null;
     created_at: string;
     last_seen_at: string | null;
-    // Custom role fields (populated by the joined list_agents query)
     custom_role_id:    string | null;
     custom_permissions: string[] | null;
     role_name:         string | null;
@@ -251,21 +302,11 @@ export interface ApiAgent {
     role_permissions:  string[] | null;
 }
 
-export interface CreateAgentPayload {
-    name: string;
-    email: string;
-    password: string;
-    role: "admin" | "agent" | "readonly";
-}
-
 export const agentsApi = {
     list: () => get<ApiAgent[]>("/admin/agents"),
-    get: (id: string) => get<ApiAgent>(`/admin/agents/${id}`),
-    create: (p: CreateAgentPayload) => post<ApiAgent>("/admin/agents", p),
-    update: (id: string, p: Partial<ApiAgent & { password?: string }>) =>
-        patch<ApiAgent>(`/admin/agents/${id}`, p),
-    delete: (id: string) => del<void>(`/admin/agents/${id}`),
-    toggleAvailable: (id: string, is_available: boolean) =>
+    update: (id: string, body: Partial<ApiAgent>) =>
+        patch<ApiAgent>(`/admin/agents/${id}`, body),
+    setAvailable: (id: string, is_available: boolean) =>
         patch<ApiAgent>(`/admin/agents/${id}`, { is_available }),
 };
 
@@ -397,7 +438,7 @@ export const profileApi = {
 
 
 // ── Custom Roles ──────────────────────────────────────────────────────────────
- 
+
 export interface CustomRole {
     id:          string;
     name:        string;
@@ -407,7 +448,7 @@ export interface CustomRole {
     protected:   boolean;
     created_at?: string;
 }
- 
+
 export const rolesApi = {
     list:   ()                                     => get<CustomRole[]>("/admin/roles"),
     create: (r: Omit<CustomRole, "protected" | "created_at">) =>
@@ -421,6 +462,7 @@ export const rolesApi = {
                     { custom_role_id: roleId }
                 ),
 };
+
 // ── Data mappers (API → UI types) ─────────────────────────────────────────────
 
 export function mapConversation(c: ApiConversation): Conversation {
@@ -442,14 +484,12 @@ export function mapConversation(c: ApiConversation): Conversation {
         unread_count: c.unread ?? 0,
         country_iso: c.country_iso,
         country:     c.country     ?? null,
-        flag_url:    c.flag_url,        
+        flag_url:    c.flag_url,
         tags:        c.tags        ?? [],
     };
 }
 
 export function mapAgent(a: ApiAgent): Agent {
-    // Effective permissions: custom_permissions (per-agent overrides) take
-    // priority, then fall back to the assigned role's permissions array.
     const permissions: string[] =
         a.custom_permissions ?? a.role_permissions ?? [];
 

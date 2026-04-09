@@ -48,7 +48,6 @@ async def list_conversations(
 ):
     from sqlalchemy import and_, case, literal
 
-    # ── Base conversation query (no ORDER BY yet — we sort after enrichment) ──
     q = select(Conversation)
     if mode:
         q = q.where(Conversation.intercept_mode == mode)
@@ -76,16 +75,12 @@ async def list_conversations(
             agent_map[str(a.id)] = a.name or ""
 
     # ── Batch-load latest message per conversation for preview + true sort ───
-    # We query the actual messages table so sort order reflects ALL activity
-    # (inbound customer messages, AI replies, human replies) — not just whatever
-    # last_message_at was written to the conversation row.
     latest_sub = (
         select(
             Message.conversation_id,
             func.max(Message.created_at).label("max_at"),
         )
         .where(Message.conversation_id.in_(conv_ids))
-        # Exclude internal notes — they should not affect sort order or preview
         .where(Message.media_type.is_(None) | (Message.media_type != "note"))
         .group_by(Message.conversation_id)
         .subquery()
@@ -95,22 +90,13 @@ async def list_conversations(
         (Message.conversation_id == latest_sub.c.conversation_id)
         & (Message.created_at == latest_sub.c.max_at),
     )
-    preview_map: dict[str, tuple[str, str]] = {}  # conv_id -> (text, iso_timestamp)
+    preview_map: dict[str, tuple[str, str]] = {}
     for m in (await db.execute(latest_q)).scalars().all():
         cid = str(m.conversation_id)
         ts  = m.created_at.isoformat() if m.created_at else None
         preview_map[cid] = (m.text or "", ts)
 
     # ── Compute unread per conversation ───────────────────────────────────────
-    # Definition: inbound messages that arrived AFTER the last outbound message.
-    # A conversation is "read" once any reply (AI or human) has been sent.
-    # Notes (media_type="note") are internal and never count as a reply here.
-    #
-    # Strategy:
-    #   1. Find the timestamp of the last real outbound message per conversation.
-    #   2. Count inbound messages that arrived strictly after that timestamp.
-    #   3. Conversations that have NEVER had an outbound message → all inbound = unread.
-
     last_outbound_sub = (
         select(
             Message.conversation_id,
@@ -118,13 +104,11 @@ async def list_conversations(
         )
         .where(Message.conversation_id.in_(conv_ids))
         .where(Message.direction == "outbound")
-        # Exclude notes — they are not replies to the customer
         .where(Message.media_type.is_(None) | (Message.media_type != "note"))
         .group_by(Message.conversation_id)
         .subquery()
     )
 
-    # Count inbound messages after the last outbound (LEFT JOIN handles never-replied convs)
     unread_q = (
         select(
             Message.conversation_id,
@@ -137,8 +121,6 @@ async def list_conversations(
         .where(Message.conversation_id.in_(conv_ids))
         .where(Message.direction == "inbound")
         .where(
-            # Either there has never been an outbound message (last_out_at IS NULL)
-            # or this inbound arrived after the last outbound
             last_outbound_sub.c.last_out_at.is_(None)
             | (Message.created_at > last_outbound_sub.c.last_out_at)
         )
@@ -153,7 +135,6 @@ async def list_conversations(
         entry = preview_map.get(str(c.id))
         if entry and entry[1]:
             return entry[1]
-        # Fall back to conversation.last_message_at, then created_at
         if c.last_message_at:
             return c.last_message_at.isoformat()
         return c.created_at.isoformat() if c.created_at else ""
@@ -168,7 +149,6 @@ async def list_conversations(
             "assigned_agent_id":    str(c.assigned_agent_id) if c.assigned_agent_id else None,
             "assigned_agent_name":  agent_map.get(str(c.assigned_agent_id), "") if c.assigned_agent_id else None,
             "intercept_since":      c.intercept_since.isoformat() if c.intercept_since else None,
-            # Use the true latest message timestamp for display — not the stale column
             "last_message_at":      preview_map[str(c.id)][1] if str(c.id) in preview_map else (
                                         c.last_message_at.isoformat() if c.last_message_at else None
                                     ),
@@ -194,24 +174,66 @@ async def get_thread(
     db: AsyncSession = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
 ):
-    result = await db.execute(
+    """
+    Return the full conversation timeline: regular chat messages interleaved
+    with system-event items (escalations, intercepts, releases, transfers).
+
+    Every item in the returned list has a `type` field:
+      - "message"      → normal chat bubble
+      - "system_event" → inline timeline divider with event_kind + event_reason
+    """
+    # ── 1. Fetch messages ─────────────────────────────────────────────────────
+    msg_result = await db.execute(
         select(Message)
         .where(Message.conversation_id == conv_id)
         .order_by(Message.created_at.asc())
     )
-    msgs = result.scalars().all()
+    msgs = msg_result.scalars().all()
 
-    # Batch-load agent names to avoid N+1
-    agent_ids = [m.agent_id for m in msgs if m.agent_id]
+    # Batch-load agent names referenced by messages to avoid N+1
+    msg_agent_ids = [m.agent_id for m in msgs if m.agent_id]
     agent_name_map: dict[str, str] = {}
-    if agent_ids:
-        a_res = await db.execute(select(Agent).where(Agent.id.in_(agent_ids)))
+    if msg_agent_ids:
+        a_res = await db.execute(select(Agent).where(Agent.id.in_(msg_agent_ids)))
         for a in a_res.scalars().all():
             agent_name_map[str(a.id)] = a.name
 
-    return [
-        {
+    # ── 2. Fetch intercept events (activity log rows) ─────────────────────────
+    # We surface escalated, flag, intercept, release, and transfer actions.
+    # approve_draft is skipped — it's implicit from the AI message that follows.
+    SURFACED_ACTIONS = {
+        InterceptAction.escalated,
+        InterceptAction.flag,
+        InterceptAction.intercept,
+        InterceptAction.release,
+        InterceptAction.transfer,
+    }
+
+    evt_result = await db.execute(
+        select(Intercept)
+        .where(Intercept.conversation_id == conv_id)
+        .where(Intercept.action.in_(SURFACED_ACTIONS))
+        .order_by(Intercept.created_at.asc())
+    )
+    events = evt_result.scalars().all()
+
+    # Batch-load agent names referenced by events
+    evt_agent_ids = [e.agent_id for e in events if e.agent_id]
+    all_agent_ids = list(set(msg_agent_ids + evt_agent_ids))
+    if evt_agent_ids:
+        extra_agents = [aid for aid in evt_agent_ids if str(aid) not in agent_name_map]
+        if extra_agents:
+            ea_res = await db.execute(select(Agent).where(Agent.id.in_(extra_agents)))
+            for a in ea_res.scalars().all():
+                agent_name_map[str(a.id)] = a.name
+
+    # ── 3. Shape messages into thread items ───────────────────────────────────
+    thread: list[dict] = []
+
+    for m in msgs:
+        thread.append({
             "id":            str(m.id),
+            "type":          "message",
             "direction":     m.direction,
             "sender":        m.sender,
             "text":          m.text,
@@ -225,9 +247,51 @@ async def get_thread(
             "media_caption": m.media_caption,
             "mime_type":     m.mime_type,
             "filename":      m.filename,
-        }
-        for m in msgs
-    ]
+        })
+
+    # ── 4. Shape intercept events into system_event thread items ──────────────
+    # Human-readable labels for each action shown in the timeline pill
+    ACTION_LABEL: dict[InterceptAction, str] = {
+        InterceptAction.escalated: "Escalated — needs human",
+        InterceptAction.flag:      "Flagged: Needs Attention",
+        InterceptAction.intercept: "Picked up by agent",
+        InterceptAction.release:   "Released to AI",
+        InterceptAction.transfer:  "Transferred",
+    }
+
+    for e in events:
+        agent_name = agent_name_map.get(str(e.agent_id)) if e.agent_id else None
+
+        # Build a human-readable label, including the agent name where relevant
+        label = ACTION_LABEL.get(e.action, e.action)
+        if e.action == InterceptAction.intercept and agent_name:
+            label = f"Picked up by {agent_name}"
+        elif e.action == InterceptAction.release and agent_name:
+            label = f"Released to AI by {agent_name}"
+        elif e.action == InterceptAction.transfer and e.note:
+            label = f"Transferred — {e.note}"
+
+        thread.append({
+            "id":           f"evt-{e.id}",
+            "type":         "system_event",
+            # Give system events neutral direction/sender fields so the
+            # frontend doesn't need to guard every field access
+            "direction":    "outbound",
+            "sender":       "ai",
+            "text":         label,
+            "created_at":   e.created_at.isoformat() if e.created_at else None,
+            # ── Timeline-specific fields ──────────────────────────────────
+            "event_kind":   e.action.value,
+            # For escalated rows the `note` column holds the reason text
+            "event_reason": e.note if e.action == InterceptAction.escalated else None,
+            "agent_name":   agent_name,
+        })
+
+    # ── 5. Sort merged timeline by created_at ascending ───────────────────────
+    thread.sort(key=lambda x: x["created_at"] or "")
+
+    return thread
+
 
 @router.get("/conversations/{conv_id}/latest-draft")
 async def get_latest_draft(
@@ -260,7 +324,6 @@ async def generate_draft(
     from openai import OpenAI
     from app.core.config import settings
 
-    # Fetch conversation and recent messages
     conv_result = await db.execute(
         select(Conversation).where(Conversation.id == conv_id)
     )
@@ -279,14 +342,12 @@ async def generate_draft(
     if not recent:
         raise HTTPException(status_code=422, detail="No messages to draft from")
 
-    # Build conversation history for the prompt
     history_lines = []
     for m in recent:
         role = "Customer" if m.direction == "inbound" else "Agent/AI"
         history_lines.append(f"{role}: {m.text}")
     history = "\n".join(history_lines)
 
-    # Call OpenAI to generate a suggested reply
     try:
         client = OpenAI(api_key=settings.openai_api_key)
         response = client.chat.completions.create(
@@ -337,8 +398,6 @@ async def add_note(
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # Store as an outbound message with media_type="note" so it stays
-    # in the message stream but is never sent to the customer
     msg = Message(
         wa_id=conv.wa_id,
         conversation_id=conv.id,
@@ -349,13 +408,12 @@ async def add_note(
         agent_id=agent.id,
     )
     db.add(msg)
-    # Notes do NOT update last_message_at — they are internal and should not
-    # affect conversation sort order or the unread counter.
     await db.commit()
     await db.refresh(msg)
 
     return {
         "id": str(msg.id),
+        "type": "message",
         "direction": "outbound",
         "sender": "human_agent",
         "text": text,
@@ -428,12 +486,6 @@ async def upload_media(
     db: AsyncSession = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
 ):
-    """
-    Upload a file from the agent's browser (multipart/form-data),
-    store it on disk, then send it to the customer via WABA.
-    Accepted types: images (jpeg/png/webp/gif), PDF, Word, Excel,
-                    MP4/3GP video, OGG/AAC/MP3 audio.
-    """
     import aiofiles, os, uuid, mimetypes
     from app.core.config import settings
 
@@ -471,9 +523,6 @@ async def upload_media(
         content = await file.read()
         await f.write(content)
 
-    # Always use the configured public URL — never fall back to request.base_url
-    # because that returns the internal Docker/proxy address (http://...) which
-    # is wrong for both WhatsApp media downloads and browser display.
     public_base = getattr(settings, "media_public_url", "").rstrip("/")
     if not public_base:
         raise HTTPException(
@@ -502,10 +551,6 @@ async def reply_media(
     db: AsyncSession = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
 ):
-    """
-    Send a media message using an already-hosted public URL.
-    Body: { media_url, media_type, caption?, filename? }
-    """
     media_url  = body.get("media_url")
     media_type = body.get("media_type", "image")
     if not media_url:
@@ -521,6 +566,7 @@ async def reply_media(
         filename=body.get("filename"),
         redis=request.app.state.redis,
     )
+
 
 @router.delete("/conversations/{conv_id}/messages")
 async def clear_chat_history(
@@ -551,11 +597,8 @@ async def clear_chat_history(
     await db.commit()
 
     redis = request.app.state.redis
-
-    # Invalidate context cache
     await redis.delete(f"context:{conv.wa_id}")
 
-    # Broadcast directly — no import needed
     import json
     await redis.publish(
         f"ws:channel:{conv_id}",
@@ -567,23 +610,6 @@ async def clear_chat_history(
     )
 
     return {"ok": True, "cleared": True, "conversation_id": conv_id}
-
-# ── Serve uploaded media files (public — no auth required) ───────────────────
-# Must be public: WhatsApp servers download the file when sending media messages,
-# and browser <img> / <video> / <audio> tags cannot attach Bearer tokens.
-
-# @router.get("/media/{filename}")
-# async def serve_media(filename: str):
-#     from fastapi.responses import FileResponse
-#     from app.core.config import settings
-#     import os
-
-#     media_dir = getattr(settings, "media_storage_path", "/tmp/neema_media")
-#     file_path = os.path.join(media_dir, filename)
-#     # Prevent path traversal
-#     if not os.path.isfile(file_path) or not os.path.abspath(file_path).startswith(os.path.abspath(media_dir)):
-#         raise HTTPException(status_code=404, detail="File not found")
-#     return FileResponse(file_path)
 
 
 # ── Agents ────────────────────────────────────────────────
@@ -626,7 +652,6 @@ async def assign_agent_role(
     db: AsyncSession = Depends(get_db),
     current: Agent = Depends(get_current_agent),
 ):
-    """Assign a custom role (and optional permission overrides) to an agent."""
     from sqlalchemy import text
     import json
 
@@ -634,7 +659,6 @@ async def assign_agent_role(
     if not custom_role_id:
         raise HTTPException(status_code=422, detail="custom_role_id is required")
 
-    # Verify the role exists
     role_row = await db.execute(
         text("SELECT id FROM custom_roles WHERE id = :id"),
         {"id": custom_role_id},
@@ -642,7 +666,6 @@ async def assign_agent_role(
     if not role_row.fetchone():
         raise HTTPException(status_code=404, detail="Role not found")
 
-    # Verify the agent exists
     result = await db.execute(select(Agent).where(Agent.id == agent_id))
     agent = result.scalar_one_or_none()
     if not agent:
@@ -662,7 +685,6 @@ async def assign_agent_role(
     )
     await db.commit()
 
-    # Return the updated agent row
     row = await db.execute(
         text("""
             SELECT a.id, a.name, a.email, a.role, a.is_available,
@@ -703,6 +725,7 @@ async def update_agent(agent_id: str, body: dict,
         agent.password_hash = hash_password(body["password"])
     await db.commit()
     return {"ok": True}
+
 
 # ── Orders ────────────────────────────────────────────────────────────────────
 

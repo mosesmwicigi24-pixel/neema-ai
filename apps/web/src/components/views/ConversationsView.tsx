@@ -12,7 +12,7 @@ import { Toggle } from "@/components/ui/Layout";
 import { timeAgo, formatPhone, displayName } from "@/lib/utils";
 import { CHANNEL_CONFIG, ALL_CHANNELS } from "@/lib/channels";
 import { conversationsApi, profileApi } from "@/lib/api";
-import { useConversationEvents } from "@/lib/websocket";
+import { useConversationEvents, buildSystemEventFromWs } from "@/lib/websocket";
 import { CustomerSidebar } from "@/components/ui/CustomerSidebar";
 import type {
     Conversation,
@@ -254,6 +254,7 @@ export function ConversationsView({
         ) {
             const msg: Message = {
                 id: event.id ?? crypto.randomUUID(),
+                type: "message",
                 direction: event.direction ?? "outbound",
                 sender: event.sender ?? "ai",
                 text: event.text,
@@ -271,6 +272,25 @@ export function ConversationsView({
                 if (existing.some((x) => x.id === msg.id)) return m;
                 return { ...m, [activeConvId]: [...existing, msg] };
             });
+        }
+        if (
+            event.type === "intercept_changed" &&
+            event.conversationId === activeConvId
+        ) {
+            // Inject a live system-event bubble into the thread so agents
+            // see mode changes (escalations, pickups, releases, transfers)
+            // without waiting for the next full thread reload.
+            const sysEvt = buildSystemEventFromWs(event);
+            if (sysEvt) {
+                setMessages((m) => {
+                    const existing = m[activeConvId] ?? [];
+                    // Avoid double-adding if a reload already persisted it
+                    if (existing.some((x) => x.event_kind === sysEvt.event_kind &&
+                        Math.abs(new Date(x.created_at).getTime() - new Date(sysEvt.created_at).getTime()) < 3000
+                    )) return m;
+                    return { ...m, [activeConvId]: [...existing, sysEvt] };
+                });
+            }
         }
         if (
             event.type === "history_cleared" &&
@@ -1160,6 +1180,48 @@ export function ConversationsView({
                                     const showDivider =
                                         idx === dividerIdx && snap > 0;
 
+                                    // ── System event pill ────────────────────
+                                    if (msg.type === "system_event") {
+                                        const kindStyles: Record<string, { pill: string; banner: string; label: string }> = {
+                                            escalated:  { pill: "bg-amber-100 text-amber-800",  banner: "bg-amber-50 border-amber-200",  label: "Escalation reason" },
+                                            flag:       { pill: "bg-red-100 text-red-800",      banner: "",                              label: "" },
+                                            intercept:  { pill: "bg-purple-100 text-purple-800", banner: "",                             label: "" },
+                                            release:    { pill: "bg-blue-100 text-blue-800",    banner: "",                              label: "" },
+                                            transfer:   { pill: "bg-indigo-100 text-indigo-800", banner: "",                             label: "" },
+                                            approve_draft: { pill: "bg-green-100 text-green-800", banner: "",                            label: "" },
+                                        };
+                                        const style = kindStyles[msg.event_kind ?? ""] ?? { pill: "bg-stone-100 text-stone-600", banner: "", label: "" };
+
+                                        return (
+                                            <React.Fragment key={msg.id}>
+                                                {showDivider && (
+                                                    <div className="flex items-center gap-2 my-1">
+                                                        <div className="flex-1 h-px bg-[#427425]/30" />
+                                                        <span className="text-[10px] font-semibold text-[#427425] bg-[#e6f3d8] px-2 py-0.5 rounded-full whitespace-nowrap">
+                                                            {snap} new {snap === 1 ? "message" : "messages"}
+                                                        </span>
+                                                        <div className="flex-1 h-px bg-[#427425]/30" />
+                                                    </div>
+                                                )}
+                                                {/* Pill divider */}
+                                                <div className="flex items-center gap-2 my-2">
+                                                    <div className="flex-1 h-px bg-stone-200" />
+                                                    <span className={`text-[10px] font-semibold px-2.5 py-1 rounded-full whitespace-nowrap ${style.pill}`}>
+                                                        {msg.text}
+                                                    </span>
+                                                    <div className="flex-1 h-px bg-stone-200" />
+                                                </div>
+                                                {/* Escalation reason banner */}
+                                                {msg.event_kind === "escalated" && msg.event_reason && (
+                                                    <div className={`mx-2 mb-2 px-3 py-2 rounded-xl border ${style.banner}`}>
+                                                        <p className="text-[10px] font-semibold text-amber-700 uppercase tracking-wide mb-1">{style.label}</p>
+                                                        <p className="text-xs text-amber-800 leading-relaxed">{msg.event_reason}</p>
+                                                    </div>
+                                                )}
+                                            </React.Fragment>
+                                        );
+                                    }
+
                                     if (isNote) {
                                         return (
                                             <React.Fragment
@@ -1777,6 +1839,62 @@ export function ConversationsView({
                     </>
                 )}
             </div>
+            {/* Activity Log — compact event trail, desktop only */}
+            {activeConv && !isMobile && (() => {
+                const systemEvents = activeMessages.filter(
+                    (m) => m.type === "system_event",
+                );
+                if (systemEvents.length === 0) return null;
+
+                const dotColor: Record<string, string> = {
+                    escalated:  "bg-amber-100 border-amber-300",
+                    flag:       "bg-red-100 border-red-300",
+                    intercept:  "bg-purple-100 border-purple-300",
+                    release:    "bg-blue-100 border-blue-300",
+                    transfer:   "bg-indigo-100 border-indigo-300",
+                    approve_draft: "bg-green-100 border-green-300",
+                };
+
+                return (
+                    <div
+                        className="flex-shrink-0 flex flex-col overflow-hidden bg-white border-l border-[#e6f3d8]"
+                        style={{ width: 196 }}
+                    >
+                        <div className="px-3 pt-3 pb-2 border-b border-[#e6f3d8]">
+                            <p className="text-[10px] font-semibold text-[#9ccd65] uppercase tracking-widest">
+                                Activity log
+                            </p>
+                        </div>
+                        <div className="flex-1 overflow-y-auto px-3 py-2 space-y-0">
+                            {systemEvents.map((evt, i) => (
+                                <div key={evt.id} className="flex gap-2 pb-3 relative">
+                                    {/* Connector line */}
+                                    {i < systemEvents.length - 1 && (
+                                        <div className="absolute left-[6px] top-4 bottom-0 w-px bg-stone-100" />
+                                    )}
+                                    {/* Dot */}
+                                    <div
+                                        className={`w-3.5 h-3.5 rounded-full border flex-shrink-0 mt-0.5 ${dotColor[evt.event_kind ?? ""] ?? "bg-stone-100 border-stone-300"}`}
+                                    />
+                                    <div className="min-w-0">
+                                        <p className="text-[11px] font-medium text-[#16270c] leading-snug">
+                                            {evt.text}
+                                        </p>
+                                        {evt.agent_name && (
+                                            <p className="text-[10px] text-[#9ccd65] mt-0.5 truncate">
+                                                {evt.agent_name}
+                                            </p>
+                                        )}
+                                        <p className="text-[10px] text-stone-400 mt-0.5">
+                                            {timeAgo(evt.created_at)}
+                                        </p>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            })()}
             {/* CRM Sidebar — open by default, collapsible */}
             {activeConv &&
                 !isMobile &&

@@ -40,24 +40,27 @@ async def intercept_conversation(
     conv.assigned_agent_id = agent.id
     conv.intercept_since   = datetime.now(timezone.utc)
 
+    # Record the intercept action so it appears in the activity timeline
     log = Intercept(
         conversation_id=conv.id,
         agent_id=agent.id,
         action=InterceptAction.intercept,
+        note=agent.name,  # store agent name for the timeline label
     )
     db.add(log)
     await db.commit()
 
-    # Broadcast to all agents so the conversation list updates immediately
-    # and other agents see it's now locked
     if redis:
-        await redis.delete(f"context:{conv.wa_id}")  # Clear cached context to avoid confusion while the agent is working on it
+        await redis.delete(f"context:{conv.wa_id}")
         await _broadcast(redis, str(conv.id), {
             "type":              "intercept_changed",
             "conversationId":    str(conv.id),
             "mode":              "human",
             "assignedAgentId":   str(agent.id),
             "assignedAgentName": agent.name,
+            # Let the frontend append a live system-event bubble
+            "eventKind":         "intercept",
+            "eventAgentName":    agent.name,
         })
 
     return {"ok": True, "mode": "human", "assigned_to": str(agent.id)}
@@ -83,20 +86,20 @@ async def release_conversation(
         conversation_id=conv.id,
         agent_id=agent.id,
         action=InterceptAction.release,
+        note=agent.name,
     )
     db.add(log)
     await db.commit()
 
-    # No message sent to customer — the AI will acknowledge the
-    # handover naturally in its next reply via handoverHint in context
-
     if redis:
-        await redis.delete(f"context:{conv.wa_id}")  # Clear cached context to avoid confusion when another agent takes over
+        await redis.delete(f"context:{conv.wa_id}")
         await _broadcast(redis, str(conv.id), {
             "type":            "intercept_changed",
             "conversationId":  str(conv.id),
             "mode":            "ai",
             "assignedAgentId": None,
+            "eventKind":       "release",
+            "eventAgentName":  agent.name,
         })
 
     return {"ok": True, "mode": "ai"}
@@ -125,6 +128,8 @@ async def transfer_conversation(
         conversation_id=conv.id,
         agent_id=agent.id,
         action=InterceptAction.transfer,
+        # Store "from → to" in the note so the timeline can display it
+        note=f"{agent.name} → {target_agent.name if target_agent else target_agent_id}",
     )
     db.add(log)
     await db.commit()
@@ -161,7 +166,60 @@ async def transfer_conversation(
         except Exception:
             pass
 
+    if redis:
+        await _broadcast(redis, str(conv.id), {
+            "type":              "intercept_changed",
+            "conversationId":    str(conv.id),
+            "mode":              "human",
+            "assignedAgentId":   target_agent_id,
+            "assignedAgentName": target_agent.name if target_agent else None,
+            "eventKind":         "transfer",
+            "eventAgentName":    target_agent.name if target_agent else None,
+            "eventNote":         log.note,
+        })
+
     return {"ok": True, "transferred_to": target_agent_id}
+
+
+async def record_escalation(
+    db: AsyncSession,
+    conv_id: str,
+    reason: str,
+    redis=None,
+) -> None:
+    """
+    Write an `escalated` Intercept row (no agent — AI-triggered).
+    Also write a follow-up `flag` row to mark the conversation Needs Attention.
+    Called from n8n_bridge when the AI cannot satisfy the customer.
+    """
+    now = datetime.now(timezone.utc)
+
+    esc_log = Intercept(
+        conversation_id=conv_id,
+        agent_id=None,
+        action=InterceptAction.escalated,
+        note=reason,
+        created_at=now,
+    )
+    db.add(esc_log)
+
+    flag_log = Intercept(
+        conversation_id=conv_id,
+        agent_id=None,
+        action=InterceptAction.flag,
+        created_at=now,
+    )
+    db.add(flag_log)
+
+    await db.commit()
+
+    if redis:
+        await _broadcast(redis, str(conv_id), {
+            "type":           "intercept_changed",
+            "conversationId": str(conv_id),
+            "eventKind":      "escalated",
+            "eventReason":    reason,
+        })
 
 
 async def send_agent_reply(
@@ -176,7 +234,7 @@ async def send_agent_reply(
     if not conv:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Conversation not found")
-    
+
     # ── Ownership lock ────────────────────────────────────────────────────────
     if (
         conv.intercept_mode == InterceptMode.human
@@ -191,7 +249,6 @@ async def send_agent_reply(
             status_code=409,
             detail=f"Conversation is handled by {owner_name}.",
         )
-    # ─────────────────────────────────────────────────────────────────────────
 
     wa_id = conv.wa_id.lstrip("+")
     await _send_waba(wa_id, text)
@@ -308,7 +365,7 @@ async def send_agent_media(
     conv_id: str,
     agent: Agent,
     media_url: str,
-    media_type: str,       # "image" | "document" | "video" | "audio"
+    media_type: str,
     caption: str | None,
     filename: str | None,
     redis=None,

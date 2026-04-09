@@ -32,14 +32,32 @@ export interface Conversation {
     tags?: string[];
 }
 
+// ── System event kinds ────────────────────────────────────────────────────────
+// Each kind maps to one InterceptAction row or a flag written by the backend.
+export type SystemEventKind =
+    | "escalated"       // AI could not satisfy — conversation flagged for human
+    | "intercept"       // Agent claimed the conversation
+    | "release"         // Agent released back to AI
+    | "transfer"        // Conversation transferred to another agent
+    | "approve_draft"   // Agent approved an AI-generated draft
+    | "flag";           // Generic "Needs Attention" flag
+
+// ── Thread item — either a chat message or an inline system event ─────────────
 export interface Message {
     id: string;
+    // "message" is the default (regular chat bubble).
+    // "system_event" renders as an inline divider pill + optional banner.
+    type?: "message" | "system_event";
     direction: "inbound" | "outbound";
     sender: "user" | "ai" | "human_agent";
     text: string;
     created_at: string;
     isNote?: boolean;
     agent_name?: string;
+    // Populated when type === "system_event"
+    event_kind?: SystemEventKind;
+    // Human-readable reason text (e.g. escalation reason from the AI)
+    event_reason?: string | null;
     // Media
     media_type?: "image" | "document" | "video" | "audio" | null;
     media_id?: string | null;
