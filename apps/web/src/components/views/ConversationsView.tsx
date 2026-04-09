@@ -81,6 +81,7 @@ export function ConversationsView({
     const [threadLoading, setThreadLoading] = useState(false);
     const [sending, setSending] = useState(false);
     const [crmOpen, setCrmOpen] = useState<boolean>(true);
+    const [activityLogOpen, setActivityLogOpen] = useState<boolean>(true);
     const [clearConfirm, setClearConfirm] = useState(false);
     const [clearing, setClearing] = useState(false);
     const [mobileCrmOpen, setMobileCrmOpen] = useState(false);
@@ -1116,37 +1117,6 @@ export function ConversationsView({
                             </div>
                         </div>
 
-                        {/* Media escalation notice — shown for received media OR media requests */}
-                        {activeConv.intercept_mode === "human" &&
-                            (() => {
-                                const hasInboundMedia = activeMessages.some(
-                                    (m) =>
-                                        m.direction === "inbound" &&
-                                        (m as any).media_type &&
-                                        (m as any).media_type !== "note",
-                                );
-                                const isUnclaimedEscalation =
-                                    !activeConv.assigned_agent_id;
-
-                                if (!hasInboundMedia && !isUnclaimedEscalation)
-                                    return null;
-
-                                const message = hasInboundMedia
-                                    ? "Customer sent a media file — please review and respond."
-                                    : "Customer requested images or files — pick up this conversation to respond.";
-
-                                return (
-                                    <div className="mx-4 mt-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 flex items-center gap-2">
-                                        <span className="text-amber-500 text-sm flex-shrink-0">
-                                            📎
-                                        </span>
-                                        <p className="text-xs font-medium text-amber-700">
-                                            {message}
-                                        </p>
-                                    </div>
-                                );
-                            })()}
-
                         {/* Messages */}
                         <div
                             className="flex-1 overflow-y-auto px-5 py-4 space-y-3"
@@ -1180,17 +1150,137 @@ export function ConversationsView({
                                     const showDivider =
                                         idx === dividerIdx && snap > 0;
 
-                                    // ── System event pill ────────────────────
+                                    // ── System event card ────────────────────
                                     if (msg.type === "system_event") {
-                                        const kindStyles: Record<string, { pill: string; banner: string; label: string }> = {
-                                            escalated:  { pill: "bg-amber-100 text-amber-800",  banner: "bg-amber-50 border-amber-200",  label: "Escalation reason" },
-                                            flag:       { pill: "bg-red-100 text-red-800",      banner: "",                              label: "" },
-                                            intercept:  { pill: "bg-purple-100 text-purple-800", banner: "",                             label: "" },
-                                            release:    { pill: "bg-blue-100 text-blue-800",    banner: "",                              label: "" },
-                                            transfer:   { pill: "bg-indigo-100 text-indigo-800", banner: "",                             label: "" },
-                                            approve_draft: { pill: "bg-green-100 text-green-800", banner: "",                            label: "" },
+                                        const kind = msg.event_kind ?? "";
+
+                                        // ── Escalated card ───────────────────
+                                        // Shown when AI cannot handle (customer
+                                        // request or media received).  Gives full
+                                        // context so the agent understands why.
+                                        if (kind === "escalated") {
+                                            return (
+                                                <React.Fragment key={msg.id}>
+                                                    {showDivider && (
+                                                        <div className="flex items-center gap-2 my-1">
+                                                            <div className="flex-1 h-px bg-[#427425]/30" />
+                                                            <span className="text-[10px] font-semibold text-[#427425] bg-[#e6f3d8] px-2 py-0.5 rounded-full whitespace-nowrap">
+                                                                {snap} new {snap === 1 ? "message" : "messages"}
+                                                            </span>
+                                                            <div className="flex-1 h-px bg-[#427425]/30" />
+                                                        </div>
+                                                    )}
+                                                    <div className="flex justify-center my-3">
+                                                        <div className="w-full max-w-[88%] rounded-2xl overflow-hidden border border-amber-200 bg-amber-50">
+                                                            {/* Header bar */}
+                                                            <div className="flex items-center gap-2 px-3 py-2 bg-amber-100 border-b border-amber-200">
+                                                                <span className="text-amber-600 text-sm leading-none">⚠</span>
+                                                                <span className="text-[11px] font-semibold text-amber-800 uppercase tracking-wide">
+                                                                    Escalated — awaiting agent
+                                                                </span>
+                                                                <span className="ml-auto text-[10px] text-amber-500">
+                                                                    {msg.created_at ? timeAgo(msg.created_at) : ""}
+                                                                </span>
+                                                            </div>
+                                                            {/* Reason body */}
+                                                            {msg.event_reason && (
+                                                                <div className="px-3 py-2">
+                                                                    <p className="text-[10px] font-semibold text-amber-700 uppercase tracking-wide mb-1">
+                                                                        Reason
+                                                                    </p>
+                                                                    <p className="text-xs text-amber-900 leading-relaxed">
+                                                                        {msg.event_reason}
+                                                                    </p>
+                                                                </div>
+                                                            )}
+                                                            {/* Waiting indicator */}
+                                                            <div className="flex items-center gap-1.5 px-3 py-2 border-t border-amber-100">
+                                                                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                                                                <span className="text-[10px] text-amber-600">
+                                                                    Waiting for an agent to pick up
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </React.Fragment>
+                                            );
+                                        }
+
+                                        // ── Flag card ────────────────────────
+                                        // "Needs Attention" — shown as a compact
+                                        // red pill when the conv is flagged.
+                                        if (kind === "flag") {
+                                            return (
+                                                <React.Fragment key={msg.id}>
+                                                    {showDivider && (
+                                                        <div className="flex items-center gap-2 my-1">
+                                                            <div className="flex-1 h-px bg-[#427425]/30" />
+                                                            <span className="text-[10px] font-semibold text-[#427425] bg-[#e6f3d8] px-2 py-0.5 rounded-full whitespace-nowrap">
+                                                                {snap} new {snap === 1 ? "message" : "messages"}
+                                                            </span>
+                                                            <div className="flex-1 h-px bg-[#427425]/30" />
+                                                        </div>
+                                                    )}
+                                                    <div className="flex items-center gap-2 my-2">
+                                                        <div className="flex-1 h-px bg-red-100" />
+                                                        <span className="text-[10px] font-semibold px-2.5 py-1 rounded-full bg-red-100 text-red-700 whitespace-nowrap">
+                                                            🚩 Flagged: Needs Attention
+                                                        </span>
+                                                        <div className="flex-1 h-px bg-red-100" />
+                                                    </div>
+                                                </React.Fragment>
+                                            );
+                                        }
+
+                                        // ── Intercept card ───────────────────
+                                        // Shows exactly who picked up the conv
+                                        // with their avatar initials.
+                                        if (kind === "intercept") {
+                                            const agentInitials = (msg.agent_name ?? "?")
+                                                .split(" ")
+                                                .map((w: string) => w[0])
+                                                .join("")
+                                                .slice(0, 2)
+                                                .toUpperCase();
+                                            return (
+                                                <React.Fragment key={msg.id}>
+                                                    {showDivider && (
+                                                        <div className="flex items-center gap-2 my-1">
+                                                            <div className="flex-1 h-px bg-[#427425]/30" />
+                                                            <span className="text-[10px] font-semibold text-[#427425] bg-[#e6f3d8] px-2 py-0.5 rounded-full whitespace-nowrap">
+                                                                {snap} new {snap === 1 ? "message" : "messages"}
+                                                            </span>
+                                                            <div className="flex-1 h-px bg-[#427425]/30" />
+                                                        </div>
+                                                    )}
+                                                    <div className="flex items-center gap-2 my-3">
+                                                        <div className="flex-1 h-px bg-purple-100" />
+                                                        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-purple-50 border border-purple-200">
+                                                            {/* Mini avatar */}
+                                                            <div className="w-4 h-4 rounded-full bg-purple-200 flex items-center justify-center text-[8px] font-bold text-purple-800 flex-shrink-0">
+                                                                {agentInitials}
+                                                            </div>
+                                                            <span className="text-[10px] font-semibold text-purple-800 whitespace-nowrap">
+                                                                {msg.agent_name
+                                                                    ? `${msg.agent_name} picked up`
+                                                                    : "Agent picked up"}
+                                                            </span>
+                                                        </div>
+                                                        <div className="flex-1 h-px bg-purple-100" />
+                                                    </div>
+                                                </React.Fragment>
+                                            );
+                                        }
+
+                                        // ── Release / Transfer / other ───────
+                                        // Simple centred pill for mode changes
+                                        // that don't need extra elaboration.
+                                        const genericPillStyle: Record<string, string> = {
+                                            release:      "bg-blue-50 border-blue-200 text-blue-700",
+                                            transfer:     "bg-indigo-50 border-indigo-200 text-indigo-700",
+                                            approve_draft: "bg-green-50 border-green-200 text-green-700",
                                         };
-                                        const style = kindStyles[msg.event_kind ?? ""] ?? { pill: "bg-stone-100 text-stone-600", banner: "", label: "" };
+                                        const pillStyle = genericPillStyle[kind] ?? "bg-stone-100 border-stone-200 text-stone-600";
 
                                         return (
                                             <React.Fragment key={msg.id}>
@@ -1203,21 +1293,13 @@ export function ConversationsView({
                                                         <div className="flex-1 h-px bg-[#427425]/30" />
                                                     </div>
                                                 )}
-                                                {/* Pill divider */}
                                                 <div className="flex items-center gap-2 my-2">
                                                     <div className="flex-1 h-px bg-stone-200" />
-                                                    <span className={`text-[10px] font-semibold px-2.5 py-1 rounded-full whitespace-nowrap ${style.pill}`}>
+                                                    <span className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border whitespace-nowrap ${pillStyle}`}>
                                                         {msg.text}
                                                     </span>
                                                     <div className="flex-1 h-px bg-stone-200" />
                                                 </div>
-                                                {/* Escalation reason banner */}
-                                                {msg.event_kind === "escalated" && msg.event_reason && (
-                                                    <div className={`mx-2 mb-2 px-3 py-2 rounded-xl border ${style.banner}`}>
-                                                        <p className="text-[10px] font-semibold text-amber-700 uppercase tracking-wide mb-1">{style.label}</p>
-                                                        <p className="text-xs text-amber-800 leading-relaxed">{msg.event_reason}</p>
-                                                    </div>
-                                                )}
                                             </React.Fragment>
                                         );
                                     }
@@ -1839,59 +1921,125 @@ export function ConversationsView({
                     </>
                 )}
             </div>
-            {/* Activity Log — compact event trail, desktop only */}
+            {/* Activity Log — collapsible, desktop only */}
             {activeConv && !isMobile && (() => {
                 const systemEvents = activeMessages.filter(
                     (m) => m.type === "system_event",
                 );
-                if (systemEvents.length === 0) return null;
 
                 const dotColor: Record<string, string> = {
-                    escalated:  "bg-amber-100 border-amber-300",
-                    flag:       "bg-red-100 border-red-300",
-                    intercept:  "bg-purple-100 border-purple-300",
-                    release:    "bg-blue-100 border-blue-300",
-                    transfer:   "bg-indigo-100 border-indigo-300",
+                    escalated:     "bg-amber-100 border-amber-300",
+                    flag:          "bg-red-100 border-red-300",
+                    intercept:     "bg-purple-100 border-purple-300",
+                    release:       "bg-blue-100 border-blue-300",
+                    transfer:      "bg-indigo-100 border-indigo-300",
                     approve_draft: "bg-green-100 border-green-300",
                 };
+
+                if (!activityLogOpen) {
+                    return (
+                        <button
+                            onClick={() => setActivityLogOpen(true)}
+                            title="Show activity log"
+                            className="flex-shrink-0 w-8 border-l border-[#e6f3d8] bg-white flex flex-col items-center justify-center gap-1 hover:bg-[#f3f9ec] transition-colors"
+                        >
+                            <svg
+                                className="w-4 h-4 text-[#9ccd65]"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                            >
+                                <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M9 5l7 7-7 7"
+                                />
+                            </svg>
+                            <span
+                                className="text-[9px] text-[#9ccd65] font-semibold uppercase tracking-widest"
+                                style={{
+                                    writingMode: "vertical-rl",
+                                    transform: "rotate(180deg)",
+                                }}
+                            >
+                                Activity
+                            </span>
+                            {systemEvents.length > 0 && (
+                                <span className="w-4 h-4 rounded-full bg-amber-100 border border-amber-300 text-[8px] font-bold text-amber-700 flex items-center justify-center">
+                                    {systemEvents.length}
+                                </span>
+                            )}
+                        </button>
+                    );
+                }
 
                 return (
                     <div
                         className="flex-shrink-0 flex flex-col overflow-hidden bg-white border-l border-[#e6f3d8]"
                         style={{ width: 196 }}
                     >
-                        <div className="px-3 pt-3 pb-2 border-b border-[#e6f3d8]">
+                        {/* Header with collapse button */}
+                        <div className="px-3 pt-3 pb-2 border-b border-[#e6f3d8] flex items-center justify-between">
                             <p className="text-[10px] font-semibold text-[#9ccd65] uppercase tracking-widest">
                                 Activity log
                             </p>
-                        </div>
-                        <div className="flex-1 overflow-y-auto px-3 py-2 space-y-0">
-                            {systemEvents.map((evt, i) => (
-                                <div key={evt.id} className="flex gap-2 pb-3 relative">
-                                    {/* Connector line */}
-                                    {i < systemEvents.length - 1 && (
-                                        <div className="absolute left-[6px] top-4 bottom-0 w-px bg-stone-100" />
-                                    )}
-                                    {/* Dot */}
-                                    <div
-                                        className={`w-3.5 h-3.5 rounded-full border flex-shrink-0 mt-0.5 ${dotColor[evt.event_kind ?? ""] ?? "bg-stone-100 border-stone-300"}`}
+                            <button
+                                onClick={() => setActivityLogOpen(false)}
+                                title="Collapse activity log"
+                                className="w-5 h-5 rounded flex items-center justify-center text-[#9ccd65] hover:bg-[#f3f9ec] transition-colors"
+                            >
+                                <svg
+                                    className="w-3.5 h-3.5"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                >
+                                    <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M9 5l7 7-7 7"
                                     />
-                                    <div className="min-w-0">
-                                        <p className="text-[11px] font-medium text-[#16270c] leading-snug">
-                                            {evt.text}
-                                        </p>
-                                        {evt.agent_name && (
-                                            <p className="text-[10px] text-[#9ccd65] mt-0.5 truncate">
-                                                {evt.agent_name}
-                                            </p>
-                                        )}
-                                        <p className="text-[10px] text-stone-400 mt-0.5">
-                                            {timeAgo(evt.created_at)}
-                                        </p>
-                                    </div>
-                                </div>
-                            ))}
+                                </svg>
+                            </button>
                         </div>
+
+                        {systemEvents.length === 0 ? (
+                            <div className="flex-1 flex items-center justify-center px-3">
+                                <p className="text-[11px] text-stone-300 text-center leading-relaxed">
+                                    No events yet
+                                </p>
+                            </div>
+                        ) : (
+                            <div className="flex-1 overflow-y-auto px-3 py-3 space-y-0">
+                                {systemEvents.map((evt, i) => (
+                                    <div key={evt.id} className="flex gap-2 pb-3 relative">
+                                        {/* Connector line */}
+                                        {i < systemEvents.length - 1 && (
+                                            <div className="absolute left-[6px] top-4 bottom-0 w-px bg-stone-100" />
+                                        )}
+                                        {/* Dot */}
+                                        <div
+                                            className={`w-3.5 h-3.5 rounded-full border flex-shrink-0 mt-0.5 ${dotColor[evt.event_kind ?? ""] ?? "bg-stone-100 border-stone-300"}`}
+                                        />
+                                        <div className="min-w-0">
+                                            <p className="text-[11px] font-medium text-[#16270c] leading-snug">
+                                                {evt.text}
+                                            </p>
+                                            {evt.agent_name && (
+                                                <p className="text-[10px] text-[#9ccd65] mt-0.5 truncate">
+                                                    {evt.agent_name}
+                                                </p>
+                                            )}
+                                            <p className="text-[10px] text-stone-400 mt-0.5">
+                                                {timeAgo(evt.created_at)}
+                                            </p>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 );
             })()}
