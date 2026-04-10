@@ -63,7 +63,10 @@ function MenuItem({
                     : "text-stone-600 hover:bg-stone-50 hover:text-stone-900",
             )}
         >
-            <span className={cn("flex-shrink-0 opacity-70 group-hover:opacity-100 transition-opacity", danger ? "text-red-500" : "text-stone-500")}>
+            <span className={cn(
+                "flex-shrink-0 opacity-70 group-hover:opacity-100 transition-opacity",
+                danger ? "text-red-500" : "text-stone-400",
+            )}>
                 {icon}
             </span>
             <span className="flex-1 text-left">{label}</span>
@@ -88,7 +91,7 @@ function NavTooltip({ label, children }: { label: string; children: React.ReactN
             {children}
             {show && (
                 <div
-                    className="absolute left-full ml-3 top-1/2 -translate-y-1/2 z-50 px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap pointer-events-none"
+                    className="absolute left-full ml-3 top-1/2 -translate-y-1/2 z-[60] px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap pointer-events-none"
                     style={{
                         backgroundColor: "#1c2917",
                         color: "#f0f9ec",
@@ -118,15 +121,12 @@ export function Sidebar({
     theme,
     setTheme,
     onLogout,
-    notificationCount,
-    notifications,
-    onClearNotifications,
 }: SidebarProps): React.ReactElement {
     const [menuOpen, setMenuOpen] = useState(false);
     const [loggingOut, setLoggingOut] = useState(false);
-    const menuRef = useRef<HTMLDivElement>(null);
+    const footerRef = useRef<HTMLDivElement>(null);
 
-    useClickOutside(menuRef as React.RefObject<HTMLElement>, () =>
+    useClickOutside(footerRef as React.RefObject<HTMLElement>, () =>
         setMenuOpen(false),
     );
 
@@ -169,11 +169,11 @@ export function Sidebar({
                 borderRight: "1px solid #edf0ea",
             }}
         >
-            {/* ── Logo / Brand ─────────────────────────────────────────────── */}
+            {/* ── Header bar: logo + bell (+ collapse button when expanded) ─ */}
             <div
                 className={cn(
-                    "flex items-center h-14 flex-shrink-0",
-                    collapsed ? "justify-center px-0" : "px-4 gap-3",
+                    "flex items-center h-14 flex-shrink-0 gap-1",
+                    collapsed ? "flex-col justify-center py-2 px-0 h-auto gap-2" : "px-3",
                 )}
                 style={{ borderBottom: "1px solid #edf0ea" }}
             >
@@ -191,10 +191,10 @@ export function Sidebar({
                     </svg>
                 </div>
 
-                {/* Brand name — only when expanded */}
+                {/* Brand name — expanded only */}
                 {!collapsed && (
-                    <div className="flex-1 min-w-0">
-                        <div className="font-semibold text-sm leading-none" style={{ color: "#16270c", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                    <div className="flex-1 min-w-0 ml-1">
+                        <div className="font-semibold text-sm leading-none" style={{ color: "#16270c" }}>
                             Neema
                         </div>
                         <div className="text-[10px] font-medium mt-0.5 uppercase tracking-widest" style={{ color: "#699a32" }}>
@@ -203,12 +203,17 @@ export function Sidebar({
                     </div>
                 )}
 
-                {/* Collapse toggle — shown only when expanded */}
+                {/* Bell — always visible; compact=true when collapsed so popup opens to the right */}
+                <NavTooltip label={collapsed ? "Notifications" : ""}>
+                    <Notifications compact={collapsed} />
+                </NavTooltip>
+
+                {/* Collapse toggle — expanded only */}
                 {!collapsed && (
                     <button
                         onClick={() => setCollapsed(true)}
-                        className="w-7 h-7 flex items-center justify-center rounded-lg transition-colors flex-shrink-0 ml-auto"
-                        style={{ color: "#b5c9a8" }}
+                        className="w-7 h-7 flex items-center justify-center rounded-lg transition-colors flex-shrink-0"
+                        style={{ color: "#c5d5bc" }}
                         title="Collapse sidebar"
                         onMouseEnter={(e) => {
                             (e.currentTarget as HTMLElement).style.backgroundColor = "#f0f4ec";
@@ -216,7 +221,7 @@ export function Sidebar({
                         }}
                         onMouseLeave={(e) => {
                             (e.currentTarget as HTMLElement).style.backgroundColor = "";
-                            (e.currentTarget as HTMLElement).style.color = "#b5c9a8";
+                            (e.currentTarget as HTMLElement).style.color = "#c5d5bc";
                         }}
                     >
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -226,33 +231,22 @@ export function Sidebar({
                 )}
             </div>
 
-            {/* ── Notifications row (expanded only) ────────────────────────── */}
-            {!collapsed && (
-                <div className="px-3 pt-3 pb-1">
-                    <Notifications
-                        count={notificationCount}
-                        notifications={notifications}
-                        onClear={onClearNotifications}
-                    />
-                </div>
-            )}
-
             {/* ── Nav items ────────────────────────────────────────────────── */}
-            <nav className={cn("flex-1 overflow-y-auto scrollbar-none py-2", collapsed ? "px-2" : "px-2")}>
-                {/* Expand button when collapsed — at top of nav */}
+            <nav className="flex-1 overflow-y-auto scrollbar-none py-2 px-2">
+                {/* Expand button — collapsed only, at top of nav */}
                 {collapsed && (
                     <NavTooltip label="Expand sidebar">
                         <button
                             onClick={() => setCollapsed(false)}
                             className="w-full flex items-center justify-center h-9 mb-2 rounded-lg transition-colors"
-                            style={{ color: "#b5c9a8" }}
+                            style={{ color: "#c5d5bc" }}
                             onMouseEnter={(e) => {
                                 (e.currentTarget as HTMLElement).style.backgroundColor = "#f0f4ec";
                                 (e.currentTarget as HTMLElement).style.color = "#427425";
                             }}
                             onMouseLeave={(e) => {
                                 (e.currentTarget as HTMLElement).style.backgroundColor = "";
-                                (e.currentTarget as HTMLElement).style.color = "#b5c9a8";
+                                (e.currentTarget as HTMLElement).style.color = "#c5d5bc";
                             }}
                         >
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -271,15 +265,11 @@ export function Sidebar({
                                 onClick={() => setView(item.id as ViewId)}
                                 className={cn(
                                     "w-full flex items-center rounded-xl text-sm font-medium transition-all duration-150 relative",
-                                    collapsed
-                                        ? "justify-center h-10 px-0"
-                                        : "gap-2.5 px-3 h-10",
-                                    isActive
-                                        ? "text-white"
-                                        : "text-stone-500 hover:text-stone-800",
+                                    collapsed ? "justify-center h-10 px-0" : "gap-2.5 px-3 h-10",
                                 )}
                                 style={{
                                     backgroundColor: isActive ? "#589b31" : "transparent",
+                                    color: isActive ? "#ffffff" : "#6b7e64",
                                 }}
                                 onMouseEnter={(e) => {
                                     if (!isActive) (e.currentTarget as HTMLElement).style.backgroundColor = "#f0f4ec";
@@ -288,7 +278,10 @@ export function Sidebar({
                                     if (!isActive) (e.currentTarget as HTMLElement).style.backgroundColor = "transparent";
                                 }}
                             >
-                                <span className={cn("flex-shrink-0 leading-none", isActive ? "text-white" : "text-stone-400")}>
+                                <span
+                                    className="flex-shrink-0 leading-none"
+                                    style={{ color: isActive ? "#ffffff" : "#8a9e80" }}
+                                >
                                     {item.icon}
                                 </span>
                                 {!collapsed && (
@@ -328,26 +321,23 @@ export function Sidebar({
                 </div>
             </nav>
 
-            {/* ── User / footer ────────────────────────────────────────────── */}
+            {/* ── User footer — always visible ──────────────────────────────── */}
             <div
-                className={cn(
-                    "flex-shrink-0 p-2 relative",
-                    collapsed ? "flex justify-center" : "",
-                )}
+                className="flex-shrink-0 p-2 relative"
                 style={{ borderTop: "1px solid #edf0ea" }}
-                ref={menuRef}
+                ref={footerRef}
             >
-                {/* Dropdown menu — rendered above footer */}
+                {/* Account popup — anchored above footer, works in both states */}
                 {menuOpen && (
                     <div
                         className={cn(
                             "absolute bottom-full mb-2 z-50 rounded-xl overflow-hidden",
-                            collapsed ? "left-full ml-2 w-56" : "left-2 right-2",
+                            collapsed ? "left-full ml-2 w-60" : "left-2 right-2",
                         )}
                         style={{
                             backgroundColor: "#ffffff",
                             border: "1px solid #e8ebe3",
-                            boxShadow: "0 8px 24px rgba(0,0,0,0.10), 0 2px 6px rgba(0,0,0,0.06)",
+                            boxShadow: "0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)",
                             animation: "menuSlideUp 0.15s ease",
                         }}
                     >
@@ -358,37 +348,40 @@ export function Sidebar({
                             }
                         `}</style>
 
-                        {/* User info header */}
-                        <div className="px-3 py-3" style={{ borderBottom: "1px solid #edf0ea" }}>
-                            <div className="flex items-center gap-2.5">
-                                <Avatar name={session.user.name} size="sm" />
-                                <div className="min-w-0 flex-1">
-                                    <div className="text-xs font-semibold truncate" style={{ color: "#16270c" }}>
-                                        {session.user.name}
-                                    </div>
-                                    <div className="text-[10px] truncate" style={{ color: "#8a9e80" }}>
-                                        {session.user.email}
-                                    </div>
+                        {/* User identity */}
+                        <div className="px-4 py-4" style={{ borderBottom: "1px solid #edf0ea" }}>
+                            <div className="flex items-center gap-3">
+                                <div className="flex-shrink-0">
+                                    <Avatar name={session.user.name} size="md" />
                                 </div>
-                                <span
-                                    className="flex-shrink-0 text-[9px] px-1.5 py-0.5 rounded-full font-semibold uppercase tracking-wide"
-                                    style={{
-                                        backgroundColor: "#f0f9ec",
-                                        color: "#589b31",
-                                        border: "1px solid #c5e7b1",
-                                    }}
-                                >
-                                    {session.user.role}
-                                </span>
+                                <div className="min-w-0 flex-1">
+                                    <div className="text-sm font-semibold truncate leading-tight" style={{ color: "#1c2917" }}>
+                                        {session.user.name || "—"}
+                                    </div>
+                                    <div className="text-[11px] truncate mt-0.5" style={{ color: "#8a9e80" }}>
+                                        {session.user.email || "—"}
+                                    </div>
+                                    <span
+                                        className="inline-block mt-1.5 text-[9px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wide"
+                                        style={{
+                                            backgroundColor: "#f0f9ec",
+                                            color: "#589b31",
+                                            border: "1px solid #c5e7b1",
+                                        }}
+                                    >
+                                        {session.user.role}
+                                    </span>
+                                </div>
                             </div>
                         </div>
 
-                        {/* Menu items */}
+                        {/* Actions */}
                         <div className="p-1.5 space-y-0.5">
                             <MenuItem
                                 icon={
                                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                            d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                                     </svg>
                                 }
                                 label="View Profile"
@@ -397,7 +390,8 @@ export function Sidebar({
                             <MenuItem
                                 icon={
                                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                            d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                                     </svg>
                                 }
                                 label="Settings"
@@ -412,15 +406,17 @@ export function Sidebar({
                                     <span className="text-stone-400">
                                         {theme === "light" ? (
                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                                    d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
                                             </svg>
                                         ) : (
                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                                    d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
                                             </svg>
                                         )}
                                     </span>
-                                    <span className="text-xs text-stone-600 font-medium">
+                                    <span className="text-xs font-medium" style={{ color: "#4a5568" }}>
                                         {theme === "light" ? "Dark mode" : "Light mode"}
                                     </span>
                                 </div>
@@ -446,7 +442,8 @@ export function Sidebar({
                             <MenuItem
                                 icon={
                                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                            d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
                                     </svg>
                                 }
                                 label={loggingOut ? "Signing out…" : "Sign out"}
@@ -457,47 +454,65 @@ export function Sidebar({
                     </div>
                 )}
 
-                {/* Collapsed state — avatar button only */}
+                {/* Collapsed: centered avatar button */}
                 {collapsed ? (
-                    <NavTooltip label={session.user.name ?? "Account"}>
-                        <button
-                            onClick={() => setMenuOpen((o) => !o)}
-                            className="py-1 rounded-xl transition-colors relative"
-                            title="Account menu"
-                        >
-                            <Avatar
-                                name={session.user.name}
-                                size="sm"
-                                className="ring-2 ring-white hover:ring-moss-200 transition-all"
-                            />
-                            {loggingOut && (
-                                <div className="absolute inset-0 flex items-center justify-center bg-white/80 rounded-xl">
-                                    <div className="w-3 h-3 border-2 border-moss-600 border-t-transparent rounded-full animate-spin" style={{ borderColor: "#589b31", borderTopColor: "transparent" }} />
-                                </div>
-                            )}
-                        </button>
-                    </NavTooltip>
-                ) : (
-                    /* Expanded state — full user row */
                     <button
                         onClick={() => setMenuOpen((o) => !o)}
-                        className={cn(
-                            "w-full flex items-center gap-2 p-2 rounded-xl transition-all duration-150",
-                            menuOpen ? "bg-stone-50" : "hover:bg-stone-50",
-                        )}
+                        className="relative mx-auto flex items-center justify-center w-10 h-10 rounded-xl transition-colors"
+                        title="Account menu"
+                        style={{ backgroundColor: menuOpen ? "#f0f4ec" : "transparent" }}
+                        onMouseEnter={(e) => {
+                            (e.currentTarget as HTMLElement).style.backgroundColor = "#f0f4ec";
+                        }}
+                        onMouseLeave={(e) => {
+                            if (!menuOpen) (e.currentTarget as HTMLElement).style.backgroundColor = "transparent";
+                        }}
                     >
                         <Avatar name={session.user.name} size="sm" />
+                        <span
+                            className="absolute bottom-1.5 right-1.5 w-2 h-2 rounded-full border-2 border-white"
+                            style={{ backgroundColor: "#22c55e" }}
+                        />
+                        {loggingOut && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-white/80 rounded-xl">
+                                <div
+                                    className="w-3 h-3 border-2 border-t-transparent rounded-full animate-spin"
+                                    style={{ borderColor: "#589b31", borderTopColor: "transparent" }}
+                                />
+                            </div>
+                        )}
+                    </button>
+                ) : (
+                    /* Expanded: full user row — avatar + name + email */
+                    <button
+                        onClick={() => setMenuOpen((o) => !o)}
+                        className="w-full flex items-center gap-2.5 p-2 rounded-xl transition-all duration-150"
+                        style={{ backgroundColor: menuOpen ? "#f0f4ec" : "transparent" }}
+                        onMouseEnter={(e) => {
+                            (e.currentTarget as HTMLElement).style.backgroundColor = "#f0f4ec";
+                        }}
+                        onMouseLeave={(e) => {
+                            if (!menuOpen) (e.currentTarget as HTMLElement).style.backgroundColor = "transparent";
+                        }}
+                    >
+                        <div className="relative flex-shrink-0">
+                            <Avatar name={session.user.name} size="sm" />
+                            <span
+                                className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-white"
+                                style={{ backgroundColor: "#22c55e" }}
+                            />
+                        </div>
                         <div className="flex-1 min-w-0 text-left">
                             <div className="text-xs font-semibold truncate leading-tight" style={{ color: "#1c2917" }}>
-                                {session.user.name}
+                                {session.user.name || "—"}
                             </div>
-                            <div className="text-[10px] uppercase tracking-wider font-medium leading-tight" style={{ color: "#699a32" }}>
-                                {session.user.role}
+                            <div className="text-[10px] truncate leading-tight mt-0.5" style={{ color: "#8a9e80" }}>
+                                {session.user.email || "—"}
                             </div>
                         </div>
                         <svg
                             className="w-3.5 h-3.5 flex-shrink-0 transition-transform duration-200"
-                            style={{ color: "#b5c9a8", transform: menuOpen ? "rotate(180deg)" : "none" }}
+                            style={{ color: "#c5d5bc", transform: menuOpen ? "rotate(180deg)" : "none" }}
                             fill="none"
                             stroke="currentColor"
                             viewBox="0 0 24 24"

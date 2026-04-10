@@ -639,7 +639,7 @@ export function ConversationsView({
                             {f === "all" && "All"}
                             {f === "unread" && (
                                 <>
-                                    Mine
+                                    Unread
                                     {unreadCount > 0 && (
                                         <span
                                             className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none ${readFilter === "unread" ? "bg-white/25 text-white" : "bg-[#427425] text-white"}`}
@@ -649,7 +649,7 @@ export function ConversationsView({
                                     )}
                                 </>
                             )}
-                            {f === "read" && "Requires Attention"}
+                            {f === "read" && "Read"}
                         </button>
                     ))}
                 </div>

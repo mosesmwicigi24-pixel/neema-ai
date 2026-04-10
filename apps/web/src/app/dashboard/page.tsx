@@ -21,6 +21,7 @@ import { Toast } from "@/components/ui/Toast";
 import { Sidebar } from "@/components/ui/Sidebar";
 import { MobileHeader, MobileBottomNav } from "@/components/ui/MobileNav";
 import { SessionExpiredModal } from "@/components/ui/SessionExpiredModal";
+import { pushNotification } from "@/components/ui/Notifications";
 
 import { ConversationsView } from "@/components/views/ConversationsView";
 import { OrdersView } from "@/components/views/OrdersView";
@@ -258,11 +259,18 @@ export default function NeemaDashboard(): React.ReactElement {
                 setNotifications((prev) => [n, ...prev].slice(0, 50));
                 setUnreadCount((c) => c + 1);
 
-                // Show an in-app toast
+                // Push into the Notifications bell via the custom event bus
+                pushNotification({
+                    type: (n.type as any) ?? "system",
+                    title: n.title,
+                    body: n.body,
+                    convId: (n as any).convId,
+                });
+
+                // Show an in-app toast as well
                 showToast(`${n.title}: ${n.body}`, "info");
 
-                // Browser push notification (only if permission already granted —
-                // call Notification.requestPermission() elsewhere on first load)
+                // Browser push notification (only if permission already granted)
                 if (
                     typeof Notification !== "undefined" &&
                     Notification.permission === "granted"
