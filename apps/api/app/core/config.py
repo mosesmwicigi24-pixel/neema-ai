@@ -9,8 +9,8 @@ class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379/0"
     secret_key: str
     algorithm: str = "HS256"
-    access_token_expire_minutes: int = 15
-    refresh_token_expire_days: int = 7
+    access_token_expire_minutes: int = 480
+    refresh_token_expire_days: int = 30
     cors_origins: list[str] = ["http://localhost:3000"]
     waba_token: str = ""
     waba_phone_number_id: str = ""
