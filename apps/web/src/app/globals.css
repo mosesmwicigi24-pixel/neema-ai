@@ -5,7 +5,7 @@
 
 /* ── Palette tokens ────────────────────────────────────────────────────────── */
 :root {
-    --radius: 0.625rem;
+    --radius: 0.5rem;
 
     /* Moss-green primary */
     --moss-50:  #f0f9ec; --moss-100: #e2f3d8; --moss-200: #c5e7b1;
@@ -38,7 +38,7 @@
     --indigo-900: #0f1424; --indigo-950: #0b0e19;
 
     /* Shadcn compatibility layer */
-    --background:   var(--willow-50);
+    --background:   #f7f8f5;
     --foreground:   var(--moss-900);
     --card:         #ffffff;
     --card-foreground: var(--moss-900);
@@ -48,13 +48,13 @@
     --primary-foreground: #ffffff;
     --secondary:    var(--willow-100);
     --secondary-foreground: var(--moss-800);
-    --muted:        var(--willow-100);
-    --muted-foreground: var(--willow-600);
+    --muted:        #f0f2ee;
+    --muted-foreground: #8a9280;
     --accent:       var(--moss-600);
     --accent-foreground: #ffffff;
     --destructive:  oklch(0.577 0.245 27.325);
-    --border:       var(--willow-200);
-    --input:        var(--willow-200);
+    --border:       #e8ebe3;
+    --input:        #e8ebe3;
     --ring:         var(--moss-500);
 
     /* Chart colours using palette */
@@ -64,14 +64,14 @@
     --chart-4: var(--indigo-500);
     --chart-5: var(--willow-400);
 
-    /* Sidebar */
-    --sidebar:           var(--moss-950);
-    --sidebar-foreground: var(--willow-100);
+    /* Sidebar — clean light icon rail */
+    --sidebar:           #ffffff;
+    --sidebar-foreground: #4a5568;
     --sidebar-primary:   var(--moss-600);
     --sidebar-primary-foreground: #ffffff;
-    --sidebar-accent:    var(--moss-800);
-    --sidebar-accent-foreground: var(--willow-200);
-    --sidebar-border:    var(--moss-800);
+    --sidebar-accent:    var(--moss-50);
+    --sidebar-accent-foreground: var(--moss-700);
+    --sidebar-border:    #edf0ea;
     --sidebar-ring:      var(--moss-500);
 
     --radius-sm: calc(var(--radius) - 4px);
@@ -119,5 +119,8 @@
     body {
         background-color: var(--background);
         color: var(--foreground);
+        font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
     }
 }

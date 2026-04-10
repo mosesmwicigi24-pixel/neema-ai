@@ -72,10 +72,15 @@ const Icon = ({ d }: { d: string }) => (
 
 function LoadingScreen() {
     return (
-        <div className="flex h-screen items-center justify-center bg-stone-50">
+        <div className="flex h-screen items-center justify-center" style={{ backgroundColor: "#f7f8f5" }}>
             <div className="text-center">
-                <div className="w-8 h-8 border-2 border-green-700 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-                <p className="text-sm text-stone-400">Loading Neema…</p>
+                <div
+                    className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin mx-auto mb-3"
+                    style={{ borderColor: "#589b31", borderTopColor: "transparent" }}
+                />
+                <p className="text-sm" style={{ color: "#8a9e80", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                    Loading Neema…
+                </p>
             </div>
         </div>
     );
@@ -89,7 +94,8 @@ export default function NeemaDashboard(): React.ReactElement {
     const [view, setView] = useState<ViewId>("conversations");
     const [messages, setMessages] = useState<MessagesMap>({});
     const [toast, setToast] = useState<ToastState | null>(null);
-    const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
+    // ── Sidebar collapsed by default — icon-rail mode ─────────────────────────
+    const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(true);
     const [sessionExpired, setSessionExpired] = useState(false);
     const [localConversations, setLocalConversations] = useState<Conversation[]>([]);
     const isMobile = useIsMobile();
@@ -448,20 +454,34 @@ export default function NeemaDashboard(): React.ReactElement {
     };
 
     return (
-        <div className="flex h-dvh overflow-hidden bg-stone-50 text-stone-900">
+        <div
+            className="flex h-dvh overflow-hidden text-stone-900"
+            style={{ backgroundColor: "#f7f8f5", fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}
+        >
             <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&display=swap');
-        * { font-family: 'Geist', system-ui, sans-serif; }
-        :root { --accent: #15803d; --accent-hover: #16a34a; --surface: #ffffff; --border: #f1f0ef; --text: #1c1917; --text-muted: #a8a29e; }
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap');
+        * { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; }
+        :root {
+            --accent: #589b31;
+            --accent-hover: #427425;
+            --surface: #ffffff;
+            --border: #e8ebe3;
+            --text: #1c2917;
+            --text-muted: #8a9e80;
+        }
         .scrollbar-none::-webkit-scrollbar { display: none; }
         .scrollbar-none { scrollbar-width: none; }
         .h-dvh { height: 100dvh; }
         .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         .animate-in { animation: fadeIn 0.18s ease; }
-        *:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+        *:focus-visible { outline: 2px solid #589b31; outline-offset: 2px; border-radius: 6px; }
         input, textarea, select { font-family: inherit; }
-        button { transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease, transform 0.15s ease; }
+        button { transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease; }
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #dde4d6; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #c5d0bc; }
       `}</style>
 
             <Toast toast={toast} isMobile={isMobile} />
@@ -476,7 +496,6 @@ export default function NeemaDashboard(): React.ReactElement {
                     session={session}
                     theme={theme}
                     setTheme={setTheme}
-                    // ── Notification bell props ───────────────────────────────
                     notificationCount={unreadCount}
                     notifications={notifications}
                     onClearNotifications={() => setUnreadCount(0)}
@@ -490,7 +509,6 @@ export default function NeemaDashboard(): React.ReactElement {
                         view={view}
                         theme={theme}
                         setTheme={setTheme}
-                        // ── Notification bell props ───────────────────────────
                         notificationCount={unreadCount}
                         onClearNotifications={() => setUnreadCount(0)}
                     />

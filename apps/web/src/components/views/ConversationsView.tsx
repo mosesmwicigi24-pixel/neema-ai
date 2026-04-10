@@ -581,27 +581,29 @@ export function ConversationsView({
 
     const ConvList = (
         <div
-            className="flex flex-col h-full border-r border-[#e6f3d8] bg-white"
+            className="flex flex-col h-full bg-white"
             style={{
                 width: isMobile ? "100%" : 288,
                 minWidth: isMobile ? "100%" : 288,
+                borderRight: "1px solid #edf0ea",
             }}
         >
             {/* Header */}
-            <div className="px-4 pt-5 pb-3 border-b border-[#e6f3d8]">
+            <div className="px-4 pt-4 pb-3" style={{ borderBottom: "1px solid #edf0ea" }}>
                 <div className="flex items-center justify-between mb-3">
-                    <h1 className="text-base font-bold text-[#16270c]">
-                        Inbox
+                    <h1 className="text-sm font-semibold" style={{ color: "#1c2917", letterSpacing: "-0.01em" }}>
+                        Chats
                     </h1>
                     <div className="flex items-center gap-2">
                         {humanCount > 0 && (
-                            <span className="text-xs bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full">
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: "#fff3cd", color: "#856404" }}>
                                 {humanCount} live
                             </span>
                         )}
                         <button
                             onClick={() => setShowFilters((f) => !f)}
-                            className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${showFilters ? "bg-stone-800 text-white" : "bg-[#e6f3d8] text-[#699a32] hover:bg-[#cee6b2]"}`}
+                            className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${showFilters ? "bg-[#589b31] text-white" : "hover:bg-[#f0f4ec]"}`}
+                            style={{ color: showFilters ? "white" : "#8a9e80" }}
                         >
                             <svg
                                 className="w-3.5 h-3.5"
@@ -620,24 +622,24 @@ export function ConversationsView({
                     </div>
                 </div>
 
-                {/* Read / Unread toggle — always visible, one-click filter */}
+                {/* Read / Unread toggle */}
                 <div className="flex items-center gap-1 mb-2">
                     {(["all", "unread", "read"] as const).map((f) => (
                         <button
                             key={f}
                             onClick={() => setReadFilter(f)}
-                            className={`flex-1 h-7 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 ${
-                                readFilter === f
-                                    ? f === "unread"
-                                        ? "bg-[#427425] text-white"
-                                        : "bg-stone-800 text-white"
-                                    : "bg-[#f3f9ec] text-[#699a32] hover:bg-[#e6f3d8]"
-                            }`}
+                            className={`flex-1 h-7 rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-1.5`}
+                            style={{
+                                backgroundColor: readFilter === f
+                                    ? f === "unread" ? "#427425" : "#1c2917"
+                                    : "#f5f6f3",
+                                color: readFilter === f ? "#fff" : "#6b7e64",
+                            }}
                         >
                             {f === "all" && "All"}
                             {f === "unread" && (
                                 <>
-                                    Unread
+                                    Mine
                                     {unreadCount > 0 && (
                                         <span
                                             className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none ${readFilter === "unread" ? "bg-white/25 text-white" : "bg-[#427425] text-white"}`}
@@ -647,7 +649,7 @@ export function ConversationsView({
                                     )}
                                 </>
                             )}
-                            {f === "read" && "Read"}
+                            {f === "read" && "Requires Attention"}
                         </button>
                     ))}
                 </div>
@@ -655,7 +657,8 @@ export function ConversationsView({
                 {/* Search */}
                 <div className="relative mb-2">
                     <svg
-                        className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#b5da8b]"
+                        className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5"
+                        style={{ color: "#b5c9a8" }}
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"
@@ -670,9 +673,14 @@ export function ConversationsView({
                     <input
                         value={searchQ}
                         onChange={(e) => setSearchQ(e.target.value)}
-                        placeholder="Search conversations…"
-                        className="w-full h-8 pl-8 pr-3 text-xs bg-[#f3f9ec] border border-[#cee6b2] rounded-lg text-[#16270c] placeholder-stone-300 focus:outline-none focus:ring-1 focus:ring-[#589b31]"
-                        style={{ fontSize: 14 }}
+                        placeholder="Start typing to search"
+                        className="w-full h-8 pl-8 pr-3 text-xs rounded-lg focus:outline-none focus:ring-1 focus:ring-[#589b31]"
+                        style={{
+                            fontSize: 13,
+                            backgroundColor: "#f5f6f3",
+                            border: "1px solid #edf0ea",
+                            color: "#1c2917",
+                        }}
                     />
                 </div>
 
@@ -682,7 +690,11 @@ export function ConversationsView({
                         <button
                             key={tab.id}
                             onClick={() => setChannelTab(tab.id)}
-                            className={`flex-shrink-0 h-6 px-2.5 rounded-md text-xs font-medium transition-colors relative ${channelTab === tab.id ? "bg-stone-800 text-white" : "text-[#699a32] hover:bg-[#e6f3d8]"}`}
+                            className="flex-shrink-0 h-6 px-2.5 rounded-md text-xs font-medium transition-colors relative"
+                            style={{
+                                backgroundColor: channelTab === tab.id ? "#589b31" : "transparent",
+                                color: channelTab === tab.id ? "#fff" : "#8a9e80",
+                            }}
                         >
                             {tab.label}
                             {channelCounts[tab.id] > 0 && (
@@ -755,11 +767,12 @@ export function ConversationsView({
 
             {/* Conversation list */}
             <div
-                className={`flex-1 overflow-y-auto scrollbar-none divide-y divide-[#f0f9ec] ${isMobile ? "pb-16" : ""}`}
+                className={`flex-1 overflow-y-auto scrollbar-none ${isMobile ? "pb-16" : ""}`}
+                style={{ backgroundColor: "#ffffff" }}
             >
                 {filteredConvs.length === 0 && (
                     <div className="py-16 text-center">
-                        <p className="text-sm text-[#9ccd65]">
+                        <p className="text-sm" style={{ color: "#b5c9a8" }}>
                             No conversations found
                         </p>
                     </div>
@@ -774,13 +787,18 @@ export function ConversationsView({
                         <button
                             key={conv.id}
                             onClick={() => handleSelectConv(conv.id)}
-                            className={`w-full text-left px-4 py-3 transition-colors border-l-2 ${
-                                isActive
-                                    ? "bg-[#f3f9ec] border-l-[#589b31]"
-                                    : hasUnread
-                                      ? "bg-[#f8fcf3] border-l-[#427425] hover:bg-[#f3f9ec]"
-                                      : "border-l-transparent hover:bg-[#f3f9ec]"
-                            }`}
+                            className="w-full text-left px-4 py-3 transition-colors relative"
+                            style={{
+                                backgroundColor: isActive ? "#f5f7f2" : "transparent",
+                                borderBottom: "1px solid #f2f4ef",
+                                borderLeft: `3px solid ${isActive ? "#589b31" : hasUnread ? "#a8da8b" : "transparent"}`,
+                            }}
+                            onMouseEnter={(e) => {
+                                if (!isActive) (e.currentTarget as HTMLElement).style.backgroundColor = "#fafbf8";
+                            }}
+                            onMouseLeave={(e) => {
+                                if (!isActive) (e.currentTarget as HTMLElement).style.backgroundColor = "transparent";
+                            }}
                         >
                             <div className="flex items-start gap-3">
                                 <div className="relative flex-shrink-0">
@@ -818,12 +836,20 @@ export function ConversationsView({
                                 <div className="flex-1 min-w-0">
                                     <div className="flex items-center justify-between mb-0.5">
                                         <span
-                                            className={`text-sm truncate ${hasUnread ? "font-bold text-[#16270c]" : "font-semibold text-[#16270c]"}`}
+                                            className="text-sm truncate"
+                                            style={{
+                                                fontWeight: hasUnread ? 600 : 500,
+                                                color: "#1c2917",
+                                            }}
                                         >
                                             {displayName(conv.name, conv.wa_id)}
                                         </span>
                                         <span
-                                            className={`text-[10px] flex-shrink-0 ml-2 ${hasUnread ? "font-semibold text-[#427425]" : "text-[#9ccd65]"}`}
+                                            className="text-[10px] flex-shrink-0 ml-2"
+                                            style={{
+                                                fontWeight: hasUnread ? 600 : 400,
+                                                color: hasUnread ? "#427425" : "#b5c9a8",
+                                            }}
                                         >
                                             {conv.last_message_at
                                                 ? timeAgo(conv.last_message_at)
@@ -832,7 +858,11 @@ export function ConversationsView({
                                     </div>
                                     <div className="flex items-center justify-between">
                                         <p
-                                            className={`text-xs truncate flex-1 ${hasUnread ? "text-[#16270c] font-medium" : "text-[#699a32]"}`}
+                                            className="text-xs truncate flex-1"
+                                            style={{
+                                                color: hasUnread ? "#3d5a30" : "#8a9e80",
+                                                fontWeight: hasUnread ? 500 : 400,
+                                            }}
                                         >
                                             {conv.last_message ??
                                                 "No messages yet"}
@@ -865,7 +895,7 @@ export function ConversationsView({
                                                 </div>
                                             )}
                                             {hasUnread && (
-                                                <span className="min-w-[20px] h-5 px-1.5 bg-[#427425] text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+                                                <span className="min-w-[18px] h-[18px] px-1 text-white text-[10px] font-bold rounded-full flex items-center justify-center" style={{ backgroundColor: "#589b31" }}>
                                                     {conv.unread > 99
                                                         ? "99+"
                                                         : conv.unread}
@@ -884,9 +914,9 @@ export function ConversationsView({
 
     const ThreadPanel = (
         <div className="flex flex-1 overflow-hidden">
-            <div className="flex flex-col flex-1 overflow-hidden bg-white relative">
+            <div className="flex flex-col flex-1 overflow-hidden relative" style={{ backgroundColor: "#f9faf7" }}>
                 {!activeConv ? (
-                    <div className="flex-1 flex items-center justify-center text-[#9ccd65]">
+                    <div className="flex-1 flex items-center justify-center" style={{ color: "#c5d5bc" }}>
                         <div className="text-center">
                             <div className="text-4xl mb-2">💬</div>
                             <p className="text-sm">Select a conversation</p>
@@ -899,7 +929,7 @@ export function ConversationsView({
                             <button
                                 onClick={() => setMobileCrmOpen(true)}
                                 title="View customer profile"
-                                className="absolute top-3 right-3 z-20 w-8 h-8 rounded-full bg-white border border-[#cee6b2] shadow-sm flex items-center justify-center text-[#427425] hover:bg-[#f3f9ec] transition-colors"
+                                className="absolute top-3 right-3 z-20 w-8 h-8 rounded-full bg-white border border-[#edf0ea] shadow-sm flex items-center justify-center text-[#427425] hover:bg-[#fafbf8] transition-colors"
                             >
                                 <svg
                                     className="w-4 h-4"
@@ -917,11 +947,11 @@ export function ConversationsView({
                             </button>
                         )}
                         {/* Thread header */}
-                        <div className="px-4 py-3 border-b border-[#e6f3d8] bg-white flex items-center gap-2 flex-wrap">
+                        <div className="px-4 py-3 bg-white flex items-center gap-2 flex-wrap" style={{ borderBottom: "1px solid #edf0ea" }}>
                             {isMobile && (
                                 <button
                                     onClick={() => setMobilePanel("list")}
-                                    className="text-[#699a32] hover:text-[#16270c] mr-1 flex-shrink-0"
+                                    className="text-[#8a9e80] mr-1 flex-shrink-0"
                                 >
                                     <svg
                                         className="w-5 h-5"
@@ -946,13 +976,13 @@ export function ConversationsView({
                                 size={32}
                             />
                             <div className="flex-1 min-w-0">
-                                <div className="text-sm font-semibold text-[#16270c] truncate">
+                                <div className="text-sm font-semibold truncate" style={{ color: "#1c2917" }}>
                                     {displayName(
                                         activeConv.name,
                                         activeConv.wa_id,
                                     )}
                                 </div>
-                                <div className="text-xs text-[#9ccd65] font-mono truncate">
+                                <div className="text-xs truncate" style={{ color: "#b5c9a8", fontFamily: "'JetBrains Mono', monospace" }}>
                                     {formatPhone(activeConv.wa_id)}
                                 </div>
                             </div>
@@ -964,7 +994,7 @@ export function ConversationsView({
                                 {/* Assigned agent name */}
                                 {activeConv.assigned_agent_id &&
                                     activeConv.assigned_agent_name && (
-                                        <span className="text-xs text-[#9ccd65] hidden lg:block">
+                                        <span className="text-xs text-[#b5c9a8] hidden lg:block">
                                             → {activeConv.assigned_agent_name}
                                         </span>
                                     )}
@@ -1120,15 +1150,15 @@ export function ConversationsView({
                         {/* Messages */}
                         <div
                             className="flex-1 overflow-y-auto px-5 py-4 space-y-3"
-                            style={{ backgroundColor: "#f8fbf4" }}
+                            style={{ backgroundColor: "#f5f7f2" }}
                         >
                             {threadLoading && (
                                 <div className="flex justify-center py-8">
-                                    <div className="w-5 h-5 border-2 border-[#427425] border-t-transparent rounded-full animate-spin" />
+                                    <div className="w-5 h-5 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: "#589b31", borderTopColor: "transparent" }} />
                                 </div>
                             )}
                             {!threadLoading && activeMessages.length === 0 && (
-                                <div className="text-center py-12 text-[#9ccd65]">
+                                <div className="text-center py-12" style={{ color: "#c5d5bc" }}>
                                     <p className="text-sm">No messages yet</p>
                                 </div>
                             )}
@@ -1446,12 +1476,16 @@ export function ConversationsView({
                                                             : "px-4 py-2.5 max-w-[75%]"
                                                     } ${
                                                         isInbound
-                                                            ? "bg-white border border-[#cee6b2] text-[#16270c] rounded-tl-sm"
+                                                            ? "bg-white text-[#1c2917] rounded-tl-sm"
                                                             : msg.sender ===
                                                                 "ai"
-                                                              ? "bg-blue-600 text-white rounded-tr-sm"
-                                                              : "bg-[#427425] text-white rounded-tr-sm"
+                                                              ? "bg-[#2a48a2] text-white rounded-tr-sm"
+                                                              : "bg-[#2c7a1e] text-white rounded-tr-sm"
                                                     }`}
+                                                    style={{
+                                                        border: isInbound ? "1px solid #edf0ea" : "none",
+                                                        boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+                                                    }}
                                                 >
                                                     {!isInbound && (
                                                         <div className="text-[10px] opacity-70 mb-1 font-medium uppercase tracking-wide">
@@ -1580,7 +1614,7 @@ export function ConversationsView({
                                                                 rel="noopener noreferrer"
                                                                 className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-opacity hover:opacity-80 ${
                                                                     isInbound
-                                                                        ? "bg-[#f3f9ec] border-[#cee6b2] text-[#16270c]"
+                                                                        ? "bg-white border-[#edf0ea] text-[#1c2917]"
                                                                         : "bg-white/20 border-white/30 text-white"
                                                                 }`}
                                                             >
@@ -1621,7 +1655,8 @@ export function ConversationsView({
                                                         );
                                                     })()}
                                                     <div
-                                                        className={`text-[10px] mt-1 ${isInbound ? "text-[#9ccd65]" : "opacity-60"}`}
+                                                        className={`text-[10px] mt-1 ${isInbound ? "" : "opacity-60"}`}
+                                                        style={{ color: isInbound ? "#b5c9a8" : undefined }}
                                                     >
                                                         {msg.created_at
                                                             ? timeAgo(
@@ -1642,7 +1677,7 @@ export function ConversationsView({
                         {activeConv.intercept_mode === "human" &&
                             (activeConv.assigned_agent_id === currentAgentId ||
                                 isAdminOrSuper) && (
-                                <div className="border-t border-[#e6f3d8] px-4 py-3 bg-white">
+                                <div className="px-4 py-3 bg-white" style={{ borderTop: "1px solid #edf0ea" }}>
                                     {/* ── AI Draft pill — shown when a draft exists but panel is collapsed */}
                                     {draftVisible && !draftExpanded && (
                                         <button
@@ -1850,14 +1885,22 @@ export function ConversationsView({
                                             }}
                                             placeholder="Type a reply… (Enter to send)"
                                             rows={2}
-                                            className="flex-1 resize-none px-3 py-2 text-sm bg-[#f3f9ec] border border-[#cee6b2] rounded-xl text-[#16270c] placeholder-stone-300 focus:outline-none focus:ring-2 focus:ring-[#589b31] focus:border-transparent"
+                                            className="flex-1 resize-none px-3 py-2 text-sm rounded-xl focus:outline-none focus:ring-2 focus:ring-[#589b31] focus:border-transparent"
+                                            style={{
+                                                backgroundColor: "#f5f7f2",
+                                                border: "1px solid #e8ebe3",
+                                                color: "#1c2917",
+                                            }}
                                         />
                                         <button
                                             onClick={sendReply}
                                             disabled={
                                                 !replyText.trim() || sending
                                             }
-                                            className="h-10 w-10 rounded-xl bg-[#427425] hover:bg-[#589b31] disabled:opacity-50 flex items-center justify-center text-white transition-colors"
+                                            className="h-10 w-10 rounded-xl disabled:opacity-50 flex items-center justify-center text-white transition-colors"
+                                            style={{ backgroundColor: "#589b31" }}
+                                            onMouseEnter={(e) => { if (!(!replyText.trim() || sending)) (e.currentTarget as HTMLElement).style.backgroundColor = "#427425"; }}
+                                            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#589b31"; }}
                                         >
                                             {sending ? (
                                                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -1881,17 +1924,18 @@ export function ConversationsView({
 
                                     {/* Media attachment preview panel */}
                                     {mediaFile && (
-                                        <div className="mt-2 p-2.5 rounded-xl bg-[#f3f9ec] border border-[#cee6b2] flex items-start gap-2">
+                                        <div className="mt-2 p-2.5 rounded-xl flex items-start gap-2" style={{ backgroundColor: "#f5f7f2", border: "1px solid #e8ebe3" }}>
                                             {mediaPreviewUrl ? (
                                                 <img
                                                     src={mediaPreviewUrl}
                                                     alt="preview"
-                                                    className="w-14 h-14 rounded-lg object-cover border border-[#cee6b2] flex-shrink-0"
+                                                    className="w-14 h-14 rounded-lg object-cover border border-[#edf0ea] flex-shrink-0"
                                                 />
                                             ) : (
-                                                <div className="w-14 h-14 rounded-lg bg-[#e6f3d8] flex items-center justify-center flex-shrink-0">
+                                                <div className="w-14 h-14 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: "#e8ebe3" }}>
                                                     <svg
-                                                        className="w-6 h-6 text-[#699a32]"
+                                                        className="w-6 h-6"
+                                                        style={{ color: "#8a9e80" }}
                                                         fill="none"
                                                         stroke="currentColor"
                                                         viewBox="0 0 24 24"
@@ -1906,7 +1950,7 @@ export function ConversationsView({
                                                 </div>
                                             )}
                                             <div className="flex-1 min-w-0 space-y-1.5">
-                                                <p className="text-xs font-medium text-[#16270c] truncate">
+                                                <p className="text-xs font-medium text-[#1c2917] truncate">
                                                     {mediaFile.name}
                                                 </p>
                                                 <input
@@ -1917,7 +1961,12 @@ export function ConversationsView({
                                                         )
                                                     }
                                                     placeholder="Add a caption (optional)…"
-                                                    className="w-full px-2 py-1 text-xs bg-white border border-[#cee6b2] rounded-lg text-[#16270c] placeholder-stone-300 focus:outline-none focus:ring-1 focus:ring-[#589b31]"
+                                                    className="w-full px-2 py-1 text-xs rounded-lg focus:outline-none focus:ring-1 focus:ring-[#589b31]"
+                                                    style={{
+                                                        backgroundColor: "#ffffff",
+                                                        border: "1px solid #e8ebe3",
+                                                        color: "#1c2917",
+                                                    }}
                                                 />
                                                 <div className="flex gap-1.5">
                                                     <button
@@ -1925,7 +1974,8 @@ export function ConversationsView({
                                                         disabled={
                                                             uploadingMedia
                                                         }
-                                                        className="flex items-center gap-1 h-7 px-3 bg-[#427425] hover:bg-[#589b31] disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors"
+                                                        className="flex items-center gap-1 h-7 px-3 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors"
+                                                        style={{ backgroundColor: "#589b31" }}
                                                     >
                                                         {uploadingMedia ? (
                                                             <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -1954,7 +2004,8 @@ export function ConversationsView({
                                                         onClick={
                                                             clearMediaAttachment
                                                         }
-                                                        className="h-7 px-3 text-xs text-[#699a32] hover:text-[#16270c] rounded-lg border border-[#cee6b2] transition-colors"
+                                                        className="h-7 px-3 text-xs rounded-lg transition-colors"
+                                                        style={{ color: "#8a9e80", border: "1px solid #e8ebe3" }}
                                                     >
                                                         Cancel
                                                     </button>
@@ -1965,17 +2016,16 @@ export function ConversationsView({
                                 </div>
                             )}
 
-                        {/* Lock banner — shown to regular agents when another agent owns the conv.
-                            Admin/superuser never see this banner. */}
+                        {/* Lock banner */}
                         {activeConv.intercept_mode === "human" &&
                         activeConv.assigned_agent_id &&
                         activeConv.assigned_agent_id !== currentAgentId &&
                         !isAdminOrSuper ? (
-                            <div className="border-t border-[#e6f3d8] px-4 py-4 bg-[#f3f9ec] flex items-center justify-center gap-2">
+                            <div className="px-4 py-4 flex items-center justify-center gap-2" style={{ borderTop: "1px solid #edf0ea", backgroundColor: "#fafbf8" }}>
                                 <span className="text-base">🔒</span>
-                                <p className="text-xs text-[#699a32]">
+                                <p className="text-xs" style={{ color: "#8a9e80" }}>
                                     Handled by{" "}
-                                    <strong className="text-[#427425]">
+                                    <strong style={{ color: "#589b31" }}>
                                         {activeConv.assigned_agent_name ??
                                             "another agent"}
                                     </strong>{" "}
@@ -2006,10 +2056,14 @@ export function ConversationsView({
                         <button
                             onClick={() => setActivityLogOpen(true)}
                             title="Show activity log"
-                            className="flex-shrink-0 w-8 border-l border-[#e6f3d8] bg-white flex flex-col items-center justify-center gap-1 hover:bg-[#f3f9ec] transition-colors"
+                            className="flex-shrink-0 w-8 flex flex-col items-center justify-center gap-1 transition-colors"
+                            style={{ borderLeft: "1px solid #edf0ea", backgroundColor: "#ffffff" }}
+                            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#fafbf8"; }}
+                            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#ffffff"; }}
                         >
                             <svg
-                                className="w-4 h-4 text-[#9ccd65]"
+                                className="w-4 h-4"
+                                style={{ color: "#c5d5bc" }}
                                 fill="none"
                                 stroke="currentColor"
                                 viewBox="0 0 24 24"
@@ -2022,8 +2076,9 @@ export function ConversationsView({
                                 />
                             </svg>
                             <span
-                                className="text-[9px] text-[#9ccd65] font-semibold uppercase tracking-widest"
+                                className="text-[9px] font-semibold uppercase tracking-widest"
                                 style={{
+                                    color: "#c5d5bc",
                                     writingMode: "vertical-rl",
                                     transform: "rotate(180deg)",
                                 }}
@@ -2041,18 +2096,21 @@ export function ConversationsView({
 
                 return (
                     <div
-                        className="flex-shrink-0 flex flex-col overflow-hidden bg-white border-l border-[#e6f3d8]"
-                        style={{ width: 196 }}
+                        className="flex-shrink-0 flex flex-col overflow-hidden"
+                        style={{ width: 196, backgroundColor: "#ffffff", borderLeft: "1px solid #edf0ea" }}
                     >
                         {/* Header with collapse button */}
-                        <div className="px-3 pt-3 pb-2 border-b border-[#e6f3d8] flex items-center justify-between">
-                            <p className="text-[10px] font-semibold text-[#9ccd65] uppercase tracking-widest">
+                        <div className="px-3 pt-3 pb-2 flex items-center justify-between" style={{ borderBottom: "1px solid #edf0ea" }}>
+                            <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "#b5c9a8" }}>
                                 Activity log
                             </p>
                             <button
                                 onClick={() => setActivityLogOpen(false)}
                                 title="Collapse activity log"
-                                className="w-5 h-5 rounded flex items-center justify-center text-[#9ccd65] hover:bg-[#f3f9ec] transition-colors"
+                                className="w-5 h-5 rounded flex items-center justify-center transition-colors"
+                                style={{ color: "#b5c9a8" }}
+                                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#f5f7f2"; }}
+                                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "transparent"; }}
                             >
                                 <svg
                                     className="w-3.5 h-3.5"
@@ -2089,11 +2147,11 @@ export function ConversationsView({
                                             className={`w-3.5 h-3.5 rounded-full border flex-shrink-0 mt-0.5 ${dotColor[evt.event_kind ?? ""] ?? "bg-stone-100 border-stone-300"}`}
                                         />
                                         <div className="min-w-0">
-                                            <p className="text-[11px] font-medium text-[#16270c] leading-snug">
+                                            <p className="text-[11px] font-medium text-[#1c2917] leading-snug">
                                                 {evt.text}
                                             </p>
                                             {evt.agent_name && (
-                                                <p className="text-[10px] text-[#9ccd65] mt-0.5 truncate">
+                                                <p className="text-[10px] text-[#b5c9a8] mt-0.5 truncate">
                                                     {evt.agent_name}
                                                 </p>
                                             )}
@@ -2135,10 +2193,14 @@ export function ConversationsView({
                     <button
                         onClick={() => setCrmOpen(true)}
                         title="Show customer profile"
-                        className="flex-shrink-0 w-8 border-l border-[#e6f3d8] bg-white flex flex-col items-center justify-center gap-1 hover:bg-[#f3f9ec] transition-colors"
+                        className="flex-shrink-0 w-8 flex flex-col items-center justify-center gap-1 transition-colors"
+                        style={{ borderLeft: "1px solid #edf0ea", backgroundColor: "#ffffff" }}
+                        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#fafbf8"; }}
+                        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#ffffff"; }}
                     >
                         <svg
-                            className="w-4 h-4 text-[#9ccd65]"
+                            className="w-4 h-4"
+                            style={{ color: "#c5d5bc" }}
                             fill="none"
                             stroke="currentColor"
                             viewBox="0 0 24 24"
@@ -2151,8 +2213,9 @@ export function ConversationsView({
                             />
                         </svg>
                         <span
-                            className="text-[9px] text-[#9ccd65] font-semibold uppercase tracking-widest"
+                            className="text-[9px] font-semibold uppercase tracking-widest"
                             style={{
+                                color: "#c5d5bc",
                                 writingMode: "vertical-rl",
                                 transform: "rotate(180deg)",
                             }}
@@ -2171,7 +2234,7 @@ export function ConversationsView({
             onClose={() => setTransferModal(false)}
             title="Transfer Conversation"
         >
-            <p className="text-sm text-[#699a32] mb-3">
+            <p className="text-sm mb-3" style={{ color: "#8a9e80" }}>
                 Select an agent to transfer this conversation to:
             </p>
             <div className="space-y-2 max-h-64 overflow-y-auto">
@@ -2185,21 +2248,21 @@ export function ConversationsView({
                         <button
                             key={a.id}
                             onClick={() => transfer(a.id)}
-                            className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-[#f3f9ec] border border-[#e6f3d8] transition-colors"
+                            className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-[#fafbf8] border border-[#edf0ea] transition-colors"
                         >
                             <Avatar name={a.name} size={32} />
                             <div className="text-left">
-                                <div className="text-sm font-semibold text-[#16270c]">
+                                <div className="text-sm font-semibold text-[#1c2917]">
                                     {a.name}
                                 </div>
-                                <div className="text-xs text-[#9ccd65]">
+                                <div className="text-xs text-[#b5c9a8]">
                                     {a.active_convs} active conversations
                                 </div>
                             </div>
                         </button>
                     ))}
                 {agents.filter((a) => a.is_available).length === 0 && (
-                    <p className="text-sm text-[#9ccd65] text-center py-4">
+                    <p className="text-sm text-[#b5c9a8] text-center py-4">
                         No available agents
                     </p>
                 )}
@@ -2353,13 +2416,14 @@ export function ConversationsView({
                         {/* Drawer */}
                         <div className="relative bg-white w-full max-w-sm flex flex-col overflow-hidden shadow-xl">
                             {/* Header */}
-                            <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-[#e6f3d8] flex-shrink-0">
-                                <h2 className="text-sm font-bold text-[#16270c]">
+                            <div className="flex items-center justify-between px-4 pt-4 pb-3 flex-shrink-0" style={{ borderBottom: "1px solid #edf0ea" }}>
+                                <h2 className="text-sm font-semibold" style={{ color: "#1c2917" }}>
                                     Customer Profile
                                 </h2>
                                 <button
                                     onClick={() => setMobileCrmOpen(false)}
-                                    className="w-7 h-7 rounded-full bg-[#f3f9ec] flex items-center justify-center text-[#699a32] hover:bg-[#e6f3d8]"
+                                    className="w-7 h-7 rounded-full flex items-center justify-center transition-colors"
+                                    style={{ backgroundColor: "#f5f7f2", color: "#589b31" }}
                                 >
                                     <svg
                                         className="w-4 h-4"
