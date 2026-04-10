@@ -12,6 +12,11 @@ import json
 router = APIRouter()
 
 
+async def _broadcast(redis, conv_id: str, payload: dict) -> None:
+    """Publish a WebSocket event to all clients watching this conversation."""
+    await redis.publish(f"ws:channel:{conv_id}", json.dumps(payload))
+
+
 def verify_n8n_secret(x_n8n_secret: str = Header(...)):
     """All n8n → API calls must include this header."""
     if x_n8n_secret != settings.n8n_api_secret:
@@ -83,8 +88,89 @@ async def outbound_gate(body: OutboundDto, request: Request, db: AsyncSession = 
     """
     Called by n8n after AI generates a reply.
     Returns {"action": "send"} or {"action": "hold"}.
+    For audio replies (is_audio_reply=True), also saves the outbound audio message
+    to DB and broadcasts it so agents see the voice note + text companion live.
     """
-    return await svc.outbound_gate(db, request.app.state.redis, body)
+    result = await svc.outbound_gate(db, request.app.state.redis, body)
+
+    # ── Audio reply: persist outbound audio message + broadcast ───────────────
+    if body.is_audio_reply and body.audio_url and result.get("action") == "send":
+        from sqlalchemy import select
+        from app.models.conversation import Conversation
+        from app.models.message import Message, MsgDirection, MsgSender
+        from datetime import datetime, timezone
+
+        db_result = await db.execute(
+            select(Conversation).where(Conversation.wa_id == body.wa_id)
+        )
+        conv = db_result.scalar_one_or_none()
+        if conv:
+            companion_text = body.ai_reply or ""
+            audio_msg = Message(
+                wa_id=body.wa_id,
+                conversation_id=conv.id,
+                direction=MsgDirection.outbound,
+                sender=MsgSender.ai,
+                # text = readable AI reply shown below the audio player
+                text=companion_text,
+                media_type="audio",
+                media_url=body.audio_url,
+                # media_caption = cart summary shown in highlighted box (if any)
+                media_caption=body.cart_text or None,
+            )
+            db.add(audio_msg)
+            conv.last_message_at = datetime.now(timezone.utc)
+            conv.last_message_preview = (
+                f"🔊 {companion_text[:80]}" if companion_text else "🔊 Voice reply"
+            )
+            await db.commit()
+            await db.refresh(audio_msg)
+
+            redis = request.app.state.redis
+            if redis:
+                await _broadcast(redis, str(conv.id), {
+                    "type":           "new_message",
+                    "conversationId": str(conv.id),
+                    "sender":         "ai",
+                    "text":           companion_text,
+                    "mediaType":      "audio",
+                    "mediaUrl":       body.audio_url,
+                    "mediaCaption":   body.cart_text or None,
+                    "transcription":  body.transcription or None,
+                })
+
+    return result
+
+
+# ── TTS audio save ────────────────────────────────────────
+@router.post("/media/save-tts", dependencies=[Depends(verify_n8n_secret)])
+async def save_tts_audio(request: Request):
+    """
+    Receives a raw MP3 binary from n8n (OpenAI TTS output), saves it to disk,
+    and returns a stable public URL used by the audio reply workflow branch.
+    n8n sends the filename via the X-Filename header.
+    """
+    import uuid, os
+    from app.routers.media import MEDIA_DIR
+
+    filename_header = request.headers.get("x-filename", "")
+    filename = filename_header if (filename_header and filename_header.endswith(".mp3")) \
+        else f"tts_{uuid.uuid4().hex}.mp3"
+
+    filepath = os.path.join(MEDIA_DIR, filename)
+    body_bytes = await request.body()
+    if not body_bytes:
+        raise HTTPException(status_code=400, detail="Empty body — no audio data received")
+
+    with open(filepath, "wb") as f:
+        f.write(body_bytes)
+
+    base = str(request.base_url).rstrip("/")
+    return {
+        "ok":        True,
+        "filename":  filename,
+        "audio_url": f"{base}/api/admin/media/{filename}",
+    }
 
 
 # ── Catalog (for n8n price lookups) ───────────────────────────────────────────

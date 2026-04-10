@@ -1593,12 +1593,67 @@ export function ConversationsView({
                                                                 "audio/",
                                                             )
                                                         ) {
+                                                            // caption field carries:
+                                                            //   inbound  → Whisper transcription of the user's voice note
+                                                            //   outbound → cart summary text (if the AI reply included cart info)
+                                                            const caption = (msg as any)
+                                                                .media_caption as
+                                                                | string
+                                                                | null
+                                                                | undefined;
+                                                            // companionText: the readable AI reply shown below the outbound player
+                                                            const companionText =
+                                                                !isInbound &&
+                                                                msg.text &&
+                                                                !msg.text.startsWith(
+                                                                    "[",
+                                                                )
+                                                                    ? msg.text
+                                                                    : null;
+                                                            // cartText: only show caption as cart box when it differs from companionText
+                                                            const cartText =
+                                                                !isInbound &&
+                                                                caption &&
+                                                                caption !==
+                                                                    companionText
+                                                                    ? caption
+                                                                    : null;
                                                             return (
-                                                                <audio
-                                                                    src={mu}
-                                                                    controls
-                                                                    className="w-full"
-                                                                />
+                                                                <div className="flex flex-col gap-1.5 w-full min-w-[200px]">
+                                                                    <audio
+                                                                        src={mu}
+                                                                        controls
+                                                                        className="w-full"
+                                                                    />
+                                                                    {/* Inbound voice note: show Whisper transcription */}
+                                                                    {isInbound &&
+                                                                        caption && (
+                                                                            <p className="text-[11px] italic opacity-70 leading-relaxed px-1">
+                                                                                📝{" "}
+                                                                                {
+                                                                                    caption
+                                                                                }
+                                                                            </p>
+                                                                        )}
+                                                                    {/* Outbound AI audio: show the text reply */}
+                                                                    {!isInbound &&
+                                                                        companionText && (
+                                                                            <p className="text-xs leading-relaxed whitespace-pre-wrap px-1">
+                                                                                {
+                                                                                    companionText
+                                                                                }
+                                                                            </p>
+                                                                        )}
+                                                                    {/* Outbound AI audio: show cart summary if present */}
+                                                                    {!isInbound &&
+                                                                        cartText && (
+                                                                            <div className="text-[11px] px-2 py-1.5 rounded-lg bg-white/20 font-medium whitespace-pre-wrap leading-relaxed">
+                                                                                {
+                                                                                    cartText
+                                                                                }
+                                                                            </div>
+                                                                        )}
+                                                                </div>
                                                             );
                                                         }
                                                         const fileName =

@@ -5,6 +5,11 @@ class OutboundDto(BaseModel):
     wa_id: str
     ai_reply: str
     session_id: str | None = None
+    # Audio reply fields — populated when the workflow responds with TTS audio
+    is_audio_reply: bool = False
+    audio_url: str | None = None       # stable URL of the TTS mp3 file
+    transcription: str | None = None   # original user voice message transcription
+    cart_text: str | None = None       # cart summary text to accompany the audio
 
 class SessionDto(BaseModel):
     wa_id: str
