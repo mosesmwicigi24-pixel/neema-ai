@@ -124,3 +124,8 @@
         -moz-osx-font-smoothing: grayscale;
     }
 }
+
+/* Hide Next.js dev error overlay */
+nextjs-portal {
+    display: none !important;
+}

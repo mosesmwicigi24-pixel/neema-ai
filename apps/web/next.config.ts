@@ -10,6 +10,10 @@ const nextConfig: NextConfig = {
             ],
         },
     },
+    // Disable the dev error overlay
+    onDemandEntries: {
+        maxInactiveAge: 0,
+    },
 };
 
 export default nextConfig;
