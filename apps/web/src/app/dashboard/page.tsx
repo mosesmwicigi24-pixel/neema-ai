@@ -11,6 +11,7 @@ import {
     agentsApi,
     catalogApi,
     ordersApi,
+    profileApi,
     mapConversation,
     mapAgent,
     mapCatalogItem,
@@ -105,6 +106,9 @@ export default function NeemaDashboard(): React.ReactElement {
     const [notifications, setNotifications] = useState<AgentNotification[]>([]);
     const [unreadCount, setUnreadCount] = useState(0);
 
+    // ── Logged-in agent profile (name + email from /api/admin/me) ─────────────
+    const [agentProfile, setAgentProfile] = useState<{ name: string; email: string } | null>(null);
+
     // Ref guard — prevents parallel 401s from re-triggering the modal
     const sessionExpiredRef = useRef(false);
     // Snapshot of the expired token so the modal can detect when a genuinely new one arrives
@@ -140,6 +144,34 @@ export default function NeemaDashboard(): React.ReactElement {
         if (refreshToken) (window as any).__neema_refresh_token = refreshToken;
     }
     const hasToken = Boolean(accessToken);
+
+    // ── Fetch the logged-in agent's name + email from /api/admin/me ──────────
+    // NextAuth's login response only returns tokens + role — not name/email.
+    // We call /me as soon as the token is ready to populate the sidebar/popup.
+    useEffect(() => {
+        if (!hasToken) return;
+        let cancelled = false;
+        const fetchProfile = (attempt = 1) => {
+            profileApi
+                .me()
+                .then((data: any) => {
+                    if (!cancelled) {
+                        setAgentProfile({
+                            name:  data.name  || "",
+                            email: data.email || "",
+                        });
+                    }
+                })
+                .catch(() => {
+                    // Retry up to 3 times with backoff (token may not be flushed yet)
+                    if (!cancelled && attempt < 3) {
+                        setTimeout(() => fetchProfile(attempt + 1), attempt * 500);
+                    }
+                });
+        };
+        fetchProfile();
+        return () => { cancelled = true; };
+    }, [hasToken]);
 
     // ── Listen for session-expired events dispatched by api.ts ───────────────
     useEffect(() => {
@@ -301,10 +333,12 @@ export default function NeemaDashboard(): React.ReactElement {
     }, [updateSession, refetchConversations, refetchAgents, refetchOrders, refetchCatalog]);
 
     // ── Session ───────────────────────────────────────────────────────────────
+    // Prefer agentProfile (fetched from /me) over NextAuth session fields,
+    // since the login response doesn't include name/email in the JWT.
     const session: Session = {
         user: {
-            email: (nextAuthSession?.user?.email as string) ?? "",
-            name:  (nextAuthSession?.user?.name  as string) ?? "",
+            email: agentProfile?.email || (nextAuthSession?.user?.email as string) || "",
+            name:  agentProfile?.name  || (nextAuthSession?.user?.name  as string) || "",
             role:  ((nextAuthSession as any)?.role ?? "agent") as "admin" | "agent",
         },
     };
