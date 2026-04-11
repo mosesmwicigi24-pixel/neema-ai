@@ -75,6 +75,8 @@ async def serve_media(filename: str):
 
 
 def _mime_to_ext(mime: str) -> str:
+    # Strip codec qualifiers e.g. "audio/ogg; codecs=opus" → "audio/ogg"
+    mime = mime.split(";")[0].strip()
     return {
         "image/jpeg":      ".jpg",
         "image/png":       ".png",
@@ -85,6 +87,9 @@ def _mime_to_ext(mime: str) -> str:
         "audio/ogg":       ".ogg",
         "audio/aac":       ".aac",
         "audio/mpeg":      ".mp3",
+        "audio/mp4":       ".m4a",
+        "audio/amr":       ".amr",
+        "audio/opus":      ".ogg",
         "application/pdf": ".pdf",
         "application/msword": ".doc",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
