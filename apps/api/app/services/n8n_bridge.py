@@ -37,16 +37,21 @@ def _fmt_precise(dt: datetime | None) -> str:
         dt = datetime.now(timezone.utc)
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
+# Normalize wa_id by stripping leading + and whitespace to ensure consistent storage and lookup.
+def _normalize_wa_id(wa_id: str) -> str:
+    """Always store wa_id without a leading + to ensure consistent lookup."""
+    return wa_id.lstrip("+").strip() if wa_id else wa_id
+
 
 # ── Intercept Gate ────────────────────────────────────────
 
 async def outbound_gate(db: AsyncSession, redis, body: OutboundDto) -> dict:
-    """Core logic: AI mode sends immediately; human mode holds the reply."""
+    body.wa_id = _normalize_wa_id(body.wa_id)
+
     result = await db.execute(
         select(Conversation).where(Conversation.wa_id == body.wa_id)
     )
     conv = result.scalar_one_or_none()
-
     if not conv:
         conv = Conversation(wa_id=body.wa_id)
         db.add(conv)
@@ -68,24 +73,66 @@ async def outbound_gate(db: AsyncSession, redis, body: OutboundDto) -> dict:
         })
         return {"action": "hold"}
 
-    await _send_waba(body.wa_id, body.ai_reply)
+    # ── Send to WhatsApp ──────────────────────────────────────────────────────
+    if body.is_audio_reply and body.audio_url:
+        # Send the TTS audio file via WABA
+        await _send_waba_audio(body.wa_id, body.audio_url)
+        # If there's a cart summary, send it as a follow-up text message
+        if body.cart_text:
+            await _send_waba(body.wa_id, body.cart_text)
+    else:
+        await _send_waba(body.wa_id, body.ai_reply)
 
+    # ── Save outbound message to DB ───────────────────────────────────────────
     msg = Message(
         wa_id=body.wa_id,
         conversation_id=conv.id,
         direction=MsgDirection.outbound,
         sender=MsgSender.ai,
-        text=body.ai_reply,
+        text=body.ai_reply,            # the full text reply (shown as transcription in UI)
+        media_type="audio" if (body.is_audio_reply and body.audio_url) else None,
+        media_url=body.audio_url if body.is_audio_reply else None,
+        media_caption=body.cart_text or None,   # cart summary shown below the player
     )
     db.add(msg)
-    await _broadcast(redis, str(conv.id), {
+    await db.commit()
+    await db.refresh(msg)
+
+    broadcast_payload = {
         "type": "new_message",
         "conversationId": str(conv.id),
         "sender": "ai",
         "text": body.ai_reply,
-    })
+    }
+    if body.is_audio_reply and body.audio_url:
+        broadcast_payload["mediaType"] = "audio"
+        broadcast_payload["mediaUrl"] = body.audio_url
+        broadcast_payload["mediaCaption"] = body.cart_text or None
+
+    await _broadcast(redis, str(conv.id), broadcast_payload)
     return {"action": "send"}
 
+
+async def _send_waba_audio(wa_id: str, audio_url: str) -> None:
+    """Send a pre-generated TTS audio file to WhatsApp via a public link."""
+    url = (f"https://graph.facebook.com/{settings.waba_api_version}"
+           f"/{settings.waba_phone_number_id}/messages")
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            url,
+            headers={"Authorization": f"Bearer {settings.waba_token}"},
+            json={
+                "messaging_product": "whatsapp",
+                "to": wa_id,
+                "type": "audio",
+                "audio": {"link": audio_url},
+            },
+            timeout=30.0,
+        )
+        if not resp.is_success:
+            import logging
+            logging.error(f"WABA audio error {resp.status_code}: {resp.text}")
+            resp.raise_for_status()
 
 # ── WABA Sender ───────────────────────────────────────────
 
@@ -118,6 +165,7 @@ async def _broadcast(redis, channel: str, payload: dict) -> None:
 # ── Context ───────────────────────────────────────────────
 
 async def get_context(db: AsyncSession, redis, wa_id: str) -> dict:
+    wa_id = _normalize_wa_id(wa_id)
     cache_key = f"context:{wa_id}"
     cached = await redis.get(cache_key)
     if cached:
@@ -180,6 +228,7 @@ async def get_context(db: AsyncSession, redis, wa_id: str) -> dict:
 # ── Get User ──────────────────────────────────────────────
 
 async def get_user(db: AsyncSession, wa_id: str) -> dict:
+    wa_id = _normalize_wa_id(wa_id)
     result = await db.execute(select(User).where(User.wa_id == wa_id))
     user = result.scalar_one_or_none()
     if not user:
@@ -226,6 +275,8 @@ async def upsert_user(db: AsyncSession, body) -> dict:
 # Returns a Firestore-style document array so n8n can consume the output directly.
 
 async def upsert_message(db: AsyncSession, redis, body) -> list:
+    body.wa_id = _normalize_wa_id(body.wa_id)
+
     result = await db.execute(
         select(Conversation).where(Conversation.wa_id == body.wa_id)
     )
@@ -363,8 +414,25 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
 # ── Patch Message ─────────────────────────────────────────
 
 async def patch_message(db: AsyncSession, docid: str, body) -> dict:
+    """
+    Patches an inbound message doc with its transcription/corrected text.
+
+    The n8n 'patch inbound and outbound' node calls this with:
+      - inbound_text  → corrected transcription for the inbound message
+      - outbound_text → the AI reply text (NOT applied here — the outbound
+                        Message row is already created by outbound_gate(), so
+                        applying outbound_text here would overwrite the inbound
+                        message's text field, causing a duplicate to appear in
+                        the agent UI)
+      - direction     → NOT applied; direction is set at insert time and must
+                        never be changed by a patch, otherwise an inbound message
+                        silently becomes outbound and renders on the wrong side.
+
+    Only inbound_text updates are accepted. Everything else is a no-op.
+    """
     from sqlalchemy import and_
 
+    # ── Locate the message by UUID or by wa_id_tsMs composite key ────────────
     try:
         import uuid
         uuid.UUID(docid)
@@ -372,9 +440,12 @@ async def patch_message(db: AsyncSession, docid: str, body) -> dict:
             select(Message).where(Message.id == docid)
         )
     except ValueError:
+        # docid format: "{wa_id}_{ts_ms}" — strip '+' from wa_id so the lookup
+        # matches the normalised form used when the message was inserted.
         parts = docid.rsplit("_", 1)
         if len(parts) == 2:
-            wa_id, ts_ms = parts[0], parts[1]
+            wa_id = _norm_wa(parts[0])
+            ts_ms = parts[1]
             result = await db.execute(
                 select(Message).where(
                     and_(
@@ -388,18 +459,23 @@ async def patch_message(db: AsyncSession, docid: str, body) -> dict:
 
     msg = result.scalar_one_or_none()
     if not msg:
+        # Silently skip — the inbound message may not have been upserted yet
+        # (e.g. audio path where Upsert inbound audio message runs in parallel).
         return {"ok": True, "skipped": True, "docid": docid}
 
+    # ── Only update inbound_text ──────────────────────────────────────────────
+    # outbound_text is intentionally ignored: the outbound reply is already
+    # stored as its own Message row by outbound_gate(). Applying it here would
+    # overwrite the inbound message's text field, making it render on the
+    # wrong side of the thread and appear as a duplicate of the outbound reply.
+    #
+    # direction is intentionally ignored: it is set at insert time and must
+    # never be mutated post-hoc or inbound messages flip to the outbound side.
     if body.inbound_text is not None:
         msg.text = body.inbound_text
-    if body.outbound_text is not None:
-        msg.text = body.outbound_text
-    if body.direction is not None:
-        msg.direction = body.direction
 
     await db.commit()
     return {"ok": True, "message_id": str(msg.id)}
-
 
 # ── Touch Session ─────────────────────────────────────────
 
