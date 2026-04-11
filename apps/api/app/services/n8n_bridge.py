@@ -543,6 +543,7 @@ async def touch_session(db: AsyncSession, body) -> list:
 # ── Get Messages ──────────────────────────────────────────
 
 async def get_messages(db: AsyncSession, wa_id: str) -> list:
+    wa_id = _normalize_wa_id(wa_id)
     result = await db.execute(
         select(Message)
         .where(Message.wa_id == wa_id)
