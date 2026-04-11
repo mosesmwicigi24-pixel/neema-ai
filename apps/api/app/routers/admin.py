@@ -613,17 +613,18 @@ async def clear_chat_history(
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
+    # Delete all messages AND all activity-log rows so both the thread
+    # and the activity log are completely clean after a clear.
     await db.execute(delete(Message).where(Message.conversation_id == conv_id))
+    await db.execute(delete(Intercept).where(Intercept.conversation_id == conv_id))
 
     conv.last_message_preview = None
     conv.last_message_at      = None
+    # Return conversation to AI mode so it is ready for a fresh start.
+    conv.intercept_mode    = InterceptMode.ai
+    conv.assigned_agent_id = None
+    conv.intercept_since   = None
 
-    log = Intercept(
-        conversation_id=conv.id,
-        agent_id=agent.id,
-        action=InterceptAction.intercept,
-    )
-    db.add(log)
     await db.commit()
 
     redis = request.app.state.redis

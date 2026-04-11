@@ -1,23 +1,16 @@
 import React from "react";
 import { initials } from "@/lib/utils";
 
-const COLORS = [
-    "bg-amber-500",
-    "bg-blue-500",
-    "bg-emerald-500",
-    "bg-rose-500",
-    "bg-violet-500",
-    "bg-orange-500",
-    "bg-cyan-500",
-    "bg-pink-500",
-];
+// Single neutral avatar colour aligned with the UI theme.
+// Light stone-green background with dark green initials — visible against
+// both the default white list background and the selected-row highlight
+// (#f3f9ec) because the tint and border keep it distinct in both states.
+const AVATAR_BG     = "rgb(245, 246, 243)";
+const AVATAR_TEXT   = "#3a5c28";
+const AVATAR_BORDER = "1px solid #dde8d5";
 
-const SIZE_CLS: Record<string, string> = {
-    xs: "w-6 h-6 text-xs",
-    sm: "w-8 h-8 text-xs",
-    md: "w-10 h-10 text-sm",
-    lg: "w-12 h-12 text-base",
-    xl: "w-16 h-16 text-xl",
+const SIZE_PX: Record<string, number> = {
+    xs: 24, sm: 32, md: 40, lg: 48, xl: 64,
 };
 
 interface AvatarProps {
@@ -31,23 +24,22 @@ export function Avatar({
     size = "md",
     className = "",
 }: AvatarProps): React.ReactElement {
-    const color = COLORS[(name?.charCodeAt(0) ?? 0) % COLORS.length];
-
-    // Numeric size: render with inline style
-    if (typeof size === "number") {
-        return (
-            <div
-                style={{ width: size, height: size, fontSize: size * 0.36 }}
-                className={`${color} rounded-full flex items-center justify-center font-semibold text-white flex-shrink-0 ${className}`}
-            >
-                {initials(name)}
-            </div>
-        );
-    }
+    const px = typeof size === "number" ? size : (SIZE_PX[size] ?? 40);
 
     return (
         <div
-            className={`${SIZE_CLS[size] ?? SIZE_CLS.md} ${color} rounded-full flex items-center justify-center font-semibold text-white flex-shrink-0 ${className}`}
+            style={{
+                width:           px,
+                height:          px,
+                fontSize:        px * 0.36,
+                backgroundColor: AVATAR_BG,
+                color:           AVATAR_TEXT,
+                border:          AVATAR_BORDER,
+                fontWeight:      700,
+                letterSpacing:   "0.02em",
+                flexShrink:      0,
+            }}
+            className={`rounded-full flex items-center justify-center ${className}`}
         >
             {initials(name)}
         </div>

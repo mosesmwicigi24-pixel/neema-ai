@@ -2,10 +2,21 @@
 import React, { useState } from "react";
 import { signIn, signOut, getSession } from "next-auth/react";
 
+interface AgentProfile {
+    name: string;
+    email: string;
+    role: string;
+    is_superuser: boolean;
+}
+
 interface Props {
     email: string;
-    /** Receives the confirmed fresh token so the parent can write it to window before resuming. */
-    onSuccess: (freshToken: string) => void | Promise<void>;
+    /**
+     * Called after successful re-auth with both the fresh token AND the
+     * agent's full profile so the parent can restore name/role in the UI
+     * without waiting for a page reload.
+     */
+    onSuccess: (freshToken: string, profile: AgentProfile) => void | Promise<void>;
     /** The stale/expired token — used to detect when a genuinely NEW token has arrived. */
     expiredToken?: string;
 }
@@ -21,19 +32,44 @@ export function SessionExpiredModal({ email, onSuccess, expiredToken }: Props) {
      *   2. Different from the expired one (so we're not just reading the stale cache)
      *   3. Has no error flag
      */
-    async function pollForFreshToken(maxWaitMs = 10000): Promise<string | null> {
+    async function pollForFreshToken(maxWaitMs = 10_000): Promise<string | null> {
         const interval = 300;
         const deadline = Date.now() + maxWaitMs;
         while (Date.now() < deadline) {
-            await new Promise<void>(r => setTimeout(r, interval));
-            const session = await getSession();
-            const token   = (session as any)?.accessToken as string | undefined;
+            await new Promise<void>((r) => setTimeout(r, interval));
+            const session  = await getSession();
+            const token    = (session as any)?.accessToken as string | undefined;
             const hasError = !!(session as any)?.error;
             if (token && !hasError && token !== expiredToken) {
                 return token;
             }
         }
         return null;
+    }
+
+    /**
+     * Fetch the agent's full profile with the fresh token so the parent
+     * can immediately restore the name/role without a page reload.
+     * Falls back gracefully if the request fails.
+     */
+    async function fetchProfile(freshToken: string): Promise<AgentProfile> {
+        try {
+            const resp = await fetch("/api/admin/me", {
+                headers: { Authorization: `Bearer ${freshToken}` },
+            });
+            if (resp.ok) {
+                const data = await resp.json();
+                return {
+                    name:         data.name         ?? "",
+                    email:        data.email        ?? email,
+                    role:         data.role         ?? "agent",
+                    is_superuser: data.is_superuser ?? false,
+                };
+            }
+        } catch {
+            // network error — fall through to minimal profile
+        }
+        return { name: "", email, role: "agent", is_superuser: false };
     }
 
     async function handleSubmit(e: React.FormEvent) {
@@ -64,7 +100,9 @@ export function SessionExpiredModal({ email, onSuccess, expiredToken }: Props) {
                 return;
             }
 
-            onSuccess(freshToken);
+            // Fetch fresh profile so the parent can restore the agent name immediately
+            const profile = await fetchProfile(freshToken);
+            await onSuccess(freshToken, profile);
 
         } catch {
             setError("Something went wrong. Please try again.");
@@ -85,19 +123,29 @@ export function SessionExpiredModal({ email, onSuccess, expiredToken }: Props) {
                             </svg>
                         </div>
                     </div>
-                    <h2 className="text-center text-xl font-semibold text-stone-900 mb-1">Session expired</h2>
+
+                    <h2 className="text-center text-xl font-semibold text-stone-900 mb-1">
+                        Session expired
+                    </h2>
                     <p className="text-center text-sm text-stone-500 mb-6">
                         Please enter your password to continue where you left off.
                     </p>
+
                     <form onSubmit={handleSubmit} className="space-y-4">
                         <div>
-                            <label className="block text-xs font-medium text-stone-500 mb-1.5">Signed in as</label>
+                            <label className="block text-xs font-medium text-stone-500 mb-1.5">
+                                Signed in as
+                            </label>
                             <div className="w-full px-3.5 py-2.5 rounded-xl bg-stone-100 border border-stone-200 text-sm text-stone-600 select-none">
                                 {email}
                             </div>
                         </div>
+
                         <div>
-                            <label className="block text-xs font-medium text-stone-500 mb-1.5" htmlFor="session-password">
+                            <label
+                                className="block text-xs font-medium text-stone-500 mb-1.5"
+                                htmlFor="session-password"
+                            >
                                 Password
                             </label>
                             <input
@@ -106,16 +154,18 @@ export function SessionExpiredModal({ email, onSuccess, expiredToken }: Props) {
                                 autoFocus
                                 autoComplete="current-password"
                                 value={password}
-                                onChange={e => setPassword(e.target.value)}
+                                onChange={(e) => setPassword(e.target.value)}
                                 placeholder="••••••••"
                                 className="w-full px-3.5 py-2.5 rounded-xl border border-stone-200 bg-white text-sm text-stone-900 placeholder-stone-300 focus:outline-none focus:ring-2 focus:ring-green-500/40 focus:border-green-500 transition"
                             />
                         </div>
+
                         {error && (
                             <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3.5 py-2.5">
                                 {error}
                             </p>
                         )}
+
                         <button
                             type="submit"
                             disabled={loading || !password}
@@ -129,8 +179,11 @@ export function SessionExpiredModal({ email, onSuccess, expiredToken }: Props) {
                                     </svg>
                                     Signing in…
                                 </>
-                            ) : "Continue"}
+                            ) : (
+                                "Continue"
+                            )}
                         </button>
+
                         <button
                             type="button"
                             onClick={() => signOut({ callbackUrl: "/login" })}
