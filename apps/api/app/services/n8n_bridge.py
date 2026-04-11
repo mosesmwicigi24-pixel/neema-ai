@@ -277,7 +277,7 @@ async def upsert_user(db: AsyncSession, body) -> dict:
 async def upsert_message(db: AsyncSession, redis, body) -> list:
     # Normalise wa_id so inbound and outbound messages always resolve to the
     # same Conversation row regardless of whether the '+' prefix is present.
-    body.wa_id = _norm_wa(body.wa_id)
+    body.wa_id = _normalize_wa_id(body.wa_id)
 
     result = await db.execute(
         select(Conversation).where(Conversation.wa_id == body.wa_id)
