@@ -25,6 +25,65 @@ import type {
 } from "@/types";
 import { useSession } from "next-auth/react";
 
+// ── AudioBubble ───────────────────────────────────────────────────────────────
+// Renders an audio player with a collapsible transcription toggle.
+// The transcript is hidden by default; agents expand it on demand.
+function AudioBubble({
+    src,
+    transcription,
+    cartText,
+    isInbound,
+}: {
+    src: string;
+    transcription: string | null;
+    cartText: string | null;
+    isInbound: boolean;
+}) {
+    const [open, setOpen] = React.useState(false);
+    const hasTranscript   = !!transcription;
+
+    return (
+        <div className="flex flex-col gap-1 w-full min-w-[220px]">
+            <audio src={src} controls className="w-full" style={{ minWidth: 220 }} />
+
+            {hasTranscript && (
+                <button
+                    onClick={() => setOpen((o) => !o)}
+                    className={[
+                        "flex items-center gap-1.5 text-[10px] font-medium",
+                        "transition-colors w-fit rounded-full px-2 py-0.5",
+                        isInbound
+                            ? "text-[#699a32] hover:text-[#427425] bg-[#f0f9e8]"
+                            : "text-white/70 hover:text-white bg-white/15",
+                    ].join(" ")}
+                >
+                    <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414A1 1 0 0119 9.414V19a2 2 0 01-2 2z" />
+                    </svg>
+                    {open ? "Hide transcript" : "Show transcript"}
+                    <span style={{ display: "inline-block", transform: open ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.15s" }}>▾</span>
+                </button>
+            )}
+
+            {open && transcription && (
+                <p className={[
+                    "text-[11px] leading-relaxed px-1 whitespace-pre-wrap",
+                    isInbound ? "italic text-[#3a5c28]/70" : "text-white/80",
+                ].join(" ")}>
+                    {transcription}
+                </p>
+            )}
+
+            {!isInbound && cartText && (
+                <div className="text-[11px] px-2 py-1.5 rounded-lg bg-white/20 font-medium whitespace-pre-wrap leading-relaxed">
+                    {cartText}
+                </div>
+            )}
+        </div>
+    );
+}
+
 type MobilePanel = "list" | "thread";
 
 interface ConversationsViewProps extends SharedViewProps {
@@ -273,9 +332,9 @@ export function ConversationsView({
                 // Primary dedup: exact DB id match
                 if (existing.some((x) => x.id === msg.id)) return m;
                 // Secondary dedup: audio replies broadcast before the DB row is
-                // committed, so msg.id is a crypto.randomUUID() that will never
-                // match the real DB id when the 10-second poll fires. Guard against
-                // a duplicate bubble by matching on media_url + direction within 15s.
+                // committed get a crypto.randomUUID() id that never matches the
+                // real DB id on the next poll. Guard with media_url + direction
+                // within a 15-second window.
                 if (msg.media_url) {
                     const tMs = new Date(msg.created_at).getTime();
                     if (
@@ -1610,9 +1669,9 @@ export function ConversationsView({
                                                                 "audio/",
                                                             )
                                                         ) {
-                                                            // inbound : caption = Whisper transcription of the customer voice note
-                                                            // outbound: text    = full AI reply text (transcript label)
-                                                            //           caption = cart summary (always-visible box)
+                                                            // inbound : caption = Whisper transcription
+                                                            // outbound: text    = full AI reply (transcript label)
+                                                            //           caption = cart summary
                                                             const transcription = isInbound
                                                                 ? ((msg as any).media_caption as string | null | undefined) ?? null
                                                                 : (msg.text && !msg.text.startsWith("[") ? msg.text : null);
