@@ -275,7 +275,9 @@ async def upsert_user(db: AsyncSession, body) -> dict:
 # Returns a Firestore-style document array so n8n can consume the output directly.
 
 async def upsert_message(db: AsyncSession, redis, body) -> list:
-    body.wa_id = _normalize_wa_id(body.wa_id)
+    # Normalise wa_id so inbound and outbound messages always resolve to the
+    # same Conversation row regardless of whether the '+' prefix is present.
+    body.wa_id = _norm_wa(body.wa_id)
 
     result = await db.execute(
         select(Conversation).where(Conversation.wa_id == body.wa_id)
@@ -325,9 +327,17 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
     )
     db.add(msg)
 
-    # ── Auto-escalate inbound media to human + broadcast ─────────────────────
+    # ── Selective auto-escalation for inbound media ───────────────────────────
+    # Audio voice notes are handled end-to-end by the AI (transcribed by Whisper,
+    # replied to with TTS audio). They must NOT escalate to human mode.
+    #
+    # Images, videos, and documents cannot be processed by the AI and still
+    # require a human agent to review and respond.
     escalated = False
-    if direction == MsgDirection.inbound and media_type:
+    is_audio_media = media_type in ("audio",) or (
+        mime_type and mime_type.startswith("audio/")
+    )
+    if direction == MsgDirection.inbound and media_type and not is_audio_media:
         if conv.intercept_mode != InterceptMode.human:
             conv.intercept_mode  = InterceptMode.human
             conv.intercept_since = datetime.now(timezone.utc)
@@ -409,7 +419,6 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
             "updateTime": now_str,
         }
     ]
-
 
 # ── Patch Message ─────────────────────────────────────────
 
