@@ -329,13 +329,16 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
 
     # ── Selective auto-escalation for inbound media ───────────────────────────
     # Audio voice notes are handled end-to-end by the AI (transcribed by Whisper,
-    # replied to with TTS audio). They must NOT escalate to human mode.
+    # replied to with TTS audio). They must NOT escalate to human mode — doing so
+    # puts the conversation into InterceptMode.human BEFORE outbound_gate() runs,
+    # which causes it to hold the AI reply instead of sending it.
     #
     # Images, videos, and documents cannot be processed by the AI and still
-    # require a human agent to review and respond.
+    # require a human agent to review and respond, so they continue to escalate.
     escalated = False
-    is_audio_media = media_type in ("audio",) or (
-        mime_type and mime_type.startswith("audio/")
+    is_audio_media = (
+        media_type == "audio"
+        or bool(mime_type and mime_type.startswith("audio/"))
     )
     if direction == MsgDirection.inbound and media_type and not is_audio_media:
         if conv.intercept_mode != InterceptMode.human:
