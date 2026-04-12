@@ -49,12 +49,19 @@ async def outbound_gate(db: AsyncSession, redis, body: OutboundDto) -> dict:
     """
     Core logic: AI mode sends immediately; human mode holds the reply.
 
-    Idempotency guard: the n8n workflow connects both the audio gate and the
-    text gate to the same downstream If node. When audio fires, n8n can invoke
-    this endpoint twice (once per gate). The guard checks for an identical
-    outbound message saved in the last 30 seconds and skips the duplicate,
-    returning {"action": "send"} so the workflow continues normally.
+    Idempotency guard: the n8n workflow has both the audio gate
+    (Outbound Gate API1 send Audio) and the text gate (Outbound Gate API)
+    connecting to the same downstream If node. When a customer sends audio,
+    n8n calls this endpoint twice — once with is_audio_reply=True (audio gate)
+    and once with is_audio_reply=False (text gate, which fires even though the
+    audio branch was taken, because If fires once per incoming connection).
+
+    The guard matches on ai_reply text within a 30-second window regardless of
+    media_type, so the audio row saved by the first call is found by the second
+    call even though the second has is_audio=False and would otherwise miss the
+    audio row (which has media_type='audio', not NULL).
     """
+    from sqlalchemy import and_
     body.wa_id = _normalize_wa_id(body.wa_id)
 
     result = await db.execute(
@@ -84,38 +91,26 @@ async def outbound_gate(db: AsyncSession, redis, body: OutboundDto) -> dict:
         return {"action": "hold"}
 
     # ── Idempotency guard ─────────────────────────────────────────────────────
-    # Both Outbound Gate API (text) and Outbound Gate API1 send Audio connect
-    # to the same If node in n8n. For audio messages, the workflow can call
-    # this endpoint twice within seconds. Detect and skip the duplicate.
-    from sqlalchemy import and_
+    # Match on (wa_id + outbound direction + same text + within 30s).
+    # Intentionally does NOT filter on media_type so that a prior audio row
+    # (media_type='audio') is found by the follow-up text-gate call
+    # (is_audio=False), preventing a duplicate plain-text bubble.
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=30)
-    is_audio = body.is_audio_reply and bool(body.audio_url)
-
-    if is_audio:
-        dupe_q = select(Message).where(
-            and_(
-                Message.wa_id == body.wa_id,
-                Message.direction == MsgDirection.outbound,
-                Message.media_url == body.audio_url,
-                Message.created_at >= cutoff,
-            )
-        )
-    else:
-        dupe_q = select(Message).where(
+    existing = await db.execute(
+        select(Message).where(
             and_(
                 Message.wa_id == body.wa_id,
                 Message.direction == MsgDirection.outbound,
                 Message.text == body.ai_reply,
-                Message.media_type.is_(None),
                 Message.created_at >= cutoff,
             )
         )
-
-    if (await db.execute(dupe_q)).scalar_one_or_none():
-        # Already saved — skip silently and let the workflow continue
+    )
+    if existing.scalar_one_or_none():
         return {"action": "send"}
 
     # ── Send to WhatsApp ──────────────────────────────────────────────────────
+    is_audio = body.is_audio_reply and bool(body.audio_url)
     if is_audio:
         await _send_waba_audio(body.wa_id, body.audio_url)
         if body.cart_text:
@@ -144,7 +139,7 @@ async def outbound_gate(db: AsyncSession, redis, body: OutboundDto) -> dict:
 
     ws_payload: dict = {
         "type":           "new_message",
-        "id":             str(msg.id),   # real DB id so frontend dedup works
+        "id":             str(msg.id),
         "conversationId": str(conv.id),
         "sender":         "ai",
         "text":           body.ai_reply,
