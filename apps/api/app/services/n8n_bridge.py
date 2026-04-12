@@ -46,6 +46,15 @@ def _normalize_wa_id(wa_id: str) -> str:
 # ── Intercept Gate ────────────────────────────────────────
 
 async def outbound_gate(db: AsyncSession, redis, body: OutboundDto) -> dict:
+    """
+    Core logic: AI mode sends immediately; human mode holds the reply.
+
+    Idempotency guard: the n8n workflow connects both the audio gate and the
+    text gate to the same downstream If node. When audio fires, n8n can invoke
+    this endpoint twice (once per gate). The guard checks for an identical
+    outbound message saved in the last 30 seconds and skips the duplicate,
+    returning {"action": "send"} so the workflow continues normally.
+    """
     body.wa_id = _normalize_wa_id(body.wa_id)
 
     result = await db.execute(
@@ -57,6 +66,7 @@ async def outbound_gate(db: AsyncSession, redis, body: OutboundDto) -> dict:
         db.add(conv)
         await db.flush()
 
+    # ── Human intercept: hold the reply ──────────────────────────────────────
     if conv.intercept_mode == InterceptMode.human:
         intercept = Intercept(
             conversation_id=conv.id,
@@ -73,43 +83,78 @@ async def outbound_gate(db: AsyncSession, redis, body: OutboundDto) -> dict:
         })
         return {"action": "hold"}
 
+    # ── Idempotency guard ─────────────────────────────────────────────────────
+    # Both Outbound Gate API (text) and Outbound Gate API1 send Audio connect
+    # to the same If node in n8n. For audio messages, the workflow can call
+    # this endpoint twice within seconds. Detect and skip the duplicate.
+    from sqlalchemy import and_
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=30)
+    is_audio = body.is_audio_reply and bool(body.audio_url)
+
+    if is_audio:
+        dupe_q = select(Message).where(
+            and_(
+                Message.wa_id == body.wa_id,
+                Message.direction == MsgDirection.outbound,
+                Message.media_url == body.audio_url,
+                Message.created_at >= cutoff,
+            )
+        )
+    else:
+        dupe_q = select(Message).where(
+            and_(
+                Message.wa_id == body.wa_id,
+                Message.direction == MsgDirection.outbound,
+                Message.text == body.ai_reply,
+                Message.media_type.is_(None),
+                Message.created_at >= cutoff,
+            )
+        )
+
+    if (await db.execute(dupe_q)).scalar_one_or_none():
+        # Already saved — skip silently and let the workflow continue
+        return {"action": "send"}
+
     # ── Send to WhatsApp ──────────────────────────────────────────────────────
-    if body.is_audio_reply and body.audio_url:
-        # Send the TTS audio file via WABA
+    if is_audio:
         await _send_waba_audio(body.wa_id, body.audio_url)
-        # If there's a cart summary, send it as a follow-up text message
         if body.cart_text:
             await _send_waba(body.wa_id, body.cart_text)
     else:
         await _send_waba(body.wa_id, body.ai_reply)
 
-    # ── Save outbound message to DB ───────────────────────────────────────────
+    # ── Save exactly ONE outbound Message row ─────────────────────────────────
     msg = Message(
         wa_id=body.wa_id,
         conversation_id=conv.id,
         direction=MsgDirection.outbound,
         sender=MsgSender.ai,
-        text=body.ai_reply,            # the full text reply (shown as transcription in UI)
-        media_type="audio" if (body.is_audio_reply and body.audio_url) else None,
-        media_url=body.audio_url if body.is_audio_reply else None,
-        media_caption=body.cart_text or None,   # cart summary shown below the player
+        text=body.ai_reply,
+        media_type="audio" if is_audio else None,
+        media_url=body.audio_url if is_audio else None,
+        media_caption=body.cart_text if (is_audio and body.cart_text) else None,
     )
     db.add(msg)
+
+    conv.last_message_at      = datetime.now(timezone.utc)
+    conv.last_message_preview = (body.ai_reply or "")[:100]
+
     await db.commit()
     await db.refresh(msg)
 
-    broadcast_payload = {
-        "type": "new_message",
+    ws_payload: dict = {
+        "type":           "new_message",
+        "id":             str(msg.id),   # real DB id so frontend dedup works
         "conversationId": str(conv.id),
-        "sender": "ai",
-        "text": body.ai_reply,
+        "sender":         "ai",
+        "text":           body.ai_reply,
     }
-    if body.is_audio_reply and body.audio_url:
-        broadcast_payload["mediaType"] = "audio"
-        broadcast_payload["mediaUrl"] = body.audio_url
-        broadcast_payload["mediaCaption"] = body.cart_text or None
+    if is_audio:
+        ws_payload["mediaType"]    = "audio"
+        ws_payload["mediaUrl"]     = body.audio_url
+        ws_payload["mediaCaption"] = body.cart_text or None
 
-    await _broadcast(redis, str(conv.id), broadcast_payload)
+    await _broadcast(redis, str(conv.id), ws_payload)
     return {"action": "send"}
 
 
@@ -456,7 +501,7 @@ async def patch_message(db: AsyncSession, docid: str, body) -> dict:
         # matches the normalised form used when the message was inserted.
         parts = docid.rsplit("_", 1)
         if len(parts) == 2:
-            wa_id = _norm_wa(parts[0])
+            wa_id = _normalize_wa_id(parts[0])
             ts_ms = parts[1]
             result = await db.execute(
                 select(Message).where(
@@ -675,4 +720,3 @@ async def upsert_customer_history(db: AsyncSession, body) -> dict:
     await db.execute(stmt)
     await db.commit()
     return {"ok": True}
-
