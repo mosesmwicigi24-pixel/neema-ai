@@ -250,19 +250,24 @@ async def get_context(db: AsyncSession, redis, wa_id: str) -> dict:
                 "at":       last_intercept.created_at.isoformat() if last_intercept.created_at else None,
             }
 
+    default_state = {"active": "active", "cart": {"items": [], "subtotal": 0}}
+
     ctx = {
         "wa_id":           wa_id,
-        "state":           user.state if user else {"active": "active", "cart": {"items": [], "subtotal": 0}},
+        "state":           (user.state if (user and user.state) else default_state),
         "last_text":       user.last_text      if user else "",
         "last_direction":  user.last_direction if user else "inbound",
         "last_message_ts": last_message_ts,
         "last_message_at": last_message_at_iso,
-        # ── Handover context — used by AI to acknowledge transitions ──────────
         "intercept_mode":   intercept_mode,
         "recent_intercept": recent_intercept,
     }
 
-    await redis.setex(cache_key, 3600, json.dumps(ctx))
+    try:
+        await redis.setex(cache_key, 3600, json.dumps(ctx))
+    except Exception:
+        pass  # Cache failure is non-fatal; always return the dict
+
     return ctx
 
 # ── Get User ──────────────────────────────────────────────
