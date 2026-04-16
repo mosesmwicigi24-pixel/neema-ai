@@ -628,17 +628,28 @@ async def clear_chat_history(
     await db.commit()
 
     redis = request.app.state.redis
-    await redis.delete(f"context:{conv.wa_id}")
+    import json, logging as _logging
+    _redis_log = _logging.getLogger("neema.redis")
 
-    import json
-    await redis.publish(
-        f"ws:channel:{conv_id}",
-        json.dumps({
-            "type":           "history_cleared",
-            "conversationId": conv_id,
-            "clearedBy":      agent.name,
-        })
-    )
+    # Cache invalidation — non-fatal: if Redis is a read replica or temporarily
+    # unavailable the cache will expire on its own (TTL=1h).
+    try:
+        await redis.delete(f"context:{conv.wa_id}")
+    except Exception as exc:
+        _redis_log.warning("Redis delete failed (context:%s): %s", conv.wa_id, exc)
+
+    # Broadcast — non-fatal: agents will see the cleared state on next refresh.
+    try:
+        await redis.publish(
+            f"ws:channel:{conv_id}",
+            json.dumps({
+                "type":           "history_cleared",
+                "conversationId": conv_id,
+                "clearedBy":      agent.name,
+            })
+        )
+    except Exception as exc:
+        _redis_log.warning("Redis publish failed (channel:%s): %s", conv_id, exc)
 
     return {"ok": True, "cleared": True, "conversation_id": conv_id}
 
