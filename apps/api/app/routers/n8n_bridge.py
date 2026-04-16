@@ -343,6 +343,8 @@ async def escalate_to_human(body: dict, request: Request, db: AsyncSession = Dep
     # ── 1. Save the customer's inbound message ────────────────────────────────
     # This ensures the agent can see exactly what the customer wrote
     # before the escalation happened.
+    from datetime import timedelta
+    msg_created_at = datetime.now(timezone.utc)
     if msg_text:
         inbound_msg = Message(
             wa_id=conv.wa_id,
@@ -350,9 +352,10 @@ async def escalate_to_human(body: dict, request: Request, db: AsyncSession = Dep
             direction=MsgDirection.inbound,
             sender=MsgSender.user,
             text=msg_text,
+            created_at=msg_created_at,
         )
         db.add(inbound_msg)
-        conv.last_message_at      = datetime.now(timezone.utc)
+        conv.last_message_at      = msg_created_at
         conv.last_message_preview = msg_text[:100]
 
     # ── 2. Intercept only if not already in human mode ────────────────────────
@@ -363,13 +366,16 @@ async def escalate_to_human(body: dict, request: Request, db: AsyncSession = Dep
         # any available agent can freely pick up the conversation.
         conv.intercept_mode    = InterceptMode.human
         conv.assigned_agent_id = None
-        conv.intercept_since   = datetime.now(timezone.utc)
+        conv.intercept_since   = msg_created_at
 
-        # Log the system-triggered intercept (no agent_id — system action)
+        # Pin the Intercept row 1s after the inbound message so it always
+        # sorts below it in the conversation thread.
         log = Intercept(
             conversation_id=conv.id,
             agent_id=None,           # system-triggered, not by a human agent
             action=InterceptAction.intercept,
+            note=reason,
+            created_at=msg_created_at + timedelta(seconds=1),
         )
         db.add(log)
 

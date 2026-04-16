@@ -385,11 +385,28 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
         media_type == "audio"
         or bool(mime_type and mime_type.startswith("audio/"))
     )
+    intercept_log = None
     if direction == MsgDirection.inbound and media_type and not is_audio_media:
         if conv.intercept_mode != InterceptMode.human:
             conv.intercept_mode  = InterceptMode.human
             conv.intercept_since = datetime.now(timezone.utc)
             escalated = True
+            # Write the Intercept row with created_at = message time + 1s so it
+            # always sorts AFTER the inbound message that triggered the escalation.
+            from app.models.intercept import Intercept, InterceptAction
+            reason = (
+                f"Customer sent a {media_type}"
+                + (f": {media_caption}" if media_caption else "")
+                + " — agent review required"
+            )
+            intercept_log = Intercept(
+                conversation_id=conv.id,
+                agent_id=None,
+                action=InterceptAction.intercept,
+                note=reason,
+                created_at=datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc) + timedelta(seconds=1),
+            )
+            db.add(intercept_log)
 
     await db.commit()
     await db.refresh(msg)
@@ -409,6 +426,11 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
     })
 
     if escalated:
+        reason = (
+            f"Customer sent a {media_type}"
+            + (f": {media_caption}" if media_caption else "")
+            + " — agent review required"
+        )
         # Broadcast to all agents — anyone can pick it up
         await _broadcast(redis, "agents:all", {
             "event":          "notification",
@@ -419,11 +441,13 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
             "conversationId": str(conv.id),
             "mediaType":      media_type,
         })
-        # Also broadcast intercept change so conversation list updates
+        # Broadcast intercept_changed with reason so the frontend pill shows it
         await _broadcast(redis, str(conv.id), {
             "type":           "intercept_changed",
             "conversationId": str(conv.id),
             "mode":           "human",
+            "eventKind":      "intercept",
+            "eventReason":    reason,
         })
 
     # ── Build response ────────────────────────────────────────────────────────

@@ -191,15 +191,40 @@ async def record_escalation(
     Write an `escalated` Intercept row (no agent — AI-triggered).
     Also write a follow-up `flag` row to mark the conversation Needs Attention.
     Called from n8n_bridge when the AI cannot satisfy the customer.
+
+    Intercept rows are timestamped 1 second after the most recent inbound
+    message so they always sort below it in the conversation thread.
     """
-    now = datetime.now(timezone.utc)
+    from sqlalchemy import select as _select
+    from app.models.message import Message as _Message, MsgDirection as _MsgDir
+    from datetime import timedelta
+
+    # Find the timestamp of the most recent inbound message for this conv
+    msg_result = await db.execute(
+        _select(_Message)
+        .where(
+            _Message.conversation_id == conv_id,
+            _Message.direction == _MsgDir.inbound,
+        )
+        .order_by(_Message.created_at.desc())
+        .limit(1)
+    )
+    last_inbound = msg_result.scalar_one_or_none()
+
+    # Pin the intercept row 1s after the triggering inbound message so it
+    # always renders below it in the thread regardless of clock skew.
+    anchor = (
+        last_inbound.created_at + timedelta(seconds=1)
+        if last_inbound and last_inbound.created_at
+        else datetime.now(timezone.utc)
+    )
 
     esc_log = Intercept(
         conversation_id=conv_id,
         agent_id=None,
         action=InterceptAction.escalated,
         note=reason,
-        created_at=now,
+        created_at=anchor,
     )
     db.add(esc_log)
 
@@ -207,7 +232,7 @@ async def record_escalation(
         conversation_id=conv_id,
         agent_id=None,
         action=InterceptAction.flag,
-        created_at=now,
+        created_at=anchor + timedelta(milliseconds=1),
     )
     db.add(flag_log)
 
