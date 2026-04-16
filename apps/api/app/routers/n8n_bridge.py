@@ -405,18 +405,32 @@ async def escalate_to_human(body: dict, request: Request, db: AsyncSession = Dep
         "already_human":  already_human,
     })
 
+    # Broadcast the inbound message so agents viewing this conversation live
+    # see what the customer wrote before the escalation pill appears.
+    if msg_text:
+        await _broadcast(redis, str(conv.id), {
+            "type":           "new_message",
+            "conversationId": str(conv.id),
+            "waId":           wa_id,
+            "direction":      "inbound",
+            "sender":         "user",
+            "text":           msg_text,
+            "created_at":     msg_created_at.isoformat(),
+        })
+
     # Broadcast intercept_changed so:
     # 1. The conversation list updates its mode indicator immediately.
     # 2. ConversationsView injects the escalation pill into the thread.
-    if not already_human:
-        await _broadcast(redis, str(conv.id), {
-            "type":            "intercept_changed",
-            "conversationId":  str(conv.id),
-            "mode":            "human",
-            "assignedAgentId": None,
-            "eventKind":       "intercept",   # renders the escalation pill
-            "eventReason":     reason,        # shown inside the pill
-        })
+    # Always broadcast (even if already_human) so the escalation pill is
+    # visible to agents who have this conversation open right now.
+    await _broadcast(redis, str(conv.id), {
+        "type":            "intercept_changed",
+        "conversationId":  str(conv.id),
+        "mode":            "human",
+        "assignedAgentId": None,
+        "eventKind":       "intercept",   # renders the escalation pill
+        "eventReason":     reason,        # shown inside the pill
+    })
 
     return {
         "ok":            True,

@@ -361,11 +361,25 @@ export function ConversationsView({
             if (sysEvt) {
                 setMessages((m) => {
                     const existing = m[activeConvId] ?? [];
-                    // Avoid double-adding if a reload already persisted it
-                    if (existing.some((x) => x.event_kind === sysEvt.event_kind &&
-                        Math.abs(new Date(x.created_at).getTime() - new Date(sysEvt.created_at).getTime()) < 3000
-                    )) return m;
-                    return { ...m, [activeConvId]: [...existing, sysEvt] };
+                    // Avoid injecting a duplicate live pill:
+                    // - If a live-evt entry with the same kind already exists
+                    //   (WS fired twice), skip it.
+                    // - DB-loaded events have ids like "evt-<uuid>" and are
+                    //   kept; they replace the temporary live-evt on next poll.
+                    const alreadyLive = existing.some(
+                        (x) =>
+                            x.id?.startsWith("live-evt-") &&
+                            x.event_kind === sysEvt.event_kind,
+                    );
+                    if (alreadyLive) return m;
+                    // Drop any previous live-evt for this kind so the new one
+                    // (with the latest reason / agent name) takes its place.
+                    const filtered = existing.filter(
+                        (x) =>
+                            !(x.id?.startsWith("live-evt-") &&
+                              x.event_kind === sysEvt.event_kind),
+                    );
+                    return { ...m, [activeConvId]: [...filtered, sysEvt] };
                 });
             }
         }
