@@ -1668,11 +1668,13 @@ export function ConversationsView({
                                                                 "audio/",
                                                             )
                                                         ) {
-                                                            // inbound : caption = Whisper transcription
+                                                            // inbound : transcription = msg.text
+                                                            //   patch_message writes the Whisper transcript
+                                                            //   to msg.text after transcription completes.
                                                             // outbound: text    = full AI reply (transcript label)
                                                             //           caption = cart summary
                                                             const transcription = isInbound
-                                                                ? ((msg as any).media_caption as string | null | undefined) ?? null
+                                                                ? (msg.text && !msg.text.startsWith("[") ? msg.text : null)
                                                                 : (msg.text && !msg.text.startsWith("[") ? msg.text : null);
                                                             const cartText = !isInbound
                                                                 ? ((msg as any).media_caption as string | null | undefined) ?? null

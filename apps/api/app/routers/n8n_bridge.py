@@ -124,57 +124,10 @@ async def outbound_gate(body: OutboundDto, request: Request, db: AsyncSession = 
     """
     Called by n8n after AI generates a reply.
     Returns {"action": "send"} or {"action": "hold"}.
-    For audio replies (is_audio_reply=True), also saves the outbound audio message
-    to DB and broadcasts it so agents see the voice note + text companion live.
+    svc.outbound_gate handles everything: saving the message row (audio or text),
+    sending to WhatsApp, and broadcasting the WS new_message event.
     """
     result = await svc.outbound_gate(db, request.app.state.redis, body)
-
-    # ── Audio reply: persist outbound audio message + broadcast ───────────────
-    if body.is_audio_reply and body.audio_url and result.get("action") == "send":
-        from sqlalchemy import select
-        from app.models.conversation import Conversation
-        from app.models.message import Message, MsgDirection, MsgSender
-        from datetime import datetime, timezone
-
-        db_result = await db.execute(
-            select(Conversation).where(Conversation.wa_id == body.wa_id)
-        )
-        conv = db_result.scalar_one_or_none()
-        if conv:
-            companion_text = body.ai_reply or ""
-            audio_msg = Message(
-                wa_id=body.wa_id,
-                conversation_id=conv.id,
-                direction=MsgDirection.outbound,
-                sender=MsgSender.ai,
-                # text = readable AI reply shown below the audio player
-                text=companion_text,
-                media_type="audio",
-                media_url=body.audio_url,
-                # media_caption = cart summary shown in highlighted box (if any)
-                media_caption=body.cart_text or None,
-            )
-            db.add(audio_msg)
-            conv.last_message_at = datetime.now(timezone.utc)
-            conv.last_message_preview = (
-                f"🔊 {companion_text[:80]}" if companion_text else "🔊 Voice reply"
-            )
-            await db.commit()
-            await db.refresh(audio_msg)
-
-            redis = request.app.state.redis
-            if redis:
-                await _broadcast(redis, str(conv.id), {
-                    "type":           "new_message",
-                    "conversationId": str(conv.id),
-                    "sender":         "ai",
-                    "text":           companion_text,
-                    "mediaType":      "audio",
-                    "mediaUrl":       body.audio_url,
-                    "mediaCaption":   body.cart_text or None,
-                    "transcription":  body.transcription or None,
-                })
-
     return result
 
 
