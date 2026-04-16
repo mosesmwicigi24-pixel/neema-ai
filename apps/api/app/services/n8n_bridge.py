@@ -121,6 +121,13 @@ async def outbound_gate(db: AsyncSession, redis, body: OutboundDto) -> dict:
         # Audio-only replies (greetings, questions, clarifications) have cart_text=""
         # and get no accompanying text message.
         if body.cart_text:
+            # WhatsApp does not guarantee delivery order based solely on API call order.
+            # The audio message is queued on WhatsApp's infrastructure and can be
+            # overtaken by the text if it is sent immediately. A short delay gives
+            # WhatsApp enough time to process and deliver the audio first so the
+            # customer always hears the voice note before reading the order summary.
+            import asyncio
+            await asyncio.sleep(2)
             await _send_waba(body.wa_id, body.ai_reply)
     else:
         await _send_waba(body.wa_id, body.ai_reply)
