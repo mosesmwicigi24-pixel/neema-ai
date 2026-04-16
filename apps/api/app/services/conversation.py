@@ -51,16 +51,25 @@ async def intercept_conversation(
     await db.commit()
 
     if redis:
-        await redis.delete(f"context:{conv.wa_id}")
+        try:
+            await redis.delete(f"context:{conv.wa_id}")
+        except Exception:
+            pass
         await _broadcast(redis, str(conv.id), {
             "type":              "intercept_changed",
             "conversationId":    str(conv.id),
             "mode":              "human",
             "assignedAgentId":   str(agent.id),
             "assignedAgentName": agent.name,
-            # Let the frontend append a live system-event bubble
             "eventKind":         "intercept",
             "eventAgentName":    agent.name,
+        })
+        await _broadcast(redis, "agents:all", {
+            "event":          "notification",
+            "type":           "intercept",
+            "title":          f"🙋 {agent.name} picked up",
+            "body":           f"Conversation with {conv.wa_id} is now being handled by {agent.name}",
+            "conversationId": str(conv.id),
         })
 
     return {"ok": True, "mode": "human", "assigned_to": str(agent.id)}
@@ -92,7 +101,10 @@ async def release_conversation(
     await db.commit()
 
     if redis:
-        await redis.delete(f"context:{conv.wa_id}")
+        try:
+            await redis.delete(f"context:{conv.wa_id}")
+        except Exception:
+            pass
         await _broadcast(redis, str(conv.id), {
             "type":            "intercept_changed",
             "conversationId":  str(conv.id),
@@ -100,6 +112,13 @@ async def release_conversation(
             "assignedAgentId": None,
             "eventKind":       "release",
             "eventAgentName":  agent.name,
+        })
+        await _broadcast(redis, "agents:all", {
+            "event":          "notification",
+            "type":           "system",
+            "title":          f"↩ Released to AI",
+            "body":           f"{agent.name} released conversation with {conv.wa_id} back to AI",
+            "conversationId": str(conv.id),
         })
 
     return {"ok": True, "mode": "ai"}
@@ -239,11 +258,20 @@ async def record_escalation(
     await db.commit()
 
     if redis:
+        # Broadcast to the conversation thread so the escalation pill appears inline
         await _broadcast(redis, str(conv_id), {
             "type":           "intercept_changed",
             "conversationId": str(conv_id),
             "eventKind":      "escalated",
             "eventReason":    reason,
+        })
+        # Broadcast to agents:all so the notification bell receives it
+        await _broadcast(redis, "agents:all", {
+            "event":          "notification",
+            "type":           "intercept",
+            "title":          "🤖 AI Escalation",
+            "body":           reason,
+            "conversationId": str(conv_id),
         })
 
 
