@@ -33,6 +33,12 @@ class MessageDto(BaseModel):
     media_caption: str | None = None
     mime_type:     str | None = None
     filename:      str | None = None
+    # Image analysis — populated by the Product Image Recognition sub-workflow.
+    # The GPT-4o description of the image; stored in media_caption so the UI
+    # can render it as a collapsible "Image Analysis" block (analogous to the
+    # audio transcription toggle). The user's own caption text (if any) is
+    # carried in `text` and rendered below the image in the conversation view.
+    image_analysis: str | None = None
 
 class UpsertMessagePatchDto(BaseModel):
     inbound_text: str | None = None

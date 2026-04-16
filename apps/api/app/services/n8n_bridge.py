@@ -336,12 +336,18 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
     sender    = MsgSender.user       if body.direction == "inbound" else MsgSender.ai
     direction = MsgDirection.inbound if body.direction == "inbound" else MsgDirection.outbound
 
-    media_type    = getattr(body, "media_type",    None)
-    media_url     = getattr(body, "media_url",     None)
-    media_id      = getattr(body, "media_id",      None)
-    media_caption = getattr(body, "media_caption", None)
-    mime_type     = getattr(body, "mime_type",     None)
-    filename      = getattr(body, "filename",      None)
+    media_type  = getattr(body, "media_type", None)
+    media_url   = getattr(body, "media_url",  None)
+    media_id    = getattr(body, "media_id",   None)
+    mime_type   = getattr(body, "mime_type",  None)
+    filename    = getattr(body, "filename",   None)
+    # image_analysis is populated by the Product Image Recognition sub-workflow
+    # (GPT-4o description of the image). It is stored in media_caption so the
+    # UI ImageBubble can render it as a collapsible "Image analysis" toggle,
+    # mirroring how audio transcriptions are stored and displayed.
+    # If image_analysis is absent, fall back to any explicit media_caption sent.
+    image_analysis = getattr(body, "image_analysis", None)
+    media_caption  = image_analysis or getattr(body, "media_caption", None)
 
     ts_ms: int | None = getattr(body, "ts_ms", None)
     ts_iso_raw: str | None = getattr(body, "ts_iso", None)
@@ -374,19 +380,25 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
 
     # ── Selective auto-escalation for inbound media ───────────────────────────
     # Audio voice notes are handled end-to-end by the AI (transcribed by Whisper,
-    # replied to with TTS audio). They must NOT escalate to human mode — doing so
-    # puts the conversation into InterceptMode.human BEFORE outbound_gate() runs,
-    # which causes it to hold the AI reply instead of sending it.
+    # replied to with TTS audio). They must NOT escalate to human mode.
     #
-    # Images, videos, and documents cannot be processed by the AI and still
-    # require a human agent to review and respond, so they continue to escalate.
+    # Images are now also handled end-to-end by the AI via GPT-4o analysis
+    # (Product Image Recognition sub-workflow). The analysis is stored in
+    # media_caption and fed back into Neema as the "user message". Escalation
+    # for images is driven explicitly by n8n via POST /api/n8n/escalate only
+    # when the AI flags that the item cannot be identified from the catalog.
+    #
+    # Only video and document messages still require a human agent to review,
+    # so those continue to auto-escalate.
     escalated = False
-    is_audio_media = (
+    is_ai_handled_media = (
         media_type == "audio"
         or bool(mime_type and mime_type.startswith("audio/"))
+        or media_type == "image"
+        or bool(mime_type and mime_type.startswith("image/"))
     )
     intercept_log = None
-    if direction == MsgDirection.inbound and media_type and not is_audio_media:
+    if direction == MsgDirection.inbound and media_type and not is_ai_handled_media:
         if conv.intercept_mode != InterceptMode.human:
             conv.intercept_mode  = InterceptMode.human
             conv.intercept_since = datetime.now(timezone.utc)
@@ -396,8 +408,7 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
             from app.models.intercept import Intercept, InterceptAction
             reason = (
                 f"Customer sent a {media_type}"
-                + (f": {media_caption}" if media_caption else "")
-                + " — agent review required"
+                + (f" — agent review required")
             )
             intercept_log = Intercept(
                 conversation_id=conv.id,
@@ -420,6 +431,7 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
         "text":           msg.text,
         "mediaType":      media_type,
         "mediaId":        media_id,
+        "mediaUrl":       media_url,
         "mediaCaption":   media_caption,
         "mimeType":       mime_type,
         "filename":       filename,
@@ -428,7 +440,6 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
     if escalated:
         reason = (
             f"Customer sent a {media_type}"
-            + (f": {media_caption}" if media_caption else "")
             + " — agent review required"
         )
         # Broadcast to all agents — anyone can pick it up
@@ -436,7 +447,7 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
             "event":          "notification",
             "type":           "human_transfer",
             "title":          f"Media received — {media_type}",
-            "body":           f"{body.wa_id} sent a {media_type}{': ' + media_caption if media_caption else ''}",
+            "body":           f"{body.wa_id} sent a {media_type} — agent review required",
             "waId":           body.wa_id,
             "conversationId": str(conv.id),
             "mediaType":      media_type,

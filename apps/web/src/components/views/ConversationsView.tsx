@@ -84,6 +84,83 @@ function AudioBubble({
     );
 }
 
+// ── ImageBubble ───────────────────────────────────────────────────────────────
+// Renders an inbound customer image with:
+//   - Clickable thumbnail (opens full-size in new tab)
+//   - Collapsible "Image analysis" toggle — GPT-4o description stored in
+//     msg.media_caption, shown exactly like the audio transcript toggle
+//   - Customer caption text (msg.text) below the image, if provided
+function ImageBubble({
+    src,
+    analysis,
+    caption,
+    isInbound,
+}: {
+    src: string;
+    analysis: string | null;
+    caption: string | null;
+    isInbound: boolean;
+}) {
+    const [open, setOpen] = React.useState(false);
+    const hasAnalysis = !!analysis;
+
+    return (
+        <div className="flex flex-col gap-1.5">
+            {/* Clickable thumbnail */}
+            <a href={src} target="_blank" rel="noopener noreferrer">
+                <img
+                    src={src}
+                    alt={caption || "image"}
+                    className="max-w-full rounded-xl border border-black/10 object-cover cursor-zoom-in"
+                    style={{ maxHeight: 240 }}
+                />
+            </a>
+
+            {/* Analysis toggle — same pill style as audio transcript toggle */}
+            {hasAnalysis && (
+                <button
+                    onClick={() => setOpen((o) => !o)}
+                    className={[
+                        "flex items-center gap-1.5 text-[10px] font-medium",
+                        "transition-colors w-fit rounded-full px-2 py-0.5",
+                        isInbound
+                            ? "text-[#699a32] hover:text-[#427425] bg-[#f0f9e8]"
+                            : "text-white/70 hover:text-white bg-white/15",
+                    ].join(" ")}
+                >
+                    {/* magnifier icon */}
+                    <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                            d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+                    </svg>
+                    {open ? "Hide image analysis" : "Show image analysis"}
+                    <span style={{ display: "inline-block", transform: open ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.15s" }}>▾</span>
+                </button>
+            )}
+
+            {/* GPT-4o analysis text (collapsible) */}
+            {open && analysis && (
+                <p className={[
+                    "text-[11px] leading-relaxed px-1 whitespace-pre-wrap",
+                    isInbound ? "italic text-[#3a5c28]/70" : "text-white/80",
+                ].join(" ")}>
+                    {analysis}
+                </p>
+            )}
+
+            {/* Customer's own caption text, rendered below the image */}
+            {caption && !caption.startsWith("[") && (
+                <p className={[
+                    "text-xs px-1 leading-relaxed",
+                    isInbound ? "text-[#1a2e0f]" : "text-white/90",
+                ].join(" ")}>
+                    {caption}
+                </p>
+            )}
+        </div>
+    );
+}
+
 type MobilePanel = "list" | "thread";
 
 interface ConversationsViewProps extends SharedViewProps {
@@ -1597,40 +1674,27 @@ export function ConversationsView({
                                                                 "image/",
                                                             )
                                                         ) {
+                                                            // media_caption holds the GPT-4o image analysis
+                                                            // (written by the Product Image Recognition
+                                                            // sub-workflow). msg.text holds the customer's
+                                                            // own caption text, if they included one.
+                                                            const imgAnalysis =
+                                                                ((msg as any).media_caption as
+                                                                    | string
+                                                                    | null
+                                                                    | undefined) ?? null;
+                                                            const imgCaption =
+                                                                msg.text &&
+                                                                !msg.text.startsWith("[")
+                                                                    ? msg.text
+                                                                    : null;
                                                             return (
-                                                                <div className="space-y-1">
-                                                                    <a
-                                                                        href={
-                                                                            mu
-                                                                        }
-                                                                        target="_blank"
-                                                                        rel="noopener noreferrer"
-                                                                    >
-                                                                        <img
-                                                                            src={
-                                                                                mu
-                                                                            }
-                                                                            alt={
-                                                                                msg.text ||
-                                                                                "image"
-                                                                            }
-                                                                            className="max-w-full rounded-xl border border-black/10 object-cover"
-                                                                            style={{
-                                                                                maxHeight: 240,
-                                                                            }}
-                                                                        />
-                                                                    </a>
-                                                                    {msg.text &&
-                                                                        !msg.text.startsWith(
-                                                                            "[",
-                                                                        ) && (
-                                                                            <p className="text-xs px-1 leading-relaxed">
-                                                                                {
-                                                                                    msg.text
-                                                                                }
-                                                                            </p>
-                                                                        )}
-                                                                </div>
+                                                                <ImageBubble
+                                                                    src={mu}
+                                                                    analysis={imgAnalysis}
+                                                                    caption={imgCaption}
+                                                                    isInbound={isInbound}
+                                                                />
                                                             );
                                                         }
                                                         if (
