@@ -1294,15 +1294,17 @@ export function ConversationsView({
                                                             <div className="flex-1 h-px bg-[#427425]/30" />
                                                         </div>
                                                     )}
-                                                    <div className="flex items-center gap-2 my-2">
-                                                        <div className="flex-1 h-px bg-amber-200" />
-                                                        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 max-w-[80%]">
-                                                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse flex-shrink-0" />
-                                                            <span className="text-[10px] font-semibold text-amber-700 whitespace-nowrap">Escalated</span>
-                                                            <span className="text-[10px] text-amber-600 truncate">— {reasonText}</span>
-                                                            <span className="text-[9px] text-amber-400 flex-shrink-0 ml-1">{msg.created_at ? timeAgo(msg.created_at) : ""}</span>
+                                                    <div className="flex flex-col items-center gap-1 my-2">
+                                                        <div className="flex items-center gap-2 w-full">
+                                                            <div className="flex-1 h-px bg-amber-200" />
+                                                            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 flex-shrink-0">
+                                                                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse flex-shrink-0" />
+                                                                <span className="text-[10px] font-semibold text-amber-700 whitespace-nowrap">Escalated to agent</span>
+                                                                <span className="text-[9px] text-amber-400 whitespace-nowrap">· {msg.created_at ? timeAgo(msg.created_at) : ""}</span>
+                                                            </div>
+                                                            <div className="flex-1 h-px bg-amber-200" />
                                                         </div>
-                                                        <div className="flex-1 h-px bg-amber-200" />
+                                                        <p className="text-[10px] text-amber-600 text-center leading-relaxed max-w-[72%]">{reasonText}</p>
                                                     </div>
                                                 </React.Fragment>
                                             );
@@ -1325,9 +1327,10 @@ export function ConversationsView({
                                                     )}
                                                     <div className="flex items-center gap-2 my-2">
                                                         <div className="flex-1 h-px bg-red-100" />
-                                                        <span className="text-[10px] font-semibold px-2.5 py-1 rounded-full bg-red-100 text-red-700 whitespace-nowrap">
-                                                            🚩 Flagged: Needs Attention
-                                                        </span>
+                                                        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-100 text-red-700">
+                                                            <span className="text-[10px] font-semibold whitespace-nowrap">🚩 Flagged: Needs Attention</span>
+                                                            {msg.created_at && <span className="text-[9px] opacity-60 whitespace-nowrap">· {timeAgo(msg.created_at)}</span>}
+                                                        </div>
                                                         <div className="flex-1 h-px bg-red-100" />
                                                     </div>
                                                 </React.Fragment>
@@ -1373,15 +1376,17 @@ export function ConversationsView({
                                                                 <div className="flex-1 h-px bg-[#427425]/30" />
                                                             </div>
                                                         )}
-                                                        <div className="flex items-center gap-2 my-2">
-                                                            <div className="flex-1 h-px bg-amber-200" />
-                                                            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 max-w-[80%]">
-                                                                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse flex-shrink-0" />
-                                                                <span className="text-[10px] font-semibold text-amber-700 whitespace-nowrap">Escalated</span>
-                                                                <span className="text-[10px] text-amber-600 truncate">— {reasonText}</span>
-                                                                <span className="text-[9px] text-amber-400 flex-shrink-0 ml-1">{msg.created_at ? timeAgo(msg.created_at) : ""}</span>
+                                                        <div className="flex flex-col items-center gap-1 my-2">
+                                                            <div className="flex items-center gap-2 w-full">
+                                                                <div className="flex-1 h-px bg-amber-200" />
+                                                                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 flex-shrink-0">
+                                                                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse flex-shrink-0" />
+                                                                    <span className="text-[10px] font-semibold text-amber-700 whitespace-nowrap">Escalated to agent</span>
+                                                                    <span className="text-[9px] text-amber-400 whitespace-nowrap">· {msg.created_at ? timeAgo(msg.created_at) : ""}</span>
+                                                                </div>
+                                                                <div className="flex-1 h-px bg-amber-200" />
                                                             </div>
-                                                            <div className="flex-1 h-px bg-amber-200" />
+                                                            <p className="text-[10px] text-amber-600 text-center leading-relaxed max-w-[72%]">{reasonText}</p>
                                                         </div>
                                                     </React.Fragment>
                                                 );
@@ -1414,6 +1419,7 @@ export function ConversationsView({
                                                             <span className="text-[10px] font-semibold text-purple-800 whitespace-nowrap">
                                                                 {msg.agent_name} picked up
                                                             </span>
+                                                            <span className="text-[9px] text-purple-400 whitespace-nowrap">· {msg.created_at ? timeAgo(msg.created_at) : ""}</span>
                                                         </div>
                                                         <div className="flex-1 h-px bg-purple-100" />
                                                     </div>
@@ -1444,9 +1450,10 @@ export function ConversationsView({
                                                 )}
                                                 <div className="flex items-center gap-2 my-2">
                                                     <div className="flex-1 h-px bg-stone-200" />
-                                                    <span className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border whitespace-nowrap ${pillStyle}`}>
-                                                        {msg.text}
-                                                    </span>
+                                                    <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border whitespace-nowrap ${pillStyle}`}>
+                                                        <span className="text-[10px] font-semibold">{msg.text}</span>
+                                                        {msg.created_at && <span className="text-[9px] opacity-60">· {timeAgo(msg.created_at)}</span>}
+                                                    </div>
                                                     <div className="flex-1 h-px bg-stone-200" />
                                                 </div>
                                             </React.Fragment>
