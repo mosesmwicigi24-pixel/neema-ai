@@ -113,8 +113,15 @@ async def outbound_gate(db: AsyncSession, redis, body: OutboundDto) -> dict:
     is_audio = body.is_audio_reply and bool(body.audio_url)
     if is_audio:
         await _send_waba_audio(body.wa_id, body.audio_url)
+        # Send the full text reply alongside audio only when cart content is present.
+        # cart_text being non-empty is the signal (set by the n8n workflow only when
+        # full_cart / items_added is non-empty). We send ai_reply — the complete
+        # formatted message with the bullet-point order summary — rather than
+        # cart_text alone, so the customer receives the full readable context.
+        # Audio-only replies (greetings, questions, clarifications) have cart_text=""
+        # and get no accompanying text message.
         if body.cart_text:
-            await _send_waba(body.wa_id, body.cart_text)
+            await _send_waba(body.wa_id, body.ai_reply)
     else:
         await _send_waba(body.wa_id, body.ai_reply)
 
