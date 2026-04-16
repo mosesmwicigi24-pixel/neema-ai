@@ -8,13 +8,49 @@ from app.schemas.n8n import (
     UserDto, OrderEventDto, CustomerHistoryDto, UserFactsDto
 )
 import json
+import logging as _logging
 
 router = APIRouter()
+_redis_log = _logging.getLogger("neema.redis")
 
 
 async def _broadcast(redis, conv_id: str, payload: dict) -> None:
-    """Publish a WebSocket event to all clients watching this conversation."""
-    await redis.publish(f"ws:channel:{conv_id}", json.dumps(payload))
+    """Publish a WebSocket event to all clients watching this conversation.
+    Non-fatal — a read-only replica or transient Redis failure must never
+    crash a request whose DB work already committed."""
+    try:
+        await redis.publish(f"ws:channel:{conv_id}", json.dumps(payload))
+    except Exception as exc:
+        _redis_log.warning(
+            "Redis publish failed (channel=%s): %s — "
+            "check REDIS_URL points to the primary node, not a read replica.",
+            conv_id, exc,
+        )
+
+
+async def _redis_delete(redis, key: str) -> None:
+    """Delete a Redis key. Non-fatal — cache invalidation failures are logged,
+    not propagated."""
+    try:
+        await redis.delete(key)
+    except Exception as exc:
+        _redis_log.warning(
+            "Redis delete failed (key=%s): %s — "
+            "check REDIS_URL points to the primary node, not a read replica.",
+            key, exc,
+        )
+
+
+async def _redis_publish(redis, channel: str, payload: dict) -> None:
+    """Publish directly to a channel (no ws:channel: prefix added). Non-fatal."""
+    try:
+        await redis.publish(channel, json.dumps(payload))
+    except Exception as exc:
+        _redis_log.warning(
+            "Redis publish failed (channel=%s): %s — "
+            "check REDIS_URL points to the primary node, not a read replica.",
+            channel, exc,
+        )
 
 
 def verify_n8n_secret(x_n8n_secret: str = Header(...)):
@@ -205,8 +241,8 @@ async def post_notify(body: dict, request: Request):
     redis = request.app.state.redis
     agent_id = body.get("agent_id")
     # Broadcast to specific agent or all agents
-    channel = f"agents:{agent_id}" if agent_id else "agents:all"
-    await redis.publish(f"ws:channel:{channel}", json.dumps({
+    channel = f"ws:channel:agents:{agent_id}" if agent_id else "ws:channel:agents:all"
+    await _redis_publish(redis, channel, {
         "event":  "notification",
         "type":   body.get("type"),
         "title":  body.get("title"),
@@ -214,10 +250,9 @@ async def post_notify(body: dict, request: Request):
         "wa_id":  body.get("wa_id"),
         "ts":     body.get("ts"),
         "data":   body,
-    }))
+    })
     return {"ok": True}
 
-# Add to app/routers/n8n_bridge.py router
 @router.post("/media/download", dependencies=[Depends(verify_n8n_secret)])
 async def n8n_download_media(body: dict, request: Request):
     media_id  = body.get("media_id")
@@ -269,7 +304,6 @@ async def n8n_download_media(body: dict, request: Request):
         "mime_type":  mime_type,
     }
 
-    # f"{base}/api/media/serve/{filename}",
 
 # ── Media Escalation (system-triggered intercept by wa_id) ───────────────────
 @router.post("/escalate", dependencies=[Depends(verify_n8n_secret)])
@@ -339,8 +373,10 @@ async def escalate_to_human(body: dict, request: Request, db: AsyncSession = Dep
         )
         db.add(log)
 
-        # Clear cached context so the next agent pick-up gets a fresh state
-        await redis.delete(f"context:{wa_id}")
+        # Clear cached context so the next agent pick-up gets a fresh state.
+        # Non-fatal: if Redis is unavailable the cache will simply expire
+        # on its own (TTL=1h set in get_context).
+        await _redis_delete(redis, f"context:{wa_id}")
 
     await db.commit()
 
@@ -353,7 +389,7 @@ async def escalate_to_human(body: dict, request: Request, db: AsyncSession = Dep
         else f"📎 {reason} — conversation is ready for pickup"
     )
 
-    await redis.publish("ws:channel:agents:all", json.dumps({
+    await _redis_publish(redis, "ws:channel:agents:all", {
         "event":          "notification",
         "type":           "media_escalation",
         "title":          "📎 Media Request",
@@ -361,7 +397,7 @@ async def escalate_to_human(body: dict, request: Request, db: AsyncSession = Dep
         "wa_id":          wa_id,
         "conv_id":        str(conv.id),
         "already_human":  already_human,
-    }))
+    })
 
     # Also broadcast intercept_changed so the conversation list
     # updates its mode indicator in the agent UI immediately.

@@ -85,8 +85,34 @@ async def run_migrations():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Redis
-    app.state.redis = aioredis.from_url(settings.redis_url, decode_responses=True)
+    import logging
+    logger = logging.getLogger("neema.startup")
+
+    # ── Redis ─────────────────────────────────────────────────────────────────
+    # Connect and immediately verify the node is writable (i.e. a primary, not
+    # a read replica).  A replica raises ReadOnlyError on any write command,
+    # which would otherwise crash the first request that tries to cache/publish.
+    redis = aioredis.from_url(
+        settings.redis_url,
+        decode_responses=True,
+        socket_connect_timeout=5,
+        socket_timeout=5,
+    )
+    try:
+        await redis.ping()
+        # Write a throw-away key to confirm this node accepts writes.
+        await redis.set("__startup_write_check__", "1", ex=10)
+        await redis.delete("__startup_write_check__")
+        logger.info("Redis: connected to writable primary ✓")
+    except Exception as exc:
+        # Log clearly so the error is obvious in deployment logs, but don't
+        # crash — the app can still serve requests; Redis failures are handled
+        # defensively throughout the codebase.
+        logger.error(
+            "Redis startup check failed — is REDIS_URL pointing at a read "
+            f"replica instead of the primary?  Error: {exc}"
+        )
+    app.state.redis = redis
 
     # Run schema migrations before serving any traffic
     await run_migrations()
