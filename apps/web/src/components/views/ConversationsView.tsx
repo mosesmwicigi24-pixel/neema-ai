@@ -1249,7 +1249,21 @@ export function ConversationsView({
                                               activeMessages.length - snap,
                                           )
                                         : -1;
-                                return activeMessages.map((msg, idx) => {
+                                // ── Sort: escalation system events nudged just after their
+                                // preceding inbound message so they always appear below it.
+                                const sortedMessages = [...activeMessages].sort((a, b) => {
+                                    const tA = new Date(a.created_at ?? 0).getTime() +
+                                        (a.type === "system_event" && (a.event_kind === "escalated" || (a.event_kind === "intercept" && !a.agent_name)) ? 1 : 0);
+                                    const tB = new Date(b.created_at ?? 0).getTime() +
+                                        (b.type === "system_event" && (b.event_kind === "escalated" || (b.event_kind === "intercept" && !b.agent_name)) ? 1 : 0);
+                                    return tA - tB;
+                                });
+
+                                // ── Dedup: only show the FIRST escalation/system-intercept per thread.
+                                // Repeat media requests after the first escalation are suppressed.
+                                let escalationShown = false;
+
+                                return sortedMessages.map((msg, idx) => {
                                     const isInbound =
                                         msg.direction === "inbound";
                                     const isNote = msg.isNote;
@@ -1265,6 +1279,10 @@ export function ConversationsView({
                                         // request or media received).  Gives full
                                         // context so the agent understands why.
                                         if (kind === "escalated") {
+                                            // Only show the first escalation; suppress repeats
+                                            if (escalationShown) return null;
+                                            escalationShown = true;
+                                            const reasonText = msg.event_reason || "AI could not continue — agent needed";
                                             return (
                                                 <React.Fragment key={msg.id}>
                                                     {showDivider && (
@@ -1276,37 +1294,15 @@ export function ConversationsView({
                                                             <div className="flex-1 h-px bg-[#427425]/30" />
                                                         </div>
                                                     )}
-                                                    <div className="flex justify-center my-3">
-                                                        <div className="w-full max-w-[88%] rounded-2xl overflow-hidden border border-amber-200 bg-amber-50">
-                                                            {/* Header bar */}
-                                                            <div className="flex items-center gap-2 px-3 py-2 bg-amber-100 border-b border-amber-200">
-                                                                <span className="text-amber-600 text-sm leading-none">⚠</span>
-                                                                <span className="text-[11px] font-semibold text-amber-800 uppercase tracking-wide">
-                                                                    Escalated — awaiting agent
-                                                                </span>
-                                                                <span className="ml-auto text-[10px] text-amber-500">
-                                                                    {msg.created_at ? timeAgo(msg.created_at) : ""}
-                                                                </span>
-                                                            </div>
-                                                            {/* Reason body */}
-                                                            {msg.event_reason && (
-                                                                <div className="px-3 py-2">
-                                                                    <p className="text-[10px] font-semibold text-amber-700 uppercase tracking-wide mb-1">
-                                                                        Reason
-                                                                    </p>
-                                                                    <p className="text-xs text-amber-900 leading-relaxed">
-                                                                        {msg.event_reason}
-                                                                    </p>
-                                                                </div>
-                                                            )}
-                                                            {/* Waiting indicator */}
-                                                            <div className="flex items-center gap-1.5 px-3 py-2 border-t border-amber-100">
-                                                                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-                                                                <span className="text-[10px] text-amber-600">
-                                                                    Waiting for an agent to pick up
-                                                                </span>
-                                                            </div>
+                                                    <div className="flex items-center gap-2 my-2">
+                                                        <div className="flex-1 h-px bg-amber-200" />
+                                                        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 max-w-[80%]">
+                                                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse flex-shrink-0" />
+                                                            <span className="text-[10px] font-semibold text-amber-700 whitespace-nowrap">Escalated</span>
+                                                            <span className="text-[10px] text-amber-600 truncate">— {reasonText}</span>
+                                                            <span className="text-[9px] text-amber-400 flex-shrink-0 ml-1">{msg.created_at ? timeAgo(msg.created_at) : ""}</span>
                                                         </div>
+                                                        <div className="flex-1 h-px bg-amber-200" />
                                                     </div>
                                                 </React.Fragment>
                                             );
@@ -1349,11 +1345,10 @@ export function ConversationsView({
                                         if (kind === "intercept") {
                                             // ── Case 1: system / media escalation ──
                                             if (!msg.agent_name) {
-                                                // Derive a human-readable reason from
-                                                // event_reason if the backend wrote one,
-                                                // otherwise fall back to context from the
-                                                // surrounding messages.
-                                                const hasInboundMedia = activeMessages
+                                                // Only show the first escalation; suppress repeats
+                                                if (escalationShown) return null;
+                                                escalationShown = true;
+                                                const hasInboundMedia = sortedMessages
                                                     .slice(0, idx)
                                                     .some(
                                                         (m) =>
@@ -1364,8 +1359,8 @@ export function ConversationsView({
                                                 const reasonText =
                                                     msg.event_reason ||
                                                     (hasInboundMedia
-                                                        ? "Customer sent a media file that the AI cannot process. An agent needs to review and respond."
-                                                        : "Customer requested media or the AI could not continue. An agent needs to take over.");
+                                                        ? "Media received — AI cannot process"
+                                                        : "AI could not continue — agent needed");
 
                                                 return (
                                                     <React.Fragment key={msg.id}>
@@ -1378,32 +1373,15 @@ export function ConversationsView({
                                                                 <div className="flex-1 h-px bg-[#427425]/30" />
                                                             </div>
                                                         )}
-                                                        <div className="flex justify-center my-3">
-                                                            <div className="w-full max-w-[88%] rounded-2xl overflow-hidden border border-amber-200 bg-amber-50">
-                                                                <div className="flex items-center gap-2 px-3 py-2 bg-amber-100 border-b border-amber-200">
-                                                                    <span className="text-amber-600 text-sm leading-none">⚠</span>
-                                                                    <span className="text-[11px] font-semibold text-amber-800 uppercase tracking-wide">
-                                                                        Escalated — awaiting agent
-                                                                    </span>
-                                                                    <span className="ml-auto text-[10px] text-amber-500">
-                                                                        {msg.created_at ? timeAgo(msg.created_at) : ""}
-                                                                    </span>
-                                                                </div>
-                                                                <div className="px-3 py-2">
-                                                                    <p className="text-[10px] font-semibold text-amber-700 uppercase tracking-wide mb-1">
-                                                                        Reason
-                                                                    </p>
-                                                                    <p className="text-xs text-amber-900 leading-relaxed">
-                                                                        {reasonText}
-                                                                    </p>
-                                                                </div>
-                                                                <div className="flex items-center gap-1.5 px-3 py-2 border-t border-amber-100">
-                                                                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-                                                                    <span className="text-[10px] text-amber-600">
-                                                                        Waiting for an agent to pick up
-                                                                    </span>
-                                                                </div>
+                                                        <div className="flex items-center gap-2 my-2">
+                                                            <div className="flex-1 h-px bg-amber-200" />
+                                                            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 max-w-[80%]">
+                                                                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse flex-shrink-0" />
+                                                                <span className="text-[10px] font-semibold text-amber-700 whitespace-nowrap">Escalated</span>
+                                                                <span className="text-[10px] text-amber-600 truncate">— {reasonText}</span>
+                                                                <span className="text-[9px] text-amber-400 flex-shrink-0 ml-1">{msg.created_at ? timeAgo(msg.created_at) : ""}</span>
                                                             </div>
+                                                            <div className="flex-1 h-px bg-amber-200" />
                                                         </div>
                                                     </React.Fragment>
                                                 );
