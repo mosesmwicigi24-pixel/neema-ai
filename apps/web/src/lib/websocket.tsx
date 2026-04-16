@@ -100,7 +100,11 @@ function resolveWsUrl(agentId: string): string | null {
         return null;
     }
 
-    return `${wsBase}/ws/${agentId}`;
+    // Strip any /api path suffix — the WebSocket endpoint is at /ws/{id},
+    // not /api/ws/{id}. NEXT_PUBLIC_API_URL often includes /api.
+    const cleanBase = wsBase.replace(/\/api\/?$/, "");
+
+    return `${cleanBase}/ws/${agentId}`;
 }
 
 // ── Context ───────────────────────────────────────────────────────────────────
