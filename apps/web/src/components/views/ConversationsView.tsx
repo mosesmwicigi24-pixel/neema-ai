@@ -1674,20 +1674,34 @@ export function ConversationsView({
                                                                 "image/",
                                                             )
                                                         ) {
-                                                            // media_caption holds the GPT-4o image analysis
-                                                            // (written by the Product Image Recognition
-                                                            // sub-workflow). msg.text holds the customer's
-                                                            // own caption text, if they included one.
+                                                            // media_caption = GPT-4o image analysis
+                                                            // (Product Image Recognition sub-workflow).
+                                                            // msg.text = customer's own caption only.
+                                                            //
+                                                            // Guard: suppress imgCaption when msg.text
+                                                            // is identical to media_caption, or starts
+                                                            // with the analysis content. This happens on
+                                                            // legacy rows where the analysis leaked into
+                                                            // the text field before the field-mapping fix.
+                                                            // In that case the analysis should only appear
+                                                            // via the collapsible toggle, never as a
+                                                            // visible caption below the image.
                                                             const imgAnalysis =
                                                                 ((msg as any).media_caption as
                                                                     | string
                                                                     | null
                                                                     | undefined) ?? null;
-                                                            const imgCaption =
-                                                                msg.text &&
-                                                                !msg.text.startsWith("[")
-                                                                    ? msg.text
-                                                                    : null;
+                                                            const rawText = msg.text ?? "";
+                                                            const imgCaption = (() => {
+                                                                if (!rawText) return null;
+                                                                // Bracket placeholders are never real captions
+                                                                if (rawText.startsWith("[")) return null;
+                                                                // Text IS the analysis — no user caption was added
+                                                                if (imgAnalysis && rawText.trim() === imgAnalysis.trim()) return null;
+                                                                // Text STARTS WITH the analysis — legacy leak
+                                                                if (imgAnalysis && rawText.trim().startsWith(imgAnalysis.trim().slice(0, 40))) return null;
+                                                                return rawText;
+                                                            })();
                                                             return (
                                                                 <ImageBubble
                                                                     src={mu}
