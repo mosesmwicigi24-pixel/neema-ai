@@ -12,8 +12,7 @@ import type { Message, SystemEventKind } from "@/types";
 
 // ── Native WebSocket wrapper ──────────────────────────────────────────────────
 // The backend is a plain FastAPI WebSocket endpoint at /ws/{agent_id}.
-// It is NOT a Socket.IO server — using socket.io-client here would fail the
-// handshake silently.  We use the browser's native WebSocket instead.
+// It is NOT a Socket.IO server — socket.io-client would fail the handshake.
 
 interface NativeWs {
     send: (data: string) => void;
@@ -28,13 +27,16 @@ function createNativeWs(url: string): NativeWs {
     let closed = false;
     let pingInterval: ReturnType<typeof setInterval> | null = null;
 
+    function emit(event: string, data: any) {
+        listeners[event]?.forEach((h) => h(data));
+    }
+
     function connect() {
         if (closed) return;
         ws = new WebSocket(url);
 
         ws.onopen = () => {
             emit("connect", null);
-            // Send pings every 25s to keep the connection alive
             pingInterval = setInterval(() => {
                 if (ws?.readyState === WebSocket.OPEN) {
                     ws.send(JSON.stringify({ type: "ping" }));
@@ -54,36 +56,51 @@ function createNativeWs(url: string): NativeWs {
         ws.onerror = () => emit("error", null);
 
         ws.onclose = () => {
-            if (pingInterval) clearInterval(pingInterval);
+            if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
             emit("disconnect", null);
-            // Reconnect after 2s unless explicitly closed
             if (!closed) setTimeout(connect, 2_000);
         };
-    }
-
-    function emit(event: string, data: any) {
-        listeners[event]?.forEach((h) => h(data));
     }
 
     connect();
 
     return {
-        send: (data) => {
-            if (ws?.readyState === WebSocket.OPEN) ws.send(data);
-        },
+        send: (data) => { if (ws?.readyState === WebSocket.OPEN) ws.send(data); },
         on: (event, handler) => {
             if (!listeners[event]) listeners[event] = new Set();
             listeners[event].add(handler);
         },
-        off: (event, handler) => {
-            listeners[event]?.delete(handler);
-        },
+        off: (event, handler) => { listeners[event]?.delete(handler); },
         close: () => {
             closed = true;
-            if (pingInterval) clearInterval(pingInterval);
+            if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
             ws?.close();
         },
     };
+}
+
+// ── Derive a valid ws:// / wss:// URL from env ────────────────────────────────
+function resolveWsUrl(agentId: string): string | null {
+    // Try NEXT_PUBLIC_API_URL first, fall back to NEXT_PUBLIC_WS_URL, then same-origin.
+    const raw =
+        process.env.NEXT_PUBLIC_API_URL ||
+        process.env.NEXT_PUBLIC_WS_URL ||
+        (typeof window !== "undefined" ? window.location.origin : "");
+
+    if (!raw) return null;
+
+    const wsBase = raw
+        .replace(/^https:\/\//, "wss://")
+        .replace(/^http:\/\//, "ws://")
+        .replace(/\/$/, "");
+
+    // Guard: must start with ws:// or wss:// after replacement
+    if (!wsBase.startsWith("ws://") && !wsBase.startsWith("wss://")) {
+        console.warn("[WS] Could not derive a ws:// URL from:", raw);
+        return null;
+    }
+
+    return `${wsBase}/ws/${agentId}`;
 }
 
 // ── Context ───────────────────────────────────────────────────────────────────
@@ -97,13 +114,16 @@ export function WsProvider({ children }: { children: ReactNode }) {
         const agentId = (session as any)?.user?.id;
         if (!agentId) return;
 
-        const base = (process.env.NEXT_PUBLIC_WS_URL ?? "").replace(/^http/, "ws");
-        const url = `${base}/ws/${agentId}`;
+        const url = resolveWsUrl(agentId);
+        if (!url) {
+            console.warn("[WS] No valid WebSocket URL — set NEXT_PUBLIC_API_URL");
+            return;
+        }
 
         const ws = createNativeWs(url);
         wsRef.current = ws;
 
-        ws.on("connect",    () => console.log("[WS] connected"));
+        ws.on("connect",    () => console.log("[WS] connected →", url));
         ws.on("disconnect", () => console.log("[WS] disconnected"));
         ws.on("error",      () => console.warn("[WS] error — will reconnect"));
 
@@ -132,9 +152,7 @@ export function useConversationEvents(
     useEffect(() => {
         if (!ws || !conversationId) return;
         ws.on("event", onEvent);
-        return () => {
-            ws.off("event", onEvent);
-        };
+        return () => { ws.off("event", onEvent); };
     }, [ws, conversationId, onEvent]);
 }
 
@@ -142,8 +160,6 @@ export function useConversationEvents(
  * Build a synthetic `system_event` Message from an `intercept_changed`
  * WebSocket broadcast. Lets ConversationsView inject a live divider pill
  * into the thread without waiting for the next full thread reload.
- *
- * Returns `null` for broadcasts that don't need a visual event bubble.
  */
 export function buildSystemEventFromWs(wsEvent: any): Message | null {
     const kind = wsEvent.eventKind as SystemEventKind | undefined;
@@ -178,19 +194,18 @@ export function buildSystemEventFromWs(wsEvent: any): Message | null {
 }
 
 // ── Agent notification type ───────────────────────────────────────────────────
-// Covers all event types the backend can send to ws:channel:agents:*
 export interface AgentNotification {
     event: "notification";
     type:
         | "new_conversation"
         | "human_transfer"
-        | "media_escalation"   // n8n /escalate endpoint
-        | "intercept"          // agent pickup / AI escalation
+        | "media_escalation"
+        | "intercept"
         | "order_update"
         | "transfer"
         | "system"
         | "daily_summary"
-        | string;              // forward-compat: don't drop unknown types
+        | string;
     title: string;
     body: string;
     wa_id?: string;
@@ -206,7 +221,6 @@ export function useAgentNotifications(
 ) {
     const ws = useWs();
 
-    // Stable handler ref so adding/removing the listener doesn't thrash on re-renders
     const cbRef = useRef(onNotification);
     useEffect(() => { cbRef.current = onNotification; }, [onNotification]);
 
