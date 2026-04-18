@@ -17,8 +17,10 @@ function jwtExpiry(token: string): number {
 }
 
 /** Call /api/auth/refresh — returns new token pair or null on failure. */
+// auth.ts
 async function doRefresh(
     refreshToken: string,
+    attempt = 1,
 ): Promise<{ access_token: string; refresh_token: string } | null> {
     try {
         const res = await fetch(`${API}/api/auth/refresh`, {
@@ -26,9 +28,19 @@ async function doRefresh(
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ refresh_token: refreshToken }),
         });
-        if (!res.ok) return null;
+        if (!res.ok) {
+            if (attempt < 3) {
+                await new Promise(r => setTimeout(r, attempt * 500));
+                return doRefresh(refreshToken, attempt + 1);
+            }
+            return null;
+        }
         return res.json();
     } catch {
+        if (attempt < 3) {
+            await new Promise(r => setTimeout(r, attempt * 500));
+            return doRefresh(refreshToken, attempt + 1);
+        }
         return null;
     }
 }
@@ -88,7 +100,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             const expiry = (token.accessTokenExpiry as number) ?? 0;
 
             // Still valid with >60s buffer — return as-is
-            if (expiry - nowSec > 60) return token;
+            if (expiry - nowSec > 300) return token;
 
             // Token is expired (or within 60s of expiry) — try silent refresh
             const refreshToken = token.refreshToken as string | undefined;
