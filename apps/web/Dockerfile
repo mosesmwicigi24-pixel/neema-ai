@@ -35,7 +35,14 @@ COPY --from=builder --chown=appuser:appgroup /app/public ./public
 USER appuser
 EXPOSE 3000
 
+# Next.js standalone server.js honours HOSTNAME — Docker sets it to the
+# container id, so without this it binds only to that hostname and the
+# in-container healthcheck on localhost:3000 is refused (the app still works
+# through the published port, but the container reports "unhealthy" forever).
+# Force it to 0.0.0.0 so localhost — and the healthcheck — resolve.
+ENV HOSTNAME=0.0.0.0 PORT=3000
+
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s \
-  CMD wget -qO- http://localhost:3000 || exit 1
+  CMD wget -qO- http://127.0.0.1:3000 || exit 1
 
 CMD ["node", "server.js"]
