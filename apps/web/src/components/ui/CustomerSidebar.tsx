@@ -617,8 +617,17 @@ export function CustomerSidebar({
                                 </span>
                             )}
                         </div>
-                        <div className="text-xs text-stone-400 font-mono">
-                            {formatPhone(profile.wa_id)}
+                        <div className="text-xs text-stone-400 font-mono flex items-center gap-1.5">
+                            {profile.country_iso && (
+                                <img
+                                    src={`https://flagcdn.com/${profile.country_iso.toLowerCase()}.svg`}
+                                    alt={profile.country || profile.country_iso}
+                                    title={profile.country || undefined}
+                                    className="inline-block rounded-sm"
+                                    style={{ width: 16, height: 12, objectFit: "cover" }}
+                                />
+                            )}
+                            <span>{formatPhone(profile.wa_id)}</span>
                         </div>
                         <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
                             <span
@@ -786,6 +795,12 @@ export function CustomerSidebar({
                                 value={profile.phone || ""}
                                 onChange={(v) => patch({ phone: v })}
                                 placeholder="+254..."
+                            />
+                            <EditableField
+                                label="Country"
+                                value={profile.country || ""}
+                                onChange={(v) => patch({ country: v })}
+                                placeholder="Resolved from phone"
                             />
                             <EditableField
                                 label="Location"

@@ -43,6 +43,63 @@ def _normalize_wa_id(wa_id: str) -> str:
     return wa_id.lstrip("+").strip() if wa_id else wa_id
 
 
+async def provision_user(
+    db: AsyncSession,
+    wa_id: str,
+    *,
+    name: str | None = None,
+    last_text: str | None = None,
+    last_direction: str | None = None,
+) -> User:
+    """Find-or-create the User row behind a wa_id and enrich it server-side.
+
+    This is the single place that guarantees every conversation has a backing
+    profile. It is server-AUTHORITATIVE for country (resolved from the dialing
+    prefix, so it never depends on the n8n enrichment call landing) and it
+    captures the WhatsApp profile name without ever clobbering a name an
+    operator has confirmed.
+
+    - name: only fills an empty, non-operator-confirmed name (the WhatsApp
+      profile name). Operator edits set name_confirmed=True and win.
+    - country/country_iso/flag_url: filled from the phone prefix whenever the
+      row has no country yet.
+
+    Caller owns the commit (this only flushes so the row is usable within the
+    same transaction).
+    """
+    from app.core.countries import resolve_country
+
+    wa_id = _normalize_wa_id(wa_id)
+    result = await db.execute(select(User).where(User.wa_id == wa_id))
+    user = result.scalar_one_or_none()
+    created = False
+    if user is None:
+        user = User(wa_id=wa_id, phone=wa_id)
+        db.add(user)
+        created = True
+
+    clean_name = (name or "").strip()
+    if clean_name and not user.name_confirmed and not (user.name or "").strip():
+        user.name = clean_name[:100]
+
+    if not user.country:
+        loc = resolve_country(wa_id)
+        if loc["country"]:
+            user.country = loc["country"]
+            user.country_iso = loc["country_iso"]
+            user.flag_url = loc["flag_url"]
+
+    if last_text is not None:
+        user.last_text = last_text
+    if last_direction is not None:
+        user.last_direction = last_direction
+    if created or last_text is not None:
+        user.last_message_at = datetime.now(timezone.utc)
+
+    await db.flush()
+    return user
+
+
 # ── Intercept Gate ────────────────────────────────────────
 
 async def outbound_gate(db: AsyncSession, redis, body: OutboundDto) -> dict:
@@ -307,23 +364,19 @@ async def get_user(db: AsyncSession, wa_id: str) -> dict:
 # ── Upsert User ───────────────────────────────────────────
 
 async def upsert_user(db: AsyncSession, body) -> dict:
-    stmt = pg_insert(User).values(
-        wa_id=body.wa_id,
-        phone=body.phone or body.wa_id,
-        name=body.name or "",
-        last_text=body.last_text or "",
-        last_direction=body.last_direction or "inbound",
-        state=body.state or {"active": "active", "cart": {"items": [], "subtotal": 0}},
-    ).on_conflict_do_update(
-        index_elements=["wa_id"],
-        set_={
-            "last_text": body.last_text or "",
-            "last_direction": body.last_direction or "inbound",
-            "state": body.state or {},
-        },
-    ).returning(User)
-    result = await db.execute(stmt)
-    user = result.scalar_one()
+    # Find-or-create + server-side enrichment (name capture + country). This
+    # fixes the long-standing bug where the old ON CONFLICT clause dropped the
+    # WhatsApp profile name for returning customers and never set the country.
+    user = await provision_user(
+        db,
+        body.wa_id,
+        name=body.name,
+        last_text=body.last_text,
+        last_direction=body.last_direction,
+    )
+    if body.state:
+        user.state = body.state
+    await db.commit()
     return {"id": str(user.id), "wa_id": user.wa_id}
 
 
@@ -346,6 +399,17 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
         conv = Conversation(wa_id=body.wa_id)
         db.add(conv)
         await db.flush()
+
+    # Guarantee a backing profile for every conversation, capturing the
+    # WhatsApp profile name (body.name) and resolving the country server-side.
+    # Only inbound messages carry a trustworthy profile name.
+    await provision_user(
+        db,
+        body.wa_id,
+        name=body.name if body.direction == "inbound" else None,
+        last_text=(body.text or None),
+        last_direction=body.direction,
+    )
 
     sender    = MsgSender.user       if body.direction == "inbound" else MsgSender.ai
     direction = MsgDirection.inbound if body.direction == "inbound" else MsgDirection.outbound

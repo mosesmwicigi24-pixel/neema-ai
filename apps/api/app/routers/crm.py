@@ -122,7 +122,18 @@ async def get_customer(
     result = await db.execute(select(User).where(User.wa_id == wa_id))
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=404, detail="Customer not found")
+        # Auto-provision from the conversation so a profile always exists (this
+        # is the 'orphan conversation' case) and resolve the country
+        # server-side. 404 only when there is no conversation either.
+        conv_exists = await db.execute(
+            select(Conversation.wa_id).where(Conversation.wa_id == wa_id)
+        )
+        if conv_exists.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="Customer not found")
+        from app.services.n8n_bridge import provision_user
+        user = await provision_user(db, wa_id)
+        await db.commit()
+        await db.refresh(user)
 
     orders_result = await db.execute(
         select(OrderEvent).where(OrderEvent.wa_id == wa_id).order_by(OrderEvent.created_at.desc())
@@ -152,12 +163,30 @@ async def update_customer(
     result = await db.execute(select(User).where(User.wa_id == wa_id))
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=404, detail="Customer not found")
+        # Upsert semantics: the operator can add data to ANY conversation,
+        # including orphan conversations that never got a user row. Requires a
+        # conversation to exist (guards against typo'd ids creating junk rows).
+        conv_exists = await db.execute(
+            select(Conversation.wa_id).where(Conversation.wa_id == wa_id)
+        )
+        if conv_exists.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="Customer not found")
+        from app.services.n8n_bridge import provision_user
+        user = await provision_user(db, wa_id)
 
-    # Direct model fields
-    for field in ("name", "email", "phone", "location", "age"):
+    # Direct model fields the operator can edit.
+    for field in ("name", "email", "phone", "location", "age", "country", "country_iso", "flag_url"):
         if field in body and body[field] is not None:
             setattr(user, field, body[field])
+
+    # An operator-set name is authoritative — lock it so the WhatsApp profile
+    # name / AI never overwrites it. Also keep the flag consistent when the
+    # operator changes the country ISO.
+    if "name" in body and (body["name"] or "").strip():
+        user.name_confirmed = True
+    if "country_iso" in body and body["country_iso"] and "flag_url" not in body:
+        from app.core.countries import flag_url_for
+        user.flag_url = flag_url_for(body["country_iso"])
 
     # State-stored fields (lead_stage, tags, notes, merged_ids)
     state = dict(user.state or {})
