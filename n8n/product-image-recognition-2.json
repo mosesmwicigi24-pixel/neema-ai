@@ -1,0 +1,531 @@
+{
+  "updatedAt": "2026-04-16T11:38:39.132Z",
+  "createdAt": "2026-04-16T10:04:33.346Z",
+  "id": "vgMKQjeZHEcGxNNT",
+  "name": "Product Image Recognition 2",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "08630a53-3b67-4139-af55-b88188c29990",
+      "name": "When Called by Main Workflow"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract image media info from the WhatsApp payload passed in\nconst msg = $json.messages[0];\nconst imageObj = msg.image || {};\nconst media_url = imageObj.url || '';\nconst caption   = imageObj.caption || '';\nconst msgText   = caption || '[image received]';\n\nreturn [{ json: {\n  wa_id:      $json.contacts[0].wa_id,\n  name:       $json.contacts[0].profile.name || '',\n  phone:      String(msg.from).replace(/[^\\d]/g, ''),\n  msgId:      msg.id,\n  tsMs:       Number(msg.timestamp || 0) * 1000,\n  tsIso:      new Date(Number(msg.timestamp || 0) * 1000).toISOString(),\n  media_type: 'image',\n  media_id:   imageObj.id || '',\n  media_url,\n  mime_type:  imageObj.mime_type || 'image/jpeg',\n  msgText,\n  caption,\n  _raw: $json,\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "id": "83c8732b-b7d5-4845-b3a9-e81423de6ace",
+      "name": "Extract Image Info"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.media_url }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "whatsAppApi",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        480,
+        0
+      ],
+      "id": "8322f50a-a04e-460e-bf30-79463f1394ca",
+      "name": "Fetch Image Binary",
+      "credentials": {
+        "whatsAppApi": {
+          "id": "7tAc6mGcyygGgALq",
+          "name": "WhatsApp account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "image",
+        "operation": "analyze",
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "GPT-4O"
+        },
+        "text": "You are an expert for Clergy Apparels, and Christian Gifts. When given an image of a vestment or church product, identify the item, describe it professionally. suggest possible close names. If the image captures different separate items, always focus on the primary object in the image. If the image captures one item with multiple clergy items, ensure to mention all of them.  Make the description brief and capture features more. ",
+        "inputType": "base64",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        720,
+        0
+      ],
+      "id": "bc53310b-bd88-4579-9ce0-c353138bddd0",
+      "name": "Analyze Image",
+      "credentials": {
+        "openAiApi": {
+          "id": "u0Xd3M6ZSk3gh7vf",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "img-set-01",
+              "name": "phoneRaw",
+              "value": "={{ $('Extract Image Info').item.json._raw.messages[0].from }}",
+              "type": "string"
+            },
+            {
+              "id": "img-set-02",
+              "name": "phone",
+              "value": "={{ $('Extract Image Info').item.json._raw.messages[0].from.replace(/[^\\d]/g,'') }}",
+              "type": "string"
+            },
+            {
+              "id": "img-set-03",
+              "name": "msgId",
+              "value": "={{ $('Extract Image Info').item.json.msgId }}",
+              "type": "string"
+            },
+            {
+              "id": "img-set-04",
+              "name": "msgText",
+              "value": "={{ (() => {\n  const analysis = $json['0'].content[0].text || '';\n  const caption  = $('Extract Image Info').item.json.caption || '';\n  return caption\n    ? `[Image] ${analysis}\\n\\nCustomer note: ${caption}`\n    : `[Image] ${analysis}`;\n})() }}",
+              "type": "string"
+            },
+            {
+              "id": "img-set-05",
+              "name": "tsMs",
+              "value": "={{ $('Extract Image Info').item.json.tsMs }}",
+              "type": "string"
+            },
+            {
+              "id": "img-set-06",
+              "name": "tsIso",
+              "value": "={{ $('Extract Image Info').item.json.tsIso }}",
+              "type": "string"
+            },
+            {
+              "id": "img-set-07",
+              "name": "wa_id",
+              "value": "={{ $('Extract Image Info').item.json.wa_id }}",
+              "type": "string"
+            },
+            {
+              "id": "img-set-08",
+              "name": "name",
+              "value": "={{ $('Extract Image Info').item.json.name }}",
+              "type": "string"
+            },
+            {
+              "id": "img-set-09",
+              "name": "audiotranscribe",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "img-set-10",
+              "name": "isAudio",
+              "value": "=false",
+              "type": "boolean"
+            },
+            {
+              "id": "img-set-11",
+              "name": "imageAnalysis",
+              "value": "={{ $json['0'].content[0].text || '' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        960,
+        0
+      ],
+      "id": "4f25401a-5760-4e81-8db4-7543fb6f4faa",
+      "name": "Extract Sender ID"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://neema.bethanyhouse.co.ke/api/n8n/message",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "REPLACE_WITH_N8N_API_SECRET"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"wa_id\":          {{ JSON.stringify($(\"Extract Image Info\").item.json.wa_id) }},\n  \"name\":           {{ JSON.stringify($(\"Extract Image Info\").item.json.name) }},\n  \"direction\":      \"inbound\",\n  \"text\":           {{ JSON.stringify($(\"Extract Image Info\").item.json.caption || \"\") }},\n  \"image_analysis\": {{ JSON.stringify($json['0'].content[0].text || \"\") }},\n  \"media_type\":     \"image\",\n  \"media_url\":      {{ JSON.stringify($('Merge stable_url').item.json.media_url || \"\") }},\n  \"media_caption\":  {{ JSON.stringify($('Extract Image Info').item.json.caption || \"\") }},\n  \"ts_ms\":          {{ $(\"Extract Image Info\").item.json.tsMs }},\n  \"ts_iso\":         {{ JSON.stringify($(\"Extract Image Info\").item.json.tsIso) }}\n}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        960,
+        192
+      ],
+      "id": "18b38a68-45f0-4584-b4f6-79e0598fe7ad",
+      "name": "Upsert Inbound Image Message"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "img-out-01",
+              "name": "wa_id",
+              "value": "={{ $json.wa_id }}",
+              "type": "string"
+            },
+            {
+              "id": "img-out-02",
+              "name": "name",
+              "value": "={{ $json.name }}",
+              "type": "string"
+            },
+            {
+              "id": "img-out-03",
+              "name": "phone",
+              "value": "={{ $json.phone }}",
+              "type": "string"
+            },
+            {
+              "id": "img-out-04",
+              "name": "msgId",
+              "value": "={{ $json.msgId }}",
+              "type": "string"
+            },
+            {
+              "id": "img-out-05",
+              "name": "msgText",
+              "value": "={{ $json.msgText }}",
+              "type": "string"
+            },
+            {
+              "id": "img-out-06",
+              "name": "tsMs",
+              "value": "={{ $json.tsMs }}",
+              "type": "string"
+            },
+            {
+              "id": "img-out-07",
+              "name": "tsIso",
+              "value": "={{ $json.tsIso }}",
+              "type": "string"
+            },
+            {
+              "id": "img-out-08",
+              "name": "audiotranscribe",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "img-out-09",
+              "name": "isAudio",
+              "value": "=false",
+              "type": "boolean"
+            },
+            {
+              "id": "img-out-10",
+              "name": "imageAnalysis",
+              "value": "={{ $json.imageAnalysis || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "img-out-11",
+              "name": "userCaption",
+              "value": "={{ $('Extract Image Info').item.json.caption || '' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1440,
+        96
+      ],
+      "id": "b1460309-ac5c-4d81-8659-c1d98d5c1917",
+      "name": "Return Image Data"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1200,
+        96
+      ],
+      "id": "91e9da53-c38c-4a0e-afae-0d970bcac200",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://neema.bethanyhouse.co.ke/api/n8n/media/download",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "REPLACE_WITH_N8N_API_SECRET"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "media_url",
+              "value": "={{ $json.media_url }}"
+            },
+            {
+              "name": "media_id",
+              "value": "={{ $json.media_id }}"
+            },
+            {
+              "name": "mime_type",
+              "value": "={{ $json.mime_type }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        192,
+        240
+      ],
+      "id": "ebe67ba6-2241-443a-a1e6-5b1b4c1f92fe",
+      "name": "Download Media API"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge the stable_url back onto the original media info\nconst download = $json; // response from Download Media API\nconst extract  = $('Extract Image Info').item.json;\n\nconst stable_url = download.ok\n  ? download.stable_url\n  : extract.media_url; // fall back to original WhatsApp URL if download failed\n\nreturn [{ json: {\n  ...extract,\n  media_url: stable_url,  // overwrite with stable internal URL\n  download_ok: download.ok ?? false,\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        240
+      ],
+      "id": "30fddf85-c67c-4836-a9bb-a1cbff120f81",
+      "name": "Merge stable_url"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        736,
+        240
+      ],
+      "id": "b4d7dabd-211b-41b5-ad9d-e3f8790db4bf",
+      "name": "Merge1"
+    }
+  ],
+  "connections": {
+    "When Called by Main Workflow": {
+      "main": [
+        [
+          {
+            "node": "Extract Image Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Image Info": {
+      "main": [
+        [
+          {
+            "node": "Fetch Image Binary",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Download Media API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Image Binary": {
+      "main": [
+        [
+          {
+            "node": "Analyze Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Image": {
+      "main": [
+        [
+          {
+            "node": "Extract Sender ID",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Sender ID": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Inbound Image Message": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Return Image Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Media API": {
+      "main": [
+        [
+          {
+            "node": "Merge stable_url",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge stable_url": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "Upsert Inbound Image Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": null,
+  "pinData": {},
+  "versionId": "a7f09e86-3d9a-4687-b35f-de7f85bb09d4",
+  "activeVersionId": "a7f09e86-3d9a-4687-b35f-de7f85bb09d4",
+  "versionCounter": 57,
+  "triggerCount": 0,
+  "tags": [],
+  "shared": [
+    {
+      "updatedAt": "2026-04-16T10:04:33.352Z",
+      "createdAt": "2026-04-16T10:04:33.352Z",
+      "role": "workflow:owner",
+      "workflowId": "vgMKQjeZHEcGxNNT",
+      "projectId": "RWAY6MzHolKbatYF",
+      "project": {
+        "updatedAt": "2026-03-04T12:36:14.939Z",
+        "createdAt": "2026-03-04T12:33:20.413Z",
+        "id": "RWAY6MzHolKbatYF",
+        "name": "Moses Mwicigi <mwicigimoses@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "00e0d748-c9a5-4812-93e6-fb3a0d5cbf37"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": "Version a7f09e86",
+    "description": ""
+  }
+}
