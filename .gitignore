@@ -24,3 +24,5 @@ redis_data/
 # IDE
 .vscode/
 .idea/
+# Server-side env backups
+.env.bak*
