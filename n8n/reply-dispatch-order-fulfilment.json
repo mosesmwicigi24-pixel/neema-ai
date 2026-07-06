@@ -1,0 +1,706 @@
+{
+  "updatedAt": "2026-04-16T16:42:24.828Z",
+  "createdAt": "2026-04-12T03:16:38.785Z",
+  "id": "V8hhLffkrHdGQn13",
+  "name": "Reply Dispatch & Order Fulfilment",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -480,
+        240
+      ],
+      "id": "4d710c21-7bd1-4993-b357-760298ec253f",
+      "name": "When Called by Main Workflow"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+              "leftValue": "={{ $json.isAudio }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -240,
+        144
+      ],
+      "id": "5f9f7b66-f212-4bb6-af09-10b94fecc370",
+      "name": "Is audio reply?"
+    },
+    {
+      "parameters": {
+        "resource": "audio",
+        "input": "={{ $json.output }}",
+        "voice": "onyx",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "d35d9f9c-5e63-4154-9381-5065cf162e25",
+      "name": "Generate audio",
+      "credentials": {
+        "openAiApi": {
+          "id": "u0Xd3M6ZSk3gh7vf",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://neema.bethanyhouse.co.ke/api/n8n/media/save-tts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "REPLACE_WITH_N8N_API_SECRET"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/octet-stream"
+            },
+            {
+              "name": "X-Filename",
+              "value": "=={{ 'tts_' + $('Is audio reply?').item.json.wa_id.replace(/\\D/g, '') + '_' + Date.now() + '.mp3' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "=data",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        0
+      ],
+      "id": "6ee087e2-bc21-432b-a27f-508eccda7a68",
+      "name": "download encoded audio"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://neema.bethanyhouse.co.ke/api/n8n/outbound",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "REPLACE_WITH_N8N_API_SECRET"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"wa_id\":         {{ JSON.stringify($(\"Is audio reply?\").item.json.wa_id) }},\n  \"ai_reply\":      {{ JSON.stringify($(\"Is audio reply?\").item.json.reply_text) }},\n  \"session_id\":    {{ JSON.stringify($(\"Is audio reply?\").item.json.sessionId ?? null) }},\n  \"is_audio_reply\": true,\n  \"audio_url\":     {{ JSON.stringify($json.audio_url ?? \"\") }},\n  \"transcription\": {{ JSON.stringify($(\"Is audio reply?\").item.json.audiotranscribe ?? \"\") }},\n  \"cart_text\":      {{ (() => {\n    const items = $(\"Is audio reply?\").item.json.full_cart ?? $(\"Is audio reply?\").item.json.items_added ?? [];\n    const hasCart = Array.isArray(items) && items.length > 0;\n    return JSON.stringify(hasCart ? ($(\"Is audio reply?\").item.json.reply_text ?? \"\") : \"\");\n  })() }}\n}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "eef5226d-399f-4093-873c-3ea02f16d079",
+      "name": "Outbound Gate API1 send Audio",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        480,
+        0
+      ],
+      "typeVersion": 4.2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://neema.bethanyhouse.co.ke/api/n8n/outbound",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "REPLACE_WITH_N8N_API_SECRET"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"wa_id\":      {{ JSON.stringify($json.wa_id) }},\n  \"ai_reply\":   {{ JSON.stringify($json.reply_text) }},\n  \"session_id\": {{ JSON.stringify($json.sessionId ?? null) }}\n}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "3dbdfda0-6146-4cf8-8439-5a110a830034",
+      "name": "Outbound Gate API",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        0,
+        240
+      ],
+      "typeVersion": 4.2
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "3bf712df-e195-49cb-95bb-1d9d35f29bb4",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "send",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        480,
+        240
+      ],
+      "id": "8dff0b95-ab75-49da-a8e1-ffc630de82a7",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ---------- safe node accessor ----------\n// $node[\"NodeName\"] throws a read-only Error if the node hasn't executed.\n// Optional chaining (?.) does NOT catch this \u2014 we need try/catch.\nconst safeNode = (name) => {\n  try {\n    return $node[name]?.json || null;\n  } catch (e) {\n    return null;\n  }\n};\n\n// ---------- helpers ----------\nconst first = (...v) => v.find(x => x !== undefined && x !== null && x !== \"\");\nconst cleanReply = (s) =>\n  String(s || \"\")\n    .replace(/<CONTROL>[\\s\\S]*?<\\/CONTROL>/g, \"\")\n    .replace(/[ \\t]+\\n/g, \"\\n\")\n    .trim();\nconst normWa = (x) => {\n  if (!x) return \"\";\n  const s = String(x).trim();\n  const plus = s.startsWith(\"+\") ? \"+\" : \"\";\n  const digits = s.replace(/[^\\d]/g, \"\");\n  return (plus + digits) || \"\";\n};\nconst asNum = (v) => {\n  const n = Number(v);\n  return Number.isFinite(n) ? n : null;\n};\n\n// ---------- detect gate action ----------\nconst gateAction = $json.action === \"hold\" ? \"hold\" : \"send\";\n\n// ---------- pull inbound from Post-process ----------\nconst P = safeNode(\"Post-process\") || {};\nconst seen = P.lastSeen || {};\nconst ctx  = P.context  || {};\n\nconst wa_id = normWa(first(\n  seen.wa_id, P.wa_id, ctx.wa_id,\n  $json.wa_id, $json.patch?.wa_id, $json.context?.wa_id\n));\nconst inboundTsMs = asNum(first(\n  seen.lastMessageTs, P.tsMs, $json.tsMs, $json.fields?.tsMs?.integerValue\n));\n\nif (!wa_id || inboundTsMs === null) {\n  throw new Error(`cust+system log: missing wa_id (${wa_id}) or inboundTsMs (${inboundTsMs}). Check Post-process.`);\n}\nconst docid = `${wa_id}_${inboundTsMs}`;\n\n// ---------- inbound snapshot ----------\nconst inboundDirection = String(first(seen.lastDirection, \"inbound\")).toLowerCase();\nconst inboundText      = String(first(seen.lastText, $json.text, \"\"));\nconst inboundTsIso     = String(first(seen.lastMessageAtIso, new Date(inboundTsMs).toISOString()));\nconst inboundTtlIso    = new Date(inboundTsMs + 120*24*3600*1000).toISOString();\n\nconst inboundFields = {\n  wa_id:       { stringValue: String(wa_id) },\n  direction:   { stringValue: inboundDirection },\n  inboundtext: { stringValue: inboundText },\n  tsMs:        { integerValue: String(inboundTsMs) },\n  tsIso:       { timestampValue: inboundTsIso },\n  ttlExpireAt: { timestampValue: inboundTtlIso },\n  docid:       { stringValue: docid },\n};\n\n// ---------- outbound (reply) ----------\n// safeNode() returns null for unexecuted nodes instead of throwing\nconst codeNodeJson        = safeNode(\"Code in JavaScript\");\nconst setOutboundJson     = safeNode(\"SetOutboundText_WABA\");\nconst neeemaAgentJson     = safeNode(\"Neema AI Agent\");\n\nconst reply = cleanReply(first(\n  P.reply_text,\n  $json.reply_text,\n  $json.output,\n  codeNodeJson?.reply_text,\n  codeNodeJson?.output,\n  setOutboundJson?.reply_text,\n  neeemaAgentJson?.output,\n  \"\"\n));\n\nconst nowMs  = Date.now();\nconst nowIso = new Date(nowMs).toISOString();\n\nconst outboundFields = {\n  outbound:      { stringValue: \"outbound\" },\n  outbound_text: { stringValue: reply },\n  outboundTs:    { stringValue: String(nowMs) },\n  outboundIso:   { timestampValue: nowIso },\n  gate_action:   { stringValue: gateAction },\n  held:          { booleanValue: gateAction === \"hold\" },\n  sent:          { booleanValue: gateAction === \"send\" },\n};\n\n// ---------- updateMask ----------\nconst updateMaskFields = [\n  \"wa_id\", \"direction\", \"text\", \"tsMs\", \"tsIso\", \"ttlExpireAt\", \"docid\",\n  \"outbound\", \"outbound_text\", \"outboundTs\", \"outboundIso\",\n  \"gate_action\", \"held\", \"sent\",\n];\n\n// ---------- emit ----------\nreturn [{\n  json: {\n    wa_id,\n    docid,\n    gate_action: gateAction,\n    inboundFields,\n    outboundFields,\n    updateMaskFields,\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        240
+      ],
+      "id": "84de9bd3-161e-4833-bef4-4e1c41257275",
+      "name": "customer + system log"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://neema.bethanyhouse.co.ke/api/n8n/message/{{$json.docid}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "REPLACE_WITH_N8N_API_SECRET"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"inbound_text\":  {{ JSON.stringify($json.inboundFields?.inboundtext?.stringValue ?? null) }},\n  \"outbound_text\": {{ JSON.stringify($json.outboundFields?.outbound_text?.stringValue ?? null) }},\n  \"direction\":     {{ JSON.stringify($json.inboundFields?.direction?.stringValue ?? \"inbound\") }},\n  \"ts_ms\":         {{ $json.inboundFields?.tsMs?.integerValue ?? null }}\n}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        960,
+        240
+      ],
+      "id": "8d030096-f2bb-441c-b69f-bf31bfd5519a",
+      "name": "patch inbound and outbound"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        720,
+        0
+      ],
+      "id": "48b35b67-d4a6-484e-8451-f4e39163ad00",
+      "name": "Merge audio context"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Last Order + Prep Patch \u2014 Confirmed-only edition\n// ONLY creates an order event when orderPlaced === true (customerExplicitlyConfirmed).\n// Does NOT fall back to text parsing, previous cart, or upstream item lists.\n// Items must come exclusively from Post-process (which already validated the gates).\n\nconst J = $json || {};\nconst ctx   = J.context || {};\nconst seen  = J.lastSeen || {};\nconst nowIso = () => new Date().toISOString();\nconst n = (v, d = 0) => (Number.isFinite(+v) ? +v : d);\n\nconst fStr = v => (v == null ? undefined : ({ stringValue: String(v) }));\nconst fInt = v => (v == null || v === '' || !Number.isFinite(+v) ? undefined : { integerValue: String(Math.trunc(+v)) });\nconst fTs  = v => ({ timestampValue: new Date(v ?? Date.now()).toISOString() });\nconst toFs = v => Array.isArray(v)\n  ? { arrayValue: { values: v.map(toFs) } }\n  : v === null\n    ? { nullValue: null }\n    : typeof v === 'object'\n      ? { mapValue: { fields: Object.fromEntries(Object.entries(v).map(([k,val]) => [k, toFs(val)])) } }\n      : (typeof v === 'number'\n          ? (Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v })\n          : (typeof v === 'boolean' ? { booleanValue: v } : { stringValue: String(v) }));\n\nconst wa_id = J.wa_id || ctx.wa_id || seen.wa_id || J.patch?.wa_id || null;\nif (!wa_id) throw new Error('Last Order + Prep Patch: wa_id missing');\n\n// \u2500\u2500 Order placement gate \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n// Post-process sets orderPlaced = true ONLY when customerExplicitlyConfirmed = true\n// AND requiresClarification = false AND isDuplicateOrder = false.\nconst orderPlaced                 = J.orderPlaced === true;\nconst customerExplicitlyConfirmed = J.customerExplicitlyConfirmed === true || J.flags?.customerExplicitlyConfirmed === true;\nconst requiresClarification       = J.requiresClarification === true || J.flags?.requiresClarification === true;\nconst isDuplicateOrder            = J.isDuplicateOrder === true || J.flags?.isDuplicateOrder === true;\n\n// Triple-check: all three gates must pass for order to be real\nconst effectiveOrderPlaced = orderPlaced && customerExplicitlyConfirmed && !requiresClarification && !isDuplicateOrder;\n\nconst baseTsMs = n(J.tsMs ?? seen.lastMessageTs, Date.now());\nconst sessionId = `${wa_id}_${Math.floor(baseTsMs / 1000)}`;\n\n// \u2500\u2500 Items: ONLY from Post-process confirmed output \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n// No text parsing. No previous cart fallback.\nconst normItem = i => {\n  if (!i || typeof i !== 'object') return null;\n  const qty  = Math.max(n(i.qty ?? i.quantity ?? 1, 1), 1);\n  const unit = n(i.price ?? i.unit ?? i.unit_price ?? 0, 0);\n  const name = String(i.name || i.product || i.title || 'item');\n  const total = n(i.total, qty * unit);\n  const sku = i.sku ?? null;\n  return { name, qty, unit, total, ...(sku ? { sku } : {}) };\n};\n\nlet items = [];\nif (effectiveOrderPlaced) {\n  const confirmedItems = J.order_event?.items || J.items_added || [];\n  items = Array.isArray(confirmedItems)\n    ? confirmedItems.map(normItem).filter(i => i && n(i.unit, 0) > 0)\n    : [];\n}\n\nconst subtotal = items.reduce((s, it) => s + n(it.total, n(it.qty,0)*n(it.unit,0)), 0);\n\nconst evtIn = J.order_event || {};\nconst order_event = {\n  eventType: effectiveOrderPlaced\n    ? (evtIn.eventType || 'order.placed')\n    : 'order.snapshot',\n  status: effectiveOrderPlaced ? 'pending' : 'open',\n  items: effectiveOrderPlaced ? items : [],\n  subtotal: effectiveOrderPlaced ? subtotal : 0,\n  tsIso: nowIso(),\n  channel: evtIn.channel || 'whatsapp',\n  source:  evtIn.source  || 'ai_agent',\n  sessionId: evtIn.sessionId || sessionId,\n  order_id:  evtIn.order_id  || sessionId,\n  isNewOrder: evtIn.isNewOrder ?? effectiveOrderPlaced,\n  customerExplicitlyConfirmed,\n  requiresClarification,\n  isDuplicateOrder,\n};\n\nconst lastOrder = {\n  found: effectiveOrderPlaced && items.length > 0,\n  wa_id,\n  updatedAt: nowIso(),\n  order_id: order_event.order_id,\n  sessionId: order_event.sessionId,\n  channel: order_event.channel,\n  source: order_event.source,\n  lastText:         seen.lastText ?? J.text ?? J.msgText ?? '',\n  lastDirection:    seen.lastDirection ?? ctx.lastDirection ?? J.direction ?? 'inbound',\n  lastMessageTs:    n(seen.lastMessageTs ?? J.tsMs, baseTsMs),\n  lastMessageAtIso: seen.lastMessageAtIso ?? J.tsIso ?? new Date(baseTsMs).toISOString(),\n  isReturning: !!J.isReturning,\n  currency: 'KES',\n  subtotal: order_event.subtotal,\n  status: order_event.status,\n  paymentStatus: 'unpaid',\n  fulfillmentStatus: effectiveOrderPlaced ? 'pending' : 'none',\n  items: order_event.items,\n};\n\nconst stateCart = { subtotal: order_event.subtotal };\nif (order_event.items.length) stateCart.items = order_event.items;\nconst state = { active: 'active', cart: stateCart };\n\nconst firestoreBody = {\n  fields: {\n    wa_id: fStr(wa_id),\n    sessionId: fStr(order_event.sessionId),\n    order_id: fStr(order_event.order_id),\n    eventType: fStr(order_event.eventType),\n    channel: fStr(order_event.channel),\n    source:  fStr(order_event.source),\n    lastText:         fStr(lastOrder.lastText || ''),\n    lastDirection:    fStr(lastOrder.lastDirection || 'inbound'),\n    lastMessageTs:    fInt(lastOrder.lastMessageTs),\n    lastMessageAtIso: fTs(lastOrder.lastMessageAtIso),\n    isReturning: { booleanValue: !!J.isReturning },\n    ...(order_event.items.length ? { items: toFs(order_event.items) } : {}),\n    subtotal:          fInt(order_event.subtotal),\n    currency:          fStr('KES'),\n    replyText:         fStr(J.reply_text || J.output || ''),\n    tsIso:             fTs(order_event.tsIso),\n    updatedAt:         fTs(Date.now()),\n    status:            fStr(lastOrder.status),\n    paymentStatus:     fStr(lastOrder.paymentStatus),\n    fulfillmentStatus: fStr(lastOrder.fulfillmentStatus),\n    state: toFs(state),\n  }\n};\n\nconst docid = `${wa_id}_${Math.floor(baseTsMs / 1000)}`;\nif (!docid || String(docid).startsWith('unknown_')) {\n  throw new Error(`OrderEvent Upsert: bad docid=\"${docid}\"`);\n}\n\nreturn [{\n  ...J,\n  wa_id,\n  items_added: order_event.items,\n  lastOrder,\n  order_event,\n  docid,\n  firestoreBody,\n  orderPlaced: effectiveOrderPlaced,\n  customerExplicitlyConfirmed,\n  requiresClarification,\n  isDuplicateOrder,\n  mergeKey: J.mergeKey ?? 1,\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        400
+      ],
+      "id": "1f6212a2-2c05-4f4b-b6a0-a67c5654fe57",
+      "name": "Last Order + Prep Patch"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "b972d0ea-6cc9-49c8-a64f-9506b96847ff",
+              "leftValue": "={{ $json.orderPlaced === true && $json.customerExplicitlyConfirmed === true && $json.requiresClarification !== true && $json.isDuplicateOrder !== true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        0,
+        400
+      ],
+      "id": "a9c67d2c-e333-4d57-b180-605ac5913db4",
+      "name": "Order Confirmed Gate"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format Input Data\n// Sits between: Last Order + Prep Patch \u2192 Upsert Order Event API\n// Shapes the payload the API receives for every order event.\n// Added: is_new_order, is_duplicate_order, customer_explicitly_confirmed,\n//        requires_clarification \u2014 needed by the API to INSERT vs UPSERT\n//        and to audit gate state per order event.\n\nconst d = $input.first().json;\n\nreturn [{\n  json: {\n    wa_id:              d.wa_id,\n\n    // Order identity\n    session_id:         d.order_event?.sessionId         ?? null,\n    event_type:         d.order_event?.eventType         ?? null,\n    // Possible values:\n    //   \"order.placed\"     \u2192 new confirmed order (INSERT)\n    //   \"order.updated\"    \u2192 same products, qty/detail changed (UPSERT)\n    //   \"order.item.added\" \u2192 items building up, not yet confirmed\n    //   \"order.snapshot\"   \u2192 no items, context-only snapshot\n\n    // API uses is_new_order to decide INSERT vs UPSERT\n    is_new_order:       d.order_event?.isNewOrder        ?? true,\n\n    // Line items and financials\n    items:              d.order_event?.items             ?? [],\n    subtotal:           parseFloat(d.order_event?.subtotal ?? 0),\n    currency:           d.lastOrder?.currency            ?? \"KES\",\n\n    // Order lifecycle status\n    status:             d.lastOrder?.status              ?? \"open\",\n    payment_status:     d.lastOrder?.paymentStatus       ?? \"unpaid\",\n    fulfillment_status: d.lastOrder?.fulfillmentStatus   ?? \"pending\",\n\n    // Message context\n    reply_text:         d.reply_text                     ?? null,\n    channel:            d.order_event?.channel           ?? \"whatsapp\",\n\n    // Cart state snapshot (persisted to user record)\n    state: d.lastSeen?.state ?? {\n      active: \"active\",\n      cart: { items: [], subtotal: 0 },\n    },\n\n    // \u2500\u2500 Gate audit fields \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    // These let the API and any downstream dashboards understand\n    // why an event was written and what its validity state is.\n\n    // true  \u2192 a duplicate was detected; API should NOT create a new order\n    is_duplicate_order:            d.isDuplicateOrder            ?? false,\n\n    // true  \u2192 customer sent an explicit affirmative (yes/confirm/sawa/ndio etc.)\n    // false \u2192 order was built but not yet confirmed by customer\n    customer_explicitly_confirmed: d.customerExplicitlyConfirmed ?? false,\n\n    // true  \u2192 item was ambiguous (e.g. plain \"cups\"); clarification still pending\n    // When true, event_type will be \"order.snapshot\" with no items\n    requires_clarification:        d.requiresClarification       ?? false,\n  },\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        400
+      ],
+      "id": "a2459c4d-d817-4e83-bc54-4f2538766e59",
+      "name": "Format Input Data"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://neema.bethanyhouse.co.ke/api/n8n/order-event",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "REPLACE_WITH_N8N_API_SECRET"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        400
+      ],
+      "id": "2b5533ed-1c7a-4693-9087-1f8a6b4ed71c",
+      "name": "Upsert Order Event API"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "648a1f3f-a428-4e18-9723-0b61fbad78f6",
+              "leftValue": "={{ ['order.confirmed', 'order.delivered', 'order.cancelled'].includes($('Post-process').item.json.order_event?.eventType) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        720,
+        400
+      ],
+      "id": "0256aa58-b1dd-4b33-93f4-d20cd84a186b",
+      "name": "Is notifiable order event?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://neema.bethanyhouse.co.ke/api/n8n/notify",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "REPLACE_WITH_N8N_API_SECRET"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"type\":     \"order_update\",\n  \"agent_id\": null,\n  \"title\":    \"={{ 'Order \u2014 ' + $('When Called by Main Workflow').item.json.order_event.eventType }}\",\n  \"body\":     \"={{ $json.wa_id + ' \u2022 KES ' + $('Post-process').item.json.order_event.subtotal }}\",\n  \"wa_id\":    \"={{ $json.wa_id }}\",\n  \"ts\":       \"={{ $('When Called by Main Workflow').item.json.order_event.tsIso }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        960,
+        400
+      ],
+      "id": "c3939ee0-de6e-4a09-967a-675c80931a02",
+      "name": "Create Order Notification"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "0ae6403a-50e1-42d9-8e9d-52bd8ae73a37",
+              "leftValue": "={{ $json.nextActionNorm === 'human' || $json.context?.nextAction === 'human' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -240,
+        560
+      ],
+      "id": "0dbb5735-19fa-4e9f-8fc5-612048f393ab",
+      "name": "Is human transfer?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://neema.bethanyhouse.co.ke/api/n8n/notify",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "REPLACE_WITH_N8N_API_SECRET"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"type\":     \"human_transfer\",\n  \"agent_id\": null,\n  \"title\":    \"={{ 'Transfer: ' + ($json.wa_id) }}\",\n  \"body\":     \"={{ 'Neema escalated \u2014 ' + ($json.context?.lastInbound?.text || 'see conversation') }}\",\n  \"wa_id\":    \"={{ $json.wa_id }}\",\n  \"ts\":       \"={{ $json.context?.lastInbound?.tsIso || $json.tsIso }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        0,
+        560
+      ],
+      "id": "0acf38c4-2e63-4adf-9f41-8c0469d57e1c",
+      "name": "Create Escalation Notification"
+    }
+  ],
+  "connections": {
+    "When Called by Main Workflow": {
+      "main": [
+        [
+          {
+            "node": "Last Order + Prep Patch",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Is human transfer?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Is audio reply?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is audio reply?": {
+      "main": [
+        [
+          {
+            "node": "Generate audio",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Outbound Gate API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate audio": {
+      "main": [
+        [
+          {
+            "node": "download encoded audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "download encoded audio": {
+      "main": [
+        [
+          {
+            "node": "Outbound Gate API1 send Audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Outbound Gate API1 send Audio": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Outbound Gate API": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [],
+        [
+          {
+            "node": "customer + system log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "customer + system log": {
+      "main": [
+        [
+          {
+            "node": "patch inbound and outbound",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Last Order + Prep Patch": {
+      "main": [
+        [
+          {
+            "node": "Order Confirmed Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Order Confirmed Gate": {
+      "main": [
+        [
+          {
+            "node": "Format Input Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Input Data": {
+      "main": [
+        [
+          {
+            "node": "Upsert Order Event API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Order Event API": {
+      "main": [
+        [
+          {
+            "node": "Is notifiable order event?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is notifiable order event?": {
+      "main": [
+        [
+          {
+            "node": "Create Order Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is human transfer?": {
+      "main": [
+        [
+          {
+            "node": "Create Escalation Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": null,
+  "pinData": {},
+  "versionId": "21ec8558-05ad-4609-be58-31e2b8d659d0",
+  "activeVersionId": "21ec8558-05ad-4609-be58-31e2b8d659d0",
+  "versionCounter": 56,
+  "triggerCount": 0,
+  "tags": [],
+  "shared": [
+    {
+      "updatedAt": "2026-04-12T03:16:38.788Z",
+      "createdAt": "2026-04-12T03:16:38.788Z",
+      "role": "workflow:owner",
+      "workflowId": "V8hhLffkrHdGQn13",
+      "projectId": "RWAY6MzHolKbatYF",
+      "project": {
+        "updatedAt": "2026-03-04T12:36:14.939Z",
+        "createdAt": "2026-03-04T12:33:20.413Z",
+        "id": "RWAY6MzHolKbatYF",
+        "name": "Moses Mwicigi <mwicigimoses@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "00e0d748-c9a5-4812-93e6-fb3a0d5cbf37"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": "Version 21ec8558",
+    "description": ""
+  }
+}

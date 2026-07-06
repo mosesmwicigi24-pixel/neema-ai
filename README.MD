@@ -117,7 +117,7 @@ docker compose exec postgres psql -U neema -d neema -f /tmp/seed.sql
 ### 6. Update the n8n workflow
 
 1. Open n8n and log in
-2. Import `n8n/Neema_Assistant.json`
+2. Import `n8n/neema-assistant-main.json`
 3. Update all HTTP Request node URLs to point to your FastAPI instance
 4. Set `N8N_API_SECRET` in n8n environment variables
 5. Activate the workflow
@@ -285,6 +285,11 @@ To migrate from the Firestore version, replace all HTTP node URLs with FastAPI e
 ---
 
 ## Production Deployment
+
+> **Note (live deployment):** at neema.bethanyhouse.co.ke the bundled nginx
+> service is disabled — the host-level nginx terminates TLS (certbot) and
+> proxies `/api/auth/*` → Next.js :3000, `/api/*` + `/ws` → FastAPI :8000,
+> and `/` → Next.js :3000. The compose nginx is only for standalone installs.
 
 ### TLS — Let's Encrypt
 

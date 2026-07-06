@@ -1,0 +1,1273 @@
+{
+  "updatedAt": "2026-04-25T02:48:30.769Z",
+  "createdAt": "2026-04-12T02:55:41.223Z",
+  "id": "A0YW67vhAF3xXs1m",
+  "name": "Neema Assistant Main",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "messages"
+        ],
+        "options": {}
+      },
+      "type": "n8n-nodes-base.whatsAppTrigger",
+      "typeVersion": 1,
+      "position": [
+        5552,
+        3824
+      ],
+      "id": "80239c10-f24c-4ae9-a8cd-3dcede794435",
+      "name": "WhatsApp Trigger",
+      "webhookId": "bb95399d-288f-4d3e-b9e5-1ff15b0e1486",
+      "credentials": {
+        "whatsAppTriggerApi": {
+          "id": "z1hdH34mdELR4M9V",
+          "name": "WhatsApp OAuth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "f82ce143-58dd-4f69-b7cd-ecf4a5855c4c",
+                    "leftValue": "={{ $json.messages[0].text.body }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "string",
+                      "operation": "exists",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "text"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.messages[0].audio }}",
+                    "rightValue": "=audio",
+                    "operator": {
+                      "type": "object",
+                      "operation": "exists",
+                      "singleValue": true
+                    },
+                    "id": "741607cc-6a56-48b9-8fbf-57a8777e2b34"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Audio"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "7d913019-4e9f-4db4-bce7-a83f1235d0d6",
+                    "leftValue": "={{ $json.messages[0].image }}",
+                    "rightValue": "image",
+                    "operator": {
+                      "type": "object",
+                      "operation": "exists",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "image"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "5daac77c-e463-4552-ac72-03f10f15f725",
+                    "leftValue": "={{ $json.messages[0].document }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "exists",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "document"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "e4e6bf3c-a320-415a-9624-a007da5e4d40",
+                    "leftValue": "={{ $json.messages[0].video }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "exists",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "video"
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        5840,
+        3888
+      ],
+      "id": "7c63b64f-fd7c-4cc8-9c4f-a8dc427a06ad",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "jsCode": "const msg  = $json.messages[0];\nconst type = msg.image    ? 'image'\n           : msg.document ? 'document'\n           : msg.video    ? 'video'\n           : msg.audio    ? 'audio'\n           : 'media';\nconst mediaObj = msg[type] || {};\nconst media_url = mediaObj.url || '';\n\n// Audio has no caption or filename \u2014 use sensible defaults\nconst caption  = mediaObj.caption  || '';\nconst filename = mediaObj.filename || (type === 'audio' ? 'voice_message.ogg' : '');\nconst msgText  = caption || `[${type} received]`;\n\nreturn [{ json: {\n  wa_id:             $json.contacts[0].wa_id,\n  name:              $json.contacts[0].profile?.name || '',\n  caption,\n  media_id:          mediaObj.id || '',\n  media_url,\n  media_type:        type,\n  mime_type:         mediaObj.mime_type || '',\n  filename,\n  tsMs:              Number($json.messages[0].timestamp || 0) * 1000,\n  tsIso:             new Date(Number($json.messages[0].timestamp || 0) * 1000).toISOString(),\n  escalation_reason: 'media_received',\n  msgText,\n  // voice-specific flag \u2014 useful if you want to transcribe later\n  is_voice:          type === 'audio' && mediaObj.voice === true,\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6512,
+        3984
+      ],
+      "id": "08d69157-d5ea-40b4-8742-41d03ecb6a1e",
+      "name": "Extract Media Info"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://neema.bethanyhouse.co.ke/api/n8n/media/download",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "REPLACE_WITH_N8N_API_SECRET"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "media_url",
+              "value": "={{ $json.media_url }}"
+            },
+            {
+              "name": "media_id",
+              "value": "={{ $json.media_id }}"
+            },
+            {
+              "name": "mime_type",
+              "value": "={{ $json.mime_type }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        6720,
+        3984
+      ],
+      "id": "55a345cc-6943-471f-840f-fde4f7719b38",
+      "name": "Download Media API"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Extract Media Info').item.json.media_type }}",
+                    "rightValue": "video",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "e7852fcf-b66a-4303-84f3-0c6c0d60d013"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Video"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "4a28de36-f35b-4d55-8588-9130950ac51e",
+                    "leftValue": "={{ $('Extract Media Info').item.json.media_type }}",
+                    "rightValue": "document",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Document"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        6912,
+        3968
+      ],
+      "id": "b117b8cf-7cb0-4f6f-a6c4-f9365635a248",
+      "name": "Switch Media Type"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge the stable_url back onto the original media info\nconst download = $json; // response from Download Media API\nconst extract  = $('Extract Media Info').item.json;\n\nconst stable_url = download.ok\n  ? download.stable_url\n  : extract.media_url; // fall back to original WhatsApp URL if download failed\n\nreturn [{ json: {\n  ...extract,\n  media_url: stable_url,  // overwrite with stable internal URL\n  download_ok: download.ok ?? false,\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7248,
+        3984
+      ],
+      "id": "f450405b-c618-4ac2-aabf-9a80f5747b30",
+      "name": "Merge stable_url"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://neema.bethanyhouse.co.ke/api/n8n/message",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "REPLACE_WITH_N8N_API_SECRET"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"wa_id\":         \"{{ $json.wa_id }}\",\n  \"direction\":     \"inbound\",\n  \"text\":          \"{{ $json.msgText }}\",\n  \"media_type\":    \"{{ $json.media_type }}\",\n  \"media_id\":      \"{{ $json.media_id }}\",\n  \"media_url\":     \"{{ $json.media_url }}\",\n  \"media_caption\": \"{{ $json.caption }}\",\n  \"mime_type\":     \"{{ $json.mime_type }}\",\n  \"filename\":      \"{{ $json.filename }}\",\n  \"ts_ms\":         \"{{ $json.tsMs }}\",\n  \"ts_iso\":        \"{{ $json.tsIso }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        7456,
+        3984
+      ],
+      "id": "4af05127-f616-43e1-9ac0-ffc7f1d96d8b",
+      "name": "Upsert Message with Escalation +Notification"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e6d921fb-b3ab-46bd-852e-0f4458b577dc",
+              "name": "=phoneRaw",
+              "value": "={{ $('WhatsApp Trigger').item.json.messages[0].from }}",
+              "type": "string"
+            },
+            {
+              "id": "d88b68ca-90fb-4b35-ba1c-e294f5764a22",
+              "name": "=phone",
+              "value": "={{ $('WhatsApp Trigger').item.json.messages[0].from.replace(/[^\\d]/g,'') }}",
+              "type": "string"
+            },
+            {
+              "id": "88132db9-dc2c-47c7-bc9d-b124aaaa7e83",
+              "name": "=msgId",
+              "value": "={{ $('WhatsApp Trigger').item.json.messages[0].id }}",
+              "type": "string"
+            },
+            {
+              "id": "3c160167-a9f0-484c-bdff-fc52374cf396",
+              "name": "msgText",
+              "value": "={{ $if($('Run Audio Transcription Sub-Workflow').isExecuted, $node['Run Audio Transcription Sub-Workflow'].json.msgText, $if($('Run Product Image Recognition Sub-Workflow').isExecuted, $node['Run Product Image Recognition Sub-Workflow'].json.msgText, $('WhatsApp Trigger').item.json.messages[0].text?.body || '')) }}",
+              "type": "string"
+            },
+            {
+              "id": "601ddacd-7ba2-48d1-a0c9-1f0e8419bd3e",
+              "name": "msgTextRaw",
+              "value": "={{ $if($('Run Audio Transcription Sub-Workflow').isExecuted, $node['Run Audio Transcription Sub-Workflow'].json.msgText, $if($('Run Product Image Recognition Sub-Workflow').isExecuted, $node['Run Product Image Recognition Sub-Workflow'].json.msgText, $('WhatsApp Trigger').item.json.messages[0].text?.body || '')) }}",
+              "type": "string"
+            },
+            {
+              "id": "afe0ef1c-1023-4378-aacd-9b7a3817a907",
+              "name": "=tsMs",
+              "value": "={{ Number($('WhatsApp Trigger').item.json.messages[0].timestamp || 0) * 1000 }}",
+              "type": "string"
+            },
+            {
+              "id": "f618be66-cf4a-4885-9eee-6cf33a1ba5db",
+              "name": "=tsIso",
+              "value": "={{ new Date( ( $('WhatsApp Trigger').item.json.messages[0].timestamp || 0) * 1000 ).toISOString() }}",
+              "type": "string"
+            },
+            {
+              "id": "4a0cdf95-a828-40d3-a171-58a006581cec",
+              "name": "=wa_id",
+              "value": "={{ $('WhatsApp Trigger').item.json.contacts[0].wa_id }}",
+              "type": "string"
+            },
+            {
+              "id": "27a8bc21-dc17-4bfa-a268-8621b76a16a9",
+              "name": "name",
+              "value": "={{ $('WhatsApp Trigger').item.json.contacts[0].profile.name }}",
+              "type": "string"
+            },
+            {
+              "id": "af411f1b-7ac7-4f21-a8f5-70a713ad4451",
+              "name": "audiotranscribe",
+              "value": "={{ $if($('Run Audio Transcription Sub-Workflow').isExecuted, $node['Run Audio Transcription Sub-Workflow'].json.audiotranscribe, '') }}",
+              "type": "string"
+            },
+            {
+              "id": "336cc958-e17d-48e9-8be9-7163da03622f",
+              "name": "",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+              "name": "isAudio",
+              "value": "={{ $if($('Run Audio Transcription Sub-Workflow').isExecuted, true, false) }}",
+              "type": "boolean"
+            },
+            {
+              "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+              "name": "imageAnalysis",
+              "value": "={{ $if($('Run Product Image Recognition Sub-Workflow').isExecuted, $('Run Product Image Recognition Sub-Workflow').item.json.imageAnalysis, '') }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        6528,
+        3760
+      ],
+      "id": "511c463c-6f1c-41f4-8cf4-dbb0a43c6bc3",
+      "name": "Extract Sender ID"
+    },
+    {
+      "parameters": {
+        "jsCode": "const countries = [\n  {\"country\":\"Afghanistan\",\"code\":\"93\",\"iso\":\"AF\"},\n{\"country\":\"Albania\",\"code\":\"355\",\"iso\":\"AL\"},\n{\"country\":\"Algeria\",\"code\":\"213\",\"iso\":\"DZ\"},\n{\"country\":\"American Samoa\",\"code\":\"1-684\",\"iso\":\"AS\"},\n{\"country\":\"Andorra\",\"code\":\"376\",\"iso\":\"AD\"},\n{\"country\":\"Angola\",\"code\":\"244\",\"iso\":\"AO\"},\n{\"country\":\"Anguilla\",\"code\":\"1-264\",\"iso\":\"AI\"},\n{\"country\":\"Antarctica\",\"code\":\"672\",\"iso\":\"AQ\"},\n{\"country\":\"Antigua and Barbuda\",\"code\":\"1-268\",\"iso\":\"AG\"},\n{\"country\":\"Argentina\",\"code\":\"54\",\"iso\":\"AR\"},\n{\"country\":\"Armenia\",\"code\":\"374\",\"iso\":\"AM\"},\n{\"country\":\"Aruba\",\"code\":\"297\",\"iso\":\"AW\"},\n{\"country\":\"Australia\",\"code\":\"61\",\"iso\":\"AU\"},\n{\"country\":\"Austria\",\"code\":\"43\",\"iso\":\"AT\"},\n{\"country\":\"Azerbaijan\",\"code\":\"994\",\"iso\":\"AZ\"},\n{\"country\":\"Bahamas\",\"code\":\"1-242\",\"iso\":\"BS\"},\n{\"country\":\"Bahrain\",\"code\":\"973\",\"iso\":\"BH\"},\n{\"country\":\"Bangladesh\",\"code\":\"880\",\"iso\":\"BD\"},\n{\"country\":\"Barbados\",\"code\":\"1-246\",\"iso\":\"BB\"},\n{\"country\":\"Belarus\",\"code\":\"375\",\"iso\":\"BY\"},\n{\"country\":\"Belgium\",\"code\":\"32\",\"iso\":\"BE\"},\n{\"country\":\"Belize\",\"code\":\"501\",\"iso\":\"BZ\"},\n{\"country\":\"Benin\",\"code\":\"229\",\"iso\":\"BJ\"},\n{\"country\":\"Bermuda\",\"code\":\"1-441\",\"iso\":\"BM\"},\n{\"country\":\"Bhutan\",\"code\":\"975\",\"iso\":\"BT\"},\n{\"country\":\"Bolivia\",\"code\":\"591\",\"iso\":\"BO\"},\n{\"country\":\"Bosnia and Herzegovina\",\"code\":\"387\",\"iso\":\"BA\"},\n{\"country\":\"Botswana\",\"code\":\"267\",\"iso\":\"BW\"},\n{\"country\":\"Brazil\",\"code\":\"55\",\"iso\":\"BR\"},\n{\"country\":\"British Indian Ocean Territory\",\"code\":\"246\",\"iso\":\"IO\"},\n{\"country\":\"British Virgin Islands\",\"code\":\"1-284\",\"iso\":\"VG\"},\n{\"country\":\"Brunei\",\"code\":\"673\",\"iso\":\"BN\"},\n{\"country\":\"Bulgaria\",\"code\":\"359\",\"iso\":\"BG\"},\n{\"country\":\"Burkina Faso\",\"code\":\"226\",\"iso\":\"BF\"},\n{\"country\":\"Burundi\",\"code\":\"257\",\"iso\":\"BI\"},\n{\"country\":\"Cambodia\",\"code\":\"855\",\"iso\":\"KH\"},\n{\"country\":\"Cameroon\",\"code\":\"237\",\"iso\":\"CM\"},\n{\"country\":\"Canada\",\"code\":\"1\",\"iso\":\"CA\"},\n{\"country\":\"Cape Verde\",\"code\":\"238\",\"iso\":\"CV\"},\n{\"country\":\"Cayman Islands\",\"code\":\"1-345\",\"iso\":\"KY\"},\n{\"country\":\"Central African Republic\",\"code\":\"236\",\"iso\":\"CF\"},\n{\"country\":\"Chad\",\"code\":\"235\",\"iso\":\"TD\"},\n{\"country\":\"Chile\",\"code\":\"56\",\"iso\":\"CL\"},\n{\"country\":\"China\",\"code\":\"86\",\"iso\":\"CN\"},\n{\"country\":\"Christmas Island\",\"code\":\"61\",\"iso\":\"CX\"},\n{\"country\":\"Cocos Islands\",\"code\":\"61\",\"iso\":\"CC\"},\n{\"country\":\"Colombia\",\"code\":\"57\",\"iso\":\"CO\"},\n{\"country\":\"Comoros\",\"code\":\"269\",\"iso\":\"KM\"},\n{\"country\":\"Cook Islands\",\"code\":\"682\",\"iso\":\"CK\"},\n{\"country\":\"Costa Rica\",\"code\":\"506\",\"iso\":\"CR\"},\n{\"country\":\"Croatia\",\"code\":\"385\",\"iso\":\"HR\"},\n{\"country\":\"Cuba\",\"code\":\"53\",\"iso\":\"CU\"},\n{\"country\":\"Curacao\",\"code\":\"599\",\"iso\":\"CW\"},\n{\"country\":\"Cyprus\",\"code\":\"357\",\"iso\":\"CY\"},\n{\"country\":\"Czech Republic\",\"code\":\"420\",\"iso\":\"CZ\"},\n{\"country\":\"Democratic Republic of the Congo\",\"code\":\"243\",\"iso\":\"CD\"},\n{\"country\":\"Denmark\",\"code\":\"45\",\"iso\":\"DK\"},\n{\"country\":\"Djibouti\",\"code\":\"253\",\"iso\":\"DJ\"},\n{\"country\":\"Dominica\",\"code\":\"1-767\",\"iso\":\"DM\"},\n{\"country\":\"Dominican Republic\",\"code\":\"1-809, 1-829, 1-849\",\"iso\":\"DO\"},\n{\"country\":\"East Timor\",\"code\":\"670\",\"iso\":\"TL\"},\n{\"country\":\"Ecuador\",\"code\":\"593\",\"iso\":\"EC\"},\n{\"country\":\"Egypt\",\"code\":\"20\",\"iso\":\"EG\"},\n{\"country\":\"El Salvador\",\"code\":\"503\",\"iso\":\"SV\"},\n{\"country\":\"Equatorial Guinea\",\"code\":\"240\",\"iso\":\"GQ\"},\n{\"country\":\"Eritrea\",\"code\":\"291\",\"iso\":\"ER\"},\n{\"country\":\"Estonia\",\"code\":\"372\",\"iso\":\"EE\"},\n{\"country\":\"Ethiopia\",\"code\":\"251\",\"iso\":\"ET\"},\n{\"country\":\"Falkland Islands\",\"code\":\"500\",\"iso\":\"FK\"},\n{\"country\":\"Faroe Islands\",\"code\":\"298\",\"iso\":\"FO\"},\n{\"country\":\"Fiji\",\"code\":\"679\",\"iso\":\"FJ\"},\n{\"country\":\"Finland\",\"code\":\"358\",\"iso\":\"FI\"},\n{\"country\":\"France\",\"code\":\"33\",\"iso\":\"FR\"},\n{\"country\":\"French Polynesia\",\"code\":\"689\",\"iso\":\"PF\"},\n{\"country\":\"Gabon\",\"code\":\"241\",\"iso\":\"GA\"},\n{\"country\":\"Gambia\",\"code\":\"220\",\"iso\":\"GM\"},\n{\"country\":\"Georgia\",\"code\":\"995\",\"iso\":\"GE\"},\n{\"country\":\"Germany\",\"code\":\"49\",\"iso\":\"DE\"},\n{\"country\":\"Ghana\",\"code\":\"233\",\"iso\":\"GH\"},\n{\"country\":\"Gibraltar\",\"code\":\"350\",\"iso\":\"GI\"},\n{\"country\":\"Greece\",\"code\":\"30\",\"iso\":\"GR\"},\n{\"country\":\"Greenland\",\"code\":\"299\",\"iso\":\"GL\"},\n{\"country\":\"Grenada\",\"code\":\"1-473\",\"iso\":\"GD\"},\n{\"country\":\"Guam\",\"code\":\"1-671\",\"iso\":\"GU\"},\n{\"country\":\"Guatemala\",\"code\":\"502\",\"iso\":\"GT\"},\n{\"country\":\"Guernsey\",\"code\":\"44-1481\",\"iso\":\"GG\"},\n{\"country\":\"Guinea\",\"code\":\"224\",\"iso\":\"GN\"},\n{\"country\":\"Guinea-Bissau\",\"code\":\"245\",\"iso\":\"GW\"},\n{\"country\":\"Guyana\",\"code\":\"592\",\"iso\":\"GY\"},\n{\"country\":\"Haiti\",\"code\":\"509\",\"iso\":\"HT\"},\n{\"country\":\"Honduras\",\"code\":\"504\",\"iso\":\"HN\"},\n{\"country\":\"Hong Kong\",\"code\":\"852\",\"iso\":\"HK\"},\n{\"country\":\"Hungary\",\"code\":\"36\",\"iso\":\"HU\"},\n{\"country\":\"Iceland\",\"code\":\"354\",\"iso\":\"IS\"},\n{\"country\":\"India\",\"code\":\"91\",\"iso\":\"IN\"},\n{\"country\":\"Indonesia\",\"code\":\"62\",\"iso\":\"ID\"},\n{\"country\":\"Iran\",\"code\":\"98\",\"iso\":\"IR\"},\n{\"country\":\"Iraq\",\"code\":\"964\",\"iso\":\"IQ\"},\n{\"country\":\"Ireland\",\"code\":\"353\",\"iso\":\"IE\"},\n{\"country\":\"Isle of Man\",\"code\":\"44-1624\",\"iso\":\"IM\"},\n{\"country\":\"Israel\",\"code\":\"972\",\"iso\":\"IL\"},\n{\"country\":\"Italy\",\"code\":\"39\",\"iso\":\"IT\"},\n{\"country\":\"Ivory Coast\",\"code\":\"225\",\"iso\":\"CI\"},\n{\"country\":\"Jamaica\",\"code\":\"1-876\",\"iso\":\"JM\"},\n{\"country\":\"Japan\",\"code\":\"81\",\"iso\":\"JP\"},\n{\"country\":\"Jersey\",\"code\":\"44-1534\",\"iso\":\"JE\"},\n{\"country\":\"Jordan\",\"code\":\"962\",\"iso\":\"JO\"},\n{\"country\":\"Kazakhstan\",\"code\":\"7\",\"iso\":\"KZ\"},\n{\"country\":\"Kenya\",\"code\":\"254\",\"iso\":\"KE\"},\n{\"country\":\"Kiribati\",\"code\":\"686\",\"iso\":\"KI\"},\n{\"country\":\"Kosovo\",\"code\":\"383\",\"iso\":\"XK\"},\n{\"country\":\"Kuwait\",\"code\":\"965\",\"iso\":\"KW\"},\n{\"country\":\"Kyrgyzstan\",\"code\":\"996\",\"iso\":\"KG\"},\n{\"country\":\"Laos\",\"code\":\"856\",\"iso\":\"LA\"},\n{\"country\":\"Latvia\",\"code\":\"371\",\"iso\":\"LV\"},\n{\"country\":\"Lebanon\",\"code\":\"961\",\"iso\":\"LB\"},\n{\"country\":\"Lesotho\",\"code\":\"266\",\"iso\":\"LS\"},\n{\"country\":\"Liberia\",\"code\":\"231\",\"iso\":\"LR\"},\n{\"country\":\"Libya\",\"code\":\"218\",\"iso\":\"LY\"},\n{\"country\":\"Liechtenstein\",\"code\":\"423\",\"iso\":\"LI\"},\n{\"country\":\"Lithuania\",\"code\":\"370\",\"iso\":\"LT\"},\n{\"country\":\"Luxembourg\",\"code\":\"352\",\"iso\":\"LU\"},\n{\"country\":\"Macao\",\"code\":\"853\",\"iso\":\"MO\"},\n{\"country\":\"Macedonia\",\"code\":\"389\",\"iso\":\"MK\"},\n{\"country\":\"Madagascar\",\"code\":\"261\",\"iso\":\"MG\"},\n{\"country\":\"Malawi\",\"code\":\"265\",\"iso\":\"MW\"},\n{\"country\":\"Malaysia\",\"code\":\"60\",\"iso\":\"MY\"},\n{\"country\":\"Maldives\",\"code\":\"960\",\"iso\":\"MV\"},\n{\"country\":\"Mali\",\"code\":\"223\",\"iso\":\"ML\"},\n{\"country\":\"Malta\",\"code\":\"356\",\"iso\":\"MT\"},\n{\"country\":\"Marshall Islands\",\"code\":\"692\",\"iso\":\"MH\"},\n{\"country\":\"Mauritania\",\"code\":\"222\",\"iso\":\"MR\"},\n{\"country\":\"Mauritius\",\"code\":\"230\",\"iso\":\"MU\"},\n{\"country\":\"Mayotte\",\"code\":\"262\",\"iso\":\"YT\"},\n{\"country\":\"Mexico\",\"code\":\"52\",\"iso\":\"MX\"},\n{\"country\":\"Micronesia\",\"code\":\"691\",\"iso\":\"FM\"},\n{\"country\":\"Moldova\",\"code\":\"373\",\"iso\":\"MD\"},\n{\"country\":\"Monaco\",\"code\":\"377\",\"iso\":\"MC\"},\n{\"country\":\"Mongolia\",\"code\":\"976\",\"iso\":\"MN\"},\n{\"country\":\"Montenegro\",\"code\":\"382\",\"iso\":\"ME\"},\n{\"country\":\"Montserrat\",\"code\":\"1-664\",\"iso\":\"MS\"},\n{\"country\":\"Morocco\",\"code\":\"212\",\"iso\":\"MA\"},\n{\"country\":\"Mozambique\",\"code\":\"258\",\"iso\":\"MZ\"},\n{\"country\":\"Myanmar\",\"code\":\"95\",\"iso\":\"MM\"},\n{\"country\":\"Namibia\",\"code\":\"264\",\"iso\":\"NA\"},\n{\"country\":\"Nauru\",\"code\":\"674\",\"iso\":\"NR\"},\n{\"country\":\"Nepal\",\"code\":\"977\",\"iso\":\"NP\"},\n{\"country\":\"Netherlands\",\"code\":\"31\",\"iso\":\"NL\"},\n{\"country\":\"Netherlands Antilles\",\"code\":\"599\",\"iso\":\"AN\"},\n{\"country\":\"New Caledonia\",\"code\":\"687\",\"iso\":\"NC\"},\n{\"country\":\"New Zealand\",\"code\":\"64\",\"iso\":\"NZ\"},\n{\"country\":\"Nicaragua\",\"code\":\"505\",\"iso\":\"NI\"},\n{\"country\":\"Niger\",\"code\":\"227\",\"iso\":\"NE\"},\n{\"country\":\"Nigeria\",\"code\":\"234\",\"iso\":\"NG\"},\n{\"country\":\"Niue\",\"code\":\"683\",\"iso\":\"NU\"},\n{\"country\":\"North Korea\",\"code\":\"850\",\"iso\":\"KP\"},\n{\"country\":\"Northern Mariana Islands\",\"code\":\"1-670\",\"iso\":\"MP\"},\n{\"country\":\"Norway\",\"code\":\"47\",\"iso\":\"NO\"},\n{\"country\":\"Oman\",\"code\":\"968\",\"iso\":\"OM\"},\n{\"country\":\"Pakistan\",\"code\":\"92\",\"iso\":\"PK\"},\n{\"country\":\"Palau\",\"code\":\"680\",\"iso\":\"PW\"},\n{\"country\":\"Palestine\",\"code\":\"970\",\"iso\":\"PS\"},\n{\"country\":\"Panama\",\"code\":\"507\",\"iso\":\"PA\"},\n{\"country\":\"Papua New Guinea\",\"code\":\"675\",\"iso\":\"PG\"},\n{\"country\":\"Paraguay\",\"code\":\"595\",\"iso\":\"PY\"},\n{\"country\":\"Peru\",\"code\":\"51\",\"iso\":\"PE\"},\n{\"country\":\"Philippines\",\"code\":\"63\",\"iso\":\"PH\"},\n{\"country\":\"Pitcairn\",\"code\":\"64\",\"iso\":\"PN\"},\n{\"country\":\"Poland\",\"code\":\"48\",\"iso\":\"PL\"},\n{\"country\":\"Portugal\",\"code\":\"351\",\"iso\":\"PT\"},\n{\"country\":\"Puerto Rico\",\"code\":\"1-787, 1-939\",\"iso\":\"PR\"},\n{\"country\":\"Qatar\",\"code\":\"974\",\"iso\":\"QA\"},\n{\"country\":\"Republic of the Congo\",\"code\":\"242\",\"iso\":\"CG\"},\n{\"country\":\"Reunion\",\"code\":\"262\",\"iso\":\"RE\"},\n{\"country\":\"Romania\",\"code\":\"40\",\"iso\":\"RO\"},\n{\"country\":\"Russia\",\"code\":\"7\",\"iso\":\"RU\"},\n{\"country\":\"Rwanda\",\"code\":\"250\",\"iso\":\"RW\"},\n{\"country\":\"Saint Barthelemy\",\"code\":\"590\",\"iso\":\"BL\"},\n{\"country\":\"Saint Helena\",\"code\":\"290\",\"iso\":\"SH\"},\n{\"country\":\"Saint Kitts and Nevis\",\"code\":\"1-869\",\"iso\":\"KN\"},\n{\"country\":\"Saint Lucia\",\"code\":\"1-758\",\"iso\":\"LC\"},\n{\"country\":\"Saint Martin\",\"code\":\"590\",\"iso\":\"MF\"},\n{\"country\":\"Saint Pierre and Miquelon\",\"code\":\"508\",\"iso\":\"PM\"},\n{\"country\":\"Saint Vincent and the Grenadines\",\"code\":\"1-784\",\"iso\":\"VC\"},\n{\"country\":\"Samoa\",\"code\":\"685\",\"iso\":\"WS\"},\n{\"country\":\"San Marino\",\"code\":\"378\",\"iso\":\"SM\"},\n{\"country\":\"Sao Tome and Principe\",\"code\":\"239\",\"iso\":\"ST\"},\n{\"country\":\"Saudi Arabia\",\"code\":\"966\",\"iso\":\"SA\"},\n{\"country\":\"Senegal\",\"code\":\"221\",\"iso\":\"SN\"},\n{\"country\":\"Serbia\",\"code\":\"381\",\"iso\":\"RS\"},\n{\"country\":\"Seychelles\",\"code\":\"248\",\"iso\":\"SC\"},\n{\"country\":\"Sierra Leone\",\"code\":\"232\",\"iso\":\"SL\"},\n{\"country\":\"Singapore\",\"code\":\"65\",\"iso\":\"SG\"},\n{\"country\":\"Sint Maarten\",\"code\":\"1-721\",\"iso\":\"SX\"},\n{\"country\":\"Slovakia\",\"code\":\"421\",\"iso\":\"SK\"},\n{\"country\":\"Slovenia\",\"code\":\"386\",\"iso\":\"SI\"},\n{\"country\":\"Solomon Islands\",\"code\":\"677\",\"iso\":\"SB\"},\n{\"country\":\"Somalia\",\"code\":\"252\",\"iso\":\"SO\"},\n{\"country\":\"South Africa\",\"code\":\"27\",\"iso\":\"ZA\"},\n{\"country\":\"South Korea\",\"code\":\"82\",\"iso\":\"KR\"},\n{\"country\":\"South Sudan\",\"code\":\"211\",\"iso\":\"SS\"},\n{\"country\":\"Spain\",\"code\":\"34\",\"iso\":\"ES\"},\n{\"country\":\"Sri Lanka\",\"code\":\"94\",\"iso\":\"LK\"},\n{\"country\":\"Sudan\",\"code\":\"249\",\"iso\":\"SD\"},\n{\"country\":\"Suriname\",\"code\":\"597\",\"iso\":\"SR\"},\n{\"country\":\"Svalbard and Jan Mayen\",\"code\":\"47\",\"iso\":\"SJ\"},\n{\"country\":\"Swaziland\",\"code\":\"268\",\"iso\":\"SZ\"},\n{\"country\":\"Sweden\",\"code\":\"46\",\"iso\":\"SE\"},\n{\"country\":\"Switzerland\",\"code\":\"41\",\"iso\":\"CH\"},\n{\"country\":\"Syria\",\"code\":\"963\",\"iso\":\"SY\"},\n{\"country\":\"Taiwan\",\"code\":\"886\",\"iso\":\"TW\"},\n{\"country\":\"Tajikistan\",\"code\":\"992\",\"iso\":\"TJ\"},\n{\"country\":\"Tanzania\",\"code\":\"255\",\"iso\":\"TZ\"},\n{\"country\":\"Thailand\",\"code\":\"66\",\"iso\":\"TH\"},\n{\"country\":\"Togo\",\"code\":\"228\",\"iso\":\"TG\"},\n{\"country\":\"Tokelau\",\"code\":\"690\",\"iso\":\"TK\"},\n{\"country\":\"Tonga\",\"code\":\"676\",\"iso\":\"TO\"},\n{\"country\":\"Trinidad and Tobago\",\"code\":\"1-868\",\"iso\":\"TT\"},\n{\"country\":\"Tunisia\",\"code\":\"216\",\"iso\":\"TN\"},\n{\"country\":\"Turkey\",\"code\":\"90\",\"iso\":\"TR\"},\n{\"country\":\"Turkmenistan\",\"code\":\"993\",\"iso\":\"TM\"},\n{\"country\":\"Turks and Caicos Islands\",\"code\":\"1-649\",\"iso\":\"TC\"},\n{\"country\":\"Tuvalu\",\"code\":\"688\",\"iso\":\"TV\"},\n{\"country\":\"U.S. Virgin Islands\",\"code\":\"1-340\",\"iso\":\"VI\"},\n{\"country\":\"Uganda\",\"code\":\"256\",\"iso\":\"UG\"},\n{\"country\":\"Ukraine\",\"code\":\"380\",\"iso\":\"UA\"},\n{\"country\":\"United Arab Emirates\",\"code\":\"971\",\"iso\":\"AE\"},\n{\"country\":\"United Kingdom\",\"code\":\"44\",\"iso\":\"GB\"},\n{\"country\":\"United States\",\"code\":\"1\",\"iso\":\"US\"},\n{\"country\":\"Uruguay\",\"code\":\"598\",\"iso\":\"UY\"},\n{\"country\":\"Uzbekistan\",\"code\":\"998\",\"iso\":\"UZ\"},\n{\"country\":\"Vanuatu\",\"code\":\"678\",\"iso\":\"VU\"},\n{\"country\":\"Vatican\",\"code\":\"379\",\"iso\":\"VA\"},\n{\"country\":\"Venezuela\",\"code\":\"58\",\"iso\":\"VE\"},\n{\"country\":\"Vietnam\",\"code\":\"84\",\"iso\":\"VN\"},\n{\"country\":\"Wallis and Futuna\",\"code\":\"681\",\"iso\":\"WF\"},\n{\"country\":\"Western Sahara\",\"code\":\"212\",\"iso\":\"EH\"},\n{\"country\":\"Yemen\",\"code\":\"967\",\"iso\":\"YE\"},\n{\"country\":\"Zambia\",\"code\":\"260\",\"iso\":\"ZM\"},\n{\"country\":\"Zimbabwe\",\"code\":\"263\",\"iso\":\"ZW\"}\n];\n\nreturn countries.map(country => ({\n  json: {\n    ...country,\n    flag_url: `https://flagcdn.com/w40/${country.iso.toLowerCase()}.png`\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6672,
+        3600
+      ],
+      "id": "e078f9bf-39c5-4964-8791-1a466bf49b8e",
+      "name": "countrycodes"
+    },
+    {
+      "parameters": {
+        "jsCode": "const wa_id  = $('Extract Sender ID').first().json.wa_id || '';\nconst digits = wa_id.replace(/\\D/g, '');\n\nlet countries = [];\ntry { countries = $('countrycodes').all().map(i => i.json); } catch(e) {}\n\nconst sorted = [...countries].sort((a, b) =>\n  b.code.replace(/\\D/g,'').length - a.code.replace(/\\D/g,'').length\n);\n\nlet match = null;\nfor (const c of sorted) {\n  const prefix = c.code.split(',')[0].replace(/\\D/g,'');\n  if (digits.startsWith(prefix)) { match = c; break; }\n}\n\nreturn [{ json: {\n  ...$json,\n  phone_country_code: match?.code    || null,\n  phone_country_name: match?.country || null,\n  phone_country_iso:  match?.iso     || null,\n  phone_flag_url:     match?.flag_url || null,\n  _resolvedCountry:   match?.country || null,\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6896,
+        3600
+      ],
+      "id": "00200301-e09e-48f4-8c6e-eb4df68bb0f1",
+      "name": "Resolve Country from Phone1"
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "useDataOfInput": 2
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        7056,
+        3728
+      ],
+      "id": "c7c35c8b-c711-49eb-808c-fb98d4d35f7c",
+      "name": "Execute Country Codes + Pass Message Data"
+    },
+    {
+      "parameters": {
+        "jsCode": "const src = $('Extract Sender ID').item.json;\nconst wa_id = src.wa_id;\nconst name = src.name;\nconst tsMs = Number(src.tsMs);\n// compute useful times\nconst tsIso = (src.tsIso || new Date(tsMs || Date.now()).toISOString()).trim();\nconst sessionId = `${wa_id}_${String(tsMs).slice(0,10)}`;\nconst sessionStartIso = (src.sessionStartIso || tsIso).trim();\n// 120-day TTL (optional)\nconst ttlDays = 120;\nconst ttlIso = new Date(Date.now() + ttlDays*86400*1000).toISOString();\n\nreturn [{\n  ...src,\n  wa_id,\n  name,\n  tsMs,\n  tsIso,\n  sessionId,\n  sessionStartIso,\n  ttlIso,\n  direction: src.direction || 'inbound',\n  projectId: 'neema-6037c',\n  mergeKey: 1,                  // <- number, not string\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7248,
+        3728
+      ],
+      "id": "31abd376-f44b-4c9d-983c-b94a578920f5",
+      "name": "Build Session Vars",
+      "executeOnce": false
+    },
+    {
+      "parameters": {
+        "jsCode": "// === Detect Media Request ===\n// Flags any inbound TEXT message that requests media the AI cannot send:\n// images, PDFs, catalogues, brochures, videos, files.\n//\n// IMPORTANT: Skip entirely when the inbound message was a voice note.\n// Pattern-matching a Whisper transcription against media-request keywords\n// causes false positives \u2014 words like \"audio\", \"send\", \"share\" appear\n// naturally in speech and incorrectly escalate to human mode, preventing\n// the AI from replying with TTS audio as intended.\nconst isAudio = $('Extract Sender ID').item.json.isAudio === true;\nif (isAudio) {\n  return [{ ...$json, isMediaRequest: false, mediaEscalationReason: null }];\n}\n\nconst imageAnalysis = $('Extract Sender ID').item.json.imageAnalysis || '';\nif (imageAnalysis) {\n  return [{ ...$json, isMediaRequest: false, mediaEscalationReason: null }];\n}\n\nconst msgText = String(\n  $json?.msgText ||\n  $json?.messages?.[0]?.text?.body ||\n  \"\"\n).toLowerCase().trim();\n\n// \u2500\u2500 Media intent patterns \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nconst MEDIA_PATTERNS = [\n  // \u2500\u2500 Bare colloquial nouns (catch \"need to see pics\", \"send pics\", \"any photos?\") \u2500\u2500\n  /\\bpics?\\b/i,\n  /\\bphotos?\\b/i,\n  /\\bimages?\\b/i,\n  /\\bpictures?\\b/i,\n  /\\bphotographs?\\b/i,\n  /\\bcatalogue\\b/i,\n  /\\bcatalog\\b/i,\n  /\\bbrochure\\b/i,\n  /\\bflyer\\b/i,\n  /\\blookbook\\b/i,\n  /\\bprice\\s*list\\b/i,\n  /\\bpdf\\b/i,\n  /\\bvoice\\s*note\\b/i,\n  /\\bvoice\\s*message\\b/i,\n  /\\bvideo\\b/i,\n  /\\baudio\\b/i,\n  /\\battachment\\b/i,\n  // \u2500\u2500 Swahili variants \u2500\u2500\n  /\\bpicha\\b/i,\n  /\\bkatalogi\\b/i,\n  /\\bbrosha\\b/i,\n  /\\bsauti\\b/i,\n  // \u2500\u2500 \"show me\", \"see\", \"view\" + visual intent \u2500\u2500\n  /\\b(show|see|view|look\\s+at|check\\s+out)\\b.{0,30}\\b(item|product|cassock|gown|alb|shirt|collar|tray|communion|stock|what\\s+you\\s+have|what\\s+you\\s+got)\\b/i,\n  // \u2500\u2500 Explicit send/share + file type (kept from before) \u2500\u2500\n  /\\b(send|share|attach|forward|drop|give|email|whatsapp)\\b.{0,40}\\b(image|photo|pic|pdf|catalogue|catalog|brochure|flyer|document|file|attachment)\\b/i,\n];\n\nconst isMediaRequest = MEDIA_PATTERNS.some(rx => rx.test(msgText));\nreturn [{\n  ...$json,\n  isMediaRequest,\n  mediaEscalationReason: isMediaRequest\n    ? \"Customer requested media/image/file \u2014 AI cannot send attachments\"\n    : null,\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7248,
+        3168
+      ],
+      "id": "8caf2f0c-e727-46f7-8008-0c5ae4f24a26",
+      "name": "Detect Media Request"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "cc128b3d-7754-4c28-9215-56815b9e9cfe",
+              "leftValue": "={{ $json.isMediaRequest }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        7728,
+        3168
+      ],
+      "id": "71615ed6-ce52-42bb-ab02-a6b7ee418c59",
+      "name": "If Media Request Exists"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "2f351010-378f-49de-819b-dc9b261c33a1",
+              "leftValue": "={{ $('WhatsApp Trigger').item.json.messages[0].type }}",
+              "rightValue": "text",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        8528,
+        3232
+      ],
+      "id": "cb3a65e4-8770-4e24-b753-fdd3302891f1",
+      "name": "Is text message?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://neema.bethanyhouse.co.ke/api/n8n/message",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "REPLACE_WITH_N8N_API_SECRET"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"wa_id\":     {{ JSON.stringify($json.wa_id) }},\n  \"name\":      {{ JSON.stringify($json.name) }},\n  \"direction\": {{ JSON.stringify($json.direction || \"inbound\") }},\n  \"text\":      {{ JSON.stringify(String($json.msgText || \"\")) }},\n  \"ts_ms\":     {{ $json.tsMs }},\n  \"ts_iso\":    {{ JSON.stringify($json.tsIso) }}\n}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        7600,
+        3712
+      ],
+      "id": "2f7f7ad3-60f3-472d-9a27-c6d10c9428c9",
+      "name": "Upsert Message API"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "4703ccf2-6a9a-4148-a9a2-309569ab3de7",
+              "leftValue": "={{ $json.fields?.lastMessageTs === null || !$json.fields?.lastMessageTs }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        7840,
+        3488
+      ],
+      "id": "4c94ce36-0180-463d-ae17-1e0a37e310f1",
+      "name": "Is new conversation?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://neema.bethanyhouse.co.ke/api/n8n/notify",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "REPLACE_WITH_N8N_API_SECRET"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"type\": \"new_conversation\",\n  \"agent_id\": null,\n  \"title\": {{ 'New chat from ' + ($json.name || $json.fields.wa_id.stringValue) }},\n  \"body\":  {{ JSON.stringify($('Extract Sender ID').item.json.msgText) }},\n  \"wa_id\": {{ JSON.stringify($('Extract Sender ID').item.json.wa_id) }},\n  \"flag_url\": \"{{ JSON.stringify($('Resolve Country from Phone1').item.json.phone_flag_url) }}\",\n  \"ts\": {{ JSON.stringify($json.fields.tsIso.stringValue) }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        8080,
+        3488
+      ],
+      "id": "9d3a2a59-e324-489d-bcca-5403f3a6c3f5",
+      "name": "Create Notification"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://neema.bethanyhouse.co.ke/api/n8n/session",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-n8n-secret",
+              "value": "REPLACE_WITH_N8N_API_SECRET"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"wa_id\":     {{ JSON.stringify($json.wa_id) }},\n  \"session_id\": {{ JSON.stringify($json.sessionId) }},\n  \"start_ts\":  {{ JSON.stringify($json.sessionStartIso) }},\n  \"last_ts\":   {{ JSON.stringify($json.tsIso) }},\n  \"turns\":     {{ Number($json.turns || 0) + 1 }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        9280,
+        3584
+      ],
+      "id": "7f6f2e80-5917-4fbb-b9be-7606dbd46d93",
+      "name": "Touch Session API"
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "useDataOfInput": 2
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        9584,
+        4000
+      ],
+      "id": "fe595a39-2bf7-461b-8362-2816d95fe91d",
+      "name": "Gate after Touch"
+    },
+    {
+      "parameters": {
+        "jsCode": "// === Media Escalation Handler ===\n// Silently escalates to a human agent \u2014 no message sent to the customer.\n// The agent will see the conversation flagged in their inbox and can\n// respond directly with the requested media.\n\nconst wa_id   = String($json?.wa_id || \"\").trim();\nconst msgText = String($json?.msgText || \"\").trim();\n\nif (!wa_id) throw new Error(\"Media Escalation: wa_id missing\");\n\n// Notification text shown to the agent in the inbox\nconst agentNote =\n  `\ud83d\udcce Media request from ${wa_id}: \"${msgText.slice(0, 120)}${msgText.length > 120 ? '\u2026' : ''}\" \u2014 ` +\n  `customer is asking for images or files. Please respond with the relevant media.`;\n\nreturn [{\n  wa_id,\n  reply_text:          null,       // no message sent to customer\n  escalationNote:      agentNote,\n  isMediaRequest:      true,\n  needsHumanIntercept: true,\n  sessionId:           $json?.sessionId || null,\n  mergeKey:            $json?.mergeKey  || 1,\n  msgText,\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7968,
+        2944
+      ],
+      "id": "dc95326b-8c92-43c4-ab84-59ee3d7d43d0",
+      "name": "Media Escalation Handler"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://neema.bethanyhouse.co.ke/api/n8n/escalate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "REPLACE_WITH_N8N_API_SECRET"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"wa_id\":    {{ JSON.stringify($json.wa_id) }},\n  \"msg_text\": {{ JSON.stringify($json.msgText) }},\n  \"reason\":   {{ JSON.stringify($json.escalationNote) }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        8288,
+        2944
+      ],
+      "id": "0b04cc90-a329-429a-b2b9-f7219b760ad6",
+      "name": "Escalate Media Request"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "I2ERPxA9cXlGwRFK",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/I2ERPxA9cXlGwRFK",
+          "cachedResultName": "Conversation Intelligence & Response"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        10336,
+        3984
+      ],
+      "id": "4df45f8d-a348-4c1c-80fb-543c1e2cd15b",
+      "name": "Run Conversation Intelligence & Response Sub-Workflow"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "IJmpgHtUncckWhjt",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/IJmpgHtUncckWhjt",
+          "cachedResultName": "Customer Profile & Session Setup"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        9920,
+        3968
+      ],
+      "id": "1d97fe04-20e3-423e-b2be-bcaaefc0310a",
+      "name": "Run Customer Profile & Session Setup Sub-Workflow"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "vgMKQjeZHEcGxNNT",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/vgMKQjeZHEcGxNNT",
+          "cachedResultName": "Product Image Recognition 2"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        6256,
+        4144
+      ],
+      "id": "fd1c48e2-e9b5-4e6b-adaa-a0110641f331",
+      "name": "Run Product Image Recognition Sub-Workflow"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "CBuGnbAAIzBYNbmk",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/CBuGnbAAIzBYNbmk",
+          "cachedResultName": "Voice Note Transcription"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        6256,
+        4336
+      ],
+      "id": "e05de712-63f0-40bc-a8c0-47ee8cc43f61",
+      "name": "Run Audio Transcription Sub-Workflow"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "V8hhLffkrHdGQn13",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/V8hhLffkrHdGQn13",
+          "cachedResultName": "Reply Dispatch & Order Fulfilment"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        10720,
+        3952
+      ],
+      "id": "bb2f96ee-6682-4424-9d63-dbf25bda08e1",
+      "name": "Run Reply Dispatch & Fulfilment Order Sub-Workflow"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "nuDkkY5Haszojjfv",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/nuDkkY5Haszojjfv",
+          "cachedResultName": "Message Debounce Buffer"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        8512,
+        3632
+      ],
+      "id": "bddd8a5b-3526-4ddc-b095-dc67c98e6573",
+      "name": "Run Message Debounce Buffer (12s)"
+    }
+  ],
+  "connections": {
+    "WhatsApp Trigger": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Extract Sender ID",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Run Audio Transcription Sub-Workflow",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Run Product Image Recognition Sub-Workflow",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract Media Info",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract Media Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Media Info": {
+      "main": [
+        [
+          {
+            "node": "Download Media API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Media API": {
+      "main": [
+        [
+          {
+            "node": "Switch Media Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch Media Type": {
+      "main": [
+        [
+          {
+            "node": "Merge stable_url",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge stable_url",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge stable_url": {
+      "main": [
+        [
+          {
+            "node": "Upsert Message with Escalation +Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Sender ID": {
+      "main": [
+        [
+          {
+            "node": "countrycodes",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Execute Country Codes + Pass Message Data",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "countrycodes": {
+      "main": [
+        [
+          {
+            "node": "Resolve Country from Phone1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Country from Phone1": {
+      "main": [
+        [
+          {
+            "node": "Execute Country Codes + Pass Message Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Country Codes + Pass Message Data": {
+      "main": [
+        [
+          {
+            "node": "Build Session Vars",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Session Vars": {
+      "main": [
+        [
+          {
+            "node": "Detect Media Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detect Media Request": {
+      "main": [
+        [
+          {
+            "node": "If Media Request Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Media Request Exists": {
+      "main": [
+        [
+          {
+            "node": "Media Escalation Handler",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is text message?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Media Escalation Handler": {
+      "main": [
+        [
+          {
+            "node": "Escalate Media Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is text message?": {
+      "main": [
+        [
+          {
+            "node": "Upsert Message API",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Touch Session API",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gate after Touch",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Upsert Message API": {
+      "main": [
+        [
+          {
+            "node": "Run Message Debounce Buffer (12s)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Is new conversation?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Touch Session API": {
+      "main": [
+        [
+          {
+            "node": "Gate after Touch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate after Touch": {
+      "main": [
+        [
+          {
+            "node": "Run Customer Profile & Session Setup Sub-Workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Conversation Intelligence & Response Sub-Workflow": {
+      "main": [
+        [
+          {
+            "node": "Run Reply Dispatch & Fulfilment Order Sub-Workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Customer Profile & Session Setup Sub-Workflow": {
+      "main": [
+        [
+          {
+            "node": "Run Conversation Intelligence & Response Sub-Workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Product Image Recognition Sub-Workflow": {
+      "main": [
+        [
+          {
+            "node": "Extract Sender ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Audio Transcription Sub-Workflow": {
+      "main": [
+        [
+          {
+            "node": "Extract Sender ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Message Debounce Buffer (12s)": {
+      "main": [
+        [
+          {
+            "node": "Touch Session API",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gate after Touch",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": null,
+  "pinData": {},
+  "versionId": "e95cc67f-515d-46ed-bc25-f3704a74554a",
+  "activeVersionId": "e95cc67f-515d-46ed-bc25-f3704a74554a",
+  "versionCounter": 400,
+  "triggerCount": 1,
+  "tags": [],
+  "shared": [
+    {
+      "updatedAt": "2026-04-12T02:55:41.232Z",
+      "createdAt": "2026-04-12T02:55:41.232Z",
+      "role": "workflow:owner",
+      "workflowId": "A0YW67vhAF3xXs1m",
+      "projectId": "RWAY6MzHolKbatYF",
+      "project": {
+        "updatedAt": "2026-03-04T12:36:14.939Z",
+        "createdAt": "2026-03-04T12:33:20.413Z",
+        "id": "RWAY6MzHolKbatYF",
+        "name": "Moses Mwicigi <mwicigimoses@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "00e0d748-c9a5-4812-93e6-fb3a0d5cbf37"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": "Version e95cc67f",
+    "description": ""
+  }
+}

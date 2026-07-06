@@ -1,0 +1,467 @@
+{
+  "updatedAt": "2026-04-14T03:06:17.410Z",
+  "createdAt": "2026-04-12T02:56:23.340Z",
+  "id": "CBuGnbAAIzBYNbmk",
+  "name": "Voice Note Transcription",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "82ba58c7-0f1c-4f41-a8fb-26699e8c38d0",
+      "name": "When Called by Main Workflow"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract audio media info from the WhatsApp payload passed in\nconst msg = $json.messages[0];\nconst mediaObj = msg.audio || {};\nconst media_url = mediaObj.url || '';\nconst caption   = mediaObj.caption || '';\nconst msgText   = caption || '[audio received]';\n\nreturn [{ json: {\n  wa_id:      $json.contacts[0].wa_id,\n  name:       $json.contacts[0].profile.name || '',\n  phone:      String($json.messages[0].from).replace(/[^\\d]/g, ''),\n  msgId:      msg.id,\n  tsMs:       Number(msg.timestamp || 0) * 1000,\n  tsIso:      new Date(Number(msg.timestamp || 0) * 1000).toISOString(),\n  media_type: 'audio',\n  media_id:   mediaObj.id || '',\n  media_url,\n  mime_type:  mediaObj.mime_type || 'audio/ogg',\n  msgText,\n  caption,\n  filename:   'voice_message.ogg',\n  _raw: $json,\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "id": "9d5c96b5-743d-4f88-90ed-e2732278f18f",
+      "name": "Extract Audio Info"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://neema.bethanyhouse.co.ke/api/n8n/media/download",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "REPLACE_WITH_N8N_API_SECRET"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "media_url",
+              "value": "={{ $json.media_url }}"
+            },
+            {
+              "name": "media_id",
+              "value": "={{ $json.media_id }}"
+            },
+            {
+              "name": "mime_type",
+              "value": "={{ $json.mime_type }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        480,
+        0
+      ],
+      "id": "84ec2a97-0858-447f-bc22-03692c8dda1d",
+      "name": "Download Media API"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Download Media API').item.json.stable_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        720,
+        0
+      ],
+      "id": "7394aa79-71bc-494b-b402-989f0b5f1604",
+      "name": "Fetch Audio for Transcription"
+    },
+    {
+      "parameters": {
+        "resource": "audio",
+        "operation": "transcribe",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        960,
+        0
+      ],
+      "id": "9c79d431-9fc8-4d0c-8699-556e9b24b351",
+      "name": "Transcribe Audio",
+      "credentials": {
+        "openAiApi": {
+          "id": "u0Xd3M6ZSk3gh7vf",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "aud-set-01",
+              "name": "phoneRaw",
+              "value": "={{ $('Extract Audio Info').item.json._raw.messages[0].from }}",
+              "type": "string"
+            },
+            {
+              "id": "aud-set-02",
+              "name": "phone",
+              "value": "={{ $('Extract Audio Info').item.json._raw.messages[0].from.replace(/[^\\d]/g,'') }}",
+              "type": "string"
+            },
+            {
+              "id": "aud-set-03",
+              "name": "msgId",
+              "value": "={{ $('Extract Audio Info').item.json.msgId }}",
+              "type": "string"
+            },
+            {
+              "id": "aud-set-04",
+              "name": "msgText",
+              "value": "={{ $('Transcribe Audio').item.json.text || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "aud-set-05",
+              "name": "tsMs",
+              "value": "={{ $('Extract Audio Info').item.json.tsMs }}",
+              "type": "string"
+            },
+            {
+              "id": "aud-set-06",
+              "name": "tsIso",
+              "value": "={{ $('Extract Audio Info').item.json.tsIso }}",
+              "type": "string"
+            },
+            {
+              "id": "aud-set-07",
+              "name": "wa_id",
+              "value": "={{ $('Extract Audio Info').item.json.wa_id }}",
+              "type": "string"
+            },
+            {
+              "id": "aud-set-08",
+              "name": "name",
+              "value": "={{ $('Extract Audio Info').item.json.name }}",
+              "type": "string"
+            },
+            {
+              "id": "aud-set-09",
+              "name": "audiotranscribe",
+              "value": "={{ $('Transcribe Audio').item.json.text || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "aud-set-10",
+              "name": "isAudio",
+              "value": "=true",
+              "type": "boolean"
+            },
+            {
+              "id": "aud-set-11",
+              "name": "imageAnalysis",
+              "value": "",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1200,
+        0
+      ],
+      "id": "abceff86-d01a-49c7-b000-1f814d77f01e",
+      "name": "Extract Sender ID"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://neema.bethanyhouse.co.ke/api/n8n/message",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "REPLACE_WITH_N8N_API_SECRET"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"wa_id\":         {{ JSON.stringify(String($('Extract Audio Info').item.json.wa_id)) }},\n  \"name\":          {{ JSON.stringify(String($('Extract Audio Info').item.json.name || \"\")) }},\n  \"direction\":     \"inbound\",\n  \"text\":          {{ JSON.stringify($('Transcribe Audio').item.json.text || \"\") }},\n  \"media_type\":    \"audio\",\n  \"media_url\":     {{ JSON.stringify($('Download Media API').item.json.stable_url) }},\n  \"media_caption\": {{ JSON.stringify($('Extract Audio Info').item.json.caption || \"\") }},\n  \"ts_ms\":         {{ $('Extract Audio Info').item.json.tsMs }},\n  \"ts_iso\":        {{ JSON.stringify($('Extract Audio Info').item.json.tsIso) }}\n}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1200,
+        192
+      ],
+      "id": "36039786-4fce-4c8e-ad91-9fb40bc82422",
+      "name": "Upsert Inbound Audio Message"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "aud-out-01",
+              "name": "wa_id",
+              "value": "={{ $json.wa_id }}",
+              "type": "string"
+            },
+            {
+              "id": "aud-out-02",
+              "name": "name",
+              "value": "={{ $json.name }}",
+              "type": "string"
+            },
+            {
+              "id": "aud-out-03",
+              "name": "phone",
+              "value": "={{ $json.phone }}",
+              "type": "string"
+            },
+            {
+              "id": "aud-out-04",
+              "name": "msgId",
+              "value": "={{ $json.msgId }}",
+              "type": "string"
+            },
+            {
+              "id": "aud-out-05",
+              "name": "msgText",
+              "value": "={{ $json.msgText }}",
+              "type": "string"
+            },
+            {
+              "id": "aud-out-06",
+              "name": "tsMs",
+              "value": "={{ $json.tsMs }}",
+              "type": "string"
+            },
+            {
+              "id": "aud-out-07",
+              "name": "tsIso",
+              "value": "={{ $json.tsIso }}",
+              "type": "string"
+            },
+            {
+              "id": "aud-out-08",
+              "name": "audiotranscribe",
+              "value": "={{ $json.audiotranscribe }}",
+              "type": "string"
+            },
+            {
+              "id": "aud-out-09",
+              "name": "isAudio",
+              "value": "=true",
+              "type": "boolean"
+            },
+            {
+              "id": "aud-out-10",
+              "name": "imageAnalysis",
+              "value": "={{ $json.imageAnalysis }}",
+              "type": "string"
+            },
+            {
+              "id": "aud-out-11",
+              "name": "stable_url",
+              "value": "={{ $('Download Media API').item.json.stable_url }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1776,
+        112
+      ],
+      "id": "29a54e7f-bcfc-493d-b6ff-866ec02bd9c2",
+      "name": "Return Audio Data",
+      "executeOnce": false
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1488,
+        112
+      ],
+      "id": "0593e8dc-5b1e-4fbf-8f7d-722cdb285b24",
+      "name": "Merge"
+    }
+  ],
+  "connections": {
+    "When Called by Main Workflow": {
+      "main": [
+        [
+          {
+            "node": "Extract Audio Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Audio Info": {
+      "main": [
+        [
+          {
+            "node": "Download Media API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Media API": {
+      "main": [
+        [
+          {
+            "node": "Fetch Audio for Transcription",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Audio for Transcription": {
+      "main": [
+        [
+          {
+            "node": "Transcribe Audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribe Audio": {
+      "main": [
+        [
+          {
+            "node": "Extract Sender ID",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Upsert Inbound Audio Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Sender ID": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Inbound Audio Message": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Return Audio Data": {
+      "main": [
+        []
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Return Audio Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": null,
+  "pinData": {},
+  "versionId": "4455e2a0-0503-4921-a117-18873bf80cae",
+  "activeVersionId": "4455e2a0-0503-4921-a117-18873bf80cae",
+  "versionCounter": 61,
+  "triggerCount": 0,
+  "tags": [],
+  "shared": [
+    {
+      "updatedAt": "2026-04-12T02:56:23.345Z",
+      "createdAt": "2026-04-12T02:56:23.345Z",
+      "role": "workflow:owner",
+      "workflowId": "CBuGnbAAIzBYNbmk",
+      "projectId": "RWAY6MzHolKbatYF",
+      "project": {
+        "updatedAt": "2026-03-04T12:36:14.939Z",
+        "createdAt": "2026-03-04T12:33:20.413Z",
+        "id": "RWAY6MzHolKbatYF",
+        "name": "Moses Mwicigi <mwicigimoses@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "00e0d748-c9a5-4812-93e6-fb3a0d5cbf37"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": "Version 4455e2a0",
+    "description": ""
+  }
+}

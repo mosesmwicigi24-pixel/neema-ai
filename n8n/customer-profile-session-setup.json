@@ -1,0 +1,818 @@
+{
+  "updatedAt": "2026-06-10T05:22:50.475Z",
+  "createdAt": "2026-04-12T03:15:11.742Z",
+  "id": "IJmpgHtUncckWhjt",
+  "name": "Customer Profile & Session Setup",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1440,
+        80
+      ],
+      "id": "4a6a70a4-c73f-47c2-8eb0-03ce109fffc8",
+      "name": "When Called by Main Workflow"
+    },
+    {
+      "parameters": {
+        "url": "=https://neema.bethanyhouse.co.ke/api/n8n/messages/{{$json.wa_id}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "REPLACE_WITH_N8N_API_SECRET"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1200,
+        -64
+      ],
+      "id": "96cb1cc3-bf78-498d-9464-b8c09e602f9f",
+      "name": "RunQuery API"
+    },
+    {
+      "parameters": {
+        "url": "=https://neema.bethanyhouse.co.ke/api/n8n/context/{{$json.wa_id}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "REPLACE_WITH_N8N_API_SECRET"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1200,
+        320
+      ],
+      "id": "1d9c40ec-92d8-4a0b-9100-52790ed3701f",
+      "name": "Read Context API"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Bundle messages from API response (flat JSON array)\nconst base = $('RunQuery API').first().json || {};\nconst rows = $input.all().map(r => r.json).filter(Boolean);\n\n// Deduplicate by message id (keep latest created_at if dupes exist)\nconst seen = new Map();\nfor (const msg of rows) {\n  const existing = seen.get(msg.id);\n  if (!existing || msg.created_at > existing.created_at) {\n    seen.set(msg.id, msg);\n  }\n}\n\nconst messages = [...seen.values()]\n  .map(msg => ({\n    id:        msg.id || '',\n    wa_id:     msg.wa_id     || base.wa_id || '',\n    name:      msg.name      || base.name  || '',\n    direction: msg.direction || 'inbound',\n    sender:    msg.sender    || 'user',\n    text:      msg.text      || '',\n    mediaType: msg.media_type || '',\n    mediaUrl:  msg.media_url  || '',\n    tsMs:      Number(msg.ts_ms ?? Date.now()),\n    tsIso:     msg.ts_iso    || msg.created_at || new Date().toISOString(),\n    createdAt: msg.created_at || '',\n  }))\n  .sort((a, b) => (a.tsMs || 0) - (b.tsMs || 0));\n\nreturn [{\n  json: {\n    ...base,\n    wa_id:    base.wa_id || messages[0]?.wa_id || '',\n    name:     base.name  || '',\n    messages,\n    mergeKey: 1,\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -944,
+        -64
+      ],
+      "id": "ea6677a7-cddf-4e44-a7d8-337d9be30862",
+      "name": "Bundle messages"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "fieldsToMatchString": "=mergeKey",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -704,
+        128
+      ],
+      "id": "1b5fac52-9fdd-4c49-8ca4-268b52431df8",
+      "name": "Merge base + messages"
+    },
+    {
+      "parameters": {
+        "url": "=https://neema.bethanyhouse.co.ke/api/n8n/user/{{ $json.wa_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "REPLACE_WITH_N8N_API_SECRET"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -480,
+        80
+      ],
+      "id": "ee4dc75f-ad56-48c9-a9e4-e94241123d0e",
+      "name": "Get User API"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "f926538d-45fa-4053-8965-92d68bdffd59",
+              "leftValue": "={{ $json.found }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -240,
+        96
+      ],
+      "id": "7eee2873-a7d7-4cf4-98a3-1de233014249",
+      "name": "user missing?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://neema.bethanyhouse.co.ke/api/n8n/user",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "REPLACE_WITH_N8N_API_SECRET"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"wa_id\":          {{ JSON.stringify($json.wa_id) }},\n  \"phone\":          {{ JSON.stringify($json.wa_id) }},\n\"name\":           {{ JSON.stringify($('When Called by Main Workflow').item.json.name || '') }},\n  \"last_text\":      \"\",\n  \"last_direction\": \"inbound\",\n  \"state\": {\n    \"active\": \"active\",\n    \"cart\": {\n      \"items\": [],\n      \"subtotal\": 0\n    }\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "410295f5-0075-4773-b4d5-24942c186590",
+      "name": "Create User API"
+    },
+    {
+      "parameters": {
+        "jsCode": "const getUserJson = $('Get User API').item.json;\n//const senderJson  = $('Extract Sender ID').item.json;\n//const gateJson    = $('Gate after Touch').item.json;\n\n// --- User ---\nconst user = getUserJson.found ? getUserJson : null;\n\n// --- Catalog ---\nlet catalog = [];\ntry {\n  catalog = $('Set Catalog').first().json.catalog || [];\n} catch(e) {}\n\n// --- Country ---\nlet phone_country_code = null;\nlet phone_country_name = null;\nlet phone_country_iso  = null;\nlet phone_flag_url     = null;\ntry {\n  const rc = $('Resolve Country from Phone').item.json;\n  phone_country_code = rc.phone_country_code || null;\n  phone_country_name = rc.phone_country_name || null;\n  phone_country_iso  = rc.phone_country_iso  || null;\n  phone_flag_url     = rc.phone_flag_url     || null;\n} catch(e) {}\n\n// --- wa_id ---\nconst wa_id = (user?.wa_id || '').toString().trim();\n\nreturn [{\n  json: {\n    ...($json || {}),\n    user,\n    wa_id,\n    catalog,\n    phone_country_code,\n    phone_country_name,\n    phone_country_iso,\n    phone_flag_url,\n    mergeKey: 1,\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        160
+      ],
+      "id": "ce955893-6e27-4de6-80b4-b66c847b8d5a",
+      "name": "Wrap User"
+    },
+    {
+      "parameters": {
+        "jsCode": "const countries = [\n  {\"country\":\"Afghanistan\",\"code\":\"93\",\"iso\":\"AF\"},\n{\"country\":\"Albania\",\"code\":\"355\",\"iso\":\"AL\"},\n{\"country\":\"Algeria\",\"code\":\"213\",\"iso\":\"DZ\"},\n{\"country\":\"American Samoa\",\"code\":\"1-684\",\"iso\":\"AS\"},\n{\"country\":\"Andorra\",\"code\":\"376\",\"iso\":\"AD\"},\n{\"country\":\"Angola\",\"code\":\"244\",\"iso\":\"AO\"},\n{\"country\":\"Anguilla\",\"code\":\"1-264\",\"iso\":\"AI\"},\n{\"country\":\"Antarctica\",\"code\":\"672\",\"iso\":\"AQ\"},\n{\"country\":\"Antigua and Barbuda\",\"code\":\"1-268\",\"iso\":\"AG\"},\n{\"country\":\"Argentina\",\"code\":\"54\",\"iso\":\"AR\"},\n{\"country\":\"Armenia\",\"code\":\"374\",\"iso\":\"AM\"},\n{\"country\":\"Aruba\",\"code\":\"297\",\"iso\":\"AW\"},\n{\"country\":\"Australia\",\"code\":\"61\",\"iso\":\"AU\"},\n{\"country\":\"Austria\",\"code\":\"43\",\"iso\":\"AT\"},\n{\"country\":\"Azerbaijan\",\"code\":\"994\",\"iso\":\"AZ\"},\n{\"country\":\"Bahamas\",\"code\":\"1-242\",\"iso\":\"BS\"},\n{\"country\":\"Bahrain\",\"code\":\"973\",\"iso\":\"BH\"},\n{\"country\":\"Bangladesh\",\"code\":\"880\",\"iso\":\"BD\"},\n{\"country\":\"Barbados\",\"code\":\"1-246\",\"iso\":\"BB\"},\n{\"country\":\"Belarus\",\"code\":\"375\",\"iso\":\"BY\"},\n{\"country\":\"Belgium\",\"code\":\"32\",\"iso\":\"BE\"},\n{\"country\":\"Belize\",\"code\":\"501\",\"iso\":\"BZ\"},\n{\"country\":\"Benin\",\"code\":\"229\",\"iso\":\"BJ\"},\n{\"country\":\"Bermuda\",\"code\":\"1-441\",\"iso\":\"BM\"},\n{\"country\":\"Bhutan\",\"code\":\"975\",\"iso\":\"BT\"},\n{\"country\":\"Bolivia\",\"code\":\"591\",\"iso\":\"BO\"},\n{\"country\":\"Bosnia and Herzegovina\",\"code\":\"387\",\"iso\":\"BA\"},\n{\"country\":\"Botswana\",\"code\":\"267\",\"iso\":\"BW\"},\n{\"country\":\"Brazil\",\"code\":\"55\",\"iso\":\"BR\"},\n{\"country\":\"British Indian Ocean Territory\",\"code\":\"246\",\"iso\":\"IO\"},\n{\"country\":\"British Virgin Islands\",\"code\":\"1-284\",\"iso\":\"VG\"},\n{\"country\":\"Brunei\",\"code\":\"673\",\"iso\":\"BN\"},\n{\"country\":\"Bulgaria\",\"code\":\"359\",\"iso\":\"BG\"},\n{\"country\":\"Burkina Faso\",\"code\":\"226\",\"iso\":\"BF\"},\n{\"country\":\"Burundi\",\"code\":\"257\",\"iso\":\"BI\"},\n{\"country\":\"Cambodia\",\"code\":\"855\",\"iso\":\"KH\"},\n{\"country\":\"Cameroon\",\"code\":\"237\",\"iso\":\"CM\"},\n{\"country\":\"Canada\",\"code\":\"1\",\"iso\":\"CA\"},\n{\"country\":\"Cape Verde\",\"code\":\"238\",\"iso\":\"CV\"},\n{\"country\":\"Cayman Islands\",\"code\":\"1-345\",\"iso\":\"KY\"},\n{\"country\":\"Central African Republic\",\"code\":\"236\",\"iso\":\"CF\"},\n{\"country\":\"Chad\",\"code\":\"235\",\"iso\":\"TD\"},\n{\"country\":\"Chile\",\"code\":\"56\",\"iso\":\"CL\"},\n{\"country\":\"China\",\"code\":\"86\",\"iso\":\"CN\"},\n{\"country\":\"Christmas Island\",\"code\":\"61\",\"iso\":\"CX\"},\n{\"country\":\"Cocos Islands\",\"code\":\"61\",\"iso\":\"CC\"},\n{\"country\":\"Colombia\",\"code\":\"57\",\"iso\":\"CO\"},\n{\"country\":\"Comoros\",\"code\":\"269\",\"iso\":\"KM\"},\n{\"country\":\"Cook Islands\",\"code\":\"682\",\"iso\":\"CK\"},\n{\"country\":\"Costa Rica\",\"code\":\"506\",\"iso\":\"CR\"},\n{\"country\":\"Croatia\",\"code\":\"385\",\"iso\":\"HR\"},\n{\"country\":\"Cuba\",\"code\":\"53\",\"iso\":\"CU\"},\n{\"country\":\"Curacao\",\"code\":\"599\",\"iso\":\"CW\"},\n{\"country\":\"Cyprus\",\"code\":\"357\",\"iso\":\"CY\"},\n{\"country\":\"Czech Republic\",\"code\":\"420\",\"iso\":\"CZ\"},\n{\"country\":\"Democratic Republic of the Congo\",\"code\":\"243\",\"iso\":\"CD\"},\n{\"country\":\"Denmark\",\"code\":\"45\",\"iso\":\"DK\"},\n{\"country\":\"Djibouti\",\"code\":\"253\",\"iso\":\"DJ\"},\n{\"country\":\"Dominica\",\"code\":\"1-767\",\"iso\":\"DM\"},\n{\"country\":\"Dominican Republic\",\"code\":\"1-809, 1-829, 1-849\",\"iso\":\"DO\"},\n{\"country\":\"East Timor\",\"code\":\"670\",\"iso\":\"TL\"},\n{\"country\":\"Ecuador\",\"code\":\"593\",\"iso\":\"EC\"},\n{\"country\":\"Egypt\",\"code\":\"20\",\"iso\":\"EG\"},\n{\"country\":\"El Salvador\",\"code\":\"503\",\"iso\":\"SV\"},\n{\"country\":\"Equatorial Guinea\",\"code\":\"240\",\"iso\":\"GQ\"},\n{\"country\":\"Eritrea\",\"code\":\"291\",\"iso\":\"ER\"},\n{\"country\":\"Estonia\",\"code\":\"372\",\"iso\":\"EE\"},\n{\"country\":\"Ethiopia\",\"code\":\"251\",\"iso\":\"ET\"},\n{\"country\":\"Falkland Islands\",\"code\":\"500\",\"iso\":\"FK\"},\n{\"country\":\"Faroe Islands\",\"code\":\"298\",\"iso\":\"FO\"},\n{\"country\":\"Fiji\",\"code\":\"679\",\"iso\":\"FJ\"},\n{\"country\":\"Finland\",\"code\":\"358\",\"iso\":\"FI\"},\n{\"country\":\"France\",\"code\":\"33\",\"iso\":\"FR\"},\n{\"country\":\"French Polynesia\",\"code\":\"689\",\"iso\":\"PF\"},\n{\"country\":\"Gabon\",\"code\":\"241\",\"iso\":\"GA\"},\n{\"country\":\"Gambia\",\"code\":\"220\",\"iso\":\"GM\"},\n{\"country\":\"Georgia\",\"code\":\"995\",\"iso\":\"GE\"},\n{\"country\":\"Germany\",\"code\":\"49\",\"iso\":\"DE\"},\n{\"country\":\"Ghana\",\"code\":\"233\",\"iso\":\"GH\"},\n{\"country\":\"Gibraltar\",\"code\":\"350\",\"iso\":\"GI\"},\n{\"country\":\"Greece\",\"code\":\"30\",\"iso\":\"GR\"},\n{\"country\":\"Greenland\",\"code\":\"299\",\"iso\":\"GL\"},\n{\"country\":\"Grenada\",\"code\":\"1-473\",\"iso\":\"GD\"},\n{\"country\":\"Guam\",\"code\":\"1-671\",\"iso\":\"GU\"},\n{\"country\":\"Guatemala\",\"code\":\"502\",\"iso\":\"GT\"},\n{\"country\":\"Guernsey\",\"code\":\"44-1481\",\"iso\":\"GG\"},\n{\"country\":\"Guinea\",\"code\":\"224\",\"iso\":\"GN\"},\n{\"country\":\"Guinea-Bissau\",\"code\":\"245\",\"iso\":\"GW\"},\n{\"country\":\"Guyana\",\"code\":\"592\",\"iso\":\"GY\"},\n{\"country\":\"Haiti\",\"code\":\"509\",\"iso\":\"HT\"},\n{\"country\":\"Honduras\",\"code\":\"504\",\"iso\":\"HN\"},\n{\"country\":\"Hong Kong\",\"code\":\"852\",\"iso\":\"HK\"},\n{\"country\":\"Hungary\",\"code\":\"36\",\"iso\":\"HU\"},\n{\"country\":\"Iceland\",\"code\":\"354\",\"iso\":\"IS\"},\n{\"country\":\"India\",\"code\":\"91\",\"iso\":\"IN\"},\n{\"country\":\"Indonesia\",\"code\":\"62\",\"iso\":\"ID\"},\n{\"country\":\"Iran\",\"code\":\"98\",\"iso\":\"IR\"},\n{\"country\":\"Iraq\",\"code\":\"964\",\"iso\":\"IQ\"},\n{\"country\":\"Ireland\",\"code\":\"353\",\"iso\":\"IE\"},\n{\"country\":\"Isle of Man\",\"code\":\"44-1624\",\"iso\":\"IM\"},\n{\"country\":\"Israel\",\"code\":\"972\",\"iso\":\"IL\"},\n{\"country\":\"Italy\",\"code\":\"39\",\"iso\":\"IT\"},\n{\"country\":\"Ivory Coast\",\"code\":\"225\",\"iso\":\"CI\"},\n{\"country\":\"Jamaica\",\"code\":\"1-876\",\"iso\":\"JM\"},\n{\"country\":\"Japan\",\"code\":\"81\",\"iso\":\"JP\"},\n{\"country\":\"Jersey\",\"code\":\"44-1534\",\"iso\":\"JE\"},\n{\"country\":\"Jordan\",\"code\":\"962\",\"iso\":\"JO\"},\n{\"country\":\"Kazakhstan\",\"code\":\"7\",\"iso\":\"KZ\"},\n{\"country\":\"Kenya\",\"code\":\"254\",\"iso\":\"KE\"},\n{\"country\":\"Kiribati\",\"code\":\"686\",\"iso\":\"KI\"},\n{\"country\":\"Kosovo\",\"code\":\"383\",\"iso\":\"XK\"},\n{\"country\":\"Kuwait\",\"code\":\"965\",\"iso\":\"KW\"},\n{\"country\":\"Kyrgyzstan\",\"code\":\"996\",\"iso\":\"KG\"},\n{\"country\":\"Laos\",\"code\":\"856\",\"iso\":\"LA\"},\n{\"country\":\"Latvia\",\"code\":\"371\",\"iso\":\"LV\"},\n{\"country\":\"Lebanon\",\"code\":\"961\",\"iso\":\"LB\"},\n{\"country\":\"Lesotho\",\"code\":\"266\",\"iso\":\"LS\"},\n{\"country\":\"Liberia\",\"code\":\"231\",\"iso\":\"LR\"},\n{\"country\":\"Libya\",\"code\":\"218\",\"iso\":\"LY\"},\n{\"country\":\"Liechtenstein\",\"code\":\"423\",\"iso\":\"LI\"},\n{\"country\":\"Lithuania\",\"code\":\"370\",\"iso\":\"LT\"},\n{\"country\":\"Luxembourg\",\"code\":\"352\",\"iso\":\"LU\"},\n{\"country\":\"Macao\",\"code\":\"853\",\"iso\":\"MO\"},\n{\"country\":\"Macedonia\",\"code\":\"389\",\"iso\":\"MK\"},\n{\"country\":\"Madagascar\",\"code\":\"261\",\"iso\":\"MG\"},\n{\"country\":\"Malawi\",\"code\":\"265\",\"iso\":\"MW\"},\n{\"country\":\"Malaysia\",\"code\":\"60\",\"iso\":\"MY\"},\n{\"country\":\"Maldives\",\"code\":\"960\",\"iso\":\"MV\"},\n{\"country\":\"Mali\",\"code\":\"223\",\"iso\":\"ML\"},\n{\"country\":\"Malta\",\"code\":\"356\",\"iso\":\"MT\"},\n{\"country\":\"Marshall Islands\",\"code\":\"692\",\"iso\":\"MH\"},\n{\"country\":\"Mauritania\",\"code\":\"222\",\"iso\":\"MR\"},\n{\"country\":\"Mauritius\",\"code\":\"230\",\"iso\":\"MU\"},\n{\"country\":\"Mayotte\",\"code\":\"262\",\"iso\":\"YT\"},\n{\"country\":\"Mexico\",\"code\":\"52\",\"iso\":\"MX\"},\n{\"country\":\"Micronesia\",\"code\":\"691\",\"iso\":\"FM\"},\n{\"country\":\"Moldova\",\"code\":\"373\",\"iso\":\"MD\"},\n{\"country\":\"Monaco\",\"code\":\"377\",\"iso\":\"MC\"},\n{\"country\":\"Mongolia\",\"code\":\"976\",\"iso\":\"MN\"},\n{\"country\":\"Montenegro\",\"code\":\"382\",\"iso\":\"ME\"},\n{\"country\":\"Montserrat\",\"code\":\"1-664\",\"iso\":\"MS\"},\n{\"country\":\"Morocco\",\"code\":\"212\",\"iso\":\"MA\"},\n{\"country\":\"Mozambique\",\"code\":\"258\",\"iso\":\"MZ\"},\n{\"country\":\"Myanmar\",\"code\":\"95\",\"iso\":\"MM\"},\n{\"country\":\"Namibia\",\"code\":\"264\",\"iso\":\"NA\"},\n{\"country\":\"Nauru\",\"code\":\"674\",\"iso\":\"NR\"},\n{\"country\":\"Nepal\",\"code\":\"977\",\"iso\":\"NP\"},\n{\"country\":\"Netherlands\",\"code\":\"31\",\"iso\":\"NL\"},\n{\"country\":\"Netherlands Antilles\",\"code\":\"599\",\"iso\":\"AN\"},\n{\"country\":\"New Caledonia\",\"code\":\"687\",\"iso\":\"NC\"},\n{\"country\":\"New Zealand\",\"code\":\"64\",\"iso\":\"NZ\"},\n{\"country\":\"Nicaragua\",\"code\":\"505\",\"iso\":\"NI\"},\n{\"country\":\"Niger\",\"code\":\"227\",\"iso\":\"NE\"},\n{\"country\":\"Nigeria\",\"code\":\"234\",\"iso\":\"NG\"},\n{\"country\":\"Niue\",\"code\":\"683\",\"iso\":\"NU\"},\n{\"country\":\"North Korea\",\"code\":\"850\",\"iso\":\"KP\"},\n{\"country\":\"Northern Mariana Islands\",\"code\":\"1-670\",\"iso\":\"MP\"},\n{\"country\":\"Norway\",\"code\":\"47\",\"iso\":\"NO\"},\n{\"country\":\"Oman\",\"code\":\"968\",\"iso\":\"OM\"},\n{\"country\":\"Pakistan\",\"code\":\"92\",\"iso\":\"PK\"},\n{\"country\":\"Palau\",\"code\":\"680\",\"iso\":\"PW\"},\n{\"country\":\"Palestine\",\"code\":\"970\",\"iso\":\"PS\"},\n{\"country\":\"Panama\",\"code\":\"507\",\"iso\":\"PA\"},\n{\"country\":\"Papua New Guinea\",\"code\":\"675\",\"iso\":\"PG\"},\n{\"country\":\"Paraguay\",\"code\":\"595\",\"iso\":\"PY\"},\n{\"country\":\"Peru\",\"code\":\"51\",\"iso\":\"PE\"},\n{\"country\":\"Philippines\",\"code\":\"63\",\"iso\":\"PH\"},\n{\"country\":\"Pitcairn\",\"code\":\"64\",\"iso\":\"PN\"},\n{\"country\":\"Poland\",\"code\":\"48\",\"iso\":\"PL\"},\n{\"country\":\"Portugal\",\"code\":\"351\",\"iso\":\"PT\"},\n{\"country\":\"Puerto Rico\",\"code\":\"1-787, 1-939\",\"iso\":\"PR\"},\n{\"country\":\"Qatar\",\"code\":\"974\",\"iso\":\"QA\"},\n{\"country\":\"Republic of the Congo\",\"code\":\"242\",\"iso\":\"CG\"},\n{\"country\":\"Reunion\",\"code\":\"262\",\"iso\":\"RE\"},\n{\"country\":\"Romania\",\"code\":\"40\",\"iso\":\"RO\"},\n{\"country\":\"Russia\",\"code\":\"7\",\"iso\":\"RU\"},\n{\"country\":\"Rwanda\",\"code\":\"250\",\"iso\":\"RW\"},\n{\"country\":\"Saint Barthelemy\",\"code\":\"590\",\"iso\":\"BL\"},\n{\"country\":\"Saint Helena\",\"code\":\"290\",\"iso\":\"SH\"},\n{\"country\":\"Saint Kitts and Nevis\",\"code\":\"1-869\",\"iso\":\"KN\"},\n{\"country\":\"Saint Lucia\",\"code\":\"1-758\",\"iso\":\"LC\"},\n{\"country\":\"Saint Martin\",\"code\":\"590\",\"iso\":\"MF\"},\n{\"country\":\"Saint Pierre and Miquelon\",\"code\":\"508\",\"iso\":\"PM\"},\n{\"country\":\"Saint Vincent and the Grenadines\",\"code\":\"1-784\",\"iso\":\"VC\"},\n{\"country\":\"Samoa\",\"code\":\"685\",\"iso\":\"WS\"},\n{\"country\":\"San Marino\",\"code\":\"378\",\"iso\":\"SM\"},\n{\"country\":\"Sao Tome and Principe\",\"code\":\"239\",\"iso\":\"ST\"},\n{\"country\":\"Saudi Arabia\",\"code\":\"966\",\"iso\":\"SA\"},\n{\"country\":\"Senegal\",\"code\":\"221\",\"iso\":\"SN\"},\n{\"country\":\"Serbia\",\"code\":\"381\",\"iso\":\"RS\"},\n{\"country\":\"Seychelles\",\"code\":\"248\",\"iso\":\"SC\"},\n{\"country\":\"Sierra Leone\",\"code\":\"232\",\"iso\":\"SL\"},\n{\"country\":\"Singapore\",\"code\":\"65\",\"iso\":\"SG\"},\n{\"country\":\"Sint Maarten\",\"code\":\"1-721\",\"iso\":\"SX\"},\n{\"country\":\"Slovakia\",\"code\":\"421\",\"iso\":\"SK\"},\n{\"country\":\"Slovenia\",\"code\":\"386\",\"iso\":\"SI\"},\n{\"country\":\"Solomon Islands\",\"code\":\"677\",\"iso\":\"SB\"},\n{\"country\":\"Somalia\",\"code\":\"252\",\"iso\":\"SO\"},\n{\"country\":\"South Africa\",\"code\":\"27\",\"iso\":\"ZA\"},\n{\"country\":\"South Korea\",\"code\":\"82\",\"iso\":\"KR\"},\n{\"country\":\"South Sudan\",\"code\":\"211\",\"iso\":\"SS\"},\n{\"country\":\"Spain\",\"code\":\"34\",\"iso\":\"ES\"},\n{\"country\":\"Sri Lanka\",\"code\":\"94\",\"iso\":\"LK\"},\n{\"country\":\"Sudan\",\"code\":\"249\",\"iso\":\"SD\"},\n{\"country\":\"Suriname\",\"code\":\"597\",\"iso\":\"SR\"},\n{\"country\":\"Svalbard and Jan Mayen\",\"code\":\"47\",\"iso\":\"SJ\"},\n{\"country\":\"Swaziland\",\"code\":\"268\",\"iso\":\"SZ\"},\n{\"country\":\"Sweden\",\"code\":\"46\",\"iso\":\"SE\"},\n{\"country\":\"Switzerland\",\"code\":\"41\",\"iso\":\"CH\"},\n{\"country\":\"Syria\",\"code\":\"963\",\"iso\":\"SY\"},\n{\"country\":\"Taiwan\",\"code\":\"886\",\"iso\":\"TW\"},\n{\"country\":\"Tajikistan\",\"code\":\"992\",\"iso\":\"TJ\"},\n{\"country\":\"Tanzania\",\"code\":\"255\",\"iso\":\"TZ\"},\n{\"country\":\"Thailand\",\"code\":\"66\",\"iso\":\"TH\"},\n{\"country\":\"Togo\",\"code\":\"228\",\"iso\":\"TG\"},\n{\"country\":\"Tokelau\",\"code\":\"690\",\"iso\":\"TK\"},\n{\"country\":\"Tonga\",\"code\":\"676\",\"iso\":\"TO\"},\n{\"country\":\"Trinidad and Tobago\",\"code\":\"1-868\",\"iso\":\"TT\"},\n{\"country\":\"Tunisia\",\"code\":\"216\",\"iso\":\"TN\"},\n{\"country\":\"Turkey\",\"code\":\"90\",\"iso\":\"TR\"},\n{\"country\":\"Turkmenistan\",\"code\":\"993\",\"iso\":\"TM\"},\n{\"country\":\"Turks and Caicos Islands\",\"code\":\"1-649\",\"iso\":\"TC\"},\n{\"country\":\"Tuvalu\",\"code\":\"688\",\"iso\":\"TV\"},\n{\"country\":\"U.S. Virgin Islands\",\"code\":\"1-340\",\"iso\":\"VI\"},\n{\"country\":\"Uganda\",\"code\":\"256\",\"iso\":\"UG\"},\n{\"country\":\"Ukraine\",\"code\":\"380\",\"iso\":\"UA\"},\n{\"country\":\"United Arab Emirates\",\"code\":\"971\",\"iso\":\"AE\"},\n{\"country\":\"United Kingdom\",\"code\":\"44\",\"iso\":\"GB\"},\n{\"country\":\"United States\",\"code\":\"1\",\"iso\":\"US\"},\n{\"country\":\"Uruguay\",\"code\":\"598\",\"iso\":\"UY\"},\n{\"country\":\"Uzbekistan\",\"code\":\"998\",\"iso\":\"UZ\"},\n{\"country\":\"Vanuatu\",\"code\":\"678\",\"iso\":\"VU\"},\n{\"country\":\"Vatican\",\"code\":\"379\",\"iso\":\"VA\"},\n{\"country\":\"Venezuela\",\"code\":\"58\",\"iso\":\"VE\"},\n{\"country\":\"Vietnam\",\"code\":\"84\",\"iso\":\"VN\"},\n{\"country\":\"Wallis and Futuna\",\"code\":\"681\",\"iso\":\"WF\"},\n{\"country\":\"Western Sahara\",\"code\":\"212\",\"iso\":\"EH\"},\n{\"country\":\"Yemen\",\"code\":\"967\",\"iso\":\"YE\"},\n{\"country\":\"Zambia\",\"code\":\"260\",\"iso\":\"ZM\"},\n{\"country\":\"Zimbabwe\",\"code\":\"263\",\"iso\":\"ZW\"}\n];\n\nreturn countries.map(country => ({\n  json: {\n    ...country,\n    flag_url: `https://flagcdn.com/w40/${country.iso.toLowerCase()}.png`\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1232,
+        528
+      ],
+      "id": "15466b18-66d8-4232-929d-9ec11f3e3c60",
+      "name": "countrycodes"
+    },
+    {
+      "parameters": {
+        "jsCode": "const wa_id  = $json.wa_id || '';\nconst digits = wa_id.replace(/\\D/g, '');\n\nlet countries = [];\ntry { countries = $('countrycodes').all().map(i => i.json); } catch(e) {}\n\nconst sorted = [...countries].sort((a, b) =>\n  b.code.replace(/\\D/g,'').length - a.code.replace(/\\D/g,'').length\n);\n\nlet match = null;\nfor (const c of sorted) {\n  const prefix = c.code.split(',')[0].replace(/\\D/g,'');\n  if (digits.startsWith(prefix)) { match = c; break; }\n}\n\nreturn [{ json: {\n  ...$json,\n  phone_country_code: match?.code    || null,\n  phone_country_name: match?.country || null,\n  phone_country_iso:  match?.iso     || null,\n  phone_flag_url:     match?.flag_url || null,\n  _resolvedCountry:   match?.country || null,\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        32
+      ],
+      "id": "ffd0c6c2-23f1-4dd0-99e6-316377d5ce04",
+      "name": "Resolve Country from Phone"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "e98b7d4a-5ab9-4ebc-b2a2-8187aed3159d",
+              "leftValue": "={{ !!$json.phone_country_name && !$json.user?.country_iso }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        720,
+        0
+      ],
+      "id": "2e9bb089-1e13-417a-a119-0415a67cacf1",
+      "name": "Country exists?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://neema.bethanyhouse.co.ke/api/n8n/user/facts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "REPLACE_WITH_N8N_API_SECRET"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n    \"wa_id\":        \"{{ $json.wa_id }}\",\n    \"country\":      \"{{ $json.phone_country_name }}\",\n    \"country_iso\":  \"{{ $json.phone_country_iso }}\",\n    \"flag_url\":     \"{{ $json.phone_flag_url }}\",\n    \"location\":     \"{{ $json.phone_country_name }}\",\n    \"only_if_empty\": [\"location\"]\n  }",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        960,
+        0
+      ],
+      "id": "0bdc7fb6-d223-4f55-b511-3c37211896f7",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "url": "https://hub.bethanyhouse.co.ke/api/v1/products",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        512,
+        704
+      ],
+      "id": "937b452e-3c76-443c-aeeb-c04d9c96279f",
+      "name": "Get Catalog Items"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7f0f3e8d-bd67-4748-ac86-4a9a7183fea6",
+              "name": "catalog",
+              "value": "={{ $input.first().json.data }}",
+              "type": "array"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        720,
+        704
+      ],
+      "id": "35feceba-4ac6-45e4-82e0-fa0bd7e5267d",
+      "name": "Set Catalog"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "numberInputs": 3,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        960,
+        240
+      ],
+      "id": "f048becc-b3a3-4031-b527-ec0bda44cf3e",
+      "name": "Merge Catalog+User"
+    },
+    {
+      "parameters": {
+        "jsCode": "// NAME UPDATE RULES (strict):\n// 1. If customer name already exists in DB \u2192 never update (manual agent only)\n// 2. If name missing in DB AND WhatsApp profile name available \u2192 update from WhatsApp\n// 3. If name missing in DB AND no WhatsApp name BUT AI extracted name from message \u2192 update from message\n\nconst waName      = ($json.name || '').trim();\nconst storedName  = ($json.user?.name || '').trim();\nconst wa_id       = $json.user?.wa_id || $json.wa_id;\nconst isNew       = !$('Get User API').item.json.found;\n\n// Rule 1: Name already in DB \u2192 NEVER auto-update\nconst nameExistsInDB = !isNew && !!storedName;\n\n// Rule 2: No name in DB + WhatsApp profile name present\nconst shouldPatchFromWA = !nameExistsInDB && !!waName;\n\n// Rule 3: No name in DB + no WA name + AI extracted name from message\n// The AI agent can surface a name via context.known.customerName or factsPatch.name\nconst aiExtractedName = (\n  $json.context?.known?.customerName ||\n  $json.factsPatch?.name?.stringValue ||\n  ''\n).trim();\nconst shouldPatchFromMessage = !nameExistsInDB && !waName && !!aiExtractedName;\n\nconst _shouldPatchName = shouldPatchFromWA || shouldPatchFromMessage;\nconst _namePatch = shouldPatchFromWA ? waName : (shouldPatchFromMessage ? aiExtractedName : '');\nconst _nameSource = shouldPatchFromWA ? 'whatsapp_profile' : (shouldPatchFromMessage ? 'message_mention' : 'none');\n\nreturn [{\n  json: {\n    ...$json,\n    _shouldPatchName: _shouldPatchName && !!_namePatch,\n    _namePatch,\n    _nameSource,   // audit trail so you can see where the name came from\n    wa_id,\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        160
+      ],
+      "id": "b35e2103-3d6a-4e22-99cb-aaedc8a1fdff",
+      "name": "Update Contact Name if Empty"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "005be44a-f65c-4b77-a197-366bab0cc9df",
+              "leftValue": "={{ $json._shouldPatchName }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1440,
+        160
+      ],
+      "id": "63f068a6-9a72-4b6e-bb31-bde0611efc8a",
+      "name": "Check if Name should be patched",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://neema.bethanyhouse.co.ke/api/n8n/user/facts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "REPLACE_WITH_N8N_API_SECRET"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n    \"wa_id\": \"{{ $json.wa_id }}\",\n    \"factsPatch\": { \"name\": { \"stringValue\": \"{{ $json._namePatch }}\" } }\n  }",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1680,
+        160
+      ],
+      "id": "6352b19b-31cf-47de-95c7-cc0549414699",
+      "name": "Update Name"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "fieldsToMatchString": "=mergeKey",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1472,
+        464
+      ],
+      "id": "28ab99bb-2362-40a2-ba82-5deda49c18cc",
+      "name": "Merge + user"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ---------- Helpers ----------\nconst safeArr = (v) => Array.isArray(v) ? v : [];\n\nconst ensureState = (s) => {\n  const st = (s && typeof s === 'object') ? s : {};\n  const cart = (st.cart && typeof st.cart === 'object') ? st.cart : {};\n  const items = safeArr(cart.items);\n  const subtotal = Number.isFinite(Number(cart.subtotal)) ? Number(cart.subtotal) : 0;\n  // Preserve ALL state keys (lead_stage, active, etc.) \u2014 don't strip unknown fields\n  return {\n    ...st,\n    cart: { items, subtotal },\n  };\n};\n\n// Read from API response (flat JSON, not Firestore format)\nconst apiResp = $json;\n\n// wa_id fallback chain\nlet wa_id = apiResp.wa_id || '';\ntry { wa_id = wa_id || $('Gate after Touch').item.json.wa_id || ''; } catch(e) {}\n\n// \u2500\u2500 Field reads: API now uses snake_case \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n// last_text / last_direction / last_message_ts (ms int) / last_message_at (ISO)\nconst lastText      = (apiResp.last_text      || '').trim();\nconst lastDirection =  apiResp.last_direction || 'inbound';\n\n// Resolve timestamp in ms \u2014 prefer last_message_ts (integer), fall back to\n// parsing last_message_at (ISO string), then fall back to current time.\nlet tsMsNum = null;\n\nif (apiResp.last_message_ts != null && Number.isFinite(Number(apiResp.last_message_ts))) {\n  tsMsNum = Number(apiResp.last_message_ts);\n} else if (apiResp.last_message_at) {\n  const parsed = Date.parse(apiResp.last_message_at);\n  if (Number.isFinite(parsed)) tsMsNum = parsed;\n}\n\n// Only fall back to now if there is truly no prior message timestamp\nconst hasLastMessage = tsMsNum != null;\nif (!hasLastMessage) tsMsNum = Date.now();\n\nconst tsIso = new Date(tsMsNum).toISOString();\n\n// Full state including lead_stage and any other keys\nconst state = ensureState(apiResp.state);\n\nconst context = {\n  wa_id,\n  lastText,\n  lastDirection,\n  lastMessageAtIso: hasLastMessage ? tsIso : null,  // null = no prior messages\n  lastMessageTs:    hasLastMessage ? tsMsNum : null,\n  tsMs:             tsMsNum,                          // always set for downstream use\n  tsIso,\n  state,\n  cart:             state.cart,\n  lead_stage:       state.lead_stage  || null,        // surfaced for easy access\n  active:           state.active      || 'active',\n  last10Messages:   [],\n  recentWindow:     [],\n};\n\ncontext.wa_id = context.wa_id || $json.wa_id || '';\n\nreturn [{\n  context,\n  mergeKey: 1,\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1488,
+        672
+      ],
+      "id": "e116176f-d668-4bb3-b0e3-a562cf8e6c9d",
+      "name": "Normalize context"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "fieldsToMatchString": "mergeKey",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1840,
+        512
+      ],
+      "id": "0820f797-1a2a-4c65-8334-a241e93fe947",
+      "name": "Merge + Context"
+    },
+    {
+      "parameters": {
+        "url": "https://neema.bethanyhouse.co.ke/api/n8n/catalog",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "REPLACE_WITH_N8N_API_SECRET"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        480,
+        384
+      ],
+      "id": "5249b517-b293-4480-ad15-56b0deff3d98",
+      "name": "Get Catalog Items Old"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7f0f3e8d-bd67-4748-ac86-4a9a7183fea6",
+              "name": "catalog",
+              "value": "={{ $input.all().map(i => i.json) }}",
+              "type": "array"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        720,
+        432
+      ],
+      "id": "a1981e6a-60ae-4bc3-90e2-dc2f3ebcbc81",
+      "name": "Set Catalog Old"
+    }
+  ],
+  "connections": {
+    "When Called by Main Workflow": {
+      "main": [
+        [
+          {
+            "node": "RunQuery API",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Read Context API",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge base + messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RunQuery API": {
+      "main": [
+        [
+          {
+            "node": "Bundle messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Context API": {
+      "main": [
+        [
+          {
+            "node": "Normalize context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bundle messages": {
+      "main": [
+        [
+          {
+            "node": "Merge base + messages",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge base + messages": {
+      "main": [
+        [
+          {
+            "node": "Get User API",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge + user",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Get User API": {
+      "main": [
+        [
+          {
+            "node": "user missing?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "user missing?": {
+      "main": [
+        [
+          {
+            "node": "Create User API",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wrap User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create User API": {
+      "main": [
+        [
+          {
+            "node": "Wrap User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "countrycodes": {
+      "main": [
+        []
+      ]
+    },
+    "Wrap User": {
+      "main": [
+        [
+          {
+            "node": "Resolve Country from Phone",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge Catalog+User",
+            "type": "main",
+            "index": 1
+          },
+          {
+            "node": "Get Catalog Items Old",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Country from Phone": {
+      "main": [
+        [
+          {
+            "node": "Country exists?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge Catalog+User",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Country exists?": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Catalog Items": {
+      "main": [
+        [
+          {
+            "node": "Set Catalog",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Catalog": {
+      "main": [
+        []
+      ]
+    },
+    "Merge Catalog+User": {
+      "main": [
+        [
+          {
+            "node": "Merge + user",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Update Contact Name if Empty",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Contact Name if Empty": {
+      "main": [
+        [
+          {
+            "node": "Check if Name should be patched",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check if Name should be patched": {
+      "main": [
+        [
+          {
+            "node": "Update Name",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge + user": {
+      "main": [
+        [
+          {
+            "node": "Merge + Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize context": {
+      "main": [
+        [
+          {
+            "node": "Merge + Context",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Get Catalog Items Old": {
+      "main": [
+        [
+          {
+            "node": "Set Catalog Old",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Catalog Old": {
+      "main": [
+        [
+          {
+            "node": "Merge Catalog+User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": null,
+  "pinData": {},
+  "versionId": "06253e24-cc29-4d7d-a693-8c23a2ce6152",
+  "activeVersionId": "06253e24-cc29-4d7d-a693-8c23a2ce6152",
+  "versionCounter": 122,
+  "triggerCount": 0,
+  "tags": [],
+  "shared": [
+    {
+      "updatedAt": "2026-04-12T03:15:11.747Z",
+      "createdAt": "2026-04-12T03:15:11.747Z",
+      "role": "workflow:owner",
+      "workflowId": "IJmpgHtUncckWhjt",
+      "projectId": "RWAY6MzHolKbatYF",
+      "project": {
+        "updatedAt": "2026-03-04T12:36:14.939Z",
+        "createdAt": "2026-03-04T12:33:20.413Z",
+        "id": "RWAY6MzHolKbatYF",
+        "name": "Moses Mwicigi <mwicigimoses@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "00e0d748-c9a5-4812-93e6-fb3a0d5cbf37"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": "Version 06253e24",
+    "description": ""
+  }
+}

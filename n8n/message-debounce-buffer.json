@@ -1,0 +1,343 @@
+{
+  "updatedAt": "2026-06-12T16:46:51.878Z",
+  "createdAt": "2026-04-21T06:44:30.746Z",
+  "id": "nuDkkY5Haszojjfv",
+  "name": "Message Debounce Buffer",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "content": "# Message Debounce Buffer (30-second text burst window)\n\n**What it does:** For the same customer, waits 12 seconds, then forwards only **one** winner execution and combines the newest **text burst** into one newline-joined string for upstream processing.\n\n**Key fixes in this version**\n1. Uses a **30-second** window instead of 12.\n2. Uses **message id first** for winner detection, with timestamp/text fallback.\n3. Combines from the **inbound-only timeline**, so a stray outbound does not break the burst.\n4. Preserves `msgTextRaw` as the real latest single inbound turn.\n5. Returns `msgText`, `text`, and `combinedTextFinal` as the debounced burst string.\n6. Passes non-text/media turns safely as a single winner item.\n\n**Parent workflow wiring**\n- `Gate after Upsert` \u2192 `Run Message Debounce Buffer (30s)`\n- `Run Message Debounce Buffer (30s)` \u2192 `Touch Session API`\n- `Run Message Debounce Buffer (30s)` \u2192 `Gate after Touch` (passthrough input)\n- `Touch Session API` \u2192 `Gate after Touch`\n\n**Important**\n- The parent must already have persisted the inbound message before calling this sub-workflow.\n- The parent should pass `wa_id`, `msgId`, `msgText`, `msgTextRaw`, `tsMs`, and `tsIso`.\n- This workflow is intentionally burst-aware for **text**; media turns still pass through safely as one winner item.30",
+        "height": 520,
+        "width": 560,
+        "color": 4
+      },
+      "id": "670534a2-6a1c-4f6b-93b9-2b00adda3e2f",
+      "name": "Setup Instructions",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1536,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "2e7e5a4b-f147-4e46-9541-51b4754a047b",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        2048,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json || {};\n\nconst raw = String(input.msgTextRaw ?? input.msgText ?? input.text ?? '').trim();\nconst mediaType = String(\n  input.media_type ??\n  input.mediaType ??\n  input.type ??\n  (input.isAudio ? 'audio' : '')\n).trim().toLowerCase();\n\nconst isTextLike = !mediaType || mediaType === 'text';\n\nreturn [{\n  json: {\n    ...input,\n    chatId: String(input.chatId ?? input.wa_id ?? input.phone ?? ''),\n    wa_id: String(input.wa_id ?? input.chatId ?? input.phone ?? ''),\n    msgId: String(input.msgId ?? input.messageId ?? input.id ?? ''),\n    msgTextRaw: raw,\n    media_type: mediaType,\n    debounceEligible: isTextLike,\n    debounceWindowMs: 30000,\n    debounceWindowSeconds: 30\n  }\n}];"
+      },
+      "id": "54299c2e-10c7-4e66-8534-cd9da9ba01dc",
+      "name": "Preserve Current Turn",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2272,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 45
+      },
+      "id": "766cfd53-0950-4e1a-b767-9e7a6af49e37",
+      "name": "Wait 12 Seconds",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2496,
+        560
+      ],
+      "webhookId": "a7ae22f7-20af-473e-b327-19fe23330b3b",
+      "notes": "Debounce window. Only the execution that still matches the latest persisted inbound after 12 seconds will continue."
+    },
+    {
+      "parameters": {
+        "url": "=https://neema.bethanyhouse.co.ke/api/n8n/messages/{{$('Preserve Current Turn').item.json.wa_id}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "REPLACE_WITH_N8N_API_SECRET"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "815bfadd-fd70-40fd-8aa6-9f12228d1bd1",
+      "name": "Fetch Recent Messages",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2720,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const original = $('Preserve Current Turn').item.json || {};\n\nconst first = (...vals) => vals.find(v => v !== undefined && v !== null && v !== '');\nconst num = (v, d = null) => {\n  const n = Number(v);\n  return Number.isFinite(n) ? n : d;\n};\nconst toMs = (iso, d = null) => {\n  const t = Date.parse(iso || '');\n  return Number.isFinite(t) ? t : d;\n};\nconst toIso = (ms) => new Date(num(ms, Date.now())).toISOString();\nconst normalizeText = (v) => String(v || '').replace(/\\s+/g, ' ').trim();\n\nconst currentTsMs = num(original.tsMs, null);\nconst currentMsgId = String(original.msgId ?? original.messageId ?? original.id ?? '').trim();\nconst currentRawText = normalizeText(original.msgTextRaw ?? original.msgText ?? original.text ?? '');\nconst debounceWindowMs = num(original.debounceWindowMs, 45000);\nconst debounceEligible = original.debounceEligible !== false;\nconst currentMediaType = String(original.media_type ?? original.mediaType ?? '').trim().toLowerCase();\n\nif (currentTsMs == null) {\n  throw new Error('Debounce: current tsMs is missing');\n}\n\nlet rows = [];\nfor (const item of $input.all()) {\n  const j = item.json || {};\n  if (Array.isArray(j.messages)) {\n    rows.push(...j.messages);\n  } else if (Array.isArray(j.results)) {\n    rows.push(...j.results);\n  } else if (Array.isArray(j.data)) {\n    rows.push(...j.data);\n  } else if (Array.isArray(j.rows)) {\n    rows.push(...j.rows);\n  } else {\n    rows.push(j);\n  }\n}\n\nconst dedupe = new Map();\n\nfor (const row of rows) {\n  const direction = String(first(row.direction, row.last_direction, 'inbound')).toLowerCase();\n  const text = normalizeText(first(row.text, row.msgText, row.transcription, row.caption, ''));\n  let tsMs = num(first(row.ts_ms, row.tsMs, row.last_message_ts, row.timestamp), null);\n  if (tsMs == null) tsMs = toMs(first(row.ts_iso, row.tsIso, row.created_at, row.last_message_at), null);\n  if (tsMs == null) continue;\n\n  const tsIso = String(first(row.ts_iso, row.tsIso, row.created_at, row.last_message_at, '') || '');\n  const mediaType = String(first(row.media_type, row.mediaType, row.type, '') || '').trim().toLowerCase();\n  const id = String(first(row.id, row.msgId, row.messageId, '') || '').trim();\n\n  const key = [id, direction, tsMs, text, mediaType, String(first(row.media_url, row.mediaUrl, ''))].join('|');\n\n  if (!dedupe.has(key)) {\n    dedupe.set(key, {\n      id,\n      direction,\n      text,\n      tsMs,\n      tsIso: tsIso || toIso(tsMs),\n      media_type: mediaType,\n      media_url: String(first(row.media_url, row.mediaUrl, '')),\n    });\n  }\n}\n\nconst timeline = [...dedupe.values()].sort((a, b) =>\n  (a.tsMs - b.tsMs) ||\n  String(a.tsIso || '').localeCompare(String(b.tsIso || '')) ||\n  String(a.id || '').localeCompare(String(b.id || ''))\n);\n\nconst inboundOnly = timeline.filter(m => m.direction === 'inbound');\n\nif (!inboundOnly.length) {\n  const rawFallback = String(original.msgTextRaw ?? original.msgText ?? original.text ?? '');\n  const rawTsIso = String(original.tsIso || toIso(currentTsMs));\n  return [{\n    json: {\n      ...original,\n      text: rawFallback,\n      msgText: rawFallback,\n      msgTextRaw: rawFallback,\n      debouncedText: rawFallback,\n      combinedTextFinal: rawFallback,\n      parts: [{\n        id: currentMsgId,\n        text: rawFallback,\n        direction: 'inbound',\n        tsMs: currentTsMs,\n        tsIso: rawTsIso,\n        media_type: currentMediaType,\n        media_url: ''\n      }],\n      messageCount: 1,\n      debounceCount: 1,\n      debounceWinner: true,\n      debounceWindowMs,\n      debounceWindowSeconds: Math.round(debounceWindowMs / 1000),\n      debounceBurstStartedAtMs: currentTsMs,\n      debounceBurstEndedAtMs: currentTsMs,\n      chatId: String(original.chatId ?? original.wa_id ?? ''),\n      wa_id: String(original.wa_id ?? original.chatId ?? '')\n    }\n  }];\n}\n\nconst latestInbound = inboundOnly[inboundOnly.length - 1];\nconst latestText = normalizeText(latestInbound.text);\nconst latestMsgId = String(latestInbound.id || '').trim();\n\nconst isWinnerById = !!currentMsgId && !!latestMsgId && currentMsgId === latestMsgId;\nconst isWinnerByFallback =\n  latestInbound.tsMs === currentTsMs &&\n  (!currentRawText || latestText === currentRawText);\n\nif (!(isWinnerById || isWinnerByFallback)) {\n  return [];\n}\n\nlet burst = [latestInbound];\n\nif (debounceEligible) {\n  const latestInboundIndex = inboundOnly.findIndex(m =>\n    String(m.id || '') === latestMsgId &&\n    m.tsMs === latestInbound.tsMs &&\n    normalizeText(m.text) === latestText\n  );\n\n  if (latestInboundIndex >= 0) {\n    let anchor = inboundOnly[latestInboundIndex];\n\n    for (let i = latestInboundIndex - 1; i >= 0; i--) {\n      const prev = inboundOnly[i];\n\n      const prevMediaType = String(prev.media_type || '').trim().toLowerCase();\n      const prevIsTextLike = !prevMediaType || prevMediaType === 'text';\n\n      if (!prevIsTextLike) break;\n\n      const gapMs = anchor.tsMs - prev.tsMs;\n      if (!Number.isFinite(gapMs) || gapMs > debounceWindowMs) break;\n\n      burst.unshift(prev);\n      anchor = prev;\n    }\n  }\n}\n\nconst parts = burst.map(m => ({\n  id: String(m.id || ''),\n  text: String(m.text || '').trim(),\n  direction: String(m.direction || 'inbound'),\n  tsMs: Number(m.tsMs || currentTsMs),\n  tsIso: String(m.tsIso || toIso(m.tsMs || currentTsMs)),\n  media_type: String(m.media_type || ''),\n  media_url: String(m.media_url || '')\n}));\n\nconst combinedParts = parts.map(p => String(p.text || '').trim()).filter(Boolean);\nconst debouncedText = combinedParts.length\n  ? combinedParts.join('\\n')\n  : String(original.msgTextRaw ?? original.msgText ?? original.text ?? '');\n\nconst burstStartMs = parts[0]?.tsMs ?? currentTsMs;\nconst burstEndMs = parts[parts.length - 1]?.tsMs ?? currentTsMs;\nconst burstEndIso = parts[parts.length - 1]?.tsIso ?? String(original.tsIso || toIso(burstEndMs));\n\nreturn [{\n  json: {\n    ...original,\n    chatId: String(original.chatId ?? original.wa_id ?? ''),\n    wa_id: String(original.wa_id ?? original.chatId ?? ''),\n    msgId: currentMsgId || latestMsgId,\n    text: debouncedText,\n    msgText: debouncedText,\n    msgTextRaw: String(original.msgTextRaw ?? original.msgText ?? original.text ?? ''),\n    debouncedText,\n    combinedTextFinal: debouncedText,\n    parts,\n    messageCount: parts.length || 1,\n    debounceCount: parts.length || 1,\n    debounceWinner: true,\n    debounceWindowMs,\n    debounceWindowSeconds: Math.round(debounceWindowMs / 1000),\n    debounceBurstStartedAtMs: burstStartMs,\n    debounceBurstEndedAtMs: burstEndMs,\n    tsMs: burstEndMs,\n    tsIso: burstEndIso\n  }\n}];"
+      },
+      "id": "a0838426-6a77-419c-a150-d51089ce80f9",
+      "name": "Resolve Winner + Combine Burst",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2944,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "out-01",
+              "name": "wa_id",
+              "value": "={{ $('Resolve Winner + Combine Burst').item.json.wa_id }}",
+              "type": "string"
+            },
+            {
+              "id": "out-02",
+              "name": "chatId",
+              "value": "={{ $('Resolve Winner + Combine Burst').item.json.chatId || $('Resolve Winner + Combine Burst').item.json.wa_id }}",
+              "type": "string"
+            },
+            {
+              "id": "out-03",
+              "name": "name",
+              "value": "={{ $('Resolve Winner + Combine Burst').item.json.name || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "out-04",
+              "name": "text",
+              "value": "={{ $('Resolve Winner + Combine Burst').item.json.text }}",
+              "type": "string"
+            },
+            {
+              "id": "out-05",
+              "name": "msgText",
+              "value": "={{ $('Resolve Winner + Combine Burst').item.json.msgText }}",
+              "type": "string"
+            },
+            {
+              "id": "out-06",
+              "name": "msgTextRaw",
+              "value": "={{ $('Resolve Winner + Combine Burst').item.json.msgTextRaw || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "out-07",
+              "name": "debouncedText",
+              "value": "={{ $('Resolve Winner + Combine Burst').item.json.debouncedText || $('Resolve Winner + Combine Burst').item.json.msgText }}",
+              "type": "string"
+            },
+            {
+              "id": "out-08",
+              "name": "combinedTextFinal",
+              "value": "={{ $('Resolve Winner + Combine Burst').item.json.combinedTextFinal || $('Resolve Winner + Combine Burst').item.json.msgText }}",
+              "type": "string"
+            },
+            {
+              "id": "out-09",
+              "name": "parts",
+              "value": "={{ $('Resolve Winner + Combine Burst').item.json.parts || [] }}",
+              "type": "array"
+            },
+            {
+              "id": "out-10",
+              "name": "messageCount",
+              "value": "={{ Number($('Resolve Winner + Combine Burst').item.json.messageCount || $('Resolve Winner + Combine Burst').item.json.debounceCount || 1) }}",
+              "type": "number"
+            },
+            {
+              "id": "out-11",
+              "name": "debounceCount",
+              "value": "={{ Number($('Resolve Winner + Combine Burst').item.json.debounceCount || $('Resolve Winner + Combine Burst').item.json.messageCount || 1) }}",
+              "type": "number"
+            },
+            {
+              "id": "out-12",
+              "name": "debounceWinner",
+              "value": "={{ $('Resolve Winner + Combine Burst').item.json.debounceWinner === true }}",
+              "type": "boolean"
+            },
+            {
+              "id": "out-13",
+              "name": "debounceWindowMs",
+              "value": "={{ Number($('Resolve Winner + Combine Burst').item.json.debounceWindowMs || 12000) }}",
+              "type": "number"
+            },
+            {
+              "id": "out-14",
+              "name": "debounceWindowSeconds",
+              "value": "={{ Number($('Resolve Winner + Combine Burst').item.json.debounceWindowSeconds || 12) }}",
+              "type": "number"
+            },
+            {
+              "id": "out-15",
+              "name": "debounceBurstStartedAtMs",
+              "value": "={{ Number($('Resolve Winner + Combine Burst').item.json.debounceBurstStartedAtMs || $('Resolve Winner + Combine Burst').item.json.tsMs || Date.now()) }}",
+              "type": "number"
+            },
+            {
+              "id": "out-16",
+              "name": "debounceBurstEndedAtMs",
+              "value": "={{ Number($('Resolve Winner + Combine Burst').item.json.debounceBurstEndedAtMs || $('Resolve Winner + Combine Burst').item.json.tsMs || Date.now()) }}",
+              "type": "number"
+            },
+            {
+              "id": "out-17",
+              "name": "tsMs",
+              "value": "={{ Number($('Resolve Winner + Combine Burst').item.json.tsMs || $('Resolve Winner + Combine Burst').item.json.debounceBurstEndedAtMs || Date.now()) }}",
+              "type": "number"
+            },
+            {
+              "id": "out-18",
+              "name": "tsIso",
+              "value": "={{ $('Resolve Winner + Combine Burst').item.json.tsIso || new Date($('Resolve Winner + Combine Burst').item.json.tsMs || Date.now()).toISOString() }}",
+              "type": "string"
+            },
+            {
+              "id": "out-19",
+              "name": "isAudio",
+              "value": "={{ $('Resolve Winner + Combine Burst').item.json.isAudio || false }}",
+              "type": "boolean"
+            },
+            {
+              "id": "out-20",
+              "name": "imageAnalysis",
+              "value": "={{ $('Resolve Winner + Combine Burst').item.json.imageAnalysis || '' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "dfcf4bc8-3f4f-4927-a13d-d374c9e83856",
+      "name": "Output Debounced Item",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3168,
+        560
+      ],
+      "notes": "Final node \u2014 returns the debounced winner payload to the parent while preserving all original fields."
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Preserve Current Turn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preserve Current Turn": {
+      "main": [
+        [
+          {
+            "node": "Wait 12 Seconds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Recent Messages": {
+      "main": [
+        [
+          {
+            "node": "Resolve Winner + Combine Burst",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Winner + Combine Burst": {
+      "main": [
+        [
+          {
+            "node": "Output Debounced Item",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 12 Seconds": {
+      "main": [
+        [
+          {
+            "node": "Fetch Recent Messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": null,
+  "pinData": {},
+  "versionId": "ce0aa63c-e152-4f44-b4bf-96dd11ffd685",
+  "activeVersionId": "7423c851-0195-4d2c-8129-4bc97f56079a",
+  "versionCounter": 51,
+  "triggerCount": 0,
+  "tags": [],
+  "shared": [
+    {
+      "updatedAt": "2026-04-21T06:44:30.749Z",
+      "createdAt": "2026-04-21T06:44:30.749Z",
+      "role": "workflow:owner",
+      "workflowId": "nuDkkY5Haszojjfv",
+      "projectId": "RWAY6MzHolKbatYF",
+      "project": {
+        "updatedAt": "2026-03-04T12:36:14.939Z",
+        "createdAt": "2026-03-04T12:33:20.413Z",
+        "id": "RWAY6MzHolKbatYF",
+        "name": "Moses Mwicigi <mwicigimoses@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "00e0d748-c9a5-4812-93e6-fb3a0d5cbf37"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": null,
+    "description": null
+  }
+}
