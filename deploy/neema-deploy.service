@@ -1,0 +1,15 @@
+# Pull-based deployer for neema-ai. Paired with neema-deploy.timer.
+# Install on the VPS:
+#   sudo cp deploy/neema-deploy.* /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now neema-deploy.timer
+[Unit]
+Description=neema-ai pull-based deploy (git + GHCR -> recreate containers)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/home/neema/neema-ai/scripts/box-deploy.sh
+# The script pulls public GHCR images and drives docker compose; needs root.
+User=root

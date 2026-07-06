@@ -210,13 +210,19 @@ The server never receives direct edits; every change lands via this flow:
 
 1. Branch from `main`, make your change, commit.
 2. Open a **pull request** — CI builds both Docker images as a check.
-3. Merge to `main` — GitHub Actions then:
-   - builds `neema-ai-api` and `neema-ai-web` images and pushes them to GHCR
-     (tagged `latest` + commit SHA for rollback),
-   - SSHes into the VPS, fast-forwards `/home/neema/neema-ai` to `origin/main`,
-   - pulls the new images and recreates the `api` and `web` containers
-     (`docker compose -f docker-compose.yml -f docker-compose.vps.yml`),
-   - verifies `/api/health` returns 200.
+3. Merge to `main` — GitHub Actions builds `neema-ai-api` and `neema-ai-web`
+   and pushes them to GHCR (tagged `latest` + commit SHA for rollback).
+4. The **VPS deploys itself**: a systemd timer (`deploy/neema-deploy.timer`)
+   runs `scripts/box-deploy.sh` every 2 minutes — it fast-forwards
+   `/home/neema/neema-ai` to `origin/main`, pulls the new GHCR images, and
+   recreates `api` + `web` only if the git ref or an image digest changed,
+   then health-checks `/api/health`. Deploy lands within ~2 min of merge.
+
+**Why pull-based, not SSH push?** This shared box sits behind a host firewall
+that intermittently drops GitHub-runner IPs on port 22, so an Actions→box SSH
+push was unreliable. Outbound pulls from the box are unaffected. This requires
+the two GHCR packages to be **public** (so the box pulls anonymously — no
+registry credentials stored on the shared box).
 
 Rollback: `IMAGE_TAG=<old-sha> docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d --no-deps api web` on the server.
 
