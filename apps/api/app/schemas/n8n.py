@@ -86,3 +86,28 @@ class CustomerHistoryDto(BaseModel):
     has_open_order: bool = False
     last_event: dict | None = None
     counts: dict | None = None
+
+
+class UsageDto(BaseModel):
+    """Logged by n8n after each LLM call so token spend is measurable.
+    Read prompt/completion/cached tokens straight from the OpenAI node's
+    `usage` object (`$json.usage.prompt_tokens`, etc.)."""
+    wa_id: str | None = None
+    workflow: str | None = None
+    node: str | None = None
+    model: str | None = None
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    # cached_tokens = usage.prompt_tokens_details.cached_tokens (OpenAI)
+    cached_tokens: int = 0
+
+
+class RouteDto(BaseModel):
+    """Ask the server whether this inbound message actually needs the
+    expensive model. Lets n8n dedupe retries, short-circuit trivial turns
+    with a cheap path, and enforce a per-conversation cool-off — all without
+    spending a classifier token."""
+    wa_id: str
+    text: str = ""
+    msg_id: str | None = None
+    media_type: str | None = None

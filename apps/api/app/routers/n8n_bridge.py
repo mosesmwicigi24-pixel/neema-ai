@@ -5,7 +5,8 @@ from app.core.config import settings
 from app.services import n8n_bridge as svc
 from app.schemas.n8n import (
     OutboundDto, SessionDto, MessageDto, UpsertMessagePatchDto,
-    UserDto, OrderEventDto, CustomerHistoryDto, UserFactsDto
+    UserDto, OrderEventDto, CustomerHistoryDto, UserFactsDto,
+    UsageDto, RouteDto,
 )
 import json
 import logging as _logging
@@ -116,6 +117,20 @@ async def upsert_order_event(body: OrderEventDto, db: AsyncSession = Depends(get
 @router.post("/customer-history", dependencies=[Depends(verify_n8n_secret)])
 async def upsert_customer_history(body: CustomerHistoryDto, db: AsyncSession = Depends(get_db)):
     return await svc.upsert_customer_history(db, body)
+
+
+# ── AI cost controls ──────────────────────────────────────
+@router.post("/usage", dependencies=[Depends(verify_n8n_secret)])
+async def log_usage(body: UsageDto, db: AsyncSession = Depends(get_db)):
+    """n8n logs each LLM call's token usage here so spend is measurable."""
+    return await svc.log_usage(db, body)
+
+
+@router.post("/route", dependencies=[Depends(verify_n8n_secret)])
+async def route_message(body: RouteDto, request: Request, db: AsyncSession = Depends(get_db)):
+    """Server-side cost governor: dedupe retries, short-circuit trivial turns
+    to a cheap path, and enforce a per-conversation cool-off — no tokens spent."""
+    return await svc.route_message(db, request.app.state.redis, body)
 
 
 # ── INTERCEPT GATE ────────────────────────────────────────

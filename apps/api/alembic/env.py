@@ -21,6 +21,7 @@ from app.models.order_event import OrderEvent # noqa: F401
 from app.models.catalog import Catalog        # noqa: F401
 from app.models.session import Session              # noqa: F401
 from app.models.customer_history import CustomerHistory  # noqa: F401
+from app.models.ai_usage import AiUsage                    # noqa: F401
 
 config = context.config
 

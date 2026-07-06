@@ -258,6 +258,20 @@ async def merge_customers(
     return {"ok": True, "merged": merge_with, "into": wa_id}
 
 
+# ── AI cost dashboard ─────────────────────────────────────────────────────────
+
+@router.get("/ai-cost")
+async def ai_cost(
+    days: int = 30,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Token spend by model over the last `days` — so cost optimizations can
+    be measured. Populated once n8n logs calls via POST /api/n8n/usage."""
+    from app.services.n8n_bridge import ai_cost_summary
+    return await ai_cost_summary(db, days=max(1, min(days, 365)))
+
+
 # ── Leads pipeline ────────────────────────────────────────────────────────────
 
 @router.get("/leads")

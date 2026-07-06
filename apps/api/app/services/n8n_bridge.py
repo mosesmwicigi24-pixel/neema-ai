@@ -275,6 +275,148 @@ async def _broadcast(redis, channel: str, payload: dict) -> None:
 
 # ── Context ───────────────────────────────────────────────
 
+import re as _re
+
+# Trivial inbound messages that don't need the expensive reasoning model — a
+# cheap templated reply (or a mini model) is enough. Kept deliberately small
+# and high-precision so real sales questions never get short-circuited.
+_GREETING_RE = _re.compile(
+    r"^(hi+|hey+|hello+|helo+|habari|niaje|mambo|sasa|yo+|good\s*(morning|afternoon|evening)|"
+    r"vipi|shalom)[\s!.,]*$",
+    _re.IGNORECASE,
+)
+_ACK_RE = _re.compile(
+    r"^(ok+(ay)?|k|kk|sawa|poa|noted|alright|got\s*it|sure|fine|yes+|no+|"
+    r"thanks?|thank\s*you|asante(\s*sana)?|thx|ty|👍+|🙏+|❤️*|😊+|amen)[\s!.,🙏👍❤😊]*$",
+    _re.IGNORECASE,
+)
+
+
+async def log_usage(db: AsyncSession, body) -> dict:
+    """Persist one LLM call's token usage + estimated cost."""
+    from app.models.ai_usage import AiUsage
+    from app.core.ai_pricing import estimate_cost_usd
+
+    cost = estimate_cost_usd(
+        body.model, body.prompt_tokens, body.completion_tokens, body.cached_tokens
+    )
+    db.add(AiUsage(
+        wa_id=_normalize_wa_id(body.wa_id) if body.wa_id else None,
+        workflow=body.workflow,
+        node=body.node,
+        model=body.model,
+        prompt_tokens=body.prompt_tokens,
+        completion_tokens=body.completion_tokens,
+        cached_tokens=body.cached_tokens,
+        cost_usd=cost,
+    ))
+    await db.commit()
+    return {"ok": True, "cost_usd": cost}
+
+
+async def route_message(db: AsyncSession, redis, body) -> dict:
+    """Decide how much intelligence THIS message deserves — server-side, no
+    LLM tokens spent. Returns a decision n8n branches on:
+
+      path: "skip" | "cheap" | "full"
+      duplicate: WhatsApp re-delivered the same message id → don't answer twice
+      intent_hint: greeting | ack | media | question
+      canned_reply: a ready reply for greetings/acks (n8n may send as-is)
+      cooldown_active / cooldown_seconds: the AI has answered a lot very
+        recently — hold or hand to a human so a runaway loop can't rack up calls
+    """
+    wa_id = _normalize_wa_id(body.wa_id)
+    text = (body.text or "").strip()
+    decision = {
+        "wa_id": wa_id, "path": "full", "duplicate": False,
+        "intent_hint": "question", "canned_reply": None,
+        "cooldown_active": False, "cooldown_seconds": 0,
+    }
+
+    # 1. Idempotency — a WhatsApp retry with the same id must not re-invoke GPT.
+    if body.msg_id:
+        seen_key = f"seen_msg:{body.msg_id}"
+        try:
+            if await redis.get(seen_key):
+                decision["duplicate"] = True
+                decision["path"] = "skip"
+                return decision
+            await redis.setex(seen_key, 6 * 3600, "1")
+        except Exception:
+            pass  # dedupe is best-effort; never block a real message
+
+    # 2. Media always needs its own (vision/transcription) path.
+    if body.media_type and body.media_type not in ("text", ""):
+        decision["intent_hint"] = "media"
+        return decision  # path stays "full"; media sub-workflows handle it
+
+    # 3. Cool-off: count AI replies sent to this conversation in the last 60s.
+    #    Beyond the threshold, tell n8n to hold — the "no time to cool off" fix.
+    try:
+        conv_res = await db.execute(select(Conversation).where(Conversation.wa_id == wa_id))
+        conv = conv_res.scalar_one_or_none()
+        if conv:
+            since = datetime.now(timezone.utc) - timedelta(seconds=60)
+            recent_ai = await db.execute(
+                select(Message).where(
+                    Message.conversation_id == conv.id,
+                    Message.direction == MsgDirection.outbound,
+                    Message.created_at >= since,
+                )
+            )
+            n_recent = len(recent_ai.scalars().all())
+            if n_recent >= 6:  # >6 AI replies in a minute = runaway loop
+                decision["cooldown_active"] = True
+                decision["cooldown_seconds"] = 60
+    except Exception:
+        pass
+
+    # 4. Cheap-path classification (rule-based, high precision).
+    if _GREETING_RE.match(text):
+        decision.update(
+            path="cheap", intent_hint="greeting",
+            canned_reply="Hello and welcome to Bethany House! 🙏 How may I help you today?",
+        )
+    elif _ACK_RE.match(text):
+        decision.update(path="cheap", intent_hint="ack", canned_reply="")
+
+    return decision
+
+
+async def ai_cost_summary(db: AsyncSession, days: int = 30) -> dict:
+    """Aggregate token spend for the admin cost view."""
+    from app.models.ai_usage import AiUsage
+    from sqlalchemy import func
+
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = (await db.execute(
+        select(
+            AiUsage.model,
+            func.count().label("calls"),
+            func.sum(AiUsage.prompt_tokens),
+            func.sum(AiUsage.completion_tokens),
+            func.sum(AiUsage.cached_tokens),
+            func.sum(AiUsage.cost_usd),
+        ).where(AiUsage.created_at >= since).group_by(AiUsage.model)
+    )).all()
+
+    by_model = [{
+        "model": r[0], "calls": r[1],
+        "prompt_tokens": int(r[2] or 0), "completion_tokens": int(r[3] or 0),
+        "cached_tokens": int(r[4] or 0), "cost_usd": float(r[5] or 0),
+    } for r in rows]
+
+    total_cost = round(sum(m["cost_usd"] for m in by_model), 4)
+    total_calls = sum(m["calls"] for m in by_model)
+    return {
+        "days": days,
+        "total_cost_usd": total_cost,
+        "total_calls": total_calls,
+        "avg_cost_per_call": round(total_cost / total_calls, 6) if total_calls else 0,
+        "by_model": sorted(by_model, key=lambda m: -m["cost_usd"]),
+    }
+
+
 async def get_context(db: AsyncSession, redis, wa_id: str) -> dict:
     wa_id = _normalize_wa_id(wa_id)
     cache_key = f"context:{wa_id}"
