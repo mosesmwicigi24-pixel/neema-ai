@@ -7,7 +7,7 @@ export type ConversationStatus = "open" | "closed";
 export type OrderStatus = "pending" | "confirmed" | "delivered" | "cancelled";
 export type PaymentMethod = "mpesa" | "cod";
 export type AgentRole = "admin" | "agent" | "readonly" | "supervisor";
-export type ToastType = "success" | "error" | "warning";
+export type ToastType = "success" | "error" | "warning" | "info";
 export type ThemeMode = "light" | "dark";
 
 export interface Conversation {

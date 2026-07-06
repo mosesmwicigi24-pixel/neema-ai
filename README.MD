@@ -203,6 +203,25 @@ neema-platform/
 
 ---
 
+## Contributing & Deployment Workflow
+
+**GitHub is the single source of truth** — `https://github.com/mosesmwicigi24-pixel/neema-ai`.
+The server never receives direct edits; every change lands via this flow:
+
+1. Branch from `main`, make your change, commit.
+2. Open a **pull request** — CI builds both Docker images as a check.
+3. Merge to `main` — GitHub Actions then:
+   - builds `neema-ai-api` and `neema-ai-web` images and pushes them to GHCR
+     (tagged `latest` + commit SHA for rollback),
+   - SSHes into the VPS, fast-forwards `/home/neema/neema-ai` to `origin/main`,
+   - pulls the new images and recreates the `api` and `web` containers
+     (`docker compose -f docker-compose.yml -f docker-compose.vps.yml`),
+   - verifies `/api/health` returns 200.
+
+Rollback: `IMAGE_TAG=<old-sha> docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d --no-deps api web` on the server.
+
+---
+
 ## Development
 
 Use the dev compose override for hot reload and exposed ports:

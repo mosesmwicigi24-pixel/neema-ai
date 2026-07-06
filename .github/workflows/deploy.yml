@@ -1,0 +1,96 @@
+name: Build & Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  API_IMAGE: ghcr.io/mosesmwicigi24-pixel/neema-ai-api
+  WEB_IMAGE: ghcr.io/mosesmwicigi24-pixel/neema-ai-web
+  NEXT_PUBLIC_API_URL: https://neema.bethanyhouse.co.ke/api
+  NEXT_PUBLIC_WS_URL: ws://neema.bethanyhouse.co.ke
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build API image
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/api
+          target: runner
+          push: ${{ github.event_name == 'push' }}
+          tags: |
+            ${{ env.API_IMAGE }}:latest
+            ${{ env.API_IMAGE }}:${{ github.sha }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+
+      - name: Build Web image
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/web
+          target: runner
+          push: ${{ github.event_name == 'push' }}
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ env.NEXT_PUBLIC_API_URL }}
+            NEXT_PUBLIC_WS_URL=${{ env.NEXT_PUBLIC_WS_URL }}
+          tags: |
+            ${{ env.WEB_IMAGE }}:latest
+            ${{ env.WEB_IMAGE }}:${{ github.sha }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
+
+  deploy:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to VPS
+        env:
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          install -m 600 /dev/null key && printf '%s\n' "$SSH_KEY" > key
+          ssh -i key -o StrictHostKeyChecking=accept-new root@72.60.187.67 \
+            "GHCR_TOKEN='$GHCR_TOKEN' bash -s" <<'DEPLOY'
+          set -euo pipefail
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u mosesmwicigi24-pixel --password-stdin
+          sudo -u neema git -C /home/neema/neema-ai fetch origin main
+          sudo -u neema git -C /home/neema/neema-ai reset --hard origin/main
+          cd /home/neema/neema-ai
+          docker compose -f docker-compose.yml -f docker-compose.vps.yml pull api web
+          docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d --no-deps api web
+          # IMPORTANT: log out so stale GHCR creds never block the other
+          # projects on this box that pull public images anonymously.
+          docker logout ghcr.io
+          DEPLOY
+
+      - name: Verify deployment
+        run: |
+          sleep 45
+          for i in 1 2 3 4 5; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' https://neema.bethanyhouse.co.ke/api/health) && \
+              [ "$code" = "200" ] && echo "API healthy" && exit 0
+            echo "attempt $i: got $code — retrying in 15s"; sleep 15
+          done
+          echo "API failed health check after deploy" && exit 1
