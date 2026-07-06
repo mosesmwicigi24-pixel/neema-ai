@@ -5,7 +5,7 @@ import type {
     AgentRole,
     Channel,
 } from "@/types";
-import { ROLE_DEFINITIONS } from "@/lib/mockData";
+import { ROLE_DEFINITIONS } from "@/lib/roles";
 import { CHANNEL_CONFIG } from "@/lib/channels";
 
 export function InterceptBadge({

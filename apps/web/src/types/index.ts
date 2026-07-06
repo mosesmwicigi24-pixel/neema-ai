@@ -30,6 +30,7 @@ export interface Conversation {
     country_iso?: string | null;
     flag_url?: string | null;
     tags?: string[];
+    created_at?: string;
 }
 
 // ── System event kinds ────────────────────────────────────────────────────────
@@ -94,6 +95,7 @@ export interface Order {
     currency: string;
     notes?: string;
     created_at: string;
+    channel?: string;
 }
 
 export interface Agent {
@@ -110,14 +112,21 @@ export interface Agent {
     created_at: string;
     joined_at: string;
     department?: string;
+    custom_role_id?: string | null;
+    custom_permissions?: string[] | null;
+    role_name?: string | null;
+    role_color?: string | null;
+    role_permissions?: string[] | null;
 }
 
 export interface CatalogItem {
     id: string;
     sku: string;
     name: string;
+    aliases?: string[];
     category: string;
     price: number;
+    unit?: string;
     in_stock: boolean;
     description: string;
 }

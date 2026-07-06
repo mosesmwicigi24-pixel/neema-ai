@@ -308,9 +308,8 @@ export function OrdersView({
                             backgroundColor: "white",
                             border: "1px solid #b5da8b",
                             color: "#16270c",
-                            fontSize: 13,
+                            fontSize: 16,
                         }}
-                        style={{ fontSize: 16 }}
                     />
                 </div>
                 {filter !== "all" && (
@@ -344,10 +343,7 @@ export function OrdersView({
                         </p>
                     </div>
                 ) : (
-                    <div
-                        className="divide-y"
-                        style={{ divideColor: "#f0f9ec" }}
-                    >
+                    <div className="divide-y divide-[#f0f9ec]">
                         {paginated.map((order) => {
                             const meta =
                                 STATUS_META[order.status] ??

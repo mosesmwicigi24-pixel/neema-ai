@@ -304,9 +304,14 @@ export interface ApiAgent {
 
 export const agentsApi = {
     list: () => get<ApiAgent[]>("/admin/agents"),
-    update: (id: string, body: Partial<ApiAgent>) =>
+    create: (body: { name: string; email: string; password: string; role?: string }) =>
+        post<ApiAgent>("/admin/agents", body),
+    update: (id: string, body: Partial<ApiAgent> & { password?: string }) =>
         patch<ApiAgent>(`/admin/agents/${id}`, body),
+    delete: (id: string) => del<{ ok: boolean }>(`/admin/agents/${id}`),
     setAvailable: (id: string, is_available: boolean) =>
+        patch<ApiAgent>(`/admin/agents/${id}`, { is_available }),
+    toggleAvailable: (id: string, is_available: boolean) =>
         patch<ApiAgent>(`/admin/agents/${id}`, { is_available }),
 };
 
