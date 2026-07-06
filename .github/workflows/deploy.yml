@@ -73,21 +73,27 @@ jobs:
           install -m 600 /dev/null key && printf '%s\n' "$SSH_KEY" > key
           cat > deploy.sh <<'DEPLOY'
           set -euo pipefail
+          # ALWAYS log out, even on failure — stale GHCR creds in
+          # /root/.docker/config.json break the other projects on this box
+          # that pull public images anonymously.
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
           echo "$GHCR_TOKEN" | docker login ghcr.io -u mosesmwicigi24-pixel --password-stdin
           sudo -u neema git -C /home/neema/neema-ai fetch origin main
           sudo -u neema git -C /home/neema/neema-ai reset --hard origin/main
           cd /home/neema/neema-ai
           docker compose -f docker-compose.yml -f docker-compose.vps.yml pull api web
           docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d --no-deps api web
-          # IMPORTANT: log out so stale GHCR creds never block the other
-          # projects on this box that pull public images anonymously.
-          docker logout ghcr.io
           DEPLOY
-          # Runner→VPS connectivity is occasionally flaky; the remote script is
-          # idempotent, so retry the whole SSH session on any failure.
+          # scp the script instead of piping it over `bash -s` stdin — docker
+          # compose reads stdin and silently swallowed the tail of the script
+          # (the logout never ran even though the job reported success).
+          # Runner→VPS connectivity is occasionally flaky and the script is
+          # idempotent, so retry the whole session on any failure.
+          SSH_OPTS="-i key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20"
           for attempt in 1 2 3; do
-            if ssh -i key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
-                 root@72.60.187.67 "GHCR_TOKEN='$GHCR_TOKEN' bash -s" < deploy.sh; then
+            if scp $SSH_OPTS deploy.sh root@72.60.187.67:/tmp/neema-deploy.sh && \
+               ssh $SSH_OPTS root@72.60.187.67 \
+                 "GHCR_TOKEN='$GHCR_TOKEN' bash /tmp/neema-deploy.sh && rm -f /tmp/neema-deploy.sh"; then
               exit 0
             fi
             echo "deploy attempt $attempt failed — retrying in 30s"
