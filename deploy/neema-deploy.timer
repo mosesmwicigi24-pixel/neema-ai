@@ -1,0 +1,11 @@
+# Runs the pull-based deployer every 2 minutes (and shortly after boot).
+[Unit]
+Description=Run neema-ai deploy check every 2 minutes
+
+[Timer]
+OnBootSec=90s
+OnUnitActiveSec=2min
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target
