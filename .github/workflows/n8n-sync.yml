@@ -1,0 +1,98 @@
+name: Sync n8n workflows
+
+# Captures changes made in the live n8n editor back into git. n8n is the
+# brain of the app (it runs the WhatsApp AI agent); the FastAPI n8n-bridge is
+# the contract between them. Keeping n8n/*.json in the repo means every
+# workflow edit is reviewable in a PR — and if an edit changes the bridge
+# contract (a new field, a new endpoint call), the diff makes that visible so
+# the API/UI can be updated to match.
+
+on:
+  schedule:
+    - cron: "0 */6 * * *" # every 6 hours
+  workflow_dispatch: {} # or run on demand
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Export active workflows from the live n8n
+        env:
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          install -m 600 /dev/null key && printf '%s\n' "$SSH_KEY" > key
+          cat > remote.sh <<'REMOTE'
+          set -euo pipefail
+          # Everything diagnostic goes to stderr so stdout is a clean base64 tar.
+          exec 3>&1        # fd3 = the real stdout (the tar)
+          rm -rf /tmp/wfsync && mkdir -p /tmp/wfsync/raw
+          docker exec n8n-n8n-1 n8n export:workflow --all --separate --output=/tmp/wfexport/ >&2 2>&1
+          docker cp n8n-n8n-1:/tmp/wfexport/. /tmp/wfsync/raw/ >&2
+          docker exec n8n-n8n-1 rm -rf /tmp/wfexport >&2
+          SECRET="$(grep '^N8N_API_SECRET=' /home/neema/neema-ai/.env | cut -d= -f2-)"
+          python3 - "$SECRET" <<'PY' >&2
+          import json, re, sys, pathlib
+          secret = sys.argv[1]
+          out = pathlib.Path("/tmp/wfsync/out"); out.mkdir(parents=True, exist_ok=True)
+          def slug(n):
+              return re.sub(r'-+', '-', re.sub(r'[^a-z0-9]+', '-', n.lower())).strip('-')
+          for p in pathlib.Path("/tmp/wfsync/raw").glob("*.json"):
+              raw = p.read_text()
+              data = json.loads(raw)
+              # Only the workflows that are actually live — skip drafts/archived copies.
+              if not data.get("active") or data.get("isArchived"):
+                  continue
+              if secret and secret in raw:
+                  raw = raw.replace(secret, "REPLACE_WITH_N8N_API_SECRET")
+                  data = json.loads(raw)
+              (out / f"{slug(data['name'])}.json").write_text(json.dumps(data, indent=2) + "\n")
+          print("exported", len(list(out.glob('*.json'))), "active workflows", file=sys.stderr)
+          PY
+          tar -C /tmp/wfsync/out -cf - . | base64 >&3
+          REMOTE
+          for attempt in 1 2 3; do
+            if ssh -i key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
+                 root@72.60.187.67 "bash -s" < remote.sh > export.b64; then
+              break
+            fi
+            echo "export attempt $attempt failed — retrying in 30s"; sleep 30
+            [ "$attempt" = 3 ] && { echo "n8n export failed"; exit 1; }
+          done
+          # Replace the tracked set wholesale so renamed/deactivated workflows
+          # don't linger. export.b64 is a pure base64 tar (diagnostics went to
+          # the Actions log via stderr).
+          rm -f n8n/*.json
+          base64 -d < export.b64 | tar -C n8n -xf -
+          rm -f key remote.sh export.b64
+          echo "Synced workflows:"; ls -1 n8n/
+
+      - name: Open a PR if anything changed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if git diff --quiet -- n8n/; then
+            echo "n8n workflows already in sync — nothing to do."
+            exit 0
+          fi
+          BRANCH="n8n-sync/$(date +%Y%m%d-%H%M%S)"
+          git config user.name "n8n-sync[bot]"
+          git config user.email "n8n-sync@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add n8n/
+          git commit -m "Sync n8n workflows from the live editor
+
+          Automated export of the active n8n workflows. Review the diff — if a
+          change alters the FastAPI n8n-bridge contract (new field, new
+          endpoint, changed payload), update apps/api (and apps/web) to match
+          before/with merging."
+          git push -u origin "$BRANCH"
+          gh pr create --fill --label n8n-sync \
+            --title "Sync n8n workflows ($(date +%Y-%m-%d))" || \
+          gh pr create --fill \
+            --title "Sync n8n workflows ($(date +%Y-%m-%d))"
