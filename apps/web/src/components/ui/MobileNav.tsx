@@ -7,6 +7,8 @@ interface MobileHeaderProps {
     view: ViewId;
     theme: ThemeMode;
     setTheme: React.Dispatch<React.SetStateAction<ThemeMode>>;
+    notificationCount?: number;
+    onClearNotifications?: () => void;
 }
 
 export function MobileHeader({
@@ -14,6 +16,8 @@ export function MobileHeader({
     view,
     theme,
     setTheme,
+    notificationCount = 0,
+    onClearNotifications,
 }: MobileHeaderProps): React.ReactElement {
     const current = navItems.find((n) => n.id === view);
     return (
@@ -40,7 +44,33 @@ export function MobileHeader({
             <span className="text-sm text-gray-500 dark:text-gray-400 font-medium">
                 {current?.label}
             </span>
-            <div className="ml-auto">
+            <div className="ml-auto flex items-center gap-1">
+                {onClearNotifications && (
+                    <button
+                        onClick={onClearNotifications}
+                        aria-label="Clear notifications"
+                        className="relative w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800 transition-all"
+                    >
+                        <svg
+                            className="w-4 h-4"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                        >
+                            <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+                            />
+                        </svg>
+                        {notificationCount > 0 && (
+                            <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-semibold flex items-center justify-center">
+                                {notificationCount > 9 ? "9+" : notificationCount}
+                            </span>
+                        )}
+                    </button>
+                )}
                 <button
                     onClick={() =>
                         setTheme((t) => (t === "light" ? "dark" : "light"))

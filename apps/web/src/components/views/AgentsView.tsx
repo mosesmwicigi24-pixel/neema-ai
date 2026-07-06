@@ -212,8 +212,8 @@ export function AgentsView({ agents, setAgents, onToast, isMobile, refetchAgents
             if (roleModal === "create") {
                 await rolesApi.create({ id:`role_${Date.now()}`, ...roleForm });
                 onToast("Role created");
-            } else if (roleModal && roleModal !== "create") {
-                await rolesApi.update((roleModal as CustomRole).id, roleForm);
+            } else if (roleModal) {
+                await rolesApi.update(roleModal.id, roleForm);
                 onToast("Role updated");
             }
             await fetchRoles(); setRoleModal(null);
@@ -587,7 +587,7 @@ export function AgentsView({ agents, setAgents, onToast, isMobile, refetchAgents
                                 <div className="flex items-center justify-between mb-1.5">
                                     <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color:"#427425" }}>{group}</span>
                                     <button onClick={() => {
-                                        const gp = ALL_PERMISSIONS.filter(p => p.group === group).map(p => p.key);
+                                        const gp: string[] = ALL_PERMISSIONS.filter(p => p.group === group).map(p => p.key);
                                         const allSel = gp.every(k => roleForm.permissions.includes(k));
                                         setRoleForm(f => ({
                                             ...f,

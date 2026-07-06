@@ -733,10 +733,14 @@ export function ConversationsView({
             // back to created_at so brand-new conversations surface correctly.
             const aTime = a.last_message_at
                 ? new Date(a.last_message_at).getTime()
-                : new Date(a.created_at).getTime();
+                : a.created_at
+                  ? new Date(a.created_at).getTime()
+                  : 0;
             const bTime = b.last_message_at
                 ? new Date(b.last_message_at).getTime()
-                : new Date(b.created_at).getTime();
+                : b.created_at
+                  ? new Date(b.created_at).getTime()
+                  : 0;
             return bTime - aTime;
         });
 
@@ -1447,8 +1451,7 @@ export function ConversationsView({
                                                     .some(
                                                         (m) =>
                                                             m.direction === "inbound" &&
-                                                            m.media_type &&
-                                                            m.media_type !== "note",
+                                                            !!m.media_type,
                                                     );
                                                 const reasonText =
                                                     msg.event_reason ||

@@ -372,8 +372,7 @@ export function LeadsView({ onToast, isMobile }: LeadsViewProps): React.ReactEle
                             value={search}
                             onChange={(e) => setSearch(e.target.value)}
                             placeholder="Search leads…"
-                            className="h-8 pl-8 pr-3 text-xs rounded-lg focus:outline-none focus:ring-1" style={{backgroundColor:"white",border:"1px solid #b5da8b",color:"#16270c",fontSize:13}}
-                            style={{ fontSize: 14 }}
+                            className="h-8 pl-8 pr-3 text-xs rounded-lg focus:outline-none focus:ring-1" style={{backgroundColor:"white",border:"1px solid #b5da8b",color:"#16270c",fontSize:14}}
                         />
                     </div>
                 </div>
