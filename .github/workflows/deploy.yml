@@ -78,8 +78,8 @@ jobs:
           sudo -u neema git -C /home/neema/neema-ai fetch origin main
           sudo -u neema git -C /home/neema/neema-ai reset --hard origin/main
           cd /home/neema/neema-ai
-          docker compose pull api web
-          docker compose up -d api web
+          docker compose -f docker-compose.yml -f docker-compose.vps.yml pull api web
+          docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d --no-deps api web
           # IMPORTANT: log out so stale GHCR creds never block the other
           # projects on this box that pull public images anonymously.
           docker logout ghcr.io
