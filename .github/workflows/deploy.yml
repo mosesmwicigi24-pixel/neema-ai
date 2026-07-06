@@ -71,8 +71,7 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           install -m 600 /dev/null key && printf '%s\n' "$SSH_KEY" > key
-          ssh -i key -o StrictHostKeyChecking=accept-new root@72.60.187.67 \
-            "GHCR_TOKEN='$GHCR_TOKEN' bash -s" <<'DEPLOY'
+          cat > deploy.sh <<'DEPLOY'
           set -euo pipefail
           echo "$GHCR_TOKEN" | docker login ghcr.io -u mosesmwicigi24-pixel --password-stdin
           sudo -u neema git -C /home/neema/neema-ai fetch origin main
@@ -84,6 +83,17 @@ jobs:
           # projects on this box that pull public images anonymously.
           docker logout ghcr.io
           DEPLOY
+          # Runner→VPS connectivity is occasionally flaky; the remote script is
+          # idempotent, so retry the whole SSH session on any failure.
+          for attempt in 1 2 3; do
+            if ssh -i key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
+                 root@72.60.187.67 "GHCR_TOKEN='$GHCR_TOKEN' bash -s" < deploy.sh; then
+              exit 0
+            fi
+            echo "deploy attempt $attempt failed — retrying in 30s"
+            sleep 30
+          done
+          echo "all deploy attempts failed" && exit 1
 
       - name: Verify deployment
         run: |
