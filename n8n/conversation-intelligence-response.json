@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-04-25T21:01:25.149Z",
+  "updatedAt": "2026-07-06T13:42:50.000Z",
   "createdAt": "2026-04-12T03:15:53.384Z",
   "id": "I2ERPxA9cXlGwRFK",
   "name": "Conversation Intelligence & Response",
@@ -37,9 +37,9 @@
       "parameters": {
         "modelId": {
           "__rl": true,
-          "value": "gpt-4.1",
+          "value": "gpt-4.1-mini",
           "mode": "list",
-          "cachedResultName": "GPT-4.1"
+          "cachedResultName": "gpt-4.1-mini"
         },
         "responses": {
           "values": [
@@ -624,9 +624,9 @@
   "staticData": null,
   "meta": null,
   "pinData": {},
-  "versionId": "f3dd74ad-c839-4353-96ce-90f12b51db88",
-  "activeVersionId": "f3dd74ad-c839-4353-96ce-90f12b51db88",
-  "versionCounter": 342,
+  "versionId": "dd4c7bb9-6854-4d9e-9d45-d4cfae9bdc9f",
+  "activeVersionId": "dd4c7bb9-6854-4d9e-9d45-d4cfae9bdc9f",
+  "versionCounter": 344,
   "triggerCount": 0,
   "tags": [],
   "shared": [
