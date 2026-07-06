@@ -1,0 +1,21 @@
+# VPS override — used on the production box together with docker-compose.yml:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d
+#
+# The host-level nginx terminates TLS and proxies to these localhost ports,
+# so api/web are published on 127.0.0.1 ONLY (never 0.0.0.0 — this box is
+# shared and pgAdmin/Postgres/Redis must not face the internet).
+#
+# Images come from GHCR (built by .github/workflows/deploy.yml on merge to
+# main) — the box never builds images itself.
+
+services:
+    api:
+        image: ghcr.io/mosesmwicigi24-pixel/neema-ai-api:${IMAGE_TAG:-latest}
+        ports:
+            - "127.0.0.1:8000:8000"
+
+    web:
+        image: ghcr.io/mosesmwicigi24-pixel/neema-ai-web:${IMAGE_TAG:-latest}
+        ports:
+            - "127.0.0.1:3000:3000"

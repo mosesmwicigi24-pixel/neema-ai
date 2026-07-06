@@ -15,8 +15,8 @@ services:
         container_name: neema_pgadmin
         restart: unless-stopped
         environment:
-            PGADMIN_DEFAULT_EMAIL: webmaster@bethanyhouse.co.ke
-            PGADMIN_DEFAULT_PASSWORD: '#MJpgp@20100#'
+            PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@example.com}
+            PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:?set PGADMIN_PASSWORD in .env}
             PGADMIN_CONFIG_SERVER_MODE: "False"
             PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
         ports:
