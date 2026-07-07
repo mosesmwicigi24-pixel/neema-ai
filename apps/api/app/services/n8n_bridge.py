@@ -1279,6 +1279,20 @@ async def _maybe_push_order_to_hub(db: AsyncSession, redis, body, event_id: str)
     return out
 
 
+async def latest_inbound_message(db, wa_id: str) -> dict | None:
+    """The customer's most recent inbound message (id + text) — used to dedupe
+    and feed the Tier 2 agent."""
+    wa_id = _normalize_wa_id(wa_id)
+    row = (await db.execute(
+        select(Message)
+        .where(Message.wa_id == wa_id, Message.direction == MsgDirection.inbound)
+        .order_by(Message.created_at.desc()).limit(1)
+    )).scalar_one_or_none()
+    if row is None:
+        return None
+    return {"id": str(row.id), "text": row.text or ""}
+
+
 async def save_outbound_message(db, redis, wa_id: str, text: str) -> None:
     """Persist an AI outbound message + broadcast it (used by the Tier 2 agent,
     which sends its own reply rather than going through the Tier 1 outbound gate)."""
