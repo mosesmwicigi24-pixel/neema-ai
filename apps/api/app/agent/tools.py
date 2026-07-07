@@ -91,6 +91,18 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "add_tags",
+        "description": "Tag this customer with short attributes you learn from the chat — "
+                       "interests or the products they care about (e.g. 'vestments', "
+                       "'communion supplies', 'wholesale', 'clergy'). Helps segment leads. "
+                       "1-3 word tags; don't tag their country (that's automatic).",
+        "input_schema": {
+            "type": "object",
+            "properties": {"tags": {"type": "array", "items": {"type": "string"}}},
+            "required": ["tags"],
+        },
+    },
+    {
         "name": "remember",
         "description": "Save a durable fact about this customer (a preference, their church, "
                        "size, etc.) so you recall it in future chats. Use sparingly for "
@@ -299,6 +311,28 @@ async def _remember(args: dict, ctx: ToolContext) -> dict:
     return {"ok": True, "memory": facts}
 
 
+async def _add_tags(args: dict, ctx: ToolContext) -> dict:
+    from sqlalchemy.orm.attributes import flag_modified
+    new_tags = [str(t).strip() for t in (args.get("tags") or []) if str(t).strip()][:10]
+    if not new_tags:
+        return {"error": "tags is required"}
+    user = (await ctx.db.execute(select(User).where(User.wa_id == ctx.wa_id))).scalar_one_or_none()
+    if user is None:
+        return {"ok": False}
+    state = dict(user.state or {})
+    tags = list(state.get("tags") or [])
+    lower = {t.strip().lower() for t in tags}
+    for t in new_tags:
+        if t.lower() not in lower:
+            tags.append(t)
+            lower.add(t.lower())
+    state["tags"] = tags[:30]
+    user.state = state
+    flag_modified(user, "state")
+    await ctx.db.commit()
+    return {"ok": True, "tags": state["tags"]}
+
+
 async def _handoff_to_human(args: dict, ctx: ToolContext) -> dict:
     from app.models.conversation import Conversation, InterceptMode
     conv = (await ctx.db.execute(
@@ -320,5 +354,6 @@ _HANDLERS = {
     "check_order_status": _check_order_status,
     "capture_customer": _capture_customer,
     "remember": _remember,
+    "add_tags": _add_tags,
     "handoff_to_human": _handoff_to_human,
 }
