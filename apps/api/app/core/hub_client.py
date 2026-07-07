@@ -191,25 +191,43 @@ def _is_made_to_order(line: dict) -> bool:
     return line.get("product_type") == "variable" and bool(line.get("is_producible"))
 
 
-async def _find_customer_id(wa_id: str) -> int | None:
-    """Reuse an existing hub customer by phone so repeat buyers don't duplicate."""
+async def _search_customer_match(wa_id: str) -> dict | None:
+    """Find the hub customer that is the *same person* as this WhatsApp contact.
+
+    The hub stores numbers in mixed formats (0712…, 254712…, +254712…), so we
+    search by the national digits (an ILIKE that hits every format) but confirm on
+    the full country-aware E.164 — so a Kenyan contact never matches a Ugandan
+    number that merely shares trailing digits. Hub numbers with no country code are
+    read as Kenyan (the shop's home country). Returns {id, name, phone} or None.
+    """
+    from app.core.phone import national_digits, same_number
+    q = national_digits(wa_id) or "".join(ch for ch in wa_id if ch.isdigit())
     base = settings.hub_api_url.rstrip("/")
     try:
         async with httpx.AsyncClient(timeout=12.0) as client:
             resp = await client.get(
                 f"{base}/api/v1/admin/pos/customers/search",
                 headers=_api_headers(),
-                params={"q": wa_id},
+                params={"q": q},
             )
             resp.raise_for_status()
-            digits = "".join(ch for ch in wa_id if ch.isdigit())
             for c in (resp.json() or {}).get("data", []):
-                cphone = "".join(ch for ch in str(c.get("phone") or "") if ch.isdigit())
-                if cphone and (cphone == digits or cphone.endswith(digits) or digits.endswith(cphone)):
-                    return c.get("id")
+                if same_number(wa_id, c.get("phone")):
+                    return {"id": c.get("id"), "name": c.get("name"), "phone": c.get("phone")}
     except Exception:
         pass  # dedupe is a nicety — fall back to new_customer
     return None
+
+
+async def _find_customer_id(wa_id: str) -> int | None:
+    """Reuse an existing hub customer by phone so repeat buyers don't duplicate."""
+    match = await _search_customer_match(wa_id)
+    return match["id"] if match else None
+
+
+async def _find_customer(wa_id: str) -> dict | None:
+    """Like `_find_customer_id` but returns {id, name, phone} of the hub match."""
+    return await _search_customer_match(wa_id)
 
 
 async def push_pending_order(
@@ -367,9 +385,10 @@ async def fetch_customer_summary(wa_id: str, redis=None) -> dict | None:
         except Exception:
             pass
 
-    customer_id = await _find_customer_id(wa_id)
-    if not customer_id:
+    match = await _find_customer(wa_id)
+    if not match:
         return None
+    customer_id = match["id"]
 
     base = settings.hub_api_url.rstrip("/")
     try:
@@ -390,6 +409,7 @@ async def fetch_customer_summary(wa_id: str, redis=None) -> dict | None:
 
     summary = {
         "customer_id":     customer_id,
+        "customer_name":   match.get("name"),
         "total_orders":    int(stats.get("total_orders") or 0),
         "total_spent":     _f(stats.get("total_spent")) or 0.0,
         "avg_order_value": _f(stats.get("average_order_value")) or 0.0,

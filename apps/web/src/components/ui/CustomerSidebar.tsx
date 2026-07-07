@@ -69,6 +69,9 @@ export interface CustomerProfile {
     lead_source?: string | null;
     orders?: PanelOrder[];
     orders_source?: "hub" | "whatsapp";
+    hub_linked?: boolean;
+    hub_customer_id?: number | null;
+    hub_customer_name?: string | null;
     lead_score: number;
     channels: CustomerChannel[];
     merged_ids: string[];
@@ -1511,6 +1514,26 @@ export function CustomerSidebar({
                 {activeTab === "activity" && (
                     <>
                         <Section title="Recent Orders">
+                            {profile.hub_linked && (
+                                <div
+                                    className="mb-2 flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px]"
+                                    style={{
+                                        backgroundColor: "#eef7e3",
+                                        border: "1px solid #cee6b2",
+                                        color: "#3f6417",
+                                    }}
+                                    title="Matched to a shop customer by phone number — same person across the counter and WhatsApp"
+                                >
+                                    <span>📇</span>
+                                    <span>
+                                        Same customer in the shop
+                                        {profile.hub_customer_name
+                                            ? ` · ${profile.hub_customer_name}`
+                                            : ""}{" "}
+                                        — showing full in-shop + WhatsApp history
+                                    </span>
+                                </div>
+                            )}
                             {customerOrders.length === 0 ? (
                                 <p className="text-xs text-stone-400 text-center py-3">
                                     No orders yet

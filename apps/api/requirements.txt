@@ -34,3 +34,5 @@ anthropic
 
 # Async file handling (for media uploads/downloads)
 aiofiles
+# Phone parsing/normalization (country-aware E.164 for identity matching)
+phonenumbers==8.13.45
