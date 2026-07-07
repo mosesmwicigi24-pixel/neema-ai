@@ -19,6 +19,7 @@ from app.models.order_event import OrderEvent
 from app.models.conversation import Conversation
 from app.models.customer_history import CustomerHistory
 from app.routers.admin import get_current_agent
+from datetime import datetime, timezone
 import json
 
 router = APIRouter()
@@ -42,6 +43,60 @@ def _compute_lead_score(user: User, order_count: int, total_spent: float, channe
     if channel_count > 1:
         score += 15
     return min(score, 100)
+
+
+def _cadence_label(days: float) -> str:
+    """Humanise the average gap between a customer's orders."""
+    if days < 1.5:
+        return "multiple times a day"
+    if days <= 10:
+        return f"about every {round(days)} days"
+    if days <= 45:
+        return f"about every {max(round(days / 7), 1)} weeks"
+    return f"about every {max(round(days / 30), 1)} months"
+
+
+def _buying_rhythm(orders: list) -> dict:
+    """How often this customer buys + how overdue they are for the next order.
+
+    Uses order dates (created_at). `overdue` means it's been noticeably longer
+    than their usual gap since the last order — a nudge-worthy signal.
+    """
+    dates = sorted(o.created_at for o in orders if getattr(o, "created_at", None))
+    n = len(dates)
+    now = datetime.now(timezone.utc)
+    days_since_last = (now - dates[-1]).days if dates else None
+    if n < 2:
+        return {"days_since_last": days_since_last, "avg_interval_days": None,
+                "cadence_label": None, "overdue": False}
+    gaps = [(dates[i] - dates[i - 1]).days for i in range(1, n)]
+    avg = sum(gaps) / len(gaps)
+    overdue = bool(days_since_last is not None and avg > 0 and days_since_last > avg * 1.5)
+    return {"days_since_last": days_since_last, "avg_interval_days": round(avg, 1),
+            "cadence_label": _cadence_label(avg), "overdue": overdue}
+
+
+_TIER_LABELS = {"prospect": "Prospect", "new": "New", "regular": "Regular",
+                "loyal": "Loyal", "vip": "VIP", "at_risk": "At risk"}
+
+
+def _customer_tier(order_count: int, total_spent: float, days_since_last) -> dict:
+    """A quick-read segment so an operator knows who they're talking to:
+    a big/loyal spender, a newcomer, or a good customer who's gone quiet."""
+    dsl = days_since_last if days_since_last is not None else 0
+    if order_count == 0:
+        t = "prospect"
+    elif order_count >= 3 and dsl > 120:
+        t = "at_risk"
+    elif total_spent >= 500_000 or order_count >= 20:
+        t = "vip"
+    elif order_count >= 5:
+        t = "loyal"
+    elif order_count <= 1:
+        t = "new"
+    else:
+        t = "regular"
+    return {"tier": t, "tier_label": _TIER_LABELS[t]}
 
 
 def _build_profile(
@@ -76,6 +131,8 @@ def _build_profile(
 
     channels = list(channel_map.values())
     lead_score = _compute_lead_score(user, order_count, total_spent, len(channels))
+    rhythm = _buying_rhythm(orders)
+    tier = _customer_tier(order_count, total_spent, rhythm["days_since_last"])
 
     # Extra fields stored in user.state
     state       = user.state or {}
@@ -100,6 +157,10 @@ def _build_profile(
         "merged_ids":     merged_ids,
         "total_orders":   order_count,
         "total_spent":    total_spent,
+        "avg_order_value": round(total_spent / order_count, 2) if order_count else 0,
+        "buying_rhythm":  rhythm,
+        "tier":           tier["tier"],
+        "tier_label":     tier["tier_label"],
         "last_order_at":  last_order.created_at.isoformat() if last_order else None,
         "last_seen_at":   user.last_message_at.isoformat() if user.last_message_at else None,
         "first_seen_at":  user.created_at.isoformat() if user.created_at else None,
@@ -312,6 +373,8 @@ async def list_leads(
         channels = list({getattr(c, "channel", "whatsapp") or "whatsapp" for c in convs})
 
         lead_score = _compute_lead_score(user, order_count, total_spent, len(channels))
+        rhythm = _buying_rhythm(orders)
+        tier = _customer_tier(order_count, total_spent, rhythm["days_since_last"])
 
         leads.append({
             "id":           str(user.id),
@@ -322,10 +385,13 @@ async def list_leads(
             "location":     user.location,
             "lead_stage":   lead_stage,
             "lead_score":   lead_score,
+            "tier":         tier["tier"],
+            "tier_label":   tier["tier_label"],
             "tags":         state.get("tags", []),
             "channels":     channels,
             "total_orders": order_count,
             "total_spent":  total_spent,
+            "buying_rhythm": rhythm,
             "last_seen_at": user.last_message_at.isoformat() if user.last_message_at else None,
             "notes":        state.get("crm_notes"),
         })
