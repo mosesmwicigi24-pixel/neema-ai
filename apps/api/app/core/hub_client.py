@@ -328,7 +328,10 @@ async def fetch_order_status(order_id: int, redis=None) -> dict | None:
             headers=_api_headers(),
         )
         resp.raise_for_status()
-        o = (resp.json() or {}).get("data") or resp.json() or {}
+        body = resp.json() or {}
+        # The hub returns the order under {"order": {...}} (admin order detail);
+        # tolerate a {"data": {...}} or bare-object shape too.
+        o = body.get("order") or body.get("data") or body
 
     status = {
         "order_id": order_id,
@@ -336,7 +339,7 @@ async def fetch_order_status(order_id: int, redis=None) -> dict | None:
         "status": o.get("status"),
         "payment_status": o.get("payment_status"),
         "fulfillment_status": o.get("fulfillment_status") or o.get("fulfilment_status"),
-        "total_amount": o.get("total_amount"),
+        "total_amount": o.get("total_amount") or o.get("total"),
         "currency_code": o.get("currency_code") or o.get("currency"),
     }
     if redis is not None:
