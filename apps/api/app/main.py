@@ -87,6 +87,15 @@ async def run_migrations():
 async def lifespan(app: FastAPI):
     import logging
     logger = logging.getLogger("neema.startup")
+    # Surface Tier 2 agent + hub activity (tool calls, order pushes) at INFO so
+    # live turns are observable; the root logger otherwise sits at WARNING.
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(levelname)s [%(name)s] %(message)s"))
+    for _name in ("neema.agent", "neema.hub"):
+        _lg = logging.getLogger(_name)
+        _lg.setLevel(logging.INFO)
+        _lg.addHandler(_h)
+        _lg.propagate = False
 
     # ── Redis ─────────────────────────────────────────────────────────────────
     # Connect and immediately verify the node is writable (i.e. a primary, not

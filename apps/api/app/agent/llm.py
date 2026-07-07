@@ -34,21 +34,35 @@ class LLM(Protocol):
     ) -> LLMResponse: ...
 
 
+def _battr(block: Any, attr: str, default=None):
+    """Read a field from a block that may be an Anthropic SDK object OR a dict.
+
+    Must NOT use truthiness fallback: a tool_use block's `input` is often {} (a
+    no-arg tool), and `{} or block.get(...)` would call .get on an SDK object,
+    which has no .get — the exact crash this replaces.
+    """
+    if isinstance(block, dict):
+        return block.get(attr, default)
+    return getattr(block, attr, default)
+
+
 def _blocks_to_response(content: list[Any]) -> LLMResponse:
     """Normalise Anthropic content blocks into an LLMResponse."""
     assistant_content: list[dict] = []
     tool_calls: list[ToolCall] = []
     text_parts: list[str] = []
     for block in content:
-        btype = getattr(block, "type", None) or (block.get("type") if isinstance(block, dict) else None)
+        btype = _battr(block, "type")
         if btype == "text":
-            t = getattr(block, "text", None) or block.get("text", "")
+            t = _battr(block, "text", "") or ""
             text_parts.append(t)
             assistant_content.append({"type": "text", "text": t})
         elif btype == "tool_use":
-            _id = getattr(block, "id", None) or block.get("id")
-            name = getattr(block, "name", None) or block.get("name")
-            inp = getattr(block, "input", None) or block.get("input") or {}
+            _id = _battr(block, "id")
+            name = _battr(block, "name")
+            inp = _battr(block, "input", {})
+            if not isinstance(inp, dict):
+                inp = {}
             tool_calls.append(ToolCall(id=_id, name=name, input=inp))
             assistant_content.append({"type": "tool_use", "id": _id, "name": name, "input": inp})
     return LLMResponse(assistant_content=assistant_content, tool_calls=tool_calls,
