@@ -20,6 +20,7 @@ from app.models.order_event import OrderEvent
 from app.models.user import User
 from app.services import n8n_bridge as svc
 from app.agent import cart as cartmod
+from app.agent import memory as memorymod
 
 _log = logging.getLogger("neema.agent")
 
@@ -87,6 +88,17 @@ TOOLS: list[dict] = [
                 "name": {"type": "string"},
                 "location": {"type": "string"},
             },
+        },
+    },
+    {
+        "name": "remember",
+        "description": "Save a durable fact about this customer (a preference, their church, "
+                       "size, etc.) so you recall it in future chats. Use sparingly for "
+                       "genuinely useful, lasting facts.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"fact": {"type": "string"}},
+            "required": ["fact"],
         },
     },
     {
@@ -279,6 +291,14 @@ async def _capture_customer(args: dict, ctx: ToolContext) -> dict:
     return {"ok": True, "name": user.name, "location": user.location}
 
 
+async def _remember(args: dict, ctx: ToolContext) -> dict:
+    fact = (args.get("fact") or "").strip()
+    if not fact:
+        return {"error": "fact is required"}
+    facts = await memorymod.add_fact(ctx.db, ctx.wa_id, fact)
+    return {"ok": True, "memory": facts}
+
+
 async def _handoff_to_human(args: dict, ctx: ToolContext) -> dict:
     from app.models.conversation import Conversation, InterceptMode
     conv = (await ctx.db.execute(
@@ -299,5 +319,6 @@ _HANDLERS = {
     "create_order": _create_order,
     "check_order_status": _check_order_status,
     "capture_customer": _capture_customer,
+    "remember": _remember,
     "handoff_to_human": _handoff_to_human,
 }

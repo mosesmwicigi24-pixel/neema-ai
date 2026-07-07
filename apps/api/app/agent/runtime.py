@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.llm import LLM, LLMResponse
+from app.agent.memory import build_memory_context
 from app.agent.prompt import build_system_prompt
 from app.agent.tools import TOOLS, ToolContext, run_tool
 from app.core.config import settings
@@ -107,6 +108,15 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     if not messages or messages[-1]["role"] != "user" or user_text.strip() not in messages[-1]["content"]:
         messages.append({"role": "user", "content": user_text})
 
+    # Cross-conversation memory: prepend as a leading context turn so it stays
+    # behind the cached system prefix and ahead of the real transcript, and
+    # never touches the dedup check above (which only looks at the last message).
+    if settings.tier2_memory:
+        mem_ctx = await build_memory_context(db, redis, wa_id, user=user)
+        if mem_ctx:
+            messages.insert(0, {"role": "user",
+                                "content": f"(Context — what you know about this customer:\n{mem_ctx})"})
+
     ctx = ToolContext(db=db, redis=redis, wa_id=wa_id)
     totals = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0}
 
@@ -114,9 +124,11 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         for k in totals:
             totals[k] += int(u.get(k, 0) or 0)
 
+    tools = TOOLS if settings.tier2_memory else [t for t in TOOLS if t["name"] != "remember"]
+
     reply = None
     for _ in range(settings.tier2_max_iterations):
-        resp: LLMResponse = await llm.complete(system=system, messages=messages, tools=TOOLS)
+        resp: LLMResponse = await llm.complete(system=system, messages=messages, tools=tools)
         _accumulate(resp.usage or {})
         messages.append({"role": "assistant", "content": resp.assistant_content})
 

@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     tier2_max_iterations: int = 8    # max tool-call loops per turn (runaway guard)
     tier2_max_tokens: int = 1024
     tier2_prompt_cache: bool = True  # cache the system+tools+conversation prefix (~90% cheaper input)
+    tier2_memory: bool = True        # cross-conversation customer memory (facts + past orders)
 
     def tier2_wa_ids(self) -> set[str]:
         return {w.strip() for w in self.tier2_enabled_wa_ids.split(",") if w.strip()}
