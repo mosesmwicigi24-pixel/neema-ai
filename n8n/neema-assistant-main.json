@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-04-25T02:48:30.769Z",
+  "updatedAt": "2026-07-07T10:05:42.000Z",
   "createdAt": "2026-04-12T02:55:41.223Z",
   "id": "A0YW67vhAF3xXs1m",
   "name": "Neema Assistant Main",
@@ -675,7 +675,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"wa_id\":     {{ JSON.stringify($json.wa_id) }},\n  \"session_id\": {{ JSON.stringify($json.sessionId) }},\n  \"start_ts\":  {{ JSON.stringify($json.sessionStartIso) }},\n  \"last_ts\":   {{ JSON.stringify($json.tsIso) }},\n  \"turns\":     {{ Number($json.turns || 0) + 1 }}\n}",
+        "jsonBody": "={\n  \"wa_id\":     {{ JSON.stringify($('Build Session Vars').item.json.wa_id) }},\n  \"session_id\": {{ JSON.stringify($('Build Session Vars').item.json.sessionId) }},\n  \"start_ts\":  {{ JSON.stringify($('Build Session Vars').item.json.sessionStartIso) }},\n  \"last_ts\":   {{ JSON.stringify($('Build Session Vars').item.json.tsIso) }},\n  \"turns\":     {{ Number($('Build Session Vars').item.json.turns || 0) + 1 }}\n}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -1242,9 +1242,9 @@
   "staticData": null,
   "meta": null,
   "pinData": {},
-  "versionId": "e95cc67f-515d-46ed-bc25-f3704a74554a",
-  "activeVersionId": "e95cc67f-515d-46ed-bc25-f3704a74554a",
-  "versionCounter": 402,
+  "versionId": "00edb409-4eaf-4797-8ba0-52073958288f",
+  "activeVersionId": "00edb409-4eaf-4797-8ba0-52073958288f",
+  "versionCounter": 409,
   "triggerCount": 1,
   "tags": [],
   "shared": [
@@ -1267,7 +1267,7 @@
     }
   ],
   "versionMetadata": {
-    "name": "Version e95cc67f",
-    "description": ""
+    "name": null,
+    "description": null
   }
 }
