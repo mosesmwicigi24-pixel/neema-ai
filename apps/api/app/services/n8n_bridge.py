@@ -714,14 +714,34 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
     if escalated:
         fields["escalated"]    = {"booleanValue": True}
 
-    return [
-        {
-            "name": f"projects/neema-6037c/databases/(default)/documents/messages/{doc_id}",
-            "fields": fields,
-            "createTime": now_str,
-            "updateTime": now_str,
-        }
-    ]
+    # Expose the identity/message fields at the TOP LEVEL too — not just inside
+    # the Firestore-style `fields` envelope. n8n's HTTP node makes this response
+    # the new `$json`, and every downstream node (the debounce, and via it the
+    # session setup, the AI, and reply dispatch) reads `$json.wa_id` etc.
+    # directly. Without these top-level keys wa_id was empty all the way down,
+    # so /context/{wa_id} 404'd and no reply was ever sent. Additive — the
+    # nested `fields` and doc `name` are unchanged, so existing readers still work.
+    result = {
+        "name": f"projects/neema-6037c/databases/(default)/documents/messages/{doc_id}",
+        "fields": fields,
+        "createTime": now_str,
+        "updateTime": now_str,
+        # top-level identity/message fields for n8n expressions
+        "wa_id": body.wa_id,
+        "docid": doc_id,
+        "tsMs": ts_ms,
+        "tsIso": ts_iso,
+        "text": msg.text or "",
+        "direction": direction.value,
+        "msgText": msg.text or "",
+    }
+    if media_type:
+        result["media_type"] = media_type
+    if media_url:
+        result["media_url"] = media_url
+    if media_caption:
+        result["media_caption"] = media_caption
+    return [result]
 
 # ── Patch Message ─────────────────────────────────────────
 
