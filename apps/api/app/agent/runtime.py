@@ -66,13 +66,21 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         messages.append({"role": "user", "content": user_text})
 
     ctx = ToolContext(db=db, redis=redis, wa_id=wa_id)
+    totals = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0}
 
+    def _accumulate(u: dict) -> None:
+        for k in totals:
+            totals[k] += int(u.get(k, 0) or 0)
+
+    reply = None
     for _ in range(settings.tier2_max_iterations):
         resp: LLMResponse = await llm.complete(system=system, messages=messages, tools=TOOLS)
+        _accumulate(resp.usage or {})
         messages.append({"role": "assistant", "content": resp.assistant_content})
 
         if not resp.tool_calls:
-            return resp.text or "One moment — let me check on that for you."
+            reply = resp.text or "One moment — let me check on that for you."
+            break
 
         results = []
         for call in resp.tool_calls:
@@ -85,9 +93,17 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                 "content": json.dumps(out),
             })
         messages.append({"role": "user", "content": results})
+    else:
+        # Ran out of iterations — return the last text if any, else a safe fallback.
+        reply = resp.text or "Let me get a colleague to help you with this."
 
-    # Ran out of iterations — return the last text if any, else a safe fallback.
-    return resp.text or "Let me get a colleague to help you with this."
+    # Measure spend so cost is visible, not guessed at (best-effort).
+    try:
+        from app.services import n8n_bridge as svc
+        await svc.log_agent_usage(db, wa_id, settings.tier2_model, totals)
+    except Exception:
+        _log.warning("usage logging failed for %s", wa_id, exc_info=False)
+    return reply
 
 
 def build_llm() -> LLM:
@@ -96,6 +112,7 @@ def build_llm() -> LLM:
         api_key=settings.anthropic_api_key,
         model=settings.tier2_model,
         max_tokens=settings.tier2_max_tokens,
+        cache=settings.tier2_prompt_cache,
     )
 
 

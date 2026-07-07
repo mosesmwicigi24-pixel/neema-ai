@@ -17,6 +17,12 @@ _PRICES: dict[str, tuple[float, float, float]] = {
     "gpt-4o":         (2.50, 1.25, 10.00),
     "gpt-4o-mini":    (0.15, 0.075, 0.60),
     "gpt-5-mini":     (0.25, 0.025, 2.00),
+    # Claude (Tier 2 agent). cached = cache-READ rate (~0.1x input); cache
+    # WRITES bill at 1.25x input, handled via cache_write_tokens below. Standard
+    # (non-intro) rates so telemetry never under-reports once intro pricing ends.
+    "claude-sonnet-5":  (3.00, 0.30, 15.00),
+    "claude-haiku-4-5": (1.00, 0.10, 5.00),
+    "claude-opus-4-8":  (5.00, 0.50, 25.00),
     # audio (billed per-token on these models; Whisper is billed per-minute
     # and logged separately by the caller)
     "whisper-1":      (0.0, 0.0, 0.0),
@@ -24,6 +30,7 @@ _PRICES: dict[str, tuple[float, float, float]] = {
 }
 
 _DEFAULT = (2.00, 0.50, 8.00)  # conservative: assume flagship pricing
+_CACHE_WRITE_MULT = 1.25       # Anthropic 5-minute cache-write premium (x input)
 
 
 def _norm(model: str | None) -> str:
@@ -45,14 +52,21 @@ def estimate_cost_usd(
     prompt_tokens: int,
     completion_tokens: int,
     cached_tokens: int = 0,
+    cache_write_tokens: int = 0,
 ) -> float:
-    """Estimate USD cost of one call. cached_tokens are a subset of
-    prompt_tokens that hit the prompt cache (billed at the cached rate)."""
+    """Estimate USD cost of one call.
+
+    `cached_tokens` and `cache_write_tokens` are disjoint subsets of
+    `prompt_tokens`: cached = cache-READ (cheap), cache_write = written to cache
+    this turn (1.25x input). The remainder bills at the full input rate. OpenAI
+    callers omit cache_write (their automatic caching has no separate write cost).
+    """
     inp, cached, out = _PRICES.get(_norm(model), _DEFAULT)
-    fresh_input = max(prompt_tokens - cached_tokens, 0)
+    fresh_input = max(prompt_tokens - cached_tokens - cache_write_tokens, 0)
     cost = (
         fresh_input / 1_000_000 * inp
         + cached_tokens / 1_000_000 * cached
+        + cache_write_tokens / 1_000_000 * inp * _CACHE_WRITE_MULT
         + completion_tokens / 1_000_000 * out
     )
     return round(cost, 6)
