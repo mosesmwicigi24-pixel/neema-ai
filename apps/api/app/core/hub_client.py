@@ -310,6 +310,100 @@ async def fetch_payment_link(order_id: int) -> str | None:
     return data.get("payment_url") or data.get("url")
 
 
+def _f(v):
+    """Best-effort float; None for blanks/garbage."""
+    try:
+        return float(v) if v not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _map_hub_order(o: dict) -> dict:
+    """One hub order → the shape Neema's CRM panel renders."""
+    items = []
+    for it in (o.get("items") or []):
+        qty = it.get("quantity") or 0
+        up = _f(it.get("unit_price")) or 0
+        tp = _f(it.get("total_price"))
+        items.append({
+            "name":       (it.get("product_name") or it.get("name") or "").strip(),
+            "qty":        qty,
+            "quantity":   qty,
+            "unit_price": up,
+            "total":      tp if tp is not None else up * (qty or 0),
+        })
+    return {
+        "id":             str(o.get("id")),
+        "order_number":   o.get("order_number"),
+        "status":         o.get("status"),
+        "payment_status": o.get("payment_status"),
+        "order_type":     o.get("order_type"),
+        "total":          _f(o.get("total_amount")),
+        "subtotal":       _f(o.get("subtotal")),
+        "currency_code":  o.get("currency_code"),
+        "created_at":     o.get("created_at"),
+        "items":          items,
+        "source":         "hub",
+    }
+
+
+async def fetch_customer_summary(wa_id: str, redis=None) -> dict | None:
+    """The customer's hub record — lifetime stats + recent orders (POS, web AND
+    WhatsApp), resolved by phone.
+
+    This is the source of truth for the CRM panel's orders and the buying-rhythm
+    / tier stats: Neema's local order_events only hold WhatsApp-originated sales
+    and undercount a repeat buyer who also walks into the shop. Returns
+    {customer_id, total_orders, total_spent, avg_order_value, last_order_date,
+    orders[]}, or None when the customer can't be resolved in the hub or the hub
+    is unreachable — the caller then falls back to the local order_events mirror.
+    """
+    key = f"hub:customer_summary:{wa_id}"
+    if redis is not None:
+        try:
+            cached = await redis.get(key)
+            if cached:
+                return json.loads(cached)
+        except Exception:
+            pass
+
+    customer_id = await _find_customer_id(wa_id)
+    if not customer_id:
+        return None
+
+    base = settings.hub_api_url.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"{base}/api/v1/admin/customers/{customer_id}",
+                headers=_api_headers(),
+            )
+            resp.raise_for_status()
+            body = resp.json() or {}
+    except Exception:
+        _log.warning("hub customer summary fetch failed for %s", wa_id)
+        return None
+
+    stats = body.get("stats") or {}
+    cust = body.get("customer") or {}
+    orders = [_map_hub_order(o) for o in (cust.get("orders") or [])]
+
+    summary = {
+        "customer_id":     customer_id,
+        "total_orders":    int(stats.get("total_orders") or 0),
+        "total_spent":     _f(stats.get("total_spent")) or 0.0,
+        "avg_order_value": _f(stats.get("average_order_value")) or 0.0,
+        "last_order_date": stats.get("last_order_date"),
+        "orders":          orders,
+    }
+    if redis is not None:
+        try:
+            await redis.setex(key, settings.hub_order_status_ttl, json.dumps(summary))
+        except Exception:
+            pass
+    return summary
+
+
 async def fetch_order_status(order_id: int, redis=None) -> dict | None:
     """Live status of a hub order (for "where's my order?"). Cached briefly."""
     key = f"hub:order:{order_id}"
