@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +26,47 @@ _log = logging.getLogger("neema.agent")
 
 def is_tier2(wa_id: str) -> bool:
     return settings.tier2_all or wa_id in settings.tier2_wa_ids()
+
+
+# ── Per-turn model routing (roadmap #2) ──────────────────────────────────────
+# Route trivial customer turns (pure greetings, thanks/acknowledgements, bare
+# affirmations) to the cheap model; anything that could plausibly need a tool
+# call — products, prices, quantities, delivery, payment, orders, or any
+# question — stays on the main model. High precision on the light path: when
+# in doubt, this returns the main model, because a mis-routed sales turn is
+# worse than an extra cent spent on a greeting. Defined locally (not imported
+# from n8n_bridge) since Tier 1's _ACK_RE deliberately excludes affirmatives
+# like "yes"/"sawa" — those are load-bearing order confirmations there, but a
+# bare "sawa"/"ok" with nothing else said still needs no tool call here.
+_GREETING_RE = re.compile(
+    r"^(hi+|hey+|hello+|helo+|habari|niaje|mambo|sasa|yo+|good\s*(morning|afternoon|evening)|"
+    r"vipi|shalom)[\s!.,]*$",
+    re.IGNORECASE,
+)
+_ACK_RE = re.compile(
+    r"^(thanks?|thank\s*you|asante(\s*sana)?|thx|ty|amen|ok(ay)?|sawa|poa|got\s*it|"
+    r"👍+|🙏+|❤️*|😊+)[\s!.,🙏👍❤😊]*$",
+    re.IGNORECASE,
+)
+
+
+def route_model(user_text: str) -> str:
+    """Return the model id to use for this turn.
+
+    Returns the light model only for turns that plainly need no tool call —
+    pure greetings and thanks/acknowledgements/one-word affirmations with
+    nothing else said. Returns the main model for everything else, including
+    any mention of products, prices, quantities, delivery, payment, or orders,
+    or any question. Respects settings.tier2_model_routing.
+    """
+    if not settings.tier2_model_routing:
+        return settings.tier2_model
+    text = (user_text or "").strip()
+    if not text:
+        return settings.tier2_model
+    if _GREETING_RE.match(text) or _ACK_RE.match(text):
+        return settings.tier2_model_light
+    return settings.tier2_model
 
 
 async def _history(db: AsyncSession, wa_id: str, limit: int = 20) -> list[dict]:
@@ -106,11 +148,11 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     return reply
 
 
-def build_llm() -> LLM:
+def build_llm(model: str | None = None) -> LLM:
     from app.agent.llm import AnthropicLLM
     return AnthropicLLM(
         api_key=settings.anthropic_api_key,
-        model=settings.tier2_model,
+        model=model or settings.tier2_model,
         max_tokens=settings.tier2_max_tokens,
         cache=settings.tier2_prompt_cache,
     )
@@ -132,7 +174,7 @@ async def _run_and_send(redis, wa_id: str, text: str) -> None:
     from app.services import n8n_bridge as svc
     try:
         async with AsyncSessionLocal() as db:
-            reply = await run_turn(db, redis, wa_id, text, build_llm())
+            reply = await run_turn(db, redis, wa_id, text, build_llm(model=route_model(text)))
         await svc._send_waba(wa_id, reply)
         async with AsyncSessionLocal() as db2:
             await svc.save_outbound_message(db2, redis, wa_id, reply)

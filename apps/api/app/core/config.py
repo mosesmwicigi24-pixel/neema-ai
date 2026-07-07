@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     # ── Tier 2 agent (tool-calling; coexists with Tier 1 behind a flag) ──────
     anthropic_api_key: str = ""
     tier2_model: str = "claude-sonnet-5"
+    tier2_model_light: str = "claude-haiku-4-5"  # cheap model for trivial turns (per-turn routing)
+    tier2_model_routing: bool = True  # route trivial turns to tier2_model_light; False = always tier2_model
     tier2_enabled_wa_ids: str = ""   # comma-separated wa_ids routed to the Tier 2 agent
     tier2_all: bool = False          # route ALL traffic to Tier 2 (full cutover)
     tier2_max_iterations: int = 8    # max tool-call loops per turn (runaway guard)
