@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     # Media file serving
     media_public_url: str = ""      # e.g. https://neema.bethanyhouse.co.ke
     media_storage_path: str = "/tmp/neema_media"
+    # Bethany House hub — single source of truth for catalogue & orders
+    hub_api_url: str = "https://hub.bethanyhouse.co.ke"
+    hub_api_token: str = ""          # Sanctum token for pushing orders (Part B)
+    hub_outlet_id: int = 0           # the online/WhatsApp outlet (Part B)
+    catalog_source: str = "hub"      # "hub" | "local" (falls back to local on hub failure)
+    hub_catalog_ttl: int = 600       # seconds to cache the hub catalogue
 
     @field_validator("cors_origins", mode="before")
     @classmethod

@@ -417,6 +417,36 @@ async def ai_cost_summary(db: AsyncSession, days: int = 30) -> dict:
     }
 
 
+async def catalog_items(db: AsyncSession, redis) -> list[dict]:
+    """The product catalogue the AI quotes from.
+
+    Source of truth is the Bethany House hub (shared with POS & website). Falls
+    back to Neema's local table only if the hub is unreachable, so a live
+    conversation never loses its price list mid-sale. Hub items carry
+    `hub_product_id` — required to push a confirmed order back to the hub.
+    """
+    from app.models.catalog import Catalog
+
+    if settings.catalog_source == "hub":
+        try:
+            from app.core.hub_client import fetch_hub_catalog
+            return await fetch_hub_catalog(redis)
+        except Exception as exc:
+            import logging
+            logging.getLogger("neema.hub").warning(
+                "hub catalogue unavailable (%s) — serving local table this turn", exc
+            )
+
+    res = await db.execute(
+        select(Catalog).where(Catalog.in_stock == True).order_by(Catalog.category, Catalog.name)
+    )
+    return [{
+        "sku": str(i.sku), "name": str(i.name), "category": str(i.category or ""),
+        "price": float(i.price), "unit": str(i.unit or ""),
+        "description": str(i.description or ""), "aliases": i.aliases or [], "in_stock": i.in_stock,
+    } for i in res.scalars().all()]
+
+
 async def get_profile(db: AsyncSession, redis, wa_id: str) -> dict:
     """One-call context bundle for the AI pipeline.
 
@@ -472,14 +502,7 @@ async def get_profile(db: AsyncSession, redis, wa_id: str) -> dict:
     state = ctx.get("state") or {"active": "active", "cart": {"items": [], "subtotal": 0}}
     cart = state.get("cart") if isinstance(state.get("cart"), dict) else {"items": [], "subtotal": 0}
 
-    cat_res = await db.execute(
-        select(Catalog).where(Catalog.in_stock == True).order_by(Catalog.category, Catalog.name)
-    )
-    catalog = [{
-        "sku": str(i.sku), "name": str(i.name), "category": str(i.category or ""),
-        "price": float(i.price), "unit": str(i.unit or ""),
-        "description": str(i.description or ""), "aliases": i.aliases or [], "in_stock": i.in_stock,
-    } for i in cat_res.scalars().all()]
+    catalog = await catalog_items(db, redis)
 
     last_in  = next((m["text"] for m in reversed(messages) if m["direction"] == "inbound"), "")
     last_out = next((m["text"] for m in reversed(messages) if m["direction"] == "outbound"), "")

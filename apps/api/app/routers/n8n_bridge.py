@@ -185,30 +185,11 @@ async def save_tts_audio(request: Request):
 
 # ── Catalog (for n8n price lookups) ───────────────────────────────────────────
 @router.get("/catalog", dependencies=[Depends(verify_n8n_secret)])
-async def get_catalog(db: AsyncSession = Depends(get_db)):
-    """
-    Returns all in-stock catalog items so n8n can build a live price map
-    instead of relying on the hardcoded fallback map.
-    """
-    from sqlalchemy import select
-    from app.models.catalog import Catalog
-    result = await db.execute(
-        select(Catalog).where(Catalog.in_stock == True).order_by(Catalog.category, Catalog.name)
-    )
-    items = result.scalars().all()
-    return [
-        {
-            "sku": str(i.sku),
-            "name": str(i.name),
-            "category": str(i.category or ""),
-            "price": float(i.price),
-            "unit": str(i.unit or ""),
-            "description": str(i.description or ""),
-            "aliases": i.aliases or [],
-            "in_stock": i.in_stock,
-        }
-        for i in items
-    ]
+async def get_catalog(request: Request, db: AsyncSession = Depends(get_db)):
+    """Live catalogue for n8n price lookups — from the Bethany House hub (the
+    single source of truth), falling back to Neema's local table if the hub is
+    unreachable."""
+    return await svc.catalog_items(db, request.app.state.redis)
 
 @router.post("/notify", dependencies=[Depends(verify_n8n_secret)])
 async def post_notify(body: dict, request: Request):
