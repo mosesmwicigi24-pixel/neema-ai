@@ -103,6 +103,17 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "set_lead_source",
+        "description": "Record where this customer first heard about us, when it comes up "
+                       "naturally (don't interrogate). Use one of: facebook, instagram, tiktok, "
+                       "youtube, whatsapp, referral, walk_in, website, google, other.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"source": {"type": "string"}},
+            "required": ["source"],
+        },
+    },
+    {
         "name": "remember",
         "description": "Save a durable fact about this customer (a preference, their church, "
                        "size, etc.) so you recall it in future chats. Use sparingly for "
@@ -311,6 +322,33 @@ async def _remember(args: dict, ctx: ToolContext) -> dict:
     return {"ok": True, "memory": facts}
 
 
+_SOURCE_ALIASES = {
+    "fb": "facebook", "meta": "facebook", "ig": "instagram", "insta": "instagram",
+    "tik tok": "tiktok", "tik-tok": "tiktok", "wa": "whatsapp", "friend": "referral",
+    "referred": "referral", "walk in": "walk_in", "walkin": "walk_in", "web": "website",
+    "yt": "youtube",
+}
+
+
+def _norm_source(s: str) -> str:
+    s = (s or "").strip().lower()
+    return _SOURCE_ALIASES.get(s, s.replace(" ", "_")) or "other"
+
+
+async def _set_lead_source(args: dict, ctx: ToolContext) -> dict:
+    from sqlalchemy.orm.attributes import flag_modified
+    source = _norm_source(args.get("source", ""))
+    user = (await ctx.db.execute(select(User).where(User.wa_id == ctx.wa_id))).scalar_one_or_none()
+    if user is None:
+        return {"ok": False}
+    state = dict(user.state or {})
+    state["lead_source"] = source
+    user.state = state
+    flag_modified(user, "state")
+    await ctx.db.commit()
+    return {"ok": True, "lead_source": source}
+
+
 async def _add_tags(args: dict, ctx: ToolContext) -> dict:
     from sqlalchemy.orm.attributes import flag_modified
     new_tags = [str(t).strip() for t in (args.get("tags") or []) if str(t).strip()][:10]
@@ -353,6 +391,7 @@ _HANDLERS = {
     "create_order": _create_order,
     "check_order_status": _check_order_status,
     "capture_customer": _capture_customer,
+    "set_lead_source": _set_lead_source,
     "remember": _remember,
     "add_tags": _add_tags,
     "handoff_to_human": _handoff_to_human,

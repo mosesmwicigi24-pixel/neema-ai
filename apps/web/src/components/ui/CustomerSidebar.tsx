@@ -51,6 +51,7 @@ export interface CustomerProfile {
     lead_stage: LeadStage;
     lead_stage_source?: "auto" | "manual" | null;
     suggested_lead_stage?: LeadStage;
+    lead_source?: string | null;
     lead_score: number;
     channels: CustomerChannel[];
     merged_ids: string[];
@@ -153,6 +154,20 @@ const TIER_META: Record<string, { label: string; cls: string; title: string }> =
     new:      { label: "New",      cls: "bg-stone-100 text-stone-600 border-stone-300",   title: "First order" },
     prospect: { label: "Prospect", cls: "bg-stone-50 text-stone-400 border-stone-200",    title: "No orders yet" },
     at_risk:  { label: "At risk",  cls: "bg-red-100 text-red-700 border-red-300",         title: "Good customer who's gone quiet — worth a nudge" },
+};
+
+// Where a lead first found us (captured by the AI or set by an operator).
+const SOURCE_META: Record<string, { label: string; icon: string }> = {
+    facebook:  { label: "Facebook",  icon: "📘" },
+    instagram: { label: "Instagram", icon: "📸" },
+    tiktok:    { label: "TikTok",    icon: "🎵" },
+    youtube:   { label: "YouTube",   icon: "▶️" },
+    whatsapp:  { label: "WhatsApp",  icon: "💬" },
+    referral:  { label: "Referral",  icon: "🤝" },
+    walk_in:   { label: "Walk-in",   icon: "🚶" },
+    website:   { label: "Website",   icon: "🌐" },
+    google:    { label: "Google",    icon: "🔍" },
+    other:     { label: "Other",     icon: "•" },
 };
 
 const STAGE_ORDER: LeadStage[] = [
@@ -823,6 +838,37 @@ export function CustomerSidebar({
                 {activeTab === "profile" && (
                     <>
                         <Section title="Contact Details">
+                            {profile.lead_source && (
+                                <div
+                                    style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "space-between",
+                                        padding: "6px 0",
+                                        fontSize: 13,
+                                    }}
+                                >
+                                    <span style={{ color: "var(--muted, #6b7280)" }}>
+                                        Source
+                                    </span>
+                                    <span
+                                        style={{
+                                            display: "inline-flex",
+                                            alignItems: "center",
+                                            gap: 6,
+                                            fontWeight: 500,
+                                        }}
+                                        title="Where this lead first found us"
+                                    >
+                                        <span>
+                                            {(SOURCE_META[profile.lead_source] ??
+                                                SOURCE_META.other).icon}
+                                        </span>
+                                        {(SOURCE_META[profile.lead_source] ??
+                                            { label: profile.lead_source }).label}
+                                    </span>
+                                </div>
+                            )}
                             <EditableField
                                 label="Name"
                                 value={profile.name || ""}

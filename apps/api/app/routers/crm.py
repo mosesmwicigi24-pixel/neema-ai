@@ -156,6 +156,7 @@ def _build_profile(
         "lead_stage":     lead_stage,
         "lead_stage_source": state.get("lead_stage_source"),
         "suggested_lead_stage": suggested_stage,
+        "lead_source":    state.get("lead_source"),
         "lead_score":     lead_score,
         "channels":       channels,
         "merged_ids":     merged_ids,
@@ -255,7 +256,7 @@ async def update_customer(
 
     # State-stored fields (lead_stage, tags, notes, merged_ids)
     state = dict(user.state or {})
-    for field in ("lead_stage", "tags", "crm_notes", "notes"):
+    for field in ("lead_stage", "tags", "crm_notes", "notes", "lead_source"):
         if field in body:
             key = "crm_notes" if field == "notes" else field
             state[key] = body[field]
