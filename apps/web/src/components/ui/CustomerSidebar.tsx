@@ -54,6 +54,15 @@ export interface CustomerProfile {
     merged_ids: string[];
     total_orders: number;
     total_spent: number;
+    avg_order_value?: number;
+    tier?: "prospect" | "new" | "regular" | "loyal" | "vip" | "at_risk";
+    tier_label?: string;
+    buying_rhythm?: {
+        days_since_last: number | null;
+        avg_interval_days: number | null;
+        cadence_label: string | null;
+        overdue: boolean;
+    };
     last_order_at: string | null;
     last_seen_at: string | null;
     first_seen_at: string | null;
@@ -132,6 +141,16 @@ const STAGE_META: Record<
         bg: "bg-red-50",
         dot: "bg-red-400",
     },
+};
+
+// Customer segment badge — a quick read of who you're talking to.
+const TIER_META: Record<string, { label: string; cls: string; title: string }> = {
+    vip:      { label: "VIP",      cls: "bg-amber-100 text-amber-800 border-amber-300",   title: "Top spender / very frequent buyer" },
+    loyal:    { label: "Loyal",    cls: "bg-emerald-100 text-emerald-700 border-emerald-300", title: "Repeat customer" },
+    regular:  { label: "Regular",  cls: "bg-sky-100 text-sky-700 border-sky-300",         title: "A few orders" },
+    new:      { label: "New",      cls: "bg-stone-100 text-stone-600 border-stone-300",   title: "First order" },
+    prospect: { label: "Prospect", cls: "bg-stone-50 text-stone-400 border-stone-200",    title: "No orders yet" },
+    at_risk:  { label: "At risk",  cls: "bg-red-100 text-red-700 border-red-300",         title: "Good customer who's gone quiet — worth a nudge" },
 };
 
 const STAGE_ORDER: LeadStage[] = [
@@ -680,6 +699,31 @@ export function CustomerSidebar({
                     <ScoreBar score={computedScore} />
                 </div>
 
+                {/* Segment badge + buying rhythm — quick read while chatting */}
+                {profile.tier && (
+                    <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                        <span
+                            title={TIER_META[profile.tier]?.title}
+                            className={`inline-flex items-center text-[10px] font-semibold rounded px-1.5 py-0.5 border ${TIER_META[profile.tier]?.cls || ""}`}
+                        >
+                            {profile.tier_label || TIER_META[profile.tier]?.label}
+                        </span>
+                        {profile.buying_rhythm?.cadence_label && (
+                            <span className="text-[10px] text-stone-500">
+                                Buys {profile.buying_rhythm.cadence_label}
+                            </span>
+                        )}
+                        {profile.buying_rhythm?.overdue && (
+                            <span
+                                title="Past their usual buying gap — a good moment to reach out"
+                                className="inline-flex items-center text-[10px] font-semibold rounded px-1.5 py-0.5 border bg-amber-50 text-amber-700 border-amber-300"
+                            >
+                                ⏰ Overdue
+                            </span>
+                        )}
+                    </div>
+                )}
+
                 <div className="flex flex-wrap gap-1 mt-2">
                     {(profile.channels || []).map((ch) => (
                         <span
@@ -1221,6 +1265,53 @@ export function CustomerSidebar({
                                 ))}
                             </div>
                         </Section>
+
+                        {profile.buying_rhythm && (
+                            <Section title="Buying Rhythm">
+                                <div className="space-y-2">
+                                    {[
+                                        {
+                                            label: "Buys",
+                                            value: profile.buying_rhythm.cadence_label || "—",
+                                        },
+                                        {
+                                            label: "Avg gap between orders",
+                                            value: profile.buying_rhythm.avg_interval_days
+                                                ? `${profile.buying_rhythm.avg_interval_days} days`
+                                                : "—",
+                                        },
+                                        {
+                                            label: "Since last order",
+                                            value:
+                                                profile.buying_rhythm.days_since_last != null
+                                                    ? `${profile.buying_rhythm.days_since_last} days`
+                                                    : "—",
+                                        },
+                                    ].map((row) => (
+                                        <div
+                                            key={row.label}
+                                            className="flex items-center justify-between"
+                                        >
+                                            <span className="text-xs" style={{ color: "#699a32" }}>
+                                                {row.label}
+                                            </span>
+                                            <span
+                                                className="text-xs font-semibold"
+                                                style={{ color: "#16270c" }}
+                                            >
+                                                {row.value}
+                                            </span>
+                                        </div>
+                                    ))}
+                                    {profile.buying_rhythm.overdue && (
+                                        <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 mt-1">
+                                            ⏰ Overdue — it's been longer than their usual gap.
+                                            A good moment to check in.
+                                        </div>
+                                    )}
+                                </div>
+                            </Section>
+                        )}
 
                         {customerOrders.length > 0 && (
                             <Section title="Top Products">
