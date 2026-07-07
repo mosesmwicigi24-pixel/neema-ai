@@ -9,7 +9,7 @@ Customer CRM endpoints:
   PATCH /admin/leads/{wa_id}             — update lead stage / tags / notes
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from app.database import get_db
@@ -19,6 +19,7 @@ from app.models.order_event import OrderEvent
 from app.models.conversation import Conversation
 from app.models.customer_history import CustomerHistory
 from app.routers.admin import get_current_agent
+from app.core import hub_client
 from datetime import datetime, timezone
 import json
 
@@ -56,13 +57,42 @@ def _cadence_label(days: float) -> str:
     return f"about every {max(round(days / 30), 1)} months"
 
 
-def _buying_rhythm(orders: list) -> dict:
+def _parse_dt(v):
+    """A datetime from an ISO string / datetime / None (assume UTC if naive)."""
+    if isinstance(v, datetime):
+        return v if v.tzinfo else v.replace(tzinfo=timezone.utc)
+    if not v:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _map_local_order(o) -> dict:
+    """A local WhatsApp order_event → the CRM panel's order shape (hub fallback)."""
+    return {
+        "id":             o.id,
+        "order_number":   o.hub_order_number,
+        "status":         o.status,
+        "payment_status": o.payment_status,
+        "total":          float(o.subtotal or 0),
+        "subtotal":       float(o.subtotal or 0),
+        "currency_code":  o.currency,
+        "created_at":     o.created_at.isoformat() if o.created_at else None,
+        "items":          o.items or [],
+        "source":         "whatsapp",
+    }
+
+
+def _buying_rhythm(dates: list) -> dict:
     """How often this customer buys + how overdue they are for the next order.
 
-    Uses order dates (created_at). `overdue` means it's been noticeably longer
+    Takes order dates (datetimes). `overdue` means it's been noticeably longer
     than their usual gap since the last order — a nudge-worthy signal.
     """
-    dates = sorted(o.created_at for o in orders if getattr(o, "created_at", None))
+    dates = sorted(d for d in dates if d)
     n = len(dates)
     now = datetime.now(timezone.utc)
     days_since_last = (now - dates[-1]).days if dates else None
@@ -104,10 +134,32 @@ def _build_profile(
     orders: list,
     conversations: list,
     history: CustomerHistory | None,
+    hub: dict | None = None,
 ) -> dict:
-    total_spent    = sum(float(o.subtotal or 0) for o in orders)
-    order_count    = len(orders)
-    last_order     = max(orders, key=lambda o: o.created_at, default=None)
+    # Orders + spend: the hub is the source of truth (every channel — POS, web
+    # AND WhatsApp). Fall back to Neema's local WhatsApp order_events only when
+    # the hub can't resolve this customer or is unreachable.
+    if hub is not None:
+        order_count     = hub["total_orders"]
+        total_spent     = hub["total_spent"]
+        avg_order_value = hub["avg_order_value"]
+        order_list      = hub["orders"]
+        order_dates     = [d for d in (_parse_dt(o.get("created_at")) for o in order_list) if d]
+        last_dt         = _parse_dt(hub.get("last_order_date"))
+        if last_dt and (not order_dates or last_dt > max(order_dates)):
+            order_dates.append(last_dt)
+        last_order_at   = (max(order_dates).isoformat() if order_dates
+                           else (last_dt.isoformat() if last_dt else None))
+        orders_source   = "hub"
+    else:
+        order_count     = len(orders)
+        total_spent     = sum(float(o.subtotal or 0) for o in orders)
+        avg_order_value = round(total_spent / order_count, 2) if order_count else 0
+        order_list      = [_map_local_order(o) for o in orders]
+        order_dates     = [o.created_at for o in orders if getattr(o, "created_at", None)]
+        _last           = max(orders, key=lambda o: o.created_at, default=None)
+        last_order_at   = _last.created_at.isoformat() if _last else None
+        orders_source   = "whatsapp"
 
     # Build channel list from conversations
     channel_map: dict[str, dict] = {}
@@ -131,8 +183,10 @@ def _build_profile(
 
     channels = list(channel_map.values())
     lead_score = _compute_lead_score(user, order_count, total_spent, len(channels))
-    rhythm = _buying_rhythm(orders)
+    rhythm = _buying_rhythm(order_dates)
     tier = _customer_tier(order_count, total_spent, rhythm["days_since_last"])
+    # Suggested stage stays on the local WhatsApp order_events — a pending
+    # WhatsApp order (hub_order_id set) is what signals "negotiating".
     from app.services.lead_signals import derive_lead_stage
     suggested_stage = derive_lead_stage(user, orders)
 
@@ -162,11 +216,13 @@ def _build_profile(
         "merged_ids":     merged_ids,
         "total_orders":   order_count,
         "total_spent":    total_spent,
-        "avg_order_value": round(total_spent / order_count, 2) if order_count else 0,
+        "avg_order_value": avg_order_value,
+        "orders":         order_list[:20],
+        "orders_source":  orders_source,
         "buying_rhythm":  rhythm,
         "tier":           tier["tier"],
         "tier_label":     tier["tier_label"],
-        "last_order_at":  last_order.created_at.isoformat() if last_order else None,
+        "last_order_at":  last_order_at,
         "last_seen_at":   user.last_message_at.isoformat() if user.last_message_at else None,
         "first_seen_at":  user.created_at.isoformat() if user.created_at else None,
         "notes":          notes,
@@ -182,6 +238,7 @@ def _build_profile(
 @router.get("/customers/{wa_id}")
 async def get_customer(
     wa_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
 ):
@@ -216,7 +273,16 @@ async def get_customer(
     )
     history = history_result.scalar_one_or_none()
 
-    return _build_profile(user, orders, conversations, history)
+    # Pull the customer's full order history + lifetime spend from the hub (the
+    # system of record across POS, web and WhatsApp). Best-effort: on any failure
+    # we fall back to the local WhatsApp order_events.
+    redis = getattr(request.app.state, "redis", None)
+    try:
+        hub = await hub_client.fetch_customer_summary(wa_id, redis)
+    except Exception:
+        hub = None
+
+    return _build_profile(user, orders, conversations, history, hub=hub)
 
 
 @router.patch("/customers/{wa_id}")
@@ -381,7 +447,7 @@ async def list_leads(
         channels = list({getattr(c, "channel", "whatsapp") or "whatsapp" for c in convs})
 
         lead_score = _compute_lead_score(user, order_count, total_spent, len(channels))
-        rhythm = _buying_rhythm(orders)
+        rhythm = _buying_rhythm([o.created_at for o in orders])
         tier = _customer_tier(order_count, total_spent, rhythm["days_since_last"])
 
         leads.append({

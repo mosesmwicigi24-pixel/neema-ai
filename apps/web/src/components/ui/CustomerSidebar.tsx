@@ -38,6 +38,21 @@ export interface CustomerChannel {
     conversation_count: number;
 }
 
+// An order as rendered in the panel — hub-sourced (full history across POS,
+// web and WhatsApp) or, as a fallback, a local WhatsApp order_event.
+export interface PanelOrder {
+    id: string;
+    order_number?: string | null;
+    status?: string | null;
+    payment_status?: string | null;
+    total?: number | null;
+    subtotal?: number | null;
+    currency_code?: string | null;
+    created_at: string;
+    items?: { name: string; qty?: number; quantity?: number; total?: number }[];
+    source?: "hub" | "whatsapp";
+}
+
 export interface CustomerProfile {
     id: string;
     wa_id: string;
@@ -52,6 +67,8 @@ export interface CustomerProfile {
     lead_stage_source?: "auto" | "manual" | null;
     suggested_lead_stage?: LeadStage;
     lead_source?: string | null;
+    orders?: PanelOrder[];
+    orders_source?: "hub" | "whatsapp";
     lead_score: number;
     channels: CustomerChannel[];
     merged_ids: string[];
@@ -535,15 +552,20 @@ export function CustomerSidebar({
         patch({ tags: profile.tags.filter((t) => t !== tag) });
     };
 
-    const customerOrders = orders.filter(
-        (o) =>
-            o.wa_id === conversation.wa_id ||
-            o.contact_phone === conversation.wa_id,
-    );
-    const totalSpent = customerOrders.reduce(
-        (s, o) => s + (o.total || o.subtotal || 0),
-        0,
-    );
+    // Prefer the hub-sourced order history (full purchase history across POS,
+    // web AND WhatsApp) served on the profile; fall back to the local WhatsApp
+    // orders list only when the profile hasn't provided one.
+    const customerOrders: PanelOrder[] = (profile?.orders ??
+        (orders.filter(
+            (o) =>
+                o.wa_id === conversation.wa_id ||
+                o.contact_phone === conversation.wa_id,
+        ) as unknown as PanelOrder[]));
+    // Lifetime spend comes from the hub (profile.total_spent); the client sum is
+    // only a fallback over whatever recent orders we have on hand.
+    const totalSpent =
+        profile?.total_spent ||
+        customerOrders.reduce((s, o) => s + (o.total || o.subtotal || 0), 0);
     const lastOrder = [...customerOrders].sort(
         (a, b) =>
             new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
@@ -772,11 +794,11 @@ export function CustomerSidebar({
                 {[
                     {
                         label: "Orders",
-                        value: customerOrders.length || profile.total_orders,
+                        value: profile.total_orders || customerOrders.length,
                     },
                     {
                         label: "Spent",
-                        value: fmtCurrency(totalSpent || profile.total_spent),
+                        value: fmtCurrency(totalSpent),
                     },
                     {
                         label: "Convs",
@@ -1262,29 +1284,31 @@ export function CustomerSidebar({
                                     {
                                         label: "Total orders",
                                         value:
-                                            customerOrders.length ||
-                                            profile.total_orders,
+                                            profile.total_orders ||
+                                            customerOrders.length,
                                     },
                                     {
                                         label: "Total spent",
-                                        value: fmtCurrency(
-                                            totalSpent || profile.total_spent,
-                                        ),
+                                        value: fmtCurrency(totalSpent),
                                     },
                                     {
                                         label: "Avg order value",
-                                        value:
-                                            customerOrders.length ||
-                                            profile.total_orders
-                                                ? fmtCurrency(
-                                                      Math.round(
-                                                          (totalSpent ||
-                                                              profile.total_spent) /
-                                                              (customerOrders.length ||
-                                                                  profile.total_orders),
-                                                      ),
-                                                  )
-                                                : "—",
+                                        value: profile.avg_order_value
+                                            ? fmtCurrency(
+                                                  Math.round(
+                                                      profile.avg_order_value,
+                                                  ),
+                                              )
+                                            : profile.total_orders ||
+                                                customerOrders.length
+                                              ? fmtCurrency(
+                                                    Math.round(
+                                                        totalSpent /
+                                                            (profile.total_orders ||
+                                                                customerOrders.length),
+                                                    ),
+                                                )
+                                              : "—",
                                     },
                                     {
                                         label: "Last order",
@@ -1426,7 +1450,8 @@ export function CustomerSidebar({
                                 {
                                     label: "Orders",
                                     pts: Math.min(
-                                        customerOrders.length * 15,
+                                        (profile.total_orders ||
+                                            customerOrders.length) * 15,
                                         45,
                                     ),
                                     max: 45,
@@ -1526,7 +1551,7 @@ export function CustomerSidebar({
                                                 style={{ color: "#16270c" }}
                                             >
                                                 {fmtCurrency(
-                                                    o.total || o.subtotal,
+                                                    o.total ?? o.subtotal ?? 0,
                                                 )}
                                             </div>
                                             <div
