@@ -295,6 +295,29 @@ _ACK_RE = _re.compile(
 )
 
 
+async def log_agent_usage(db: AsyncSession, wa_id: str, model: str, totals: dict) -> dict:
+    """Persist aggregated Tier 2 agent token usage for one customer turn, so
+    spend + cache effectiveness are measurable. `totals` carries the summed
+    input/output/cache-read/cache-write tokens across the turn's tool loop."""
+    from app.models.ai_usage import AiUsage
+    from app.core.ai_pricing import estimate_cost_usd
+
+    inp = int(totals.get("input_tokens", 0) or 0)
+    out = int(totals.get("output_tokens", 0) or 0)
+    cread = int(totals.get("cache_read_tokens", 0) or 0)
+    cwrite = int(totals.get("cache_write_tokens", 0) or 0)
+    prompt_total = inp + cread + cwrite
+    cost = estimate_cost_usd(model, prompt_total, out, cached_tokens=cread, cache_write_tokens=cwrite)
+    db.add(AiUsage(
+        wa_id=_normalize_wa_id(wa_id) if wa_id else None,
+        workflow="tier2-agent", node="run_turn", model=model,
+        prompt_tokens=prompt_total, completion_tokens=out,
+        cached_tokens=cread, cost_usd=cost,
+    ))
+    await db.commit()
+    return {"ok": True, "cost_usd": cost}
+
+
 async def log_usage(db: AsyncSession, body) -> dict:
     """Persist one LLM call's token usage + estimated cost."""
     from app.models.ai_usage import AiUsage

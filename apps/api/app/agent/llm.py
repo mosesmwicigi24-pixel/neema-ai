@@ -26,6 +26,8 @@ class LLMResponse:
     tool_calls: list[ToolCall] = field(default_factory=list)
     text: str = ""
     stop_reason: str = "end_turn"
+    # {input_tokens, output_tokens, cache_read_tokens, cache_write_tokens}
+    usage: dict = field(default_factory=dict)
 
 
 class LLM(Protocol):
@@ -69,25 +71,65 @@ def _blocks_to_response(content: list[Any]) -> LLMResponse:
                        text="".join(text_parts).strip())
 
 
-class AnthropicLLM:
-    """Real Claude client (async)."""
+_EPHEMERAL = {"type": "ephemeral"}
 
-    def __init__(self, api_key: str, model: str, max_tokens: int = 1024):
+
+def _cached_system(system: str):
+    """System as a single cached text block (render order tools→system→messages,
+    so this one breakpoint caches BOTH the tool defs and the system prompt)."""
+    if not system:
+        return system
+    return [{"type": "text", "text": system, "cache_control": _EPHEMERAL}]
+
+
+def _cache_last_message(messages: list[dict]) -> list[dict]:
+    """Return a shallow copy of messages with a cache breakpoint on the last
+    block, so the whole conversation prefix is cached and read incrementally
+    across the tool-call loop. Never mutates the caller's list/blocks."""
+    if not messages:
+        return messages
+    out = list(messages)
+    last = dict(out[-1])
+    content = last.get("content")
+    if isinstance(content, str):
+        last["content"] = [{"type": "text", "text": content, "cache_control": _EPHEMERAL}]
+    elif isinstance(content, list) and content:
+        new_content = list(content)
+        new_content[-1] = {**new_content[-1], "cache_control": _EPHEMERAL}
+        last["content"] = new_content
+    out[-1] = last
+    return out
+
+
+class AnthropicLLM:
+    """Real Claude client (async), with prompt caching + usage capture."""
+
+    def __init__(self, api_key: str, model: str, max_tokens: int = 1024, cache: bool = True):
         from anthropic import AsyncAnthropic
         self._client = AsyncAnthropic(api_key=api_key)
         self._model = model
         self._max_tokens = max_tokens
+        self._cache = cache
 
     async def complete(self, *, system: str, messages: list[dict], tools: list[dict]) -> LLMResponse:
+        sys_param = _cached_system(system) if self._cache else system
+        msgs = _cache_last_message(messages) if self._cache else messages
         resp = await self._client.messages.create(
             model=self._model,
             max_tokens=self._max_tokens,
-            system=system,
-            messages=messages,
+            system=sys_param,
+            messages=msgs,
             tools=tools,
         )
         r = _blocks_to_response(resp.content)
         r.stop_reason = resp.stop_reason or "end_turn"
+        u = resp.usage
+        r.usage = {
+            "input_tokens": getattr(u, "input_tokens", 0) or 0,
+            "output_tokens": getattr(u, "output_tokens", 0) or 0,
+            "cache_read_tokens": getattr(u, "cache_read_input_tokens", 0) or 0,
+            "cache_write_tokens": getattr(u, "cache_creation_input_tokens", 0) or 0,
+        }
         return r
 
 

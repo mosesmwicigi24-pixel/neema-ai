@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     tier2_all: bool = False          # route ALL traffic to Tier 2 (full cutover)
     tier2_max_iterations: int = 8    # max tool-call loops per turn (runaway guard)
     tier2_max_tokens: int = 1024
+    tier2_prompt_cache: bool = True  # cache the system+tools+conversation prefix (~90% cheaper input)
 
     def tier2_wa_ids(self) -> set[str]:
         return {w.strip() for w in self.tier2_enabled_wa_ids.split(",") if w.strip()}

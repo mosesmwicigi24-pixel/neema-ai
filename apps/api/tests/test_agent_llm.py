@@ -9,7 +9,31 @@ import json
 
 import types
 
-from app.agent.llm import FakeLLM, LLMResponse, _blocks_to_response
+from app.agent.llm import (
+    FakeLLM, LLMResponse, _blocks_to_response, _cached_system, _cache_last_message,
+)
+
+
+def test_cached_system_wraps_with_breakpoint():
+    out = _cached_system("You are Neema.")
+    assert out == [{"type": "text", "text": "You are Neema.",
+                    "cache_control": {"type": "ephemeral"}}]
+    assert _cached_system("") == ""  # empty stays empty (no breakpoint)
+
+
+def test_cache_last_message_string_content():
+    msgs = [{"role": "user", "content": "hi"}]
+    out = _cache_last_message(msgs)
+    assert out[-1]["content"][-1]["cache_control"] == {"type": "ephemeral"}
+    assert msgs[-1]["content"] == "hi"  # original not mutated
+
+
+def test_cache_last_message_block_content_not_mutated():
+    original = [{"type": "tool_result", "tool_use_id": "t1", "content": "{}"}]
+    msgs = [{"role": "user", "content": original}]
+    out = _cache_last_message(msgs)
+    assert out[-1]["content"][-1]["cache_control"] == {"type": "ephemeral"}
+    assert "cache_control" not in original[-1]  # caller's block untouched
 
 
 def test_blocks_to_response_handles_sdk_objects_with_empty_input():
