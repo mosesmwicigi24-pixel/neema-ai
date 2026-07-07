@@ -219,6 +219,11 @@ def _build_profile(
         "avg_order_value": avg_order_value,
         "orders":         order_list[:20],
         "orders_source":  orders_source,
+        # Identity link: this WhatsApp contact resolved to a hub (shop) customer
+        # by phone. Lets the panel show their in-shop history is the same person.
+        "hub_linked":       hub is not None,
+        "hub_customer_id":  hub.get("customer_id") if hub else None,
+        "hub_customer_name": hub.get("customer_name") if hub else None,
         "buying_rhythm":  rhythm,
         "tier":           tier["tier"],
         "tier_label":     tier["tier_label"],
