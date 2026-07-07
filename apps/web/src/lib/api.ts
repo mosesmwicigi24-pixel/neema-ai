@@ -318,16 +318,19 @@ export const agentsApi = {
 // ── Catalog ───────────────────────────────────────────────────────────────────
 
 export interface ApiCatalogItem {
-    id: string;
+    // Local-table rows have `id`; hub-sourced rows carry `hub_product_id` instead.
+    id?: string;
+    hub_product_id?: number | null;
+    available_qty?: number | null;
     sku: string;
     name: string;
-    aliases: string[];
+    aliases?: string[];
     price: number;
-    unit: string | null;
+    unit?: string | null;
     category: string | null;
     description: string | null;
     in_stock: boolean;
-    updated_at: string;
+    updated_at?: string;
 }
 
 export interface CreateCatalogPayload {
@@ -522,15 +525,18 @@ export function mapAgent(a: ApiAgent): Agent {
 
 export function mapCatalogItem(c: ApiCatalogItem): CatalogItem {
     return {
-        id: c.id,
+        // Hub rows have no local `id` — synthesise a stable one for React keys.
+        id: c.id ?? String(c.hub_product_id ?? c.sku),
         sku: c.sku,
         name: c.name,
-        aliases: c.aliases,
+        aliases: c.aliases ?? [],
         price: c.price,
         unit: c.unit ?? "",
         category: c.category ?? "General",
         description: c.description ?? "",
         in_stock: c.in_stock,
+        hub_product_id: c.hub_product_id ?? null,
+        available_qty: c.available_qty ?? null,
     };
 }
 
