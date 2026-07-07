@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     hub_outlet_id: int = 0           # the online/WhatsApp outlet (Part B)
     catalog_source: str = "hub"      # "hub" | "local" (falls back to local on hub failure)
     hub_catalog_ttl: int = 600       # seconds to cache the hub catalogue
+    hub_push_orders: bool = True     # push confirmed WhatsApp orders into the hub (Part B)
+    hub_relay_receipt: bool = True   # WhatsApp the customer the receipt/payment link (Loop C)
+    hub_order_status_ttl: int = 60   # seconds to cache a hub order's live status (Loop C)
 
     @field_validator("cors_origins", mode="before")
     @classmethod

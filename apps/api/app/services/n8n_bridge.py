@@ -1,5 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 import json
 import httpx
@@ -507,6 +507,9 @@ async def get_profile(db: AsyncSession, redis, wa_id: str) -> dict:
     last_in  = next((m["text"] for m in reversed(messages) if m["direction"] == "inbound"), "")
     last_out = next((m["text"] for m in reversed(messages) if m["direction"] == "outbound"), "")
 
+    # ── Loop C: the customer's live hub order (answers "where's my order?") ────
+    open_order = await _hub_open_order(db, redis, wa_id)
+
     # ── Cost governor: should this turn spend the expensive model? ────────────
     # n8n gates the Conversation-Intelligence sub-workflow on `should_run_ai`.
     # This is the "give the AI time to cool off" fix + skip replies nobody needs.
@@ -552,8 +555,44 @@ async def get_profile(db: AsyncSession, redis, wa_id: str) -> dict:
         "last_message_at": ctx.get("last_message_at"),
         "intercept_mode": ctx.get("intercept_mode"),
         "catalog": catalog,
+        "openOrder": open_order,
         "mergeKey": 1,
     }
+
+
+async def _hub_open_order(db: AsyncSession, redis, wa_id: str) -> dict | None:
+    """The customer's most recent hub-pushed order + its LIVE status, so the AI
+    can answer order questions from the hub (Loop C). None if they have none."""
+    if not settings.hub_api_token:
+        return None
+    row = (await db.execute(
+        select(OrderEvent)
+        .where(OrderEvent.wa_id == wa_id, OrderEvent.hub_order_id.isnot(None))
+        .order_by(OrderEvent.created_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if row is None:
+        return None
+
+    info = {
+        "order_id": row.hub_order_id,
+        "order_number": row.hub_order_number,
+        "payment_url": row.hub_payment_url,
+        "currency": row.hub_currency,
+        "total": float(row.hub_total) if row.hub_total is not None else None,
+    }
+    try:
+        from app.core import hub_client
+        live = await hub_client.fetch_order_status(row.hub_order_id, redis)
+        if live:
+            info.update({
+                "status": live.get("status"),
+                "payment_status": live.get("payment_status"),
+                "fulfillment_status": live.get("fulfillment_status"),
+            })
+    except Exception:
+        pass  # fall back to the stored snapshot — never break the profile
+    return info
 
 
 async def get_context(db: AsyncSession, redis, wa_id: str) -> dict:
@@ -1073,7 +1112,7 @@ async def save_user_facts(db: AsyncSession, body) -> dict:
 
 # ── Upsert Order Event ────────────────────────────────────
 
-async def upsert_order_event(db: AsyncSession, body) -> dict:
+async def upsert_order_event(db: AsyncSession, body, redis=None) -> dict:
     from app.models.order_event import OrderEvent
 
     event_id = f"{body.wa_id}_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
@@ -1106,7 +1145,177 @@ async def upsert_order_event(db: AsyncSession, body) -> dict:
     )
     await db.execute(stmt)
     await db.commit()
-    return {"ok": True, "event_id": event_id}
+
+    result = {"ok": True, "event_id": event_id}
+    # Part B / Loop C — best-effort; never breaks the order-event save.
+    try:
+        push = await _maybe_push_order_to_hub(db, redis, body, event_id)
+        if push:
+            result.update(push)
+    except Exception as exc:
+        import logging
+        logging.getLogger("neema.hub").warning(
+            "hub order push errored for %s (%s) — order-event saved regardless",
+            body.wa_id, exc,
+        )
+    return result
+
+
+async def _maybe_push_order_to_hub(db: AsyncSession, redis, body, event_id: str) -> dict | None:
+    """Push a CONFIRMED WhatsApp cart into the Bethany House hub (Part B), then
+    relay the payment link to the customer (Loop C).
+
+    A confirmed order-event is the only kind that carries item lines (snapshots
+    are empty), so `items` being non-empty is the trigger. Idempotent per
+    session: if this session already produced a hub order, we copy its ids and
+    skip. Failures are recorded on the row for retry on the next confirmed event.
+    """
+    from app.models.order_event import OrderEvent
+    from app.core import hub_client
+    from app.core.countries import resolve_country
+
+    items = list(body.items or [])
+    if not settings.hub_push_orders or not settings.hub_api_token or not settings.hub_outlet_id:
+        return None
+    if not items:                       # snapshot / non-order event — nothing to push
+        return None
+
+    import logging
+    log = logging.getLogger("neema.hub")
+
+    async def _save(**cols):
+        await db.execute(
+            update(OrderEvent).where(OrderEvent.id == event_id).values(**cols)
+        )
+        await db.commit()
+
+    # ── Idempotency: one hub order per WhatsApp session ───────────────────────
+    dedupe_col = OrderEvent.session_id if body.session_id else OrderEvent.wa_id
+    dedupe_val = body.session_id or body.wa_id
+    prior = (await db.execute(
+        select(OrderEvent)
+        .where(dedupe_col == dedupe_val, OrderEvent.hub_order_id.isnot(None))
+        .order_by(OrderEvent.created_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if prior is not None:
+        await _save(
+            hub_order_id=prior.hub_order_id,
+            hub_order_number=prior.hub_order_number,
+            hub_payment_url=prior.hub_payment_url,
+            hub_push_status="skipped_dup",
+        )
+        return {"hub_order_id": prior.hub_order_id, "hub_push_status": "skipped_dup"}
+
+    # ── Customer identity ─────────────────────────────────────────────────────
+    from app.models.user import User
+    user = (await db.execute(select(User).where(User.wa_id == body.wa_id))).scalar_one_or_none()
+    first_name = ((user.name if user else None) or "WhatsApp Customer").split()[0]
+    country_iso = (resolve_country(body.wa_id) or {}).get("country_iso")
+
+    # ── Resolve lines against the live hub catalogue + create the order ───────
+    try:
+        catalog = await catalog_items(db, redis)
+    except Exception as exc:
+        await _save(hub_push_status="failed", hub_last_error=f"catalog: {exc}")
+        return {"hub_push_status": "failed"}
+
+    try:
+        pushed = await hub_client.push_pending_order(
+            catalog, wa_id=body.wa_id, first_name=first_name,
+            country_iso=country_iso, items=items,
+        )
+    except ValueError as exc:            # nothing matched a hub product
+        unmatched = getattr(exc, "unmatched", [])
+        await _save(hub_push_status="skipped_nomatch",
+                    hub_last_error=f"no hub match for: {unmatched}")
+        log.warning("hub push: no product match for %s (%s)", body.wa_id, unmatched)
+        return {"hub_push_status": "skipped_nomatch", "unmatched": unmatched}
+    except Exception as exc:
+        await _save(hub_push_status="failed", hub_last_error=str(exc)[:500])
+        log.warning("hub push failed for %s: %s", body.wa_id, exc)
+        return {"hub_push_status": "failed"}
+
+    hub_order_id = pushed.get("order_id")
+    await _save(
+        hub_order_id=hub_order_id,
+        hub_order_number=pushed.get("order_number"),
+        hub_currency=pushed.get("currency_code"),
+        hub_total=pushed.get("total_amount"),
+        hub_push_status="pushed",
+        hub_pushed_at=datetime.now(timezone.utc),
+        hub_last_error=None,
+    )
+    log.info("hub order created: #%s (%s) for %s",
+             hub_order_id, pushed.get("order_number"), body.wa_id)
+
+    out = {
+        "hub_order_id": hub_order_id,
+        "hub_order_number": pushed.get("order_number"),
+        "hub_push_status": "pushed",
+        "unmatched": pushed.get("unmatched") or [],
+    }
+
+    # ── Loop C: relay the payment link to the customer ────────────────────────
+    if settings.hub_relay_receipt and hub_order_id:
+        try:
+            pay_url = await hub_client.fetch_payment_link(hub_order_id)
+            if pay_url:
+                await _save(hub_payment_url=pay_url)
+                await _relay_order_confirmation(
+                    db, redis, body.wa_id,
+                    order_number=pushed.get("order_number"),
+                    currency=pushed.get("currency_code"),
+                    total=pushed.get("total_amount"),
+                    pay_url=pay_url,
+                )
+                out["hub_payment_url"] = pay_url
+        except Exception as exc:
+            log.warning("Loop C receipt relay failed for %s: %s", body.wa_id, exc)
+
+    return out
+
+
+async def _relay_order_confirmation(db, redis, wa_id, *, order_number, currency, total, pay_url) -> None:
+    """WhatsApp the customer their order confirmation + secure payment link, and
+    save it to history so it appears in the conversation (Loop C)."""
+    try:
+        amount = f"{currency or 'KES'} {float(total):,.0f}" if total is not None else ""
+    except (TypeError, ValueError):
+        amount = ""
+    num = f" {order_number}" if order_number else ""
+    text = (
+        f"✅ Your order{num} is confirmed{(' — total ' + amount) if amount else ''}.\n\n"
+        f"Pay securely here:\n{pay_url}\n\n"
+        "Once payment is received we'll prepare and ship your order. "
+        "You can ask me \"where's my order?\" anytime for an update."
+    )
+
+    await _send_waba(wa_id, text)
+
+    # Persist as an outbound message (mirrors outbound_gate's single-row save).
+    conv = (await db.execute(
+        select(Conversation).where(Conversation.wa_id == wa_id)
+    )).scalar_one_or_none()
+    if conv is None:
+        conv = Conversation(wa_id=wa_id)
+        db.add(conv)
+        await db.flush()
+    db.add(Message(
+        wa_id=wa_id,
+        conversation_id=conv.id,
+        direction=MsgDirection.outbound,
+        sender=MsgSender.ai,
+        text=text,
+    ))
+    await db.commit()
+    try:
+        await _broadcast(redis, str(conv.id), {
+            "type": "message", "conversationId": str(conv.id),
+            "waId": wa_id, "direction": "outbound", "text": text,
+        })
+    except Exception:
+        pass
 
 
 # ── Upsert Customer History ───────────────────────────────

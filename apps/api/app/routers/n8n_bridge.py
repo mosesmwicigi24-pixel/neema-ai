@@ -115,8 +115,8 @@ async def get_user(wa_id: str, db: AsyncSession = Depends(get_db)):
 
 # ── Orders ────────────────────────────────────────────────
 @router.post("/order-event", dependencies=[Depends(verify_n8n_secret)])
-async def upsert_order_event(body: OrderEventDto, db: AsyncSession = Depends(get_db)):
-    return await svc.upsert_order_event(db, body)
+async def upsert_order_event(body: OrderEventDto, request: Request, db: AsyncSession = Depends(get_db)):
+    return await svc.upsert_order_event(db, body, request.app.state.redis)
 
 
 # ── Customer History ──────────────────────────────────────

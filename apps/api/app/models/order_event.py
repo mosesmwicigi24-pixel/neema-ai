@@ -1,6 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
-from sqlalchemy import String, Text, Numeric, DateTime
+from sqlalchemy import String, Text, Numeric, DateTime, Integer
 from sqlalchemy.dialects.postgresql import JSONB, CHAR
 from sqlalchemy.orm import Mapped, mapped_column
 from app.models import Base
@@ -23,3 +23,15 @@ class OrderEvent(Base):
     state              : Mapped[dict]     = mapped_column(JSONB, default=dict)
     created_at         : Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at         : Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # ── Bethany House hub linkage (Part B push / Loop C relay) ──────────────
+    # Set when a confirmed order-event is pushed into the hub as a pending order.
+    hub_order_id       : Mapped[int | None] = mapped_column(Integer, nullable=True)
+    hub_order_number   : Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # None = never attempted; "pushed" | "failed" | "skipped_dup" | "skipped_nomatch"
+    hub_push_status    : Mapped[str | None] = mapped_column(String(20), nullable=True)
+    hub_payment_url    : Mapped[str | None] = mapped_column(Text, nullable=True)
+    hub_currency       : Mapped[str | None] = mapped_column(String(3), nullable=True)
+    hub_total          : Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    hub_last_error     : Mapped[str | None] = mapped_column(Text, nullable=True)
+    hub_pushed_at      : Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

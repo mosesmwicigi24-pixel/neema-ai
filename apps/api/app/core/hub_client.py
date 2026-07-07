@@ -99,3 +99,183 @@ async def fetch_hub_catalog(redis) -> list[dict]:
             pass
     _log.info("hub catalogue loaded: %d products", len(items))
     return items
+
+
+# ── Order push (Part B) + fulfilment relay (Loop C) ──────────────────────────
+#
+# A confirmed WhatsApp cart carries item lines like {name, qty, unit, sku?} but
+# NOT the hub product id — the AI matches by name. We resolve each line back to a
+# hub product HERE (server-authoritative) against the same cached catalogue the
+# agent sold from, then create a "pending, awaiting payment" order in the hub
+# under the WhatsApp outlet. No money moves: the customer pays via the hub's own
+# payment link (relayed on WhatsApp by Loop C).
+
+def _api_headers() -> dict:
+    return {
+        "Authorization": f"Bearer {settings.hub_api_token}",
+        "Accept": "application/json",          # else the hub 302-redirects HTML
+        "Content-Type": "application/json",
+    }
+
+
+def _norm(s) -> str:
+    return " ".join(str(s or "").lower().split())
+
+
+def resolve_hub_line(item: dict, catalog: list[dict]) -> dict | None:
+    """Match one confirmed cart line to a hub product.
+
+    Precedence: exact SKU → exact name → alias → substring. Returns a hub order
+    line {product_id, quantity, unit_price, name, matched_by} using the hub's own
+    price (source of truth), or None if nothing matched.
+    """
+    name = _norm(item.get("name") or item.get("product") or item.get("title"))
+    sku = _norm(item.get("sku"))
+    qty = item.get("qty") or item.get("quantity") or 1
+    try:
+        qty = max(int(qty), 1)
+    except (TypeError, ValueError):
+        qty = 1
+
+    def _line(p: dict, matched_by: str) -> dict:
+        # Hub price is authoritative; fall back to the AI's quoted unit only if
+        # the catalogue has no price (shouldn't happen for a sellable item).
+        price = p.get("price")
+        if price in (None, 0, 0.0):
+            price = item.get("unit") or item.get("price") or item.get("unit_price") or 0
+        return {
+            "product_id": p.get("hub_product_id"),
+            "quantity": qty,
+            "unit_price": float(price or 0),
+            "name": p.get("name"),
+            "matched_by": matched_by,
+        }
+
+    by_sku = {_norm(p.get("sku")): p for p in catalog if p.get("sku")}
+    by_name = {_norm(p.get("name")): p for p in catalog if p.get("name")}
+
+    if sku and sku in by_sku and by_sku[sku].get("hub_product_id"):
+        return _line(by_sku[sku], "sku")
+    if name and name in by_name and by_name[name].get("hub_product_id"):
+        return _line(by_name[name], "name")
+    for p in catalog:                       # alias exact
+        if p.get("hub_product_id") and any(_norm(a) == name for a in (p.get("aliases") or [])):
+            return _line(p, "alias")
+    if name:                                # substring (longest name wins)
+        cands = [
+            p for p in catalog
+            if p.get("hub_product_id") and (name in _norm(p.get("name")) or _norm(p.get("name")) in name)
+        ]
+        if cands:
+            cands.sort(key=lambda p: len(_norm(p.get("name"))), reverse=True)
+            return _line(cands[0], "contains")
+    return None
+
+
+async def push_pending_order(
+    catalog: list[dict],
+    *,
+    wa_id: str,
+    first_name: str,
+    country_iso: str | None,
+    items: list[dict],
+) -> dict:
+    """Create a pending order in the hub from a confirmed WhatsApp cart.
+
+    Returns {order_id, order_number, total_amount, currency_code, lines,
+    unmatched}. Raises on HTTP failure (caller records the error and retries
+    on the next confirmed event). Raises ValueError with .unmatched attached
+    when NO line could be matched to a hub product.
+    """
+    lines, unmatched = [], []
+    for it in items or []:
+        line = resolve_hub_line(it, catalog)
+        if line:
+            lines.append(line)
+        else:
+            unmatched.append(it.get("name") or it.get("product") or "item")
+
+    if not lines:
+        err = ValueError("no cart line matched a hub product")
+        err.unmatched = unmatched            # type: ignore[attr-defined]
+        raise err
+
+    payload = {
+        "outlet_id": settings.hub_outlet_id,
+        "new_customer": {"first_name": first_name or "WhatsApp Customer", "phone": wa_id},
+        "items": [
+            {"product_id": l["product_id"], "quantity": l["quantity"], "unit_price": l["unit_price"]}
+            for l in lines
+        ],
+    }
+    if country_iso:
+        payload["customer_country_code"] = country_iso.upper()
+
+    base = settings.hub_api_url.rstrip("/")
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        resp = await client.post(
+            f"{base}/api/v1/admin/pos/pending-order",
+            headers=_api_headers(),
+            json=payload,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+    return {
+        "order_id": data.get("order_id"),
+        "order_number": data.get("order_number"),
+        "total_amount": data.get("total_amount"),
+        "currency_code": data.get("currency_code"),
+        "lines": lines,
+        "unmatched": unmatched,
+    }
+
+
+async def fetch_payment_link(order_id: int) -> str | None:
+    """The hub's customer payment page URL for an order (mints the 72h token)."""
+    base = settings.hub_api_url.rstrip("/")
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{base}/api/v1/admin/orders/{order_id}/payment-link",
+            headers=_api_headers(),
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    return data.get("payment_url") or data.get("url")
+
+
+async def fetch_order_status(order_id: int, redis=None) -> dict | None:
+    """Live status of a hub order (for "where's my order?"). Cached briefly."""
+    key = f"hub:order:{order_id}"
+    if redis is not None:
+        try:
+            cached = await redis.get(key)
+            if cached:
+                return json.loads(cached)
+        except Exception:
+            pass
+
+    base = settings.hub_api_url.rstrip("/")
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"{base}/api/v1/admin/orders/{order_id}",
+            headers=_api_headers(),
+        )
+        resp.raise_for_status()
+        o = (resp.json() or {}).get("data") or resp.json() or {}
+
+    status = {
+        "order_id": order_id,
+        "order_number": o.get("order_number"),
+        "status": o.get("status"),
+        "payment_status": o.get("payment_status"),
+        "fulfillment_status": o.get("fulfillment_status") or o.get("fulfilment_status"),
+        "total_amount": o.get("total_amount"),
+        "currency_code": o.get("currency_code") or o.get("currency"),
+    }
+    if redis is not None:
+        try:
+            await redis.setex(key, settings.hub_order_status_ttl, json.dumps(status))
+        except Exception:
+            pass
+    return status
