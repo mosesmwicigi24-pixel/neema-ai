@@ -84,6 +84,17 @@ async def get_profile(wa_id: str, request: Request, db: AsyncSession = Depends(g
     from app.agent import runtime
     norm = svc._normalize_wa_id(wa_id)
     if runtime.is_tier2(norm):
+        # If a human agent has taken this conversation over (manual handoff, or a
+        # video/document escalation), stay silent — never auto-reply over a human.
+        # Read fresh (the profile's intercept_mode may be a cached value).
+        from sqlalchemy import select
+        from app.models.conversation import Conversation, InterceptMode
+        conv = (await db.execute(
+            select(Conversation).where(Conversation.wa_id == norm)
+        )).scalar_one_or_none()
+        if conv and conv.intercept_mode == InterceptMode.human:
+            return profile
+
         last = await svc.latest_inbound_message(db, norm)
         if last:
             text = (last.get("text") or "").strip()
