@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-06-12T16:46:51.878Z",
+  "updatedAt": "2026-07-07T09:53:15.000Z",
   "createdAt": "2026-04-21T06:44:30.746Z",
   "id": "nuDkkY5Haszojjfv",
   "name": "Message Debounce Buffer",
@@ -38,7 +38,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const input = $input.first().json || {};\n\nconst raw = String(input.msgTextRaw ?? input.msgText ?? input.text ?? '').trim();\nconst mediaType = String(\n  input.media_type ??\n  input.mediaType ??\n  input.type ??\n  (input.isAudio ? 'audio' : '')\n).trim().toLowerCase();\n\nconst isTextLike = !mediaType || mediaType === 'text';\n\nreturn [{\n  json: {\n    ...input,\n    chatId: String(input.chatId ?? input.wa_id ?? input.phone ?? ''),\n    wa_id: String(input.wa_id ?? input.chatId ?? input.phone ?? ''),\n    msgId: String(input.msgId ?? input.messageId ?? input.id ?? ''),\n    msgTextRaw: raw,\n    media_type: mediaType,\n    debounceEligible: isTextLike,\n    debounceWindowMs: 30000,\n    debounceWindowSeconds: 30\n  }\n}];"
+        "jsCode": "const input = $input.first().json || {};\n\nconst raw = String(input.msgTextRaw ?? input.msgText ?? input.text ?? '').trim();\nconst mediaType = String(\n  input.media_type ??\n  input.mediaType ??\n  input.type ??\n  (input.isAudio ? 'audio' : '')\n).trim().toLowerCase();\n\nconst isTextLike = !mediaType || mediaType === 'text';\n\n// FIX: tsMs was stripped upstream (the 'Upsert Message API' HTTP node returns\n// the API doc, dropping the session tsMs), so 'Resolve Winner' threw\n// 'current tsMs is missing' and every text message failed. Derive it robustly.\nlet tsMs = Number(input.tsMs ?? input.ts_ms);\nif (!Number.isFinite(tsMs)) {\n  const iso = input.tsIso ?? input.ts_iso ?? input.timestamp ?? input.created_at;\n  const parsed = iso ? Date.parse(iso) : NaN;\n  tsMs = Number.isFinite(parsed) ? parsed : Date.now();\n}\n\nreturn [{\n  json: {\n    ...input,\n    chatId: String(input.chatId ?? input.wa_id ?? input.phone ?? ''),\n    wa_id: String(input.wa_id ?? input.chatId ?? input.phone ?? ''),\n    msgId: String(input.msgId ?? input.messageId ?? input.id ?? ''),\n    msgTextRaw: raw,\n    media_type: mediaType,\n    tsMs,\n    debounceEligible: isTextLike,\n    debounceWindowMs: 30000,\n    debounceWindowSeconds: 30\n  }\n}];"
       },
       "id": "54299c2e-10c7-4e66-8534-cd9da9ba01dc",
       "name": "Preserve Current Turn",
@@ -312,9 +312,9 @@
   "staticData": null,
   "meta": null,
   "pinData": {},
-  "versionId": "ce0aa63c-e152-4f44-b4bf-96dd11ffd685",
-  "activeVersionId": "7423c851-0195-4d2c-8129-4bc97f56079a",
-  "versionCounter": 53,
+  "versionId": "1e96169f-c196-4b30-97b1-c80668011475",
+  "activeVersionId": "1e96169f-c196-4b30-97b1-c80668011475",
+  "versionCounter": 59,
   "triggerCount": 0,
   "tags": [],
   "shared": [
