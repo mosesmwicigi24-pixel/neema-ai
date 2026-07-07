@@ -8,6 +8,7 @@ def test_kenya_from_wa_id():
         "country": "Kenya",
         "country_iso": "KE",
         "flag_url": "https://flagcdn.com/ke.svg",
+        "code": "254",
     }
 
 

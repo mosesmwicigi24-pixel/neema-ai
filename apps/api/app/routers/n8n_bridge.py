@@ -72,6 +72,12 @@ async def touch_session(body: SessionDto, db: AsyncSession = Depends(get_db)):
     return await svc.touch_session(db, body)
 
 
+# ── Profile bundle (one-call replacement for the n8n Customer-Profile assembly)
+@router.get("/profile/{wa_id}", dependencies=[Depends(verify_n8n_secret)])
+async def get_profile(wa_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    return await svc.get_profile(db, request.app.state.redis, wa_id)
+
+
 # ── Messages ──────────────────────────────────────────────
 @router.get("/messages/{wa_id}", dependencies=[Depends(verify_n8n_secret)])
 async def get_messages(wa_id: str, db: AsyncSession = Depends(get_db)):
