@@ -174,6 +174,10 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         await svc.log_agent_usage(db, wa_id, settings.tier2_model, totals)
     except Exception:
         _log.warning("usage logging failed for %s", wa_id, exc_info=False)
+
+    # Let the AI keep the lead stage + country tag current (forward-only).
+    from app.services.lead_signals import refresh_lead_signals
+    await refresh_lead_signals(db, wa_id)
     return reply
 
 

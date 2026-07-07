@@ -49,6 +49,8 @@ export interface CustomerProfile {
     age: number | null;
     tags: string[];
     lead_stage: LeadStage;
+    lead_stage_source?: "auto" | "manual" | null;
+    suggested_lead_stage?: LeadStage;
     lead_score: number;
     channels: CustomerChannel[];
     merged_ids: string[];
@@ -864,6 +866,14 @@ export function CustomerSidebar({
                         </Section>
 
                         <Section title="Lead Stage">
+                            {profile.lead_stage_source === "auto" && (
+                                <div className="text-[10px] text-violet-600 mb-1.5 flex items-center gap-1">
+                                    <span className="inline-flex items-center rounded px-1 py-0.5 bg-violet-50 border border-violet-200 font-semibold">
+                                        ✦ AI
+                                    </span>
+                                    set from the conversation — click any stage to override.
+                                </div>
+                            )}
                             <div className="flex flex-wrap gap-1">
                                 {STAGE_ORDER.map((stage) => {
                                     const m = STAGE_META[stage];

@@ -133,6 +133,8 @@ def _build_profile(
     lead_score = _compute_lead_score(user, order_count, total_spent, len(channels))
     rhythm = _buying_rhythm(orders)
     tier = _customer_tier(order_count, total_spent, rhythm["days_since_last"])
+    from app.services.lead_signals import derive_lead_stage
+    suggested_stage = derive_lead_stage(user, orders)
 
     # Extra fields stored in user.state
     state       = user.state or {}
@@ -152,6 +154,8 @@ def _build_profile(
         "age":            user.age,
         "tags":           tags,
         "lead_stage":     lead_stage,
+        "lead_stage_source": state.get("lead_stage_source"),
+        "suggested_lead_stage": suggested_stage,
         "lead_score":     lead_score,
         "channels":       channels,
         "merged_ids":     merged_ids,
@@ -255,6 +259,9 @@ async def update_customer(
         if field in body:
             key = "crm_notes" if field == "notes" else field
             state[key] = body[field]
+    # An operator-set stage is authoritative — lock it so the AI won't re-advance it.
+    if "lead_stage" in body:
+        state["lead_stage_source"] = "manual"
 
     user.state = state
     await db.commit()
@@ -416,6 +423,7 @@ async def update_lead(
     state = dict(user.state or {})
     if "lead_stage" in body:
         state["lead_stage"] = body["lead_stage"]
+        state["lead_stage_source"] = "manual"  # operator override locks the AI out
     if "tags" in body:
         state["tags"] = body["tags"]
     if "notes" in body:
