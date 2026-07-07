@@ -75,7 +75,21 @@ async def touch_session(body: SessionDto, db: AsyncSession = Depends(get_db)):
 # ── Profile bundle (one-call replacement for the n8n Customer-Profile assembly)
 @router.get("/profile/{wa_id}", dependencies=[Depends(verify_n8n_secret)])
 async def get_profile(wa_id: str, request: Request, db: AsyncSession = Depends(get_db)):
-    return await svc.get_profile(db, request.app.state.redis, wa_id)
+    redis = request.app.state.redis
+    profile = await svc.get_profile(db, redis, wa_id)
+
+    # Tier 2 routing: for enabled numbers, fire the agent in the background and
+    # tell n8n NOT to run the Tier 1 AI (the agent sends its own reply). This is
+    # the coexistence seam — everyone else falls through to Tier 1 untouched.
+    from app.agent import runtime
+    norm = svc._normalize_wa_id(wa_id)
+    if runtime.is_tier2(norm):
+        last = await svc.latest_inbound_message(db, norm)
+        if last and (last.get("text") or "").strip():
+            await runtime.schedule_reply(redis, norm, last["text"], last["id"])
+        profile["should_run_ai"] = False
+        profile["route_reason"] = "tier2_agent"
+    return profile
 
 
 # ── Messages ──────────────────────────────────────────────
