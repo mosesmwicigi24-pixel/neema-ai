@@ -129,6 +129,9 @@ export interface CatalogItem {
     unit?: string;
     in_stock: boolean;
     description: string;
+    // Present when sourced from the Bethany House hub (the live source of truth).
+    hub_product_id?: number | null;
+    available_qty?: number | null;
 }
 
 export interface ActivityEntry {

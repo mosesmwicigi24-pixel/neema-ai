@@ -830,19 +830,32 @@ async def update_order(
 
 @router.get("/catalog")
 async def list_catalog(
+    request: Request,
     category: str | None = None,
     search: str | None = None,
     db: AsyncSession = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
 ):
-    from app.models.catalog import Catalog
-    q = select(Catalog).order_by(Catalog.name)
+    """Operator catalogue view.
+
+    Reads the SAME source the AI sells from — the Bethany House hub when
+    `catalog_source=hub` (live prices + stock), falling back to Neema's local
+    table if the hub is unreachable. Read-only here: products are maintained in
+    the hub, so operators see exactly what the agent quotes.
+    """
+    from app.services import n8n_bridge as svc
+    items = await svc.catalog_items(db, request.app.state.redis)
     if category:
-        q = q.where(Catalog.category == category)
+        items = [i for i in items if (i.get("category") or "") == category]
     if search:
-        q = q.where(Catalog.name.ilike(f"%{search}%"))
-    result = await db.execute(q)
-    return result.scalars().all()
+        needle = search.lower()
+        items = [
+            i for i in items
+            if needle in (i.get("name") or "").lower()
+            or needle in (i.get("sku") or "").lower()
+            or any(needle in str(a).lower() for a in (i.get("aliases") or []))
+        ]
+    return items
 
 
 @router.post("/catalog")
