@@ -441,7 +441,7 @@ async def get_profile(db: AsyncSession, redis, wa_id: str) -> dict:
     # Recent messages, oldest->newest, in the bundled shape the pipeline reads.
     res = await db.execute(
         select(Message)
-        .where(Message.wa_id == wa_id, Message.deleted_at.is_(None))
+        .where(Message.wa_id == wa_id)
         .order_by(Message.created_at.desc())
         .limit(20)
     )
