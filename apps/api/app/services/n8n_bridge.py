@@ -285,9 +285,12 @@ _GREETING_RE = _re.compile(
     r"vipi|shalom)[\s!.,]*$",
     _re.IGNORECASE,
 )
+# Only PURE gratitude / closers are safe to short-circuit. Affirmatives like
+# "yes", "no", "ok", "sure", "sawa", "poa", "fine", "alright" are load-bearing in
+# a sales flow — a bare "yes" is how a customer CONFIRMS an order — so they must
+# reach the AI. (Runaway loops are still capped by the cooldown below.)
 _ACK_RE = _re.compile(
-    r"^(ok+(ay)?|k|kk|sawa|poa|noted|alright|got\s*it|sure|fine|yes+|no+|"
-    r"thanks?|thank\s*you|asante(\s*sana)?|thx|ty|👍+|🙏+|❤️*|😊+|amen)[\s!.,🙏👍❤😊]*$",
+    r"^(thanks?|thank\s*you|asante(\s*sana)?|thx|ty|amen|👍+|🙏+|❤️*|😊+)[\s!.,🙏👍❤😊]*$",
     _re.IGNORECASE,
 )
 
