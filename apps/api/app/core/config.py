@@ -30,6 +30,16 @@ class Settings(BaseSettings):
     hub_push_orders: bool = True     # push confirmed WhatsApp orders into the hub (Part B)
     hub_relay_receipt: bool = True   # WhatsApp the customer the receipt/payment link (Loop C)
     hub_order_status_ttl: int = 60   # seconds to cache a hub order's live status (Loop C)
+    # ── Tier 2 agent (tool-calling; coexists with Tier 1 behind a flag) ──────
+    anthropic_api_key: str = ""
+    tier2_model: str = "claude-sonnet-5"
+    tier2_enabled_wa_ids: str = ""   # comma-separated wa_ids routed to the Tier 2 agent
+    tier2_all: bool = False          # route ALL traffic to Tier 2 (full cutover)
+    tier2_max_iterations: int = 8    # max tool-call loops per turn (runaway guard)
+    tier2_max_tokens: int = 1024
+
+    def tier2_wa_ids(self) -> set[str]:
+        return {w.strip() for w in self.tier2_enabled_wa_ids.split(",") if w.strip()}
 
     @field_validator("cors_origins", mode="before")
     @classmethod

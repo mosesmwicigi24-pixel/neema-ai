@@ -1279,6 +1279,31 @@ async def _maybe_push_order_to_hub(db: AsyncSession, redis, body, event_id: str)
     return out
 
 
+async def save_outbound_message(db, redis, wa_id: str, text: str) -> None:
+    """Persist an AI outbound message + broadcast it (used by the Tier 2 agent,
+    which sends its own reply rather than going through the Tier 1 outbound gate)."""
+    wa_id = _normalize_wa_id(wa_id)
+    conv = (await db.execute(
+        select(Conversation).where(Conversation.wa_id == wa_id)
+    )).scalar_one_or_none()
+    if conv is None:
+        conv = Conversation(wa_id=wa_id)
+        db.add(conv)
+        await db.flush()
+    db.add(Message(
+        wa_id=wa_id, conversation_id=conv.id,
+        direction=MsgDirection.outbound, sender=MsgSender.ai, text=text,
+    ))
+    await db.commit()
+    try:
+        await _broadcast(redis, str(conv.id), {
+            "type": "message", "conversationId": str(conv.id),
+            "waId": wa_id, "direction": "outbound", "text": text,
+        })
+    except Exception:
+        pass
+
+
 async def _relay_order_confirmation(db, redis, wa_id, *, order_number, currency, total, pay_url) -> None:
     """WhatsApp the customer their order confirmation + secure payment link, and
     save it to history so it appears in the conversation (Loop C)."""

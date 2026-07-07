@@ -29,5 +29,8 @@ python-multipart==0.0.12   # file uploads
 # OpenAI API client
 openai
 
+# Anthropic API client (Tier 2 agent)
+anthropic
+
 # Async file handling (for media uploads/downloads)
 aiofiles

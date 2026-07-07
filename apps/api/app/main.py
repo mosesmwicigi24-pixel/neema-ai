@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import redis.asyncio as aioredis
 
 from app.core.config import settings
-from app.routers import auth, admin, n8n_bridge, websocket, health, crm, roles, media
+from app.routers import auth, admin, n8n_bridge, websocket, health, crm, roles, media, agent
 from app.database import AsyncSessionLocal
 from sqlalchemy import text
 
@@ -146,6 +146,7 @@ app.include_router(admin.router,      prefix="/api/admin", tags=["Admin"])
 app.include_router(crm.router,        prefix="/api/admin", tags=["CRM"])
 app.include_router(roles.router,      prefix="/api/admin", tags=["Roles"])
 app.include_router(n8n_bridge.router, prefix="/api/n8n",   tags=["n8n Bridge"])
+app.include_router(agent.router,      prefix="/api/agent", tags=["Tier 2 Agent"])
 app.include_router(websocket.router,  prefix="",           tags=["WebSocket"])
 app.include_router(media.router,      prefix="/api",       tags=["Media"])
 
