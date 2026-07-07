@@ -7,7 +7,22 @@ final text turn.
 import asyncio
 import json
 
-from app.agent.llm import FakeLLM, LLMResponse
+import types
+
+from app.agent.llm import FakeLLM, LLMResponse, _blocks_to_response
+
+
+def test_blocks_to_response_handles_sdk_objects_with_empty_input():
+    # Real Anthropic blocks are objects (no .get); a no-arg tool has input={}.
+    # This reproduces the live 'ToolUseBlock has no attribute get' crash.
+    text_block = types.SimpleNamespace(type="text", text="On it.")
+    tool_block = types.SimpleNamespace(type="tool_use", id="toolu_1", name="get_cart", input={})
+    r = _blocks_to_response([text_block, tool_block])
+    assert r.text == "On it."
+    assert len(r.tool_calls) == 1
+    assert r.tool_calls[0].name == "get_cart"
+    assert r.tool_calls[0].input == {}
+    assert r.assistant_content[1] == {"type": "tool_use", "id": "toolu_1", "name": "get_cart", "input": {}}
 
 
 def test_fakellm_replays_tools_then_text():
