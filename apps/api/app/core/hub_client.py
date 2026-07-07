@@ -54,6 +54,11 @@ def _map_product(p: dict) -> dict:
         "aliases":        p.get("aliases") or [],
         "in_stock":       bool(p.get("in_stock", True)),
         "available_qty":  p.get("available_qty"),
+        # Order-routing: "variable" products track stock per-variant, so a bare
+        # product_id fails the POS stock check. Producible (made-to-order) items
+        # are pushed via production_items[] instead — no variant, no stock check.
+        "product_type":   p.get("product_type") or "simple",
+        "is_producible":  bool(p.get("is_producible")),
     }
 
 
@@ -149,6 +154,8 @@ def resolve_hub_line(item: dict, catalog: list[dict]) -> dict | None:
             "unit_price": float(price or 0),
             "name": p.get("name"),
             "matched_by": matched_by,
+            "product_type": p.get("product_type") or "simple",
+            "is_producible": bool(p.get("is_producible")),
         }
 
     by_sku = {_norm(p.get("sku")): p for p in catalog if p.get("sku")}
@@ -172,6 +179,39 @@ def resolve_hub_line(item: dict, catalog: list[dict]) -> dict | None:
     return None
 
 
+def _is_made_to_order(line: dict) -> bool:
+    """A line the hub should MAKE, not sell from stock.
+
+    Variable products track inventory per-variant, so a bare product_id fails
+    the POS stock check; when such a product is also producible it's a genuine
+    made-to-order item (custom vestments — sized per order). These go through
+    production_items[], which skips the stock check and needs no variant_id.
+    Simple products (and non-producible ones) sell from stock via items[].
+    """
+    return line.get("product_type") == "variable" and bool(line.get("is_producible"))
+
+
+async def _find_customer_id(wa_id: str) -> int | None:
+    """Reuse an existing hub customer by phone so repeat buyers don't duplicate."""
+    base = settings.hub_api_url.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            resp = await client.get(
+                f"{base}/api/v1/admin/pos/customers/search",
+                headers=_api_headers(),
+                params={"q": wa_id},
+            )
+            resp.raise_for_status()
+            digits = "".join(ch for ch in wa_id if ch.isdigit())
+            for c in (resp.json() or {}).get("data", []):
+                cphone = "".join(ch for ch in str(c.get("phone") or "") if ch.isdigit())
+                if cphone and (cphone == digits or cphone.endswith(digits) or digits.endswith(cphone)):
+                    return c.get("id")
+    except Exception:
+        pass  # dedupe is a nicety — fall back to new_customer
+    return None
+
+
 async def push_pending_order(
     catalog: list[dict],
     *,
@@ -182,34 +222,53 @@ async def push_pending_order(
 ) -> dict:
     """Create a pending order in the hub from a confirmed WhatsApp cart.
 
+    Stock lines go via items[]; made-to-order lines (custom vestments) via
+    production_items[]. Reuses an existing customer (by phone) when present.
     Returns {order_id, order_number, total_amount, currency_code, lines,
-    unmatched}. Raises on HTTP failure (caller records the error and retries
-    on the next confirmed event). Raises ValueError with .unmatched attached
-    when NO line could be matched to a hub product.
+    production_lines, unmatched}. Raises on HTTP failure (caller records the
+    error and retries). Raises ValueError with .unmatched attached when NO line
+    could be matched to a hub product.
     """
-    lines, unmatched = [], []
+    stock_lines, mto_lines, unmatched = [], [], []
     for it in items or []:
         line = resolve_hub_line(it, catalog)
-        if line:
-            lines.append(line)
-        else:
+        if not line:
             unmatched.append(it.get("name") or it.get("product") or "item")
+        elif _is_made_to_order(line):
+            mto_lines.append(line)
+        else:
+            stock_lines.append(line)
 
-    if not lines:
+    if not stock_lines and not mto_lines:
         err = ValueError("no cart line matched a hub product")
         err.unmatched = unmatched            # type: ignore[attr-defined]
         raise err
 
-    payload = {
-        "outlet_id": settings.hub_outlet_id,
-        "new_customer": {"first_name": first_name or "WhatsApp Customer", "phone": wa_id},
-        "items": [
+    payload = {"outlet_id": settings.hub_outlet_id}
+    if stock_lines:
+        payload["items"] = [
             {"product_id": l["product_id"], "quantity": l["quantity"], "unit_price": l["unit_price"]}
-            for l in lines
-        ],
-    }
+            for l in stock_lines
+        ]
+    if mto_lines:
+        payload["production_items"] = [
+            {
+                "product_id": l["product_id"],
+                "quantity": l["quantity"],
+                "unit_price": l["unit_price"],
+                # Size/measurements aren't captured on WhatsApp yet — prompt staff.
+                "production_notes": "WhatsApp order via Neema — confirm size/measurements with the customer.",
+            }
+            for l in mto_lines
+        ]
     if country_iso:
         payload["customer_country_code"] = country_iso.upper()
+
+    customer_id = await _find_customer_id(wa_id)
+    if customer_id:
+        payload["customer_id"] = customer_id
+    else:
+        payload["new_customer"] = {"first_name": first_name or "WhatsApp Customer", "phone": wa_id}
 
     base = settings.hub_api_url.rstrip("/")
     async with httpx.AsyncClient(timeout=20.0) as client:
@@ -226,7 +285,8 @@ async def push_pending_order(
         "order_number": data.get("order_number"),
         "total_amount": data.get("total_amount"),
         "currency_code": data.get("currency_code"),
-        "lines": lines,
+        "lines": stock_lines,
+        "production_lines": mto_lines,
         "unmatched": unmatched,
     }
 
