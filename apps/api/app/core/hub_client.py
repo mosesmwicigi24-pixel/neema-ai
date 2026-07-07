@@ -244,7 +244,13 @@ async def push_pending_order(
         err.unmatched = unmatched            # type: ignore[attr-defined]
         raise err
 
-    payload = {"outlet_id": settings.hub_outlet_id}
+    # channel='whatsapp' groups the order under the hub's "WhatsApp Orders" (and
+    # tags order_type/number as WA-), while the outlet stays the fulfilling store.
+    payload = {
+        "outlet_id": settings.hub_outlet_id,
+        "channel": "whatsapp",
+        "notes": "WhatsApp order via Neema",
+    }
     if stock_lines:
         payload["items"] = [
             {"product_id": l["product_id"], "quantity": l["quantity"], "unit_price": l["unit_price"]}
