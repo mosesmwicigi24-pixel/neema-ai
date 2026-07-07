@@ -272,7 +272,7 @@ def resolve_country(wa_id_or_phone: str | None) -> dict:
     Returns a dict with None values when nothing matches (never raises), so
     callers can spread it unconditionally.
     """
-    empty = {"country": None, "country_iso": None, "flag_url": None}
+    empty = {"country": None, "country_iso": None, "flag_url": None, "code": None}
     if not wa_id_or_phone:
         return empty
     digits = "".join(ch for ch in str(wa_id_or_phone) if ch.isdigit())
@@ -280,5 +280,5 @@ def resolve_country(wa_id_or_phone: str | None) -> dict:
         return empty
     for prefix, name, iso in _SORTED:
         if digits.startswith(prefix):
-            return {"country": name, "country_iso": iso, "flag_url": flag_url_for(iso)}
+            return {"country": name, "country_iso": iso, "flag_url": flag_url_for(iso), "code": prefix}
     return empty

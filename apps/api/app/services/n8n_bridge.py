@@ -417,6 +417,104 @@ async def ai_cost_summary(db: AsyncSession, days: int = 30) -> dict:
     }
 
 
+async def get_profile(db: AsyncSession, redis, wa_id: str) -> dict:
+    """One-call context bundle for the AI pipeline.
+
+    Replaces the fragile n8n 'Customer Profile & Session Setup' assembly
+    (RunQuery -> Bundle -> a chain of 'combine' merges that collapsed to 0
+    items whenever a branch was empty, silently halting the agent before it
+    ever replied). This is server-authoritative and ALWAYS returns a usable
+    object: identity + resolved country, the recent message window in the
+    shape n8n's 'Compose context' expects, session state/cart, and the live
+    catalogue — everything the AI needs, in one robust payload.
+    """
+    from app.core.countries import resolve_country
+    from app.models.catalog import Catalog
+
+    wa_id = _normalize_wa_id(wa_id)
+    user = await provision_user(db, wa_id)   # find-or-create + country enrichment
+    await db.commit()
+    await db.refresh(user)
+
+    ctx = await get_context(db, redis, wa_id)
+
+    # Recent messages, oldest->newest, in the bundled shape the pipeline reads.
+    res = await db.execute(
+        select(Message)
+        .where(Message.wa_id == wa_id, Message.deleted_at.is_(None))
+        .order_by(Message.created_at.desc())
+        .limit(20)
+    )
+    rows = list(reversed(res.scalars().all()))
+    messages = [{
+        "id":        str(m.id),
+        "wa_id":     wa_id,
+        "name":      user.name or "",
+        "direction": m.direction.value if hasattr(m.direction, "value") else str(m.direction or "inbound"),
+        "sender":    m.sender.value if hasattr(m.sender, "value") else str(m.sender or "user"),
+        "text":      m.text or "",
+        "media_type": m.media_type or "",
+        "mediaType": m.media_type or "",
+        "media_url": m.media_url or "",
+        "mediaUrl":  m.media_url or "",
+        "ts_ms":     m.ts_ms or (int(m.created_at.timestamp() * 1000) if m.created_at else 0),
+        "tsMs":      m.ts_ms or (int(m.created_at.timestamp() * 1000) if m.created_at else 0),
+        "tsIso":     m.created_at.isoformat() if m.created_at else "",
+        "created_at": m.created_at.isoformat() if m.created_at else "",
+        "createdAt": m.created_at.isoformat() if m.created_at else "",
+    } for m in rows]
+
+    loc = resolve_country(wa_id)
+    facts = {
+        "name": user.name or "", "email": user.email, "phone": user.phone or wa_id,
+        "location": user.location, "country": user.country, "country_iso": user.country_iso,
+    }
+    state = ctx.get("state") or {"active": "active", "cart": {"items": [], "subtotal": 0}}
+    cart = state.get("cart") if isinstance(state.get("cart"), dict) else {"items": [], "subtotal": 0}
+
+    cat_res = await db.execute(
+        select(Catalog).where(Catalog.in_stock == True).order_by(Catalog.category, Catalog.name)
+    )
+    catalog = [{
+        "sku": str(i.sku), "name": str(i.name), "category": str(i.category or ""),
+        "price": float(i.price), "unit": str(i.unit or ""),
+        "description": str(i.description or ""), "aliases": i.aliases or [], "in_stock": i.in_stock,
+    } for i in cat_res.scalars().all()]
+
+    last_in  = next((m["text"] for m in reversed(messages) if m["direction"] == "inbound"), "")
+    last_out = next((m["text"] for m in reversed(messages) if m["direction"] == "outbound"), "")
+
+    return {
+        "wa_id": wa_id,
+        "name": user.name or "",
+        "phone": user.phone or wa_id,
+        "email": user.email,
+        "location": user.location,
+        "country": user.country,
+        "countryName": user.country,
+        "countryIso": user.country_iso,
+        "countryCode": loc.get("code"),
+        "flag_url": user.flag_url,
+        "user": facts,
+        "userFacts": facts,
+        "messages": messages,
+        "history": {
+            "last10Messages": messages[-10:],
+            "lastInbound": last_in,
+            "lastOutbound": last_out,
+        },
+        "state": state,
+        "cart": cart,
+        "last_text": ctx.get("last_text"),
+        "last_direction": ctx.get("last_direction"),
+        "last_message_ts": ctx.get("last_message_ts"),
+        "last_message_at": ctx.get("last_message_at"),
+        "intercept_mode": ctx.get("intercept_mode"),
+        "catalog": catalog,
+        "mergeKey": 1,
+    }
+
+
 async def get_context(db: AsyncSession, redis, wa_id: str) -> dict:
     wa_id = _normalize_wa_id(wa_id)
     cache_key = f"context:{wa_id}"
