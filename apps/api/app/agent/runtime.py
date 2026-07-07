@@ -92,7 +92,8 @@ async def _history(db: AsyncSession, wa_id: str, limit: int = 20) -> list[dict]:
     return msgs
 
 
-async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM) -> str:
+async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM,
+                   media: dict | None = None) -> str:
     """Run one agent turn and return the reply text (does NOT send it)."""
     user = (await db.execute(select(User).where(User.wa_id == wa_id))).scalar_one_or_none()
     loc = resolve_country(wa_id) or {}
@@ -103,9 +104,25 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     )
 
     messages = await _history(db, wa_id)
+
+    # Current inbound turn. An image message has empty text (skipped by _history),
+    # so build a multimodal turn — the agent SEES the photo (Claude vision) and
+    # can match it to the catalogue. Voice notes already arrive as transcribed
+    # text, so they need no special handling here.
+    img_block = None
+    if settings.tier2_vision and media and (media.get("type") == "image"):
+        from app.agent.media import load_image_block
+        img_block = load_image_block(media.get("url"))
+    if img_block:
+        caption = (media.get("caption") or "").strip()
+        messages.append({"role": "user", "content": [
+            img_block,
+            {"type": "text", "text": caption or
+             "(The customer sent this photo. Identify the item and search our catalogue for it.)"},
+        ]})
     # The just-received message is already persisted by /message; only append it
     # if history didn't capture it (defensive) so the model always sees it last.
-    if not messages or messages[-1]["role"] != "user" or user_text.strip() not in messages[-1]["content"]:
+    elif not messages or messages[-1]["role"] != "user" or user_text.strip() not in messages[-1]["content"]:
         messages.append({"role": "user", "content": user_text})
 
     # Cross-conversation memory: prepend as a leading context turn so it stays
@@ -181,12 +198,13 @@ import asyncio  # noqa: E402
 _bg_tasks: set = set()
 
 
-async def _run_and_send(redis, wa_id: str, text: str) -> None:
+async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None) -> None:
     from app.database import AsyncSessionLocal
     from app.services import n8n_bridge as svc
     try:
         async with AsyncSessionLocal() as db:
-            reply = await run_turn(db, redis, wa_id, text, build_llm(model=route_model(text)))
+            reply = await run_turn(db, redis, wa_id, text,
+                                   build_llm(model=route_model(text)), media=media)
         await svc._send_waba(wa_id, reply)
         async with AsyncSessionLocal() as db2:
             await svc.save_outbound_message(db2, redis, wa_id, reply)
@@ -195,7 +213,8 @@ async def _run_and_send(redis, wa_id: str, text: str) -> None:
         _log.exception("tier2 background turn failed for %s", wa_id)
 
 
-async def schedule_reply(redis, wa_id: str, text: str, dedup_id: str | None) -> bool:
+async def schedule_reply(redis, wa_id: str, text: str, dedup_id: str | None,
+                         media: dict | None = None) -> bool:
     """Fire the agent for this inbound once. Returns False if already handled."""
     if redis is not None and dedup_id:
         try:
@@ -204,7 +223,7 @@ async def schedule_reply(redis, wa_id: str, text: str, dedup_id: str | None) -> 
                 return False
         except Exception:
             pass  # if the dedup store is down, better to reply than to go silent
-    task = asyncio.create_task(_run_and_send(redis, wa_id, text))
+    task = asyncio.create_task(_run_and_send(redis, wa_id, text, media))
     _bg_tasks.add(task)
     task.add_done_callback(_bg_tasks.discard)
     return True

@@ -85,8 +85,19 @@ async def get_profile(wa_id: str, request: Request, db: AsyncSession = Depends(g
     norm = svc._normalize_wa_id(wa_id)
     if runtime.is_tier2(norm):
         last = await svc.latest_inbound_message(db, norm)
-        if last and (last.get("text") or "").strip():
-            await runtime.schedule_reply(redis, norm, last["text"], last["id"])
+        if last:
+            text = (last.get("text") or "").strip()
+            mtype = last.get("media_type")
+            is_image = mtype == "image" and bool(last.get("media_url"))
+            # Images go to the agent as a photo (vision). Other media (video,
+            # document) can't be seen — pass the caption so it still responds.
+            if not text and not is_image:
+                text = (last.get("media_caption") or "").strip() or (
+                    f"(the customer sent a {mtype})" if mtype else "")
+            media = {"type": mtype, "url": last.get("media_url"),
+                     "caption": last.get("media_caption")} if is_image else None
+            if text or is_image:
+                await runtime.schedule_reply(redis, norm, text, last["id"], media=media)
         profile["should_run_ai"] = False
         profile["route_reason"] = "tier2_agent"
     return profile

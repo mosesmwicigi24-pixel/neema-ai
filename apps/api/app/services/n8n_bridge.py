@@ -1313,7 +1313,11 @@ async def latest_inbound_message(db, wa_id: str) -> dict | None:
     )).scalar_one_or_none()
     if row is None:
         return None
-    return {"id": str(row.id), "text": row.text or ""}
+    return {
+        "id": str(row.id), "text": row.text or "",
+        "media_type": row.media_type, "media_url": row.media_url,
+        "media_caption": row.media_caption,
+    }
 
 
 async def save_outbound_message(db, redis, wa_id: str, text: str) -> None:
