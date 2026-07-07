@@ -484,8 +484,26 @@ async def get_profile(db: AsyncSession, redis, wa_id: str) -> dict:
     last_in  = next((m["text"] for m in reversed(messages) if m["direction"] == "inbound"), "")
     last_out = next((m["text"] for m in reversed(messages) if m["direction"] == "outbound"), "")
 
+    # ── Cost governor: should this turn spend the expensive model? ────────────
+    # n8n gates the Conversation-Intelligence sub-workflow on `should_run_ai`.
+    # This is the "give the AI time to cool off" fix + skip replies nobody needs.
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    recent_ai_replies = sum(
+        1 for m in messages
+        if m["direction"] == "outbound" and (now_ms - (m["tsMs"] or 0)) <= 60_000
+    )
+    li = (last_in or "").strip()
+    is_ack = bool(_ACK_RE.match(li)) and not _GREETING_RE.match(li)
+    should_run_ai, route_reason = True, "full"
+    if recent_ai_replies >= 6:
+        should_run_ai, route_reason = False, "cooldown"   # runaway loop → hold
+    elif is_ack:
+        should_run_ai, route_reason = False, "ack"         # "ok"/"thanks" → no reply needed
+
     return {
         "wa_id": wa_id,
+        "should_run_ai": should_run_ai,
+        "route_reason": route_reason,
         "name": user.name or "",
         "phone": user.phone or wa_id,
         "email": user.email,
