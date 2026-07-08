@@ -134,15 +134,29 @@ WhatsApp unchanged).** Not yet fused to `main`. Commits:
   dup identities; merge/unmerge round-trips exactly; migrations up/downgrade
   clean). Test suite: 87 passed.
 
+**Also shipped into the epic (beyond Phase 0):**
+- **M-Pesa payment → person reconciler** (the load-bearing deterministic bridge,
+  lever 2): `identifiers` table (`type/value` portable tokens) + `Identifier`;
+  `app/services/reconcile.py` resolves a payer to a person by exact country-safe
+  E.164 (WhatsApp identity → phone identifier → new person; auto-merges a
+  phone-only person into a WhatsApp one on a match — Tier-1 deterministic).
+  Records phone/mpesa_ref/order_number identifiers + stamps the local order_event.
+  Receiver: `POST /api/n8n/payment`. Contract for the hub:
+  [`PAYMENT_RECONCILE_CONTRACT.md`](./PAYMENT_RECONCILE_CONTRACT.md). Merge now
+  also moves identifiers (reversibly).
+- **Person-scoped CRM reads** — a merged customer shows unified order/chat history
+  across all their WhatsApp handles; leads list hides tombstoned (merged) persons.
+- All verified against Postgres 16; 89 tests pass.
+
 **Deliberately NOT done yet (and why):**
 - `UNIQUE(conversations.wa_id)` is still in place and the query layer still keys on
   `wa_id` — cutting it over to `person` is the next spine slice, gated on nothing
   external but larger/riskier; kept separate so each epic merge stays coherent.
 - Messenger/Instagram ingestion — blocked on **Meta App Review** (`pages_messaging`,
   `instagram_manage_messages`, `business_management`); platform paperwork, not code.
-- M-Pesa payment→person receiver — the neema side is ready to build, but it needs
-  the **hub** (`feat/customer-country-e164` in bethany-house) to expose the payer
-  MSISDN to a neema endpoint; cross-repo contract, so parked until that lands.
+- M-Pesa payment→person receiver — **neema side DONE** (`POST /api/n8n/payment`,
+  see above). Remaining: the **hub** (`feat/customer-country-e164` in bethany-house)
+  must POST captured payments to it — contract in `PAYMENT_RECONCILE_CONTRACT.md`.
 - Pre-existing: the Alembic chain isn't replayable on a fresh DB (migration
   `6436af8b40be` drops `custom_roles`/agent cols the initial migration never
   creates). Flagged as a separate task; doesn't affect prod (already past it).
