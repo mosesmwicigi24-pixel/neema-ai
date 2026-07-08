@@ -316,6 +316,52 @@ async def get_customer(
     return _build_profile(user, orders, conversations, history, hub=hub, identities=identities)
 
 
+# ── Identity spine health (ops trust the backfill in prod) ────────────────────
+
+@router.get("/identities/health")
+async def identity_spine_health(
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Read-only integrity snapshot of the identity spine. After the migration
+    runs in prod, every wa_id-keyed row should have a person_id (orphans == 0)
+    and there should be exactly one whatsapp identity per distinct wa_id. Lets
+    ops confirm the backfill + resolver are healthy without opening the DB."""
+    orphans: dict[str, int] = {}
+    for model, name in (
+        (User, "users"), (Conversation, "conversations"), (Message, "messages"),
+        (OrderEvent, "order_events"), (CustomerHistory, "customer_history"),
+    ):
+        orphans[name] = (await db.execute(
+            select(func.count()).select_from(model).where(model.person_id.is_(None))
+        )).scalar() or 0
+
+    persons_total   = (await db.execute(select(func.count()).select_from(Person))).scalar() or 0
+    persons_merged  = (await db.execute(
+        select(func.count()).select_from(Person).where(Person.merged_into_id.isnot(None))
+    )).scalar() or 0
+    identities_total = (await db.execute(select(func.count()).select_from(Identity))).scalar() or 0
+    wa_identities    = (await db.execute(
+        select(func.count()).select_from(Identity).where(Identity.channel == "whatsapp")
+    )).scalar() or 0
+    active_merges = (await db.execute(
+        select(func.count()).select_from(PersonMerge).where(PersonMerge.undone_at.is_(None))
+    )).scalar() or 0
+
+    total_orphans = sum(orphans.values())
+    return {
+        "healthy":            total_orphans == 0,
+        "orphan_rows":        orphans,
+        "total_orphan_rows":  total_orphans,
+        "persons_total":      persons_total,
+        "persons_merged":     persons_merged,
+        "persons_live":       persons_total - persons_merged,
+        "identities_total":   identities_total,
+        "whatsapp_identities": wa_identities,
+        "active_merges":      active_merges,
+    }
+
+
 # ── Identity graph (spine) ────────────────────────────────────────────────────
 
 @router.get("/customers/{wa_id}/identities")
