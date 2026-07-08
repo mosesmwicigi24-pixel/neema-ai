@@ -14,14 +14,22 @@ class MsgSender(str, enum.Enum):
     ai           = "ai"
     human_agent  = "human_agent"
 
+def _external_id_from_wa_id(context):
+    """Default external_id to wa_id so existing `Message(wa_id=…)` (WhatsApp)
+    keeps working after the channel cutover; Messenger/IG messages pass it."""
+    return context.get_current_parameters().get("wa_id")
+
+
 class Message(Base):
     __tablename__ = "messages"
 
     id              : Mapped[uuid.UUID]        = mapped_column(primary_key=True, default=uuid.uuid4)
     name            : Mapped[str | None]       = mapped_column(String(100), nullable=True)
-    wa_id           : Mapped[str]              = mapped_column(String(30), nullable=False, index=True)
-    # Identity spine (additive): backfilled 1:1 from wa_id; channel defaults to whatsapp.
-    channel         : Mapped[str | None]       = mapped_column(String(20), nullable=True, server_default="whatsapp")
+    # WhatsApp handle — populated for WhatsApp (shim); NULL for Messenger/IG.
+    wa_id           : Mapped[str | None]       = mapped_column(String(30), nullable=True, index=True)
+    channel         : Mapped[str]              = mapped_column(String(20), nullable=False, server_default="whatsapp")
+    # Channel-native handle (wa_id | PSID | IGSID) == the conversation's external_id.
+    external_id     : Mapped[str | None]       = mapped_column(String(128), nullable=True, index=True, default=_external_id_from_wa_id)
     person_id       : Mapped[uuid.UUID | None] = mapped_column(ForeignKey("persons.id", ondelete="SET NULL"), nullable=True, index=True)
     conversation_id : Mapped[uuid.UUID | None] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), nullable=True)
     direction       : Mapped[MsgDirection]     = mapped_column(PgEnum(MsgDirection), nullable=False)
