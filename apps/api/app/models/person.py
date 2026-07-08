@@ -82,3 +82,30 @@ class Identity(Base):
     updated_at  : Mapped[datetime]    = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
 
     person = relationship("Person", back_populates="identities", foreign_keys=[person_id])
+
+
+class PersonMerge(Base):
+    """Audit row for one real, reversible person-level merge.
+
+    Written by app/services/merge.py when secondary's identities are moved onto
+    primary. Holds exactly what unmerge needs to reverse the move: the moved
+    identity ids and the external_ids (wa_ids) whose denormalized person_id cache
+    was refreshed. `undone_at` is set when the merge is reversed.
+    """
+    __tablename__ = "person_merges"
+    __table_args__ = (
+        Index("ix_person_merges_primary_person_id", "primary_person_id"),
+        Index("ix_person_merges_secondary_person_id", "secondary_person_id"),
+    )
+
+    id                  : Mapped[uuid.UUID]   = mapped_column(primary_key=True, default=uuid.uuid4)
+    primary_person_id   : Mapped[uuid.UUID]   = mapped_column(ForeignKey("persons.id", ondelete="CASCADE"), nullable=False)
+    secondary_person_id : Mapped[uuid.UUID]   = mapped_column(ForeignKey("persons.id", ondelete="CASCADE"), nullable=False)
+    moved_identity_ids  : Mapped[list]        = mapped_column(JSONB, default=list)
+    moved_external_ids  : Mapped[list]        = mapped_column(JSONB, default=list)
+    primary_wa_id       : Mapped[str | None]  = mapped_column(String(30), nullable=True)
+    secondary_wa_id     : Mapped[str | None]  = mapped_column(String(30), nullable=True)
+    performed_by        : Mapped[uuid.UUID | None] = mapped_column(ForeignKey("agents.id", ondelete="SET NULL"), nullable=True)
+    created_at          : Mapped[datetime]    = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    undone_at           : Mapped[datetime | None]  = mapped_column(DateTime(timezone=True), nullable=True)
+    undone_by           : Mapped[uuid.UUID | None] = mapped_column(ForeignKey("agents.id", ondelete="SET NULL"), nullable=True)
