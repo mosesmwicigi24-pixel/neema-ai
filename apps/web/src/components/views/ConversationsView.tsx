@@ -772,8 +772,8 @@ export function ConversationsView({
         <div
             className="flex flex-col h-full bg-white"
             style={{
-                width: isMobile ? "100%" : 288,
-                minWidth: isMobile ? "100%" : 288,
+                width: isMobile ? "100%" : 340,
+                minWidth: isMobile ? "100%" : 340,
                 borderRight: "1px solid #edf0ea",
             }}
         >

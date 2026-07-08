@@ -608,7 +608,7 @@ export function CustomerSidebar({
     if (loading) {
         return (
             <div
-                className="w-72 flex-shrink-0 flex items-center justify-center"
+                className="w-80 flex-shrink-0 flex items-center justify-center"
                 style={{
                     backgroundColor: "#f8fafc",
                     borderLeft: "1px solid #fde68a",
@@ -631,7 +631,7 @@ export function CustomerSidebar({
 
     return (
         <div
-            className={className ?? "w-72 flex-shrink-0 flex flex-col overflow-hidden"}
+            className={className ?? "w-80 flex-shrink-0 flex flex-col overflow-hidden"}
             style={{
                 backgroundColor: "#ffffff",
                 ...(className ? {} : { borderLeft: "1px solid #fde68a" }),
