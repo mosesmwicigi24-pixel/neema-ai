@@ -39,15 +39,24 @@ def _meta_addendum(currency: str = "USD") -> str:
     wa = (settings.whatsapp_handoff_number or "").strip()
     where = f"on WhatsApp at {wa}" if wa else "on WhatsApp"
     money = "Kenyan Shillings (KES)" if currency == "KES" else "US Dollars (USD)"
+    # Local-currency conversion only for the USD-quoted customer, and only on request.
+    local = ""
+    if currency == "USD":
+        local = (
+            " If they explicitly ask for their own local currency, convert from the "
+            "USD amount (never from KES) at the country's current central-bank rate, "
+            "rounding UP to the nearest 10; state it confidently, not as a guess."
+        )
     return (
         "\n\n## This conversation is on Facebook Messenger / Instagram (not WhatsApp)\n"
         f"- Answer product questions using the catalogue via search_catalog. Prices "
-        f"from the tool are already in {money} — quote them exactly, never convert, "
-        "and never invent a product or price; if something isn't in the catalogue, "
-        "say so.\n"
+        f"from the tool are already in {money} — quote them exactly, and never invent "
+        f"a product or price; if something isn't in the catalogue, say so.{local}\n"
+        "- Write PLAIN TEXT here — Messenger/Instagram show no bold, so use no "
+        "asterisks, no `**`, no markdown; use short lines and hyphen lists.\n"
         f"- You CANNOT take payment or place an order here. When the customer is "
         f"ready to order, warmly invite them to continue {where} to confirm and pay.\n"
-        "- Keep replies short and friendly; you are the same Bethany House assistant."
+        "- Keep replies short, precise, and friendly; you are the same Bethany House assistant."
     )
 
 
