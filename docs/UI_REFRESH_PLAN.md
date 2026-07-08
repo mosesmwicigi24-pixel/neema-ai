@@ -124,3 +124,7 @@ tsc clean.
 **Slice 3 (done):** conversation rows → Figma — gold active accent (left bar +
 warm bg, was green), channel shown as a right-side WA/FB/IG pill (removed the
 avatar-corner icon), gold unread pulse dot. Data/logic untouched. tsc clean.
+
+**Slice 4 (done):** thread panel → Figma — outbound bubbles dark navy (#1e293b
+AI / #243447 agent; inbound stays light), thread bg cooler light (#f8fafc),
+composer: neutral attach button, gold focus ring, GOLD send button. tsc clean.

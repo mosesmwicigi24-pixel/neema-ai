@@ -1122,7 +1122,7 @@ export function ConversationsView({
 
     const ThreadPanel = (
         <div className="flex flex-1 overflow-hidden">
-            <div className="flex flex-col flex-1 overflow-hidden relative" style={{ backgroundColor: "#f9faf7" }}>
+            <div className="flex flex-col flex-1 overflow-hidden relative" style={{ backgroundColor: "#f8fafc" }}>
                 {!activeConv ? (
                     <div className="flex-1 flex items-center justify-center" style={{ color: "#c5d5bc" }}>
                         <div className="text-center">
@@ -1671,8 +1671,8 @@ export function ConversationsView({
                                                             ? "bg-white text-[#1c2917] rounded-tl-sm"
                                                             : msg.sender ===
                                                                 "ai"
-                                                              ? "bg-[#2a48a2] text-white rounded-tr-sm"
-                                                              : "bg-[#2c7a1e] text-white rounded-tr-sm"
+                                                              ? "bg-[#1e293b] text-white rounded-tr-sm"
+                                                              : "bg-[#243447] text-white rounded-tr-sm"
                                                     }`}
                                                     style={{
                                                         border: isInbound ? "1px solid #edf0ea" : "none",
@@ -2058,7 +2058,7 @@ export function ConversationsView({
                                                 fileInputRef.current?.click()
                                             }
                                             title="Attach image or file"
-                                            className="h-10 w-10 rounded-xl bg-[#e6f3d8] hover:bg-[#cee6b2] flex items-center justify-center text-[#427425] transition-colors flex-shrink-0"
+                                            className="h-10 w-10 rounded-xl bg-[#f1f3f5] hover:bg-[#e5e8eb] flex items-center justify-center text-[#64748b] transition-colors flex-shrink-0"
                                         >
                                             <svg
                                                 className="w-4 h-4"
@@ -2090,10 +2090,10 @@ export function ConversationsView({
                                             }}
                                             placeholder="Type a reply… (Enter to send)"
                                             rows={2}
-                                            className="flex-1 resize-none px-3 py-2 text-sm rounded-xl focus:outline-none focus:ring-2 focus:ring-[#589b31] focus:border-transparent"
+                                            className="flex-1 resize-none px-3 py-2 text-sm rounded-xl focus:outline-none focus:ring-2 focus:ring-[#f59e0b] focus:border-transparent"
                                             style={{
-                                                backgroundColor: "#f5f7f2",
-                                                border: "1px solid #e8ebe3",
+                                                backgroundColor: "#f8fafc",
+                                                border: "1px solid #e2e8f0",
                                                 color: "#1c2917",
                                             }}
                                         />
@@ -2103,9 +2103,9 @@ export function ConversationsView({
                                                 !replyText.trim() || sending
                                             }
                                             className="h-10 w-10 rounded-xl disabled:opacity-50 flex items-center justify-center text-white transition-colors"
-                                            style={{ backgroundColor: "#589b31" }}
-                                            onMouseEnter={(e) => { if (!(!replyText.trim() || sending)) (e.currentTarget as HTMLElement).style.backgroundColor = "#427425"; }}
-                                            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#589b31"; }}
+                                            style={{ backgroundColor: "#f59e0b" }}
+                                            onMouseEnter={(e) => { if (!(!replyText.trim() || sending)) (e.currentTarget as HTMLElement).style.backgroundColor = "#d97706"; }}
+                                            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#f59e0b"; }}
                                         >
                                             {sending ? (
                                                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
