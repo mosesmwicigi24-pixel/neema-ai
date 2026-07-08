@@ -16,6 +16,14 @@ class Settings(BaseSettings):
     waba_phone_number_id: str = ""
     waba_api_version: str = "v21.0"
     n8n_api_secret: str = ""
+    # ── Meta Messenger / Instagram webhook (multichannel ingestion) ──────────
+    # meta_verify_token: the arbitrary secret you also paste into the Meta app's
+    #   webhook "Verify token" field — echoed back during the GET handshake.
+    # meta_app_secret: the Meta App Secret, used to verify the X-Hub-Signature-256
+    #   on inbound POSTs. If unset, signature verification is skipped (dev only).
+    # The webhook is INERT until meta_verify_token is set.
+    meta_verify_token: str = ""
+    meta_app_secret: str = ""
     environment: str = "production"
     openai_api_key: str = ""
     # Media file serving
