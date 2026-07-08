@@ -324,7 +324,7 @@ function ScoreBar({ score }: { score: number }) {
         <div className="flex items-center gap-2">
             <div
                 className="flex-1 h-1.5 rounded-full overflow-hidden"
-                style={{ backgroundColor: "#fef3c7" }}
+                style={{ backgroundColor: "#f1f5f9" }}
             >
                 <div
                     className={`h-full rounded-full transition-all duration-500 ${color}`}
@@ -352,7 +352,7 @@ function Section({
             <div className="flex items-center justify-between mb-2">
                 <span
                     className="text-[10px] font-bold uppercase tracking-widest"
-                    style={{ color: "#d97706" }}
+                    style={{ color: "#334155" }}
                 >
                     {title}
                 </span>
@@ -385,11 +385,11 @@ function EditableField({
     return (
         <div
             className="group flex items-start gap-2 py-1.5 border-b last:border-0"
-            style={{ borderColor: "#fef3c7" }}
+            style={{ borderColor: "#f1f5f9" }}
         >
             <span
                 className="text-[10px] w-16 flex-shrink-0 pt-0.5"
-                style={{ color: "#d97706" }}
+                style={{ color: "#334155" }}
             >
                 {label}
             </span>
@@ -611,13 +611,13 @@ export function CustomerSidebar({
                 className="w-80 flex-shrink-0 flex items-center justify-center"
                 style={{
                     backgroundColor: "#f8fafc",
-                    borderLeft: "1px solid #fde68a",
+                    borderLeft: "1px solid #e2e8f0",
                 }}
             >
                 <div
                     className="w-5 h-5 border-2 border-t-transparent rounded-full animate-spin"
                     style={{
-                        borderColor: "#f59e0b",
+                        borderColor: "#1e293b",
                         borderTopColor: "transparent",
                     }}
                 />
@@ -634,18 +634,18 @@ export function CustomerSidebar({
             className={className ?? "w-80 flex-shrink-0 flex flex-col overflow-hidden"}
             style={{
                 backgroundColor: "#ffffff",
-                ...(className ? {} : { borderLeft: "1px solid #fde68a" }),
+                ...(className ? {} : { borderLeft: "1px solid #e2e8f0" }),
             }}
         >
             {/* Header */}
             {!hideHeader && (
             <div
                 className="px-4 py-3 flex items-center justify-between"
-                style={{ borderBottom: "1px solid #fde68a" }}
+                style={{ borderBottom: "1px solid #e2e8f0" }}
             >
                 <span
                     className="text-xs font-bold uppercase tracking-widest"
-                    style={{ color: "#b45309" }}
+                    style={{ color: "#1e293b" }}
                 >
                     Customer
                 </span>
@@ -674,7 +674,7 @@ export function CustomerSidebar({
             {/* Profile hero */}
             <div
                 className="px-4 pt-4 pb-3"
-                style={{ borderBottom: "1px solid #fde68a" }}
+                style={{ borderBottom: "1px solid #e2e8f0" }}
             >
                 <div className="flex items-start gap-3 mb-3">
                     <Avatar
@@ -792,9 +792,9 @@ export function CustomerSidebar({
                             title={`${ch.channel}: ${ch.identifier} · ${ch.conversation_count} conv`}
                             className="inline-flex items-center gap-0.5 text-[10px] rounded px-1.5 py-0.5 capitalize"
                             style={{
-                                backgroundColor: "#fef3c7",
+                                backgroundColor: "#f1f5f9",
                                 border: "1px solid #b5da8b",
-                                color: "#b45309",
+                                color: "#1e293b",
                             }}
                         >
                             <ChannelBadge channel={ch.channel} /> {ch.channel}
@@ -811,7 +811,7 @@ export function CustomerSidebar({
             {/* Quick stats */}
             <div
                 className="grid grid-cols-3"
-                style={{ borderBottom: "1px solid #fde68a" }}
+                style={{ borderBottom: "1px solid #e2e8f0" }}
             >
                 {[
                     {
@@ -834,7 +834,7 @@ export function CustomerSidebar({
                     <div
                         key={s.label}
                         className="px-3 py-2.5 text-center last:border-0"
-                        style={{ borderRight: "1px solid #fde68a" }}
+                        style={{ borderRight: "1px solid #e2e8f0" }}
                     >
                         <div
                             className="text-sm font-bold"
@@ -844,7 +844,7 @@ export function CustomerSidebar({
                         </div>
                         <div
                             className="text-[10px]"
-                            style={{ color: "#d97706" }}
+                            style={{ color: "#334155" }}
                         >
                             {s.label}
                         </div>
@@ -865,7 +865,7 @@ export function CustomerSidebar({
                         }`}
                         style={
                             activeTab === tab
-                                ? { color: "#f59e0b", borderColor: "#f59e0b" }
+                                ? { color: "#1e293b", borderColor: "#1e293b" }
                                 : undefined
                         }
                     >
@@ -994,8 +994,8 @@ export function CustomerSidebar({
                                         key={tag}
                                         className="inline-flex items-center gap-1 text-[10px] rounded px-1.5 py-0.5"
                                         style={{
-                                            backgroundColor: "#fef3c7",
-                                            color: "#b45309",
+                                            backgroundColor: "#f1f5f9",
+                                            color: "#1e293b",
                                         }}
                                     >
                                         {tag}
@@ -1029,8 +1029,8 @@ export function CustomerSidebar({
                                     onClick={addTag}
                                     className="text-xs font-semibold px-2 py-1 rounded transition-colors"
                                     style={{
-                                        backgroundColor: "#fffbeb",
-                                        color: "#f59e0b",
+                                        backgroundColor: "#f8fafc",
+                                        color: "#1e293b",
                                         border: "1px solid #b5da8b",
                                     }}
                                 >
@@ -1085,7 +1085,7 @@ export function CustomerSidebar({
                                     className="w-full text-left text-xs rounded-lg px-2.5 py-2 transition-colors min-h-[40px]"
                                     style={{
                                         backgroundColor: "white",
-                                        border: "1px solid #fef3c7",
+                                        border: "1px solid #f1f5f9",
                                         color: "#16270c",
                                     }}
                                 >
@@ -1107,13 +1107,13 @@ export function CustomerSidebar({
                                     style={
                                         showMerge
                                             ? {
-                                                  backgroundColor: "#fde68a",
-                                                  color: "#b45309",
-                                                  border: "1px solid #fcd34d",
+                                                  backgroundColor: "#e2e8f0",
+                                                  color: "#1e293b",
+                                                  border: "1px solid #cbd5e1",
                                               }
                                             : {
-                                                  backgroundColor: "#fffbeb",
-                                                  color: "#f59e0b",
+                                                  backgroundColor: "#f8fafc",
+                                                  color: "#1e293b",
                                                   border: "1px solid #b5da8b",
                                               }
                                     }
@@ -1188,13 +1188,13 @@ export function CustomerSidebar({
                                 </div>
                             )}
                             {profile.merged_ids.length > 0 && (
-                                <div className="mt-2 p-2 rounded-lg" style={{ backgroundColor: "#fef3c7", border: "1px solid #fde68a" }}>
-                                    <div className="text-[10px] font-semibold mb-1" style={{ color: "#b45309" }}>
+                                <div className="mt-2 p-2 rounded-lg" style={{ backgroundColor: "#f1f5f9", border: "1px solid #e2e8f0" }}>
+                                    <div className="text-[10px] font-semibold mb-1" style={{ color: "#1e293b" }}>
                                         Merged ({profile.merged_ids.length})
                                     </div>
                                     {profile.merged_ids.map((mid) => (
                                         <div key={mid} className="flex items-center justify-between gap-2 py-0.5">
-                                            <span className="text-[10px] font-mono" style={{ color: "#92400e" }}>{formatPhone(mid)}</span>
+                                            <span className="text-[10px] font-mono" style={{ color: "#0f172a" }}>{formatPhone(mid)}</span>
                                             <button
                                                 onClick={async () => {
                                                     try {
@@ -1206,7 +1206,7 @@ export function CustomerSidebar({
                                                     }
                                                 }}
                                                 className="text-[9px] font-semibold px-1.5 py-0.5 rounded hover:opacity-80 flex-shrink-0"
-                                                style={{ color: "#b45309", border: "1px solid #fcd34d" }}
+                                                style={{ color: "#1e293b", border: "1px solid #cbd5e1" }}
                                             >
                                                 Unmerge
                                             </button>
@@ -1218,8 +1218,8 @@ export function CustomerSidebar({
                                 <div
                                     className="mt-3 rounded-xl border-2 border-dashed overflow-hidden"
                                     style={{
-                                        borderColor: "#fcd34d",
-                                        backgroundColor: "#fffbeb",
+                                        borderColor: "#cbd5e1",
+                                        backgroundColor: "#f8fafc",
                                     }}
                                 >
                                     <div className="px-3 pt-3 pb-2">
@@ -1227,8 +1227,8 @@ export function CustomerSidebar({
                                             <div
                                                 className="w-7 h-7 rounded-lg flex items-center justify-center text-sm flex-shrink-0"
                                                 style={{
-                                                    backgroundColor: "#fde68a",
-                                                    color: "#b45309",
+                                                    backgroundColor: "#e2e8f0",
+                                                    color: "#1e293b",
                                                 }}
                                             >
                                                 ⊕
@@ -1236,13 +1236,13 @@ export function CustomerSidebar({
                                             <div>
                                                 <div
                                                     className="text-xs font-bold"
-                                                    style={{ color: "#b45309" }}
+                                                    style={{ color: "#1e293b" }}
                                                 >
                                                     Merge Profiles
                                                 </div>
                                                 <div
                                                     className="text-[10px]"
-                                                    style={{ color: "#d97706" }}
+                                                    style={{ color: "#334155" }}
                                                 >
                                                     Combine duplicate customer
                                                     records
@@ -1251,7 +1251,7 @@ export function CustomerSidebar({
                                         </div>
                                         <p
                                             className="text-[10px] mb-2.5 leading-relaxed"
-                                            style={{ color: "#b45309" }}
+                                            style={{ color: "#1e293b" }}
                                         >
                                             Enter the phone / wa_id of the
                                             profile to merge{" "}
@@ -1267,19 +1267,19 @@ export function CustomerSidebar({
                                             className="w-full text-xs rounded-lg px-2.5 py-2 mb-2.5 focus:outline-none focus:ring-2"
                                             style={{
                                                 backgroundColor: "white",
-                                                border: "1.5px solid #fcd34d",
+                                                border: "1.5px solid #cbd5e1",
                                                 color: "#16270c",
                                                 fontSize: 12,
                                             }}
                                             onFocus={(e) => {
                                                 (
                                                     e.target as HTMLInputElement
-                                                ).style.borderColor = "#f59e0b";
+                                                ).style.borderColor = "#1e293b";
                                             }}
                                             onBlur={(e) => {
                                                 (
                                                     e.target as HTMLInputElement
-                                                ).style.borderColor = "#fcd34d";
+                                                ).style.borderColor = "#cbd5e1";
                                             }}
                                         />
                                         <div className="flex gap-1.5">
@@ -1311,7 +1311,7 @@ export function CustomerSidebar({
                                                 }}
                                                 className="flex-1 text-[10px] font-bold py-1.5 rounded-lg text-white transition-colors"
                                                 style={{
-                                                    backgroundColor: "#f59e0b",
+                                                    backgroundColor: "#1e293b",
                                                 }}
                                             >
                                                 ⊕ Merge now
@@ -1323,8 +1323,8 @@ export function CustomerSidebar({
                                                 }}
                                                 className="text-[10px] font-semibold px-3 py-1.5 rounded-lg border transition-colors"
                                                 style={{
-                                                    borderColor: "#fcd34d",
-                                                    color: "#b45309",
+                                                    borderColor: "#cbd5e1",
+                                                    color: "#1e293b",
                                                     backgroundColor: "white",
                                                 }}
                                             >
@@ -1393,7 +1393,7 @@ export function CustomerSidebar({
                                     >
                                         <span
                                             className="text-xs"
-                                            style={{ color: "#d97706" }}
+                                            style={{ color: "#334155" }}
                                         >
                                             {row.label}
                                         </span>
@@ -1434,7 +1434,7 @@ export function CustomerSidebar({
                                             key={row.label}
                                             className="flex items-center justify-between"
                                         >
-                                            <span className="text-xs" style={{ color: "#d97706" }}>
+                                            <span className="text-xs" style={{ color: "#334155" }}>
                                                 {row.label}
                                             </span>
                                             <span
@@ -1578,7 +1578,7 @@ export function CustomerSidebar({
                                     className="mb-2 flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px]"
                                     style={{
                                         backgroundColor: "#eef7e3",
-                                        border: "1px solid #fde68a",
+                                        border: "1px solid #e2e8f0",
                                         color: "#3f6417",
                                     }}
                                     title="Matched to a shop customer by phone number — same person across the counter and WhatsApp"
@@ -1605,7 +1605,7 @@ export function CustomerSidebar({
                                             className="p-2.5 rounded-lg"
                                             style={{
                                                 backgroundColor: "white",
-                                                border: "1px solid #fef3c7",
+                                                border: "1px solid #f1f5f9",
                                             }}
                                         >
                                             <div className="flex items-center justify-between mb-1">
@@ -1638,7 +1638,7 @@ export function CustomerSidebar({
                                             </div>
                                             <div
                                                 className="text-[10px] mt-0.5 truncate"
-                                                style={{ color: "#d97706" }}
+                                                style={{ color: "#334155" }}
                                             >
                                                 {(o.items || [])
                                                     .map((i) => i.name)
@@ -1693,11 +1693,11 @@ export function CustomerSidebar({
             {/* Quick actions */}
             <div
                 className="px-4 py-3 bg-white"
-                style={{ borderTop: "1px solid #fde68a" }}
+                style={{ borderTop: "1px solid #e2e8f0" }}
             >
                 <div
                     className="text-[10px] font-bold uppercase tracking-widest mb-2"
-                    style={{ color: "#d97706" }}
+                    style={{ color: "#334155" }}
                 >
                     Quick Actions
                 </div>
@@ -1729,8 +1729,8 @@ export function CustomerSidebar({
                         }}
                         className="w-full text-[10px] font-semibold py-1.5 rounded-lg transition-colors"
                         style={{
-                            backgroundColor: "#fffbeb",
-                            color: "#b45309",
+                            backgroundColor: "#f8fafc",
+                            color: "#1e293b",
                             border: "1px solid #b5da8b",
                         }}
                     >
