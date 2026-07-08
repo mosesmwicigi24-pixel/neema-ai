@@ -148,10 +148,21 @@ WhatsApp unchanged).** Not yet fused to `main`. Commits:
   across all their WhatsApp handles; leads list hides tombstoned (merged) persons.
 - All verified against Postgres 16; 89 tests pass.
 
+**Query-layer cutover — BUILT + verified on `feat/channel-conversations` (not yet
+deployed):** conversations/messages are now channel-native. Migration
+`a1b2c3d4e5f6` adds `external_id` (backfilled = wa_id), replaces the unique wa_id
+index with `UNIQUE(channel, external_id)`, makes `wa_id` nullable. `external_id`
+defaults to wa_id via an ORM default so every existing WhatsApp creation site is
+UNCHANGED. `app/services/channel.py` get_or_create_conversation keys on
+(channel, external_id). C3: the Meta webhook now creates person+conversation+message
+for inbound Messenger/IG DMs (idempotent on mid) → they land in the unified inbox.
+C4: `app/services/meta_send.py` + conversation.py route outbound replies by channel
+(Send API for Meta) so agents can ANSWER Messenger/IG. Verified on Postgres 16
+(schema swap reversible; ingest + reply round-trips); 101 tests pass. **Deploy is
+GATED** (riskiest migration — alters the busiest table). Needs META_PAGE_TOKEN for
+replies. Next: auto AI-reply on Meta (route the Tier-2 agent to messenger convs).
+
 **Deliberately NOT done yet (and why):**
-- `UNIQUE(conversations.wa_id)` is still in place and the query layer still keys on
-  `wa_id` — cutting it over to `person` is the next spine slice, gated on nothing
-  external but larger/riskier; kept separate so each epic merge stays coherent.
 - Messenger/Instagram ingestion — **webhook receiver SHIPPED**: `GET/POST
   /api/meta/webhook` (`app/routers/meta_webhook.py`) does the Meta verification
   handshake + X-Hub-Signature-256 check + **captures sender identities**
