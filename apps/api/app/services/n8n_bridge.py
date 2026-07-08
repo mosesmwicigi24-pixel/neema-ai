@@ -1385,6 +1385,28 @@ async def save_outbound_message(db, redis, wa_id: str, text: str) -> None:
         pass
 
 
+async def save_outbound_channel_message(db, redis, channel: str, external_id: str, text: str) -> None:
+    """Persist an AI outbound reply for a non-WhatsApp channel (Messenger/IG) and
+    broadcast it, so it shows in the unified inbox. Keyed on (channel, external_id)."""
+    from app.services.channel import get_or_create_conversation
+    conv = await get_or_create_conversation(db, channel, external_id)
+    db.add(Message(
+        channel=channel, external_id=external_id, wa_id=None,
+        person_id=conv.person_id, conversation_id=conv.id,
+        direction=MsgDirection.outbound, sender=MsgSender.ai, text=text,
+    ))
+    conv.last_message_at = datetime.now(timezone.utc)
+    conv.last_message_preview = (text or "")[:100]
+    await db.commit()
+    try:
+        await _broadcast(redis, str(conv.id), {
+            "type": "message", "conversationId": str(conv.id),
+            "channel": channel, "sender": "ai", "direction": "outbound", "text": text,
+        })
+    except Exception:
+        pass
+
+
 async def _relay_order_confirmation(db, redis, wa_id, *, order_number, currency, total, pay_url) -> None:
     """WhatsApp the customer their order confirmation + secure payment link, and
     save it to history so it appears in the conversation (Loop C)."""

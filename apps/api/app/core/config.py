@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     # account is linked to the Page. Unset → outbound Messenger/IG is disabled.
     meta_page_token: str = ""
     meta_graph_version: str = "v21.0"
+    # When true, the Tier-2 agent auto-answers inbound Messenger/IG DMs (same KES
+    # hub catalogue as WhatsApp; checkout routed to WhatsApp). Default OFF so the
+    # webhook stays ingestion-only until you flip it on. Needs meta_page_token set.
+    meta_agent_reply: bool = False
+    # Optional WhatsApp number the Messenger/IG agent invites buyers to for checkout.
+    whatsapp_handoff_number: str = ""
     environment: str = "production"
     openai_api_key: str = ""
     # Media file serving
