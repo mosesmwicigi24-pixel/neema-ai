@@ -152,8 +152,14 @@ WhatsApp unchanged).** Not yet fused to `main`. Commits:
 - `UNIQUE(conversations.wa_id)` is still in place and the query layer still keys on
   `wa_id` — cutting it over to `person` is the next spine slice, gated on nothing
   external but larger/riskier; kept separate so each epic merge stays coherent.
-- Messenger/Instagram ingestion — blocked on **Meta App Review** (`pages_messaging`,
-  `instagram_manage_messages`, `business_management`); platform paperwork, not code.
+- Messenger/Instagram ingestion — **webhook receiver SHIPPED**: `GET/POST
+  /api/meta/webhook` (`app/routers/meta_webhook.py`) does the Meta verification
+  handshake + X-Hub-Signature-256 check + **captures sender identities**
+  (person/identity per PSID/IGSID — mines the backlog). Inert until
+  `META_VERIFY_TOKEN` is set. Still blocked on **Meta App Review**
+  (`pages_messaging`, `instagram_manage_messages`, `business_management`) for
+  production access, and full two-way chat (inbox + replies) needs the wa_id→
+  person conversation cutover below. Verification + identity capture work now.
 - M-Pesa payment→person receiver — **neema side DONE** (`POST /api/n8n/payment`,
   see above). Remaining: the **hub** (`feat/customer-country-e164` in bethany-house)
   must POST captured payments to it — contract in `PAYMENT_RECONCILE_CONTRACT.md`.
