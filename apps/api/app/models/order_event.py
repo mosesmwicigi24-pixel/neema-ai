@@ -1,6 +1,7 @@
+import uuid
 from datetime import datetime
 from decimal import Decimal
-from sqlalchemy import String, Text, Numeric, DateTime, Integer
+from sqlalchemy import String, Text, Numeric, DateTime, Integer, ForeignKey
 from sqlalchemy.dialects.postgresql import JSONB, CHAR
 from sqlalchemy.orm import Mapped, mapped_column
 from app.models import Base
@@ -10,6 +11,9 @@ class OrderEvent(Base):
 
     id                 : Mapped[str]      = mapped_column(String(80), primary_key=True)  # {wa_id}_{epoch}
     wa_id              : Mapped[str]      = mapped_column(String(30), nullable=False, index=True)
+    # Identity spine (additive): the human this order rolls up to. Backfilled 1:1
+    # from wa_id. `channel` already exists below (default whatsapp).
+    person_id          : Mapped[uuid.UUID | None] = mapped_column(ForeignKey("persons.id", ondelete="SET NULL"), nullable=True, index=True)
     session_id         : Mapped[str | None] = mapped_column(String(80), nullable=True)
     event_type         : Mapped[str | None] = mapped_column(String(40), nullable=True)
     items              : Mapped[list]     = mapped_column(JSONB, default=list)
