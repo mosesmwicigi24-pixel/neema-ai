@@ -6,6 +6,7 @@ from app.models.message import Message, MsgDirection, MsgSender
 from app.models.intercept import Intercept, InterceptAction
 from app.models.agent import Agent
 from app.services.n8n_bridge import _send_waba, _broadcast
+from app.services.meta_send import send_to_channel, META_CHANNELS
 
 
 async def intercept_conversation(
@@ -154,16 +155,16 @@ async def transfer_conversation(
     await db.commit()
 
     if target_agent:
-        wa_id = conv.wa_id.lstrip("+")
         notification = (
             f"🔄 You've been transferred to *{target_agent.name}*, "
             f"who will continue assisting you. "
             f"One moment please! 😊"
         )
         try:
-            await _send_waba(wa_id, notification)
+            await send_to_channel(conv.channel or "whatsapp", conv.external_id or conv.wa_id, notification)
             msg = Message(
                 wa_id=conv.wa_id,
+                external_id=conv.external_id,
                 conversation_id=conv.id,
                 person_id=conv.person_id,
                 channel=conv.channel or "whatsapp",
@@ -305,11 +306,11 @@ async def send_agent_reply(
             detail=f"Conversation is handled by {owner_name}.",
         )
 
-    wa_id = conv.wa_id.lstrip("+")
-    await _send_waba(wa_id, text)
+    await send_to_channel(conv.channel or "whatsapp", conv.external_id or conv.wa_id, text)
 
     msg = Message(
         wa_id=conv.wa_id,
+        external_id=conv.external_id,
         conversation_id=conv.id,
         person_id=conv.person_id,
         channel=conv.channel or "whatsapp",
@@ -371,11 +372,11 @@ async def approve_draft(
         from fastapi import HTTPException
         raise HTTPException(status_code=422, detail="No draft text found to approve")
 
-    wa_id = conv.wa_id.lstrip("+")
-    await _send_waba(wa_id, text)
+    await send_to_channel(conv.channel or "whatsapp", conv.external_id or conv.wa_id, text)
 
     msg = Message(
         wa_id=conv.wa_id,
+        external_id=conv.external_id,
         conversation_id=conv.id,
         person_id=conv.person_id,
         channel=conv.channel or "whatsapp",
@@ -436,12 +437,19 @@ async def send_agent_media(
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Conversation not found")
 
+    if (conv.channel or "whatsapp") in META_CHANNELS:
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=400,
+            detail="Media replies to Messenger/Instagram aren't supported yet — send text.",
+        )
     wa_id = conv.wa_id.lstrip("+")
     await _send_waba_media(wa_id, media_type, media_url, caption, filename)
 
     preview = caption or filename or f"[{media_type}]"
     msg = Message(
         wa_id=conv.wa_id,
+        external_id=conv.external_id,
         conversation_id=conv.id,
         person_id=conv.person_id,
         channel=conv.channel or "whatsapp",

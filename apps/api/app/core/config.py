@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     # The webhook is INERT until meta_verify_token is set.
     meta_verify_token: str = ""
     meta_app_secret: str = ""
+    # Page access token used to SEND Messenger/Instagram replies via the Graph
+    # Send API (/me/messages). Instagram DMs use the same token once the IG
+    # account is linked to the Page. Unset → outbound Messenger/IG is disabled.
+    meta_page_token: str = ""
+    meta_graph_version: str = "v21.0"
     environment: str = "production"
     openai_api_key: str = ""
     # Media file serving
