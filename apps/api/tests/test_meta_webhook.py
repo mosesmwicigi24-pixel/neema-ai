@@ -173,3 +173,59 @@ def test_capture_schedules_agent_reply_only_when_enabled(monkeypatch):
     monkeypatch.setattr(settings, "meta_agent_reply", True, raising=False)
     asyncio.run(mw._capture_events(_FakeDB(), "messenger", payload))
     assert calls == [("messenger", "PSID_1", "how much for a cassock?", "m1")]
+
+
+# ── Facebook/Instagram comment engagement ────────────────────────────────────
+
+def test_parse_comment_feed_and_instagram_and_ignores_noise():
+    feed = mw._parse_comment({"field": "feed", "value": {
+        "item": "comment", "verb": "add", "comment_id": "c1", "message": "How much?",
+        "from": {"id": "U1", "name": "Jane Doe"}, "post_id": "P1"}})
+    assert feed["comment_id"] == "c1" and feed["from_id"] == "U1"
+    assert feed["post_id"] == "P1" and feed["from_name"] == "Jane Doe"
+
+    ig = mw._parse_comment({"field": "comments", "value": {
+        "id": "ig1", "text": "Price?", "from": {"id": "IG1", "username": "jane"},
+        "media": {"id": "M1"}}})
+    assert ig["comment_id"] == "ig1" and ig["from_id"] == "IG1" and ig["post_id"] == "M1"
+
+    # likes, edits/removes, and non-comment fields are ignored
+    assert mw._parse_comment({"field": "feed", "value": {"item": "like", "verb": "add"}}) is None
+    assert mw._parse_comment({"field": "feed", "value": {
+        "item": "comment", "verb": "remove", "comment_id": "c"}}) is None
+    assert mw._parse_comment({"field": "reactions", "value": {}}) is None
+
+
+def test_comment_capture_is_inert_when_disabled(monkeypatch):
+    monkeypatch.setattr(settings, "meta_comment_reply", False, raising=False)
+    scheduled = []
+    import app.agent.runtime as rt
+    monkeypatch.setattr(rt, "schedule_comment_engage",
+                        lambda *a, **k: scheduled.append(a), raising=False)
+    payload = {"entry": [{"changes": [{"field": "feed", "value": {
+        "item": "comment", "verb": "add", "comment_id": "c1", "message": "hi",
+        "from": {"id": "U1"}}}]}]}
+    asyncio.run(mw._capture_comment_events(_FakeDB(), "messenger", payload))
+    assert scheduled == []
+
+
+def test_comment_capture_schedules_and_skips_own_page(monkeypatch):
+    calls = {}
+    _patch(monkeypatch, calls)
+    monkeypatch.setattr(settings, "meta_comment_reply", True, raising=False)
+    monkeypatch.setattr(settings, "meta_page_id", "PAGE1", raising=False)
+    scheduled = []
+    import app.agent.runtime as rt
+    monkeypatch.setattr(rt, "schedule_comment_engage",
+                        lambda redis, channel, c, own: scheduled.append((channel, c["comment_id"], c["from_id"])),
+                        raising=False)
+    payload = {"entry": [{"changes": [
+        {"field": "feed", "value": {"item": "comment", "verb": "add", "comment_id": "c1",
+                                    "message": "How much for a cassock?",
+                                    "from": {"id": "U1", "name": "Jane"}, "post_id": "P1"}},
+        {"field": "feed", "value": {"item": "comment", "verb": "add", "comment_id": "c2",
+                                    "message": "our own reply", "from": {"id": "PAGE1"},
+                                    "post_id": "P1"}},   # our page → must be skipped
+    ]}]}
+    asyncio.run(mw._capture_comment_events(_FakeDB(), "messenger", payload))
+    assert scheduled == [("messenger", "c1", "U1")]   # only the customer's comment

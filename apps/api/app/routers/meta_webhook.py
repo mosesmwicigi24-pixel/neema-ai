@@ -84,6 +84,10 @@ async def receive_webhook(request: Request, db: AsyncSession = Depends(get_db)):
         await _capture_events(db, channel, payload, redis=redis)
     except Exception as exc:                     # never let capture break the ack
         _log.warning("meta webhook capture failed (%s) — acking anyway: %s", channel, exc)
+    try:
+        await _capture_comment_events(db, channel, payload, redis=redis)
+    except Exception as exc:
+        _log.warning("meta comment capture failed (%s) — acking anyway: %s", channel, exc)
 
     return PlainTextResponse("EVENT_RECEIVED")
 
@@ -181,3 +185,99 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
                     await runtime.schedule_meta_reply(redis, channel, sender, text, dedup_id=mid)
                 except Exception as exc:
                     _log.warning("meta agent reply failed to schedule for %s: %s", sender, exc)
+
+
+# ── Facebook/Instagram comment engagement ────────────────────────────────────
+# Comments arrive as `entry[].changes[]` (a different shape from DM `messaging`
+# events). On a NEW comment we log it to the inbox (attributed to the source
+# post), then fire a public acknowledgement + a private reply that opens a DM.
+# Inert unless META_COMMENT_REPLY is on.
+
+def _own_page_ids() -> set[str]:
+    return {p.strip() for p in (settings.meta_page_id or "").split(",") if p.strip()}
+
+
+def _parse_comment(change: dict) -> dict | None:
+    """Normalise a Facebook `feed` or Instagram `comments` change into a comment
+    dict, or None if it isn't a new top-level comment we should act on."""
+    field = change.get("field")
+    value = change.get("value") or {}
+    frm = value.get("from") or {}
+    if field == "feed":
+        if value.get("item") != "comment" or value.get("verb") != "add":
+            return None      # ignore likes, edits, removes, posts, shares
+        return {
+            "comment_id": value.get("comment_id"),
+            "text": (value.get("message") or "").strip(),
+            "from_id": str(frm.get("id") or ""),
+            "from_name": frm.get("name") or "",
+            "post_id": value.get("post_id") or value.get("parent_id") or "",
+        }
+    if field == "comments":  # Instagram — every event is a new comment
+        return {
+            "comment_id": value.get("id"),
+            "text": (value.get("text") or "").strip(),
+            "from_id": str(frm.get("id") or ""),
+            "from_name": frm.get("username") or "",
+            "post_id": (value.get("media") or {}).get("id") or "",
+        }
+    return None
+
+
+async def _capture_comment_events(db: AsyncSession, channel: str, payload: dict, redis=None) -> None:
+    """Log each new comment to the inbox (attributed to its source post) and
+    schedule the public + private replies. Deduped on the comment id; skips our
+    own Page's comments so Neema never answers itself. Inert unless enabled."""
+    if not settings.meta_comment_reply:
+        return
+    from datetime import datetime, timezone
+    from app.services.identity import resolve_or_create_person
+    from app.services.channel import get_or_create_conversation
+    from app.models.message import Message, MsgDirection, MsgSender
+
+    own = _own_page_ids()
+    engage: list[dict] = []
+    for entry in payload.get("entry", []):
+        for change in entry.get("changes", []) or []:
+            c = _parse_comment(change)
+            if not c or not c.get("comment_id") or not c.get("from_id"):
+                continue
+            if c["from_id"] in own:            # our own comment/reply — never self-answer
+                continue
+            if redis is not None:              # dedup on the comment id (best-effort)
+                try:
+                    ok = await redis.set(f"meta:comment:{c['comment_id']}", "1",
+                                         nx=True, ex=7 * 24 * 3600)
+                    if not ok:
+                        continue
+                except Exception:
+                    pass
+
+            ident = await resolve_or_create_person(
+                db, channel, c["from_id"], source=f"{channel}_comment",
+                confidence="deterministic",
+                raw_profile={"source_post": c["post_id"], "comment": c["text"],
+                             "name": c["from_name"]},
+            )
+            conv = await get_or_create_conversation(db, channel, c["from_id"],
+                                                    person_id=ident.person_id)
+            db.add(Message(
+                channel=channel, external_id=c["from_id"], wa_id=None,
+                person_id=ident.person_id, conversation_id=conv.id,
+                direction=MsgDirection.inbound, sender=MsgSender.user,
+                text=(f"[comment] {c['text']}" if c["text"] else "[comment]"),
+            ))
+            conv.last_message_at = datetime.now(timezone.utc)
+            conv.last_message_preview = (c["text"] or "[comment]")[:100]
+            engage.append(c)
+
+    if engage:
+        await db.commit()
+        _log.info("meta webhook: captured %d %s comment(s)", len(engage), channel)
+        from app.agent import runtime
+        for c in engage:
+            try:
+                runtime.schedule_comment_engage(redis, channel, c, own)
+            except Exception as exc:
+                _log.warning("comment engage failed to schedule for %s: %s",
+                             c.get("comment_id"), exc)

@@ -35,6 +35,19 @@ class Settings(BaseSettings):
     meta_agent_reply: bool = False
     # Optional WhatsApp number the Messenger/IG agent invites buyers to for checkout.
     whatsapp_handoff_number: str = ""
+    # ── Facebook/Instagram comment engagement (comment → public reply + DM) ──
+    # When true, a NEW comment on a Page post/reel/ad fires BOTH a short public
+    # acknowledgement AND a private reply that opens a Messenger DM (where Neema
+    # sells 1:1). Needs meta_page_token + the pages_manage_engagement /
+    # pages_messaging perms (App Review for beyond-tester reach). Default OFF.
+    meta_comment_reply: bool = False
+    # Comma-separated Page ID(s) WE own — used to skip our own comments/replies so
+    # Neema never answers itself (infinite loop). Public replies are skipped when
+    # this is unset, since we then can't tell our own comment from a customer's.
+    meta_page_id: str = ""
+    # Optional override for the public acknowledgement. `{name}` = commenter's
+    # first name (blank if unknown). Kept short and price-free by design.
+    meta_comment_public_text: str = ""
     # Currency display gate: Kenya (+254) customers are quoted KES; everyone else
     # (and all Messenger/IG, which have no phone) is quoted USD = round(KES / rate).
     usd_kes_rate: int = 100
