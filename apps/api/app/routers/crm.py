@@ -281,37 +281,45 @@ async def get_customer(
         await db.commit()
         await db.refresh(user)
 
-    orders_result = await db.execute(
-        select(OrderEvent).where(OrderEvent.wa_id == wa_id).order_by(OrderEvent.created_at.desc())
-    )
-    orders = orders_result.scalars().all()
-
-    convs_result = await db.execute(
-        select(Conversation).where(Conversation.wa_id == wa_id)
-    )
-    conversations = convs_result.scalars().all()
-
-    history_result = await db.execute(
-        select(CustomerHistory).where(CustomerHistory.wa_id == wa_id)
-    )
-    history = history_result.scalar_one_or_none()
-
-    # Pull the customer's full order history + lifetime spend from the hub (the
-    # system of record across POS, web and WhatsApp). Best-effort: on any failure
-    # we fall back to the local WhatsApp order_events.
-    redis = getattr(request.app.state, "redis", None)
-    try:
-        hub = await hub_client.fetch_customer_summary(wa_id, redis)
-    except Exception:
-        hub = None
-
-    # Identity spine: every channel identity linked to this person.
-    identities = []
+    # Identity spine: gather every WhatsApp handle for this person so a *merged*
+    # customer shows unified local history (two wa_ids collapse into one profile),
+    # not just the requested handle's slice.
+    identities: list = []
+    wa_ids = [wa_id]
     if user.person_id is not None:
         identities = (await db.execute(
             select(Identity).where(Identity.person_id == user.person_id)
             .order_by(Identity.created_at)
         )).scalars().all()
+        wa_handles = [i.external_id for i in identities if i.channel == "whatsapp"]
+        if wa_handles:
+            wa_ids = sorted(set(wa_handles) | {wa_id})
+
+    orders_result = await db.execute(
+        select(OrderEvent).where(OrderEvent.wa_id.in_(wa_ids)).order_by(OrderEvent.created_at.desc())
+    )
+    orders = orders_result.scalars().all()
+
+    convs_result = await db.execute(
+        select(Conversation).where(Conversation.wa_id.in_(wa_ids))
+    )
+    conversations = convs_result.scalars().all()
+
+    history_result = await db.execute(
+        select(CustomerHistory).where(CustomerHistory.wa_id.in_(wa_ids))
+        .order_by(CustomerHistory.updated_at.desc())
+    )
+    history = history_result.scalars().first()   # most-recent snapshot across handles
+
+    # Pull the customer's full order history + lifetime spend from the hub (the
+    # system of record across POS, web and WhatsApp). Best-effort: on any failure
+    # we fall back to the local WhatsApp order_events. (Hub summary is fetched by
+    # the requested handle; multi-number hub aggregation is a later slice.)
+    redis = getattr(request.app.state, "redis", None)
+    try:
+        hub = await hub_client.fetch_customer_summary(wa_id, redis)
+    except Exception:
+        hub = None
 
     return _build_profile(user, orders, conversations, history, hub=hub, identities=identities)
 
@@ -627,12 +635,20 @@ async def list_leads(
     users_result = await db.execute(select(User).order_by(User.updated_at.desc()))
     users = users_result.scalars().all()
 
+    # Persons that were merged away (tombstoned). Covers both operator merges and
+    # deterministic reconciler auto-merges — the latter don't touch user state, so
+    # the spine tombstone is the authoritative "this is a duplicate" signal.
+    tombstoned = set((await db.execute(
+        select(Person.id).where(Person.merged_into_id.isnot(None))
+    )).scalars().all())
+
     leads = []
     for user in users:
         state = user.state or {}
 
-        # Skip users merged into another
-        if state.get("merged_into"):
+        # Skip users merged into another (state contract) or whose person was
+        # tombstoned by a real/reconciler merge.
+        if state.get("merged_into") or (user.person_id in tombstoned):
             continue
 
         lead_stage = state.get("lead_stage", "new")
