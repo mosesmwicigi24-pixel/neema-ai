@@ -115,3 +115,8 @@ that don't block the build — don't be alarmed by them.
 **Slice 1 (done):** channel-filter tabs → Figma icon-pills (brand-colour icons +
 short labels WA/FB/IG + corner count badges), wired to the existing
 `CHANNEL_CONFIG` + `channelCounts`. tsc clean.
+
+**Slice 2 (done):** left nav (Sidebar.tsx) → Figma dark-navy + gold accent —
+navy background, gold logo, gold active nav pill, light labels, muted icons, dark
+hover, user card (name + role). Colour-only restyle; all collapse/popup logic kept.
+tsc clean.

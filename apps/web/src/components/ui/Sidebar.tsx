@@ -396,14 +396,22 @@ export function Sidebar({
     const handleTheme    = useCallback(() => { setTheme((t) => t === "light" ? "dark" : "light"); }, [setTheme]);
 
     // ── Shared inline styles ──────────────────────────────────────────────────
+    // ── Figma dark-navy palette ───────────────────────────────────────────────
+    const NAVY = "#0e1729";        // sidebar background
+    const NAVY_BORDER = "#1e2a44"; // dividers / borders
+    const NAVY_HOVER = "#1b2740";  // hover fill
+    const GOLD = "#f59e0b";        // active / accent
+    const TEXT_MUTED = "#94a3b8";  // inactive labels + icons
+    const TEXT_LIGHT = "#f8fafc";  // primary text on navy
+
     const sidebarStyle: React.CSSProperties = {
         display: "flex",
         flexDirection: "column",
         height: "100%",
         width: collapsed ? 60 : 208,
         flexShrink: 0,
-        backgroundColor: "#ffffff",
-        borderRight: "1px solid #edf0ea",
+        backgroundColor: NAVY,
+        borderRight: `1px solid ${NAVY_BORDER}`,
         transition: "width 0.3s ease",
         position: "relative",
         // NO overflow:hidden — lets fixed popups escape freely
@@ -416,14 +424,14 @@ export function Sidebar({
         height: collapsed ? "auto" : 56,
         padding: collapsed ? "12px 0 8px" : "0 10px",
         gap: collapsed ? 6 : 4,
-        borderBottom: "1px solid #edf0ea",
+        borderBottom: `1px solid ${NAVY_BORDER}`,
         flexShrink: 0,
     };
 
     const footerStyle: React.CSSProperties = {
         flexShrink: 0,
         padding: 8,
-        borderTop: "1px solid #edf0ea",
+        borderTop: `1px solid ${NAVY_BORDER}`,
     };
 
     return (
@@ -434,8 +442,8 @@ export function Sidebar({
                 <div style={{
                     width: 32, height: 32,
                     borderRadius: 10,
-                    backgroundColor: "#589b31",
-                    boxShadow: "0 2px 8px rgba(88,155,49,0.28)",
+                    backgroundColor: GOLD,
+                    boxShadow: "0 2px 8px rgba(245,158,11,0.35)",
                     display: "flex", alignItems: "center", justifyContent: "center",
                     flexShrink: 0,
                 }}>
@@ -448,8 +456,8 @@ export function Sidebar({
                 {/* Brand — expanded only */}
                 {!collapsed && (
                     <div style={{ flex: 1, minWidth: 0, marginLeft: 6 }}>
-                        <div style={{ fontWeight: 600, fontSize: 13, color: "#16270c", lineHeight: 1 }}>Neema</div>
-                        <div style={{ fontSize: 10, fontWeight: 500, color: "#699a32", letterSpacing: "0.08em", textTransform: "uppercase", marginTop: 2 }}>Admin</div>
+                        <div style={{ fontWeight: 600, fontSize: 13, color: TEXT_LIGHT, lineHeight: 1 }}>Neema AI</div>
+                        <div style={{ fontSize: 10, fontWeight: 500, color: TEXT_MUTED, letterSpacing: "0.08em", textTransform: "uppercase", marginTop: 2 }}>Admin Portal</div>
                     </div>
                 )}
 
@@ -465,12 +473,12 @@ export function Sidebar({
                             width: 28, height: 28,
                             display: "flex", alignItems: "center", justifyContent: "center",
                             borderRadius: 8, border: "none",
-                            backgroundColor: "transparent", color: "#c5d5bc",
+                            backgroundColor: "transparent", color: TEXT_MUTED,
                             cursor: "pointer", flexShrink: 0,
                             transition: "background-color 0.15s, color 0.15s",
                         }}
-                        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#f0f4ec"; (e.currentTarget as HTMLElement).style.color = "#427425"; }}
-                        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "transparent"; (e.currentTarget as HTMLElement).style.color = "#c5d5bc"; }}
+                        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = NAVY_HOVER; (e.currentTarget as HTMLElement).style.color = GOLD; }}
+                        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "transparent"; (e.currentTarget as HTMLElement).style.color = TEXT_MUTED; }}
                     >
                         <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
@@ -490,12 +498,12 @@ export function Sidebar({
                                 width: "100%", height: 36, marginBottom: 6,
                                 display: "flex", alignItems: "center", justifyContent: "center",
                                 borderRadius: 10, border: "none",
-                                backgroundColor: "transparent", color: "#c5d5bc",
+                                backgroundColor: "transparent", color: TEXT_MUTED,
                                 cursor: "pointer",
                                 transition: "background-color 0.15s, color 0.15s",
                             }}
-                            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#f0f4ec"; (e.currentTarget as HTMLElement).style.color = "#427425"; }}
-                            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "transparent"; (e.currentTarget as HTMLElement).style.color = "#c5d5bc"; }}
+                            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = NAVY_HOVER; (e.currentTarget as HTMLElement).style.color = GOLD; }}
+                            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "transparent"; (e.currentTarget as HTMLElement).style.color = TEXT_MUTED; }}
                         >
                             <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
@@ -521,19 +529,19 @@ export function Sidebar({
                                     height: 40,
                                     borderRadius: 12,
                                     border: "none",
-                                    backgroundColor: isActive ? "#589b31" : "transparent",
-                                    color: isActive ? "#ffffff" : "#6b7e64",
+                                    backgroundColor: isActive ? GOLD : "transparent",
+                                    color: isActive ? "#ffffff" : TEXT_MUTED,
                                     cursor: "pointer",
                                     position: "relative",
                                     transition: "background-color 0.15s",
                                     fontFamily: "inherit",
                                     fontSize: 13,
-                                    fontWeight: 500,
+                                    fontWeight: isActive ? 600 : 500,
                                 }}
-                                onMouseEnter={(e) => { if (!isActive) (e.currentTarget as HTMLElement).style.backgroundColor = "#f0f4ec"; }}
+                                onMouseEnter={(e) => { if (!isActive) (e.currentTarget as HTMLElement).style.backgroundColor = NAVY_HOVER; }}
                                 onMouseLeave={(e) => { if (!isActive) (e.currentTarget as HTMLElement).style.backgroundColor = "transparent"; }}
                             >
-                                <span style={{ color: isActive ? "#ffffff" : "#8a9e80", flexShrink: 0, lineHeight: 0 }}>
+                                <span style={{ color: isActive ? "#ffffff" : TEXT_MUTED, flexShrink: 0, lineHeight: 0 }}>
                                     {item.icon}
                                 </span>
                                 {!collapsed && (
@@ -544,7 +552,7 @@ export function Sidebar({
                                         {item.badge != null && (
                                             <span style={{
                                                 marginLeft: "auto", flexShrink: 0,
-                                                backgroundColor: isActive ? "rgba(255,255,255,0.3)" : "#589b31",
+                                                backgroundColor: isActive ? "rgba(255,255,255,0.3)" : GOLD,
                                                 color: "#fff", fontSize: 10, fontWeight: 700,
                                                 borderRadius: 999, minWidth: 18, height: 18,
                                                 display: "flex", alignItems: "center", justifyContent: "center",
@@ -559,7 +567,7 @@ export function Sidebar({
                                     <span style={{
                                         position: "absolute", top: 4, right: 4,
                                         width: 14, height: 14,
-                                        backgroundColor: "#589b31", color: "#fff",
+                                        backgroundColor: GOLD, color: "#fff",
                                         fontSize: 8, fontWeight: 700,
                                         borderRadius: 999,
                                         display: "flex", alignItems: "center", justifyContent: "center",
@@ -605,11 +613,11 @@ export function Sidebar({
                             display: "flex", alignItems: "center", justifyContent: "center",
                             padding: "4px 0",
                             border: "none", borderRadius: 12,
-                            backgroundColor: menuOpen ? "#f0f4ec" : "transparent",
+                            backgroundColor: menuOpen ? NAVY_HOVER : "transparent",
                             cursor: "pointer", position: "relative",
                             transition: "background-color 0.15s",
                         }}
-                        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#f0f4ec"; }}
+                        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = NAVY_HOVER; }}
                         onMouseLeave={(e) => { if (!menuOpen) (e.currentTarget as HTMLElement).style.backgroundColor = "transparent"; }}
                     >
                         <div style={{ position: "relative", display: "inline-flex" }}>
@@ -619,19 +627,19 @@ export function Sidebar({
                                 width: 9, height: 9,
                                 backgroundColor: "#22c55e",
                                 borderRadius: "50%",
-                                border: "2px solid #ffffff",
+                                border: `2px solid ${NAVY}`,
                             }} />
                         </div>
                         {loggingOut && (
                             <div style={{
                                 position: "absolute", inset: 0,
                                 display: "flex", alignItems: "center", justifyContent: "center",
-                                backgroundColor: "rgba(255,255,255,0.85)",
+                                backgroundColor: "rgba(14,23,41,0.85)",
                                 borderRadius: 12,
                             }}>
                                 <div style={{
                                     width: 14, height: 14,
-                                    border: "2px solid #589b31",
+                                    border: `2px solid ${GOLD}`,
                                     borderTopColor: "transparent",
                                     borderRadius: "50%",
                                     animation: "spin 0.7s linear infinite",
@@ -649,12 +657,12 @@ export function Sidebar({
                             display: "flex", alignItems: "center", gap: 10,
                             padding: "6px 8px",
                             border: "none", borderRadius: 12,
-                            backgroundColor: menuOpen ? "#f0f4ec" : "transparent",
+                            backgroundColor: menuOpen ? NAVY_HOVER : "transparent",
                             cursor: "pointer",
                             transition: "background-color 0.15s",
                             fontFamily: "inherit",
                         }}
-                        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#f0f4ec"; }}
+                        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = NAVY_HOVER; }}
                         onMouseLeave={(e) => { if (!menuOpen) (e.currentTarget as HTMLElement).style.backgroundColor = "transparent"; }}
                     >
                         {/* Avatar + online dot */}
@@ -665,31 +673,31 @@ export function Sidebar({
                                 width: 9, height: 9,
                                 backgroundColor: "#22c55e",
                                 borderRadius: "50%",
-                                border: "2px solid #ffffff",
+                                border: `2px solid ${NAVY}`,
                             }} />
                         </div>
 
-                        {/* Name + email */}
+                        {/* Name + role */}
                         <div style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
                             <div style={{
-                                fontSize: 12, fontWeight: 600, color: "#1c2917",
+                                fontSize: 12, fontWeight: 600, color: TEXT_LIGHT,
                                 overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                                 lineHeight: 1.3,
                             }}>
                                 {session.user.name || "—"}
                             </div>
                             <div style={{
-                                fontSize: 10, color: "#8a9e80",
+                                fontSize: 10, color: TEXT_MUTED,
                                 overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                                lineHeight: 1.3, marginTop: 1,
+                                lineHeight: 1.3, marginTop: 1, textTransform: "capitalize",
                             }}>
-                                {session.user.email || "—"}
+                                {session.user.role || session.user.email || "—"}
                             </div>
                         </div>
 
                         {/* Chevron */}
                         <svg
-                            width="14" height="14" fill="none" stroke="#c5d5bc" viewBox="0 0 24 24"
+                            width="14" height="14" fill="none" stroke={TEXT_MUTED} viewBox="0 0 24 24"
                             style={{ flexShrink: 0, transition: "transform 0.2s", transform: menuOpen ? "rotate(180deg)" : "none" }}
                         >
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
