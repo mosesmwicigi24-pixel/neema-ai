@@ -128,3 +128,7 @@ avatar-corner icon), gold unread pulse dot. Data/logic untouched. tsc clean.
 **Slice 4 (done):** thread panel → Figma — outbound bubbles dark navy (#1e293b
 AI / #243447 agent; inbound stays light), thread bg cooler light (#f8fafc),
 composer: neutral attach button, gold focus ring, GOLD send button. tsc clean.
+
+**Slice 4 (done):** thread bubbles + composer → Figma — AI/agent bubbles to dark
+navy (#1e293b / #243447), composer attach button neutral, textarea focus ring +
+send button to gold. tsc clean.
