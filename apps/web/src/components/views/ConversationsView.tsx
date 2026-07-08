@@ -1055,9 +1055,9 @@ export function ConversationsView({
                                                 : ""}
                                         </span>
                                     </div>
-                                    <div className="flex items-center justify-between">
+                                    <div className="flex items-start justify-between gap-2">
                                         <p
-                                            className="text-xs truncate flex-1"
+                                            className="text-xs line-clamp-2 break-words flex-1"
                                             style={{
                                                 color: hasUnread ? "#3d5a30" : "#8a9e80",
                                                 fontWeight: hasUnread ? 500 : 400,
@@ -1066,7 +1066,7 @@ export function ConversationsView({
                                             {conv.last_message ??
                                                 "No messages yet"}
                                         </p>
-                                        <div className="flex items-center gap-1 ml-2 flex-shrink-0">
+                                        <div className="flex items-center gap-1 flex-shrink-0 mt-0.5">
                                             {/* Channel pill — Figma WA/FB/IG tag */}
                                             {cfg && (
                                                 <span
