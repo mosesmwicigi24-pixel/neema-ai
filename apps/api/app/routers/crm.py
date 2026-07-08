@@ -18,6 +18,7 @@ from app.models.user import User
 from app.models.order_event import OrderEvent
 from app.models.conversation import Conversation
 from app.models.customer_history import CustomerHistory
+from app.models.person import Person, Identity, PersonMerge
 from app.routers.admin import get_current_agent
 from app.core import hub_client
 from datetime import datetime, timezone
@@ -135,6 +136,7 @@ def _build_profile(
     conversations: list,
     history: CustomerHistory | None,
     hub: dict | None = None,
+    identities: list | None = None,
 ) -> dict:
     # Orders + spend: the hub is the source of truth (every channel — POS, web
     # AND WhatsApp). Fall back to Neema's local WhatsApp order_events only when
@@ -197,6 +199,20 @@ def _build_profile(
     notes       = state.get("crm_notes")
     merged_ids  = state.get("merged_ids", [])
 
+    # Identity spine: the real channel identities linked to this person. Replaces
+    # the phantom merged_ids with concrete (channel, external_id) rows so the
+    # panel can show "this is the same human across WhatsApp / Messenger / …".
+    linked_identities = [
+        {
+            "channel":      i.channel,
+            "external_id":  i.external_id,
+            "display_name": i.display_name,
+            "source":       i.source,
+            "confidence":   i.confidence,
+        }
+        for i in (identities or [])
+    ]
+
     return {
         "id":             str(user.id),
         "wa_id":          user.wa_id,
@@ -214,6 +230,8 @@ def _build_profile(
         "lead_score":     lead_score,
         "channels":       channels,
         "merged_ids":     merged_ids,
+        "person_id":         str(getattr(user, "person_id", None)) if getattr(user, "person_id", None) else None,
+        "linked_identities": linked_identities,
         "total_orders":   order_count,
         "total_spent":    total_spent,
         "avg_order_value": avg_order_value,
@@ -287,7 +305,67 @@ async def get_customer(
     except Exception:
         hub = None
 
-    return _build_profile(user, orders, conversations, history, hub=hub)
+    # Identity spine: every channel identity linked to this person.
+    identities = []
+    if user.person_id is not None:
+        identities = (await db.execute(
+            select(Identity).where(Identity.person_id == user.person_id)
+            .order_by(Identity.created_at)
+        )).scalars().all()
+
+    return _build_profile(user, orders, conversations, history, hub=hub, identities=identities)
+
+
+# ── Identity graph (spine) ────────────────────────────────────────────────────
+
+@router.get("/customers/{wa_id}/identities")
+async def get_customer_identities(
+    wa_id: str,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """The full identity graph for the person behind `wa_id`: every linked
+    channel identity + the reversible merge history. Powers the panel's
+    'linked identities' section and the unmerge affordance."""
+    user = (await db.execute(select(User).where(User.wa_id == wa_id))).scalar_one_or_none()
+    if user is None or user.person_id is None:
+        raise HTTPException(status_code=404, detail="No person for this customer")
+
+    identities = (await db.execute(
+        select(Identity).where(Identity.person_id == user.person_id).order_by(Identity.created_at)
+    )).scalars().all()
+
+    merges = (await db.execute(
+        select(PersonMerge)
+        .where(PersonMerge.primary_person_id == user.person_id)
+        .order_by(PersonMerge.created_at.desc())
+    )).scalars().all()
+
+    return {
+        "person_id": str(user.person_id),
+        "identities": [
+            {
+                "channel":      i.channel,
+                "external_id":  i.external_id,
+                "display_name": i.display_name,
+                "source":       i.source,
+                "confidence":   i.confidence,
+                "created_at":   i.created_at.isoformat() if i.created_at else None,
+            }
+            for i in identities
+        ],
+        "merges": [
+            {
+                "id":               str(m.id),
+                "secondary_wa_id":  m.secondary_wa_id,
+                "moved_external_ids": m.moved_external_ids,
+                "performed_by":     str(m.performed_by) if m.performed_by else None,
+                "created_at":       m.created_at.isoformat() if m.created_at else None,
+                "undone_at":        m.undone_at.isoformat() if m.undone_at else None,
+            }
+            for m in merges
+        ],
+    }
 
 
 @router.patch("/customers/{wa_id}")
