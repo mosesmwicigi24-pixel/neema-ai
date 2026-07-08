@@ -102,6 +102,19 @@ class UsageDto(BaseModel):
     cached_tokens: int = 0
 
 
+class PaymentDto(BaseModel):
+    """An M-Pesa (or other) payment the hub captured, relayed here to bind the
+    payer into the phone-anchored person world (docs/MULTICHANNEL_IDENTITY_PLAN.md
+    lever 2). Only `payer_msisdn` is required; the rest enrich the link. Extra
+    fields the hub sends are ignored."""
+    payer_msisdn: str                       # the paying phone (any format; canonicalized to E.164)
+    payer_name: str | None = None           # M-Pesa registered name
+    mpesa_ref: str | None = None            # M-Pesa transaction code (portable token)
+    hub_order_id: int | None = None         # hub order this paid (to stamp the local order_event)
+    order_number: str | None = None         # human order number (portable token)
+    region: str = "KE"                      # default region for a local number
+
+
 class RouteDto(BaseModel):
     """Ask the server whether this inbound message actually needs the
     expensive model. Lets n8n dedupe retries, short-circuit trivial turns

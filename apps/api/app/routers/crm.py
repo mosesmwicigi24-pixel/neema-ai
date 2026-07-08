@@ -18,6 +18,7 @@ from app.models.user import User
 from app.models.order_event import OrderEvent
 from app.models.conversation import Conversation
 from app.models.customer_history import CustomerHistory
+from app.models.person import Person, Identity, Identifier, PersonMerge
 from app.routers.admin import get_current_agent
 from app.core import hub_client
 from datetime import datetime, timezone
@@ -135,6 +136,7 @@ def _build_profile(
     conversations: list,
     history: CustomerHistory | None,
     hub: dict | None = None,
+    identities: list | None = None,
 ) -> dict:
     # Orders + spend: the hub is the source of truth (every channel — POS, web
     # AND WhatsApp). Fall back to Neema's local WhatsApp order_events only when
@@ -197,6 +199,20 @@ def _build_profile(
     notes       = state.get("crm_notes")
     merged_ids  = state.get("merged_ids", [])
 
+    # Identity spine: the real channel identities linked to this person. Replaces
+    # the phantom merged_ids with concrete (channel, external_id) rows so the
+    # panel can show "this is the same human across WhatsApp / Messenger / …".
+    linked_identities = [
+        {
+            "channel":      i.channel,
+            "external_id":  i.external_id,
+            "display_name": i.display_name,
+            "source":       i.source,
+            "confidence":   i.confidence,
+        }
+        for i in (identities or [])
+    ]
+
     return {
         "id":             str(user.id),
         "wa_id":          user.wa_id,
@@ -214,6 +230,8 @@ def _build_profile(
         "lead_score":     lead_score,
         "channels":       channels,
         "merged_ids":     merged_ids,
+        "person_id":         str(getattr(user, "person_id", None)) if getattr(user, "person_id", None) else None,
+        "linked_identities": linked_identities,
         "total_orders":   order_count,
         "total_spent":    total_spent,
         "avg_order_value": avg_order_value,
@@ -263,31 +281,161 @@ async def get_customer(
         await db.commit()
         await db.refresh(user)
 
+    # Identity spine: gather every WhatsApp handle for this person so a *merged*
+    # customer shows unified local history (two wa_ids collapse into one profile),
+    # not just the requested handle's slice.
+    identities: list = []
+    wa_ids = [wa_id]
+    if user.person_id is not None:
+        identities = (await db.execute(
+            select(Identity).where(Identity.person_id == user.person_id)
+            .order_by(Identity.created_at)
+        )).scalars().all()
+        wa_handles = [i.external_id for i in identities if i.channel == "whatsapp"]
+        if wa_handles:
+            wa_ids = sorted(set(wa_handles) | {wa_id})
+
     orders_result = await db.execute(
-        select(OrderEvent).where(OrderEvent.wa_id == wa_id).order_by(OrderEvent.created_at.desc())
+        select(OrderEvent).where(OrderEvent.wa_id.in_(wa_ids)).order_by(OrderEvent.created_at.desc())
     )
     orders = orders_result.scalars().all()
 
     convs_result = await db.execute(
-        select(Conversation).where(Conversation.wa_id == wa_id)
+        select(Conversation).where(Conversation.wa_id.in_(wa_ids))
     )
     conversations = convs_result.scalars().all()
 
     history_result = await db.execute(
-        select(CustomerHistory).where(CustomerHistory.wa_id == wa_id)
+        select(CustomerHistory).where(CustomerHistory.wa_id.in_(wa_ids))
+        .order_by(CustomerHistory.updated_at.desc())
     )
-    history = history_result.scalar_one_or_none()
+    history = history_result.scalars().first()   # most-recent snapshot across handles
 
     # Pull the customer's full order history + lifetime spend from the hub (the
     # system of record across POS, web and WhatsApp). Best-effort: on any failure
-    # we fall back to the local WhatsApp order_events.
+    # we fall back to the local WhatsApp order_events. (Hub summary is fetched by
+    # the requested handle; multi-number hub aggregation is a later slice.)
     redis = getattr(request.app.state, "redis", None)
     try:
         hub = await hub_client.fetch_customer_summary(wa_id, redis)
     except Exception:
         hub = None
 
-    return _build_profile(user, orders, conversations, history, hub=hub)
+    return _build_profile(user, orders, conversations, history, hub=hub, identities=identities)
+
+
+# ── Identity spine health (ops trust the backfill in prod) ────────────────────
+
+@router.get("/identities/health")
+async def identity_spine_health(
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Read-only integrity snapshot of the identity spine. After the migration
+    runs in prod, every wa_id-keyed row should have a person_id (orphans == 0)
+    and there should be exactly one whatsapp identity per distinct wa_id. Lets
+    ops confirm the backfill + resolver are healthy without opening the DB."""
+    orphans: dict[str, int] = {}
+    for model, name in (
+        (User, "users"), (Conversation, "conversations"), (Message, "messages"),
+        (OrderEvent, "order_events"), (CustomerHistory, "customer_history"),
+    ):
+        orphans[name] = (await db.execute(
+            select(func.count()).select_from(model).where(model.person_id.is_(None))
+        )).scalar() or 0
+
+    persons_total   = (await db.execute(select(func.count()).select_from(Person))).scalar() or 0
+    persons_merged  = (await db.execute(
+        select(func.count()).select_from(Person).where(Person.merged_into_id.isnot(None))
+    )).scalar() or 0
+    identities_total = (await db.execute(select(func.count()).select_from(Identity))).scalar() or 0
+    wa_identities    = (await db.execute(
+        select(func.count()).select_from(Identity).where(Identity.channel == "whatsapp")
+    )).scalar() or 0
+    identifiers_total = (await db.execute(select(func.count()).select_from(Identifier))).scalar() or 0
+    active_merges = (await db.execute(
+        select(func.count()).select_from(PersonMerge).where(PersonMerge.undone_at.is_(None))
+    )).scalar() or 0
+
+    total_orphans = sum(orphans.values())
+    return {
+        "healthy":            total_orphans == 0,
+        "orphan_rows":        orphans,
+        "total_orphan_rows":  total_orphans,
+        "persons_total":      persons_total,
+        "persons_merged":     persons_merged,
+        "persons_live":       persons_total - persons_merged,
+        "identities_total":   identities_total,
+        "whatsapp_identities": wa_identities,
+        "identifiers_total":  identifiers_total,
+        "active_merges":      active_merges,
+    }
+
+
+# ── Identity graph (spine) ────────────────────────────────────────────────────
+
+@router.get("/customers/{wa_id}/identities")
+async def get_customer_identities(
+    wa_id: str,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """The full identity graph for the person behind `wa_id`: every linked
+    channel identity + the reversible merge history. Powers the panel's
+    'linked identities' section and the unmerge affordance."""
+    user = (await db.execute(select(User).where(User.wa_id == wa_id))).scalar_one_or_none()
+    if user is None or user.person_id is None:
+        raise HTTPException(status_code=404, detail="No person for this customer")
+
+    identities = (await db.execute(
+        select(Identity).where(Identity.person_id == user.person_id).order_by(Identity.created_at)
+    )).scalars().all()
+
+    identifiers = (await db.execute(
+        select(Identifier).where(Identifier.person_id == user.person_id).order_by(Identifier.created_at)
+    )).scalars().all()
+
+    merges = (await db.execute(
+        select(PersonMerge)
+        .where(PersonMerge.primary_person_id == user.person_id)
+        .order_by(PersonMerge.created_at.desc())
+    )).scalars().all()
+
+    return {
+        "person_id": str(user.person_id),
+        "identities": [
+            {
+                "channel":      i.channel,
+                "external_id":  i.external_id,
+                "display_name": i.display_name,
+                "source":       i.source,
+                "confidence":   i.confidence,
+                "created_at":   i.created_at.isoformat() if i.created_at else None,
+            }
+            for i in identities
+        ],
+        "identifiers": [
+            {
+                "type":       idf.type,
+                "value":      idf.value,
+                "source":     idf.source,
+                "confidence": idf.confidence,
+                "created_at": idf.created_at.isoformat() if idf.created_at else None,
+            }
+            for idf in identifiers
+        ],
+        "merges": [
+            {
+                "id":               str(m.id),
+                "secondary_wa_id":  m.secondary_wa_id,
+                "moved_external_ids": m.moved_external_ids,
+                "performed_by":     str(m.performed_by) if m.performed_by else None,
+                "created_at":       m.created_at.isoformat() if m.created_at else None,
+                "undone_at":        m.undone_at.isoformat() if m.undone_at else None,
+            }
+            for m in merges
+        ],
+    }
 
 
 @router.patch("/customers/{wa_id}")
@@ -350,12 +498,20 @@ async def merge_customers(
     agent: Agent = Depends(get_current_agent),
 ):
     """
-    Merge `merge_with` profile into the primary `wa_id` profile.
-    - Copies any missing fields from secondary to primary
-    - Re-points secondary's orders and conversations to primary
-    - Records secondary wa_id in primary's merged_ids list
-    - Marks secondary as merged (does not delete)
+    Merge `merge_with` (secondary) into the primary `wa_id` profile — a REAL,
+    reversible, person-level merge:
+    - Moves the secondary's identities onto the primary's person and refreshes
+      the person_id on the secondary's conversations, messages, orders and
+      history (via app/services/merge.py).
+    - Copies any missing scalar fields secondary → primary and unions tags.
+    - Records the merge in `person_merges` so it can be undone (see /unmerge).
+    - Marks the secondary via state["merged_into"] so it drops out of the leads
+      list, and appends it to the primary's state["merged_ids"] (UI contract).
+    Precision-first: this is an operator-confirmed action, never automatic.
     """
+    from app.services.identity import resolve_person_id_for_wa_id
+    from app.services.merge import merge_persons
+
     merge_with = body.get("merge_with", "").strip()
     if not merge_with or merge_with == wa_id:
         raise HTTPException(status_code=422, detail="Invalid merge_with value")
@@ -394,8 +550,63 @@ async def merge_customers(
     s_state["merged_into"] = wa_id
     secondary.state = s_state
 
+    # ── The real merge: move identities + re-point history onto the primary ───
+    # Ensure both sides carry a person_id (backfill/resolver should guarantee it;
+    # provision defensively for any pre-spine orphan).
+    if primary.person_id is None:
+        primary.person_id = await resolve_person_id_for_wa_id(db, wa_id)
+    if secondary.person_id is None:
+        secondary.person_id = await resolve_person_id_for_wa_id(db, merge_with)
+    await db.flush()
+
+    merge_id = None
+    if primary.person_id != secondary.person_id:
+        audit = await merge_persons(
+            db, primary.person_id, secondary.person_id,
+            performed_by=agent.id, primary_wa_id=wa_id, secondary_wa_id=merge_with,
+        )
+        merge_id = str(audit.id)
+
     await db.commit()
-    return {"ok": True, "merged": merge_with, "into": wa_id}
+    return {"ok": True, "merged": merge_with, "into": wa_id, "merge_id": merge_id}
+
+
+@router.post("/customers/{wa_id}/unmerge")
+async def unmerge_customer(
+    wa_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Reverse a prior merge of `merge_with` into `wa_id`: move the secondary's
+    identities + history back to their own person and restore it to the leads
+    list. Reversible-by-audit — the inverse of POST /customers/{wa_id}/merge."""
+    from app.services.merge import unmerge, latest_active_merge
+
+    merge_with = (body.get("merge_with") or "").strip()
+    if not merge_with or merge_with == wa_id:
+        raise HTTPException(status_code=422, detail="Invalid merge_with value")
+
+    audit = await latest_active_merge(db, wa_id, merge_with)
+    if audit is None:
+        raise HTTPException(status_code=404, detail="No active merge to undo for this pair")
+
+    await unmerge(db, audit, undone_by=agent.id)
+
+    # Restore the UI/state bookkeeping.
+    primary   = (await db.execute(select(User).where(User.wa_id == wa_id))).scalar_one_or_none()
+    secondary = (await db.execute(select(User).where(User.wa_id == merge_with))).scalar_one_or_none()
+    if primary is not None:
+        p_state = dict(primary.state or {})
+        p_state["merged_ids"] = [m for m in p_state.get("merged_ids", []) if m != merge_with]
+        primary.state = p_state
+    if secondary is not None:
+        s_state = dict(secondary.state or {})
+        s_state.pop("merged_into", None)
+        secondary.state = s_state
+
+    await db.commit()
+    return {"ok": True, "unmerged": merge_with, "from": wa_id}
 
 
 # ── AI cost dashboard ─────────────────────────────────────────────────────────
@@ -424,12 +635,20 @@ async def list_leads(
     users_result = await db.execute(select(User).order_by(User.updated_at.desc()))
     users = users_result.scalars().all()
 
+    # Persons that were merged away (tombstoned). Covers both operator merges and
+    # deterministic reconciler auto-merges — the latter don't touch user state, so
+    # the spine tombstone is the authoritative "this is a duplicate" signal.
+    tombstoned = set((await db.execute(
+        select(Person.id).where(Person.merged_into_id.isnot(None))
+    )).scalars().all())
+
     leads = []
     for user in users:
         state = user.state or {}
 
-        # Skip users merged into another
-        if state.get("merged_into"):
+        # Skip users merged into another (state contract) or whose person was
+        # tombstoned by a real/reconciler merge.
+        if state.get("merged_into") or (user.person_id in tombstoned):
             continue
 
         lead_stage = state.get("lead_stage", "new")

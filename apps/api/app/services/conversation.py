@@ -165,6 +165,8 @@ async def transfer_conversation(
             msg = Message(
                 wa_id=conv.wa_id,
                 conversation_id=conv.id,
+                person_id=conv.person_id,
+                channel=conv.channel or "whatsapp",
                 direction=MsgDirection.outbound,
                 sender=MsgSender.human_agent,
                 text=notification,
@@ -309,6 +311,8 @@ async def send_agent_reply(
     msg = Message(
         wa_id=conv.wa_id,
         conversation_id=conv.id,
+        person_id=conv.person_id,
+        channel=conv.channel or "whatsapp",
         direction=MsgDirection.outbound,
         sender=MsgSender.human_agent,
         text=text,
@@ -373,6 +377,8 @@ async def approve_draft(
     msg = Message(
         wa_id=conv.wa_id,
         conversation_id=conv.id,
+        person_id=conv.person_id,
+        channel=conv.channel or "whatsapp",
         direction=MsgDirection.outbound,
         sender=MsgSender.ai,
         text=text,
@@ -437,6 +443,8 @@ async def send_agent_media(
     msg = Message(
         wa_id=conv.wa_id,
         conversation_id=conv.id,
+        person_id=conv.person_id,
+        channel=conv.channel or "whatsapp",
         direction=MsgDirection.outbound,
         sender=MsgSender.human_agent,
         text=preview,

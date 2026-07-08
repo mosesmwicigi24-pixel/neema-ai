@@ -6,7 +6,7 @@ from app.services import n8n_bridge as svc
 from app.schemas.n8n import (
     OutboundDto, SessionDto, MessageDto, UpsertMessagePatchDto,
     UserDto, OrderEventDto, CustomerHistoryDto, UserFactsDto,
-    UsageDto, RouteDto,
+    UsageDto, RouteDto, PaymentDto,
 )
 import json
 import logging as _logging
@@ -159,6 +159,27 @@ async def upsert_order_event(body: OrderEventDto, request: Request, db: AsyncSes
 @router.post("/customer-history", dependencies=[Depends(verify_n8n_secret)])
 async def upsert_customer_history(body: CustomerHistoryDto, db: AsyncSession = Depends(get_db)):
     return await svc.upsert_customer_history(db, body)
+
+
+# ── Payment → person reconciliation (the deterministic identity bridge) ──────
+@router.post("/payment", dependencies=[Depends(verify_n8n_secret)])
+async def reconcile_payment(body: PaymentDto, db: AsyncSession = Depends(get_db)):
+    """The hub relays a captured M-Pesa payment here (payer MSISDN + name +
+    order refs). We bind the payer to a person deterministically by phone —
+    the load-bearing bridge that pulls no-phone social leads into World A. See
+    app/services/reconcile.py."""
+    from app.services.reconcile import reconcile_payment as _reconcile
+    result = await _reconcile(
+        db,
+        payer_msisdn=body.payer_msisdn,
+        payer_name=body.payer_name,
+        mpesa_ref=body.mpesa_ref,
+        hub_order_id=body.hub_order_id,
+        order_number=body.order_number,
+        region=body.region,
+    )
+    await db.commit()
+    return result
 
 
 # ── AI cost controls ──────────────────────────────────────
@@ -340,6 +361,8 @@ async def escalate_to_human(body: dict, request: Request, db: AsyncSession = Dep
         inbound_msg = Message(
             wa_id=conv.wa_id,
             conversation_id=conv.id,
+            person_id=conv.person_id,
+            channel=getattr(conv, "channel", None) or "whatsapp",
             direction=MsgDirection.inbound,
             sender=MsgSender.user,
             text=msg_text,

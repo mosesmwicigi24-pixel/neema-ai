@@ -19,6 +19,11 @@ class Conversation(Base):
 
     id                  : Mapped[uuid.UUID]      = mapped_column(primary_key=True, default=uuid.uuid4)
     wa_id               : Mapped[str]            = mapped_column(String(30), nullable=False, unique=True, index=True)
+    # Identity spine (additive). channel defaults to whatsapp — the only channel
+    # today. person_id is backfilled 1:1 from wa_id; UNIQUE(wa_id) stays until a
+    # later slice drops it for the per-channel conversation model.
+    channel             : Mapped[str | None]     = mapped_column(String(20), nullable=True, server_default="whatsapp")
+    person_id           : Mapped[uuid.UUID | None] = mapped_column(ForeignKey("persons.id", ondelete="SET NULL"), nullable=True, index=True)
     intercept_mode      : Mapped[InterceptMode]  = mapped_column(PgEnum(InterceptMode), default=InterceptMode.ai)
     assigned_agent_id   : Mapped[uuid.UUID | None] = mapped_column(ForeignKey("agents.id", ondelete="SET NULL"), nullable=True)
     intercept_since     : Mapped[datetime | None]  = mapped_column(DateTime(timezone=True), nullable=True)

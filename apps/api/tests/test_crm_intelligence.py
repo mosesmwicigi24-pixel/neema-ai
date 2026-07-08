@@ -119,3 +119,31 @@ def test_build_profile_falls_back_to_local_when_no_hub():
     assert p["total_orders"] == 2
     assert p["total_spent"] == 6000.0
     assert {o["id"] for o in p["orders"]} == {"l1", "l2"}
+
+
+# ── Identity spine surfacing in the profile ──────────────────────────────────
+
+def test_build_profile_surfaces_linked_identities_and_person_id():
+    import uuid
+    pid = uuid.uuid4()
+    user = _user()
+    user.person_id = pid
+    idents = [
+        types.SimpleNamespace(channel="whatsapp", external_id="254700000001",
+                              display_name="Moses", source="backfill", confidence="deterministic"),
+        types.SimpleNamespace(channel="instagram", external_id="IGSID_1",
+                              display_name="moses.ke", source="manual_link", confidence="assisted"),
+    ]
+    p = _build_profile(user, [], [], None, hub=None, identities=idents)
+
+    assert p["person_id"] == str(pid)
+    assert [i["channel"] for i in p["linked_identities"]] == ["whatsapp", "instagram"]
+    ig = next(i for i in p["linked_identities"] if i["channel"] == "instagram")
+    assert ig["external_id"] == "IGSID_1" and ig["confidence"] == "assisted"
+
+
+def test_build_profile_without_identities_is_backward_compatible():
+    # No person_id attr, no identities passed → safe empty defaults (old callers).
+    p = _build_profile(_user(), [], [], None, hub=None)
+    assert p["person_id"] is None
+    assert p["linked_identities"] == []
