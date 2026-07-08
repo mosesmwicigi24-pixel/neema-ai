@@ -173,14 +173,32 @@ interface ConversationsViewProps extends SharedViewProps {
     refetchConversations?: () => void;
 }
 
-const CHANNEL_TABS: { id: "all" | Channel; label: string }[] = [
-    { id: "all", label: "All" },
-    { id: "whatsapp", label: "WhatsApp" },
-    { id: "messenger", label: "Messenger" },
-    { id: "instagram", label: "Instagram" },
-    { id: "email", label: "Email" },
-    { id: "sms", label: "SMS" },
+const CHANNEL_TABS: { id: "all" | Channel; label: string; short: string }[] = [
+    { id: "all", label: "All", short: "All" },
+    { id: "whatsapp", label: "WhatsApp", short: "WA" },
+    { id: "messenger", label: "Messenger", short: "FB" },
+    { id: "instagram", label: "Instagram", short: "IG" },
+    { id: "email", label: "Email", short: "Email" },
+    { id: "sms", label: "SMS", short: "SMS" },
 ];
+
+// Accent for the "All" tab (gold) — channels use their own brand colour.
+const ALL_TAB_ACCENT = "#f59e0b";
+// Active-row accent (Figma gold).
+const ROW_ACCENT = "#f59e0b";
+// Short channel labels for the conversation-row pill (Figma: WA / FB / IG).
+const CH_SHORT: Record<Channel, string> = {
+    whatsapp: "WA",
+    messenger: "FB",
+    instagram: "IG",
+    email: "Email",
+    sms: "SMS",
+};
+const SparkleIcon = () => (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
+        <path d="M12 2l1.9 5.6L19.5 9l-5.6 1.9L12 16.5 10.1 10.9 4.5 9l5.6-1.4L12 2zm6.5 11l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9.9-2.6z" />
+    </svg>
+);
 
 export function ConversationsView({
     conversations,
@@ -855,26 +873,47 @@ export function ConversationsView({
                     />
                 </div>
 
-                {/* Channel tabs */}
-                <div className="flex gap-1 overflow-x-auto scrollbar-none pb-1">
-                    {CHANNEL_TABS.map((tab) => (
-                        <button
-                            key={tab.id}
-                            onClick={() => setChannelTab(tab.id)}
-                            className="flex-shrink-0 h-6 px-2.5 rounded-md text-xs font-medium transition-colors relative"
-                            style={{
-                                backgroundColor: channelTab === tab.id ? "#589b31" : "transparent",
-                                color: channelTab === tab.id ? "#fff" : "#8a9e80",
-                            }}
-                        >
-                            {tab.label}
-                            {channelCounts[tab.id] > 0 && (
-                                <span className="ml-1 text-[10px] bg-red-500 text-white px-1 rounded-full">
-                                    {channelCounts[tab.id]}
+                {/* Channel tabs — icon pills per channel (Figma refresh) */}
+                <div className="flex gap-2 overflow-x-auto scrollbar-none pb-1">
+                    {CHANNEL_TABS.map((tab) => {
+                        const active = channelTab === tab.id;
+                        const cfg = tab.id === "all" ? null : CHANNEL_CONFIG[tab.id as Channel];
+                        const accent = cfg?.color ?? ALL_TAB_ACCENT;
+                        const count = channelCounts[tab.id] ?? 0;
+                        return (
+                            <button
+                                key={tab.id}
+                                onClick={() => setChannelTab(tab.id)}
+                                title={tab.label}
+                                className="relative flex-shrink-0 flex flex-col items-center justify-center gap-1 w-[52px] h-[52px] rounded-xl border transition-all"
+                                style={{
+                                    backgroundColor: active ? accent : "#f6f7f5",
+                                    borderColor: active ? accent : "#e6e9e3",
+                                }}
+                            >
+                                <span
+                                    className="flex items-center justify-center"
+                                    style={{ color: active ? "#ffffff" : accent }}
+                                >
+                                    {tab.id === "all" ? <SparkleIcon /> : cfg!.icon}
                                 </span>
-                            )}
-                        </button>
-                    ))}
+                                <span
+                                    className="text-[10px] font-semibold leading-none"
+                                    style={{ color: active ? "#ffffff" : "#6b7280" }}
+                                >
+                                    {tab.short}
+                                </span>
+                                {count > 0 && (
+                                    <span
+                                        className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold flex items-center justify-center text-white"
+                                        style={{ backgroundColor: active ? "#ef4444" : accent }}
+                                    >
+                                        {count}
+                                    </span>
+                                )}
+                            </button>
+                        );
+                    })}
                 </div>
 
                 {/* Extra filters */}
@@ -960,12 +999,12 @@ export function ConversationsView({
                             onClick={() => handleSelectConv(conv.id)}
                             className="w-full text-left px-4 py-3 transition-colors relative"
                             style={{
-                                backgroundColor: isActive ? "#f5f7f2" : "transparent",
+                                backgroundColor: isActive ? "#fdf6e9" : "transparent",
                                 borderBottom: "1px solid #f2f4ef",
-                                borderLeft: `3px solid ${isActive ? "#589b31" : hasUnread ? "#a8da8b" : "transparent"}`,
+                                borderLeft: `3px solid ${isActive ? ROW_ACCENT : hasUnread ? "#fcd98a" : "transparent"}`,
                             }}
                             onMouseEnter={(e) => {
-                                if (!isActive) (e.currentTarget as HTMLElement).style.backgroundColor = "#fafbf8";
+                                if (!isActive) (e.currentTarget as HTMLElement).style.backgroundColor = "#fbfaf6";
                             }}
                             onMouseLeave={(e) => {
                                 if (!isActive) (e.currentTarget as HTMLElement).style.backgroundColor = "transparent";
@@ -988,20 +1027,9 @@ export function ConversationsView({
                                             className="absolute -top-0.5 -right-0.5 w-4 h-3 rounded-sm object-cover border border-white shadow-sm"
                                         />
                                     )}
-                                    {/* Channel badge — bottom right */}
-                                    {cfg && (
-                                        <div
-                                            className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full flex items-center justify-center text-white text-[9px]"
-                                            style={{
-                                                backgroundColor: cfg.color,
-                                            }}
-                                        >
-                                            {cfg.icon}
-                                        </div>
-                                    )}
                                     {/* Unread pulse dot on avatar */}
                                     {hasUnread && (
-                                        <span className="absolute -top-0.5 -left-0.5 w-2.5 h-2.5 bg-[#427425] rounded-full border-2 border-white" />
+                                        <span className="absolute -top-0.5 -left-0.5 w-2.5 h-2.5 rounded-full border-2 border-white" style={{ backgroundColor: ROW_ACCENT }} />
                                     )}
                                 </div>
                                 <div className="flex-1 min-w-0">
@@ -1039,6 +1067,15 @@ export function ConversationsView({
                                                 "No messages yet"}
                                         </p>
                                         <div className="flex items-center gap-1 ml-2 flex-shrink-0">
+                                            {/* Channel pill — Figma WA/FB/IG tag */}
+                                            {cfg && (
+                                                <span
+                                                    className="text-[10px] font-bold px-1.5 h-[16px] rounded flex items-center leading-none"
+                                                    style={{ backgroundColor: cfg.color + "1a", color: cfg.color }}
+                                                >
+                                                    {CH_SHORT[conv.channel as Channel]}
+                                                </span>
+                                            )}
                                             {conv.intercept_mode !== "ai" && (
                                                 <div className="flex items-center gap-1">
                                                     <InterceptBadge
