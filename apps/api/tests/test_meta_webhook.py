@@ -7,6 +7,10 @@ import hashlib
 import hmac
 import types
 
+# Full ORM registry so Message() (built inside _capture_events) configures.
+import app.models.agent, app.models.conversation, app.models.intercept  # noqa: F401
+import app.models.person, app.models.user  # noqa: F401
+from app.models.message import Message
 from app.routers import meta_webhook as mw
 from app.core.config import settings
 
@@ -36,46 +40,80 @@ def test_signature_skipped_when_no_secret(monkeypatch):
 # ── Inbound identity capture ─────────────────────────────────────────────────
 
 class _FakeDB:
-    def __init__(self):
+    def __init__(self, existing_mid=None):
+        self._existing_mid = existing_mid   # a mid already stored → dedup path
         self.commits = 0
+        self.added = []
+
+    async def execute(self, stmt):          # the dedup SELECT
+        return types.SimpleNamespace(scalar_one_or_none=lambda: self._existing_mid)
+
+    def add(self, obj):
+        self.added.append(obj)
+
+    async def flush(self):
+        pass
 
     async def commit(self):
         self.commits += 1
 
 
-def test_capture_events_resolves_each_sender(monkeypatch):
-    calls = []
+class _FakeConv:
+    def __init__(self, cid="c1"):
+        self.id = cid
+        self.last_message_at = None
+        self.last_message_preview = None
 
-    async def fake_resolve(db, channel, external_id, **kw):
-        calls.append((channel, external_id, kw.get("source")))
-        return types.SimpleNamespace(person_id="p")
 
-    monkeypatch.setattr("app.services.identity.resolve_or_create_person", fake_resolve)
+def _patch(monkeypatch, calls):
+    async def fake_person(db, channel, external_id, **kw):
+        calls.setdefault("persons", []).append((channel, external_id, kw.get("source")))
+        return types.SimpleNamespace(person_id="p-" + external_id)
 
+    async def fake_conv(db, channel, external_id, **kw):
+        calls.setdefault("convs", []).append((channel, external_id))
+        return _FakeConv()
+
+    monkeypatch.setattr("app.services.identity.resolve_or_create_person", fake_person)
+    monkeypatch.setattr("app.services.channel.get_or_create_conversation", fake_conv)
+
+
+def test_capture_creates_person_conversation_and_message(monkeypatch):
+    calls = {}
+    _patch(monkeypatch, calls)
     payload = {
         "object": "page",
-        "entry": [
-            {"messaging": [
-                {"sender": {"id": "PSID_1"}, "message": {"text": "hi"}},
-                {"sender": {"id": "PSID_2"}, "message": {"text": "how much?"}},
-                {"sender": {"id": "PAGE"}, "message": {"is_echo": True, "text": "our reply"}},  # skipped
-                {"delivery": {"mids": ["m1"]}},                                                 # no sender → skipped
-            ]},
-        ],
+        "entry": [{"messaging": [
+            {"sender": {"id": "PSID_1"}, "message": {"mid": "m1", "text": "hi"}},
+            {"sender": {"id": "PSID_2"}, "message": {"mid": "m2", "text": "how much?"}},
+            {"sender": {"id": "PAGE"}, "message": {"is_echo": True, "text": "reply"}},   # skipped
+            {"delivery": {"mids": ["x"]}},                                              # no sender → skipped
+        ]}],
     }
     db = _FakeDB()
     asyncio.run(mw._capture_events(db, "messenger", payload))
 
-    assert [c[1] for c in calls] == ["PSID_1", "PSID_2"]         # echo + sender-less skipped
-    assert all(c[0] == "messenger" and c[2] == "messenger_inbound" for c in calls)
+    assert [p[1] for p in calls["persons"]] == ["PSID_1", "PSID_2"]   # echo + sender-less skipped
+    assert calls["convs"] == [("messenger", "PSID_1"), ("messenger", "PSID_2")]
+    msgs = [o for o in db.added if isinstance(o, Message)]
+    assert len(msgs) == 2 and all(m.channel == "messenger" and m.wa_id is None for m in msgs)
     assert db.commits == 1
 
 
-def test_capture_events_no_senders_does_not_commit(monkeypatch):
-    async def fake_resolve(*a, **k):
-        raise AssertionError("should not be called")
+def test_capture_dedupes_on_message_id(monkeypatch):
+    calls = {}
+    _patch(monkeypatch, calls)
+    payload = {"object": "page", "entry": [{"messaging": [
+        {"sender": {"id": "PSID_1"}, "message": {"mid": "already-seen", "text": "hi"}},
+    ]}]}
+    db = _FakeDB(existing_mid="already-seen")   # the dedup SELECT finds it
+    asyncio.run(mw._capture_events(db, "messenger", payload))
+    assert calls.get("persons", []) == []       # skipped before resolving
+    assert db.commits == 0
 
-    monkeypatch.setattr("app.services.identity.resolve_or_create_person", fake_resolve)
+
+def test_capture_no_senders_does_not_commit(monkeypatch):
+    _patch(monkeypatch, {})
     db = _FakeDB()
     asyncio.run(mw._capture_events(db, "instagram", {"object": "instagram", "entry": []}))
     assert db.commits == 0
