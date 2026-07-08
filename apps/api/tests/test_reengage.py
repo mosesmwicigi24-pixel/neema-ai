@@ -5,10 +5,27 @@ on us — the newest message is an inbound text — and skip our-own-last-reply 
 text-less rows.
 """
 import asyncio
+import subprocess
+import sys
 from types import SimpleNamespace
 
 from app.models.message import MsgDirection
 from app.jobs import reengage
+
+
+def test_job_configures_mappers_in_a_fresh_interpreter():
+    """On the box, `python -m app.jobs.reengage` starts a clean interpreter that
+    imports ONLY what the job imports — so the job must pull in enough models to
+    configure SQLAlchemy's mappers by itself. pytest loads every model via other
+    test files, hiding this, so verify it in a subprocess with a fresh registry."""
+    code = (
+        "import app.jobs.reengage;"
+        "from sqlalchemy.orm import configure_mappers; configure_mappers();"
+        "print('MAPPERS_OK')"
+    )
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert "MAPPERS_OK" in r.stdout
 
 
 def _msg(direction, text):

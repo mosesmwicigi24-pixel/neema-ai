@@ -29,6 +29,15 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.database import AsyncSessionLocal
+# Import the FULL model set so SQLAlchemy's mapper registry is complete before we
+# compile any query. Conversation.relationship("Agent"/"Intercept"/"Message") and
+# the person spine must all be registered, or configuring the Conversation mapper
+# raises `failed to locate a name ('Agent')`. The app's startup imports these via
+# main; a standalone job must do it explicitly.
+import app.models.agent      # noqa: F401
+import app.models.intercept  # noqa: F401
+import app.models.person     # noqa: F401
+import app.models.user       # noqa: F401
 from app.models.conversation import Conversation, ConvStatus, InterceptMode
 from app.models.message import Message, MsgDirection
 
