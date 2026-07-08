@@ -99,3 +99,19 @@ Leads·Analytics·Catalog·Team·Settings; footer = current user (avatar + role)
 **Build order:** tokens/theme → Col1 (list + channel filter + badges) → Col2
 (thread + composer) → Col4 PROFILE (with real CROSS-CHANNEL/Merge) → Col3 activity
 → Col4 INSIGHTS. Wire each to the live endpoint above; verify `pnpm build`; gate deploy.
+
+---
+
+## Key finding: this is a RESTYLE, not a rebuild
+`ConversationsView.tsx` is **already fully functional and multichannel-aware** —
+`channelTab` state, `CHANNEL_TABS`, `channelCounts`, per-channel filtering,
+`ChannelBadge`, live WS, intercept/reply all work. So the Figma refresh = swap the
+markup/styling to match the design, **keeping every existing data hook**. Much
+lower risk than a greenfield build. Verify each slice with
+`node_modules/.bin/tsc --noEmit` (exit 0). Note: `next build` does NOT run ESLint
+(Next 15/16), and there are pre-existing `no-explicit-any` lint errors on `main`
+that don't block the build — don't be alarmed by them.
+
+**Slice 1 (done):** channel-filter tabs → Figma icon-pills (brand-colour icons +
+short labels WA/FB/IG + corner count badges), wired to the existing
+`CHANNEL_CONFIG` + `channelCounts`. tsc clean.

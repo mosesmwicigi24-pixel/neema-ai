@@ -173,14 +173,22 @@ interface ConversationsViewProps extends SharedViewProps {
     refetchConversations?: () => void;
 }
 
-const CHANNEL_TABS: { id: "all" | Channel; label: string }[] = [
-    { id: "all", label: "All" },
-    { id: "whatsapp", label: "WhatsApp" },
-    { id: "messenger", label: "Messenger" },
-    { id: "instagram", label: "Instagram" },
-    { id: "email", label: "Email" },
-    { id: "sms", label: "SMS" },
+const CHANNEL_TABS: { id: "all" | Channel; label: string; short: string }[] = [
+    { id: "all", label: "All", short: "All" },
+    { id: "whatsapp", label: "WhatsApp", short: "WA" },
+    { id: "messenger", label: "Messenger", short: "FB" },
+    { id: "instagram", label: "Instagram", short: "IG" },
+    { id: "email", label: "Email", short: "Email" },
+    { id: "sms", label: "SMS", short: "SMS" },
 ];
+
+// Accent for the "All" tab (gold) — channels use their own brand colour.
+const ALL_TAB_ACCENT = "#f59e0b";
+const SparkleIcon = () => (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
+        <path d="M12 2l1.9 5.6L19.5 9l-5.6 1.9L12 16.5 10.1 10.9 4.5 9l5.6-1.4L12 2zm6.5 11l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9.9-2.6z" />
+    </svg>
+);
 
 export function ConversationsView({
     conversations,
@@ -855,26 +863,47 @@ export function ConversationsView({
                     />
                 </div>
 
-                {/* Channel tabs */}
-                <div className="flex gap-1 overflow-x-auto scrollbar-none pb-1">
-                    {CHANNEL_TABS.map((tab) => (
-                        <button
-                            key={tab.id}
-                            onClick={() => setChannelTab(tab.id)}
-                            className="flex-shrink-0 h-6 px-2.5 rounded-md text-xs font-medium transition-colors relative"
-                            style={{
-                                backgroundColor: channelTab === tab.id ? "#589b31" : "transparent",
-                                color: channelTab === tab.id ? "#fff" : "#8a9e80",
-                            }}
-                        >
-                            {tab.label}
-                            {channelCounts[tab.id] > 0 && (
-                                <span className="ml-1 text-[10px] bg-red-500 text-white px-1 rounded-full">
-                                    {channelCounts[tab.id]}
+                {/* Channel tabs — icon pills per channel (Figma refresh) */}
+                <div className="flex gap-2 overflow-x-auto scrollbar-none pb-1">
+                    {CHANNEL_TABS.map((tab) => {
+                        const active = channelTab === tab.id;
+                        const cfg = tab.id === "all" ? null : CHANNEL_CONFIG[tab.id as Channel];
+                        const accent = cfg?.color ?? ALL_TAB_ACCENT;
+                        const count = channelCounts[tab.id] ?? 0;
+                        return (
+                            <button
+                                key={tab.id}
+                                onClick={() => setChannelTab(tab.id)}
+                                title={tab.label}
+                                className="relative flex-shrink-0 flex flex-col items-center justify-center gap-1 w-[52px] h-[52px] rounded-xl border transition-all"
+                                style={{
+                                    backgroundColor: active ? accent : "#f6f7f5",
+                                    borderColor: active ? accent : "#e6e9e3",
+                                }}
+                            >
+                                <span
+                                    className="flex items-center justify-center"
+                                    style={{ color: active ? "#ffffff" : accent }}
+                                >
+                                    {tab.id === "all" ? <SparkleIcon /> : cfg!.icon}
                                 </span>
-                            )}
-                        </button>
-                    ))}
+                                <span
+                                    className="text-[10px] font-semibold leading-none"
+                                    style={{ color: active ? "#ffffff" : "#6b7280" }}
+                                >
+                                    {tab.short}
+                                </span>
+                                {count > 0 && (
+                                    <span
+                                        className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold flex items-center justify-center text-white"
+                                        style={{ backgroundColor: active ? "#ef4444" : accent }}
+                                    >
+                                        {count}
+                                    </span>
+                                )}
+                            </button>
+                        );
+                    })}
                 </div>
 
                 {/* Extra filters */}
