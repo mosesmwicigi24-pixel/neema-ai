@@ -873,8 +873,8 @@ export function ConversationsView({
                     />
                 </div>
 
-                {/* Channel tabs — icon pills per channel (Figma refresh) */}
-                <div className="flex gap-2 overflow-x-auto scrollbar-none pb-1">
+                {/* Channel tabs — compact icon pills per channel */}
+                <div className="flex gap-1.5 overflow-x-auto scrollbar-none pb-1">
                     {CHANNEL_TABS.map((tab) => {
                         const active = channelTab === tab.id;
                         const cfg = tab.id === "all" ? null : CHANNEL_CONFIG[tab.id as Channel];
@@ -885,27 +885,27 @@ export function ConversationsView({
                                 key={tab.id}
                                 onClick={() => setChannelTab(tab.id)}
                                 title={tab.label}
-                                className="relative flex-shrink-0 flex flex-col items-center justify-center gap-1 w-[52px] h-[52px] rounded-xl border transition-all"
+                                className="relative flex-shrink-0 flex flex-col items-center justify-center gap-0.5 w-10 h-10 rounded-lg border transition-all"
                                 style={{
                                     backgroundColor: active ? accent : "#f6f7f5",
                                     borderColor: active ? accent : "#e6e9e3",
                                 }}
                             >
                                 <span
-                                    className="flex items-center justify-center"
+                                    className="flex items-center justify-center [&>svg]:w-3 [&>svg]:h-3"
                                     style={{ color: active ? "#ffffff" : accent }}
                                 >
                                     {tab.id === "all" ? <SparkleIcon /> : cfg!.icon}
                                 </span>
                                 <span
-                                    className="text-[10px] font-semibold leading-none"
-                                    style={{ color: active ? "#ffffff" : "#6b7280" }}
+                                    className="text-[8px] font-semibold leading-none tracking-tight"
+                                    style={{ color: active ? "#ffffff" : "#94a3b8" }}
                                 >
                                     {tab.short}
                                 </span>
                                 {count > 0 && (
                                     <span
-                                        className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold flex items-center justify-center text-white"
+                                        className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-[3px] rounded-full text-[8px] font-bold flex items-center justify-center text-white leading-none"
                                         style={{ backgroundColor: active ? "#ef4444" : accent }}
                                     >
                                         {count}
