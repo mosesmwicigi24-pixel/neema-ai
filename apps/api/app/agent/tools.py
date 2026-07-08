@@ -48,6 +48,24 @@ def _display(kes, ctx: "ToolContext"):
     return kes
 
 
+def _to_display(kes, ctx: "ToolContext", price_usd=None):
+    """Display price for THIS customer, preferring the hub's own USD price.
+
+    Kenya → raw KES. Everyone else → the product's hub `price_usd` when it's a
+    valid positive number, otherwise fall back to KES / rate so a missing/zero
+    USD price never surfaces as $0. Catalogue and cart both go through this so
+    quotes and totals stay consistent."""
+    if ctx.currency != "USD":
+        return kes
+    try:
+        v = float(price_usd)
+        if v > 0:
+            return round(v)
+    except (TypeError, ValueError):
+        pass
+    return _display(kes, ctx)
+
+
 # ── Tool schemas (Anthropic format) ──────────────────────────────────────────
 
 TOOLS: list[dict] = [
@@ -179,7 +197,7 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
     results = [{
         "name": p.get("name"),
         "sku": p.get("sku"),
-        "price": _display(p.get("price"), ctx),
+        "price": _to_display(p.get("price"), ctx, p.get("price_usd")),
         "currency": ctx.currency,
         "in_stock": p.get("in_stock"),
         "available_qty": p.get("available_qty"),
@@ -189,20 +207,36 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
     return {"count": len(results), "currency": ctx.currency, "results": results}
 
 
-def _display_items(items: list, ctx: ToolContext) -> list:
-    """Cart items with unit_price shown in the customer's display currency."""
-    out = []
+async def _cart_display(cart: dict, ctx: ToolContext) -> tuple[list, object]:
+    """Cart items + total in the customer's display currency, preferring hub USD.
+
+    KES customers get the raw items and cart_total untouched. For USD we map each
+    line to its hub `price_usd` (falling back to KES/rate), convert per line, and
+    sum the converted lines so the shown total matches the shown unit prices. The
+    catalogue is only loaded for the USD path (and it's cached), so the common
+    Kenyan turn does no extra work."""
+    items = cart.get("items", [])
+    if ctx.currency != "USD":
+        return list(items), cartmod.cart_total(cart)
+    catalog = await svc.catalog_items(ctx.db, ctx.redis)
+    usd_by_id = {p.get("hub_product_id"): p.get("price_usd") for p in catalog}
+    out, total = [], 0
     for i in items:
+        unit = _to_display(i.get("unit_price"), ctx, usd_by_id.get(i.get("hub_product_id")))
         d = dict(i)
-        d["unit_price"] = _display(i.get("unit_price"), ctx)
+        d["unit_price"] = unit
         out.append(d)
-    return out
+        try:
+            total += (unit or 0) * int(i.get("qty") or 1)
+        except (TypeError, ValueError):
+            pass
+    return out, total
 
 
 async def _get_cart(args: dict, ctx: ToolContext) -> dict:
     cart = await cartmod.get_cart(ctx.db, ctx.wa_id)
-    return {"items": _display_items(cart["items"], ctx),
-            "total": _display(cartmod.cart_total(cart), ctx), "currency": ctx.currency}
+    items, total = await _cart_display(cart, ctx)
+    return {"items": items, "total": total, "currency": ctx.currency}
 
 
 async def _update_cart(args: dict, ctx: ToolContext) -> dict:
@@ -255,8 +289,8 @@ async def _update_cart(args: dict, ctx: ToolContext) -> dict:
         cart["items"] = items
 
     cart = await cartmod.save_cart(ctx.db, ctx.wa_id, cart)
-    return {"ok": True, "items": _display_items(cart["items"], ctx),
-            "total": _display(cartmod.cart_total(cart), ctx), "currency": ctx.currency}
+    items, total = await _cart_display(cart, ctx)
+    return {"ok": True, "items": items, "total": total, "currency": ctx.currency}
 
 
 async def _create_order(args: dict, ctx: ToolContext) -> dict:

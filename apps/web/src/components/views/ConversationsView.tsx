@@ -10,6 +10,7 @@ import { Modal } from "@/components/ui/Modal";
 import { TextareaField, InputField } from "@/components/ui/FormFields";
 import { Toggle } from "@/components/ui/Layout";
 import { timeAgo, formatPhone, displayName } from "@/lib/utils";
+import { formatWa } from "@/lib/waText";
 import { CHANNEL_CONFIG, ALL_CHANNELS } from "@/lib/channels";
 import { conversationsApi, profileApi } from "@/lib/api";
 import { useConversationEvents, buildSystemEventFromWs } from "@/lib/websocket";
@@ -1734,7 +1735,7 @@ export function ConversationsView({
                                                         if (!mt || !mu) {
                                                             return (
                                                                 <p className="leading-relaxed whitespace-pre-wrap">
-                                                                    {msg.text}
+                                                                    {formatWa(msg.text)}
                                                                 </p>
                                                             );
                                                         }
@@ -1801,10 +1802,10 @@ export function ConversationsView({
                                                                         !msg.text.startsWith(
                                                                             "[",
                                                                         ) && (
-                                                                            <p className="text-xs px-1 leading-relaxed">
-                                                                                {
-                                                                                    msg.text
-                                                                                }
+                                                                            <p className="text-xs px-1 leading-relaxed whitespace-pre-wrap">
+                                                                                {formatWa(
+                                                                                    msg.text,
+                                                                                )}
                                                                             </p>
                                                                         )}
                                                                 </div>
