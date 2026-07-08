@@ -54,18 +54,22 @@ world strongly, then bridge the two clusters opportunistically.
    universal checkout** for all channels — every serious Messenger/IG buyer is moved
    to WhatsApp for "order confirmation + payment link." The phone key falls out of
    *closing the sale*, not a separate handshake.
-2. **M-Pesa is a Kenya-specific deterministic reconciler.** A payment carries the
-   payer **MSISDN + registered name** → binds a no-phone social lead into World A at
-   the moment they pay. **TODO: confirm the hub captures payer MSISDN/name on
-   payment.** If yes, lean the whole funnel on it.
+2. **M-Pesa is a Kenya-specific deterministic reconciler — CONFIRMED LIVE.** The hub
+   **already captures the payer MSISDN + registered name on payment**, so a no-phone
+   social lead is bound into World A the moment they pay. This is the load-bearing
+   bridge — **lean the whole funnel on it.** Build: on payment, resolve/create the
+   `person` from the M-Pesa MSISDN (E.164) and attach the paying channel identity to
+   it. The precision-first "only auto-merge on money" model is now concrete.
 3. **Order numbers / payment refs / M-Pesa codes = portable identity tokens.**
    Anyone quoting `BH-1234` on any channel binds that channel identity to whoever
    placed it.
-4. **Comment-to-DM automation.** 14M views → thousands of public reel comments
-   ("price?", "do you ship to Kisumu?"). Meta allows a **private reply (DM) to a
-   comment** + public reply. Auto-converting comment-askers into agent DM threads is
-   the biggest untapped top-of-funnel — and it *feeds* the identity spine.
-   **TODO: confirm we do none of this today (assumed yes).**
+4. **Comment-to-DM — ALREADY LIVE.** They already convert public reel/post comments
+   into DMs, so the top-of-funnel capture exists (correcting the earlier assumption
+   that it was untapped). The work is therefore **integration, not building**: route
+   those comment-driven DMs into the agent (so they stop becoming backlog) and
+   **attribute each back to the reel/post that drove it** for the content→revenue loop
+   (lever 8). TODO when building: confirm whether the current comment→DM is automated
+   (a tool/Meta automation) or manual, since that dictates where we hook in.
 5. **Cluster & defer, don't force a merge.** Keep identities as separate
    *person-candidates*; collapse only when a hard key arrives (payment / volunteered
    phone) or a human confirms. Reversible clustering > premature merging.
@@ -117,17 +121,21 @@ order_event  → already has channel; gains person_id
    refactor the `wa_id`-keyed query layer behind a compat shim, **make merge real**.
    Worth building even if no channel ships; makes WA↔hub linking robust.
 1. **Messenger ingestion (pilot channel)** — in+out through the agent; unified inbox.
-2. **Comment-to-DM** on Messenger/IG — open the top-of-funnel floodgate.
+2. **Wire the existing comment-to-DM into the agent** — route the comment-driven DMs
+   (already live) through the agent + tag them with the source reel/post.
 3. **Instagram DM** — mostly config once Messenger works.
-4. **Reconciliation service** — confidence tiers, payment/M-Pesa auto-link, Meta
-   ID-Match for PSID↔IGSID, review queue for Tier 2.
+4. **Reconciliation service** — confidence tiers, **payment/M-Pesa auto-link
+   (confirmed available)**, Meta ID-Match for PSID↔IGSID, review queue for Tier 2.
 5. **Content→revenue attribution** — CTWA + reel-level reporting.
 
-## Open decisions / TODO to confirm before/while building
+## Confirmed / open decisions
 
-- [ ] Hub captures **M-Pesa payer MSISDN + name** on payment? (unlocks auto-reconcile)
-- [ ] Current comment-to-DM automation: confirmed none today?
+- [x] Hub captures **M-Pesa payer MSISDN + name** on payment → deterministic
+      reconciler is LIVE; lean the funnel on it.
+- [x] **Comment-to-DM is already live** → work is integration + attribution, not
+      building the funnel. (Confirm automated vs manual when building.)
 - [ ] Meta App Review scope + timeline (who owns the Business Manager submission).
 - [ ] Sequence check: backlog/triage vs identity spine — which lands first for the
       new session? (Recommend: ship a Messenger *answering* pilot fast to stop the
-      bleed, build the spine in parallel.)
+      bleed, build the spine in parallel; wire M-Pesa payment → `person` early since
+      it's the deterministic bridge and the data already exists.)
