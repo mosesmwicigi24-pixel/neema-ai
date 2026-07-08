@@ -94,7 +94,7 @@ def test_generic_loop_terminates_on_text():
     ])
 
     async def fake_run_tool(name, args):
-        return {"count": 1, "results": [{"name": "Eliad Anointing Oil", "price_kes": 5000}]}
+        return {"count": 1, "currency": "KES", "results": [{"name": "Eliad Anointing Oil", "price": 5000, "currency": "KES"}]}
 
     async def loop():
         messages = [{"role": "user", "content": "do you have anointing oil?"}]

@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     meta_agent_reply: bool = False
     # Optional WhatsApp number the Messenger/IG agent invites buyers to for checkout.
     whatsapp_handoff_number: str = ""
+    # Currency display gate: Kenya (+254) customers are quoted KES; everyone else
+    # (and all Messenger/IG, which have no phone) is quoted USD = round(KES / rate).
+    usd_kes_rate: int = 100
     environment: str = "production"
     openai_api_key: str = ""
     # Media file serving

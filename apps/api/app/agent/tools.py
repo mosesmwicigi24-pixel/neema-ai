@@ -30,6 +30,22 @@ class ToolContext:
     db: AsyncSession
     redis: object
     wa_id: str
+    currency: str = "KES"   # display currency for THIS customer (KES | USD)
+    usd_rate: int = 100     # KES per 1 USD (config.usd_kes_rate)
+
+
+def _display(kes, ctx: "ToolContext"):
+    """Convert a KES amount to the customer's display currency. Catalogue/cart
+    amounts are stored in KES; Kenyan customers see KES, everyone else sees
+    USD = round(KES / rate). Whole-number USD keeps quotes clean."""
+    if kes is None:
+        return None
+    if ctx.currency == "USD":
+        try:
+            return round(float(kes) / (ctx.usd_rate or 100))
+        except (TypeError, ValueError):
+            return kes
+    return kes
 
 
 # ── Tool schemas (Anthropic format) ──────────────────────────────────────────
@@ -163,18 +179,30 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
     results = [{
         "name": p.get("name"),
         "sku": p.get("sku"),
-        "price_kes": p.get("price"),
+        "price": _display(p.get("price"), ctx),
+        "currency": ctx.currency,
         "in_stock": p.get("in_stock"),
         "available_qty": p.get("available_qty"),
         "category": p.get("category"),
         "made_to_order": p.get("product_type") == "variable" and bool(p.get("is_producible")),
     } for p in catalog if hit(p)][:8]
-    return {"count": len(results), "results": results}
+    return {"count": len(results), "currency": ctx.currency, "results": results}
+
+
+def _display_items(items: list, ctx: ToolContext) -> list:
+    """Cart items with unit_price shown in the customer's display currency."""
+    out = []
+    for i in items:
+        d = dict(i)
+        d["unit_price"] = _display(i.get("unit_price"), ctx)
+        out.append(d)
+    return out
 
 
 async def _get_cart(args: dict, ctx: ToolContext) -> dict:
     cart = await cartmod.get_cart(ctx.db, ctx.wa_id)
-    return {"items": cart["items"], "total_kes": cartmod.cart_total(cart)}
+    return {"items": _display_items(cart["items"], ctx),
+            "total": _display(cartmod.cart_total(cart), ctx), "currency": ctx.currency}
 
 
 async def _update_cart(args: dict, ctx: ToolContext) -> dict:
@@ -184,7 +212,7 @@ async def _update_cart(args: dict, ctx: ToolContext) -> dict:
 
     if action == "clear":
         cart = await cartmod.clear_cart(ctx.db, ctx.wa_id)
-        return {"ok": True, "items": [], "total_kes": 0}
+        return {"ok": True, "items": [], "total": 0, "currency": ctx.currency}
 
     prod = (args.get("product") or "").strip()
     if not prod:
@@ -227,7 +255,8 @@ async def _update_cart(args: dict, ctx: ToolContext) -> dict:
         cart["items"] = items
 
     cart = await cartmod.save_cart(ctx.db, ctx.wa_id, cart)
-    return {"ok": True, "items": cart["items"], "total_kes": cartmod.cart_total(cart)}
+    return {"ok": True, "items": _display_items(cart["items"], ctx),
+            "total": _display(cartmod.cart_total(cart), ctx), "currency": ctx.currency}
 
 
 async def _create_order(args: dict, ctx: ToolContext) -> dict:

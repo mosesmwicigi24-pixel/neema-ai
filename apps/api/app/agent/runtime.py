@@ -35,14 +35,16 @@ _META_TOOL_NAMES = {"search_catalog", "remember", "handoff_to_human"}
 MESSENGER_TOOLS = [t for t in TOOLS if t["name"] in _META_TOOL_NAMES]
 
 
-def _meta_addendum() -> str:
+def _meta_addendum(currency: str = "USD") -> str:
     wa = (settings.whatsapp_handoff_number or "").strip()
     where = f"on WhatsApp at {wa}" if wa else "on WhatsApp"
+    money = "Kenyan Shillings (KES)" if currency == "KES" else "US Dollars (USD)"
     return (
         "\n\n## This conversation is on Facebook Messenger / Instagram (not WhatsApp)\n"
-        "- Answer product questions using the catalogue via search_catalog. All "
-        "prices are in KES — never quote USD, and never invent a product or price; "
-        "if something isn't in the catalogue, say so.\n"
+        f"- Answer product questions using the catalogue via search_catalog. Prices "
+        f"from the tool are already in {money} — quote them exactly, never convert, "
+        "and never invent a product or price; if something isn't in the catalogue, "
+        "say so.\n"
         f"- You CANNOT take payment or place an order here. When the customer is "
         f"ready to order, warmly invite them to continue {where} to confirm and pay.\n"
         "- Keep replies short and friendly; you are the same Bethany House assistant."
@@ -136,13 +138,18 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     user = None if is_meta else (
         await db.execute(select(User).where(User.wa_id == wa_id))).scalar_one_or_none()
     loc = {} if is_meta else (resolve_country(wa_id) or {})
+    # Currency display gate: Kenya (+254) → KES; everyone else, and all
+    # Messenger/IG (no phone), → USD (= KES / usd_kes_rate, done in the tools).
+    currency = "USD" if is_meta else (
+        "KES" if (loc.get("country_iso") or "").upper() == "KE" else "USD")
     system = build_system_prompt(
         customer_name=(user.name if user else "") or "",
         country=loc.get("country") or "",
         country_iso=loc.get("country_iso") or "",
+        currency=currency,
     )
     if is_meta:
-        system += _meta_addendum()
+        system += _meta_addendum(currency)
 
     messages = await _history(db, key, channel=channel)
 
@@ -175,7 +182,8 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             messages.insert(0, {"role": "user",
                                 "content": f"(Context — what you know about this customer:\n{mem_ctx})"})
 
-    ctx = ToolContext(db=db, redis=redis, wa_id=key)
+    ctx = ToolContext(db=db, redis=redis, wa_id=key,
+                      currency=currency, usd_rate=settings.usd_kes_rate)
     totals = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0}
 
     def _accumulate(u: dict) -> None:

@@ -39,8 +39,8 @@ def test_full_order_turn(monkeypatch):
     async def fake_run_tool(name, args, ctx):
         calls.append((name, args))
         return {
-            "search_catalog": {"count": 1, "results": [{"name": "Cassock", "price_kes": 12000, "made_to_order": True}]},
-            "update_cart": {"ok": True, "items": [{"name": "Cassock", "qty": 3}], "total_kes": 36000},
+            "search_catalog": {"count": 1, "currency": "KES", "results": [{"name": "Cassock", "price": 12000, "currency": "KES", "made_to_order": True}]},
+            "update_cart": {"ok": True, "items": [{"name": "Cassock", "qty": 3}], "total": 36000, "currency": "KES"},
             "create_order": {"ok": True, "order_number": "ORD-250707-ABCD", "total": 36000,
                               "currency": "KES", "payment_url": "https://hub.example/pay/tok123",
                               "made_to_order_items": ["Cassock"]},
