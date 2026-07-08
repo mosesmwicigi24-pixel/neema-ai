@@ -120,3 +120,7 @@ short labels WA/FB/IG + corner count badges), wired to the existing
 navy background, gold logo, gold active nav pill, light labels, muted icons, dark
 hover, user card (name + role). Colour-only restyle; all collapse/popup logic kept.
 tsc clean.
+
+**Slice 3 (done):** conversation rows → Figma — gold active accent (left bar +
+warm bg, was green), channel shown as a right-side WA/FB/IG pill (removed the
+avatar-corner icon), gold unread pulse dot. Data/logic untouched. tsc clean.
