@@ -111,8 +111,10 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
     from app.services.identity import resolve_or_create_person
     from app.services.channel import get_or_create_conversation
     from app.models.message import Message, MsgDirection, MsgSender
+    from app.models.conversation import InterceptMode
 
     broadcasts: list[tuple[str, dict]] = []
+    replies: list[tuple[str, str, str | None]] = []   # (sender, text, mid) to hand the agent
     captured = 0
     for entry in payload.get("entry", []):
         for event in entry.get("messaging", []) or entry.get("standby", []):
@@ -152,6 +154,10 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
                 "type": "new_message", "conversationId": str(conv.id),
                 "channel": channel, "sender": "user", "text": text,
             }))
+            # Only hand the agent a real text turn (skip attachment placeholders),
+            # and only when the conversation is AI-mode (never talk over a human).
+            if message.get("text") and conv.intercept_mode == InterceptMode.ai:
+                replies.append((sender, message["text"].strip(), mid))
             captured += 1
 
     if captured:
@@ -164,3 +170,14 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
                     await redis.publish(f"ws:channel:{conv_id}", json.dumps(ev))
                 except Exception:
                     pass   # broadcast is best-effort
+
+        # ── Neema answers (gated by META_AGENT_REPLY) ─────────────────────────
+        # Same Tier-2 agent, same KES hub catalogue; reply goes out via the Graph
+        # Send API. Fires after the inbound is persisted; deduped on the Meta mid.
+        if settings.meta_agent_reply:
+            from app.agent import runtime
+            for sender, text, mid in replies:
+                try:
+                    await runtime.schedule_meta_reply(redis, channel, sender, text, dedup_id=mid)
+                except Exception as exc:
+                    _log.warning("meta agent reply failed to schedule for %s: %s", sender, exc)

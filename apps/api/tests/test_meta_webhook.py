@@ -60,9 +60,11 @@ class _FakeDB:
 
 class _FakeConv:
     def __init__(self, cid="c1"):
+        from app.models.conversation import InterceptMode
         self.id = cid
         self.last_message_at = None
         self.last_message_preview = None
+        self.intercept_mode = InterceptMode.ai
 
 
 def _patch(monkeypatch, calls):
@@ -117,3 +119,53 @@ def test_capture_no_senders_does_not_commit(monkeypatch):
     db = _FakeDB()
     asyncio.run(mw._capture_events(db, "instagram", {"object": "instagram", "entry": []}))
     assert db.commits == 0
+
+
+# ── Neema-answers-Messenger (agent auto-reply) ───────────────────────────────
+
+def test_messenger_agent_tool_set_is_read_only():
+    """Messenger must NOT expose the phone/hub order tools — it can only answer
+    from the catalogue and hand off. Prevents phone-less bad orders."""
+    from app.agent.runtime import MESSENGER_TOOLS
+    names = {t["name"] for t in MESSENGER_TOOLS}
+    assert names == {"search_catalog", "remember", "handoff_to_human"}
+    assert "create_order" not in names and "update_cart" not in names
+
+
+def test_messenger_addendum_is_kes_and_routes_to_whatsapp():
+    from app.agent.runtime import _meta_addendum
+    a = _meta_addendum().lower()
+    assert "kes" in a and "whatsapp" in a and "usd" in a   # KES prices, no USD, route to WA
+
+
+def test_capture_schedules_agent_reply_only_when_enabled(monkeypatch):
+    calls = []
+
+    async def fake_person(db, channel, external_id, **kw):
+        return types.SimpleNamespace(person_id="p")
+
+    async def fake_conv(db, channel, external_id, **kw):
+        return _FakeConv()
+
+    async def fake_sched(redis, channel, external_id, text, dedup_id=None):
+        calls.append((channel, external_id, text, dedup_id))
+
+    monkeypatch.setattr("app.services.identity.resolve_or_create_person", fake_person)
+    monkeypatch.setattr("app.services.channel.get_or_create_conversation", fake_conv)
+    import app.agent.runtime as rt
+    monkeypatch.setattr(rt, "schedule_meta_reply", fake_sched)
+
+    payload = {"object": "page", "entry": [{"messaging": [
+        {"sender": {"id": "PSID_1"}, "message": {"mid": "m1", "text": "how much for a cassock?"}},
+        {"sender": {"id": "PSID_2"}, "message": {"mid": "m2", "attachments": [{"type": "image"}]}},  # no text → no reply
+    ]}]}
+
+    # disabled (default) → no agent reply
+    monkeypatch.setattr(settings, "meta_agent_reply", False, raising=False)
+    asyncio.run(mw._capture_events(_FakeDB(), "messenger", payload))
+    assert calls == []
+
+    # enabled → replies only to the real-text turn
+    monkeypatch.setattr(settings, "meta_agent_reply", True, raising=False)
+    asyncio.run(mw._capture_events(_FakeDB(), "messenger", payload))
+    assert calls == [("messenger", "PSID_1", "how much for a cassock?", "m1")]
