@@ -132,10 +132,14 @@ def test_messenger_agent_tool_set_is_read_only():
     assert "create_order" not in names and "update_cart" not in names
 
 
-def test_messenger_addendum_is_kes_and_routes_to_whatsapp():
+def test_messenger_addendum_currency_and_routes_to_whatsapp():
     from app.agent.runtime import _meta_addendum
-    a = _meta_addendum().lower()
-    assert "kes" in a and "whatsapp" in a and "usd" in a   # KES prices, no USD, route to WA
+    # Messenger/IG default to USD (no phone → not +254); route checkout to WhatsApp.
+    usd = _meta_addendum().lower()
+    assert "usd" in usd and "whatsapp" in usd and "convert" in usd
+    # A Kenyan-context caller (KES) is quoted in shillings instead.
+    kes = _meta_addendum("KES").lower()
+    assert "kes" in kes and "whatsapp" in kes
 
 
 def test_capture_schedules_agent_reply_only_when_enabled(monkeypatch):
