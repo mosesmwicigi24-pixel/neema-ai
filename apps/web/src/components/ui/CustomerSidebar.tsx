@@ -175,6 +175,27 @@ const STAGE_META: Record<
     },
 };
 
+// Full English country name from an ISO-3166 alpha-2 code (BW -> Botswana).
+// Uses the platform Intl.DisplayNames; prefers an explicit override (e.g. a
+// user-entered country) and falls back to the raw code if unavailable.
+const REGION_DISPLAY =
+    typeof Intl !== "undefined" && "DisplayNames" in Intl
+        ? new Intl.DisplayNames(["en"], { type: "region" })
+        : null;
+function countryFullName(
+    iso: string | null | undefined,
+    override?: string | null,
+): string {
+    const o = override?.trim();
+    if (o) return o;
+    if (!iso) return "";
+    try {
+        return REGION_DISPLAY?.of(iso.toUpperCase()) ?? iso.toUpperCase();
+    } catch {
+        return iso.toUpperCase();
+    }
+}
+
 // Customer segment badge — a quick read of who you're talking to.
 const TIER_META: Record<string, { label: string; cls: string; title: string }> = {
     vip:      { label: "VIP",      cls: "bg-amber-100 text-amber-800 border-amber-300",   title: "Top spender / very frequent buyer" },
@@ -721,7 +742,7 @@ export function CustomerSidebar({
                             {/* Country flag + ISO */}
                             {profile.country_iso && (
                                 <span
-                                    className="inline-flex items-center gap-1 text-[10px] font-mono text-stone-500 cursor-default select-none"
+                                    className="inline-flex items-center gap-1 text-[10px] text-stone-500 cursor-default select-none"
                                     title={
                                         profile.country ?? profile.country_iso
                                     }
@@ -735,7 +756,10 @@ export function CustomerSidebar({
                                         className="w-4 h-4 rounded-sm object-cover border border-stone-200 shadow-sm"
                                     />
                                     <span>
-                                        {profile.country_iso.toUpperCase()}
+                                        {countryFullName(
+                                            profile.country_iso,
+                                            profile.country,
+                                        )}
                                     </span>
                                 </span>
                             )}
