@@ -140,3 +140,7 @@ linked_identities; the panel renders the linked channel identities (channel dot 
 external_id + confidence) and per-merge **Unmerge** buttons (POST /customers/{wa_id}/
 unmerge); merge already hits the real POST /merge. tsc clean. WhatsApp brand green
 and tailwind semantic (won/tier) colours preserved.
+
+**Pixel-perfect touches (done):** sidebar now expanded-by-default (Figma) —
+collapsible to the icon rail; thread-header Intercept button already gold
+(Btn primary = amber-500). Full `next build` passes.

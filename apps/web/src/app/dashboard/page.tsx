@@ -96,8 +96,8 @@ export default function NeemaDashboard(): React.ReactElement {
     const [view, setView] = useState<ViewId>("conversations");
     const [messages, setMessages] = useState<MessagesMap>({});
     const [toast, setToast] = useState<ToastState | null>(null);
-    // ── Sidebar collapsed by default — icon-rail mode ─────────────────────────
-    const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(true);
+    // ── Sidebar expanded by default (Figma) — collapsible to an icon rail ──────
+    const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
     const [sessionExpired, setSessionExpired] = useState(false);
     const [localConversations, setLocalConversations] = useState<Conversation[]>([]);
     const isMobile = useIsMobile();
