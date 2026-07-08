@@ -84,6 +84,30 @@ class Identity(Base):
     person = relationship("Person", back_populates="identities", foreign_keys=[person_id])
 
 
+class Identifier(Base):
+    """A portable identity token bound to a person — a phone/email the customer
+    volunteered or we matched, an M-Pesa payer MSISDN, an order number quoted
+    across channels. Distinct from `Identity` (a messaging surface): an
+    identifier is a *claim* that helps bridge worlds. `UNIQUE(type, value)` →
+    one token maps to one person. See docs/MULTICHANNEL_IDENTITY_PLAN.md.
+    """
+    __tablename__ = "identifiers"
+    __table_args__ = (
+        UniqueConstraint("type", "value", name="uq_identifier_type_value"),
+        Index("ix_identifiers_person_id", "person_id"),
+    )
+
+    id         : Mapped[uuid.UUID]   = mapped_column(primary_key=True, default=uuid.uuid4)
+    person_id  : Mapped[uuid.UUID]   = mapped_column(ForeignKey("persons.id", ondelete="RESTRICT"), nullable=False)
+    type       : Mapped[str]         = mapped_column(String(20), nullable=False)   # phone | email | mpesa_ref | order_number
+    value      : Mapped[str]         = mapped_column(String(128), nullable=False)
+    source     : Mapped[str | None]  = mapped_column(String(40), nullable=True)
+    confidence : Mapped[str | None]  = mapped_column(String(20), nullable=True)
+    raw        : Mapped[dict]        = mapped_column(JSONB, default=dict)
+    created_at : Mapped[datetime]    = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at : Mapped[datetime]    = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class PersonMerge(Base):
     """Audit row for one real, reversible person-level merge.
 
@@ -102,6 +126,7 @@ class PersonMerge(Base):
     primary_person_id   : Mapped[uuid.UUID]   = mapped_column(ForeignKey("persons.id", ondelete="CASCADE"), nullable=False)
     secondary_person_id : Mapped[uuid.UUID]   = mapped_column(ForeignKey("persons.id", ondelete="CASCADE"), nullable=False)
     moved_identity_ids  : Mapped[list]        = mapped_column(JSONB, default=list)
+    moved_identifier_ids: Mapped[list]        = mapped_column(JSONB, default=list)
     moved_external_ids  : Mapped[list]        = mapped_column(JSONB, default=list)
     primary_wa_id       : Mapped[str | None]  = mapped_column(String(30), nullable=True)
     secondary_wa_id     : Mapped[str | None]  = mapped_column(String(30), nullable=True)

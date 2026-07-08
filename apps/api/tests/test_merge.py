@@ -10,20 +10,25 @@ import uuid
 from datetime import datetime, timezone
 
 from app.services.merge import merge_persons, unmerge
-from app.models.person import Person, Identity, PersonMerge
+from app.models.person import Person, Identity, Identifier, PersonMerge
 
 
 class _FakeDB:
-    def __init__(self, secondary_identities, persons):
+    def __init__(self, secondary_identities, persons, secondary_identifiers=None):
         self._sec = secondary_identities
+        self._sec_idf = secondary_identifiers or []
         self._persons = persons          # {person_id: Person}
+        self._select_calls = 0
         self.added = []
         self.update_count = 0            # bulk UPDATE ... person_id executes
 
     async def execute(self, stmt):
         if type(stmt).__name__ == "Select":
+            # merge_persons selects identities first, then identifiers.
+            self._select_calls += 1
+            rows = self._sec if self._select_calls == 1 else self._sec_idf
             return types.SimpleNamespace(
-                scalars=lambda: types.SimpleNamespace(all=lambda: self._sec))
+                scalars=lambda rows=rows: types.SimpleNamespace(all=lambda: rows))
         self.update_count += 1           # an update() against a wa_id table
         return None
 
@@ -65,6 +70,20 @@ def test_merge_moves_identities_tombstones_and_audits():
     # secondary tombstoned + audit persisted
     assert sec_person.merged_into_id == primary and sec_person.merged_at is not None
     assert audit in db.added
+
+
+def test_merge_moves_identifiers_too():
+    primary, secondary = uuid.uuid4(), uuid.uuid4()
+    wa = _ident(secondary, "whatsapp", "254722222222")
+    phone = Identifier(person_id=secondary, type="phone", value="+254722222222")
+    phone.id = uuid.uuid4()
+    sec_person = Person(); sec_person.id = secondary
+    db = _FakeDB([wa], {secondary: sec_person}, secondary_identifiers=[phone])
+
+    audit = asyncio.run(merge_persons(db, primary, secondary))
+
+    assert phone.person_id == primary                     # identifier followed the person
+    assert audit.moved_identifier_ids == [str(phone.id)]  # recorded for reversal
 
 
 def test_merge_with_no_whatsapp_handle_skips_cache_refresh():

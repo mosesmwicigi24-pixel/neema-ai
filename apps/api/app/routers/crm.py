@@ -18,7 +18,7 @@ from app.models.user import User
 from app.models.order_event import OrderEvent
 from app.models.conversation import Conversation
 from app.models.customer_history import CustomerHistory
-from app.models.person import Person, Identity, PersonMerge
+from app.models.person import Person, Identity, Identifier, PersonMerge
 from app.routers.admin import get_current_agent
 from app.core import hub_client
 from datetime import datetime, timezone
@@ -344,6 +344,7 @@ async def identity_spine_health(
     wa_identities    = (await db.execute(
         select(func.count()).select_from(Identity).where(Identity.channel == "whatsapp")
     )).scalar() or 0
+    identifiers_total = (await db.execute(select(func.count()).select_from(Identifier))).scalar() or 0
     active_merges = (await db.execute(
         select(func.count()).select_from(PersonMerge).where(PersonMerge.undone_at.is_(None))
     )).scalar() or 0
@@ -358,6 +359,7 @@ async def identity_spine_health(
         "persons_live":       persons_total - persons_merged,
         "identities_total":   identities_total,
         "whatsapp_identities": wa_identities,
+        "identifiers_total":  identifiers_total,
         "active_merges":      active_merges,
     }
 
@@ -381,6 +383,10 @@ async def get_customer_identities(
         select(Identity).where(Identity.person_id == user.person_id).order_by(Identity.created_at)
     )).scalars().all()
 
+    identifiers = (await db.execute(
+        select(Identifier).where(Identifier.person_id == user.person_id).order_by(Identifier.created_at)
+    )).scalars().all()
+
     merges = (await db.execute(
         select(PersonMerge)
         .where(PersonMerge.primary_person_id == user.person_id)
@@ -399,6 +405,16 @@ async def get_customer_identities(
                 "created_at":   i.created_at.isoformat() if i.created_at else None,
             }
             for i in identities
+        ],
+        "identifiers": [
+            {
+                "type":       idf.type,
+                "value":      idf.value,
+                "source":     idf.source,
+                "confidence": idf.confidence,
+                "created_at": idf.created_at.isoformat() if idf.created_at else None,
+            }
+            for idf in identifiers
         ],
         "merges": [
             {
