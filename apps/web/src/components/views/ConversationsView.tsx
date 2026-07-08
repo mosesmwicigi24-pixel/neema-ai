@@ -1406,6 +1406,36 @@ export function ConversationsView({
                                     if (msg.type === "system_event") {
                                         const kind = msg.event_kind ?? "";
 
+                                        // ── Handoff / mode-change events live in the
+                                        // Activity Log side panel ONLY — keep them out
+                                        // of the thread so the log isn't duplicated
+                                        // inline (Released to AI, agent pickup, transfer,
+                                        // approved draft). Escalation/flag cards stay
+                                        // inline since they carry "why" context.
+                                        const isAgentPickup =
+                                            kind === "intercept" && !!msg.agent_name;
+                                        if (
+                                            kind === "release" ||
+                                            kind === "transfer" ||
+                                            kind === "approve_draft" ||
+                                            isAgentPickup
+                                        ) {
+                                            // Preserve the "N new" divider if it happens
+                                            // to land on a suppressed event.
+                                            return showDivider ? (
+                                                <div
+                                                    key={msg.id}
+                                                    className="flex items-center gap-2 my-1"
+                                                >
+                                                    <div className="flex-1 h-px bg-[#427425]/30" />
+                                                    <span className="text-[10px] font-semibold text-[#427425] bg-[#e6f3d8] px-2 py-0.5 rounded-full whitespace-nowrap">
+                                                        {snap} new {snap === 1 ? "message" : "messages"}
+                                                    </span>
+                                                    <div className="flex-1 h-px bg-[#427425]/30" />
+                                                </div>
+                                            ) : null;
+                                        }
+
                                         // ── Escalated card ───────────────────
                                         // Shown when AI cannot handle (customer
                                         // request or media received).  Gives full
