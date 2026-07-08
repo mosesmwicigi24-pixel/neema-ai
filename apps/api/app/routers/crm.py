@@ -350,12 +350,20 @@ async def merge_customers(
     agent: Agent = Depends(get_current_agent),
 ):
     """
-    Merge `merge_with` profile into the primary `wa_id` profile.
-    - Copies any missing fields from secondary to primary
-    - Re-points secondary's orders and conversations to primary
-    - Records secondary wa_id in primary's merged_ids list
-    - Marks secondary as merged (does not delete)
+    Merge `merge_with` (secondary) into the primary `wa_id` profile — a REAL,
+    reversible, person-level merge:
+    - Moves the secondary's identities onto the primary's person and refreshes
+      the person_id on the secondary's conversations, messages, orders and
+      history (via app/services/merge.py).
+    - Copies any missing scalar fields secondary → primary and unions tags.
+    - Records the merge in `person_merges` so it can be undone (see /unmerge).
+    - Marks the secondary via state["merged_into"] so it drops out of the leads
+      list, and appends it to the primary's state["merged_ids"] (UI contract).
+    Precision-first: this is an operator-confirmed action, never automatic.
     """
+    from app.services.identity import resolve_person_id_for_wa_id
+    from app.services.merge import merge_persons
+
     merge_with = body.get("merge_with", "").strip()
     if not merge_with or merge_with == wa_id:
         raise HTTPException(status_code=422, detail="Invalid merge_with value")
@@ -394,8 +402,63 @@ async def merge_customers(
     s_state["merged_into"] = wa_id
     secondary.state = s_state
 
+    # ── The real merge: move identities + re-point history onto the primary ───
+    # Ensure both sides carry a person_id (backfill/resolver should guarantee it;
+    # provision defensively for any pre-spine orphan).
+    if primary.person_id is None:
+        primary.person_id = await resolve_person_id_for_wa_id(db, wa_id)
+    if secondary.person_id is None:
+        secondary.person_id = await resolve_person_id_for_wa_id(db, merge_with)
+    await db.flush()
+
+    merge_id = None
+    if primary.person_id != secondary.person_id:
+        audit = await merge_persons(
+            db, primary.person_id, secondary.person_id,
+            performed_by=agent.id, primary_wa_id=wa_id, secondary_wa_id=merge_with,
+        )
+        merge_id = str(audit.id)
+
     await db.commit()
-    return {"ok": True, "merged": merge_with, "into": wa_id}
+    return {"ok": True, "merged": merge_with, "into": wa_id, "merge_id": merge_id}
+
+
+@router.post("/customers/{wa_id}/unmerge")
+async def unmerge_customer(
+    wa_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Reverse a prior merge of `merge_with` into `wa_id`: move the secondary's
+    identities + history back to their own person and restore it to the leads
+    list. Reversible-by-audit — the inverse of POST /customers/{wa_id}/merge."""
+    from app.services.merge import unmerge, latest_active_merge
+
+    merge_with = (body.get("merge_with") or "").strip()
+    if not merge_with or merge_with == wa_id:
+        raise HTTPException(status_code=422, detail="Invalid merge_with value")
+
+    audit = await latest_active_merge(db, wa_id, merge_with)
+    if audit is None:
+        raise HTTPException(status_code=404, detail="No active merge to undo for this pair")
+
+    await unmerge(db, audit, undone_by=agent.id)
+
+    # Restore the UI/state bookkeeping.
+    primary   = (await db.execute(select(User).where(User.wa_id == wa_id))).scalar_one_or_none()
+    secondary = (await db.execute(select(User).where(User.wa_id == merge_with))).scalar_one_or_none()
+    if primary is not None:
+        p_state = dict(primary.state or {})
+        p_state["merged_ids"] = [m for m in p_state.get("merged_ids", []) if m != merge_with]
+        primary.state = p_state
+    if secondary is not None:
+        s_state = dict(secondary.state or {})
+        s_state.pop("merged_into", None)
+        secondary.state = s_state
+
+    await db.commit()
+    return {"ok": True, "unmerged": merge_with, "from": wa_id}
 
 
 # ── AI cost dashboard ─────────────────────────────────────────────────────────

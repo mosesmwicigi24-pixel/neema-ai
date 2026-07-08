@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import String, Text, Boolean, Integer, DateTime
+from sqlalchemy import String, Text, Boolean, Integer, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from app.models import Base
@@ -10,6 +10,9 @@ class User(Base):
 
     id              : Mapped[uuid.UUID]   = mapped_column(primary_key=True, default=uuid.uuid4)
     wa_id           : Mapped[str]         = mapped_column(String(30), nullable=False, unique=True, index=True)
+    # Identity spine (additive): the human this WhatsApp profile rolls up to.
+    # Nullable during rollout; backfilled 1:1 from wa_id. See app/models/person.py.
+    person_id       : Mapped[uuid.UUID | None] = mapped_column(ForeignKey("persons.id", ondelete="SET NULL"), nullable=True, index=True)
     phone           : Mapped[str | None]  = mapped_column(String(30), nullable=True)
     name            : Mapped[str | None]  = mapped_column(String(100), nullable=True)
     name_confirmed  : Mapped[bool]        = mapped_column(Boolean, default=False)

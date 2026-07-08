@@ -20,6 +20,9 @@ class Message(Base):
     id              : Mapped[uuid.UUID]        = mapped_column(primary_key=True, default=uuid.uuid4)
     name            : Mapped[str | None]       = mapped_column(String(100), nullable=True)
     wa_id           : Mapped[str]              = mapped_column(String(30), nullable=False, index=True)
+    # Identity spine (additive): backfilled 1:1 from wa_id; channel defaults to whatsapp.
+    channel         : Mapped[str | None]       = mapped_column(String(20), nullable=True, server_default="whatsapp")
+    person_id       : Mapped[uuid.UUID | None] = mapped_column(ForeignKey("persons.id", ondelete="SET NULL"), nullable=True, index=True)
     conversation_id : Mapped[uuid.UUID | None] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), nullable=True)
     direction       : Mapped[MsgDirection]     = mapped_column(PgEnum(MsgDirection), nullable=False)
     sender          : Mapped[MsgSender]        = mapped_column(PgEnum(MsgSender), default=MsgSender.user)

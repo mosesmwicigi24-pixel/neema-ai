@@ -96,6 +96,20 @@ async def provision_user(
     if created or last_text is not None:
         user.last_message_at = datetime.now(timezone.utc)
 
+    # ── Identity spine: bind this WhatsApp profile to a person ─────────────────
+    # Additive — guarantees every user row carries a person_id (the backfill did
+    # history; this does the future). A phone IS the person in World A, so the
+    # (whatsapp, wa_id) identity is deterministic. Never overwrites an existing
+    # person link (that only changes via an audited merge).
+    from app.services.identity import resolve_or_create_person, WHATSAPP
+    ident = await resolve_or_create_person(
+        db, WHATSAPP, wa_id,
+        display_name=(user.name or clean_name or None),
+        source="whatsapp_inbound", confidence="deterministic",
+    )
+    if user.person_id is None:
+        user.person_id = ident.person_id
+
     await db.flush()
     return user
 
@@ -129,6 +143,13 @@ async def outbound_gate(db: AsyncSession, redis, body: OutboundDto) -> dict:
         conv = Conversation(wa_id=body.wa_id)
         db.add(conv)
         await db.flush()
+    # Identity spine (additive): ensure this conversation is bound to a person.
+    if conv.person_id is None:
+        from app.services.identity import resolve_person_id_for_wa_id
+        conv.person_id = await resolve_person_id_for_wa_id(
+            db, body.wa_id, source="whatsapp_outbound")
+    if conv.channel is None:
+        conv.channel = "whatsapp"
 
     # ── Human intercept: hold the reply ──────────────────────────────────────
     if conv.intercept_mode == InterceptMode.human:
@@ -193,6 +214,8 @@ async def outbound_gate(db: AsyncSession, redis, body: OutboundDto) -> dict:
     msg = Message(
         wa_id=body.wa_id,
         conversation_id=conv.id,
+        person_id=conv.person_id,
+        channel="whatsapp",
         direction=MsgDirection.outbound,
         sender=MsgSender.ai,
         text=body.ai_reply,
@@ -749,13 +772,18 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
     # Guarantee a backing profile for every conversation, capturing the
     # WhatsApp profile name (body.name) and resolving the country server-side.
     # Only inbound messages carry a trustworthy profile name.
-    await provision_user(
+    user = await provision_user(
         db,
         body.wa_id,
         name=body.name if body.direction == "inbound" else None,
         last_text=(body.text or None),
         last_direction=body.direction,
     )
+    # Identity spine (additive): stamp the conversation with its person/channel.
+    if conv.person_id is None:
+        conv.person_id = user.person_id
+    if conv.channel is None:
+        conv.channel = "whatsapp"
 
     sender    = MsgSender.user       if body.direction == "inbound" else MsgSender.ai
     direction = MsgDirection.inbound if body.direction == "inbound" else MsgDirection.outbound
@@ -789,6 +817,8 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
     msg = Message(
         conversation_id=conv.id,
         wa_id=body.wa_id,
+        person_id=conv.person_id,
+        channel="whatsapp",
         direction=direction,
         sender=sender,
         text=body.text or (media_caption or f"[{media_type} received]" if media_type else ""),
@@ -1143,9 +1173,14 @@ async def upsert_order_event(db: AsyncSession, body, redis=None) -> dict:
 
     event_id = f"{body.wa_id}_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
 
+    # Identity spine (additive): bind the order to a person.
+    from app.services.identity import resolve_person_id_for_wa_id
+    person_id = await resolve_person_id_for_wa_id(db, body.wa_id, source="whatsapp_order")
+
     stmt = pg_insert(OrderEvent).values(
         id=event_id,
         wa_id=body.wa_id,
+        person_id=person_id,
         session_id=body.session_id,
         event_type=body.event_type,
         items=body.items,
@@ -1331,8 +1366,13 @@ async def save_outbound_message(db, redis, wa_id: str, text: str) -> None:
         conv = Conversation(wa_id=wa_id)
         db.add(conv)
         await db.flush()
+    if conv.person_id is None:
+        from app.services.identity import resolve_person_id_for_wa_id
+        conv.person_id = await resolve_person_id_for_wa_id(db, wa_id, source="whatsapp_agent")
+    if conv.channel is None:
+        conv.channel = "whatsapp"
     db.add(Message(
-        wa_id=wa_id, conversation_id=conv.id,
+        wa_id=wa_id, conversation_id=conv.id, person_id=conv.person_id, channel="whatsapp",
         direction=MsgDirection.outbound, sender=MsgSender.ai, text=text,
     ))
     await db.commit()
@@ -1370,9 +1410,16 @@ async def _relay_order_confirmation(db, redis, wa_id, *, order_number, currency,
         conv = Conversation(wa_id=wa_id)
         db.add(conv)
         await db.flush()
+    if conv.person_id is None:
+        from app.services.identity import resolve_person_id_for_wa_id
+        conv.person_id = await resolve_person_id_for_wa_id(db, wa_id, source="whatsapp_receipt")
+    if conv.channel is None:
+        conv.channel = "whatsapp"
     db.add(Message(
         wa_id=wa_id,
         conversation_id=conv.id,
+        person_id=conv.person_id,
+        channel="whatsapp",
         direction=MsgDirection.outbound,
         sender=MsgSender.ai,
         text=text,
@@ -1392,8 +1439,13 @@ async def _relay_order_confirmation(db, redis, wa_id, *, order_number, currency,
 async def upsert_customer_history(db: AsyncSession, body) -> dict:
     from app.models.customer_history import CustomerHistory
 
+    # Identity spine (additive): bind the history snapshot to a person.
+    from app.services.identity import resolve_person_id_for_wa_id
+    person_id = await resolve_person_id_for_wa_id(db, body.wa_id, source="whatsapp_history")
+
     stmt = pg_insert(CustomerHistory).values(
         wa_id=body.wa_id,
+        person_id=person_id,
         last_status=body.last_status,
         has_open_order=body.has_open_order,
         last_event=body.last_event or {},
