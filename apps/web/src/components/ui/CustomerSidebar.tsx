@@ -834,7 +834,7 @@ export function CustomerSidebar({
             </div>
 
             {/* Tabs */}
-            <div className="flex" style={{ borderBottom: "1px solid #cee6b2" }}>
+            <div className="flex" style={{ borderBottom: "1px solid #e2e8f0" }}>
                 {(["profile", "insights", "activity"] as const).map((tab) => (
                     <button
                         key={tab}
@@ -842,11 +842,11 @@ export function CustomerSidebar({
                         className={`flex-1 py-2 text-[10px] font-semibold uppercase tracking-wider transition-colors border-b-2 ${
                             activeTab === tab
                                 ? ""
-                                : "border-transparent text-[#9ccd65]"
+                                : "border-transparent text-[#94a3b8]"
                         }`}
                         style={
                             activeTab === tab
-                                ? { color: "#427425", borderColor: "#589b31" }
+                                ? { color: "#f59e0b", borderColor: "#f59e0b" }
                                 : undefined
                         }
                     >
@@ -858,7 +858,7 @@ export function CustomerSidebar({
             {/* Tab content */}
             <div
                 className="flex-1 overflow-y-auto px-4 py-4"
-                style={{ backgroundColor: "#f3f9ec" }}
+                style={{ backgroundColor: "#f8fafc" }}
             >
                 {activeTab === "profile" && (
                     <>

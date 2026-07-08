@@ -132,3 +132,9 @@ composer: neutral attach button, gold focus ring, GOLD send button. tsc clean.
 **Slice 4 (done):** thread bubbles + composer → Figma — AI/agent bubbles to dark
 navy (#1e293b / #243447), composer attach button neutral, textarea focus ring +
 send button to gold. tsc clean.
+
+**Slice 5 (in progress):** customer panel — tabs PROFILE/INSIGHTS/ACTIVITY →
+gold active (was green), neutral content bg. REMAINING (large): recolour the panel
+body green→gold, and WIRE the real cross-channel data — the panel still uses the
+old `merged_ids`; switch it to `linked_identities` + `GET /customers/{wa_id}/
+identities` + the real merge/unmerge endpoints. Do that as a focused functional slice.
