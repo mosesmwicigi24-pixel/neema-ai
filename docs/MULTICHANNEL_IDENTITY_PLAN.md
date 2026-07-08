@@ -115,11 +115,43 @@ order_event  → already has channel; gains person_id
   automation + human-handoff rules or risk the account driving all the revenue.
   Design within tags/handoff from day one.
 
+## Progress (epic/multichannel-identity)
+
+**Phase 0 — identity spine: SHIPPED into the epic branch (verified, additive,
+WhatsApp unchanged).** Not yet fused to `main`. Commits:
+- `persons` + `identities` (`UNIQUE(channel, external_id)`) + nullable
+  `person_id`/`channel` on the wa_id tables; one migration adds **and backfills**
+  (every wa_id → one person + one `(whatsapp, wa_id)` identity).
+- `app/services/identity.py` resolver wired into every write path so no new row
+  lands with a NULL `person_id` (backfill did history; this does the future).
+- **Real, reversible merge**: `app/services/merge.py` moves identities +
+  re-points history onto the surviving person, tombstones the secondary, writes a
+  `person_merges` audit; `POST /customers/{wa_id}/merge` is now real +
+  `…/unmerge` reverses it. (The old merge was cosmetic.)
+- CRM panel surfacing: profile returns `person_id` + real `linked_identities`;
+  `GET /customers/{wa_id}/identities` returns the identity graph + merge history.
+- Verified end-to-end on Postgres 16 (backfill unifies person_id; UNIQUE rejects
+  dup identities; merge/unmerge round-trips exactly; migrations up/downgrade
+  clean). Test suite: 87 passed.
+
+**Deliberately NOT done yet (and why):**
+- `UNIQUE(conversations.wa_id)` is still in place and the query layer still keys on
+  `wa_id` — cutting it over to `person` is the next spine slice, gated on nothing
+  external but larger/riskier; kept separate so each epic merge stays coherent.
+- Messenger/Instagram ingestion — blocked on **Meta App Review** (`pages_messaging`,
+  `instagram_manage_messages`, `business_management`); platform paperwork, not code.
+- M-Pesa payment→person receiver — the neema side is ready to build, but it needs
+  the **hub** (`feat/customer-country-e164` in bethany-house) to expose the payer
+  MSISDN to a neema endpoint; cross-repo contract, so parked until that lands.
+- Pre-existing: the Alembic chain isn't replayable on a fresh DB (migration
+  `6436af8b40be` drops `custom_roles`/agent cols the initial migration never
+  creates). Flagged as a separate task; doesn't affect prod (already past it).
+
 ## Recommended sequence
 
-0. **Identity spine (World-A only)** — `person`/`identity`, backfill every `wa_id`,
-   refactor the `wa_id`-keyed query layer behind a compat shim, **make merge real**.
-   Worth building even if no channel ships; makes WA↔hub linking robust.
+0. ~~**Identity spine (World-A only)**~~ — **DONE** (see Progress above), minus the
+   `wa_id`-query-layer cutover + dropping `UNIQUE(conversations.wa_id)`, which is
+   the next spine slice.
 1. **Messenger ingestion (pilot channel)** — in+out through the agent; unified inbox.
 2. **Wire the existing comment-to-DM into the agent** — route the comment-driven DMs
    (already live) through the agent + tag them with the source reel/post.
