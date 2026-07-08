@@ -1703,7 +1703,7 @@ export function ConversationsView({
                                                             : msg.sender ===
                                                                 "ai"
                                                               ? "bg-[#1e293b] text-white rounded-tr-sm"
-                                                              : "bg-[#243447] text-white rounded-tr-sm"
+                                                              : "bg-[#2ad113] text-[#0a2e05] rounded-tr-sm"
                                                     }`}
                                                     style={{
                                                         border: isInbound ? "1px solid #edf0ea" : "none",
