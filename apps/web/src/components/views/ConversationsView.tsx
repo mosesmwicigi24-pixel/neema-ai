@@ -1190,7 +1190,7 @@ export function ConversationsView({
                                         activeConv.wa_id,
                                     )}
                                 </div>
-                                <div className="text-xs truncate" style={{ color: "#b5c9a8", fontFamily: "'JetBrains Mono', monospace" }}>
+                                <div className="text-xs truncate" style={{ color: "#b5c9a8", fontFamily: "'DM Mono', monospace" }}>
                                     {formatPhone(activeConv.wa_id)}
                                 </div>
                             </div>

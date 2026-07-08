@@ -7,6 +7,11 @@
 :root {
     --radius: 0.5rem;
 
+    /* Typography — Manrope (clean UI sans), DM Serif Display, DM Mono */
+    --font-sans: 'Manrope', system-ui, sans-serif;
+    --font-display: 'DM Serif Display', Georgia, serif;
+    --font-mono: 'DM Mono', 'Courier New', monospace;
+
     /* Moss-green primary */
     --moss-50:  #f0f9ec; --moss-100: #e2f3d8; --moss-200: #c5e7b1;
     --moss-300: #a8da8b; --moss-400: #8bce64; --moss-500: #6ec23d;
@@ -119,7 +124,7 @@
     body {
         background-color: var(--background);
         color: var(--foreground);
-        font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+        font-family: var(--font-sans);
         -webkit-font-smoothing: antialiased;
         -moz-osx-font-smoothing: grayscale;
     }

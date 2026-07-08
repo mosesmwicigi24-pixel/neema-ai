@@ -80,7 +80,7 @@ function LoadingScreen() {
                     className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin mx-auto mb-3"
                     style={{ borderColor: "#589b31", borderTopColor: "transparent" }}
                 />
-                <p className="text-sm" style={{ color: "#8a9e80", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+                <p className="text-sm" style={{ color: "#8a9e80", fontFamily: "'Manrope', sans-serif" }}>
                     Loading Neema…
                 </p>
             </div>
@@ -498,11 +498,11 @@ export default function NeemaDashboard(): React.ReactElement {
     return (
         <div
             className="flex h-dvh overflow-hidden text-stone-900"
-            style={{ backgroundColor: "#f7f8f5", fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}
+            style={{ backgroundColor: "#f7f8f5", fontFamily: "'Manrope', system-ui, sans-serif" }}
         >
             <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap');
-        * { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; }
+        @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@400;500&display=swap');
+        * { font-family: 'Manrope', system-ui, sans-serif; }
         :root {
             --accent: #589b31;
             --accent-hover: #427425;
