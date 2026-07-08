@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.person import Person, Identity, PersonMerge
+from app.models.person import Person, Identity, Identifier, PersonMerge
 from app.models.user import User
 from app.models.conversation import Conversation
 from app.models.message import Message
@@ -52,9 +52,16 @@ async def merge_persons(
     # Only whatsapp external_ids index the denormalized wa_id tables today.
     moved_external_ids = [i.external_id for i in idents if i.channel == "whatsapp"]
 
-    # 1. Move the identities (the source of truth).
+    identifiers = (await db.execute(
+        select(Identifier).where(Identifier.person_id == secondary_person_id)
+    )).scalars().all()
+    moved_identifier_ids = [str(i.id) for i in identifiers]
+
+    # 1. Move the identities + identifiers (everything the secondary owned).
     for i in idents:
         i.person_id = primary_person_id
+    for idf in identifiers:
+        idf.person_id = primary_person_id
 
     # 2. Refresh the denormalized person_id cache for those wa_ids.
     if moved_external_ids:
@@ -76,6 +83,7 @@ async def merge_persons(
         primary_person_id=primary_person_id,
         secondary_person_id=secondary_person_id,
         moved_identity_ids=moved_identity_ids,
+        moved_identifier_ids=moved_identifier_ids,
         moved_external_ids=moved_external_ids,
         primary_wa_id=primary_wa_id,
         secondary_wa_id=secondary_wa_id,
@@ -104,6 +112,14 @@ async def unmerge(
         await db.execute(
             update(Identity)
             .where(Identity.id.in_(ident_ids))
+            .values(person_id=audit.secondary_person_id)
+        )
+
+    idf_ids = [uuid.UUID(x) for x in (audit.moved_identifier_ids or [])]
+    if idf_ids:
+        await db.execute(
+            update(Identifier)
+            .where(Identifier.id.in_(idf_ids))
             .values(person_id=audit.secondary_person_id)
         )
 
