@@ -874,7 +874,7 @@ export function ConversationsView({
                 </div>
 
                 {/* Channel tabs — compact icon pills per channel */}
-                <div className="flex gap-1.5 overflow-x-auto scrollbar-none pb-1">
+                <div className="flex gap-1.5 overflow-x-auto scrollbar-none pt-2 pb-1">
                     {CHANNEL_TABS.map((tab) => {
                         const active = channelTab === tab.id;
                         const cfg = tab.id === "all" ? null : CHANNEL_CONFIG[tab.id as Channel];
