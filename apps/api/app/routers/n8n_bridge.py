@@ -108,6 +108,14 @@ async def get_profile(wa_id: str, request: Request, db: AsyncSession = Depends(g
             media = {"type": mtype, "url": last.get("media_url"),
                      "caption": last.get("media_caption")} if is_image else None
             if text or is_image:
+                # Cross-channel bridge: if they arrived via a wa.me deep link from
+                # a social DM, link them back to that contact + attribute the source
+                # (before the agent replies, so it answers with unified context).
+                try:
+                    from app.services.identity import reconcile_waref
+                    await reconcile_waref(db, redis, norm, text)
+                except Exception:
+                    pass
                 await runtime.schedule_reply(redis, norm, text, last["id"], media=media)
         profile["should_run_ai"] = False
         profile["route_reason"] = "tier2_agent"
