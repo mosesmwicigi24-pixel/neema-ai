@@ -1,12 +1,22 @@
 """System prompt for the Tier 2 Neema agent."""
 from __future__ import annotations
 
+from app.core.config import settings
+
 
 def build_system_prompt(*, customer_name: str = "", country: str = "", country_iso: str = "",
                         currency: str = "KES") -> str:
     who = f"You are speaking with {customer_name}. " if customer_name else ""
     where = f"They appear to be in {country}. " if country else ""
     money = "Kenyan Shillings (KES)" if currency == "KES" else "US Dollars (USD)"
+    # Business facts (location, hours, delivery, payment, contacts) so Neema can
+    # answer logistics/FAQ questions — not just the catalogue. Editable via config.
+    biz = (settings.business_info or "").strip()
+    business = (
+        "\n\nABOUT BETHANY HOUSE — answer location, hours, delivery, payment and "
+        f"contact questions from these facts (don't invent any):\n{biz}\n"
+        if biz else ""
+    )
     # Local-currency conversion only makes sense for the USD-quoted (non-Kenyan)
     # customer. Convert FROM the USD figure — never from KES — and only on request.
     local_ccy = ""
@@ -64,4 +74,4 @@ STYLE
   don't carry it, say what you see and ask a clarifying question.
 
 Move the conversation toward a confirmed order, but never pushy. Serve first.
-"""
+{business}"""

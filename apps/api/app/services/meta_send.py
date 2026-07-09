@@ -20,57 +20,72 @@ _log = logging.getLogger("neema.meta")
 META_CHANNELS = ("messenger", "facebook", "instagram")
 
 
-async def send_meta_message(recipient_id: str, text: str) -> None:
-    """Send a text reply to a Messenger PSID / Instagram IGSID. Raises if the
-    Page token is unset or Graph rejects the call (the caller decides how to
-    surface it)."""
-    if not settings.meta_page_token:
-        raise RuntimeError("META_PAGE_TOKEN not configured — cannot send a Messenger/IG reply")
-    url = f"https://graph.facebook.com/{settings.meta_graph_version}/me/messages"
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            url,
-            params={"access_token": settings.meta_page_token},
-            json={
-                "recipient": {"id": recipient_id},
-                "messaging_type": "RESPONSE",
-                "message": {"text": text},
-            },
-            timeout=30.0,
-        )
-        if not resp.is_success:
-            _log.error("Meta Send API error %s: %s", resp.status_code, resp.text)
-            resp.raise_for_status()
-
-
-async def _post_comment_edge(comment_id: str, edge: str, text: str, what: str) -> None:
-    """POST a message to a comment edge (`comments` = public reply, or
-    `private_replies` = opens a Messenger DM). Raises on a non-2xx."""
+async def _graph_post(path: str, body: dict, what: str) -> dict:
+    """POST to the Graph API with the Page token in the Authorization header —
+    NEVER in the URL, so the token can't leak into request logs or error
+    messages. On failure, logs Facebook's message (token-free) and raises a clean
+    error that carries no URL and no token."""
     if not settings.meta_page_token:
         raise RuntimeError(f"META_PAGE_TOKEN not configured — cannot {what}")
-    url = f"https://graph.facebook.com/{settings.meta_graph_version}/{comment_id}/{edge}"
+    url = f"https://graph.facebook.com/{settings.meta_graph_version}/{path}"
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             url,
-            params={"access_token": settings.meta_page_token},
-            json={"message": text},
+            headers={"Authorization": f"Bearer {settings.meta_page_token}"},
+            json=body,
             timeout=30.0,
         )
-        if not resp.is_success:
-            _log.error("Meta %s error %s: %s", what, resp.status_code, resp.text)
-            resp.raise_for_status()
+    if not resp.is_success:
+        _log.error("Meta %s failed %s: %s", what, resp.status_code, resp.text)
+        raise RuntimeError(f"Meta {what} failed ({resp.status_code}): {resp.text[:300]}")
+    return resp.json() if resp.content else {}
+
+
+async def send_meta_message(recipient_id: str, text: str) -> None:
+    """Send a text reply to a Messenger PSID / Instagram IGSID via the Send API."""
+    await _graph_post("me/messages", {
+        "recipient": {"id": recipient_id},
+        "messaging_type": "RESPONSE",
+        "message": {"text": text},
+    }, "send message")
 
 
 async def reply_to_comment(comment_id: str, text: str) -> None:
     """Public reply posted under a Facebook/Instagram comment."""
-    await _post_comment_edge(comment_id, "comments", text, "reply to comment")
+    await _graph_post(f"{comment_id}/comments", {"message": text}, "reply to comment")
 
 
 async def send_private_reply(comment_id: str, text: str) -> None:
     """Private reply to a comment — opens a Messenger thread with the commenter.
     One-shot per comment and time-limited by Meta; after it, the conversation
     continues as a normal Messenger DM (which the agent already handles)."""
-    await _post_comment_edge(comment_id, "private_replies", text, "send private reply")
+    await _graph_post(f"{comment_id}/private_replies", {"message": text}, "send private reply")
+
+
+async def fetch_profile(external_id: str) -> dict:
+    """Best-effort: a Messenger/Instagram user's public profile (name + photo) via
+    the User Profile API. The Page token in the Authorization header only — never
+    the URL. Returns {} on any error (permissions, unknown user, IG w/o profile)."""
+    if not settings.meta_page_token or not external_id:
+        return {}
+    url = f"https://graph.facebook.com/{settings.meta_graph_version}/{external_id}"
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                url,
+                params={"fields": "name,first_name,last_name,profile_pic"},
+                headers={"Authorization": f"Bearer {settings.meta_page_token}"},
+                timeout=15.0,
+            )
+        if resp.is_success:
+            d = resp.json()
+            name = (d.get("name")
+                    or f"{d.get('first_name', '')} {d.get('last_name', '')}".strip())
+            return {"name": name or None, "profile_pic": d.get("profile_pic")}
+        _log.info("profile fetch for %s → %s", external_id, resp.status_code)
+    except Exception as exc:
+        _log.info("profile fetch for %s failed: %s", external_id, exc)
+    return {}
 
 
 async def send_to_channel(channel: str, recipient: str, text: str) -> None:

@@ -170,10 +170,37 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
             # matches the resolved media_type (so "[fallback]" becomes "[image]").
             if media_type and (not text or text.startswith("[")):
                 text = f"[{media_type}]"
+
+            # Enrich name + photo from Meta's User Profile API, once per contact
+            # (redis-gated) so a phone-less DM becomes a named, pictured lead. Best
+            # effort: on failure we clear the gate so the next message retries.
+            prof: dict = {}
+            fresh = True
+            if redis is not None:
+                try:
+                    fresh = bool(await redis.set(f"meta:prof:{channel}:{sender}", "1",
+                                                 nx=True, ex=30 * 24 * 3600))
+                except Exception:
+                    fresh = True
+            if fresh:
+                from app.services.meta_send import fetch_profile
+                prof = await fetch_profile(sender)
+                if not prof and redis is not None:
+                    try:
+                        await redis.delete(f"meta:prof:{channel}:{sender}")
+                    except Exception:
+                        pass
+
+            raw = {}
+            if text:
+                raw["last_text"] = text
+            if prof.get("profile_pic"):
+                raw["profile_pic"] = prof["profile_pic"]
             ident = await resolve_or_create_person(
                 db, channel, sender,
                 source=f"{channel}_inbound", confidence="deterministic",
-                raw_profile={"last_text": text} if text else None,
+                display_name=(prof.get("name") or None),
+                raw_profile=raw or None,
             )
             conv = await get_or_create_conversation(db, channel, sender, person_id=ident.person_id)
 
@@ -310,6 +337,7 @@ async def _capture_comment_events(db: AsyncSession, channel: str, payload: dict,
             ident = await resolve_or_create_person(
                 db, comment_channel, c["from_id"], source=f"{comment_channel}_comment",
                 confidence="deterministic",
+                display_name=(c["from_name"] or None),   # FB comments carry the name for free
                 raw_profile={"source_post": c["post_id"], "comment": c["text"],
                              "name": c["from_name"]},
             )

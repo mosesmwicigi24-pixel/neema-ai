@@ -6,6 +6,7 @@ from app.models.conversation import Conversation, InterceptMode
 from app.models.message import Message
 from app.models.agent import Agent
 from app.models.user import User
+from app.models.person import Person
 from app.models.intercept import Intercept, InterceptAction
 from app.schemas.conversation import ConversationListItem, InterceptRequest
 from app.services.conversation import (
@@ -65,6 +66,24 @@ async def list_conversations(
     u_res = await db.execute(select(User).where(User.wa_id.in_(wa_ids)))
     for u in u_res.scalars().all():
         user_map[u.wa_id] = u
+
+    # ── Batch-load person display_names (names for phone-less Meta contacts) ──
+    # WhatsApp names come from User (keyed on wa_id); Messenger/IG/Facebook have
+    # no wa_id, so their name lives on the resolved person (enriched from the FB
+    # comment name or the Messenger profile API). Without this they read "Unknown".
+    person_ids = [c.person_id for c in conversations if getattr(c, "person_id", None)]
+    person_map: dict = {}
+    if person_ids:
+        p_res = await db.execute(select(Person).where(Person.id.in_(person_ids)))
+        for p in p_res.scalars().all():
+            person_map[p.id] = p
+
+    def _name_for(c: Conversation):
+        u = user_map.get(c.wa_id)
+        if u and u.name:
+            return u.name
+        p = person_map.get(getattr(c, "person_id", None))
+        return p.display_name if p else None
 
     # ── Batch-load assigned agent names ──────────────────────────────────────
     agent_ids = [c.assigned_agent_id for c in conversations if c.assigned_agent_id]
@@ -157,7 +176,7 @@ async def list_conversations(
             "status":               c.status,
             "created_at":           c.created_at.isoformat() if c.created_at else None,
             "updated_at":           c.updated_at.isoformat() if c.updated_at else None,
-            "name":                 user_map[c.wa_id].name if c.wa_id in user_map else None,
+            "name":                 _name_for(c),
             "country_iso":          user_map[c.wa_id].country_iso if c.wa_id in user_map else None,
             "flag_url":             user_map[c.wa_id].flag_url if c.wa_id in user_map else None,
             "channel":              getattr(c, "channel", "whatsapp") or "whatsapp",

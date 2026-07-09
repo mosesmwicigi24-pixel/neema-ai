@@ -64,3 +64,13 @@ def test_cart_display_usd_uses_hub_price_and_sums_lines(monkeypatch):
 def test_prompt_is_currency_aware():
     assert "US Dollars (USD)" in build_system_prompt(currency="USD")
     assert "Kenyan Shillings (KES)" in build_system_prompt(currency="KES")
+
+
+def test_business_info_injected_only_when_set(monkeypatch):
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "business_info", "We're on Biashara St, Nairobi CBD; open Mon–Sat.",
+                        raising=False)
+    p = build_system_prompt(currency="KES")
+    assert "Biashara St" in p and "ABOUT BETHANY HOUSE" in p   # facts Neema can quote
+    monkeypatch.setattr(settings, "business_info", "", raising=False)
+    assert "ABOUT BETHANY HOUSE" not in build_system_prompt(currency="KES")   # nothing injected
