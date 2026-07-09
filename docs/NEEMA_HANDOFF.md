@@ -21,11 +21,16 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   Neema converts USD→local at the central-bank rate, rounding up to nearest 10.
 - **WhatsApp formatting**: agent emits `*bold*` (not `**`); Messenger = plain text;
   the web inbox renders WhatsApp markup (`apps/web/src/lib/waText.tsx`).
-- **FB comment funnel** (Bethany House page, LIVE): a comment → intent classify
-  (`classify_comment_intent`) → `plan_comment_actions`: high=public answer+DM,
-  low=light public thanks, negative=empathetic+route-to-human, spam=silent. Public
-  reply works; the private-reply DM opener needs a TOP-LEVEL comment + App Review of
-  `pages_messaging` for the public (subcode 33 otherwise).
+- **FB comment funnel** (Bethany House page, LIVE): a comment → intent classify →
+  the PUBLIC reply IS the sale. High-intent → real agent reply in `public_comment`
+  mode (brief, personal, CATALOGUE-ACCURATE price via search_catalog) + a one-tap
+  `wa.me` order link appended in code → close in the comment. Praise/emoji → VARIED
+  warm thanks (picked by commenter id, no pitch). Negative → empathy + human. Spam →
+  silent. Per-post cap `meta_comment_agent_cap` (30): first N buying comments get
+  the full agent reply, rest get a lighter warm line (cost/rate control). The DM is
+  a SILENT BONUS (best-effort; no public DM promise) — real DMs to non-testers need
+  App Review of `pages_messaging` (subcode 33 otherwise). SET `BUSINESS_INFO` +
+  `WHATSAPP_HANDOFF_NUMBER` on the box for the links/logistics to work.
 - **One-tap WhatsApp close**: `whatsapp_checkout_link` tool → `wa.me` deep link
   prefilled with product + a `ref`, minted to redis `waref:<ref>`.
 - **Social profile enrichment**: FB comment name (free) + Messenger/IG profile
