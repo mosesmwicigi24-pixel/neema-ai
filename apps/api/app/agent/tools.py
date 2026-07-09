@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import hub_client
+from app.core.config import settings
 from app.core.countries import resolve_country
 from app.models.order_event import OrderEvent
 from app.models.user import User
@@ -32,6 +33,7 @@ class ToolContext:
     wa_id: str
     currency: str = "KES"   # display currency for THIS customer (KES | USD)
     usd_rate: int = 100     # KES per 1 USD (config.usd_kes_rate)
+    channel: str = "whatsapp"  # source channel (whatsapp | messenger | instagram)
 
 
 def _display(kes, ctx: "ToolContext"):
@@ -166,6 +168,20 @@ TOOLS: list[dict] = [
             "type": "object",
             "properties": {"reason": {"type": "string"}},
             "required": ["reason"],
+        },
+    },
+    {
+        "name": "whatsapp_checkout_link",
+        "description": "Give a Messenger/Instagram customer a ONE-TAP WhatsApp link to finish "
+                       "their order — checkout and payment happen on WhatsApp. Use this the "
+                       "moment they show buying intent ('how do I pay', 'I'll take it', a clear "
+                       "yes). Pass the product(s) so the link is pre-filled; share the returned "
+                       "link and warmly invite them to tap it.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"product": {"type": "string",
+                                       "description": "product(s) to pre-fill, e.g. 'a black cassock, size 52'"}},
+            "required": [],
         },
     },
 ]
@@ -447,6 +463,34 @@ async def _handoff_to_human(args: dict, ctx: ToolContext) -> dict:
     return {"ok": True, "reason": args.get("reason")}
 
 
+async def _whatsapp_checkout_link(args: dict, ctx: ToolContext) -> dict:
+    """Build a one-tap wa.me deep link, pre-filled with the product, that lands
+    the customer on WhatsApp ready to order (where checkout + M-Pesa live). A
+    short ref ties the resulting WhatsApp lead back to THIS social contact so we
+    can reconcile identity + attribute the sale."""
+    import secrets
+    from urllib.parse import quote
+    num = (settings.whatsapp_handoff_number or "").lstrip("+").strip()
+    if not num:
+        return {"error": "WhatsApp checkout number not configured"}
+    product = (args.get("product") or "").strip()
+    ref = secrets.token_hex(3).upper()          # e.g. '9F2A7C'
+    body = (f"Hi Bethany House! I'd like to order {product}. (ref {ref})"
+            if product else f"Hi Bethany House! I'd like to order. (ref {ref})")
+    link = f"https://wa.me/{num}?text={quote(body)}"
+    try:
+        if ctx.redis is not None:
+            await ctx.redis.set(
+                f"waref:{ref}",
+                json.dumps({"channel": ctx.channel, "external_id": ctx.wa_id}),
+                ex=14 * 24 * 3600,
+            )
+    except Exception:
+        pass                                     # attribution is best-effort
+    return {"link": link, "ref": ref,
+            "note": "Share this link and invite them to tap it to finish on WhatsApp."}
+
+
 _HANDLERS = {
     "search_catalog": _search_catalog,
     "get_cart": _get_cart,
@@ -458,4 +502,5 @@ _HANDLERS = {
     "remember": _remember,
     "add_tags": _add_tags,
     "handoff_to_human": _handoff_to_human,
+    "whatsapp_checkout_link": _whatsapp_checkout_link,
 }
