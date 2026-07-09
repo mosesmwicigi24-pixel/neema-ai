@@ -204,25 +204,25 @@ export default function NeemaDashboard(): React.ReactElement {
     const { data: rawConversations, refetch: refetchConversations } =
         usePolling(
             () => hasToken ? conversationsApi.list() : Promise.resolve(null),
-            8000,
+            20000,
             [hasToken],
         );
 
     const { data: rawAgents, refetch: refetchAgents } = usePolling(
         () => (hasToken ? agentsApi.list() : Promise.resolve(null)),
-        15000,
+        45000,
         [hasToken],
     );
 
     const { data: rawCatalog, refetch: refetchCatalog } = usePolling(
         () => (hasToken ? catalogApi.list() : Promise.resolve(null)),
-        30000,
+        120000,
         [hasToken],
     );
 
     const { data: rawOrders, refetch: refetchOrders } = usePolling(
         () => (hasToken ? ordersApi.list() : Promise.resolve(null)),
-        10000,
+        30000,
         [hasToken],
     );
 

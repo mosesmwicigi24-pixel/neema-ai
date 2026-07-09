@@ -476,12 +476,14 @@ export function ConversationsView({
         }, 50);
     }, [activeConvId]);
 
-    // ── Poll active thread every 10s as a WebSocket fallback ─────────────────
+    // ── Poll active thread as a WebSocket fallback (WS is primary; skip
+    // ticks while the tab is hidden) ──────────────────────────────────────────
     useEffect(() => {
         if (!activeConvId) return;
         const timer = setInterval(() => {
+            if (document.visibilityState === "hidden") return;
             loadMessages(activeConvId, true);
-        }, 10000);
+        }, 20000);
         return () => clearInterval(timer);
     }, [activeConvId, loadMessages]);
 

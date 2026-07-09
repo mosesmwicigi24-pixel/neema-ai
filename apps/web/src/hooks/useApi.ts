@@ -56,8 +56,22 @@ export function usePolling<T>(
     const result = useApi<T>(fetcher, deps);
 
     useEffect(() => {
-        const timer = setInterval(result.refetch, intervalMs);
-        return () => clearInterval(timer);
+        // Polls are the WebSocket's *fallback*, not the primary transport — so
+        // skip ticks while the tab is hidden (an idle background dashboard was
+        // hammering the API for nobody) and refetch once on return.
+        const tick = () => {
+            if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+            result.refetch();
+        };
+        const timer = setInterval(tick, intervalMs);
+        const onVisible = () => {
+            if (document.visibilityState === "visible") result.refetch();
+        };
+        document.addEventListener("visibilitychange", onVisible);
+        return () => {
+            clearInterval(timer);
+            document.removeEventListener("visibilitychange", onVisible);
+        };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [intervalMs, result.refetch]);
 
