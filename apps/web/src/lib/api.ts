@@ -119,6 +119,7 @@ export interface ApiConversation {
     created_at: string;
     updated_at: string;
     name?: string;
+    avatar_url?: string | null;
     channel?: string;
     unread?: number;
     country?: string | null;

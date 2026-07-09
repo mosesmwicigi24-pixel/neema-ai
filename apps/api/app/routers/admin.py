@@ -6,7 +6,7 @@ from app.models.conversation import Conversation, InterceptMode
 from app.models.message import Message
 from app.models.agent import Agent
 from app.models.user import User
-from app.models.person import Person
+from app.models.person import Person, Identity
 from app.models.intercept import Intercept, InterceptAction
 from app.schemas.conversation import ConversationListItem, InterceptRequest
 from app.services.conversation import (
@@ -77,6 +77,17 @@ async def list_conversations(
         p_res = await db.execute(select(Person).where(Person.id.in_(person_ids)))
         for p in p_res.scalars().all():
             person_map[p.id] = p
+
+    # ── Profile photos (Messenger/IG avatars) keyed by person ────────────────
+    # Stored on the identity's raw_profile by the DM enrichment. Meta pic URLs can
+    # expire, so the frontend falls back to the initial if the image 404s.
+    avatar_map: dict = {}
+    if person_ids:
+        id_res = await db.execute(select(Identity).where(Identity.person_id.in_(person_ids)))
+        for idn in id_res.scalars().all():
+            pic = (idn.raw_profile or {}).get("profile_pic")
+            if pic and idn.person_id not in avatar_map:
+                avatar_map[idn.person_id] = pic
 
     def _name_for(c: Conversation):
         u = user_map.get(c.wa_id)
@@ -177,6 +188,7 @@ async def list_conversations(
             "created_at":           c.created_at.isoformat() if c.created_at else None,
             "updated_at":           c.updated_at.isoformat() if c.updated_at else None,
             "name":                 _name_for(c),
+            "avatar_url":           avatar_map.get(getattr(c, "person_id", None)),
             "country_iso":          user_map[c.wa_id].country_iso if c.wa_id in user_map else None,
             "flag_url":             user_map[c.wa_id].flag_url if c.wa_id in user_map else None,
             "channel":              getattr(c, "channel", "whatsapp") or "whatsapp",

@@ -1020,6 +1020,7 @@ export function ConversationsView({
                                             conv.name,
                                             conv.wa_id,
                                         )}
+                                        src={conv.avatar_url}
                                         size={38}
                                     />
                                     {/* Country flag — top right */}
@@ -1184,6 +1185,7 @@ export function ConversationsView({
                                     activeConv.name,
                                     activeConv.wa_id,
                                 )}
+                                src={activeConv.avatar_url}
                                 size={32}
                             />
                             <div className="flex-1 min-w-0">

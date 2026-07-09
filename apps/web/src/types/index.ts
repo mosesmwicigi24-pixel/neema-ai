@@ -20,6 +20,7 @@ export interface Conversation {
     id: string;
     wa_id: string;
     name: string | null;
+    avatar_url?: string | null;
     channel: Channel;
     intercept_mode: InterceptMode;
     status: ConversationStatus;

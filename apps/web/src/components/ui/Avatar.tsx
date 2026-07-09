@@ -15,16 +15,24 @@ const SIZE_PX: Record<string, number> = {
 
 interface AvatarProps {
     name?: string;
+    // Optional profile photo (e.g. a Messenger/IG avatar). Meta pic URLs can
+    // expire, so on any load error we fall back to the initials automatically.
+    src?: string | null;
     size?: "xs" | "sm" | "md" | "lg" | "xl" | number;
     className?: string;
 }
 
 export function Avatar({
     name,
+    src,
     size = "md",
     className = "",
 }: AvatarProps): React.ReactElement {
     const px = typeof size === "number" ? size : (SIZE_PX[size] ?? 40);
+    const [broken, setBroken] = React.useState(false);
+    // Reset the error state when the photo changes (e.g. switching conversations).
+    React.useEffect(() => setBroken(false), [src]);
+    const showImg = Boolean(src) && !broken;
 
     return (
         <div
@@ -39,9 +47,18 @@ export function Avatar({
                 letterSpacing:   "0.02em",
                 flexShrink:      0,
             }}
-            className={`rounded-full flex items-center justify-center ${className}`}
+            className={`rounded-full flex items-center justify-center overflow-hidden ${className}`}
         >
-            {initials(name)}
+            {showImg ? (
+                <img
+                    src={src as string}
+                    alt={name || ""}
+                    onError={() => setBroken(true)}
+                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                />
+            ) : (
+                initials(name)
+            )}
         </div>
     );
 }
