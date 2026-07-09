@@ -55,8 +55,20 @@ async def resolve_or_create_person(
 
     ident = await _select_identity(db, channel, external_id)
     if ident is not None:
+        # Enrich in place on a return visit. The inbox reads Person.display_name
+        # and the avatar reads Identity.raw_profile.profile_pic, so a late name /
+        # photo (e.g. the Meta Profile API only started answering once the app was
+        # approved) must land on BOTH — otherwise the contact stays "Unknown"
+        # forever despite the identity now knowing its name.
         if display_name and not ident.display_name:
             ident.display_name = display_name[:200]
+        new_pic = (raw_profile or {}).get("profile_pic")
+        if new_pic and (ident.raw_profile or {}).get("profile_pic") != new_pic:
+            ident.raw_profile = {**(ident.raw_profile or {}), "profile_pic": new_pic}
+        if display_name:
+            person = await db.get(Person, ident.person_id)
+            if person is not None and not person.display_name:
+                person.display_name = display_name[:200]
         return ident
 
     try:

@@ -129,6 +129,26 @@ async def lifespan(app: FastAPI):
     # Run schema migrations before serving any traffic
     await run_migrations()
 
+    # ── Drain the "Unknown" Meta contact backlog (best-effort, gated) ─────────
+    # Now that the Meta app is approved for the Profile API, retro-name the
+    # contacts that came in anonymous. Redis-gated so only one worker runs it and
+    # only every few hours; bounded so it never hammers the Graph API. Never
+    # blocks startup — fire-and-forget, and any failure is swallowed.
+    async def _meta_backfill_once():
+        try:
+            if redis is not None:
+                got = await redis.set("meta:backfill:lock", "1", nx=True, ex=6 * 3600)
+                if not got:
+                    return
+            from app.services.meta_enrich import backfill_unknown_profiles
+            async with AsyncSessionLocal() as db:
+                await backfill_unknown_profiles(db, limit=50)
+        except Exception as exc:
+            logger.warning("meta profile backfill (startup) skipped: %s", exc)
+
+    import asyncio as _asyncio
+    app.state._meta_backfill_task = _asyncio.create_task(_meta_backfill_once())
+
     yield
 
     # Shutdown

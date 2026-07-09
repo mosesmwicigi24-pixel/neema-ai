@@ -1078,3 +1078,16 @@ async def delete_agent(
     await db.delete(agent)
     await db.commit()
     return {"ok": True}
+
+# ── Meta profile backfill ─────────────────────────────────────────────────────
+# Retro-enrich "Unknown" Messenger/Instagram/Facebook contacts now that the Meta
+# app is approved for the Profile API. Operator-triggered (safe, bounded); a
+# gated pass also runs on startup (see main.py) so the backlog drains on its own.
+@router.post("/meta/backfill-profiles")
+async def backfill_meta_profiles(
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    from app.services.meta_enrich import backfill_unknown_profiles
+    return await backfill_unknown_profiles(db, limit=min(max(limit, 1), 200))
