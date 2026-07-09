@@ -31,6 +31,24 @@ def _price(prices_by_ccy: dict, ccy: str):
         return None
 
 
+def _map_images(p: dict) -> list[dict]:
+    """Ordered {url, thumb, alt} list from the hub's product images (primary
+    first). Empty list when the product has no images."""
+    imgs = p.get("images") or []
+    out = [
+        {
+            "url":   im.get("image_url"),
+            "thumb": im.get("thumbnail_url") or im.get("image_url"),
+            "alt":   im.get("alt_text") or "",
+            "primary": bool(im.get("is_primary")),
+            "sort":  im.get("sort_order") or 0,
+        }
+        for im in imgs if im.get("image_url")
+    ]
+    out.sort(key=lambda i: (not i["primary"], i["sort"]))   # primary first, then sort_order
+    return out
+
+
 def _map_product(p: dict) -> dict:
     trans = p.get("translations") or []
     en = next((t for t in trans if t.get("language_code") == "en"),
@@ -38,10 +56,12 @@ def _map_product(p: dict) -> dict:
     prices = {pr.get("currency_code"): pr for pr in (p.get("prices") or [])}
     kes = _price(prices, "KES")
     usd = _price(prices, "USD")
+    images = _map_images(p)
     return {
         "hub_product_id": p.get("id"),
         "uuid":           p.get("uuid"),
         "sku":            p.get("sku") or "",
+        "slug":           p.get("slug") or "",
         "name":           en.get("name") or "",
         "category":       (p.get("category") or {}).get("name_en") or "",
         # `price` stays KES for backward-compat with the current prompt; both
@@ -54,6 +74,11 @@ def _map_product(p: dict) -> dict:
         "aliases":        p.get("aliases") or [],
         "in_stock":       bool(p.get("in_stock", True)),
         "available_qty":  p.get("available_qty"),
+        # Product visuals (primary first) — for the shareable catalog + inline
+        # product images the agent can send in chat.
+        "images":         images,
+        "image_url":      images[0]["url"] if images else None,
+        "thumbnail_url":  images[0]["thumb"] if images else None,
         # Order-routing: "variable" products track stock per-variant, so a bare
         # product_id fails the POS stock check. Producible (made-to-order) items
         # are pushed via production_items[] instead — no variant, no stock check.

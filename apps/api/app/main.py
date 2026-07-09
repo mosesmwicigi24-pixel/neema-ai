@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import redis.asyncio as aioredis
 
 from app.core.config import settings
-from app.routers import auth, admin, n8n_bridge, websocket, health, crm, roles, media, agent, meta_webhook
+from app.routers import auth, admin, n8n_bridge, websocket, health, crm, roles, media, agent, meta_webhook, public
 from app.database import AsyncSessionLocal
 from sqlalchemy import text
 
@@ -182,6 +182,7 @@ app.include_router(meta_webhook.router, prefix="/api/meta", tags=["Meta Webhook"
 app.include_router(agent.router,      prefix="/api/agent", tags=["Tier 2 Agent"])
 app.include_router(websocket.router,  prefix="",           tags=["WebSocket"])
 app.include_router(media.router,      prefix="/api",       tags=["Media"])
+app.include_router(public.router,     prefix="/api/public", tags=["Public Catalog"])
 
 
 @app.get("/api/health")
