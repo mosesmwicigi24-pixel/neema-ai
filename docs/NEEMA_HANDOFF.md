@@ -75,6 +75,22 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
 - Meta Profile API CONFIRMED blocked for non-testers (400 subcode: missing
   permissions; 1/69 named) → names come from asking in chat until App Review.
 
+## Phase E continued (attribution → tokens → perf → review pack)
+- **Attribution live** (`681be7f`): GET /api/admin/attribution + "Where Sales Come
+  From" card on Analytics — leads/orders/revenue by (source, post), honest
+  `unattributed` row.
+- **Per-page token routing** (`f42bb1d`): META_PAGE_TOKENS="pageid:token,…";
+  webhook stamps the owning page on each identity; all reply paths act as the
+  right page. TO ENABLE Executive replies: generate its Page token, set
+  META_PAGE_TOKENS with both pages, up -d api.
+- **Inbox polling calmed** (`5f8e98e`): fallback polls 20/30/45/120s, paused when
+  tab hidden, refetch on return (WS remains primary).
+- **Meta location surfaced**: CRM profile falls back to person.state.location
+  (capture_contact) when User.location is empty.
+- **App Review pack**: docs/APP_REVIEW_PACK.md — permissions, use-case texts,
+  screencast script, reviewer steps. Submit to unlock DMs + private replies +
+  profile names in one review.
+
 ## Next build (queued)
 - **Attribution reporting view** — revenue-by-source. Data link exists now
   (`person.state.source_post` + hub orders → person). Backend aggregation + a small

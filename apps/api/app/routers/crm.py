@@ -139,6 +139,7 @@ def _build_profile(
     history: CustomerHistory | None,
     hub: dict | None = None,
     identities: list | None = None,
+    person_state: dict | None = None,
 ) -> dict:
     # Orders + spend: the hub is the source of truth (every channel — POS, web
     # AND WhatsApp). Fall back to Neema's local WhatsApp order_events only when
@@ -222,7 +223,7 @@ def _build_profile(
         "name_confirmed": user.name_confirmed,
         "email":          user.email,
         "phone":          user.phone or (user.wa_id if is_plausible_phone(user.wa_id) else None),
-        "location":       user.location,
+        "location":       user.location or (person_state or {}).get("location"),
         "age":            user.age,
         "tags":           tags,
         "lead_stage":     lead_stage,
@@ -387,7 +388,12 @@ async def get_customer(
     except Exception:
         hub = None
 
-    return _build_profile(user, orders, conversations, history, hub=hub, identities=identities)
+    person_state = None
+    if user.person_id is not None:
+        _p = await db.get(Person, user.person_id)
+        person_state = (_p.state or None) if _p is not None else None
+    return _build_profile(user, orders, conversations, history, hub=hub,
+                          identities=identities, person_state=person_state)
 
 
 # ── Identity spine health (ops trust the backfill in prod) ────────────────────
