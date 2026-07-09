@@ -44,6 +44,15 @@ class _FakeDB:
     async def execute(self, *a, **k):
         return _Res(one=self._existing)
 
+    async def get(self, model, pk):
+        # The existing identity's backing person, for name enrichment on a return
+        # visit. Lazily created (never add()ed — it already exists); display_name
+        # empty so the resolver fills it.
+        if getattr(self, "_person", None) is None:
+            from app.models.person import Person
+            self._person = Person(display_name=None)
+        return self._person
+
     def add(self, obj):
         self.added.append(obj)
 

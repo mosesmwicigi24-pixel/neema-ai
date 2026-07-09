@@ -160,7 +160,8 @@ def test_messenger_agent_tool_set_has_no_order_tools():
     WhatsApp checkout link. Prevents phone-less bad orders."""
     from app.agent.runtime import MESSENGER_TOOLS
     names = {t["name"] for t in MESSENGER_TOOLS}
-    assert names == {"search_catalog", "remember", "handoff_to_human", "whatsapp_checkout_link"}
+    assert names == {"search_catalog", "remember", "handoff_to_human",
+                     "whatsapp_checkout_link", "share_catalog"}
     assert "create_order" not in names and "update_cart" not in names
 
 

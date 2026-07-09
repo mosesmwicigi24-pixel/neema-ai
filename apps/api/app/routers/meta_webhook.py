@@ -384,6 +384,7 @@ async def _capture_comment_events(db: AsyncSession, channel: str, payload: dict,
                 person_id=ident.person_id, conversation_id=conv.id,
                 direction=MsgDirection.inbound, sender=MsgSender.user,
                 text=(c["text"] or ""),
+                waba_msg_id=c["comment_id"],   # the comment id, so a reply can target it
                 comment_context=(ctx or None),
             ))
             conv.last_message_at = datetime.now(timezone.utc)

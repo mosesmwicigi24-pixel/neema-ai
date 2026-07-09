@@ -278,6 +278,33 @@ async def record_escalation(
         })
 
 
+async def _latest_inbound(db: AsyncSession, conv_id) -> Message | None:
+    return (await db.execute(
+        select(Message)
+        .where(Message.conversation_id == conv_id, Message.direction == MsgDirection.inbound)
+        .order_by(Message.created_at.desc()).limit(1)
+    )).scalar_one_or_none()
+
+
+async def _deliver_agent_reply(db: AsyncSession, conv: Conversation, text: str) -> None:
+    """Send a human reply on the conversation's channel, raising on failure.
+
+    A Facebook/Instagram COMMENT conversation must reply on the COMMENT edge —
+    the commenter may have no open DM thread, and a Send-API DM to them 400s
+    (that was the 500). FB comments live on their own `facebook` channel; IG
+    comments carry `comment_context`. Everything else (Messenger/IG DMs,
+    WhatsApp) uses the normal transport."""
+    channel = conv.channel or "whatsapp"
+    latest_in = await _latest_inbound(db, conv.id)
+    is_comment = channel == "facebook" or bool(getattr(latest_in, "comment_context", None))
+    comment_id = latest_in.waba_msg_id if latest_in else None
+    if is_comment and comment_id:
+        from app.services.meta_send import reply_to_comment
+        await reply_to_comment(comment_id, text)      # public reply under the comment
+    else:
+        await send_to_channel(channel, conv.external_id or conv.wa_id, text)
+
+
 async def send_agent_reply(
     db: AsyncSession,
     conv_id: str,
@@ -306,7 +333,16 @@ async def send_agent_reply(
             detail=f"Conversation is handled by {owner_name}.",
         )
 
-    await send_to_channel(conv.channel or "whatsapp", conv.external_id or conv.wa_id, text)
+    # Deliver first; only persist the outbound if it actually went out. A send
+    # failure returns a clean error (not a 500) so the inbox can surface it.
+    try:
+        await _deliver_agent_reply(db, conv, text)
+    except Exception as exc:
+        import logging
+        logging.getLogger("neema.inbox").warning(
+            "agent reply delivery failed for conv %s (%s): %s",
+            conv.id, conv.channel, exc)
+        return {"ok": False, "error": f"Couldn't send the reply: {str(exc)[:200]}"}
 
     msg = Message(
         wa_id=conv.wa_id,
