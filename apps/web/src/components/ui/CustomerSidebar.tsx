@@ -230,6 +230,62 @@ const STAGE_ORDER: LeadStage[] = [
     "lost",
 ];
 
+// ── Lead-pipeline stepper ────────────────────────────────────────────────────
+// Horizontal gold stepper matched to the reference design. Displays the linear
+// path New → Contacted → Qualified → Proposal → Won, with Lost as a faded
+// terminal branch. (Negotiating stays a valid data stage; it maps onto Proposal
+// for progress purposes — see stepState below.)
+const PIPELINE_STAGES: LeadStage[] = [
+    "new",
+    "contacted",
+    "qualified",
+    "proposal",
+    "won",
+    "lost",
+];
+// Forward progression used to decide which nodes are already completed.
+const PIPELINE_FORWARD: LeadStage[] = [
+    "new",
+    "contacted",
+    "qualified",
+    "proposal",
+    "negotiation",
+    "won",
+];
+// Goldenrod palette sampled from the reference photo.
+const PIPE_GOLD = "#c89b3c"; // completed node outline/check, connectors, labels
+const PIPE_GOLD_SOLID = "#a97c14"; // current (active) filled node + its label
+const PIPE_IDLE = "#e7e5e4"; // not-yet-reached connector / node border
+const PIPE_IDLE_TEXT = "#a8a29e"; // not-yet-reached label
+const PIPE_LOST = "#f4cccc"; // Lost terminal border + connector (faded pink)
+const PIPE_LOST_ICON = "#efa3a3"; // Lost ✕ icon
+const PIPE_LOST_TEXT = "#e08a8a"; // Lost label
+
+// Clean labels for the stepper (STAGE_META.won is "Won ✓" — drop the glyph
+// here since the node circle already shows a checkmark).
+const PIPE_LABEL: Record<LeadStage, string> = {
+    new: "New",
+    contacted: "Contacted",
+    qualified: "Qualified",
+    proposal: "Proposal",
+    negotiation: "Negotiating",
+    won: "Won",
+    lost: "Lost",
+};
+
+type StepState = "active" | "done" | "future";
+function stepState(stage: LeadStage, active: LeadStage): StepState {
+    if (stage === active) return "active";
+    if (stage === "lost") return "future"; // Lost is only ever active when current
+    if (active === "lost") {
+        // Customer is lost: everything up to Proposal is done, Won is skipped.
+        return stage === "won" ? "future" : "done";
+    }
+    const a = PIPELINE_FORWARD.indexOf(active);
+    const s = PIPELINE_FORWARD.indexOf(stage);
+    return s > -1 && a > -1 && s < a ? "done" : "future";
+}
+
 // Channel label + brand colour for the cross-channel identities list.
 const CH_META: Record<string, { label: string; color: string }> = {
     whatsapp: { label: "WhatsApp", color: "#25D366" },
@@ -979,7 +1035,7 @@ export function CustomerSidebar({
                             />
                         </Section>
 
-                        <Section title="Lead Stage">
+                        <Section title="Lead Pipeline">
                             {profile.lead_stage_source === "auto" && (
                                 <div className="text-[10px] text-violet-600 mb-1.5 flex items-center gap-1">
                                     <span className="inline-flex items-center rounded px-1 py-0.5 bg-violet-50 border border-violet-200 font-semibold">
@@ -988,25 +1044,146 @@ export function CustomerSidebar({
                                     set from the conversation — click any stage to override.
                                 </div>
                             )}
-                            <div className="flex flex-wrap gap-1">
-                                {STAGE_ORDER.map((stage) => {
-                                    const m = STAGE_META[stage];
-                                    const active = profile.lead_stage === stage;
-                                    return (
+                            <div className="flex items-center relative pb-5 px-0.5">
+                                {PIPELINE_STAGES.flatMap((stage, i) => {
+                                    const state = stepState(
+                                        stage,
+                                        profile.lead_stage,
+                                    );
+                                    const isLost = stage === "lost";
+                                    const reached =
+                                        state === "done" || state === "active";
+
+                                    // Circle appearance per state
+                                    let circleStyle: React.CSSProperties;
+                                    if (state === "active") {
+                                        circleStyle = isLost
+                                            ? {
+                                                  backgroundColor: "#ef4444",
+                                                  borderColor: "#ef4444",
+                                                  color: "#ffffff",
+                                              }
+                                            : {
+                                                  backgroundColor:
+                                                      PIPE_GOLD_SOLID,
+                                                  borderColor: PIPE_GOLD_SOLID,
+                                                  color: "#ffffff",
+                                              };
+                                    } else if (state === "done") {
+                                        circleStyle = {
+                                            backgroundColor: "#ffffff",
+                                            borderColor: PIPE_GOLD,
+                                            color: PIPE_GOLD,
+                                        };
+                                    } else if (isLost) {
+                                        circleStyle = {
+                                            backgroundColor: "#ffffff",
+                                            borderColor: PIPE_LOST,
+                                            color: PIPE_LOST_ICON,
+                                        };
+                                    } else {
+                                        circleStyle = {
+                                            backgroundColor: "#ffffff",
+                                            borderColor: PIPE_IDLE,
+                                            color: "transparent",
+                                        };
+                                    }
+
+                                    // Label colour + weight per state
+                                    const labelColor =
+                                        state === "active"
+                                            ? isLost
+                                                ? "#ef4444"
+                                                : PIPE_GOLD_SOLID
+                                            : state === "done"
+                                              ? PIPE_GOLD
+                                              : isLost
+                                                ? PIPE_LOST_TEXT
+                                                : PIPE_IDLE_TEXT;
+
+                                    // Show ✕ for Lost, ✓ for reached forward nodes
+                                    const showCheck = reached && !isLost;
+                                    const showX =
+                                        isLost &&
+                                        (state === "active" ||
+                                            state === "future");
+
+                                    // Connector colour (segment before this node)
+                                    const connColor = isLost
+                                        ? PIPE_LOST
+                                        : reached
+                                          ? PIPE_GOLD
+                                          : PIPE_IDLE;
+
+                                    const els: React.ReactNode[] = [];
+                                    if (i > 0) {
+                                        els.push(
+                                            <div
+                                                key={`c-${stage}`}
+                                                className="flex-1 h-0.5 rounded-full"
+                                                style={{
+                                                    backgroundColor: connColor,
+                                                }}
+                                            />,
+                                        );
+                                    }
+                                    els.push(
                                         <button
-                                            key={stage}
+                                            key={`n-${stage}`}
                                             onClick={() =>
                                                 patch({ lead_stage: stage })
                                             }
-                                            className={`text-[10px] font-semibold px-2 py-1 rounded-lg border transition-all ${
-                                                active
-                                                    ? `${m.bg} ${m.color} border-current`
-                                                    : "bg-white text-stone-400 border-stone-200 hover:border-stone-400"
-                                            }`}
+                                            title={PIPE_LABEL[stage]}
+                                            className="relative flex-shrink-0"
                                         >
-                                            {m.label}
-                                        </button>
+                                            <span
+                                                className="flex items-center justify-center w-6 h-6 rounded-full border-2 transition-colors"
+                                                style={circleStyle}
+                                            >
+                                                {showCheck && (
+                                                    <svg
+                                                        viewBox="0 0 24 24"
+                                                        fill="none"
+                                                        stroke="currentColor"
+                                                        strokeWidth={3.5}
+                                                        className="w-3 h-3"
+                                                    >
+                                                        <path
+                                                            strokeLinecap="round"
+                                                            strokeLinejoin="round"
+                                                            d="M5 13l4 4L19 7"
+                                                        />
+                                                    </svg>
+                                                )}
+                                                {showX && (
+                                                    <svg
+                                                        viewBox="0 0 24 24"
+                                                        fill="none"
+                                                        stroke="currentColor"
+                                                        strokeWidth={3.5}
+                                                        className="w-3 h-3"
+                                                    >
+                                                        <path
+                                                            strokeLinecap="round"
+                                                            strokeLinejoin="round"
+                                                            d="M6 6l12 12M18 6L6 18"
+                                                        />
+                                                    </svg>
+                                                )}
+                                            </span>
+                                            <span
+                                                className={`absolute top-[26px] left-1/2 -translate-x-1/2 text-[9px] whitespace-nowrap ${
+                                                    state === "active"
+                                                        ? "font-bold"
+                                                        : "font-semibold"
+                                                }`}
+                                                style={{ color: labelColor }}
+                                            >
+                                                {PIPE_LABEL[stage]}
+                                            </span>
+                                        </button>,
                                     );
+                                    return els;
                                 })}
                             </div>
                         </Section>
