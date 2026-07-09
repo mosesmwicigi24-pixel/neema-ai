@@ -144,6 +144,7 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
 
     broadcasts: list[tuple[str, dict]] = []
     replies: list[tuple[str, str, str | None]] = []   # (sender, text, mid) to hand the agent
+    media_rehosts: list[tuple[str, str, str]] = []    # (mid, cdn_url, media_type) to re-host
     captured = 0
     for entry in payload.get("entry", []):
         for event in entry.get("messaging", []) or entry.get("standby", []):
@@ -190,6 +191,11 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
                 "channel": channel, "sender": "user", "text": text,
                 "mediaType": media_type, "mediaUrl": media_url,
             }))
+            # Meta CDN links expire — queue a background download so the row's
+            # media_url is swapped to a permanently-served copy (needs the mid to
+            # locate the row afterward).
+            if media_url and mid:
+                media_rehosts.append((mid, media_url, media_type))
             # Only hand the agent a real text turn (skip attachment placeholders),
             # and only when the conversation is AI-mode (never talk over a human).
             if message.get("text") and conv.intercept_mode == InterceptMode.ai:
@@ -206,6 +212,17 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
                     await redis.publish(f"ws:channel:{conv_id}", json.dumps(ev))
                 except Exception:
                     pass   # broadcast is best-effort
+
+        # ── Re-host attachments (Meta CDN links expire) ───────────────────────
+        # Fires after the rows are committed so each task can locate its message
+        # by (channel, mid) and rewrite media_url to a stable served copy.
+        if media_rehosts:
+            from app.services import meta_media
+            for mid, cdn_url, mtype in media_rehosts:
+                try:
+                    meta_media.schedule_media_rehost(channel, mid, cdn_url, mtype)
+                except Exception as exc:
+                    _log.warning("meta media rehost failed to schedule for %s: %s", mid, exc)
 
         # ── Neema answers (gated by META_AGENT_REPLY) ─────────────────────────
         # Same Tier-2 agent, same KES hub catalogue; reply goes out via the Graph
