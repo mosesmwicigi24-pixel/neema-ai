@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     # Optional override for the public acknowledgement. `{name}` = commenter's
     # first name (blank if unknown). Kept short and price-free by design.
     meta_comment_public_text: str = ""
+    # ── Business facts Neema answers logistics/FAQ questions from ─────────────
+    # Free text (location/branches, hours, delivery, payment, contacts) injected
+    # into the system prompt. Without it Neema only knows the catalogue and can't
+    # answer "where are you located?". Keep it short and factual.
+    business_info: str = ""
     # Currency display gate: Kenya (+254) customers are quoted KES; everyone else
     # (and all Messenger/IG, which have no phone) is quoted USD = round(KES / rate).
     usd_kes_rate: int = 100
