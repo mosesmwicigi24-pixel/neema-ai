@@ -1,5 +1,11 @@
 // ── Channel types ─────────────────────────────────────────────────────────────
-export type Channel = "whatsapp" | "messenger" | "instagram" | "email" | "sms";
+export type Channel =
+    | "whatsapp"
+    | "messenger"
+    | "facebook"
+    | "instagram"
+    | "email"
+    | "sms";
 
 // ── Domain models ─────────────────────────────────────────────────────────────
 export type InterceptMode = "ai" | "human" | "paused";

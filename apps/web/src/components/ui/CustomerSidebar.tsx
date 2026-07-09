@@ -290,6 +290,7 @@ function stepState(stage: LeadStage, active: LeadStage): StepState {
 const CH_META: Record<string, { label: string; color: string }> = {
     whatsapp: { label: "WhatsApp", color: "#25D366" },
     messenger: { label: "Messenger", color: "#0084FF" },
+    facebook: { label: "Facebook", color: "#1877F2" },
     instagram: { label: "Instagram", color: "#E1306C" },
     email: { label: "Email", color: "#6366f1" },
     sms: { label: "SMS", color: "#64748b" },
@@ -304,6 +305,10 @@ const CHANNEL_ICON_SVG: Record<string, { svg: string; bg: string }> = {
     messenger: {
         bg: "#0099FF",
         svg: '<path d="M16 2C8.27 2 2 7.93 2 15.2c0 3.82 1.6 7.25 4.2 9.72V30l4.88-2.68A14.5 14.5 0 0016 28.4c7.73 0 14-5.93 14-13.2S23.73 2 16 2zm1.38 17.78l-3.56-3.8-6.96 3.8L13.2 12l3.66 3.8L23.72 12l-6.34 7.78z"/>',
+    },
+    facebook: {
+        bg: "#1877F2",
+        svg: '<path d="M14.5 21v-6.5h2.2l.33-2.6h-2.53v-1.66c0-.75.2-1.26 1.28-1.26h1.37V6.6c-.24-.03-1.05-.1-2-.1-1.98 0-3.33 1.2-3.33 3.42v1.98H9.6v2.6h2.19V21h2.72z"/>',
     },
     instagram: {
         bg: "linear-gradient(45deg,#f09433,#e6683c,#dc2743,#cc2366,#bc1888)",

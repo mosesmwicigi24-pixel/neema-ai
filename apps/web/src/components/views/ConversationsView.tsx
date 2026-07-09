@@ -177,7 +177,8 @@ interface ConversationsViewProps extends SharedViewProps {
 const CHANNEL_TABS: { id: "all" | Channel; label: string; short: string }[] = [
     { id: "all", label: "All", short: "All" },
     { id: "whatsapp", label: "WhatsApp", short: "WA" },
-    { id: "messenger", label: "Messenger", short: "FB" },
+    { id: "facebook", label: "Facebook", short: "FB" },
+    { id: "messenger", label: "Messenger", short: "MSG" },
     { id: "instagram", label: "Instagram", short: "IG" },
     { id: "email", label: "Email", short: "Email" },
     { id: "sms", label: "SMS", short: "SMS" },
@@ -190,7 +191,8 @@ const ROW_ACCENT = "#f59e0b";
 // Short channel labels for the conversation-row pill (Figma: WA / FB / IG).
 const CH_SHORT: Record<Channel, string> = {
     whatsapp: "WA",
-    messenger: "FB",
+    messenger: "MSG",
+    facebook: "FB",
     instagram: "IG",
     email: "Email",
     sms: "SMS",
