@@ -23,6 +23,7 @@ from app.routers.admin import get_current_agent
 from app.core import hub_client
 from datetime import datetime, timezone
 import json
+import uuid as _uuid
 
 router = APIRouter()
 
@@ -270,11 +271,22 @@ async def _resolve_customer_user(
     so operator-edited profile fields (phone, country, tags, notes…) had nowhere
     to persist and silently vanished on reload. This bridges them:
 
+      0. internal User id (UUID) — the Leads page keys rows on this,
       1. direct wa_id (WhatsApp, or an already-provisioned shim),
       2. else the identity's person → its existing User (shared across channels),
       3. else, when `create`, provision a shim User keyed by the channel handle
          and linked to the same person, so edits stick.
     """
+    # 0. Internal User id (UUID). A wa_id/PSID is never a valid UUID, so this
+    #    only matches genuine ids — the Leads page PATCHes /leads/{user.id}.
+    try:
+        uid = _uuid.UUID(str(ident))
+        user = (await db.execute(select(User).where(User.id == uid))).scalar_one_or_none()
+        if user:
+            return user
+    except (ValueError, AttributeError, TypeError):
+        pass
+
     # 1. Direct wa_id.
     user = (await db.execute(select(User).where(User.wa_id == ident))).scalar_one_or_none()
     if user:
@@ -554,6 +566,7 @@ async def merge_customers(
     body: dict,
     db: AsyncSession = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
+    channel: str | None = None,
 ):
     """
     Merge `merge_with` (secondary) into the primary `wa_id` profile — a REAL,
@@ -574,16 +587,22 @@ async def merge_customers(
     if not merge_with or merge_with == wa_id:
         raise HTTPException(status_code=422, detail="Invalid merge_with value")
 
-    primary_res   = await db.execute(select(User).where(User.wa_id == wa_id))
-    secondary_res = await db.execute(select(User).where(User.wa_id == merge_with))
-
-    primary   = primary_res.scalar_one_or_none()
-    secondary = secondary_res.scalar_one_or_none()
+    # Resolve both sides across channels (id / wa_id / PSID·IGSID) so a Messenger
+    # or Instagram profile can be merged, not just WhatsApp numbers.
+    primary   = await _resolve_customer_user(db, wa_id, channel, create=False)
+    secondary = await _resolve_customer_user(db, merge_with, None, create=False)
 
     if not primary:
         raise HTTPException(status_code=404, detail="Primary customer not found")
     if not secondary:
         raise HTTPException(status_code=404, detail="Secondary customer not found")
+    if primary.id == secondary.id:
+        raise HTTPException(status_code=422, detail="Cannot merge a profile into itself")
+
+    # Canonical handles for the audit / state bookkeeping (the typed identifier
+    # may have been a UUID or a channel handle; the stored wa_id is the key both
+    # the merge audit and unmerge look up by).
+    pk, sk = primary.wa_id, secondary.wa_id
 
     # Merge missing fields from secondary → primary
     for field in ("name", "email", "phone", "location", "age"):
@@ -597,36 +616,36 @@ async def merge_customers(
     s_tags = set(s_state.get("tags", []))
     p_state["tags"] = list(p_tags | s_tags)
 
-    # Record merged id
+    # Record merged id (canonical secondary handle, so the unmerge chip resolves)
     merged = p_state.get("merged_ids", [])
-    if merge_with not in merged:
-        merged.append(merge_with)
+    if sk not in merged:
+        merged.append(sk)
     p_state["merged_ids"] = merged
     primary.state = p_state
 
     # Mark secondary as merged
-    s_state["merged_into"] = wa_id
+    s_state["merged_into"] = pk
     secondary.state = s_state
 
     # ── The real merge: move identities + re-point history onto the primary ───
     # Ensure both sides carry a person_id (backfill/resolver should guarantee it;
     # provision defensively for any pre-spine orphan).
     if primary.person_id is None:
-        primary.person_id = await resolve_person_id_for_wa_id(db, wa_id)
+        primary.person_id = await resolve_person_id_for_wa_id(db, pk)
     if secondary.person_id is None:
-        secondary.person_id = await resolve_person_id_for_wa_id(db, merge_with)
+        secondary.person_id = await resolve_person_id_for_wa_id(db, sk)
     await db.flush()
 
     merge_id = None
     if primary.person_id != secondary.person_id:
         audit = await merge_persons(
             db, primary.person_id, secondary.person_id,
-            performed_by=agent.id, primary_wa_id=wa_id, secondary_wa_id=merge_with,
+            performed_by=agent.id, primary_wa_id=pk, secondary_wa_id=sk,
         )
         merge_id = str(audit.id)
 
     await db.commit()
-    return {"ok": True, "merged": merge_with, "into": wa_id, "merge_id": merge_id}
+    return {"ok": True, "merged": sk, "into": pk, "merge_id": merge_id}
 
 
 @router.post("/customers/{wa_id}/unmerge")
@@ -635,6 +654,7 @@ async def unmerge_customer(
     body: dict,
     db: AsyncSession = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
+    channel: str | None = None,
 ):
     """Reverse a prior merge of `merge_with` into `wa_id`: move the secondary's
     identities + history back to their own person and restore it to the leads
@@ -645,18 +665,25 @@ async def unmerge_customer(
     if not merge_with or merge_with == wa_id:
         raise HTTPException(status_code=422, detail="Invalid merge_with value")
 
-    audit = await latest_active_merge(db, wa_id, merge_with)
+    # Resolve both sides to their canonical wa_ids (the merge audit is keyed by
+    # them), so unmerge works from any channel handle the same way merge does.
+    primary   = await _resolve_customer_user(db, wa_id, channel, create=False)
+    secondary = await _resolve_customer_user(db, merge_with, None, create=False)
+    pk = primary.wa_id if primary else wa_id
+    sk = secondary.wa_id if secondary else merge_with
+    if pk == sk:
+        raise HTTPException(status_code=422, detail="Invalid merge_with value")
+
+    audit = await latest_active_merge(db, pk, sk)
     if audit is None:
         raise HTTPException(status_code=404, detail="No active merge to undo for this pair")
 
     await unmerge(db, audit, undone_by=agent.id)
 
     # Restore the UI/state bookkeeping.
-    primary   = (await db.execute(select(User).where(User.wa_id == wa_id))).scalar_one_or_none()
-    secondary = (await db.execute(select(User).where(User.wa_id == merge_with))).scalar_one_or_none()
     if primary is not None:
         p_state = dict(primary.state or {})
-        p_state["merged_ids"] = [m for m in p_state.get("merged_ids", []) if m != merge_with]
+        p_state["merged_ids"] = [m for m in p_state.get("merged_ids", []) if m != sk]
         primary.state = p_state
     if secondary is not None:
         s_state = dict(secondary.state or {})
@@ -664,7 +691,7 @@ async def unmerge_customer(
         secondary.state = s_state
 
     await db.commit()
-    return {"ok": True, "unmerged": merge_with, "from": wa_id}
+    return {"ok": True, "unmerged": sk, "from": pk}
 
 
 # ── AI cost dashboard ─────────────────────────────────────────────────────────
@@ -763,9 +790,12 @@ async def update_lead(
     body: dict,
     db: AsyncSession = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
+    channel: str | None = None,
 ):
-    result = await db.execute(select(User).where(User.wa_id == wa_id))
-    user = result.scalar_one_or_none()
+    # The Leads page keys rows on the User id (UUID), not wa_id — and a Messenger
+    # lead has no wa_id anyway. Resolve across id / wa_id / channel handle so a
+    # stage/tag/notes change actually persists instead of 404-ing.
+    user = await _resolve_customer_user(db, wa_id, channel, create=False)
     if not user:
         raise HTTPException(status_code=404, detail="Lead not found")
 

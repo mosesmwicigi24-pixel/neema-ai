@@ -1419,7 +1419,7 @@ export function CustomerSidebar({
                                             <button
                                                 onClick={async () => {
                                                     try {
-                                                        await crmReq("POST", `/admin/customers/${profile.wa_id}/unmerge`, { merge_with: mid });
+                                                        await crmReq("POST", `/admin/customers/${encodeURIComponent(profile.wa_id || custId)}/unmerge${chParam}`, { merge_with: mid });
                                                         onToast("Unmerged");
                                                         loadProfile();
                                                     } catch {
@@ -1511,7 +1511,7 @@ export function CustomerSidebar({
                                                     try {
                                                         await crmReq(
                                                             "POST",
-                                                            `/admin/customers/${profile.wa_id}/merge`,
+                                                            `/admin/customers/${encodeURIComponent(profile.wa_id || custId)}/merge${chParam}`,
                                                             {
                                                                 merge_with:
                                                                     mergeQuery.trim(),

@@ -316,7 +316,7 @@ export function LeadsView({ onToast, isMobile }: LeadsViewProps): React.ReactEle
     const updateLead = async (id: string, updates: Partial<Lead>) => {
         setLeads((prev) => prev.map((l) => l.id === id ? { ...l, ...updates } : l));
         try {
-            await fetch(`/api/admin/leads/${id}`, {
+            const res = await fetch(`/api/admin/leads/${id}`, {
                 method: "PATCH",
                 headers: {
                     "Content-Type": "application/json",
@@ -324,6 +324,10 @@ export function LeadsView({ onToast, isMobile }: LeadsViewProps): React.ReactEle
                 },
                 body: JSON.stringify(updates),
             });
+            // fetch() only rejects on network errors — a 404/500 still resolves,
+            // so without this check a failed save looked successful and then
+            // reverted on the next reload. Surface it and roll back.
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
             onToast("Lead updated");
         } catch {
             onToast("Failed to update lead", "error");
