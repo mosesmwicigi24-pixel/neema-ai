@@ -177,24 +177,44 @@ def test_plan_comment_actions_by_intent():
                                             "dm": False, "human": False}
 
 
-def test_public_reply_is_honest_about_the_dm(monkeypatch):
-    """The public comment reply must only promise a DM when the DM actually sent;
-    otherwise it invites to WhatsApp (no broken 'check your DM' promise)."""
+def test_thanks_pool_is_varied_but_stable_per_person():
+    """A viral post's praise replies must not read identically — the line is
+    picked by the commenter id (stable for one person, varied across people)."""
+    import app.agent.runtime as rt
+    a = rt._pick(rt._THANKS_POOL, "PSID_A")
+    b = rt._pick(rt._THANKS_POOL, "PSID_B")
+    assert a in rt._THANKS_POOL and b in rt._THANKS_POOL
+    assert rt._pick(rt._THANKS_POOL, "PSID_A") == a          # stable for the same person
+    seen = {rt._pick(rt._THANKS_POOL, f"u{i}") for i in range(40)}
+    assert len(seen) > 1                                     # genuinely varied across people
+
+
+def test_order_link_is_tap_to_order_with_ref(monkeypatch):
+    import app.agent.runtime as rt
+    monkeypatch.setattr(settings, "whatsapp_handoff_number", "+254712000000", raising=False)
+    link = asyncio.run(rt._order_link(None, "facebook", "PSID_1", "a black cassock"))
+    assert link.startswith("https://wa.me/254712000000?text=")
+    assert "cassock" in link.lower() and "ref" in link.lower()
+    # no number configured → empty (caller then just omits the link)
+    monkeypatch.setattr(settings, "whatsapp_handoff_number", "", raising=False)
+    assert asyncio.run(rt._order_link(None, "facebook", "PSID_1", "x")) == ""
+
+
+def test_post_cap_falls_back_after_n_full_replies(monkeypatch):
+    """The first N buying comments per post get the full agent reply; beyond the
+    cap, over_cap flips True so they get the lighter warm line instead."""
     import app.agent.runtime as rt
 
-    def _no_llm(*a, **k):
-        raise RuntimeError("force the template fallback")
+    class _FakeRedis:
+        def __init__(self): self.v = {}
+        async def incr(self, k): self.v[k] = self.v.get(k, 0) + 1; return self.v[k]
+        async def expire(self, k, ex): pass
 
-    monkeypatch.setattr(rt, "build_llm", _no_llm)
-    monkeypatch.setattr(settings, "whatsapp_handoff_number", "254712000000", raising=False)
-    monkeypatch.setattr(settings, "meta_comment_public_text", "", raising=False)
-
-    sent = asyncio.run(rt._public_reply_text("answer", "how much?", " Jane", dm_sent=True))
-    failed = asyncio.run(rt._public_reply_text("answer", "how much?", " Jane", dm_sent=False))
-
-    assert "inbox" in sent.lower()                        # DM sent → point to the inbox
-    assert "whatsapp" in failed.lower() and "254712000000" in failed   # DM failed → WhatsApp
-    assert "inbox" not in failed.lower()                  # never claim a DM we didn't send
+    monkeypatch.setattr(settings, "meta_comment_agent_cap", 3, raising=False)
+    r = _FakeRedis()
+    results = [asyncio.run(rt._post_over_cap(r, "POST1")) for _ in range(5)]
+    assert results == [False, False, False, True, True]     # 3 full, then capped
+    assert asyncio.run(rt._post_over_cap(r, "POST2")) is False  # a different post is independent
 
 
 def test_whatsapp_checkout_link_builds_prefilled_deep_link(monkeypatch):

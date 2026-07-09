@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     # Optional override for the public acknowledgement. `{name}` = commenter's
     # first name (blank if unknown). Kept short and price-free by design.
     meta_comment_public_text: str = ""
+    # Max FULL agent-generated public comment replies per post before falling back
+    # to a lighter (still warm, varied) reply — caps AI cost + Graph rate on a
+    # viral post. Buying comments beyond this still get a friendly WhatsApp nudge.
+    meta_comment_agent_cap: int = 30
     # ── Business facts Neema answers logistics/FAQ questions from ─────────────
     # Free text (location/branches, hours, delivery, payment, contacts) injected
     # into the system prompt. Without it Neema only knows the catalogue and can't

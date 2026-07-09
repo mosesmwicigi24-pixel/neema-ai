@@ -36,6 +36,34 @@ META_CHANNELS = ("messenger", "facebook", "instagram")
 _META_TOOL_NAMES = {"search_catalog", "remember", "handoff_to_human", "whatsapp_checkout_link", "share_catalog"}
 MESSENGER_TOOLS = [t for t in TOOLS if t["name"] in _META_TOOL_NAMES]
 
+# A PUBLIC comment reply is short and read-only — it just needs the real price, so
+# the catalogue tool (+ memory) is enough. The tap-to-order WhatsApp link is
+# appended in code, not by the model.
+_PUBLIC_COMMENT_TOOL_NAMES = {"search_catalog", "remember"}
+PUBLIC_COMMENT_TOOLS = [t for t in TOOLS if t["name"] in _PUBLIC_COMMENT_TOOL_NAMES]
+
+
+def _public_comment_addendum(currency: str = "USD") -> str:
+    """System addendum for a PUBLIC comment reply — brief, warm, personal, and
+    accurate (real price via search_catalog). The customer is being answered where
+    everyone can see, so it must read like a person, not an autoresponder."""
+    money = "Kenyan Shillings (KES)" if currency == "KES" else "US Dollars (USD)"
+    return (
+        "\n\n## You are replying PUBLICLY under a Facebook/Instagram comment\n"
+        "- PUBLIC and short: at most TWO warm, natural sentences. Never robotic or "
+        "templated — this must read like a real person wrote it just for them.\n"
+        "- Greet them by name if you know it; mirror a little of their own wording.\n"
+        f"- Answer their EXACT question. Use search_catalog for the REAL price and "
+        f"whether it's made-to-order, and quote the price in {money}. Never invent a "
+        "price; if you truly can't find the item, warmly say you'll share details.\n"
+        "- Most clergy apparel is MADE TO ORDER — say so warmly (never 'out of stock').\n"
+        "- Plain text only: no markdown, no asterisks, no headings.\n"
+        "- End with a short, natural nudge to order on WhatsApp. Do NOT write any link "
+        "or phone number yourself — a tap-to-order link is appended after your text.\n"
+        "- If the comment is only praise or an emoji, reply with a brief, genuine, "
+        "varied thank-you and NO sales pitch."
+    )
+
 
 def _meta_addendum(currency: str = "USD") -> str:
     wa = (settings.whatsapp_handoff_number or "").strip()
@@ -139,7 +167,8 @@ async def _history(db: AsyncSession, key: str, limit: int = 20,
 
 async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM,
                    media: dict | None = None,
-                   *, channel: str = "whatsapp", external_id: str | None = None) -> str:
+                   *, channel: str = "whatsapp", external_id: str | None = None,
+                   public_comment: bool = False) -> str:
     """Run one agent turn and return the reply text (does NOT send it).
 
     WhatsApp is the default and unchanged. For Messenger/Instagram, pass
@@ -163,7 +192,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         currency=currency,
     )
     if is_meta:
-        system += _meta_addendum(currency)
+        system += _public_comment_addendum(currency) if public_comment else _meta_addendum(currency)
 
     messages = await _history(db, key, channel=channel)
 
@@ -204,7 +233,9 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         for k in totals:
             totals[k] += int(u.get(k, 0) or 0)
 
-    if is_meta:
+    if is_meta and public_comment:
+        base = PUBLIC_COMMENT_TOOLS       # read-only: just enough to quote a real price
+    elif is_meta:
         base = MESSENGER_TOOLS
     else:
         base = TOOLS
@@ -348,11 +379,6 @@ async def schedule_meta_reply(redis, channel: str, external_id: str, text: str,
 # so the sale continues 1:1. Runs off the webhook ack path (Meta wants a fast
 # 200); deduped upstream on the comment id.
 
-_DEFAULT_PUBLIC_REPLY = (
-    "Amen{name} 🙏 Thank you for reaching out! I've just sent you a message — "
-    "please check your inbox and I'll help you right away. 💛"
-)
-_PUBLIC_LIGHT = "Amen{name} 🙏 Thank you so much — God bless you! 💛"
 _PUBLIC_EMPATHY = (
     "So sorry to hear this{name} 🙏 A member of our team will reach out to you "
     "personally to make it right — thank you for your patience. 💛"
@@ -401,41 +427,6 @@ def plan_comment_actions(intent: str) -> dict:
     return {"public": True, "style": "answer", "dm": True, "human": False}   # high
 
 
-async def _public_reply_text(style: str, comment_text: str, name_tag: str,
-                             *, dm_sent: bool = True) -> str:
-    if style == "light":
-        return _PUBLIC_LIGHT.replace("{name}", name_tag)
-    if style == "empathy":
-        return _PUBLIC_EMPATHY.replace("{name}", name_tag)
-    # 'answer' style — HONEST about whether the DM actually went out. Meta blocks
-    # private-reply DMs to non-app-testers until App Review, so we must not promise
-    # a DM we couldn't send. Either way: one short warm sentence, NO price.
-    wa = (settings.whatsapp_handoff_number or "").strip()
-    if dm_sent:
-        fallback = (settings.meta_comment_public_text or _DEFAULT_PUBLIC_REPLY).replace("{name}", name_tag)
-        sys = ("You are Neema, Bethany House's warm Christ-centred assistant, replying "
-               "PUBLICLY under a comment. ONE short friendly sentence. Do NOT quote a "
-               "price. Acknowledge their interest and tell them you've just sent them a "
-               "DM with the details. Plain text, no markdown.")
-    else:
-        where = f"on WhatsApp at {wa}" if wa else "on WhatsApp"
-        fallback = (f"Thank you{name_tag} 🙏 Please message us {where} and we'll help you "
-                    "with all the details right away 💛")
-        sys = ("You are Neema, Bethany House's warm Christ-centred assistant, replying "
-               "PUBLICLY under a comment. ONE short friendly sentence. Do NOT quote a "
-               f"price and do NOT mention a DM. Acknowledge their interest and warmly "
-               f"invite them to message us {where} to get the details and order. Plain "
-               "text, no markdown.")
-    try:
-        llm = build_llm(model=settings.tier2_model_light)
-        resp = await llm.complete(system=sys,
-                                  messages=[{"role": "user", "content": f"Comment: {comment_text[:300]}"}],
-                                  tools=[])
-        return (resp.text or "").strip() or fallback
-    except Exception:
-        return fallback
-
-
 async def _route_comment_to_human(channel: str, external_id: str) -> None:
     from sqlalchemy import select
     from app.database import AsyncSessionLocal
@@ -447,6 +438,66 @@ async def _route_comment_to_human(channel: str, external_id: str) -> None:
         if conv is not None:
             conv.intercept_mode = InterceptMode.human
             await db.commit()
+
+
+# Varied warm lines so a viral post's replies don't read identically. Picked
+# deterministically by the commenter id — same person, stable line; different
+# people, different lines.
+_THANKS_POOL = [
+    "Amen{name} 🙏 Thank you so much — God bless you! 💛",
+    "Bless you{name} 🙏 We're so glad this speaks to you! 💛",
+    "Thank you{name}! 🙏 Your kind words mean the world to us 💛",
+    "Asante{name}! 🙏 May God bless you abundantly 💛",
+    "So grateful{name} 🙏 Glory to God! 💛",
+]
+_WA_INVITE_POOL = [
+    "Thank you{name} 🙏 Message us on WhatsApp and we'll help you order right away 💛",
+    "Bless you{name}! 🙏 Reach us on WhatsApp and we'll sort you out 💛",
+    "We'd love to help{name}! 🙏 Continue on WhatsApp to get yours 💛",
+    "Karibu{name} 🙏 Tap through to WhatsApp and we'll take it from there 💛",
+]
+
+
+def _pick(pool: list, seed: str) -> str:
+    import hashlib
+    i = int(hashlib.sha1((seed or "x").encode()).hexdigest(), 16) % len(pool)
+    return pool[i]
+
+
+async def _order_link(redis, channel: str, ext: str, product: str = "") -> str:
+    """A tap-to-order wa.me deep link (pre-filled + a ref for attribution), so a
+    commenter can go from the comment straight to a WhatsApp order in one tap."""
+    import secrets
+    from urllib.parse import quote
+    num = (settings.whatsapp_handoff_number or "").lstrip("+").strip()
+    if not num:
+        return ""
+    ref = secrets.token_hex(3).upper()
+    body = (f"Hi Bethany House! I'd like to order {product}. (ref {ref})"
+            if product else f"Hi Bethany House! I'd like to order. (ref {ref})")
+    link = f"https://wa.me/{num}?text={quote(body)}"
+    try:
+        if redis is not None:
+            await redis.set(f"waref:{ref}", json.dumps({"channel": channel, "external_id": ext}),
+                            ex=14 * 24 * 3600)
+    except Exception:
+        pass
+    return link
+
+
+async def _post_over_cap(redis, post_id: str) -> bool:
+    """True once we've already spent `meta_comment_agent_cap` full agent replies on
+    this post — beyond that, buying comments still get a warm reply, just a lighter
+    (no-LLM) one. Caps AI cost + Graph rate on a viral post."""
+    if not redis or not post_id:
+        return False
+    try:
+        n = await redis.incr(f"meta:postcap:{post_id}")
+        if n == 1:
+            await redis.expire(f"meta:postcap:{post_id}", 14 * 24 * 3600)
+        return n > settings.meta_comment_agent_cap
+    except Exception:
+        return False
 
 
 async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set) -> None:
@@ -466,20 +517,23 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     if not (plan["public"] or plan["dm"] or plan["human"]):
         return                                   # spam → silent
 
-    async def _public(style: str, dm_sent: bool = True) -> None:
+    async def _post_public(text: str) -> None:
         if not own_pages:                        # loop guard: can't tell our own reply apart
             _log.warning("META_PAGE_ID unset — skipping public reply for %s", cid)
             return
         try:
-            text = await _public_reply_text(style, comment_text, name_tag, dm_sent=dm_sent)
-            await reply_to_comment(cid, text.strip())
+            await reply_to_comment(cid, (text or "").strip())
         except Exception as exc:
             _log.warning("public comment reply failed for %s: %s", cid, exc)
 
-    # ── Low / negative: public reply per style, then route complaints to a human.
+    # ── Low intent (praise/emoji): a brief, VARIED, human thank-you — no pitch.
+    # ── Negative: an empathetic line + route the conversation to a human.
     if not plan["dm"]:
         if plan["public"]:
-            await _public(plan["style"])
+            text = (_pick(_THANKS_POOL, ext).replace("{name}", name_tag)
+                    if plan["style"] == "light"
+                    else _PUBLIC_EMPATHY.replace("{name}", name_tag))
+            await _post_public(text)
         if plan["human"]:
             try:
                 await _route_comment_to_human(channel, ext)
@@ -487,36 +541,49 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
                 _log.warning("route-to-human failed for comment %s: %s", cid, exc)
         return
 
-    # ── High intent: DM FIRST, then an HONEST public reply. Meta blocks private
-    # replies to non-app-testers until App Review, so the DM genuinely may fail —
-    # we must not publicly promise a DM that never arrives.
+    # ── High intent: the comment reply IS the sale. Give a real, personalised,
+    # catalogue-accurate answer (with the true price) and a tap-to-order link,
+    # right in the comment. The DM is a silent bonus, not the value.
     prompt_text = comment_text or "Hi! I saw your comment — how can I help?"
-    # Ground the reply in the post they commented under, so "how much?" is answered
-    # about the RIGHT product instead of a generic greeting.
+    post_id = comment.get("post_id") or (comment.get("post_context") or {}).get("post_id") or ""
     post_title = ((comment.get("post_context") or {}).get("title") or "").strip()
     if post_title:
         prompt_text = f'(commented on our post: "{post_title}") {prompt_text}'
 
+    link = await _order_link(redis, channel, ext, post_title)
+    over_cap = await _post_over_cap(redis, post_id)
+
+    public_text = ""
+    if not over_cap:
+        # Full agent reply — REAL price via search_catalog, warm + personal + brief.
+        try:
+            async with AsyncSessionLocal() as db:
+                public_text = (await run_turn(
+                    db, redis, wa_id=ext, user_text=prompt_text,
+                    llm=build_llm(model=route_model(prompt_text)),
+                    channel=channel, external_id=ext, public_comment=True)).strip()
+        except Exception as exc:
+            _log.warning("public agent reply failed for %s: %s", cid, exc)
+    if not public_text:                          # over cap OR agent failed → light warm line
+        public_text = _pick(_WA_INVITE_POOL, ext).replace("{name}", name_tag)
+
+    if link and "wa.me" not in public_text:      # append the tap-to-order link once
+        public_text = f"{public_text}\nOrder here 👉 {link}"
+
+    await _post_public(public_text)
+
+    # Bonus: also open the DM with the same answer (best-effort; Meta blocks private
+    # replies to non-testers until App Review). Silent either way — the comment
+    # already delivered the answer, so we never promise a DM publicly.
     dm_sent = False
     try:
-        async with AsyncSessionLocal() as db:
-            reply = await run_turn(db, redis, wa_id=ext, user_text=prompt_text,
-                                   llm=build_llm(model=route_model(prompt_text)),
-                                   channel=channel, external_id=ext)
-        try:
-            await send_private_reply(cid, reply)
-            dm_sent = True
-            async with AsyncSessionLocal() as db2:
-                await svc.save_outbound_channel_message(db2, redis, channel, ext, reply)
-        except Exception as exc:
-            _log.warning("private reply (DM) failed for comment %s: %s", cid, exc)
+        await send_private_reply(cid, public_text)
+        dm_sent = True
+        async with AsyncSessionLocal() as db2:
+            await svc.save_outbound_channel_message(db2, redis, channel, ext, public_text)
     except Exception as exc:
-        _log.warning("comment DM generation failed for %s: %s", cid, exc)
-
-    # Public reply reflects reality: "sent you a DM" only if it truly sent, else a
-    # warm invite to WhatsApp (never a broken DM promise).
-    await _public("answer", dm_sent=dm_sent)
-    _log.info("comment %s engaged: dm_sent=%s", cid, dm_sent)
+        _log.info("comment DM (bonus) not delivered for %s: %s", cid, exc)
+    _log.info("comment %s engaged: agent=%s over_cap=%s dm=%s", cid, not over_cap, over_cap, dm_sent)
 
 
 def schedule_comment_engage(redis, channel: str, comment: dict, own_pages: set) -> None:
