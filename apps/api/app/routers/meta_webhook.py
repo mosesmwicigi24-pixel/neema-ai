@@ -273,6 +273,32 @@ def _own_page_ids() -> set[str]:
     return {p.strip() for p in (settings.meta_page_id or "").split(",") if p.strip()}
 
 
+async def _post_context(post_id: str, redis=None) -> dict:
+    """Source-post context for a comment ({post_id,title,permalink,thumb}), cached
+    by post_id in Redis (posts don't change) so a burst of comments on one post
+    costs a single Graph call. Empty dict on no post id / fetch failure."""
+    if not post_id:
+        return {}
+    key = f"meta:postctx:{post_id}"
+    if redis is not None:
+        try:
+            import json
+            cached = await redis.get(key)
+            if cached:
+                return json.loads(cached)
+        except Exception:
+            pass
+    from app.services.meta_send import fetch_post_context
+    ctx = await fetch_post_context(post_id)
+    if ctx and redis is not None:
+        try:
+            import json
+            await redis.set(key, json.dumps(ctx), ex=14 * 24 * 3600)
+        except Exception:
+            pass
+    return ctx
+
+
 def _parse_comment(change: dict) -> dict | None:
     """Normalise a Facebook `feed` or Instagram `comments` change into a comment
     dict, or None if it isn't a new top-level comment we should act on."""
@@ -334,6 +360,13 @@ async def _capture_comment_events(db: AsyncSession, channel: str, payload: dict,
                 except Exception:
                     pass
 
+            # Resolve WHAT this comment is replying to. A bare comment ("how much?"
+            # / "where are you?") is meaningless without the post it sits under, so
+            # we pull the source-post context and carry it on the message + into the
+            # AI reply. Cached per post_id; best-effort (empty context → no card).
+            ctx = await _post_context(c["post_id"], redis=redis)
+            c["post_context"] = ctx           # rides into the engage → AI reply path
+
             ident = await resolve_or_create_person(
                 db, comment_channel, c["from_id"], source=f"{comment_channel}_comment",
                 confidence="deterministic",
@@ -343,14 +376,18 @@ async def _capture_comment_events(db: AsyncSession, channel: str, payload: dict,
             )
             conv = await get_or_create_conversation(db, comment_channel, c["from_id"],
                                                     person_id=ident.person_id)
+            # Store the raw comment text (no "[comment]" prefix — the inbox now
+            # shows a proper "commented on your post" context card instead) plus
+            # the source-post context for that card.
             db.add(Message(
                 channel=comment_channel, external_id=c["from_id"], wa_id=None,
                 person_id=ident.person_id, conversation_id=conv.id,
                 direction=MsgDirection.inbound, sender=MsgSender.user,
-                text=(f"[comment] {c['text']}" if c["text"] else "[comment]"),
+                text=(c["text"] or ""),
+                comment_context=(ctx or None),
             ))
             conv.last_message_at = datetime.now(timezone.utc)
-            conv.last_message_preview = (c["text"] or "[comment]")[:100]
+            conv.last_message_preview = ("💬 " + (c["text"] or "Commented on your post"))[:100]
             engage.append(c)
 
     if engage:

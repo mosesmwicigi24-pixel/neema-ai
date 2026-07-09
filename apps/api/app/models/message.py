@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime
 from sqlalchemy import String, Text, BigInteger, ForeignKey, Enum as PgEnum, DateTime
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models import Base
 import enum
@@ -44,6 +45,12 @@ class Message(Base):
     media_caption   : Mapped[str | None]       = mapped_column(Text,        nullable=True)
     mime_type       : Mapped[str | None]       = mapped_column(String(100), nullable=True)
     filename       : Mapped[str | None]        = mapped_column(String(200), nullable=True)
+    # For Facebook/Instagram comment messages: the source-post context so an
+    # agent (and the AI) can see WHAT the comment is replying to. Shape:
+    #   {"post_id", "title", "permalink", "thumb"} — any field may be missing.
+    # NULL for every non-comment message. Kept as one JSONB blob so new context
+    # fields (ad id, parent comment, …) never need another migration.
+    comment_context : Mapped[dict | None]      = mapped_column(JSONB, nullable=True)
     created_at      : Mapped[datetime]         = mapped_column(DateTime(timezone=True), default=datetime.utcnow, index=True)
 
     conversation = relationship("Conversation", back_populates="messages")

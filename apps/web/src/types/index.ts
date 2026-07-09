@@ -73,6 +73,14 @@ export interface Message {
     media_caption?: string | null;
     mime_type?: string | null;
     filename?: string | null;
+    // For Facebook/Instagram comment messages: the source post this comment
+    // replies to, so the agent sees WHAT is being commented on.
+    comment_context?: {
+        post_id?: string;
+        title?: string;
+        permalink?: string;
+        thumb?: string;
+    } | null;
 }
 
 export type MessagesMap = Record<string, Message[]>;

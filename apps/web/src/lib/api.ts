@@ -149,6 +149,7 @@ export interface ApiThreadItem {
     media_caption?: string | null;
     mime_type?: string | null;
     filename?: string | null;
+    comment_context?: Message["comment_context"];
     // System-event-specific
     event_kind?: SystemEventKind | null;
     event_reason?: string | null;
@@ -175,6 +176,7 @@ function mapThreadItem(raw: ApiThreadItem): Message {
         media_caption: raw.media_caption ?? null,
         mime_type:     raw.mime_type ?? null,
         filename:      raw.filename ?? null,
+        comment_context: raw.comment_context ?? null,
     };
 }
 

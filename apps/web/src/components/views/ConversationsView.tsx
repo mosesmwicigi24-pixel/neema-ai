@@ -85,6 +85,105 @@ function AudioBubble({
     );
 }
 
+// ── CommentContextCard ────────────────────────────────────────────────────────
+// A Facebook/Instagram comment is a reply to one of our posts — but the comment
+// text alone ("how much?", "where are you located?") is meaningless without it.
+// This card tells the responder WHAT the comment is on: the post thumbnail, its
+// caption, and a "View on Facebook" link straight to the original post.
+function CommentContextCard({
+    ctx,
+    isInbound,
+}: {
+    ctx: {
+        post_id?: string;
+        title?: string;
+        permalink?: string;
+        thumb?: string;
+    };
+    isInbound: boolean;
+}) {
+    const title = (ctx.title || "").trim() || "a post";
+    const permalink = ctx.permalink || "";
+    const thumb = ctx.thumb || "";
+
+    const body = (
+        <div
+            className={[
+                "flex items-center gap-2 rounded-lg px-2 py-1.5",
+                isInbound
+                    ? "bg-[#f0f4ec] border border-[#dde8d5]"
+                    : "bg-white/15 border border-white/20",
+            ].join(" ")}
+        >
+            {thumb ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                    src={thumb}
+                    alt=""
+                    className="w-8 h-8 rounded object-cover flex-shrink-0"
+                    onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).style.display = "none";
+                    }}
+                />
+            ) : (
+                <div
+                    className={[
+                        "w-8 h-8 rounded flex-shrink-0 flex items-center justify-center",
+                        isInbound ? "bg-[#dde8d5]" : "bg-white/20",
+                    ].join(" ")}
+                >
+                    {/* comment glyph */}
+                    <svg className="w-4 h-4 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                            d="M8 12h.01M12 12h.01M16 12h.01M21 12a9 9 0 1 1-4.5-7.8L21 3l-1.2 3.5A8.96 8.96 0 0 1 21 12z" />
+                    </svg>
+                </div>
+            )}
+            <div className="min-w-0 flex-1">
+                <div
+                    className={[
+                        "text-[9px] font-semibold uppercase tracking-wide leading-none mb-0.5",
+                        isInbound ? "text-[#699a32]" : "text-white/70",
+                    ].join(" ")}
+                >
+                    Commented on your post
+                </div>
+                <div
+                    className={[
+                        "text-[11px] leading-snug truncate",
+                        isInbound ? "text-[#3a5c28]" : "text-white/90",
+                    ].join(" ")}
+                    title={title}
+                >
+                    {title}
+                </div>
+            </div>
+            {permalink && (
+                <svg
+                    className={["w-3 h-3 flex-shrink-0", isInbound ? "text-[#699a32]" : "text-white/70"].join(" ")}
+                    fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                        d="M10 6H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                </svg>
+            )}
+        </div>
+    );
+
+    return permalink ? (
+        <a
+            href={permalink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block hover:opacity-80 transition-opacity"
+        >
+            {body}
+        </a>
+    ) : (
+        body
+    );
+}
+
 // ── ImageBubble ───────────────────────────────────────────────────────────────
 // Renders an inbound customer image with:
 //   - Clickable thumbnail (opens full-size in new tab)
@@ -1726,6 +1825,48 @@ export function ConversationsView({
                                                         </div>
                                                     )}
                                                     {(() => {
+                                                        // ── Facebook/IG comment ──
+                                                        // Show the source-post card
+                                                        // so the agent knows what the
+                                                        // comment is replying to. Also
+                                                        // covers legacy rows whose text
+                                                        // still carries a "[comment]"
+                                                        // prefix (no context captured).
+                                                        const cctx = (msg as any)
+                                                            .comment_context as
+                                                            | {
+                                                                  post_id?: string;
+                                                                  title?: string;
+                                                                  permalink?: string;
+                                                                  thumb?: string;
+                                                              }
+                                                            | null
+                                                            | undefined;
+                                                        const rawText = msg.text ?? "";
+                                                        const isComment =
+                                                            !!cctx ||
+                                                            rawText.startsWith("[comment]");
+                                                        if (isComment) {
+                                                            const body = rawText.replace(
+                                                                /^\[comment\]\s*/,
+                                                                "",
+                                                            );
+                                                            return (
+                                                                <div className="flex flex-col gap-1.5">
+                                                                    {cctx && (
+                                                                        <CommentContextCard
+                                                                            ctx={cctx}
+                                                                            isInbound={isInbound}
+                                                                        />
+                                                                    )}
+                                                                    {body && (
+                                                                        <p className="leading-relaxed whitespace-pre-wrap">
+                                                                            {formatWa(body)}
+                                                                        </p>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        }
                                                         const mt = (msg as any)
                                                             .media_type as
                                                             | string

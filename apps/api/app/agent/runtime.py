@@ -474,6 +474,11 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # 3) High intent → private reply opens a DM with a real, selling answer.
     if plan["dm"]:
         prompt_text = comment_text or "Hi! I saw your comment — how can I help?"
+        # Ground the reply in the post they commented under, so "how much?" gets
+        # answered about the RIGHT product instead of a generic greeting.
+        post_title = ((comment.get("post_context") or {}).get("title") or "").strip()
+        if post_title:
+            prompt_text = f'(commented on our post: "{post_title}") {prompt_text}'
         try:
             async with AsyncSessionLocal() as db:
                 reply = await run_turn(db, redis, wa_id=ext, user_text=prompt_text,

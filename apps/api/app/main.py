@@ -29,6 +29,9 @@ MIGRATION_STATEMENTS = [
     # New columns on agents (safe — ADD COLUMN IF NOT EXISTS)
     "ALTER TABLE agents ADD COLUMN IF NOT EXISTS custom_role_id TEXT",
     "ALTER TABLE agents ADD COLUMN IF NOT EXISTS custom_permissions JSONB",
+    # Source-post context for Facebook/Instagram comment messages (see
+    # models/message.py) — lets the inbox show WHAT a comment is replying to.
+    "ALTER TABLE messages ADD COLUMN IF NOT EXISTS comment_context JSONB",
     # Seed: Super Admin (protected, cannot be modified)
     """
     INSERT INTO custom_roles (id, name, description, color, permissions, protected)

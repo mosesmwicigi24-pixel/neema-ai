@@ -278,6 +278,8 @@ async def get_thread(
             "media_caption": m.media_caption,
             "mime_type":     m.mime_type,
             "filename":      m.filename,
+            # Source-post context for FB/IG comment messages (what it replies to)
+            "comment_context": m.comment_context,
         })
 
     # ── 4. Shape intercept events into system_event thread items ──────────────

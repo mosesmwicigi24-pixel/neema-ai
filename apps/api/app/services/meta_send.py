@@ -88,6 +88,54 @@ async def fetch_profile(external_id: str) -> dict:
     return {}
 
 
+async def fetch_post_context(post_id: str) -> dict:
+    """Best-effort: the source post a comment is replying to, so the inbox can
+    show WHAT the customer is commenting on (they never say — "how much?" under a
+    photo is meaningless without the photo).
+
+    One Graph read on the post id with the Page token; returns a compact dict:
+        {post_id, title, permalink, thumb}
+    `title` is the post caption, else the first attachment's title/description,
+    else a type label ("Photo", "Video", "Shared link"). `thumb` is the post's
+    picture when there is one. Returns {} on any error — the caller treats an
+    empty context as "no card", never a failure. Callers should cache by post_id
+    (posts don't change) to avoid re-fetching for every comment on the same post."""
+    if not settings.meta_page_token or not post_id:
+        return {}
+    url = f"https://graph.facebook.com/{settings.meta_graph_version}/{post_id}"
+    fields = "message,permalink_url,full_picture,created_time,attachments{title,description,media_type,media{image{src}}}"
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                url,
+                params={"fields": fields},
+                headers={"Authorization": f"Bearer {settings.meta_page_token}"},
+                timeout=15.0,
+            )
+        if not resp.is_success:
+            _log.info("post context fetch for %s → %s", post_id, resp.status_code)
+            return {}
+        d = resp.json()
+    except Exception as exc:
+        _log.info("post context fetch for %s failed: %s", post_id, exc)
+        return {}
+
+    att = ((d.get("attachments") or {}).get("data") or [{}])[0]
+    title = (d.get("message") or att.get("title") or att.get("description") or "").strip()
+    if not title:
+        _MEDIA_LABEL = {"photo": "Photo post", "video": "Video post",
+                        "share": "Shared link", "album": "Photo album"}
+        title = _MEDIA_LABEL.get((att.get("media_type") or "").lower(), "a post")
+    thumb = (d.get("full_picture")
+             or (((att.get("media") or {}).get("image") or {}).get("src")))
+    return {
+        "post_id":   post_id,
+        "title":     title[:200],
+        "permalink": d.get("permalink_url") or "",
+        "thumb":     thumb or "",
+    }
+
+
 async def send_to_channel(channel: str, recipient: str, text: str) -> None:
     """Dispatch an outbound text reply to the right transport for `channel`.
     `recipient` is the conversation's external_id (wa_id | PSID | IGSID)."""
