@@ -235,6 +235,11 @@ async def _capture_comment_events(db: AsyncSession, channel: str, payload: dict,
     from app.services.channel import get_or_create_conversation
     from app.models.message import Message, MsgDirection, MsgSender
 
+    # Comments get their OWN channel, distinct from DMs: a Facebook Page comment
+    # is "facebook" (vs Messenger DMs = "messenger"); Instagram comments stay
+    # "instagram". This keeps page-comment conversations on their own inbox tab.
+    comment_channel = "instagram" if channel == "instagram" else "facebook"
+
     own = _own_page_ids()
     engage: list[dict] = []
     for entry in payload.get("entry", []):
@@ -254,15 +259,15 @@ async def _capture_comment_events(db: AsyncSession, channel: str, payload: dict,
                     pass
 
             ident = await resolve_or_create_person(
-                db, channel, c["from_id"], source=f"{channel}_comment",
+                db, comment_channel, c["from_id"], source=f"{comment_channel}_comment",
                 confidence="deterministic",
                 raw_profile={"source_post": c["post_id"], "comment": c["text"],
                              "name": c["from_name"]},
             )
-            conv = await get_or_create_conversation(db, channel, c["from_id"],
+            conv = await get_or_create_conversation(db, comment_channel, c["from_id"],
                                                     person_id=ident.person_id)
             db.add(Message(
-                channel=channel, external_id=c["from_id"], wa_id=None,
+                channel=comment_channel, external_id=c["from_id"], wa_id=None,
                 person_id=ident.person_id, conversation_id=conv.id,
                 direction=MsgDirection.inbound, sender=MsgSender.user,
                 text=(f"[comment] {c['text']}" if c["text"] else "[comment]"),
@@ -273,11 +278,11 @@ async def _capture_comment_events(db: AsyncSession, channel: str, payload: dict,
 
     if engage:
         await db.commit()
-        _log.info("meta webhook: captured %d %s comment(s)", len(engage), channel)
+        _log.info("meta webhook: captured %d %s comment(s)", len(engage), comment_channel)
         from app.agent import runtime
         for c in engage:
             try:
-                runtime.schedule_comment_engage(redis, channel, c, own)
+                runtime.schedule_comment_engage(redis, comment_channel, c, own)
             except Exception as exc:
                 _log.warning("comment engage failed to schedule for %s: %s",
                              c.get("comment_id"), exc)

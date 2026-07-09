@@ -228,4 +228,27 @@ def test_comment_capture_schedules_and_skips_own_page(monkeypatch):
                                     "post_id": "P1"}},   # our page → must be skipped
     ]}]}
     asyncio.run(mw._capture_comment_events(_FakeDB(), "messenger", payload))
-    assert scheduled == [("messenger", "c1", "U1")]   # only the customer's comment
+    # Facebook Page comments get their own "facebook" channel (not "messenger").
+    assert scheduled == [("facebook", "c1", "U1")]   # only the customer's comment
+    assert calls["convs"] == [("facebook", "U1")]
+    assert calls["persons"] == [("facebook", "U1", "facebook_comment")]
+
+
+def test_instagram_comments_stay_on_instagram_channel(monkeypatch):
+    calls = {}
+    _patch(monkeypatch, calls)
+    monkeypatch.setattr(settings, "meta_comment_reply", True, raising=False)
+    monkeypatch.setattr(settings, "meta_page_id", "PAGE1", raising=False)
+    scheduled = []
+    import app.agent.runtime as rt
+    monkeypatch.setattr(rt, "schedule_comment_engage",
+                        lambda redis, channel, c, own: scheduled.append((channel, c["comment_id"])),
+                        raising=False)
+    payload = {"entry": [{"changes": [
+        {"field": "comments", "value": {"id": "ig1", "text": "how much?",
+                                        "from": {"id": "IG1", "username": "jo"},
+                                        "media": {"id": "M1"}}},
+    ]}]}
+    asyncio.run(mw._capture_comment_events(_FakeDB(), "instagram", payload))
+    assert scheduled == [("instagram", "ig1")]
+    assert calls["convs"] == [("instagram", "IG1")]

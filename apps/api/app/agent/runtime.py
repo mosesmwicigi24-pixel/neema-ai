@@ -24,7 +24,9 @@ from app.models.user import User
 
 _log = logging.getLogger("neema.agent")
 
-META_CHANNELS = ("messenger", "instagram")
+# Meta Graph channels (see meta_send.META_CHANNELS). "facebook" = Page comment
+# conversations — treated like Messenger for history keying + prompt formatting.
+META_CHANNELS = ("messenger", "facebook", "instagram")
 
 # On Messenger/Instagram the customer has no phone, so we can't take payment or
 # push an order to the hub. The agent answers product questions from the SAME

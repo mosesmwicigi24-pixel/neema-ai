@@ -14,7 +14,10 @@ from app.core.config import settings
 
 _log = logging.getLogger("neema.meta")
 
-META_CHANNELS = ("messenger", "instagram")
+# Channels that send via the Meta Graph API (Page token) rather than WABA.
+# "facebook" = Facebook Page comment conversations; it uses the same Send API
+# and Page token as Messenger, so it routes identically here.
+META_CHANNELS = ("messenger", "facebook", "instagram")
 
 
 async def send_meta_message(recipient_id: str, text: str) -> None:
