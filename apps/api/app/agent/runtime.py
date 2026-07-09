@@ -335,3 +335,60 @@ async def schedule_meta_reply(redis, channel: str, external_id: str, text: str,
     _bg_tasks.add(task)
     task.add_done_callback(_bg_tasks.discard)
     return True
+
+
+# ── Facebook / Instagram comment engagement ──────────────────────────────────
+# A new comment fires TWO replies: a short PUBLIC acknowledgement under the
+# comment, and a PRIVATE reply that opens a Messenger DM with a real Neema answer
+# so the sale continues 1:1. Runs off the webhook ack path (Meta wants a fast
+# 200); deduped upstream on the comment id.
+
+_DEFAULT_PUBLIC_REPLY = (
+    "Amen{name} 🙏 Thank you for reaching out! I've just sent you a message — "
+    "please check your inbox and I'll help you right away. 💛"
+)
+
+
+async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set) -> None:
+    from app.database import AsyncSessionLocal
+    from app.services import n8n_bridge as svc
+    from app.services.meta_send import reply_to_comment, send_private_reply
+
+    cid = comment.get("comment_id")
+    ext = comment.get("from_id")
+    comment_text = (comment.get("text") or "").strip()
+
+    # 1) Public acknowledgement — short, no prices. Skipped when META_PAGE_ID is
+    #    unset, because without it we can't tell our own reply from a customer's
+    #    and would risk answering ourselves in a loop.
+    if own_pages:
+        first = (comment.get("from_name") or "").strip().split(" ")[0]
+        tmpl = settings.meta_comment_public_text or _DEFAULT_PUBLIC_REPLY
+        public = tmpl.replace("{name}", f" {first}" if first else "")
+        try:
+            await reply_to_comment(cid, public.strip())
+        except Exception as exc:
+            _log.warning("public comment reply failed for %s: %s", cid, exc)
+    else:
+        _log.warning("META_PAGE_ID unset — skipping public reply (loop guard) for %s", cid)
+
+    # 2) Private reply → opens the DM with a genuine, selling answer.
+    prompt_text = comment_text or "Hi! I saw your comment — how can I help?"
+    try:
+        async with AsyncSessionLocal() as db:
+            reply = await run_turn(db, redis, wa_id=ext, user_text=prompt_text,
+                                   llm=build_llm(model=route_model(prompt_text)),
+                                   channel=channel, external_id=ext)
+        await send_private_reply(cid, reply)
+        async with AsyncSessionLocal() as db2:
+            await svc.save_outbound_channel_message(db2, redis, channel, ext, reply)
+        _log.info("comment %s engaged: public+DM on %s", cid, channel)
+    except Exception as exc:
+        _log.warning("private reply failed for comment %s: %s", cid, exc)
+
+
+def schedule_comment_engage(redis, channel: str, comment: dict, own_pages: set) -> None:
+    """Fire public + private replies for one new comment, off the ack path."""
+    task = asyncio.create_task(_run_comment_engage(redis, channel, comment, own_pages))
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
