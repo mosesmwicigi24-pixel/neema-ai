@@ -282,7 +282,7 @@ def test_capture_schedules_agent_reply_only_when_enabled(monkeypatch):
     async def fake_conv(db, channel, external_id, **kw):
         return _FakeConv()
 
-    async def fake_sched(redis, channel, external_id, text, dedup_id=None):
+    async def fake_sched(redis, channel, external_id, text, dedup_id=None, page_id=None):
         calls.append((channel, external_id, text, dedup_id))
 
     monkeypatch.setattr("app.services.identity.resolve_or_create_person", fake_person)
@@ -383,3 +383,39 @@ def test_instagram_comments_stay_on_instagram_channel(monkeypatch):
     asyncio.run(mw._capture_comment_events(_FakeDB(), "instagram", payload))
     assert scheduled == [("instagram", "ig1")]
     assert calls["convs"] == [("instagram", "IG1")]
+
+
+def test_per_page_token_routing(monkeypatch):
+    """A page listed in META_PAGE_TOKENS replies with its OWN token; unknown pages
+    fall back to the global META_PAGE_TOKEN (single-token setups unchanged)."""
+    from app.services.meta_send import token_for_page
+    monkeypatch.setattr(settings, "meta_page_token", "GLOBAL", raising=False)
+    monkeypatch.setattr(settings, "meta_page_tokens",
+                        "1556733441275467:TOK_BH, 103756315006608:TOK_EXEC", raising=False)
+    assert token_for_page("1556733441275467") == "TOK_BH"
+    assert token_for_page("103756315006608") == "TOK_EXEC"      # Executive page
+    assert token_for_page("999") == "GLOBAL"                    # unknown → fallback
+    assert token_for_page(None) == "GLOBAL"
+    monkeypatch.setattr(settings, "meta_page_tokens", "", raising=False)
+    assert token_for_page("1556733441275467") == "GLOBAL"       # map unset → fallback
+
+
+def test_capture_stamps_owning_page_on_identity(monkeypatch):
+    """The webhook stamps entry.id (the owning page) into the identity's
+    raw_profile so replies can pick that page's token later."""
+    calls = {}
+
+    async def fake_person(db, channel, external_id, **kw):
+        calls.setdefault("raw", []).append(kw.get("raw_profile") or {})
+        return types.SimpleNamespace(person_id="p")
+
+    async def fake_conv(db, channel, external_id, **kw):
+        return _FakeConv()
+
+    monkeypatch.setattr("app.services.identity.resolve_or_create_person", fake_person)
+    monkeypatch.setattr("app.services.channel.get_or_create_conversation", fake_conv)
+    payload = {"object": "page", "entry": [{"id": "103756315006608", "messaging": [
+        {"sender": {"id": "PSID_X"}, "message": {"mid": "mX", "text": "hi"}},
+    ]}]}
+    asyncio.run(mw._capture_events(_FakeDB(), "messenger", payload))
+    assert calls["raw"][0].get("page_id") == "103756315006608"

@@ -28,7 +28,22 @@ class Settings(BaseSettings):
     # Send API (/me/messages). Instagram DMs use the same token once the IG
     # account is linked to the Page. Unset → outbound Messenger/IG is disabled.
     meta_page_token: str = ""
+    # Per-page tokens for multi-page setups (Bethany House + Bethany House
+    # Executive): "pageid:token,pageid:token". A page listed here replies with
+    # its own token; anything else falls back to meta_page_token. PSIDs are
+    # page-scoped, so each contact belongs to exactly one page.
+    meta_page_tokens: str = ""
     meta_graph_version: str = "v21.0"
+
+    def page_token_map(self) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for pair in (self.meta_page_tokens or "").split(","):
+            pair = pair.strip()
+            if ":" in pair:
+                pid, tok = pair.split(":", 1)
+                if pid.strip() and tok.strip():
+                    out[pid.strip()] = tok.strip()
+        return out
     # When true, the Tier-2 agent auto-answers inbound Messenger/IG DMs (same KES
     # hub catalogue as WhatsApp; checkout routed to WhatsApp). Default OFF so the
     # webhook stays ingestion-only until you flip it on. Needs meta_page_token set.

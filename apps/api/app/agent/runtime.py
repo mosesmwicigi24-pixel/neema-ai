@@ -344,7 +344,8 @@ async def schedule_reply(redis, wa_id: str, text: str, dedup_id: str | None,
 # catalogue; the reply goes out via the Graph Send API and is saved as a
 # channel message. Deduped on the Meta message id.
 
-async def _run_and_send_meta(redis, channel: str, external_id: str, text: str) -> None:
+async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
+                             page_id: str | None = None) -> None:
     from app.database import AsyncSessionLocal
     from app.services.meta_send import send_to_channel
     from app.services import n8n_bridge as svc
@@ -353,7 +354,7 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str) -
             reply = await run_turn(db, redis, wa_id=external_id, user_text=text,
                                    llm=build_llm(model=route_model(text)),
                                    channel=channel, external_id=external_id)
-        await send_to_channel(channel, external_id, reply)
+        await send_to_channel(channel, external_id, reply, page_id=page_id)
         async with AsyncSessionLocal() as db2:
             await svc.save_outbound_channel_message(db2, redis, channel, external_id, reply)
         _log.info("tier2 replied on %s to %s (%d chars)", channel, external_id, len(reply))
@@ -362,7 +363,7 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str) -
 
 
 async def schedule_meta_reply(redis, channel: str, external_id: str, text: str,
-                              dedup_id: str | None) -> bool:
+                              dedup_id: str | None, page_id: str | None = None) -> bool:
     """Fire the agent for one inbound Messenger/IG message. Deduped on the Meta
     message id so a redelivered webhook never double-replies."""
     if redis is not None and dedup_id:
@@ -372,7 +373,7 @@ async def schedule_meta_reply(redis, channel: str, external_id: str, text: str,
                 return False
         except Exception:
             pass
-    task = asyncio.create_task(_run_and_send_meta(redis, channel, external_id, text))
+    task = asyncio.create_task(_run_and_send_meta(redis, channel, external_id, text, page_id))
     _bg_tasks.add(task)
     task.add_done_callback(_bg_tasks.discard)
     return True
@@ -536,7 +537,7 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
             _log.warning("META_PAGE_ID unset — skipping public reply for %s", cid)
             return
         try:
-            await reply_to_comment(cid, (text or "").strip())
+            await reply_to_comment(cid, (text or "").strip(), page_id=comment.get("page_id"))
         except Exception as exc:
             _log.warning("public comment reply failed for %s: %s", cid, exc)
 
@@ -602,7 +603,7 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # already delivered the answer, and it's the SAME text, so we don't re-save it.
     dm_sent = False
     try:
-        await send_private_reply(cid, public_text)
+        await send_private_reply(cid, public_text, page_id=comment.get("page_id"))
         dm_sent = True
     except Exception as exc:
         _log.info("comment DM (bonus) not delivered for %s: %s", cid, exc)

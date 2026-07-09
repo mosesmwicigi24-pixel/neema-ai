@@ -20,18 +20,29 @@ _log = logging.getLogger("neema.meta")
 META_CHANNELS = ("messenger", "facebook", "instagram")
 
 
-async def _graph_post(path: str, body: dict, what: str) -> dict:
+def token_for_page(page_id: str | None) -> str:
+    """The Page token to act as: the page's own token when configured
+    (META_PAGE_TOKENS="pageid:token,…"), else the global META_PAGE_TOKEN."""
+    if page_id:
+        tok = settings.page_token_map().get(str(page_id))
+        if tok:
+            return tok
+    return settings.meta_page_token
+
+
+async def _graph_post(path: str, body: dict, what: str, page_id: str | None = None) -> dict:
     """POST to the Graph API with the Page token in the Authorization header —
     NEVER in the URL, so the token can't leak into request logs or error
     messages. On failure, logs Facebook's message (token-free) and raises a clean
     error that carries no URL and no token."""
-    if not settings.meta_page_token:
+    token = token_for_page(page_id)
+    if not token:
         raise RuntimeError(f"META_PAGE_TOKEN not configured — cannot {what}")
     url = f"https://graph.facebook.com/{settings.meta_graph_version}/{path}"
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             url,
-            headers={"Authorization": f"Bearer {settings.meta_page_token}"},
+            headers={"Authorization": f"Bearer {token}"},
             json=body,
             timeout=30.0,
         )
@@ -41,25 +52,26 @@ async def _graph_post(path: str, body: dict, what: str) -> dict:
     return resp.json() if resp.content else {}
 
 
-async def send_meta_message(recipient_id: str, text: str) -> None:
-    """Send a text reply to a Messenger PSID / Instagram IGSID via the Send API."""
+async def send_meta_message(recipient_id: str, text: str, page_id: str | None = None) -> None:
+    """Send a text reply to a Messenger PSID / Instagram IGSID via the Send API,
+    acting as the page that owns this PSID when page_id is given."""
     await _graph_post("me/messages", {
         "recipient": {"id": recipient_id},
         "messaging_type": "RESPONSE",
         "message": {"text": text},
-    }, "send message")
+    }, "send message", page_id=page_id)
 
 
-async def reply_to_comment(comment_id: str, text: str) -> None:
+async def reply_to_comment(comment_id: str, text: str, page_id: str | None = None) -> None:
     """Public reply posted under a Facebook/Instagram comment."""
-    await _graph_post(f"{comment_id}/comments", {"message": text}, "reply to comment")
+    await _graph_post(f"{comment_id}/comments", {"message": text}, "reply to comment", page_id=page_id)
 
 
-async def send_private_reply(comment_id: str, text: str) -> None:
+async def send_private_reply(comment_id: str, text: str, page_id: str | None = None) -> None:
     """Private reply to a comment — opens a Messenger thread with the commenter.
     One-shot per comment and time-limited by Meta; after it, the conversation
     continues as a normal Messenger DM (which the agent already handles)."""
-    await _graph_post(f"{comment_id}/private_replies", {"message": text}, "send private reply")
+    await _graph_post(f"{comment_id}/private_replies", {"message": text}, "send private reply", page_id=page_id)
 
 
 async def fetch_profile(external_id: str, channel: str = "messenger") -> dict:
@@ -140,11 +152,39 @@ async def fetch_post_context(post_id: str) -> dict:
     }
 
 
-async def send_to_channel(channel: str, recipient: str, text: str) -> None:
+async def page_of_contact(channel: str, external_id: str) -> str | None:
+    """Best-effort: the Meta page that owns this contact (stamped on the identity
+    at capture — PSIDs are page-scoped). None → the global-token fallback. Skips
+    the DB round-trip entirely on single-token setups."""
+    if not settings.page_token_map():
+        return None
+    try:
+        from sqlalchemy import select
+        from app.database import AsyncSessionLocal
+        from app.models.person import Identity
+        async with AsyncSessionLocal() as db:
+            rows = (await db.execute(
+                select(Identity.raw_profile).where(
+                    Identity.external_id == external_id,
+                    Identity.channel.in_(META_CHANNELS))
+            )).scalars().all()
+        for rp in rows:
+            pid = (rp or {}).get("page_id")
+            if pid:
+                return str(pid)
+    except Exception:
+        pass
+    return None
+
+
+async def send_to_channel(channel: str, recipient: str, text: str,
+                          page_id: str | None = None) -> None:
     """Dispatch an outbound text reply to the right transport for `channel`.
     `recipient` is the conversation's external_id (wa_id | PSID | IGSID)."""
     if channel in META_CHANNELS:
-        await send_meta_message(recipient, text)
+        if page_id is None:
+            page_id = await page_of_contact(channel, recipient)
+        await send_meta_message(recipient, text, page_id=page_id)
     else:
         # WhatsApp — the existing WABA sender expects a bare number (no '+').
         from app.services.n8n_bridge import _send_waba

@@ -143,7 +143,7 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
     from app.models.conversation import InterceptMode
 
     broadcasts: list[tuple[str, dict]] = []
-    replies: list[tuple[str, str, str | None]] = []   # (sender, text, mid) to hand the agent
+    replies: list[tuple[str, str, str | None, str]] = []   # (sender, text, mid, page_id)
     media_rehosts: list[tuple[str, str, str]] = []    # (mid, cdn_url, media_type) to re-host
     captured = 0
     for entry in payload.get("entry", []):
@@ -192,6 +192,9 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
                         pass
 
             raw = {}
+            page_id = str(entry.get("id") or "")   # the page this PSID belongs to
+            if page_id:
+                raw["page_id"] = page_id
             if text:
                 raw["last_text"] = text
             if prof.get("profile_pic"):
@@ -226,7 +229,7 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
             # Only hand the agent a real text turn (skip attachment placeholders),
             # and only when the conversation is AI-mode (never talk over a human).
             if message.get("text") and conv.intercept_mode == InterceptMode.ai:
-                replies.append((sender, message["text"].strip(), mid))
+                replies.append((sender, message["text"].strip(), mid, page_id))
             captured += 1
 
     if captured:
@@ -256,9 +259,10 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
         # Send API. Fires after the inbound is persisted; deduped on the Meta mid.
         if settings.meta_agent_reply:
             from app.agent import runtime
-            for sender, text, mid in replies:
+            for sender, text, mid, page_id in replies:
                 try:
-                    await runtime.schedule_meta_reply(redis, channel, sender, text, dedup_id=mid)
+                    await runtime.schedule_meta_reply(redis, channel, sender, text, dedup_id=mid,
+                                                      page_id=page_id or None)
                 except Exception as exc:
                     _log.warning("meta agent reply failed to schedule for %s: %s", sender, exc)
 
@@ -349,6 +353,7 @@ async def _capture_comment_events(db: AsyncSession, channel: str, payload: dict,
             c = _parse_comment(change)
             if not c or not c.get("comment_id") or not c.get("from_id"):
                 continue
+            c["page_id"] = str(entry.get("id") or "") or None   # owning page → right token
             if c["from_id"] in own:            # our own comment/reply — never self-answer
                 continue
             if redis is not None:              # dedup on the comment id (best-effort)
@@ -372,7 +377,8 @@ async def _capture_comment_events(db: AsyncSession, channel: str, payload: dict,
                 confidence="deterministic",
                 display_name=(c["from_name"] or None),   # FB comments carry the name for free
                 raw_profile={"source_post": c["post_id"], "comment": c["text"],
-                             "name": c["from_name"]},
+                             "name": c["from_name"],
+                             **({"page_id": c["page_id"]} if c.get("page_id") else {})},
             )
             conv = await get_or_create_conversation(db, comment_channel, c["from_id"],
                                                     person_id=ident.person_id)

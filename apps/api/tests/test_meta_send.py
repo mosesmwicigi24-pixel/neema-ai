@@ -8,7 +8,7 @@ from app.core.config import settings
 def test_send_to_channel_routes_meta_channels(monkeypatch):
     sent = []
 
-    async def fake_meta(rid, text):
+    async def fake_meta(rid, text, page_id=None):
         sent.append((rid, text))
 
     monkeypatch.setattr(meta_send, "send_meta_message", fake_meta)

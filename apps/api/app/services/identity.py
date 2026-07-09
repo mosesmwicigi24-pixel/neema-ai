@@ -65,6 +65,11 @@ async def resolve_or_create_person(
         new_pic = (raw_profile or {}).get("profile_pic")
         if new_pic and (ident.raw_profile or {}).get("profile_pic") != new_pic:
             ident.raw_profile = {**(ident.raw_profile or {}), "profile_pic": new_pic}
+        # The Meta page that owns this contact (PSIDs are page-scoped) — needed to
+        # pick the right page token in a multi-page setup.
+        new_page = (raw_profile or {}).get("page_id")
+        if new_page and (ident.raw_profile or {}).get("page_id") != new_page:
+            ident.raw_profile = {**(ident.raw_profile or {}), "page_id": str(new_page)}
         if display_name:
             person = await db.get(Person, ident.person_id)
             if person is not None and not person.display_name:
