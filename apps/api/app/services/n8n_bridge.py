@@ -69,12 +69,17 @@ async def provision_user(
     """
     from app.core.countries import resolve_country
 
+    from app.core.phone import is_plausible_phone
+
     wa_id = _normalize_wa_id(wa_id)
+    is_phone = is_plausible_phone(wa_id)
     result = await db.execute(select(User).where(User.wa_id == wa_id))
     user = result.scalar_one_or_none()
     created = False
     if user is None:
-        user = User(wa_id=wa_id, phone=wa_id)
+        # A 16-17 digit Meta id is not a phone — never surface it in the phone
+        # field (that's how PSIDs ended up displayed as "Phone" in the CRM).
+        user = User(wa_id=wa_id, phone=(wa_id if is_phone else None))
         db.add(user)
         created = True
 
@@ -101,14 +106,21 @@ async def provision_user(
     # history; this does the future). A phone IS the person in World A, so the
     # (whatsapp, wa_id) identity is deterministic. Never overwrites an existing
     # person link (that only changes via an audited merge).
-    from app.services.identity import resolve_or_create_person, WHATSAPP
-    ident = await resolve_or_create_person(
-        db, WHATSAPP, wa_id,
-        display_name=(user.name or clean_name or None),
-        source="whatsapp_inbound", confidence="deterministic",
-    )
-    if user.person_id is None:
-        user.person_id = ident.person_id
+    # Guard: only a real phone can become a (whatsapp, …) identity. A Meta id
+    # reaching this path (e.g. the CRM's orphan-conversation fallback) must not
+    # mint a phantom "WhatsApp" identity — adopt an existing one instead.
+    if is_phone:
+        from app.services.identity import resolve_or_create_person, WHATSAPP
+        ident = await resolve_or_create_person(
+            db, WHATSAPP, wa_id,
+            display_name=(user.name or clean_name or None),
+            source="whatsapp_inbound", confidence="deterministic",
+        )
+        if user.person_id is None:
+            user.person_id = ident.person_id
+    elif user.person_id is None:
+        from app.services.identity import resolve_person_id_for_wa_id
+        user.person_id = await resolve_person_id_for_wa_id(db, wa_id)  # adopt-only for non-phones
 
     await db.flush()
     return user

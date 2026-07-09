@@ -105,10 +105,22 @@ async def resolve_person_id_for_wa_id(
     source: str = "whatsapp",
 ) -> "uuid.UUID | None":  # noqa: F821  (uuid only needed as a type hint)
     """Convenience: the person_id behind a WhatsApp wa_id, creating the
-    person/identity on first sight. Returns None only for an empty wa_id."""
+    person/identity on first sight. Returns None for an empty wa_id — or for an
+    id that cannot be a phone (a 16-17 digit Meta PSID/IGSID leaked into a
+    WhatsApp path): minting a (whatsapp, <meta-id>) identity here is what created
+    the phantom "WhatsApp" contacts in the CRM, so for a non-phone we only ADOPT
+    an existing identity's person (any channel), never create."""
+    from app.core.phone import is_plausible_phone
+
     wa_id = (wa_id or "").lstrip("+").strip()
     if not wa_id:
         return None
+    if not is_plausible_phone(wa_id):
+        existing = (await db.execute(
+            select(Identity).where(Identity.external_id == wa_id)
+            .order_by(Identity.created_at)
+        )).scalars().first()
+        return existing.person_id if existing is not None else None
     ident = await resolve_or_create_person(
         db, WHATSAPP, wa_id,
         display_name=display_name, source=source, confidence="deterministic",

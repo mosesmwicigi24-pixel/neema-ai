@@ -76,3 +76,16 @@ def national_digits(raw: str | None, region: str = DEFAULT_REGION) -> str | None
     except phonenumbers.NumberParseException:
         return None
     return str(p.national_number)
+
+
+def is_plausible_phone(raw: str | None) -> bool:
+    """Cheap guard: could this string be a phone number at all?
+
+    E.164 caps a full international number at 15 digits; Meta scoped ids (Messenger
+    PSIDs, Facebook comment-author ids, IGSIDs) are 16-17 digits. So anything longer
+    than 15 digits is NOT a phone — it's a platform id that must never be stored as
+    a wa_id-as-phone or minted as a (whatsapp, …) identity. Deliberately does NOT
+    require full to_e164 validity (WhatsApp wa_ids are trusted), just plausibility.
+    """
+    digits = "".join(ch for ch in str(raw or "") if ch.isdigit())
+    return 7 <= len(digits) <= 15

@@ -15,6 +15,7 @@ from sqlalchemy import select, func, or_
 from app.database import get_db
 from app.models.agent import Agent
 from app.models.user import User
+from app.core.phone import is_plausible_phone
 from app.models.order_event import OrderEvent
 from app.models.conversation import Conversation
 from app.models.customer_history import CustomerHistory
@@ -220,7 +221,7 @@ def _build_profile(
         "name":           user.name,
         "name_confirmed": user.name_confirmed,
         "email":          user.email,
-        "phone":          user.phone or user.wa_id,
+        "phone":          user.phone or (user.wa_id if is_plausible_phone(user.wa_id) else None),
         "location":       user.location,
         "age":            user.age,
         "tags":           tags,
@@ -763,7 +764,7 @@ async def list_leads(
             "id":           str(user.id),
             "wa_id":        user.wa_id,
             "name":         user.name,
-            "phone":        user.phone or user.wa_id,
+            "phone":        user.phone or (user.wa_id if is_plausible_phone(user.wa_id) else None),
             "email":        user.email,
             "location":     user.location,
             "lead_stage":   lead_stage,
