@@ -62,27 +62,31 @@ async def send_private_reply(comment_id: str, text: str) -> None:
     await _graph_post(f"{comment_id}/private_replies", {"message": text}, "send private reply")
 
 
-async def fetch_profile(external_id: str) -> dict:
+async def fetch_profile(external_id: str, channel: str = "messenger") -> dict:
     """Best-effort: a Messenger/Instagram user's public profile (name + photo) via
-    the User Profile API. The Page token in the Authorization header only — never
-    the URL. Returns {} on any error (permissions, unknown user, IG w/o profile)."""
+    the User Profile API. Field names differ by platform — the Messenger Profile
+    API exposes first_name/last_name (asking for `name` 400s the WHOLE call, which
+    is why Messenger contacts read 'Unknown'); Instagram exposes name/username.
+    Page token in the Authorization header only. Returns {} on any error."""
     if not settings.meta_page_token or not external_id:
         return {}
+    fields = "name,username,profile_pic" if channel == "instagram" else "first_name,last_name,profile_pic"
     url = f"https://graph.facebook.com/{settings.meta_graph_version}/{external_id}"
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 url,
-                params={"fields": "name,first_name,last_name,profile_pic"},
+                params={"fields": fields},
                 headers={"Authorization": f"Bearer {settings.meta_page_token}"},
                 timeout=15.0,
             )
         if resp.is_success:
             d = resp.json()
-            name = (d.get("name")
+            name = (d.get("name") or d.get("username")
                     or f"{d.get('first_name', '')} {d.get('last_name', '')}".strip())
             return {"name": name or None, "profile_pic": d.get("profile_pic")}
-        _log.info("profile fetch for %s → %s", external_id, resp.status_code)
+        _log.info("profile fetch for %s (%s) → %s: %s",
+                  external_id, channel, resp.status_code, resp.text[:200])
     except Exception as exc:
         _log.info("profile fetch for %s failed: %s", external_id, exc)
     return {}

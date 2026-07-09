@@ -42,7 +42,7 @@ async def backfill_unknown_profiles(db: AsyncSession, limit: int = 50) -> dict:
     enriched = 0
     for ident, person in rows:
         attempted += 1
-        prof = await fetch_profile(ident.external_id)   # {} on any failure
+        prof = await fetch_profile(ident.external_id, ident.channel)   # {} on any failure
         name = (prof.get("name") or "").strip()
         pic = prof.get("profile_pic")
         if not name and not pic:

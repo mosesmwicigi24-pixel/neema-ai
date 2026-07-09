@@ -184,7 +184,7 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
                     fresh = True
             if fresh:
                 from app.services.meta_send import fetch_profile
-                prof = await fetch_profile(sender)
+                prof = await fetch_profile(sender, channel)
                 if not prof and redis is not None:
                     try:
                         await redis.delete(f"meta:prof:{channel}:{sender}")
