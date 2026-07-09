@@ -26,26 +26,35 @@ _META_CHANNELS = ("messenger", "instagram", "facebook")
 
 
 async def backfill_unknown_profiles(db: AsyncSession, limit: int = 50) -> dict:
-    """Enrich up to `limit` still-nameless Meta contacts. Returns a small summary
-    ({attempted, enriched, scanned}); commits once at the end."""
+    """Enrich up to `limit` still-nameless Meta contacts. Contacts the Profile API
+    returns nothing for are stamped raw_profile.no_profile=true so repeated runs
+    ADVANCE through the backlog instead of re-hammering the same dead ids. Returns
+    {attempted, enriched, marked, scanned}; commits once at the end."""
+    untried = or_(
+        Identity.raw_profile["no_profile"].astext.is_(None),
+        Identity.raw_profile["no_profile"].astext != "true",
+    )
     rows = (await db.execute(
         select(Identity, Person)
         .join(Person, Person.id == Identity.person_id)
         .where(Identity.channel.in_(_META_CHANNELS))
         .where(or_(Person.display_name.is_(None), Person.display_name == ""))
         .where(Person.merged_into_id.is_(None))       # skip tombstoned duplicates
+        .where(untried)                                # skip ids we already tried + missed
         .order_by(Identity.created_at.desc())          # newest (most likely to matter) first
         .limit(limit)
     )).all()
 
-    attempted = 0
-    enriched = 0
+    attempted = enriched = marked = 0
     for ident, person in rows:
         attempted += 1
         prof = await fetch_profile(ident.external_id, ident.channel)   # {} on any failure
         name = (prof.get("name") or "").strip()
         pic = prof.get("profile_pic")
         if not name and not pic:
+            # Profile API gave us nothing — mark it so the next run moves on.
+            ident.raw_profile = {**(ident.raw_profile or {}), "no_profile": True}
+            marked += 1
             continue
         if name:
             if not person.display_name:
@@ -56,7 +65,8 @@ async def backfill_unknown_profiles(db: AsyncSession, limit: int = 50) -> dict:
             ident.raw_profile = {**(ident.raw_profile or {}), "profile_pic": pic}
         enriched += 1
 
-    if enriched:
+    if enriched or marked:
         await db.commit()
-    _log.info("meta profile backfill: enriched %d/%d nameless contact(s)", enriched, attempted)
-    return {"attempted": attempted, "enriched": enriched, "scanned": len(rows)}
+    _log.info("meta profile backfill: enriched %d, marked %d of %d nameless contact(s)",
+              enriched, marked, attempted)
+    return {"attempted": attempted, "enriched": enriched, "marked": marked, "scanned": len(rows)}
