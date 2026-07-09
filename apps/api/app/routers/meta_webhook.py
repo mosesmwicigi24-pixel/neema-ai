@@ -104,6 +104,31 @@ def _event_text(message: dict) -> str:
     return ""
 
 
+def _event_media(message: dict) -> tuple[str | None, str | None]:
+    """Extract (media_type, media_url) from the first inbound attachment that
+    carries a usable URL, else (None, None).
+
+    Meta puts the URL under `payload.url` for image/video/audio/file, but for
+    `fallback`/share/story attachments it often sits at the top level (`url`)
+    with a null payload. A `fallback` that points at a real Meta CDN asset is a
+    photo/video the customer sent (render it inline); one that points at an
+    `l.facebook.com` redirect is a shared link (render it as a file/link)."""
+    for att in (message.get("attachments") or []):
+        payload = att.get("payload") or {}
+        url = payload.get("url") or att.get("url")
+        if not url:
+            continue
+        t = (att.get("type") or "").lower()
+        if t in ("image", "video", "audio", "file"):
+            return t, url
+        # fallback / share / story / unsupported — guess from the URL.
+        low = url.lower()
+        is_redirect = "l.facebook.com" in low or "l.php" in low
+        looks_cdn = any(s in low for s in ("fbcdn", "lookaside", "cdninstagram", "scontent"))
+        return ("image" if (looks_cdn and not is_redirect) else "file"), url
+    return None, None
+
+
 async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=None) -> None:
     """For each inbound Messenger/IG event: resolve the sender to a person/identity,
     get-or-create the (channel, sender) conversation, and store the inbound
@@ -139,6 +164,11 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
                     continue
 
             text = _event_text(message)
+            media_type, media_url = _event_media(message)
+            # No caption on a media message → give it a clean placeholder that
+            # matches the resolved media_type (so "[fallback]" becomes "[image]").
+            if media_type and (not text or text.startswith("[")):
+                text = f"[{media_type}]"
             ident = await resolve_or_create_person(
                 db, channel, sender,
                 source=f"{channel}_inbound", confidence="deterministic",
@@ -151,12 +181,14 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
                 person_id=ident.person_id, conversation_id=conv.id,
                 direction=MsgDirection.inbound, sender=MsgSender.user,
                 text=text, waba_msg_id=mid,
+                media_type=media_type, media_url=media_url,
             ))
             conv.last_message_at = datetime.now(timezone.utc)
             conv.last_message_preview = (text or f"[{channel} message]")[:100]
             broadcasts.append((str(conv.id), {
                 "type": "new_message", "conversationId": str(conv.id),
                 "channel": channel, "sender": "user", "text": text,
+                "mediaType": media_type, "mediaUrl": media_url,
             }))
             # Only hand the agent a real text turn (skip attachment placeholders),
             # and only when the conversation is AI-mode (never talk over a human).

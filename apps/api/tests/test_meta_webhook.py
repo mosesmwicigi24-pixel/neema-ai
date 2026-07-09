@@ -102,6 +102,37 @@ def test_capture_creates_person_conversation_and_message(monkeypatch):
     assert db.commits == 1
 
 
+def test_event_media_extracts_attachments():
+    # image via payload.url
+    assert mw._event_media({"attachments": [
+        {"type": "image", "payload": {"url": "https://scontent.xx/p.jpg"}}]}) == (
+        "image", "https://scontent.xx/p.jpg")
+    # fallback pointing at a real CDN asset → treated as an image
+    assert mw._event_media({"attachments": [
+        {"type": "fallback", "payload": None, "url": "https://lookaside.fbsbx.com/x.jpg"}]}) == (
+        "image", "https://lookaside.fbsbx.com/x.jpg")
+    # fallback pointing at a share redirect → treated as a file/link
+    assert mw._event_media({"attachments": [
+        {"type": "fallback", "url": "https://l.facebook.com/l.php?u=http://ex.com"}]}) == (
+        "file", "https://l.facebook.com/l.php?u=http://ex.com")
+    # no attachments
+    assert mw._event_media({"text": "hi"}) == (None, None)
+
+
+def test_capture_stores_media_url_and_type(monkeypatch):
+    calls = {}
+    _patch(monkeypatch, calls)
+    payload = {"object": "page", "entry": [{"messaging": [
+        {"sender": {"id": "PSID_1"}, "message": {"mid": "img1", "attachments": [
+            {"type": "image", "payload": {"url": "https://scontent.xx/p.jpg"}}]}},
+    ]}]}
+    db = _FakeDB()
+    asyncio.run(mw._capture_events(db, "messenger", payload))
+    msg = next(o for o in db.added if isinstance(o, Message))
+    assert msg.media_type == "image" and msg.media_url == "https://scontent.xx/p.jpg"
+    assert msg.text == "[image]"        # placeholder cleaned from "[fallback]"/none
+
+
 def test_capture_dedupes_on_message_id(monkeypatch):
     calls = {}
     _patch(monkeypatch, calls)
