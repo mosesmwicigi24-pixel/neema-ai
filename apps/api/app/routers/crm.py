@@ -942,3 +942,86 @@ async def decline_production(
         e.status = "declined"
         await db.commit()
     return {"ok": True}
+
+
+# ── Attribution: which source/post actually drives leads and revenue ─────────
+
+@router.get("/attribution")
+async def attribution(
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Revenue-by-source rollup for the data-driven Bethany House.
+
+    Joins the three places a lead's origin lands — `users.state.lead_source`
+    (the WhatsApp set_lead_source tool), `persons.state.lead_source/source_post`
+    (the waref comment→WhatsApp bridge), and Meta identities'
+    `raw_profile.source_post` (comment capture) — against hub orders
+    (OrderEvent, via person_id or wa_id). Orders with no known origin are
+    reported honestly as `unattributed`, never silently dropped. Aggregated in
+    Python: these tables are small at Bethany House scale, and the JSONB paths
+    differ per store, so this beats a thicket of dialect-specific SQL.
+    """
+    users = (await db.execute(select(User))).scalars().all()
+    persons = (await db.execute(
+        select(Person).where(Person.merged_into_id.is_(None)))).scalars().all()
+    idents = (await db.execute(
+        select(Identity).where(Identity.channel.in_(("messenger", "facebook", "instagram")))
+    )).scalars().all()
+    orders = (await db.execute(
+        select(OrderEvent).where(OrderEvent.hub_order_id.isnot(None)))).scalars().all()
+
+    # person_id -> (source, post) — most-specific origin wins.
+    origin: dict = {}
+    for p in persons:
+        st = p.state or {}
+        if st.get("source_post") or st.get("lead_source"):
+            origin[p.id] = (st.get("lead_source") or "facebook", st.get("source_post"))
+    for i in idents:
+        post = (i.raw_profile or {}).get("source_post")
+        if post and i.person_id not in origin:
+            origin[i.person_id] = (i.channel, post)
+    wa_person: dict = {}
+    for u in users:
+        if u.person_id is not None:
+            wa_person[u.wa_id] = u.person_id
+        src = (u.state or {}).get("lead_source")
+        if src and u.person_id is not None and u.person_id not in origin:
+            origin[u.person_id] = (src, None)
+
+    buckets: dict = {}
+
+    def _bucket(key):
+        return buckets.setdefault(key, {
+            "source": key[0], "post": key[1],
+            "leads": 0, "orders": 0, "revenue": 0.0, "paid_revenue": 0.0,
+        })
+
+    for pid, key in origin.items():
+        _bucket(key)["leads"] += 1
+
+    unattributed = {"orders": 0, "revenue": 0.0, "paid_revenue": 0.0}
+    for o in orders:
+        pid = o.person_id or wa_person.get(o.wa_id)
+        try:
+            amount = float(o.hub_total if o.hub_total is not None else o.subtotal or 0)
+        except (TypeError, ValueError):
+            amount = 0.0
+        key = origin.get(pid)
+        target = _bucket(key) if key else unattributed
+        target["orders"] += 1
+        target["revenue"] += amount
+        if (o.payment_status or "") == "paid":
+            target["paid_revenue"] += amount
+
+    rows = sorted(buckets.values(),
+                  key=lambda b: (b["revenue"], b["leads"]), reverse=True)
+    return {
+        "sources": rows,
+        "unattributed": unattributed,
+        "totals": {
+            "leads": sum(b["leads"] for b in rows),
+            "orders": sum(b["orders"] for b in rows) + unattributed["orders"],
+            "revenue": sum(b["revenue"] for b in rows) + unattributed["revenue"],
+        },
+    }

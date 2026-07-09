@@ -2,9 +2,9 @@ import React, { useEffect, useState } from "react";
 import { Avatar } from "@/components/ui/Avatar";
 import { timeAgo, fmtCurrency, fmtDate, formatPhone, displayName } from "@/lib/utils";
 import { ALL_CHANNELS, CHANNEL_CONFIG } from "@/lib/channels";
-import { statsApi } from "@/lib/api";
+import { statsApi, attributionApi } from "@/lib/api";
 import type { Conversation, Agent, Order, CatalogItem, SharedViewProps } from "@/types";
-import type { ApiStats } from "@/lib/api";
+import type { ApiStats, ApiAttribution } from "@/lib/api";
 
 interface OverviewViewProps extends SharedViewProps {
     conversations: Conversation[];
@@ -87,6 +87,7 @@ export function OverviewView({
 }: OverviewViewProps): React.ReactElement {
     const [apiStats,     setApiStats]     = useState<ApiStats | null>(null);
     const [statsLoading, setStatsLoading] = useState(true);
+    const [attrib,       setAttrib]       = useState<ApiAttribution | null>(null);
 
     useEffect(() => {
         setStatsLoading(true);
@@ -94,6 +95,7 @@ export function OverviewView({
             .then(setApiStats)
             .catch(() => setApiStats(null))
             .finally(() => setStatsLoading(false));
+        attributionApi.get().then(setAttrib).catch(() => setAttrib(null));
 
         const timer = setInterval(() => {
             statsApi.overview().then(setApiStats).catch(() => {});
@@ -248,6 +250,57 @@ export function OverviewView({
                     sub={`${stats.inStockItems} in stock`} icon="📦" accent="border-t-violet-400"
                     loading={statsLoading && !apiStats} />
             </div>
+
+            {/* Attribution — which source/post drives leads + revenue */}
+            {attrib && attrib.sources.length > 0 && (
+                <div className="bg-white rounded-xl border border-[#cee6b2] shadow-sm p-5 mb-4">
+                    <div className="flex items-center justify-between mb-3">
+                        <div className="text-xs font-semibold text-[#9ccd65] uppercase tracking-wider">
+                            Where Sales Come From
+                        </div>
+                        <div className="text-[11px] text-[#9ccd65]">
+                            {attrib.totals.leads} attributed lead{attrib.totals.leads === 1 ? "" : "s"}
+                        </div>
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                            <thead>
+                                <tr className="text-left text-[10px] uppercase tracking-wider text-[#9ccd65] border-b border-[#edf0ea]">
+                                    <th className="py-1.5 pr-3 font-semibold">Source</th>
+                                    <th className="py-1.5 pr-3 font-semibold">Post</th>
+                                    <th className="py-1.5 pr-3 font-semibold text-right">Leads</th>
+                                    <th className="py-1.5 pr-3 font-semibold text-right">Orders</th>
+                                    <th className="py-1.5 font-semibold text-right">Revenue (KES)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {attrib.sources.slice(0, 8).map((r, i) => (
+                                    <tr key={`${r.source}-${r.post ?? i}`} className="border-b border-[#f5f7f2] last:border-0">
+                                        <td className="py-2 pr-3 capitalize font-medium text-[#1c2917]">{r.source}</td>
+                                        <td className="py-2 pr-3 font-mono text-[10px] text-[#64748b] max-w-[180px] truncate">
+                                            {r.post ?? "—"}
+                                        </td>
+                                        <td className="py-2 pr-3 text-right">{r.leads}</td>
+                                        <td className="py-2 pr-3 text-right">{r.orders}</td>
+                                        <td className="py-2 text-right font-semibold">
+                                            {fmtCurrency(r.revenue)}
+                                        </td>
+                                    </tr>
+                                ))}
+                                {attrib.unattributed.orders > 0 && (
+                                    <tr className="text-[#94a3b8]">
+                                        <td className="py-2 pr-3 italic">unattributed</td>
+                                        <td className="py-2 pr-3">—</td>
+                                        <td className="py-2 pr-3 text-right">—</td>
+                                        <td className="py-2 pr-3 text-right">{attrib.unattributed.orders}</td>
+                                        <td className="py-2 text-right">{fmtCurrency(attrib.unattributed.revenue)}</td>
+                                    </tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
 
             {/* Charts row */}
             <div className={`grid gap-4 mb-4 ${isMobile ? "grid-cols-1" : "grid-cols-5"}`}>

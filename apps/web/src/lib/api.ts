@@ -440,6 +440,27 @@ export const statsApi = {
     overview: () => get<ApiStats>("/admin/stats"),
 };
 
+// ── Attribution (which source/post drives leads + revenue) ───────────────────
+
+export interface AttributionRow {
+    source: string;
+    post: string | null;
+    leads: number;
+    orders: number;
+    revenue: number;
+    paid_revenue: number;
+}
+
+export interface ApiAttribution {
+    sources: AttributionRow[];
+    unattributed: { orders: number; revenue: number; paid_revenue: number };
+    totals: { leads: number; orders: number; revenue: number };
+}
+
+export const attributionApi = {
+    get: () => get<ApiAttribution>("/admin/attribution"),
+};
+
 // ── Profile ───────────────────────────────────────────────────────────────────
 
 export const profileApi = {
