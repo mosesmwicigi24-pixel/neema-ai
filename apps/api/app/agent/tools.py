@@ -224,16 +224,28 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
                         " ".join(p.get("aliases") or [])]).lower()
         return all(t in hay for t in toks) if toks else True
 
-    results = [{
-        "name": p.get("name"),
-        "sku": p.get("sku"),
-        "price": _to_display(p.get("price"), ctx, p.get("price_usd")),
-        "currency": ctx.currency,
-        "in_stock": p.get("in_stock"),
-        "available_qty": p.get("available_qty"),
-        "category": p.get("category"),
-        "made_to_order": p.get("product_type") == "variable" and bool(p.get("is_producible")),
-    } for p in catalog if hit(p)][:8]
+    results = []
+    for p in catalog:
+        if not hit(p):
+            continue
+        mto = p.get("product_type") == "variable" and bool(p.get("is_producible"))
+        row = {
+            "name": p.get("name"),
+            "sku": p.get("sku"),
+            "price": _to_display(p.get("price"), ctx, p.get("price_usd")),
+            "currency": ctx.currency,
+            "category": p.get("category"),
+            "made_to_order": mto,
+            # Made-to-order items are produced on demand — they are ALWAYS
+            # available and carry no stock. Only surface stock for ready goods,
+            # so the agent never wrongly tells a customer a garment is sold out.
+            "availability": "made_to_order" if mto else ("in_stock" if p.get("in_stock") else "out_of_stock"),
+        }
+        if not mto:
+            row["available_qty"] = p.get("available_qty")
+        results.append(row)
+        if len(results) >= 8:
+            break
     return {"count": len(results), "currency": ctx.currency, "results": results}
 
 
