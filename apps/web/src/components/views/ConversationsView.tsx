@@ -1839,12 +1839,26 @@ export function ConversationsView({
                                                                   title?: string;
                                                                   permalink?: string;
                                                                   thumb?: string;
+                                                                  reply_to?: string;
                                                               }
                                                             | null
                                                             | undefined;
                                                         const rawText = msg.text ?? "";
+                                                        // Our public reply to a comment: render it threaded
+                                                        // (↳ indented) so it reads as a reply under the comment.
+                                                        if (cctx?.reply_to) {
+                                                            return (
+                                                                <div className="flex gap-1.5 pl-2 border-l-2 border-amber-300/60">
+                                                                    <span className="text-amber-400 select-none">↳</span>
+                                                                    <p className="leading-relaxed whitespace-pre-wrap">
+                                                                        {formatWa(msg.text)}
+                                                                    </p>
+                                                                </div>
+                                                            );
+                                                        }
+                                                        // An inbound comment: the source-post card + the comment.
                                                         const isComment =
-                                                            !!cctx ||
+                                                            !!(cctx && (cctx.title || cctx.post_id)) ||
                                                             rawText.startsWith("[comment]");
                                                         if (isComment) {
                                                             const body = rawText.replace(
@@ -1853,7 +1867,7 @@ export function ConversationsView({
                                                             );
                                                             return (
                                                                 <div className="flex flex-col gap-1.5">
-                                                                    {cctx && (
+                                                                    {cctx && (cctx.title || cctx.post_id) && (
                                                                         <CommentContextCard
                                                                             ctx={cctx}
                                                                             isInbound={isInbound}

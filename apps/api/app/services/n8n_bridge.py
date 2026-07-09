@@ -1385,15 +1385,19 @@ async def save_outbound_message(db, redis, wa_id: str, text: str) -> None:
         pass
 
 
-async def save_outbound_channel_message(db, redis, channel: str, external_id: str, text: str) -> None:
-    """Persist an AI outbound reply for a non-WhatsApp channel (Messenger/IG) and
-    broadcast it, so it shows in the unified inbox. Keyed on (channel, external_id)."""
+async def save_outbound_channel_message(db, redis, channel: str, external_id: str, text: str,
+                                        reply_to_comment_id: str | None = None) -> None:
+    """Persist an AI outbound reply for a non-WhatsApp channel (Messenger/IG/FB) and
+    broadcast it, so it shows in the unified inbox. Keyed on (channel, external_id).
+    Pass reply_to_comment_id for a PUBLIC comment reply so the inbox can thread it
+    under the comment it answers (stored on comment_context.reply_to)."""
     from app.services.channel import get_or_create_conversation
     conv = await get_or_create_conversation(db, channel, external_id)
     db.add(Message(
         channel=channel, external_id=external_id, wa_id=None,
         person_id=conv.person_id, conversation_id=conv.id,
         direction=MsgDirection.outbound, sender=MsgSender.ai, text=text,
+        comment_context=({"reply_to": reply_to_comment_id} if reply_to_comment_id else None),
     ))
     conv.last_message_at = datetime.now(timezone.utc)
     conv.last_message_preview = (text or "")[:100]
@@ -1402,6 +1406,7 @@ async def save_outbound_channel_message(db, redis, channel: str, external_id: st
         await _broadcast(redis, str(conv.id), {
             "type": "message", "conversationId": str(conv.id),
             "channel": channel, "sender": "ai", "direction": "outbound", "text": text,
+            "reply_to": reply_to_comment_id,
         })
     except Exception:
         pass

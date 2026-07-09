@@ -583,15 +583,22 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
 
     await _post_public(public_text)
 
+    # Save our public reply THREADED to the comment it answers, so the inbox shows
+    # comment → reply the way Facebook does (reply_to = this comment id).
+    try:
+        async with AsyncSessionLocal() as db2:
+            await svc.save_outbound_channel_message(db2, redis, channel, ext, public_text,
+                                                    reply_to_comment_id=cid)
+    except Exception as exc:
+        _log.warning("saving public reply to thread failed for %s: %s", cid, exc)
+
     # Bonus: also open the DM with the same answer (best-effort; Meta blocks private
     # replies to non-testers until App Review). Silent either way — the comment
-    # already delivered the answer, so we never promise a DM publicly.
+    # already delivered the answer, and it's the SAME text, so we don't re-save it.
     dm_sent = False
     try:
         await send_private_reply(cid, public_text)
         dm_sent = True
-        async with AsyncSessionLocal() as db2:
-            await svc.save_outbound_channel_message(db2, redis, channel, ext, public_text)
     except Exception as exc:
         _log.info("comment DM (bonus) not delivered for %s: %s", cid, exc)
     _log.info("comment %s engaged: agent=%s over_cap=%s dm=%s", cid, not over_cap, over_cap, dm_sent)

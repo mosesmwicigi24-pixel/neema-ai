@@ -77,12 +77,15 @@ export interface Message {
     mime_type?: string | null;
     filename?: string | null;
     // For Facebook/Instagram comment messages: the source post this comment
-    // replies to, so the agent sees WHAT is being commented on.
+    // replies to, so the agent sees WHAT is being commented on. For our OUTBOUND
+    // public reply, `reply_to` = the comment id it answers (so the inbox threads
+    // reply-under-comment, the way Facebook does).
     comment_context?: {
         post_id?: string;
         title?: string;
         permalink?: string;
         thumb?: string;
+        reply_to?: string;
     } | null;
 }
 
