@@ -59,6 +59,29 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
 - **Per-page token routing** — map webhook `entry.id`→page token so the "Bethany
   House Executive" page also replies (only the main page's token is held today).
 
+## 🐞 Known bugs (fix next)
+1. **Human reply to a FB/IG COMMENT conversation 500s.** `POST
+   /api/admin/conversations/{id}/reply` → 500 (Internal Server Error) when an
+   agent types a manual reply on a comment-origin conversation (seen on "Alau
+   Oguns", conv `79723425-…`). Root cause: `send_agent_reply`
+   (`app/services/conversation.py:309`) calls `send_to_channel(conv.channel,
+   conv.external_id, text)`; for a comment that routes to `send_meta_message`
+   (Messenger `/me/messages`), but the recipient is a comment author with **no
+   open DM thread**, so Meta rejects → `_graph_post` raises `RuntimeError` →
+   unhandled → 500. Fixes: (a) wrap the send in `send_agent_reply` and return a
+   clean 4xx (`{"ok":false,"error":…}`) instead of a 500; (b) for comment-origin
+   conversations a human reply should post a PUBLIC comment reply and/or a
+   `private_reply` (opens the DM) — but the conversation/message doesn't yet
+   carry the `comment_id`, so store it (e.g. on the inbound comment Message /
+   conversation.state) so both AI and human replies can use the right edge;
+   (c) note `"facebook"` is in `meta_send.META_CHANNELS` (routes to /me/messages,
+   DM-only) — a comment needs the comment edges, not the Send API.
+   Minor display quirk: the comment author's numeric FB id renders in the
+   "Phone" field ("27426443210383735") — external_id shown as phone.
+2. Inbox polls a LOT (orders/messages/conversations/agents/catalog/session
+   repeat rapidly in the Network tab) — worth throttling/batching for perf, not
+   urgent.
+
 ## Unconfirmed / verify
 - Did the **re-engage `--send`** sweep (`python -m app.jobs.reengage --send`) complete?
 - Is the **Messenger DM** reply (not just comments) working end-to-end in prod?
