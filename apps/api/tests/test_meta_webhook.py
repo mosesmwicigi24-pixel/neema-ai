@@ -123,13 +123,40 @@ def test_capture_no_senders_does_not_commit(monkeypatch):
 
 # ── Neema-answers-Messenger (agent auto-reply) ───────────────────────────────
 
-def test_messenger_agent_tool_set_is_read_only():
-    """Messenger must NOT expose the phone/hub order tools — it can only answer
-    from the catalogue and hand off. Prevents phone-less bad orders."""
+def test_messenger_agent_tool_set_has_no_order_tools():
+    """Messenger must NOT expose the phone/hub order tools — checkout happens on
+    WhatsApp. It answers from the catalogue, hands off, and can mint a one-tap
+    WhatsApp checkout link. Prevents phone-less bad orders."""
     from app.agent.runtime import MESSENGER_TOOLS
     names = {t["name"] for t in MESSENGER_TOOLS}
-    assert names == {"search_catalog", "remember", "handoff_to_human"}
+    assert names == {"search_catalog", "remember", "handoff_to_human", "whatsapp_checkout_link"}
     assert "create_order" not in names and "update_cart" not in names
+
+
+def test_plan_comment_actions_by_intent():
+    from app.agent.runtime import plan_comment_actions
+    assert plan_comment_actions("high") == {"public": True, "style": "answer",
+                                            "dm": True, "human": False}
+    low = plan_comment_actions("low")
+    assert low["public"] is True and low["dm"] is False and low["human"] is False
+    neg = plan_comment_actions("negative")
+    assert neg["human"] is True and neg["dm"] is False and neg["style"] == "empathy"
+    assert plan_comment_actions("spam") == {"public": False, "style": None,
+                                            "dm": False, "human": False}
+
+
+def test_whatsapp_checkout_link_builds_prefilled_deep_link(monkeypatch):
+    from types import SimpleNamespace
+    from app.agent.tools import _whatsapp_checkout_link
+    monkeypatch.setattr(settings, "whatsapp_handoff_number", "+254700111222", raising=False)
+    ctx = SimpleNamespace(redis=None, wa_id="PSID1", channel="messenger")
+    out = asyncio.run(_whatsapp_checkout_link({"product": "black cassock"}, ctx))
+    assert out["link"].startswith("https://wa.me/254700111222?text=")
+    assert out["ref"] and out["ref"] in out["link"]       # ref rides in the prefilled text
+    assert "cassock" in out["link"].lower()               # product carried through
+    # no number configured → a clean error, not a broken link
+    monkeypatch.setattr(settings, "whatsapp_handoff_number", "", raising=False)
+    assert "error" in asyncio.run(_whatsapp_checkout_link({}, ctx))
 
 
 def test_messenger_addendum_currency_and_routes_to_whatsapp():
