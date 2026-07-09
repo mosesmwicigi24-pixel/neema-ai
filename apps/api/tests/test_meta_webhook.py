@@ -189,15 +189,47 @@ def test_thanks_pool_is_varied_but_stable_per_person():
     assert len(seen) > 1                                     # genuinely varied across people
 
 
-def test_order_link_is_tap_to_order_with_ref(monkeypatch):
+def test_order_link_is_short_and_hides_the_wame_target(monkeypatch):
+    """The comment must show a short on-brand link, not a 300-char wa.me?text=…
+    monster — the real target is stashed in redis for the redirect."""
+    import json as _json
     import app.agent.runtime as rt
+
+    class _FakeRedis:
+        def __init__(self): self.store = {}
+        async def set(self, k, v, ex=None): self.store[k] = v
+
     monkeypatch.setattr(settings, "whatsapp_handoff_number", "+254712000000", raising=False)
-    link = asyncio.run(rt._order_link(None, "facebook", "PSID_1", "a black cassock"))
-    assert link.startswith("https://wa.me/254712000000?text=")
-    assert "cassock" in link.lower() and "ref" in link.lower()
-    # no number configured → empty (caller then just omits the link)
+    monkeypatch.setattr(settings, "media_public_url", "https://neema.bethanyhouse.co.ke", raising=False)
+    r = _FakeRedis()
+    link = asyncio.run(rt._order_link(r, "facebook", "PSID_1", "a black cassock"))
+    assert link.startswith("https://neema.bethanyhouse.co.ke/api/o/")   # short, clean
+    assert "wa.me" not in link and "%20" not in link                    # no scary encoded URL
+    ref = link.rsplit("/", 1)[-1]
+    target = _json.loads(r.store[f"waref:{ref}"])["target"]
+    assert target.startswith("https://wa.me/254712000000?text=") and ref in target
+
+    # no public host → falls back to the raw wa.me link (still works)
+    monkeypatch.setattr(settings, "media_public_url", "", raising=False)
+    assert asyncio.run(rt._order_link(r, "facebook", "PSID_1")).startswith("https://wa.me/254712000000?text=")
+    # no number → no link
     monkeypatch.setattr(settings, "whatsapp_handoff_number", "", raising=False)
-    assert asyncio.run(rt._order_link(None, "facebook", "PSID_1", "x")) == ""
+    assert asyncio.run(rt._order_link(r, "facebook", "PSID_1")) == ""
+
+
+def test_short_link_redirects_to_stored_target():
+    import json as _json
+    from types import SimpleNamespace
+    from app.routers.short_link import order_redirect
+
+    class _R:
+        async def get(self, k):
+            return _json.dumps({"target": "https://wa.me/254712000000?text=hi"}) if k == "waref:ABC123" else None
+
+    req = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(redis=_R())))
+    resp = asyncio.run(order_redirect("ABC123", req))
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "https://wa.me/254712000000?text=hi"
 
 
 def test_post_cap_falls_back_after_n_full_replies(monkeypatch):

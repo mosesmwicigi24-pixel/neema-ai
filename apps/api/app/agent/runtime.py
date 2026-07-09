@@ -465,24 +465,33 @@ def _pick(pool: list, seed: str) -> str:
 
 
 async def _order_link(redis, channel: str, ext: str, product: str = "") -> str:
-    """A tap-to-order wa.me deep link (pre-filled + a ref for attribution), so a
-    commenter can go from the comment straight to a WhatsApp order in one tap."""
+    """A SHORT tap-to-order link the commenter can tap to reach a pre-filled
+    WhatsApp order in one tap. Returns our own short URL
+    (`{media_public_url}/api/o/{ref}`) that 302-redirects to the real wa.me target
+    stored in redis — so the comment shows a clean link, not a 300-char wa.me?text=…
+    monster. Falls back to the raw wa.me link only if no public host is configured."""
     import secrets
     from urllib.parse import quote
     num = (settings.whatsapp_handoff_number or "").lstrip("+").strip()
     if not num:
         return ""
     ref = secrets.token_hex(3).upper()
-    body = (f"Hi Bethany House! I'd like to order {product}. (ref {ref})"
-            if product else f"Hi Bethany House! I'd like to order. (ref {ref})")
-    link = f"https://wa.me/{num}?text={quote(body)}"
+    # Keep the WhatsApp opener SHORT + sane — never stuff a whole post caption in.
+    hint = " ".join((product or "").split())[:40].strip()
+    body = (f"Hi Bethany House! I'd like to order {hint} (ref {ref})"
+            if hint else f"Hi Bethany House! I'd like to order (ref {ref})")
+    target = f"https://wa.me/{num}?text={quote(body)}"
     try:
         if redis is not None:
-            await redis.set(f"waref:{ref}", json.dumps({"channel": channel, "external_id": ext}),
-                            ex=14 * 24 * 3600)
+            await redis.set(
+                f"waref:{ref}",
+                json.dumps({"channel": channel, "external_id": ext, "target": target}),
+                ex=14 * 24 * 3600,
+            )
     except Exception:
         pass
-    return link
+    base = (settings.media_public_url or "").rstrip("/")
+    return f"{base}/api/o/{ref}" if base else target
 
 
 async def _post_over_cap(redis, post_id: str) -> bool:
@@ -550,7 +559,7 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     if post_title:
         prompt_text = f'(commented on our post: "{post_title}") {prompt_text}'
 
-    link = await _order_link(redis, channel, ext, post_title)
+    link = await _order_link(redis, channel, ext)   # clean generic opener; agent carries the context
     over_cap = await _post_over_cap(redis, post_id)
 
     public_text = ""
