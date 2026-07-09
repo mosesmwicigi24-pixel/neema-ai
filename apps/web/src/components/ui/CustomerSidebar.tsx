@@ -123,6 +123,8 @@ interface Props {
     onClose: () => void;
     /** Called after a successful name save so parent can update conv list */
     onNameChange?: (wa_id: string, newName: string) => void;
+    /** Open this person's conversation on another channel (click a linked identity). */
+    onOpenIdentity?: (channel: string, externalId: string) => void;
     /** Override root container width — pass "w-full" when used inside mobile drawer */
     className?: string;
     /** Hide the built-in "Customer" header bar — useful when a parent drawer provides its own header */
@@ -557,6 +559,7 @@ export function CustomerSidebar({
     onToast,
     onClose,
     onNameChange,
+    onOpenIdentity,
     className,
     hideHeader,
 }: Props) {
@@ -1447,10 +1450,27 @@ export function CustomerSidebar({
                                 <div className="mt-2 space-y-1">
                                     {profile.linked_identities!.map((id) => {
                                         const meta = CH_META[id.channel] ?? { label: id.channel, color: "#64748b" };
+                                        // A real WhatsApp number (not a phantom Meta id) opens a
+                                        // wa.me chat; every other channel jumps to that
+                                        // conversation inside Neema. Both are one tap.
+                                        const digits = (id.external_id || "").replace(/\D/g, "");
+                                        const isRealPhone = id.channel === "whatsapp" && digits.length >= 7 && digits.length <= 15;
+                                        const clickable = isRealPhone || !!onOpenIdentity;
+                                        const onClick = () => {
+                                            if (isRealPhone) {
+                                                window.open(`https://wa.me/${digits}`, "_blank", "noopener");
+                                            } else {
+                                                onOpenIdentity?.(id.channel, id.external_id);
+                                            }
+                                        };
                                         return (
-                                            <div
+                                            <button
                                                 key={id.channel + id.external_id}
-                                                className="flex items-center gap-2 p-2 rounded-lg"
+                                                type="button"
+                                                onClick={clickable ? onClick : undefined}
+                                                disabled={!clickable}
+                                                title={isRealPhone ? "Open WhatsApp chat" : `Open ${meta.label} conversation`}
+                                                className={`w-full flex items-center gap-2 p-2 rounded-lg text-left transition-colors ${clickable ? "hover:brightness-95 cursor-pointer" : "cursor-default"}`}
                                                 style={{ backgroundColor: "#f8fafc", border: "1px solid #e2e8f0" }}
                                             >
                                                 <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: meta.color }} />
@@ -1460,12 +1480,15 @@ export function CustomerSidebar({
                                                         {id.channel === "whatsapp" ? formatPhone(id.external_id) : id.external_id}
                                                     </div>
                                                 </div>
+                                                {clickable && (
+                                                    <span className="text-[11px] flex-shrink-0" style={{ color: meta.color }} aria-hidden>↗</span>
+                                                )}
                                                 {id.confidence && (
                                                     <span className="text-[9px] px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: "#f1f5f9", color: "#64748b" }}>
                                                         {id.confidence}
                                                     </span>
                                                 )}
-                                            </div>
+                                            </button>
                                         );
                                     })}
                                 </div>

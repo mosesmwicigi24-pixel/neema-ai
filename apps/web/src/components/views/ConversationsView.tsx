@@ -428,6 +428,19 @@ export function ConversationsView({
     const activeConv = conversations.find((c) => c.id === activeConvId);
     const activeMessages: Message[] = messages[activeConvId] ?? [];
 
+    // Jump to the same person's conversation on another channel (clicking a
+    // linked identity in the customer panel). WhatsApp real numbers open wa.me in
+    // the sidebar itself; everything else lands here and we switch the thread.
+    const openIdentityConversation = (channel: string, externalId: string) => {
+        const conv = conversations.find(
+            (c) =>
+                c.channel === channel &&
+                (c.external_id === externalId || c.wa_id === externalId),
+        );
+        if (conv) setActiveConvId(conv.id);
+        else onToast?.("No conversation on that channel yet.", "warning");
+    };
+
     // ── Ownership helpers (depend on activeConv) ──────────────────────────────
     // isOwner: current agent is the one who intercepted this conversation
     const isOwner =
@@ -2570,6 +2583,7 @@ export function ConversationsView({
                         orders={orders}
                         onToast={onToast}
                         onClose={() => setCrmOpen(false)}
+                        onOpenIdentity={openIdentityConversation}
                         onNameChange={(wa_id, newName) => {
                             setConversations((prev) =>
                                 prev.map((c) =>
@@ -2841,6 +2855,7 @@ export function ConversationsView({
                                     orders={orders}
                                     onToast={onToast}
                                     onClose={() => setMobileCrmOpen(false)}
+                                    onOpenIdentity={openIdentityConversation}
                                     className="w-full flex flex-col overflow-hidden"
                                     hideHeader
                                     onNameChange={(wa_id, newName) => {

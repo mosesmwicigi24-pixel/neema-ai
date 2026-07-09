@@ -175,6 +175,7 @@ async def list_conversations(
         {
             "id":                   str(c.id),
             "wa_id":                c.wa_id,
+            "external_id":          getattr(c, "external_id", None),
             # Channel-native handle (wa_id | PSID | IGSID). == wa_id for WhatsApp,
             # but the ONLY customer key for Messenger/IG/FB (whose wa_id is null),
             # so the panel can load + save their profile.
