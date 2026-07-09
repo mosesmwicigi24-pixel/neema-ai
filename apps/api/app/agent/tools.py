@@ -185,6 +185,22 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "capture_contact",
+        "description": "Save a Messenger/Instagram customer's name (and phone if they share it) "
+                       "to their profile. We CANNOT read Messenger names automatically, so when "
+                       "someone new starts chatting, warmly ask their name and call this. If they "
+                       "give a phone/WhatsApp number, pass it too — it links their Messenger and "
+                       "WhatsApp into one customer.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "the customer's name"},
+                "phone": {"type": "string", "description": "phone/WhatsApp number if they shared it"},
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "share_catalog",
         "description": "Share a link to our online catalog so the customer can SEE product "
                        "photos, prices and details and order in one tap. Use when they ask to "
@@ -419,6 +435,52 @@ async def _capture_customer(args: dict, ctx: ToolContext) -> dict:
     return {"ok": True, "name": user.name, "location": user.location}
 
 
+async def _capture_contact(args: dict, ctx: ToolContext) -> dict:
+    """Messenger/IG: save the customer's name (Meta blocks reading it) and, if they
+    share a phone, attach it and LINK their Messenger↔WhatsApp into one person."""
+    from app.services.identity import _select_identity, resolve_or_create_person, WHATSAPP
+    from app.models.person import Person
+    name = (args.get("name") or "").strip()
+    phone = (args.get("phone") or "").strip()
+
+    ident = await _select_identity(ctx.db, ctx.channel, ctx.wa_id)
+    if ident is None:
+        ident = await resolve_or_create_person(ctx.db, ctx.channel, ctx.wa_id,
+                                               source=f"{ctx.channel}_capture")
+    out = {"ok": True}
+
+    if name:
+        ident.display_name = ident.display_name or name[:200]
+        person = await ctx.db.get(Person, ident.person_id)
+        if person is not None and not person.display_name:
+            person.display_name = name[:200]
+        out["name"] = name
+
+    if phone:
+        from app.core.phone import to_e164
+        from app.services.reconcile import attach_identifier
+        e164 = to_e164(phone)
+        if e164:
+            await attach_identifier(ctx.db, ident.person_id, "phone", e164,
+                                    source=f"{ctx.channel}_capture", confidence="self_reported")
+            # Link to the WhatsApp person for that number, if one exists — keep the
+            # phone-anchored WhatsApp person as primary (it can transact + be paid).
+            wa_ident = await _select_identity(ctx.db, WHATSAPP, e164.lstrip("+"))
+            if wa_ident is not None and wa_ident.person_id != ident.person_id:
+                from app.services.merge import merge_persons
+                try:
+                    await merge_persons(ctx.db, primary_person_id=wa_ident.person_id,
+                                        secondary_person_id=ident.person_id,
+                                        primary_wa_id=e164.lstrip("+"))
+                    out["linked_whatsapp"] = True
+                except Exception as exc:
+                    _log.warning("capture_contact link failed for %s: %s", ctx.wa_id, exc)
+            out["phone"] = e164
+
+    await ctx.db.commit()
+    return out
+
+
 async def _remember(args: dict, ctx: ToolContext) -> dict:
     fact = (args.get("fact") or "").strip()
     if not fact:
@@ -559,6 +621,7 @@ _HANDLERS = {
     "remember": _remember,
     "add_tags": _add_tags,
     "handoff_to_human": _handoff_to_human,
+    "capture_contact": _capture_contact,
     "whatsapp_checkout_link": _whatsapp_checkout_link,
     "share_catalog": _share_catalog,
 }

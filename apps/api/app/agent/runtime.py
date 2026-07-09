@@ -33,7 +33,8 @@ META_CHANNELS = ("messenger", "facebook", "instagram")
 # hub catalogue (KES) — one source of truth, never USD, never invented items —
 # and moves serious buyers to WhatsApp to check out. So it gets a read-only tool
 # set (no cart / order / hub tools).
-_META_TOOL_NAMES = {"search_catalog", "remember", "handoff_to_human", "whatsapp_checkout_link", "share_catalog"}
+_META_TOOL_NAMES = {"search_catalog", "remember", "handoff_to_human", "whatsapp_checkout_link",
+                    "share_catalog", "capture_contact"}
 MESSENGER_TOOLS = [t for t in TOOLS if t["name"] in _META_TOOL_NAMES]
 
 # A PUBLIC comment reply is short and read-only — it just needs the real price, so
@@ -84,6 +85,9 @@ def _meta_addendum(currency: str = "USD") -> str:
         f"a product or price; if something isn't in the catalogue, say so.{local}\n"
         "- Write PLAIN TEXT here — Messenger/Instagram show no bold, so use no "
         "asterisks, no `**`, no markdown; use short lines and hyphen lists.\n"
+        "- We can't see their name here, so early on ask it warmly ('May I know "
+        "your name?') and save it with capture_contact. If they share a phone/"
+        "WhatsApp number, pass it to capture_contact too — it links their accounts.\n"
         "- You CANNOT take payment or place an order here — checkout is on WhatsApp. "
         "The MOMENT the customer shows buying intent ('I'll take it', 'how do I "
         "pay', a clear yes), call whatsapp_checkout_link with the product(s) and "
