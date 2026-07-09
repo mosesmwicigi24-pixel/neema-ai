@@ -2,8 +2,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 import json
-import re
-import logging
 import httpx
 from datetime import datetime, timezone, timedelta
 
@@ -365,92 +363,6 @@ async def log_usage(db: AsyncSession, body) -> dict:
     return {"ok": True, "cost_usd": cost}
 
 
-# One-time handoff token minted by the whatsapp_checkout_link tool, e.g. the
-# customer's first WhatsApp message reads "…I'd like to order X. (ref 9F2A7C)".
-_WAREF_RE = re.compile(r"\(ref\s+([0-9A-Fa-f]{6})\)")
-
-
-async def maybe_link_waref(db: AsyncSession, redis, wa_id: str, text: str) -> None:
-    """Deterministic cross-channel identity link.
-
-    When a WhatsApp message carries the one-time ref we minted for a
-    Messenger/Instagram → WhatsApp handoff, collapse the two contacts into ONE
-    person: the customer proved they're the same human by tapping our unique
-    link. We merge the social identity INTO the WhatsApp person (the phone is the
-    commercial identity — it carries orders + hub linkage) and enrich the
-    WhatsApp profile with the social name. Reversible via the panel's Unmerge.
-
-    Best-effort — never breaks message routing. One-shot — the ref key is deleted
-    on use, and the person-equality check makes a re-delivery a no-op."""
-    if not text or redis is None:
-        return
-    m = _WAREF_RE.search(text)
-    if not m:
-        return
-    key = f"waref:{m.group(1).upper()}"
-    try:
-        raw = await redis.get(key)
-    except Exception:
-        return
-    if not raw:
-        return
-    try:
-        origin = json.loads(raw)
-    except Exception:
-        origin = {}
-    social_channel = origin.get("channel")
-    social_ext = origin.get("external_id")
-    if not social_channel or not social_ext or social_channel == "whatsapp":
-        return
-
-    log = logging.getLogger("neema.meta")
-    from app.services.identity import resolve_person_id_for_wa_id, resolve_or_create_person
-    from app.services.merge import merge_persons
-    try:
-        wa_person_id = await resolve_person_id_for_wa_id(db, wa_id, source="whatsapp")
-        social_ident = await resolve_or_create_person(
-            db, social_channel, social_ext,
-            source=f"{social_channel}_inbound", confidence="deterministic",
-        )
-        social_person_id = social_ident.person_id
-        # Already one person (ref re-delivered, or previously linked) — consume + stop.
-        if not wa_person_id or not social_person_id or wa_person_id == social_person_id:
-            try:
-                await redis.delete(key)
-            except Exception:
-                pass
-            return
-
-        await merge_persons(
-            db, wa_person_id, social_person_id,
-            performed_by=None, primary_wa_id=wa_id, secondary_wa_id=social_ext,
-        )
-
-        # Enrich the WhatsApp profile from the social one + record the merge on the
-        # panel (merged chip + one-tap unmerge), mirroring crm.merge_customers.
-        user = (await db.execute(
-            select(User).where(User.wa_id == wa_id)
-        )).scalar_one_or_none()
-        if user is not None:
-            if not user.name and social_ident.display_name:
-                user.name = social_ident.display_name
-            state = dict(user.state or {})
-            merged = state.get("merged_ids", [])
-            if social_ext not in merged:
-                merged.append(social_ext)
-            state["merged_ids"] = merged
-            user.state = state
-
-        await db.commit()
-        try:
-            await redis.delete(key)
-        except Exception:
-            pass
-        log.info("waref linked: %s %s → WhatsApp %s", social_channel, social_ext, wa_id)
-    except Exception as exc:
-        log.warning("waref link failed for %s: %s", key, exc)
-
-
 async def route_message(db: AsyncSession, redis, body) -> dict:
     """Decide how much intelligence THIS message deserves — server-side, no
     LLM tokens spent. Returns a decision n8n branches on:
@@ -481,13 +393,6 @@ async def route_message(db: AsyncSession, redis, body) -> dict:
             await redis.setex(seen_key, 6 * 3600, "1")
         except Exception:
             pass  # dedupe is best-effort; never block a real message
-
-    # 1b. Deterministic cross-channel link — if this message carries a handoff
-    #     ref, collapse the Messenger/IG contact into this WhatsApp person.
-    try:
-        await maybe_link_waref(db, redis, wa_id, text)
-    except Exception:
-        pass  # identity linking must never block routing
 
     # 2. Media always needs its own (vision/transcription) path.
     if body.media_type and body.media_type not in ("text", ""):
