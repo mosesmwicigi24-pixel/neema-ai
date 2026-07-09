@@ -401,19 +401,33 @@ def plan_comment_actions(intent: str) -> dict:
     return {"public": True, "style": "answer", "dm": True, "human": False}   # high
 
 
-async def _public_reply_text(style: str, comment_text: str, name_tag: str) -> str:
+async def _public_reply_text(style: str, comment_text: str, name_tag: str,
+                             *, dm_sent: bool = True) -> str:
     if style == "light":
         return _PUBLIC_LIGHT.replace("{name}", name_tag)
     if style == "empathy":
         return _PUBLIC_EMPATHY.replace("{name}", name_tag)
-    # 'answer' — one short warm sentence, NO price, drive to the DM.
-    fallback = (settings.meta_comment_public_text or _DEFAULT_PUBLIC_REPLY).replace("{name}", name_tag)
+    # 'answer' style — HONEST about whether the DM actually went out. Meta blocks
+    # private-reply DMs to non-app-testers until App Review, so we must not promise
+    # a DM we couldn't send. Either way: one short warm sentence, NO price.
+    wa = (settings.whatsapp_handoff_number or "").strip()
+    if dm_sent:
+        fallback = (settings.meta_comment_public_text or _DEFAULT_PUBLIC_REPLY).replace("{name}", name_tag)
+        sys = ("You are Neema, Bethany House's warm Christ-centred assistant, replying "
+               "PUBLICLY under a comment. ONE short friendly sentence. Do NOT quote a "
+               "price. Acknowledge their interest and tell them you've just sent them a "
+               "DM with the details. Plain text, no markdown.")
+    else:
+        where = f"on WhatsApp at {wa}" if wa else "on WhatsApp"
+        fallback = (f"Thank you{name_tag} 🙏 Please message us {where} and we'll help you "
+                    "with all the details right away 💛")
+        sys = ("You are Neema, Bethany House's warm Christ-centred assistant, replying "
+               "PUBLICLY under a comment. ONE short friendly sentence. Do NOT quote a "
+               f"price and do NOT mention a DM. Acknowledge their interest and warmly "
+               f"invite them to message us {where} to get the details and order. Plain "
+               "text, no markdown.")
     try:
         llm = build_llm(model=settings.tier2_model_light)
-        sys = ("You are Neema, Bethany House's warm Christ-centred assistant, replying "
-               "PUBLICLY under a comment. Reply in ONE short friendly sentence. Do NOT "
-               "quote any price or make promises. Acknowledge their interest and say "
-               "you've sent them a DM with the details. Plain text, no markdown.")
         resp = await llm.complete(system=sys,
                                   messages=[{"role": "user", "content": f"Comment: {comment_text[:300]}"}],
                                   tools=[])
@@ -452,44 +466,57 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     if not (plan["public"] or plan["dm"] or plan["human"]):
         return                                   # spam → silent
 
-    # 1) Public reply — style depends on intent. Needs META_PAGE_ID (loop guard).
-    if plan["public"]:
-        if own_pages:
-            try:
-                text = await _public_reply_text(plan["style"], comment_text, name_tag)
-                await reply_to_comment(cid, text.strip())
-            except Exception as exc:
-                _log.warning("public comment reply failed for %s: %s", cid, exc)
-        else:
-            _log.warning("META_PAGE_ID unset — skipping public reply (loop guard) for %s", cid)
-
-    # 2) Complaint → hand the conversation to a human; never auto-sell into it.
-    if plan["human"]:
+    async def _public(style: str, dm_sent: bool = True) -> None:
+        if not own_pages:                        # loop guard: can't tell our own reply apart
+            _log.warning("META_PAGE_ID unset — skipping public reply for %s", cid)
+            return
         try:
-            await _route_comment_to_human(channel, ext)
+            text = await _public_reply_text(style, comment_text, name_tag, dm_sent=dm_sent)
+            await reply_to_comment(cid, text.strip())
         except Exception as exc:
-            _log.warning("route-to-human failed for comment %s: %s", cid, exc)
+            _log.warning("public comment reply failed for %s: %s", cid, exc)
+
+    # ── Low / negative: public reply per style, then route complaints to a human.
+    if not plan["dm"]:
+        if plan["public"]:
+            await _public(plan["style"])
+        if plan["human"]:
+            try:
+                await _route_comment_to_human(channel, ext)
+            except Exception as exc:
+                _log.warning("route-to-human failed for comment %s: %s", cid, exc)
         return
 
-    # 3) High intent → private reply opens a DM with a real, selling answer.
-    if plan["dm"]:
-        prompt_text = comment_text or "Hi! I saw your comment — how can I help?"
-        # Ground the reply in the post they commented under, so "how much?" gets
-        # answered about the RIGHT product instead of a generic greeting.
-        post_title = ((comment.get("post_context") or {}).get("title") or "").strip()
-        if post_title:
-            prompt_text = f'(commented on our post: "{post_title}") {prompt_text}'
+    # ── High intent: DM FIRST, then an HONEST public reply. Meta blocks private
+    # replies to non-app-testers until App Review, so the DM genuinely may fail —
+    # we must not publicly promise a DM that never arrives.
+    prompt_text = comment_text or "Hi! I saw your comment — how can I help?"
+    # Ground the reply in the post they commented under, so "how much?" is answered
+    # about the RIGHT product instead of a generic greeting.
+    post_title = ((comment.get("post_context") or {}).get("title") or "").strip()
+    if post_title:
+        prompt_text = f'(commented on our post: "{post_title}") {prompt_text}'
+
+    dm_sent = False
+    try:
+        async with AsyncSessionLocal() as db:
+            reply = await run_turn(db, redis, wa_id=ext, user_text=prompt_text,
+                                   llm=build_llm(model=route_model(prompt_text)),
+                                   channel=channel, external_id=ext)
         try:
-            async with AsyncSessionLocal() as db:
-                reply = await run_turn(db, redis, wa_id=ext, user_text=prompt_text,
-                                       llm=build_llm(model=route_model(prompt_text)),
-                                       channel=channel, external_id=ext)
             await send_private_reply(cid, reply)
+            dm_sent = True
             async with AsyncSessionLocal() as db2:
                 await svc.save_outbound_channel_message(db2, redis, channel, ext, reply)
-            _log.info("comment %s engaged: public + DM on %s", cid, channel)
         except Exception as exc:
-            _log.warning("private reply failed for comment %s: %s", cid, exc)
+            _log.warning("private reply (DM) failed for comment %s: %s", cid, exc)
+    except Exception as exc:
+        _log.warning("comment DM generation failed for %s: %s", cid, exc)
+
+    # Public reply reflects reality: "sent you a DM" only if it truly sent, else a
+    # warm invite to WhatsApp (never a broken DM promise).
+    await _public("answer", dm_sent=dm_sent)
+    _log.info("comment %s engaged: dm_sent=%s", cid, dm_sent)
 
 
 def schedule_comment_engage(redis, channel: str, comment: dict, own_pages: set) -> None:

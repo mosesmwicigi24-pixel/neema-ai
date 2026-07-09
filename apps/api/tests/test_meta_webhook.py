@@ -177,6 +177,26 @@ def test_plan_comment_actions_by_intent():
                                             "dm": False, "human": False}
 
 
+def test_public_reply_is_honest_about_the_dm(monkeypatch):
+    """The public comment reply must only promise a DM when the DM actually sent;
+    otherwise it invites to WhatsApp (no broken 'check your DM' promise)."""
+    import app.agent.runtime as rt
+
+    def _no_llm(*a, **k):
+        raise RuntimeError("force the template fallback")
+
+    monkeypatch.setattr(rt, "build_llm", _no_llm)
+    monkeypatch.setattr(settings, "whatsapp_handoff_number", "254712000000", raising=False)
+    monkeypatch.setattr(settings, "meta_comment_public_text", "", raising=False)
+
+    sent = asyncio.run(rt._public_reply_text("answer", "how much?", " Jane", dm_sent=True))
+    failed = asyncio.run(rt._public_reply_text("answer", "how much?", " Jane", dm_sent=False))
+
+    assert "inbox" in sent.lower()                        # DM sent → point to the inbox
+    assert "whatsapp" in failed.lower() and "254712000000" in failed   # DM failed → WhatsApp
+    assert "inbox" not in failed.lower()                  # never claim a DM we didn't send
+
+
 def test_whatsapp_checkout_link_builds_prefilled_deep_link(monkeypatch):
     from types import SimpleNamespace
     from app.agent.tools import _whatsapp_checkout_link
