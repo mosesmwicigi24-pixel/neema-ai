@@ -155,7 +155,7 @@ async def submit_measurement(
         note=f"Made-to-order measurement request — {prod_name}",
     ))
     # Structured record so a colleague can push it to the hub in one tap.
-    db.add(ProductionEnquiry(
+    enq = ProductionEnquiry(
         product_slug=slug or None,
         product_name=prod_name,
         hub_product_id=(prod or {}).get("hub_product_id"),
@@ -168,7 +168,8 @@ async def submit_measurement(
         conversation_id=conv.id,
         person_id=user.person_id,
         status="new",
-    ))
+    )
+    db.add(enq)
     await db.commit()
 
     if redis is not None:
@@ -181,4 +182,52 @@ async def submit_measurement(
         except Exception:
             pass
 
-    return {"ok": True, "message": "Thank you! We've received your measurements and will confirm your made-to-order shortly."}
+    return {"ok": True, "reference": str(enq.id),
+            "message": "Thank you! We've received your measurements and will confirm your made-to-order shortly."}
+
+
+# ── Customer order tracking ───────────────────────────────────────────────────
+# The enquiry's UUID is an unguessable capability token (given to the customer on
+# submit), so tracking needs no login and orders can't be enumerated. Returns
+# ONLY a coarse stage + product name — never phone, prices, or internal ids.
+
+_TRACK_STAGES = ["received", "in_production", "ready", "delivered"]
+
+
+@router.get("/order/track/{ref}")
+async def track_order(ref: str, request: Request, db: AsyncSession = Depends(get_db)):
+    from app.models.production_enquiry import ProductionEnquiry
+    import uuid as _uuid
+    try:
+        eid = _uuid.UUID(ref)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=404, detail="Order not found")
+    e = await db.get(ProductionEnquiry, eid)
+    if not e:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    stage = "received"
+    if e.status == "declined":
+        stage = "closed"
+    elif e.status == "pushed":
+        stage = "in_production"
+        if e.hub_order_id:
+            try:
+                redis = getattr(request.app.state, "redis", None)
+                st = await hub_client.fetch_order_status(e.hub_order_id, redis) or {}
+                fulfil = (st.get("fulfillment_status") or "").lower()
+                sraw = (st.get("status") or "").lower()
+                if fulfil in ("delivered", "fulfilled") or sraw in ("delivered", "completed"):
+                    stage = "delivered"
+                elif fulfil in ("ready", "ready_for_pickup", "packed", "picked"):
+                    stage = "ready"
+            except Exception:
+                pass  # keep "in_production" on any hub hiccup
+
+    return {
+        "product_name": e.product_name,
+        "created_at": e.created_at.isoformat() if e.created_at else None,
+        "order_number": e.hub_order_number,
+        "stage": stage,                         # received | in_production | ready | delivered | closed
+        "stages": _TRACK_STAGES,
+    }

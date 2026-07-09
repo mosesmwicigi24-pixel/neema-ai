@@ -38,6 +38,7 @@ export default function MeasurePage(): React.ReactElement {
     const [ms, setMs] = useState<Record<string, string>>({});
     const [submitting, setSubmitting] = useState(false);
     const [done, setDone] = useState(false);
+    const [reference, setReference] = useState("");
     const [error, setError] = useState("");
 
     useEffect(() => {
@@ -81,6 +82,8 @@ export default function MeasurePage(): React.ReactElement {
                 }),
             });
             if (!res.ok) throw new Error();
+            const data = await res.json().catch(() => ({}));
+            if (data.reference) setReference(data.reference);
             setDone(true);
         } catch {
             setError("Something went wrong sending your request. Please try again.");
@@ -102,9 +105,30 @@ export default function MeasurePage(): React.ReactElement {
                         <strong>{productName || "your item"}</strong> and a member of our team will
                         confirm your made-to-order shortly.
                     </p>
-                    <Link href="/catalog" style={{ display: "inline-block", marginTop: 22, color: MOSS_DK, fontWeight: 700 }}>
-                        ← Back to catalog
-                    </Link>
+                    {reference && (
+                        <div style={{ marginTop: 22 }}>
+                            <Link
+                                href={`/order/${reference}`}
+                                style={{
+                                    display: "inline-block",
+                                    background: MOSS,
+                                    color: "white",
+                                    fontWeight: 700,
+                                    fontSize: 15,
+                                    padding: "12px 22px",
+                                    borderRadius: 12,
+                                    textDecoration: "none",
+                                }}
+                            >
+                                Track your order →
+                            </Link>
+                        </div>
+                    )}
+                    <div style={{ marginTop: 18 }}>
+                        <Link href="/catalog" style={{ color: MOSS_DK, fontWeight: 700 }}>
+                            ← Back to catalog
+                        </Link>
+                    </div>
                 </div>
             </div>
         );
