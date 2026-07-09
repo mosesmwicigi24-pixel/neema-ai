@@ -186,16 +186,17 @@ TOOLS: list[dict] = [
     },
     {
         "name": "capture_contact",
-        "description": "Save a Messenger/Instagram customer's name (and phone if they share it) "
-                       "to their profile. We CANNOT read Messenger names automatically, so when "
-                       "someone new starts chatting, warmly ask their name and call this. If they "
-                       "give a phone/WhatsApp number, pass it too — it links their Messenger and "
-                       "WhatsApp into one customer.",
+        "description": "Save a Messenger/Instagram customer's details to their profile: name, "
+                       "phone, and city/country. We CANNOT read Messenger names automatically, so "
+                       "when someone new starts chatting, warmly ask their name (and city & "
+                       "country for delivery) and call this. If they give a phone/WhatsApp "
+                       "number, pass it too — it links their Messenger and WhatsApp into one customer.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "name": {"type": "string", "description": "the customer's name"},
                 "phone": {"type": "string", "description": "phone/WhatsApp number if they shared it"},
+                "location": {"type": "string", "description": "city and/or country, e.g. 'Kampala, Uganda'"},
             },
             "required": [],
         },
@@ -442,19 +443,28 @@ async def _capture_contact(args: dict, ctx: ToolContext) -> dict:
     from app.models.person import Person
     name = (args.get("name") or "").strip()
     phone = (args.get("phone") or "").strip()
+    location = (args.get("location") or "").strip()
 
     ident = await _select_identity(ctx.db, ctx.channel, ctx.wa_id)
     if ident is None:
         ident = await resolve_or_create_person(ctx.db, ctx.channel, ctx.wa_id,
                                                source=f"{ctx.channel}_capture")
     out = {"ok": True}
+    person = await ctx.db.get(Person, ident.person_id)
 
     if name:
         ident.display_name = ident.display_name or name[:200]
-        person = await ctx.db.get(Person, ident.person_id)
         if person is not None and not person.display_name:
             person.display_name = name[:200]
         out["name"] = name
+
+    if location and person is not None:
+        from sqlalchemy.orm.attributes import flag_modified
+        state = dict(person.state or {})
+        state["location"] = location[:200]
+        person.state = state
+        flag_modified(person, "state")
+        out["location"] = location
 
     if phone:
         from app.core.phone import to_e164
