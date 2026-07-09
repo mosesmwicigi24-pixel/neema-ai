@@ -60,6 +60,18 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   House Executive" page also replies (only the main page's token is held today).
 
 ## 🐞 Known bugs
+0. ✅ **FIXED (main `739b1c7`)** — MISSING MIGRATION for `messages.comment_context`.
+   The column was added to the Message model (85f1643) with no Alembic migration,
+   so the deployed model SELECTed a column prod's DB lacked → 500s across the inbox
+   (list, thread, comment capture, agent reply). Invisible to /api/health (Redis
+   only). Migration `c3f7a1b9d2e4` adds it (`ADD COLUMN IF NOT EXISTS`, reversible);
+   runs before uvicorn so it self-heals on deploy. VERIFY going forward: any new
+   model column needs a matching migration — run the drift check (below).
+   ⚠️ SEPARATE pre-existing bug (NOT fixed): fresh-DB `alembic upgrade head` breaks
+   at `a3e90c34e4ac`'s `op.drop_table('custom_roles')` (table never created on a
+   fresh DB). Only bites a from-scratch rebuild, not prod. Fix by guarding that
+   drop with `IF EXISTS`. This also blocks the automated schema-drift check on a
+   fresh DB — until fixed, audit drift by grepping models vs `alembic/versions/`.
 1. ✅ **FIXED (main `8128b7c`)** — human reply to a FB/IG COMMENT conversation
    500'd. `_deliver_agent_reply` (`app/services/conversation.py`) now routes a
    comment conversation to the PUBLIC comment edge (`reply_to_comment`) using the
