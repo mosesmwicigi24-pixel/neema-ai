@@ -7,11 +7,24 @@ admin surface — the whole point of a customer-faced view.
 
 Mounted at /api/public with NO auth dependency.
 """
+from urllib.parse import quote
+
 from fastapi import APIRouter, Request, HTTPException
 
 from app.core import hub_client
+from app.core.config import settings
 
 router = APIRouter()
+
+
+def _order_url(name: str | None) -> str | None:
+    """A one-tap WhatsApp order link, pre-filled with the product name. Built
+    server-side so the number stays out of the client bundle. None if unset."""
+    num = (settings.whatsapp_handoff_number or "").lstrip("+").strip()
+    if not num:
+        return None
+    msg = f"Hi Bethany House! I'm interested in {name}." if name else "Hi Bethany House!"
+    return f"https://wa.me/{num}?text={quote(msg)}"
 
 
 def _card(p: dict) -> dict:
@@ -29,6 +42,7 @@ def _card(p: dict) -> dict:
         # rather than a stock count, so they're never wrongly "out of stock".
         "made_to_order": bool(p.get("is_producible")),
         "in_stock":      bool(p.get("in_stock", True)),
+        "order_url":     _order_url(p.get("name")),
     }
 
 

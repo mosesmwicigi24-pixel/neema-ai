@@ -184,6 +184,20 @@ TOOLS: list[dict] = [
             "required": [],
         },
     },
+    {
+        "name": "share_catalog",
+        "description": "Share a link to our online catalog so the customer can SEE product "
+                       "photos, prices and details and order in one tap. Use when they ask to "
+                       "see products, ask 'do you have photos', want to browse, or you're "
+                       "describing an item that has a picture. Pass the product name to link "
+                       "straight to that item; omit it to share the whole catalog.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"product": {"type": "string",
+                                       "description": "a specific product to link to, e.g. 'black cassock'; omit for the full catalog"}},
+            "required": [],
+        },
+    },
 ]
 
 
@@ -491,6 +505,37 @@ async def _whatsapp_checkout_link(args: dict, ctx: ToolContext) -> dict:
             "note": "Share this link and invite them to tap it to finish on WhatsApp."}
 
 
+async def _share_catalog(args: dict, ctx: ToolContext) -> dict:
+    """Return a shareable catalog link — the whole storefront, or a deep link to
+    one product when named. The customer sees photos + prices and orders in a tap."""
+    base = (settings.media_public_url or "").rstrip("/")
+    if not base:
+        return {"error": "catalog URL not configured"}
+    product = (args.get("product") or "").strip()
+    if not product:
+        return {"link": f"{base}/catalog",
+                "note": "Share this so the customer can browse our products with photos and prices."}
+
+    catalog = await svc.catalog_items(ctx.db, ctx.redis)
+    pn = product.lower().strip()
+    match = None
+    for p in catalog:                                   # exact name first
+        if p.get("slug") and (p.get("name") or "").lower().strip() == pn:
+            match = p
+            break
+    if not match:                                       # then substring (longest wins)
+        cands = [p for p in catalog if p.get("slug") and pn
+                 and (pn in (p.get("name") or "").lower() or (p.get("name") or "").lower() in pn)]
+        cands.sort(key=lambda p: len(p.get("name") or ""), reverse=True)
+        match = cands[0] if cands else None
+
+    if match:
+        return {"link": f"{base}/catalog/{match['slug']}", "product": match.get("name"),
+                "note": "Share this so the customer can see this product's photos and price, and order in one tap."}
+    return {"link": f"{base}/catalog",
+            "note": "Couldn't find that exact product — sharing the full catalog instead."}
+
+
 _HANDLERS = {
     "search_catalog": _search_catalog,
     "get_cart": _get_cart,
@@ -503,4 +548,5 @@ _HANDLERS = {
     "add_tags": _add_tags,
     "handoff_to_human": _handoff_to_human,
     "whatsapp_checkout_link": _whatsapp_checkout_link,
+    "share_catalog": _share_catalog,
 }

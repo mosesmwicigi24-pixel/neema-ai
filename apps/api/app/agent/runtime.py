@@ -33,7 +33,7 @@ META_CHANNELS = ("messenger", "facebook", "instagram")
 # hub catalogue (KES) — one source of truth, never USD, never invented items —
 # and moves serious buyers to WhatsApp to check out. So it gets a read-only tool
 # set (no cart / order / hub tools).
-_META_TOOL_NAMES = {"search_catalog", "remember", "handoff_to_human", "whatsapp_checkout_link"}
+_META_TOOL_NAMES = {"search_catalog", "remember", "handoff_to_human", "whatsapp_checkout_link", "share_catalog"}
 MESSENGER_TOOLS = [t for t in TOOLS if t["name"] in _META_TOOL_NAMES]
 
 
