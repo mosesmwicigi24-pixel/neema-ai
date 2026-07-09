@@ -57,6 +57,24 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
 4. **App Review** of `pages_messaging`/`pages_manage_engagement`/`instagram_manage_*`
    for beyond-tester reach.
 
+## Phase E (2026-07-09/10, Fable autonomous pass) — SHIPPED
+- **Phantom WhatsApp contacts FIXED** (`b70e1de`): root cause was crm.py's shim-User
+  path + provision_user minting `(whatsapp, <16-17-digit Meta id>)` identities and
+  showing the PSID as Phone. Guards: `core/phone.is_plausible_phone` (7-15 digits;
+  E.164 max 15, Meta ids 16-17); resolve_person_id_for_wa_id adopt-only for
+  non-phones; provision_user phone=NULL + no identity mint for non-phones; CRM
+  phone display guarded. **RUN ON BOX to repair existing rows:**
+  `docker compose … exec -T api python -m app.jobs.fix_phantoms` (dry-run) then `--apply`.
+- **Person-scoped memory** (`ba1b011`): Meta customers now have cross-conversation
+  memory on persons.state (was User-only → Meta had none); survives merges; past
+  orders via OrderEvent.person_id.
+- **Elite consultant prompt** (`605685c`): warm+direct, first-contact asks item +
+  city&country, ship-worldwide framing, natural upsell, capture-everything.
+- **Messenger location capture** (`75c597a`): capture_contact gains location →
+  person.state.location; meta addendum asks city&country.
+- Meta Profile API CONFIRMED blocked for non-testers (400 subcode: missing
+  permissions; 1/69 named) → names come from asking in chat until App Review.
+
 ## Next build (queued)
 - **Attribution reporting view** — revenue-by-source. Data link exists now
   (`person.state.source_post` + hub orders → person). Backend aggregation + a small
