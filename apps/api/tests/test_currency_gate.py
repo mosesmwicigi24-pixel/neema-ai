@@ -61,6 +61,21 @@ def test_cart_display_usd_uses_hub_price_and_sums_lines(monkeypatch):
     assert cart["items"][0]["unit_price"] == 12000   # original untouched
 
 
+def test_search_catalog_public_comment_price_is_usd(monkeypatch):
+    """Public comments (all Meta) are quoted in USD — only +254 WhatsApp gets KES."""
+    from app.agent import tools
+    from app.agent.tools import _search_catalog, ToolContext
+
+    async def fake_catalog(db, redis):
+        return [{"name": "Doctoral Gown", "sku": "DG1", "price": 13000, "price_usd": 130,
+                 "category": "gowns", "product_type": "variable", "is_producible": True}]
+
+    monkeypatch.setattr(tools.svc, "catalog_items", fake_catalog)
+    ctx = ToolContext(db=None, redis=None, wa_id="PSID", currency="USD")   # Meta → USD
+    r = asyncio.run(_search_catalog({"query": "gown"}, ctx))["results"][0]
+    assert r["price"] == 130 and r["currency"] == "USD"
+
+
 def test_prompt_is_currency_aware():
     assert "US Dollars (USD)" in build_system_prompt(currency="USD")
     assert "Kenyan Shillings (KES)" in build_system_prompt(currency="KES")

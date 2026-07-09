@@ -232,8 +232,6 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
         row = {
             "name": p.get("name"),
             "sku": p.get("sku"),
-            "price": _to_display(p.get("price"), ctx, p.get("price_usd")),
-            "currency": ctx.currency,
             "category": p.get("category"),
             "made_to_order": mto,
             # Made-to-order items are produced on demand — they are ALWAYS
@@ -241,6 +239,8 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
             # so the agent never wrongly tells a customer a garment is sold out.
             "availability": "made_to_order" if mto else ("in_stock" if p.get("in_stock") else "out_of_stock"),
         }
+        row["price"] = _to_display(p.get("price"), ctx, p.get("price_usd"))
+        row["currency"] = ctx.currency
         if not mto:
             row["available_qty"] = p.get("available_qty")
         results.append(row)

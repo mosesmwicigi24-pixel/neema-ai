@@ -44,24 +44,24 @@ PUBLIC_COMMENT_TOOLS = [t for t in TOOLS if t["name"] in _PUBLIC_COMMENT_TOOL_NA
 
 
 def _public_comment_addendum(currency: str = "USD") -> str:
-    """System addendum for a PUBLIC comment reply — brief, warm, personal, and
-    accurate (real price via search_catalog). The customer is being answered where
-    everyone can see, so it must read like a person, not an autoresponder."""
-    money = "Kenyan Shillings (KES)" if currency == "KES" else "US Dollars (USD)"
+    """System addendum for a PUBLIC comment reply — SELL, don't tell stories.
+    Straight to the point: identify the product from the post image, quote the real
+    price, offer to order. The customer wants the answer, not a paragraph."""
     return (
-        "\n\n## You are replying PUBLICLY under a Facebook/Instagram comment\n"
-        "- PUBLIC and short: at most TWO warm, natural sentences. Never robotic or "
-        "templated — this must read like a real person wrote it just for them.\n"
-        "- Greet them by name if you know it; mirror a little of their own wording.\n"
-        f"- Answer their EXACT question. Use search_catalog for the REAL price and "
-        f"whether it's made-to-order, and quote the price in {money}. Never invent a "
-        "price; if you truly can't find the item, warmly say you'll share details.\n"
-        "- Most clergy apparel is MADE TO ORDER — say so warmly (never 'out of stock').\n"
-        "- Plain text only: no markdown, no asterisks, no headings.\n"
-        "- End with a short, natural nudge to order on WhatsApp. Do NOT write any link "
-        "or phone number yourself — a tap-to-order link is appended after your text.\n"
-        "- If the comment is only praise or an emoji, reply with a brief, genuine, "
-        "varied thank-you and NO sales pitch."
+        "\n\n## Replying PUBLICLY under a Facebook/Instagram comment — SELL, don't chat\n"
+        "- STRAIGHT to the point. NO preamble, NO congratulations, NO backstory, NO "
+        "scripture, NO 'that's a big milestone / years of work' — cut ALL of it. The "
+        "customer wants a straight answer.\n"
+        "- If they ask the price, the FIRST words are the item + price, e.g. "
+        "'This gown is $130.' Quote the price in US DOLLARS (the `price` from "
+        "search_catalog, already in USD) — never invent it.\n"
+        "- Recognise the product from the POST IMAGE (you can see it) and find it in "
+        "the catalogue with search_catalog; if they name a different item, price that.\n"
+        "- ONE short line. Plain text — no markdown, no asterisks, no headings.\n"
+        "- Made-to-order? Say it in ≤3 words ('made to your size'), never a paragraph.\n"
+        "- End with a 3–4 word nudge to order (e.g. 'Order yours 👇'). Do NOT write "
+        "any link or phone number — a tap-to-order link is appended after your text.\n"
+        "- Praise / emoji only → a 3–4 word genuine thanks, nothing salesy."
     )
 
 
@@ -553,24 +553,26 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # ── High intent: the comment reply IS the sale. Give a real, personalised,
     # catalogue-accurate answer (with the true price) and a tap-to-order link,
     # right in the comment. The DM is a silent bonus, not the value.
-    prompt_text = comment_text or "Hi! I saw your comment — how can I help?"
-    post_id = comment.get("post_id") or (comment.get("post_context") or {}).get("post_id") or ""
-    post_title = ((comment.get("post_context") or {}).get("title") or "").strip()
-    if post_title:
-        prompt_text = f'(commented on our post: "{post_title}") {prompt_text}'
+    prompt_text = comment_text or "How much?"
+    post_ctx = comment.get("post_context") or {}
+    post_id = comment.get("post_id") or post_ctx.get("post_id") or ""
+    thumb = (post_ctx.get("thumb") or "").strip()
+    # Let the agent SEE the product in the post image and match it to the catalogue
+    # (they rarely name the item — "how much?" under a photo is meaningless alone).
+    media = {"type": "image", "url": thumb} if thumb else None
 
     link = await _order_link(redis, channel, ext)   # clean generic opener; agent carries the context
     over_cap = await _post_over_cap(redis, post_id)
 
     public_text = ""
     if not over_cap:
-        # Full agent reply — REAL price via search_catalog, warm + personal + brief.
+        # Full agent reply — SEES the post image, quotes the REAL price, one line.
         try:
             async with AsyncSessionLocal() as db:
                 public_text = (await run_turn(
-                    db, redis, wa_id=ext, user_text=prompt_text,
-                    llm=build_llm(model=route_model(prompt_text)),
-                    channel=channel, external_id=ext, public_comment=True)).strip()
+                    db, redis, wa_id=ext, user_text=prompt_text, llm=build_llm(),
+                    media=media, channel=channel, external_id=ext,
+                    public_comment=True)).strip()
         except Exception as exc:
             _log.warning("public agent reply failed for %s: %s", cid, exc)
     if not public_text:                          # over cap OR agent failed → light warm line
