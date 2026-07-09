@@ -114,3 +114,76 @@ async def resolve_person_id_for_wa_id(
         display_name=display_name, source=source, confidence="deterministic",
     )
     return ident.person_id
+
+
+# ── Cross-channel bridge: WhatsApp arrival via a social deep link ────────────
+import json  # noqa: E402
+import re    # noqa: E402
+
+# Matches the ref minted by whatsapp_checkout_link (6 hex chars), e.g. "(ref 9F2A7C)".
+_WAREF_RE = re.compile(r"\bref[:#\s]*([0-9A-Fa-f]{6})\b", re.IGNORECASE)
+
+
+async def reconcile_waref(db: AsyncSession, redis, wa_id: str, text: str) -> bool:
+    """When a WhatsApp buyer arrives via a wa.me deep link we generated inside
+    their Messenger/IG DM, its `ref` token ties them back to that social contact.
+    Clicking our unique link is a strong, self-asserted signal, so we MERGE the two
+    persons (phone-anchored WhatsApp person stays primary) and stamp the source for
+    attribution. One-shot — the ref is consumed. Best-effort; never raises. Returns
+    True if a link was made."""
+    if not text or redis is None:
+        return False
+    m = _WAREF_RE.search(text)
+    if not m:
+        return False
+    key = f"waref:{m.group(1).upper()}"
+    try:
+        raw = await redis.get(key)
+    except Exception:
+        return False
+    if not raw:
+        return False
+
+    async def _consume():
+        try:
+            await redis.delete(key)
+        except Exception:
+            pass
+
+    try:
+        data = json.loads(raw)
+    except Exception:
+        data = {}
+    channel, ext = data.get("channel"), str(data.get("external_id") or "")
+    if not channel or not ext:
+        await _consume()
+        return False
+
+    social = await _select_identity(db, channel, ext)
+    wa_person_id = await resolve_person_id_for_wa_id(db, wa_id)
+    if social is None or wa_person_id is None or social.person_id == wa_person_id:
+        await _consume()                       # nothing to link (or already same person)
+        return False
+
+    # Stamp the attribution source on the WhatsApp person, then merge the social
+    # person into it (reversible; identities move onto the phone-anchored person).
+    wa_person = await db.get(Person, wa_person_id)
+    if wa_person is not None:
+        state = dict(wa_person.state or {})
+        state.setdefault("lead_source", channel)
+        src = (social.raw_profile or {}).get("source_post")
+        if src:
+            state["source_post"] = src
+        wa_person.state = state
+
+    from app.services.merge import merge_persons
+    try:
+        await merge_persons(db, primary_person_id=wa_person_id,
+                            secondary_person_id=social.person_id,
+                            primary_wa_id=(wa_id or "").lstrip("+"))
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        return False
+    await _consume()
+    return True
