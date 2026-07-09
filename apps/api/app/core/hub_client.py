@@ -340,6 +340,62 @@ async def push_pending_order(
     }
 
 
+async def create_production_order(
+    *,
+    wa_id: str,
+    first_name: str,
+    country_iso: str | None,
+    hub_product_id: int,
+    product_name: str,
+    quantity: int = 1,
+    unit_price: float | None = None,
+    production_notes: str = "",
+) -> dict:
+    """Create a made-to-order production order in the hub from a reviewed
+    enquiry — a single production line, with the customer's measurements carried
+    in `production_notes`. Reuses an existing hub customer by phone. Raises on
+    HTTP failure. Returns {order_id, order_number, total_amount, currency_code}."""
+    if not hub_product_id:
+        raise ValueError("hub_product_id is required to create a production order")
+
+    payload = {
+        "outlet_id": settings.hub_outlet_id,
+        "channel": "whatsapp",
+        "notes": f"Made-to-order via Neema — {product_name}",
+        "production_items": [{
+            "product_id": hub_product_id,
+            "quantity": max(int(quantity or 1), 1),
+            "unit_price": float(unit_price or 0),
+            "production_notes": production_notes or "Confirm measurements with the customer.",
+        }],
+    }
+    if country_iso:
+        payload["customer_country_code"] = country_iso.upper()
+
+    customer_id = await _find_customer_id(wa_id)
+    if customer_id:
+        payload["customer_id"] = customer_id
+    else:
+        payload["new_customer"] = {"first_name": first_name or "Customer", "phone": wa_id}
+
+    base = settings.hub_api_url.rstrip("/")
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        resp = await client.post(
+            f"{base}/api/v1/admin/pos/pending-order",
+            headers=_api_headers(),
+            json=payload,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+    return {
+        "order_id": data.get("order_id"),
+        "order_number": data.get("order_number"),
+        "total_amount": data.get("total_amount"),
+        "currency_code": data.get("currency_code"),
+    }
+
+
 async def fetch_payment_link(order_id: int) -> str | None:
     """The hub's customer payment page URL for an order (mints the 72h token)."""
     base = settings.hub_api_url.rstrip("/")

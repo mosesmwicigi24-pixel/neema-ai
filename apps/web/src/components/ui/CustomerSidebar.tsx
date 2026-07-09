@@ -105,6 +105,17 @@ export interface CustomerProfile {
     flag_url: string | null;
 }
 
+interface ProductionEnquiry {
+    id: string;
+    product_name: string | null;
+    measurements: Record<string, string>;
+    notes: string | null;
+    location: string | null;
+    status: "new" | "pushed" | "declined";
+    hub_order_number: string | null;
+    pushable: boolean;
+}
+
 interface Props {
     conversation: Conversation;
     orders?: Order[];
@@ -560,6 +571,9 @@ export function CustomerSidebar({
     const [showMerge, setShowMerge] = useState(false);
     const [mergeQuery, setMergeQuery] = useState("");
     const [tagInput, setTagInput] = useState("");
+    // Made-to-order enquiry pending on this conversation (measurement form).
+    const [enquiry, setEnquiry] = useState<ProductionEnquiry | null>(null);
+    const [pushing, setPushing] = useState(false);
 
     // Customer key: wa_id for WhatsApp, else the channel-native handle (PSID /
     // IGSID). WhatsApp's wa_id IS its external_id, so this is wa_id there too.
@@ -660,6 +674,54 @@ export function CustomerSidebar({
         },
         [profile, onToast, onNameChange, custId, chParam],
     );
+
+    // Pending made-to-order enquiry for this conversation (measurement form).
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const r = await crmReq<{ enquiry: ProductionEnquiry | null }>(
+                    "GET",
+                    `/admin/production/conversation/${conversation.id}`,
+                );
+                if (!cancelled) setEnquiry(r.enquiry ?? null);
+            } catch {
+                if (!cancelled) setEnquiry(null);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [conversation.id]);
+
+    const pushProduction = async () => {
+        if (!enquiry) return;
+        setPushing(true);
+        try {
+            const r = await crmReq<{ hub_order_number?: string }>(
+                "POST",
+                `/admin/production/${enquiry.id}/push`,
+            );
+            setEnquiry({ ...enquiry, status: "pushed", hub_order_number: r.hub_order_number ?? null });
+            onToast(r.hub_order_number ? `Sent to production · ${r.hub_order_number}` : "Sent to production");
+        } catch {
+            onToast("Couldn't send to production", "error");
+        } finally {
+            setPushing(false);
+        }
+    };
+
+    const declineProduction = async () => {
+        if (!enquiry) return;
+        const prev = enquiry;
+        setEnquiry({ ...enquiry, status: "declined" });
+        try {
+            await crmReq("POST", `/admin/production/${enquiry.id}/decline`);
+        } catch {
+            setEnquiry(prev);
+            onToast("Couldn't dismiss", "error");
+        }
+    };
 
     const addTag = () => {
         if (!tagInput.trim() || !profile) return;
@@ -1910,6 +1972,69 @@ export function CustomerSidebar({
                     </>
                 )}
             </div>
+
+            {/* Made-to-order enquiry (measurement form → hub production) */}
+            {enquiry && (
+                <div className="px-4 py-3 bg-white" style={{ borderTop: "1px solid #e2e8f0" }}>
+                    <div
+                        className="text-[10px] font-bold uppercase tracking-widest mb-2"
+                        style={{ color: "#334155" }}
+                    >
+                        🧵 Made-to-order request
+                    </div>
+                    <div className="rounded-lg p-2.5" style={{ background: "#f0f9ec", border: "1px solid #dde8d5" }}>
+                        <div className="text-xs font-semibold" style={{ color: "#1a2e0f" }}>
+                            {enquiry.product_name || "Custom item"}
+                        </div>
+                        {Object.keys(enquiry.measurements || {}).length > 0 && (
+                            <div className="text-[10px] mt-1 leading-relaxed" style={{ color: "#3a5c28" }}>
+                                {Object.entries(enquiry.measurements)
+                                    .map(([k, v]) => `${k}: ${v}`)
+                                    .join(" · ")}
+                            </div>
+                        )}
+                        {enquiry.notes && (
+                            <div className="text-[10px] mt-1" style={{ color: "#3a5c28" }}>
+                                Notes: {enquiry.notes}
+                            </div>
+                        )}
+                        {enquiry.status === "pushed" ? (
+                            <div className="text-[10px] mt-2 font-semibold" style={{ color: "#427425" }}>
+                                ✓ In production{enquiry.hub_order_number ? ` · ${enquiry.hub_order_number}` : ""}
+                            </div>
+                        ) : enquiry.status === "declined" ? (
+                            <div className="text-[10px] mt-2" style={{ color: "#94a3b8" }}>
+                                Dismissed
+                            </div>
+                        ) : (
+                            <>
+                                <div className="flex gap-1.5 mt-2">
+                                    <button
+                                        onClick={pushProduction}
+                                        disabled={pushing || !enquiry.pushable}
+                                        className="flex-1 text-[10px] font-semibold py-1.5 rounded-lg text-white transition-colors disabled:opacity-60"
+                                        style={{ background: pushing ? "#9db98a" : "#589b31" }}
+                                    >
+                                        {pushing ? "Sending…" : "→ Push to production"}
+                                    </button>
+                                    <button
+                                        onClick={declineProduction}
+                                        className="text-[10px] font-semibold py-1.5 px-2.5 rounded-lg"
+                                        style={{ background: "#f8fafc", color: "#64748b", border: "1px solid #e2e8f0" }}
+                                    >
+                                        Dismiss
+                                    </button>
+                                </div>
+                                {!enquiry.pushable && (
+                                    <div className="text-[9px] mt-1.5" style={{ color: "#94a3b8" }}>
+                                        No linked hub product — set this order up in the hub manually.
+                                    </div>
+                                )}
+                            </>
+                        )}
+                    </div>
+                </div>
+            )}
 
             {/* Quick actions */}
             <div

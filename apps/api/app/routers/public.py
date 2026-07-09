@@ -138,6 +138,7 @@ async def submit_measurement(
     from app.models.message import Message, MsgDirection, MsgSender
     from app.models.conversation import InterceptMode
     from app.models.intercept import Intercept, InterceptAction
+    from app.models.production_enquiry import ProductionEnquiry
 
     user = await provision_user(db, phone, name=name)
     conv = await get_or_create_conversation(db, "whatsapp", phone, person_id=user.person_id)
@@ -152,6 +153,21 @@ async def submit_measurement(
     db.add(Intercept(
         conversation_id=conv.id, action=InterceptAction.flag,
         note=f"Made-to-order measurement request — {prod_name}",
+    ))
+    # Structured record so a colleague can push it to the hub in one tap.
+    db.add(ProductionEnquiry(
+        product_slug=slug or None,
+        product_name=prod_name,
+        hub_product_id=(prod or {}).get("hub_product_id"),
+        customer_name=name,
+        phone=phone,
+        country_iso=(getattr(user, "country_iso", None) or None),
+        measurements=(measurements if isinstance(measurements, dict) else {"notes": str(measurements)}),
+        notes=notes or None,
+        location=location or None,
+        conversation_id=conv.id,
+        person_id=user.person_id,
+        status="new",
     ))
     await db.commit()
 

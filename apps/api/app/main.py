@@ -32,6 +32,30 @@ MIGRATION_STATEMENTS = [
     # Source-post context for Facebook/Instagram comment messages (see
     # models/message.py) — lets the inbox show WHAT a comment is replying to.
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS comment_context JSONB",
+    # Made-to-order enquiries from the public measurement form (see
+    # models/production_enquiry.py). Reviewed in the inbox, then pushed to the hub.
+    """
+    CREATE TABLE IF NOT EXISTS production_enquiries (
+        id               UUID PRIMARY KEY,
+        created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        product_slug     TEXT,
+        product_name     TEXT,
+        hub_product_id   BIGINT,
+        customer_name    TEXT,
+        phone            TEXT,
+        country_iso      TEXT,
+        measurements     JSONB NOT NULL DEFAULT '{}',
+        notes            TEXT,
+        location         TEXT,
+        conversation_id  UUID REFERENCES conversations(id) ON DELETE SET NULL,
+        person_id        UUID REFERENCES persons(id) ON DELETE SET NULL,
+        status           TEXT NOT NULL DEFAULT 'new',
+        hub_order_id     BIGINT,
+        hub_order_number TEXT
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS ix_prod_enq_conv ON production_enquiries (conversation_id)",
+    "CREATE INDEX IF NOT EXISTS ix_prod_enq_status ON production_enquiries (status)",
     # Seed: Super Admin (protected, cannot be modified)
     """
     INSERT INTO custom_roles (id, name, description, color, permissions, protected)

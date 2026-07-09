@@ -811,3 +811,133 @@ async def update_lead(
     user.state = state
     await db.commit()
     return {"ok": True}
+
+# ── Made-to-order production enquiries ────────────────────────────────────────
+# A public measurement-form submission lands as a ProductionEnquiry (status=new),
+# flagged in the inbox. A colleague reviews it and pushes it to the hub in one
+# tap — the point where a real production order (and price/payment) is created.
+
+from app.models.production_enquiry import ProductionEnquiry
+
+
+def _enq_json(e: ProductionEnquiry) -> dict:
+    return {
+        "id":               str(e.id),
+        "created_at":       e.created_at.isoformat() if e.created_at else None,
+        "product_name":     e.product_name,
+        "product_slug":     e.product_slug,
+        "customer_name":    e.customer_name,
+        "phone":            e.phone,
+        "measurements":     e.measurements or {},
+        "notes":            e.notes,
+        "location":         e.location,
+        "status":           e.status,
+        "hub_order_id":     e.hub_order_id,
+        "hub_order_number": e.hub_order_number,
+        "pushable":         bool(e.status == "new" and e.hub_product_id),
+    }
+
+
+def _measurement_notes(e: ProductionEnquiry) -> str:
+    parts = [f"{k}: {v}" for k, v in (e.measurements or {}).items() if str(v).strip()]
+    body = "; ".join(parts)
+    tail = []
+    if e.notes:
+        tail.append(f"Notes: {e.notes}")
+    if e.location:
+        tail.append(f"Delivery: {e.location}")
+    joined = " | ".join(p for p in [body, *tail] if p)
+    return joined or "Confirm measurements with the customer."
+
+
+@router.get("/production/conversation/{conv_id}")
+async def get_conversation_enquiry(
+    conv_id: str,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """The most recent made-to-order enquiry for a conversation (for the inbox
+    Push-to-production affordance). {enquiry: null} when there is none."""
+    try:
+        cid = _uuid.UUID(conv_id)
+    except (ValueError, TypeError):
+        return {"enquiry": None}
+    e = (await db.execute(
+        select(ProductionEnquiry)
+        .where(ProductionEnquiry.conversation_id == cid)
+        .order_by(ProductionEnquiry.created_at.desc()).limit(1)
+    )).scalars().first()
+    return {"enquiry": _enq_json(e) if e else None}
+
+
+@router.post("/production/{enquiry_id}/push")
+async def push_production(
+    enquiry_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Create the hub production order from a reviewed enquiry. Idempotent — a
+    second call returns the already-created order rather than duplicating it."""
+    try:
+        eid = _uuid.UUID(enquiry_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=404, detail="Enquiry not found")
+    e = await db.get(ProductionEnquiry, eid)
+    if not e:
+        raise HTTPException(status_code=404, detail="Enquiry not found")
+    if e.status == "pushed":
+        return {"ok": True, "already": True, "hub_order_id": e.hub_order_id,
+                "hub_order_number": e.hub_order_number}
+    if not e.hub_product_id:
+        raise HTTPException(status_code=422,
+                            detail="This enquiry has no linked hub product — create the order in the hub manually.")
+
+    # Hub price is authoritative; pass it so the order isn't zero-value.
+    redis = getattr(request.app.state, "redis", None)
+    unit_price = None
+    try:
+        catalog = await hub_client.fetch_hub_catalog(redis)
+        p = next((x for x in catalog if x.get("hub_product_id") == e.hub_product_id), None)
+        unit_price = (p or {}).get("price_kes")
+    except Exception:
+        pass
+
+    try:
+        result = await hub_client.create_production_order(
+            wa_id=e.phone or "",
+            first_name=(e.customer_name or "").split(" ")[0],
+            country_iso=e.country_iso,
+            hub_product_id=e.hub_product_id,
+            product_name=e.product_name or "",
+            quantity=1,
+            unit_price=unit_price,
+            production_notes=_measurement_notes(e),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Hub rejected the order: {exc}")
+
+    e.status = "pushed"
+    e.hub_order_id = result.get("order_id")
+    e.hub_order_number = result.get("order_number")
+    await db.commit()
+    return {"ok": True, "hub_order_id": e.hub_order_id, "hub_order_number": e.hub_order_number,
+            "total_amount": result.get("total_amount"), "currency_code": result.get("currency_code")}
+
+
+@router.post("/production/{enquiry_id}/decline")
+async def decline_production(
+    enquiry_id: str,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Dismiss an enquiry that won't go to production."""
+    try:
+        eid = _uuid.UUID(enquiry_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=404, detail="Enquiry not found")
+    e = await db.get(ProductionEnquiry, eid)
+    if e and e.status == "new":
+        e.status = "declined"
+        await db.commit()
+    return {"ok": True}
