@@ -11,7 +11,7 @@ Customer CRM endpoints:
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from app.database import get_db
 from app.models.agent import Agent
 from app.models.user import User
@@ -258,28 +258,76 @@ def _build_profile(
 
 # ── Customer profile ──────────────────────────────────────────────────────────
 
+
+async def _resolve_customer_user(
+    db: AsyncSession, ident: str, channel: str | None = None, *, create: bool = False
+) -> User | None:
+    """Resolve the CRM `User` for a customer handle that may be a WhatsApp wa_id
+    OR a channel-native id (Messenger PSID / Instagram IGSID / Facebook id).
+
+    WhatsApp contacts are a `User` row keyed by wa_id. Non-WhatsApp contacts live
+    only on the identity spine (Person + Identity) with NO User row and NO wa_id —
+    so operator-edited profile fields (phone, country, tags, notes…) had nowhere
+    to persist and silently vanished on reload. This bridges them:
+
+      1. direct wa_id (WhatsApp, or an already-provisioned shim),
+      2. else the identity's person → its existing User (shared across channels),
+      3. else, when `create`, provision a shim User keyed by the channel handle
+         and linked to the same person, so edits stick.
+    """
+    # 1. Direct wa_id.
+    user = (await db.execute(select(User).where(User.wa_id == ident))).scalar_one_or_none()
+    if user:
+        return user
+
+    # 2. Channel-native id → person → User.
+    iq = select(Identity).where(Identity.external_id == ident)
+    if channel and channel != "whatsapp":
+        iq = iq.where(Identity.channel == channel)
+    identity = (await db.execute(iq.order_by(Identity.created_at))).scalars().first()
+    if identity is None or identity.person_id is None:
+        return None
+    user = (await db.execute(
+        select(User).where(User.person_id == identity.person_id)
+    )).scalar_one_or_none()
+    if user or not create:
+        return user
+
+    # 3. Provision a shim User for this person. wa_id holds the channel handle (a
+    #    PSID/IGSID never collides with a phone wa_id); phone is left BLANK for the
+    #    operator to fill — never defaulted to the opaque id.
+    user = User(wa_id=ident, phone=None, person_id=identity.person_id,
+                name=identity.display_name or None)
+    db.add(user)
+    await db.flush()
+    return user
+
+
 @router.get("/customers/{wa_id}")
 async def get_customer(
     wa_id: str,
     request: Request,
     db: AsyncSession = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
+    channel: str | None = None,
 ):
-    result = await db.execute(select(User).where(User.wa_id == wa_id))
-    user = result.scalar_one_or_none()
+    # Resolve across channels: wa_id for WhatsApp, PSID/IGSID for Messenger/IG/FB
+    # (via the identity spine). Provisions a shim User for a non-WhatsApp contact
+    # that has none yet, so a profile always exists to hang edits on.
+    user = await _resolve_customer_user(db, wa_id, channel, create=True)
     if not user:
-        # Auto-provision from the conversation so a profile always exists (this
-        # is the 'orphan conversation' case) and resolve the country
-        # server-side. 404 only when there is no conversation either.
+        # Orphan conversation with no identity spine entry (legacy WhatsApp).
         conv_exists = await db.execute(
-            select(Conversation.wa_id).where(Conversation.wa_id == wa_id)
+            select(Conversation.id).where(
+                or_(Conversation.wa_id == wa_id, Conversation.external_id == wa_id)
+            )
         )
         if conv_exists.scalar_one_or_none() is None:
             raise HTTPException(status_code=404, detail="Customer not found")
         from app.services.n8n_bridge import provision_user
         user = await provision_user(db, wa_id)
-        await db.commit()
-        await db.refresh(user)
+    await db.commit()
+    await db.refresh(user)
 
     # Identity spine: gather every WhatsApp handle for this person so a *merged*
     # customer shows unified local history (two wa_ids collapse into one profile),
@@ -300,8 +348,13 @@ async def get_customer(
     )
     orders = orders_result.scalars().all()
 
+    conv_filter = [Conversation.wa_id.in_(wa_ids)]
+    if user.person_id is not None:
+        # Non-WhatsApp conversations have a null wa_id — match them by person so
+        # the profile still lists the Messenger/IG/FB channel.
+        conv_filter.append(Conversation.person_id == user.person_id)
     convs_result = await db.execute(
-        select(Conversation).where(Conversation.wa_id.in_(wa_ids))
+        select(Conversation).where(or_(*conv_filter))
     )
     conversations = convs_result.scalars().all()
 
@@ -444,15 +497,20 @@ async def update_customer(
     body: dict,
     db: AsyncSession = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
+    channel: str | None = None,
 ):
-    result = await db.execute(select(User).where(User.wa_id == wa_id))
-    user = result.scalar_one_or_none()
+    # Resolve across channels (see _resolve_customer_user): this is what makes an
+    # operator's edits on a Messenger/Instagram/Facebook contact actually persist,
+    # instead of hitting /customers/null and silently reverting.
+    user = await _resolve_customer_user(db, wa_id, channel, create=True)
     if not user:
         # Upsert semantics: the operator can add data to ANY conversation,
         # including orphan conversations that never got a user row. Requires a
         # conversation to exist (guards against typo'd ids creating junk rows).
         conv_exists = await db.execute(
-            select(Conversation.wa_id).where(Conversation.wa_id == wa_id)
+            select(Conversation.id).where(
+                or_(Conversation.wa_id == wa_id, Conversation.external_id == wa_id)
+            )
         )
         if conv_exists.scalar_one_or_none() is None:
             raise HTTPException(status_code=404, detail="Customer not found")

@@ -561,20 +561,29 @@ export function CustomerSidebar({
     const [mergeQuery, setMergeQuery] = useState("");
     const [tagInput, setTagInput] = useState("");
 
+    // Customer key: wa_id for WhatsApp, else the channel-native handle (PSID /
+    // IGSID). WhatsApp's wa_id IS its external_id, so this is wa_id there too.
+    // Without this, Messenger/IG/FB contacts (wa_id === null) hit
+    // /admin/customers/null and every edit silently reverts on reload.
+    const custId = conversation.wa_id ?? conversation.external_id ?? "";
+    const chParam = conversation.channel
+        ? `?channel=${encodeURIComponent(conversation.channel)}`
+        : "";
+
     const loadProfile = useCallback(async () => {
         setLoading(true);
         try {
             const data = await crmReq<CustomerProfile>(
                 "GET",
-                `/admin/customers/${conversation.wa_id}`,
+                `/admin/customers/${encodeURIComponent(custId)}${chParam}`,
             );
             setProfile(data);
             setNoteDraft(data.notes || "");
         } catch {
             // Fallback: minimal profile from conversation data
             setProfile({
-                id: conversation.wa_id,
-                wa_id: conversation.wa_id,
+                id: custId,
+                wa_id: custId,
                 name: conversation.name ?? null,
                 name_confirmed: false,
                 email: null,
@@ -610,6 +619,8 @@ export function CustomerSidebar({
             setLoading(false);
         }
     }, [
+        custId,
+        chParam,
         conversation.wa_id,
         conversation.name,
         conversation.channel,
@@ -626,10 +637,14 @@ export function CustomerSidebar({
             setSaving(true);
             const prev = profile;
             setProfile({ ...profile, ...updates });
+            // Persist against the channel-native key (profile.wa_id is the shim
+            // wa_id for non-WhatsApp contacts), with the channel so the backend
+            // resolves the right person even before a shim User exists.
+            const key = profile.wa_id || custId;
             try {
                 await crmReq(
                     "PATCH",
-                    `/admin/customers/${profile.wa_id}`,
+                    `/admin/customers/${encodeURIComponent(key)}${chParam}`,
                     updates,
                 );
                 onToast("Saved");
@@ -643,7 +658,7 @@ export function CustomerSidebar({
                 setSaving(false);
             }
         },
-        [profile, onToast, onNameChange],
+        [profile, onToast, onNameChange, custId, chParam],
     );
 
     const addTag = () => {

@@ -19,6 +19,9 @@ export type ThemeMode = "light" | "dark";
 export interface Conversation {
     id: string;
     wa_id: string;
+    // Channel-native handle (wa_id | Messenger PSID | IG IGSID). == wa_id for
+    // WhatsApp; the only customer key for channels whose wa_id is null.
+    external_id?: string | null;
     name: string | null;
     avatar_url?: string | null;
     channel: Channel;

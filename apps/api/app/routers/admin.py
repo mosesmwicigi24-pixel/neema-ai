@@ -175,6 +175,10 @@ async def list_conversations(
         {
             "id":                   str(c.id),
             "wa_id":                c.wa_id,
+            # Channel-native handle (wa_id | PSID | IGSID). == wa_id for WhatsApp,
+            # but the ONLY customer key for Messenger/IG/FB (whose wa_id is null),
+            # so the panel can load + save their profile.
+            "external_id":          c.external_id,
             "intercept_mode":       c.intercept_mode,
             "assigned_agent_id":    str(c.assigned_agent_id) if c.assigned_agent_id else None,
             "assigned_agent_name":  agent_map.get(str(c.assigned_agent_id), "") if c.assigned_agent_id else None,
