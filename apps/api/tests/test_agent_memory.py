@@ -136,8 +136,9 @@ def test_build_memory_context_includes_facts():
 def test_remember_tool_dispatches_to_add_fact(monkeypatch):
     calls = []
 
-    async def fake_add_fact(db, wa_id, fact):
+    async def fake_add_fact(db, wa_id, fact, channel="whatsapp"):
         calls.append((wa_id, fact))
+        assert channel == "whatsapp"      # default ToolContext channel
         return ["prefers black cassocks", fact]
 
     monkeypatch.setattr("app.agent.tools.memorymod.add_fact", fake_add_fact)

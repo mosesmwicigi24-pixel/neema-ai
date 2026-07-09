@@ -224,7 +224,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     # behind the cached system prefix and ahead of the real transcript, and
     # never touches the dedup check above (which only looks at the last message).
     if settings.tier2_memory:
-        mem_ctx = await build_memory_context(db, redis, key, user=user)
+        mem_ctx = await build_memory_context(db, redis, key, user=user, channel=channel)
         if mem_ctx:
             messages.insert(0, {"role": "user",
                                 "content": f"(Context — what you know about this customer:\n{mem_ctx})"})

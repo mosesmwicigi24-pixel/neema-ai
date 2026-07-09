@@ -485,7 +485,7 @@ async def _remember(args: dict, ctx: ToolContext) -> dict:
     fact = (args.get("fact") or "").strip()
     if not fact:
         return {"error": "fact is required"}
-    facts = await memorymod.add_fact(ctx.db, ctx.wa_id, fact)
+    facts = await memorymod.add_fact(ctx.db, ctx.wa_id, fact, channel=ctx.channel)
     return {"ok": True, "memory": facts}
 
 

@@ -1,10 +1,13 @@
 """Cross-conversation customer memory for the Tier 2 agent.
 
-Stored on `users.state["agent_memory"]` (JSONB) as a capped list of short,
-durable facts (preferences, church, sizing, etc.) — separate from `agent_cart`
-so the two don't collide. Follows the exact load/mutate/flag_modified/commit
-pattern used by `cart.py`. Also surfaces a one-line summary of the customer's
-past hub orders so the agent can sell like it remembers them.
+Stored as a capped list of short, durable facts (preferences, church, sizing…)
+in a JSONB `state` column — on the **User** for WhatsApp (the historical home,
+`users.state["agent_memory"]`) and on the identity's **Person** for Meta
+channels (`persons.state["agent_memory"]`), which have no User row. Keying Meta
+memory on the person means it survives a Messenger↔WhatsApp merge and a repeat
+Messenger buyer is remembered instead of treated as new every time. Also
+surfaces a one-line summary of past hub orders (by wa_id for WhatsApp, by
+person for Meta) so the agent sells like it remembers them.
 """
 from __future__ import annotations
 
@@ -13,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.order_event import OrderEvent
+from app.models.person import Person, Identity
 from app.models.user import User
 
 _KEY = "agent_memory"
@@ -21,6 +25,21 @@ _MAX_FACTS = 20
 
 async def _load_user(db: AsyncSession, wa_id: str) -> User | None:
     return (await db.execute(select(User).where(User.wa_id == wa_id))).scalar_one_or_none()
+
+
+async def _load_store(db: AsyncSession, key: str, channel: str = "whatsapp"):
+    """The ORM object whose JSONB `state` owns this customer's memory:
+    the User for WhatsApp, the identity's Person for Meta channels.
+    Returns None when the contact doesn't resolve (memory then no-ops)."""
+    if channel == "whatsapp":
+        return await _load_user(db, key)
+    ident = (await db.execute(
+        select(Identity).where(Identity.channel == channel,
+                               Identity.external_id == key)
+    )).scalar_one_or_none()
+    if ident is None:
+        return None
+    return await db.get(Person, ident.person_id)
 
 
 def read_memory(state: dict | None) -> list[str]:
@@ -40,33 +59,38 @@ def _merge(facts: list[str], fact: str) -> list[str]:
     return merged[-_MAX_FACTS:]
 
 
-async def get_memory(db: AsyncSession, wa_id: str) -> list[str]:
-    user = await _load_user(db, wa_id)
-    return read_memory(user.state if user else None)
+async def get_memory(db: AsyncSession, wa_id: str, channel: str = "whatsapp") -> list[str]:
+    store = await _load_store(db, wa_id, channel)
+    return read_memory(store.state if store else None)
 
 
-async def add_fact(db: AsyncSession, wa_id: str, fact: str) -> list[str]:
-    user = await _load_user(db, wa_id)
-    if user is None:
+async def add_fact(db: AsyncSession, wa_id: str, fact: str, channel: str = "whatsapp") -> list[str]:
+    store = await _load_store(db, wa_id, channel)
+    if store is None:
         return []
-    state = dict(user.state or {})
+    state = dict(store.state or {})
     facts = _merge(read_memory(state), fact)
     state[_KEY] = facts
-    user.state = state
+    store.state = state
     # JSONB columns need an explicit reassignment to be flagged dirty.
-    flag_modified(user, "state")
+    flag_modified(store, "state")
     await db.commit()
     return facts
 
 
-async def _recent_orders_summary(db: AsyncSession, wa_id: str, limit: int = 3) -> list[str]:
+async def _recent_orders_summary(db: AsyncSession, wa_id: str, limit: int = 3,
+                                 person_id=None) -> list[str]:
     """Best-effort: swallow errors so a turn never fails just because the
     order-history lookup couldn't be served (mirrors the usage-logging
-    best-effort pattern in runtime.run_turn)."""
+    best-effort pattern in runtime.run_turn). WhatsApp orders key on wa_id;
+    a Meta contact's orders are found via their person (stamped on OrderEvent),
+    so a merged Messenger↔WhatsApp customer shows one history."""
     try:
+        where = (OrderEvent.person_id == person_id) if person_id is not None else (
+            OrderEvent.wa_id == wa_id)
         rows = (await db.execute(
             select(OrderEvent)
-            .where(OrderEvent.wa_id == wa_id, OrderEvent.hub_order_id.isnot(None))
+            .where(where, OrderEvent.hub_order_id.isnot(None))
             .order_by(OrderEvent.created_at.desc()).limit(limit)
         )).scalars().all()
     except Exception:
@@ -80,17 +104,20 @@ async def _recent_orders_summary(db: AsyncSession, wa_id: str, limit: int = 3) -
     return lines
 
 
-async def build_memory_context(db: AsyncSession, redis, wa_id: str, user: User | None = None) -> str | None:
+async def build_memory_context(db: AsyncSession, redis, wa_id: str, user: User | None = None,
+                               channel: str = "whatsapp") -> str | None:
     """Return a short block combining stored facts + a past-orders summary, or
     None if there's nothing worth telling the model about this customer yet.
 
     `user` may be passed in when the caller already loaded it (e.g.
-    `runtime.run_turn`) to avoid a redundant query; otherwise it's fetched here.
+    `runtime.run_turn`) to avoid a redundant query; otherwise the store (User
+    for WhatsApp, the identity's Person for Meta) is fetched here.
     """
-    if user is None:
-        user = await _load_user(db, wa_id)
-    facts = read_memory(getattr(user, "state", None) if user else None)
-    orders = await _recent_orders_summary(db, wa_id)
+    store = user if (user is not None and channel == "whatsapp") else (
+        await _load_store(db, wa_id, channel))
+    facts = read_memory(getattr(store, "state", None) if store else None)
+    person_id = store.id if (channel != "whatsapp" and isinstance(store, Person)) else None
+    orders = await _recent_orders_summary(db, wa_id, person_id=person_id)
     if not facts and not orders:
         return None
 
