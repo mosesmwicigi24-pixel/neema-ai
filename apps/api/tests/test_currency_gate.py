@@ -89,3 +89,32 @@ def test_business_info_injected_only_when_set(monkeypatch):
     assert "Biashara St" in p and "ABOUT BETHANY HOUSE" in p   # facts Neema can quote
     monkeypatch.setattr(settings, "business_info", "", raising=False)
     assert "ABOUT BETHANY HOUSE" not in build_system_prompt(currency="KES")   # nothing injected
+
+
+def test_prompt_payment_and_fulfilment_are_country_specific():
+    """Paybill/M-Pesa-link payment is a KENYAN thing; international customers get
+    route discovery (WU/Mukuru + handoff) and courier shipping — never
+    'delivery or pickup?'. Vestment expertise appears for both."""
+    ke = build_system_prompt(currency="KES")
+    intl = build_system_prompt(currency="USD")
+
+    assert "M-Pesa payment link" in ke and "ask: delivery or pickup?" in ke
+    assert "KES 350" in ke and "3kg" in ke              # fee baseline + parcel advisory
+    assert "Western Union" not in ke                     # no intl routes for Kenyans
+
+    assert "Western Union" in intl and "Mukuru" in intl  # discover the route
+    assert "Do NOT present the KES payment link" in intl
+    assert 'never ask "delivery or pickup?"' in intl     # courier talk instead
+    assert "DHL" in intl and "KES 350" not in intl       # no Kenyan fee language abroad
+
+    for p in (ke, intl):                                 # clergy-wear expertise everywhere
+        assert "CLERGY WEAR EXPERTISE" in p and "full set" in p.lower()
+        assert "chasuble" in p.lower() and "OVERLAY" in p
+        assert "never open with" in p                    # customer-led quantities
+
+
+def test_prompt_greets_by_nairobi_time():
+    from app.agent.prompt import _nairobi_daypart
+    assert _nairobi_daypart() in ("morning", "afternoon", "evening", "late night")
+    p = build_system_prompt(currency="KES")
+    assert "in Nairobi right now" in p and "Greet ONCE" in p
