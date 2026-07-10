@@ -39,14 +39,19 @@ class ToolContext:
 def _display(kes, ctx: "ToolContext"):
     """Convert a KES amount to the customer's display currency. Catalogue/cart
     amounts are stored in KES; Kenyan customers see KES, everyone else sees
-    USD = round(KES / rate). Whole-number USD keeps quotes clean."""
+    USD = round(KES / rate). Whole-number USD keeps quotes clean — but small
+    items (communion cups, wafers) keep cents: whole-dollar rounding floored a
+    real KES price to '$0' and the agent told a customer cups were free."""
     if kes is None:
         return None
     if ctx.currency == "USD":
         try:
-            return round(float(kes) / (ctx.usd_rate or 100))
+            usd = float(kes) / (ctx.usd_rate or 100)
         except (TypeError, ValueError):
             return kes
+        if usd <= 0:
+            return 0
+        return round(usd) if usd >= 1 else max(round(usd, 2), 0.01)
     return kes
 
 
@@ -62,7 +67,7 @@ def _to_display(kes, ctx: "ToolContext", price_usd=None):
     try:
         v = float(price_usd)
         if v > 0:
-            return round(v)
+            return round(v) if v >= 1 else round(v, 2)   # cents for small items, never $0
     except (TypeError, ValueError):
         pass
     return _display(kes, ctx)

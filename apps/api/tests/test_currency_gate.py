@@ -33,6 +33,21 @@ def test_display_respects_rate_and_bad_input():
     assert _display("not-a-number", _ctx("USD")) == "not-a-number"
 
 
+def test_display_small_items_keep_cents_never_zero_dollars():
+    """A KES 20 plastic communion cup was rounding to '$0' and the agent told a
+    customer cups were free — small USD amounts keep cents, never zero."""
+    usd = _ctx("USD", rate=100)
+    assert _display(20, usd) == 0.2       # KES 20 → $0.20, not $0
+    assert _display(50, usd) == 0.5
+    assert _display(99, usd) == 0.99
+    assert _display(1, usd) == 0.01       # never rounds below a cent
+    assert _display(100, usd) == 1        # $1+ stays whole-dollar
+    assert _display(0, usd) == 0          # genuinely zero stays zero
+    # A hub USD price under a dollar keeps its cents too
+    assert _to_display(None, usd, price_usd=0.5) == 0.5
+    assert _to_display(None, usd, price_usd=130) == 130
+
+
 def test_to_display_prefers_hub_usd_else_divides():
     usd, kes = _ctx("USD"), _ctx("KES")
     assert _to_display(10000, usd, price_usd=95) == 95     # hub USD wins
@@ -111,6 +126,19 @@ def test_prompt_payment_and_fulfilment_are_country_specific():
         assert "CLERGY WEAR EXPERTISE" in p and "full set" in p.lower()
         assert "chasuble" in p.lower() and "OVERLAY" in p
         assert "never open with" in p                    # customer-led quantities
+
+
+def test_prompt_sells_with_keen_reading_not_menu_dumps():
+    """The Jacky Ebot transcript: 'wine cups' split into wine + cups, full menu
+    dumped twice, wine bottles pushed uninvited. The consultant rules forbid all
+    three, for every market."""
+    for currency in ("KES", "USD"):
+        p = build_system_prompt(currency=currency)
+        assert "KEEN READING" in p
+        assert "wine cups" in p                      # compound name = ONE product
+        assert "NEVER dump the menu" in p
+        assert "FEELING behind the words" in p       # sacred errand, calm service
+        assert "offered only AFTER their stated need" in p   # upsell discipline
 
 
 def test_prompt_greets_by_nairobi_time():
