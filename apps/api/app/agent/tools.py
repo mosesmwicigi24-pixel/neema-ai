@@ -665,6 +665,23 @@ async def _pause_conversation(args: dict, ctx: ToolContext) -> dict:
     try:
         if ctx.redis is not None:
             await ctx.redis.set(f"agent:pause:{ctx.channel}:{ctx.wa_id}", "1", ex=2 * 3600)
+            # Activity log: the pause must be visible to the team, not silent.
+            try:
+                from sqlalchemy import or_
+                from app.models.conversation import Conversation
+                from app.models.intercept import Intercept, InterceptAction
+                conv = (await ctx.db.execute(select(Conversation).where(
+                    Conversation.channel == ctx.channel,
+                    or_(Conversation.external_id == ctx.wa_id,
+                        Conversation.wa_id == ctx.wa_id)))).scalars().first()
+                if conv is not None:
+                    ctx.db.add(Intercept(conversation_id=conv.id,
+                                         action=InterceptAction.flag,
+                                         note="AI paused this conversation for 2 hours "
+                                              "(repeated off-topic drift)"))
+                    await ctx.db.commit()
+            except Exception:
+                pass
             return {"ok": True, "paused_hours": 2}
     except Exception as exc:
         _log.warning("pause_conversation failed for %s: %s", ctx.wa_id, exc)

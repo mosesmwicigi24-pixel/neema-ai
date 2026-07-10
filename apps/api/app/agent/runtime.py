@@ -565,6 +565,14 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
                     if plan["style"] == "light"
                     else _PUBLIC_EMPATHY.replace("{name}", name_tag))
             await _post_public(text)
+            # Persist it threaded under the comment — the inbox must show every
+            # outgoing reply, not just the high-intent ones.
+            try:
+                async with AsyncSessionLocal() as db2:
+                    await svc.save_outbound_channel_message(db2, redis, channel, ext, text,
+                                                            reply_to_comment_id=cid)
+            except Exception as exc:
+                _log.warning("saving light reply failed for %s: %s", cid, exc)
         if plan["human"]:
             try:
                 await _route_comment_to_human(channel, ext)
