@@ -277,8 +277,9 @@ export function OverviewView({
                                 {attrib.sources.slice(0, 8).map((r, i) => (
                                     <tr key={`${r.source}-${r.post ?? i}`} className="border-b border-[#f5f7f2] last:border-0">
                                         <td className="py-2 pr-3 capitalize font-medium text-[#1c2917]">{r.source}</td>
-                                        <td className="py-2 pr-3 font-mono text-[10px] text-[#64748b] max-w-[180px] truncate">
-                                            {r.post ?? "—"}
+                                        <td className={`py-2 pr-3 text-[10px] text-[#64748b] max-w-[180px] truncate ${r.post_title ? "" : "font-mono"}`}
+                                            title={r.post ?? undefined}>
+                                            {r.post_title ?? r.post ?? "—"}
                                         </td>
                                         <td className="py-2 pr-3 text-right">{r.leads}</td>
                                         <td className="py-2 pr-3 text-right">{r.orders}</td>

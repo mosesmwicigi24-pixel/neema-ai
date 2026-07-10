@@ -445,6 +445,7 @@ export const statsApi = {
 export interface AttributionRow {
     source: string;
     post: string | null;
+    post_title?: string | null;
     leads: number;
     orders: number;
     revenue: number;

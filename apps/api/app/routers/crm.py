@@ -1022,6 +1022,32 @@ async def attribution(
 
     rows = sorted(buckets.values(),
                   key=lambda b: (b["revenue"], b["leads"]), reverse=True)
+
+    # Human-readable post titles: the comment capture already stored each post's
+    # caption on messages.comment_context — surface "Doctoral gown reel" instead
+    # of a raw graph id. Best-effort, one query for just the posts on the board.
+    post_ids = {r["post"] for r in rows if r["post"]}
+    if post_ids:
+        try:
+            from app.models.message import Message
+            ctxs = (await db.execute(
+                select(Message.comment_context)
+                .where(Message.comment_context.isnot(None)).limit(500)
+            )).scalars().all()
+            titles = {}
+            for c in ctxs:
+                pid, title = (c or {}).get("post_id"), (c or {}).get("title")
+                if pid in post_ids and title and pid not in titles:
+                    titles[pid] = title
+            for r in rows:
+                r["post_title"] = titles.get(r["post"])
+        except Exception:
+            for r in rows:
+                r["post_title"] = None
+    else:
+        for r in rows:
+            r["post_title"] = None
+
     return {
         "sources": rows,
         "unattributed": unattributed,
