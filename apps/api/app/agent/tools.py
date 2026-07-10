@@ -180,12 +180,13 @@ TOOLS: list[dict] = [
         "description": "Give a Messenger/Instagram customer a ONE-TAP WhatsApp link to finish "
                        "their order — checkout and payment happen on WhatsApp. Use this the "
                        "moment they show buying intent ('how do I pay', 'I'll take it', a clear "
-                       "yes). Pass the product(s) so the link is pre-filled; share the returned "
-                       "link and warmly invite them to tap it.",
+                       "yes). Pass a SHORT product summary (a few words, never the full order "
+                       "breakdown); share the returned tiny link exactly as given.",
         "input_schema": {
             "type": "object",
             "properties": {"product": {"type": "string",
-                                       "description": "product(s) to pre-fill, e.g. 'a black cassock, size 52'"}},
+                                       "description": "SHORT product summary to pre-fill, max ~8 words, "
+                                                      "e.g. 'white cassock full set'"}},
             "required": [],
         },
     },
@@ -676,31 +677,41 @@ async def _handoff_to_human(args: dict, ctx: ToolContext) -> dict:
 
 
 async def _whatsapp_checkout_link(args: dict, ctx: ToolContext) -> dict:
-    """Build a one-tap wa.me deep link, pre-filled with the product, that lands
-    the customer on WhatsApp ready to order (where checkout + M-Pesa live). A
-    short ref ties the resulting WhatsApp lead back to THIS social contact so we
-    can reconcile identity + attribute the sale."""
+    """A TINY tap-to-order link that opens WhatsApp with the order message
+    pre-filled. Returns our own short URL (…/api/o/{ref}) that 302-redirects to
+    the real wa.me target stored in redis — a 500-char wa.me?text=… monster in
+    a chat scares customers and burns tokens. Falls back to the raw wa.me link
+    only when no public host is configured (or redis is down, so the pre-filled
+    message isn't lost). The ref ties the resulting WhatsApp lead back to THIS
+    social contact for identity reconciliation + sale attribution."""
     import secrets
     from urllib.parse import quote
     num = (settings.whatsapp_handoff_number or "").lstrip("+").strip()
     if not num:
         return {"error": "WhatsApp checkout number not configured"}
-    product = (args.get("product") or "").strip()
+    product = " ".join((args.get("product") or "").split())
+    hint = product[:80].strip()                  # short opener, never the full breakdown
     ref = secrets.token_hex(3).upper()          # e.g. '9F2A7C'
-    body = (f"Hi Bethany House! I'd like to order {product}. (ref {ref})"
-            if product else f"Hi Bethany House! I'd like to order. (ref {ref})")
-    link = f"https://wa.me/{num}?text={quote(body)}"
+    body = (f"Hi Bethany House! I'd like to order {hint}. (ref {ref})"
+            if hint else f"Hi Bethany House! I'd like to order. (ref {ref})")
+    target = f"https://wa.me/{num}?text={quote(body)}"
+    stored = False
     try:
         if ctx.redis is not None:
             await ctx.redis.set(
                 f"waref:{ref}",
-                json.dumps({"channel": ctx.channel, "external_id": ctx.wa_id}),
+                json.dumps({"channel": ctx.channel, "external_id": ctx.wa_id,
+                            "target": target, "product": product[:200]}),
                 ex=14 * 24 * 3600,
             )
+            stored = True
     except Exception:
         pass                                     # attribution is best-effort
+    base = (settings.media_public_url or "").rstrip("/")
+    link = f"{base}/api/o/{ref}" if (base and stored) else target
     return {"link": link, "ref": ref,
-            "note": "Share this link and invite them to tap it to finish on WhatsApp."}
+            "note": "Share this exact short link — one tap opens WhatsApp with "
+                    "their order message ready to send."}
 
 
 async def _share_catalog(args: dict, ctx: ToolContext) -> dict:

@@ -250,15 +250,45 @@ def test_post_cap_falls_back_after_n_full_replies(monkeypatch):
     assert asyncio.run(rt._post_over_cap(r, "POST2")) is False  # a different post is independent
 
 
-def test_whatsapp_checkout_link_builds_prefilled_deep_link(monkeypatch):
+def test_whatsapp_checkout_link_is_a_tiny_short_link(monkeypatch):
+    """A 500-char wa.me?text=… monster in a Messenger chat scares customers —
+    the tool returns our short /api/o/{ref} URL; the real wa.me target (with the
+    pre-filled order message) lives in redis behind the redirect."""
+    import json as _json
     from types import SimpleNamespace
     from app.agent.tools import _whatsapp_checkout_link
     monkeypatch.setattr(settings, "whatsapp_handoff_number", "+254700111222", raising=False)
-    ctx = SimpleNamespace(redis=None, wa_id="PSID1", channel="messenger")
-    out = asyncio.run(_whatsapp_checkout_link({"product": "black cassock"}, ctx))
-    assert out["link"].startswith("https://wa.me/254700111222?text=")
-    assert out["ref"] and out["ref"] in out["link"]       # ref rides in the prefilled text
-    assert "cassock" in out["link"].lower()               # product carried through
+    monkeypatch.setattr(settings, "media_public_url", "https://neema.example", raising=False)
+
+    class _R:
+        def __init__(self): self.saved = {}
+        async def set(self, k, v, ex=None): self.saved[k] = v
+
+    r = _R()
+    ctx = SimpleNamespace(redis=r, wa_id="PSID1", channel="messenger")
+    long_order = ("Men's cassock full set: white cassock with black trim/collar/sleeves "
+                  "(Kwa Shingo), grey round collar clerical shirt, double-sided stole "
+                  "(green & purple), 2 cincture belts (black & grey) - Total $249.")
+    out = asyncio.run(_whatsapp_checkout_link({"product": long_order}, ctx))
+    assert out["link"] == f"https://neema.example/api/o/{out['ref']}"   # tiny
+    stored = _json.loads(r.saved[f"waref:{out['ref']}"])
+    assert stored["target"].startswith("https://wa.me/254700111222?text=")
+    assert "cassock" in stored["target"].lower()          # opener keeps the gist…
+    assert "Total" not in stored["target"]                # …but never the full breakdown
+    assert stored["channel"] == "messenger" and stored["external_id"] == "PSID1"
+
+    # no public host → raw wa.me link still works
+    monkeypatch.setattr(settings, "media_public_url", "", raising=False)
+    out2 = asyncio.run(_whatsapp_checkout_link({"product": "black cassock"}, ctx))
+    assert out2["link"].startswith("https://wa.me/254700111222?text=")
+
+    # redis down → raw link too, so the pre-filled message isn't lost behind
+    # a redirect that would forget it
+    monkeypatch.setattr(settings, "media_public_url", "https://neema.example", raising=False)
+    ctx2 = SimpleNamespace(redis=None, wa_id="PSID1", channel="messenger")
+    out3 = asyncio.run(_whatsapp_checkout_link({}, ctx2))
+    assert out3["link"].startswith("https://wa.me/254700111222?text=")
+
     # no number configured → a clean error, not a broken link
     monkeypatch.setattr(settings, "whatsapp_handoff_number", "", raising=False)
     assert "error" in asyncio.run(_whatsapp_checkout_link({}, ctx))
