@@ -202,6 +202,15 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "pause_conversation",
+        "description": "Pause this conversation for 2 hours. Use ONLY after ~3 consecutive "
+                       "customer turns that stay outside Bethany House business (legal advice, "
+                       "ministry counselling, off-topic chat) despite gentle redirection — send "
+                       "one brief kind closing line, then call this. Never use it on a buying "
+                       "customer, a complaint, or an open order.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
         "name": "share_catalog",
         "description": "Share a link to our online catalog so the customer can SEE product "
                        "photos, prices and details and order in one tap. Use when they ask to "
@@ -620,6 +629,19 @@ async def _share_catalog(args: dict, ctx: ToolContext) -> dict:
             "note": "Couldn't find that exact product — sharing the full catalog instead."}
 
 
+async def _pause_conversation(args: dict, ctx: ToolContext) -> dict:
+    """Code-enforced cooldown: the reply schedulers skip this contact while the
+    key lives, so drift costs zero tokens for 2 hours. Best-effort — no redis,
+    no pause (the agent's polite close still went out)."""
+    try:
+        if ctx.redis is not None:
+            await ctx.redis.set(f"agent:pause:{ctx.channel}:{ctx.wa_id}", "1", ex=2 * 3600)
+            return {"ok": True, "paused_hours": 2}
+    except Exception as exc:
+        _log.warning("pause_conversation failed for %s: %s", ctx.wa_id, exc)
+    return {"ok": False}
+
+
 _HANDLERS = {
     "search_catalog": _search_catalog,
     "get_cart": _get_cart,
@@ -631,6 +653,7 @@ _HANDLERS = {
     "remember": _remember,
     "add_tags": _add_tags,
     "handoff_to_human": _handoff_to_human,
+    "pause_conversation": _pause_conversation,
     "capture_contact": _capture_contact,
     "whatsapp_checkout_link": _whatsapp_checkout_link,
     "share_catalog": _share_catalog,

@@ -34,7 +34,7 @@ META_CHANNELS = ("messenger", "facebook", "instagram")
 # and moves serious buyers to WhatsApp to check out. So it gets a read-only tool
 # set (no cart / order / hub tools).
 _META_TOOL_NAMES = {"search_catalog", "remember", "handoff_to_human", "whatsapp_checkout_link",
-                    "share_catalog", "capture_contact"}
+                    "share_catalog", "capture_contact", "pause_conversation"}
 MESSENGER_TOOLS = [t for t in TOOLS if t["name"] in _META_TOOL_NAMES]
 
 # A PUBLIC comment reply is short and read-only — it just needs the real price, so
@@ -308,6 +308,18 @@ import asyncio  # noqa: E402
 _bg_tasks: set = set()
 
 
+async def _is_paused(redis, channel: str, key: str) -> bool:
+    """True while the agent has paused this contact (pause_conversation tool —
+    non-buying drift cooldown). Best-effort: no redis → not paused."""
+    try:
+        if redis is not None and await redis.get(f"agent:pause:{channel}:{key}"):
+            _log.info("agent paused for %s/%s — skipping reply", channel, key)
+            return True
+    except Exception:
+        pass
+    return False
+
+
 async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None) -> None:
     from app.database import AsyncSessionLocal
     from app.services import n8n_bridge as svc
@@ -326,6 +338,8 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None)
 async def schedule_reply(redis, wa_id: str, text: str, dedup_id: str | None,
                          media: dict | None = None) -> bool:
     """Fire the agent for this inbound once. Returns False if already handled."""
+    if await _is_paused(redis, "whatsapp", wa_id):
+        return False
     if redis is not None and dedup_id:
         try:
             ok = await redis.set(f"agent:seen:{dedup_id}", "1", ex=600, nx=True)
@@ -366,6 +380,8 @@ async def schedule_meta_reply(redis, channel: str, external_id: str, text: str,
                               dedup_id: str | None, page_id: str | None = None) -> bool:
     """Fire the agent for one inbound Messenger/IG message. Deduped on the Meta
     message id so a redelivered webhook never double-replies."""
+    if await _is_paused(redis, channel, external_id):
+        return False
     if redis is not None and dedup_id:
         try:
             ok = await redis.set(f"agent:seen:meta:{dedup_id}", "1", ex=600, nx=True)
