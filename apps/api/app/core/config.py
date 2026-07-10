@@ -50,6 +50,8 @@ class Settings(BaseSettings):
     meta_agent_reply: bool = False
     # Optional WhatsApp number the Messenger/IG agent invites buyers to for checkout.
     whatsapp_handoff_number: str = ""
+    # Second official line (calls) — quoted verbatim in prompts alongside the above.
+    whatsapp_handoff_alt: str = ""
     # ── Facebook/Instagram comment engagement (comment → public reply + DM) ──
     # When true, a NEW comment on a Page post/reel/ad fires BOTH a short public
     # acknowledgement AND a private reply that opens a Messenger DM (where Neema

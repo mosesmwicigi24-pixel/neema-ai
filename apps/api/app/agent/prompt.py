@@ -33,6 +33,25 @@ def build_system_prompt(*, customer_name: str = "", country: str = "", country_i
         f"contact questions from these facts (don't invent any):\n{biz}\n"
         if biz else ""
     )
+    # Official contacts, verbatim — a garbled digit or an invented wa.me link
+    # sends a customer to a stranger. The model must quote these EXACTLY.
+    wa_num = (settings.whatsapp_handoff_number or "").strip()
+    alt_num = (settings.whatsapp_handoff_alt or "").strip()
+    contacts = ""
+    if wa_num or alt_num:
+        lines = []
+        if wa_num:
+            lines.append(f"- WhatsApp: {wa_num}")
+        if alt_num:
+            lines.append(f"- Phone / calls: {alt_num}")
+        contacts = (
+            "\n\nOUR OFFICIAL CONTACTS — quote EXACTLY as written, digit for digit:\n"
+            + "\n".join(lines) +
+            "\n- NEVER type a phone number or wa.me link from memory. When sharing "
+            "a WhatsApp order link, use the exact link a tool returned, unchanged. "
+            "If asked for our number, give the ones above verbatim."
+        )
+    business += contacts
     # Local-currency conversion only makes sense for the USD-quoted (non-Kenyan)
     # customer. Convert FROM the USD figure — never from KES — and only on request.
     local_ccy = ""

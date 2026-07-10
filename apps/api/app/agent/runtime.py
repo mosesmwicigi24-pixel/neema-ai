@@ -104,7 +104,8 @@ def _meta_addendum(currency: str = "USD") -> str:
         "- You CANNOT take payment or place an order here — checkout is on WhatsApp. "
         "The MOMENT the customer shows buying intent ('I'll take it', 'how do I "
         "pay', a clear yes), call whatsapp_checkout_link with the product(s) and "
-        "share the one-tap link it returns so they finish on WhatsApp.\n"
+        "share the link it returns EXACTLY as given — never hand-type a wa.me link "
+        "or number.\n"
         f"- If they're not ready yet, keep helping and gently point them {where} when it's time.\n"
         "- Keep replies short, precise, and friendly; you are the same Bethany House assistant."
     )

@@ -128,6 +128,23 @@ def test_prompt_payment_and_fulfilment_are_country_specific():
         assert "never open with" in p                    # customer-led quantities
 
 
+def test_prompt_carries_official_contacts_verbatim(monkeypatch):
+    """A garbled digit or an invented wa.me link sends a customer to a stranger —
+    the exact contacts ride in the prompt with a never-hand-type rule."""
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "whatsapp_handoff_number", "+254727891989", raising=False)
+    monkeypatch.setattr(settings, "whatsapp_handoff_alt", "+254785490805", raising=False)
+    p = build_system_prompt(currency="USD")
+    assert "OUR OFFICIAL CONTACTS" in p
+    assert "WhatsApp: +254727891989" in p
+    assert "Phone / calls: +254785490805" in p
+    assert "NEVER type a phone number or wa.me link from memory" in p
+    # unset → no contacts block, no empty scaffolding
+    monkeypatch.setattr(settings, "whatsapp_handoff_number", "", raising=False)
+    monkeypatch.setattr(settings, "whatsapp_handoff_alt", "", raising=False)
+    assert "OUR OFFICIAL CONTACTS" not in build_system_prompt(currency="USD")
+
+
 def test_prompt_sells_with_keen_reading_not_menu_dumps():
     """The Jacky Ebot transcript: 'wine cups' split into wine + cups, full menu
     dumped twice, wine bottles pushed uninvited. The consultant rules forbid all
