@@ -392,6 +392,20 @@ async def get_customer(
     if user.person_id is not None:
         _p = await db.get(Person, user.person_id)
         person_state = (_p.state or None) if _p is not None else None
+        # A captured phone (Messenger customer shared their number) shows as a
+        # clickable WhatsApp entry in Cross-Channel Identity — unless a real
+        # whatsapp identity already covers it.
+        has_wa = any(i.channel == "whatsapp" for i in (identities or []))
+        if not has_wa:
+            from types import SimpleNamespace
+            phones = (await db.execute(
+                select(Identifier).where(Identifier.person_id == user.person_id,
+                                         Identifier.type == "phone"))).scalars().all()
+            for ph in phones:
+                identities = list(identities or []) + [SimpleNamespace(
+                    channel="whatsapp", external_id=ph.value,
+                    display_name=user.name, source=ph.source,
+                    confidence=ph.confidence)]
     return _build_profile(user, orders, conversations, history, hub=hub,
                           identities=identities, person_state=person_state)
 

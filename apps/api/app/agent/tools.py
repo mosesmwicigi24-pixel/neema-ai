@@ -484,9 +484,16 @@ async def _capture_contact(args: dict, ctx: ToolContext) -> dict:
         out["location"] = location
 
     if phone:
+        from app.core.countries import iso_from_text
         from app.core.phone import to_e164
         from app.services.reconcile import attach_identifier
-        e164 = to_e164(phone)
+        # A number shared without a country code ("0799223329") must be resolved
+        # against THEIR country, not Kenya's — we know it from their captured
+        # location (this turn's or the profile's).
+        region = (iso_from_text(location)
+                  or iso_from_text((person.state or {}).get("location") if person else None)
+                  or "KE")
+        e164 = to_e164(phone, region)
         if e164:
             await attach_identifier(ctx.db, ident.person_id, "phone", e164,
                                     source=f"{ctx.channel}_capture", confidence="self_reported")
@@ -502,6 +509,13 @@ async def _capture_contact(args: dict, ctx: ToolContext) -> dict:
                     out["linked_whatsapp"] = True
                 except Exception as exc:
                     _log.warning("capture_contact link failed for %s: %s", ctx.wa_id, exc)
+            # The phone becomes the customer's primary contact identity: show it
+            # on their profile (the shim User row), keeping the Messenger id
+            # linked so future DMs still resolve to the same customer.
+            user = (await ctx.db.execute(
+                select(User).where(User.person_id == ident.person_id))).scalar_one_or_none()
+            if user is not None and not user.phone:
+                user.phone = e164
             out["phone"] = e164
 
     await ctx.db.commit()

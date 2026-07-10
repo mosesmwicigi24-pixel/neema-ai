@@ -49,3 +49,21 @@ def test_resolver_adopts_existing_identity_for_meta_id():
     db = _FakeDB(existing=existing)
     got = asyncio.run(idm.resolve_person_id_for_wa_id(db, PSID))
     assert got == pid and db.added == []        # adopted the messenger identity's person
+
+
+def test_iso_from_text_resolves_captured_locations():
+    from app.core.countries import iso_from_text
+    assert iso_from_text("Somerset East, Eastern Cape, South Africa") == "ZA"
+    assert iso_from_text("Kampala, Uganda") == "UG"
+    assert iso_from_text("Nairobi, Kenya") == "KE"
+    assert iso_from_text("South Sudan, Juba") == "SS"    # longest name wins over Sudan
+    assert iso_from_text("somewhere unknown") is None
+    assert iso_from_text("") is None and iso_from_text(None) is None
+
+
+def test_shared_number_normalizes_against_their_country():
+    """A Messenger customer in South Africa sharing '0799223329' must become
+    +27799223329 (strip the 0, add THEIR code) — never Kenya's +254."""
+    from app.core.phone import to_e164
+    assert to_e164("0799223329", "ZA") == "+27799223329"
+    assert to_e164("0712345678", "KE") == "+254712345678"

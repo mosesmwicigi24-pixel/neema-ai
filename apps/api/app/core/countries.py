@@ -282,3 +282,18 @@ def resolve_country(wa_id_or_phone: str | None) -> dict:
         if digits.startswith(prefix):
             return {"country": name, "country_iso": iso, "flag_url": flag_url_for(iso), "code": prefix}
     return empty
+
+
+def iso_from_text(text: str | None) -> str | None:
+    """Best-effort ISO country from free text (e.g. a captured location like
+    'Somerset East, Eastern Cape, South Africa'). Longest country name wins so
+    'South Sudan' never matches plain 'Sudan'. None when nothing matches."""
+    t = (text or "").lower()
+    if not t:
+        return None
+    best: tuple[int, str] | None = None
+    for _prefix, name, iso in _COUNTRY_TABLE:
+        n = name.lower()
+        if n in t and (best is None or len(n) > best[0]):
+            best = (len(n), iso)
+    return best[1] if best else None
