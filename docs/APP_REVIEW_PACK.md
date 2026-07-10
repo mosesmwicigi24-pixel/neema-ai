@@ -8,11 +8,16 @@ App: **Neema Assistant** (id 1076892141296942) · Pages: Bethany House
 (1556733441275467), Bethany House Executive (103756315006608).
 
 ## Before submitting (blockers)
-1. **Business Verification** — business.facebook.com → Security Center → Verify
-   (Bethany House registration docs + address). Nothing passes without it.
-2. **App settings → Basic**: app icon 1024×1024, Privacy Policy URL, Terms URL,
-   category (Business), Data Deletion instructions URL. Auto-reject if missing.
-3. App Mode: **Live**.
+1. ✅ **Business Verification** — DONE (verified Jun 10 2025, use case "App
+   requires access to permissions on Meta for Developers").
+2. **App settings → Basic** — fill in (pages are LIVE, just paste the URLs):
+   - Privacy Policy URL: `https://neema.bethanyhouse.co.ke/privacy`
+   - Terms of Service URL: `https://neema.bethanyhouse.co.ke/terms`
+   - Data Deletion Instructions URL: `https://neema.bethanyhouse.co.ke/data-deletion`
+   - App icon 1024×1024 + category (Business).
+3. App Mode: **Live** (already Live).
+4. Recommended: enable **2FA** on the Business portfolio (Security Center shows
+   0/1) and add a second admin — reviewers and Meta security prompts favor it.
 
 ## Permissions to request (Advanced Access)
 | Permission | Why (copy-paste use case) |
