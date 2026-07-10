@@ -19,6 +19,14 @@ App: **Neema Assistant** (id 1076892141296942) · Pages: Bethany House
 4. Recommended: enable **2FA** on the Business portfolio (Security Center shows
    0/1) and add a second admin — reviewers and Meta security prompts favor it.
 
+## Activation status (2026-07-10)
+- "Request advanced access" buttons start GREYED until Meta counts ≥1 successful
+  API call on the permission (counter lags up to 24h).
+- Activation calls made 2026-07-10: `GET /me`, `GET /me/conversations`,
+  `GET /{page}/subscribed_apps` — all 200 with the page token. A live DM reply +
+  public comment reply add pages_messaging + pages_manage_engagement usage.
+- → Re-open Permissions and Features within 24h; the buttons will be active.
+
 ## Permissions to request (Advanced Access)
 | Permission | Why (copy-paste use case) |
 |---|---|
