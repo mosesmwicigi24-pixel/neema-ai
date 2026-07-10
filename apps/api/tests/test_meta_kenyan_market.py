@@ -15,7 +15,8 @@ PSID = "26414904614761138"
 
 
 class _FakeDB:
-    """Scripted: every execute() pops the next result; get() returns the person."""
+    """Scripted: every execute() pops the next result; get() returns the person.
+    A popped list serves .scalars().all(); a single object serves the scalar."""
     def __init__(self, results, person=None):
         self._results = list(results)
         self._person = person
@@ -23,8 +24,11 @@ class _FakeDB:
 
     async def execute(self, stmt):
         nxt = self._results.pop(0) if self._results else None
-        return SimpleNamespace(scalar_one_or_none=lambda: nxt,
-                               scalars=lambda: SimpleNamespace(first=lambda: nxt))
+        items = nxt if isinstance(nxt, list) else ([nxt] if nxt is not None else [])
+        return SimpleNamespace(
+            scalar_one_or_none=lambda: items[0] if items else None,
+            scalars=lambda: SimpleNamespace(first=lambda: items[0] if items else None,
+                                            all=lambda: items))
 
     async def get(self, model, pk):
         return self._person
@@ -39,30 +43,51 @@ def _person(name=None, location=None):
     return p
 
 
-def _ident(person, display_name=None):
+def _ident(person, display_name=None, raw_profile=None):
     return SimpleNamespace(person_id=person.id, channel="messenger",
-                           external_id=PSID, display_name=display_name)
+                           external_id=PSID, display_name=display_name,
+                           raw_profile=raw_profile)
 
 
 def test_meta_market_flips_to_kes_for_captured_kenyan_location():
     person = _person(name="Meshack Munyao", location="Machakos . kenya")
-    db = _FakeDB([_ident(person), None], person=person)   # identity, then no User row
-    currency, loc, name = asyncio.run(_meta_market(db, "messenger", PSID))
+    # identity, no User row, no sibling identities with a source post
+    db = _FakeDB([_ident(person), None, []], person=person)
+    currency, loc, name, src = asyncio.run(_meta_market(db, "messenger", PSID))
     assert currency == "KES"
     assert loc["country_iso"] == "KE"
     assert name == "Meshack Munyao"                        # greeted by name from turn one
+    assert src is None
 
 
 def test_meta_market_defaults_usd_without_location():
     person = _person(name="Jane")
-    db = _FakeDB([_ident(person), None], person=person)
-    currency, loc, _ = asyncio.run(_meta_market(db, "messenger", PSID))
+    db = _FakeDB([_ident(person), None, []], person=person)
+    currency, loc, _, _ = asyncio.run(_meta_market(db, "messenger", PSID))
     assert currency == "USD" and loc == {}
     # South Africa stays USD too — only Kenya is the KES market
     person2 = _person(location="Somerset East, South Africa")
-    db2 = _FakeDB([_ident(person2), None], person=person2)
-    currency2, loc2, _ = asyncio.run(_meta_market(db2, "messenger", PSID))
+    db2 = _FakeDB([_ident(person2), None, []], person=person2)
+    currency2, loc2, _, _ = asyncio.run(_meta_market(db2, "messenger", PSID))
     assert currency2 == "USD" and loc2["country_iso"] == "ZA"
+
+
+def test_meta_market_surfaces_source_post_from_identity_and_siblings():
+    # This identity carries the comment funnel's source post directly.
+    person = _person(name="Meshack Munyao")
+    ident = _ident(person, raw_profile={"source_post": "P_777", "comment": "How much"})
+    db = _FakeDB([ident, None], person=person)
+    *_, src = asyncio.run(_meta_market(db, "messenger", PSID))
+    assert src == {"post_id": "P_777", "comment": "How much"}
+
+    # The DM identity is bare — the FACEBOOK comment sibling carries the post.
+    person2 = _person(name="Meshack Munyao")
+    sib = SimpleNamespace(person_id=person2.id, channel="facebook", external_id=PSID,
+                          display_name=None,
+                          raw_profile={"source_post": "P_888", "comment": "Kenya money"})
+    db2 = _FakeDB([_ident(person2), None, [sib]], person=person2)
+    *_, src2 = asyncio.run(_meta_market(db2, "messenger", PSID))
+    assert src2 == {"post_id": "P_888", "comment": "Kenya money"}
 
 
 def test_capture_contact_flips_currency_same_turn():
@@ -111,3 +136,12 @@ def test_meta_addendum_kenya_rule_only_while_usd():
     assert "ease of communication" in usd                  # ask the number to close
     kes = _meta_addendum("KES")
     assert "do NOT convert" not in kes                     # already the Kenyan market
+
+
+def test_public_comment_addendum_follows_currency():
+    from app.agent.runtime import _public_comment_addendum
+    usd = _public_comment_addendum("USD")
+    assert "US Dollars (USD)" in usd and "$130" in usd
+    kes = _public_comment_addendum("KES")
+    assert "Kenyan Shillings (KES)" in kes and "KES 13,000" in kes
+    assert "US Dollars" not in kes                         # no contradictory USD order

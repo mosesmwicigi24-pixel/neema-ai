@@ -49,7 +49,7 @@ def _candidates(text: str) -> list[str]:
 async def run(apply: bool) -> None:
     mode = "APPLY" if apply else "DRY RUN (pass --apply to save)"
     print(f"── contact backfill · {mode} ──")
-    found = linked = 0
+    found = linked = names_fixed = 0
     async with AsyncSessionLocal() as db:
         idents = (await db.execute(select(Identity).where(
             Identity.channel.in_(META)))).scalars().all()
@@ -60,6 +60,28 @@ async def run(apply: bool) -> None:
             location = ((person.state or {}).get("location") if person else None) \
                 or (user.location if user else None)
             region = iso_from_text(location) or "KE"
+
+            # NAME SYNC: fuller name wins across identity/person/user (the
+            # 'Meshack' vs 'Meshack Munyao' case). Go-forward captures already
+            # reconcile; this heals rows written before that fix. Only applied
+            # when every stored name is contained in the fullest one — never
+            # merges genuinely different names.
+            stored = [(ident.display_name or "").strip(),
+                      ((person.display_name or "").strip() if person else ""),
+                      ((user.name or "").strip() if user else "")]
+            names = [n for n in stored if n]
+            if names:
+                full = max(names, key=len)
+                if (all(n.lower() in full.lower() for n in names)
+                        and any(n and n != full for n in stored)):
+                    names_fixed += 1
+                    print(f"{ident.channel}/{full}: NAME SYNC {sorted(set(names))} → '{full}'")
+                    if apply:
+                        ident.display_name = full
+                        if person is not None:
+                            person.display_name = full
+                        if user is not None:
+                            user.name = full[:100]
 
             # Already has a phone? Verify its country matches the known location —
             # early captures defaulted to Kenya (+254799… for a South African).
@@ -152,7 +174,8 @@ async def run(apply: bool) -> None:
                     print(f"  link failed: {exc}")
         if apply:
             await db.commit()
-    print(f"── {'saved' if apply else 'found'}: {found} phone(s), {linked} cross-channel link(s) ──")
+    print(f"── {'saved' if apply else 'found'}: {found} phone(s), {linked} cross-channel "
+          f"link(s), {names_fixed} name sync(s) ──")
 
 
 if __name__ == "__main__":

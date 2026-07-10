@@ -48,14 +48,16 @@ def _public_comment_addendum(currency: str = "USD") -> str:
     """System addendum for a PUBLIC comment reply — SELL, don't tell stories.
     Straight to the point: identify the product from the post image, quote the real
     price, offer to order. The customer wants the answer, not a paragraph."""
+    money = "Kenyan Shillings (KES)" if currency == "KES" else "US Dollars (USD)"
+    example = "'This gown is KES 13,000.'" if currency == "KES" else "'This gown is $130.'"
     return (
         "\n\n## Replying PUBLICLY under a Facebook/Instagram comment — SELL, don't chat\n"
         "- STRAIGHT to the point. NO preamble, NO congratulations, NO backstory, NO "
         "scripture, NO 'that's a big milestone / years of work' — cut ALL of it. The "
         "customer wants a straight answer.\n"
-        "- If they ask the price, the FIRST words are the item + price, e.g. "
-        "'This gown is $130.' Quote the price in US DOLLARS (the `price` from "
-        "search_catalog, already in USD) — never invent it.\n"
+        f"- If they ask the price, the FIRST words are the item + price, e.g. "
+        f"{example} Quote the price in {money} (the `price` from "
+        f"search_catalog is already in {money}) — never invent it.\n"
         "- Recognise the product from the POST IMAGE (you can see it) and find it in "
         "the catalogue with search_catalog; if they name a different item, price that.\n"
         "- ONE short line. Plain text — no markdown, no asterisks, no headings.\n"
@@ -180,22 +182,25 @@ async def _history(db: AsyncSession, key: str, limit: int = 20,
     return msgs
 
 
-async def _meta_market(db: AsyncSession, channel: str, key: str) -> tuple[str, dict, str]:
-    """(currency, loc, customer_name) for a Meta contact. Messenger/IG carry no
-    phone, so the default market is USD/worldwide — but a customer whose
-    captured location (their own words via capture_contact, or a panel edit)
-    resolves to Kenya IS the Kenyan market: real KES catalogue prices, M-Pesa,
-    local delivery — never a USD conversion. The name comes from the person /
-    identity so a known customer is greeted by name from turn one."""
+async def _meta_market(db: AsyncSession, channel: str, key: str) -> tuple[str, dict, str, dict | None]:
+    """(currency, loc, customer_name, source_post) for a Meta contact.
+    Messenger/IG carry no phone, so the default market is USD/worldwide — but a
+    customer whose captured location (their own words via capture_contact, or a
+    panel edit) resolves to Kenya IS the Kenyan market: real KES catalogue
+    prices, M-Pesa, local delivery — never a USD conversion. The name comes from
+    the person / identity so a known customer is greeted by name from turn one.
+    source_post ({post_id, comment}) is the post their comment funnelled in
+    from — a "How much?" DM refers to THAT product, so the agent must never ask
+    "what are you looking for?"."""
     from app.core.countries import iso_from_text
     from app.models.person import Person, Identity
-    currency, loc, name = "USD", {}, ""
+    currency, loc, name, source_post = "USD", {}, "", None
     try:
         ident = (await db.execute(select(Identity).where(
             Identity.channel == channel,
             Identity.external_id == key))).scalar_one_or_none()
         if ident is None:
-            return currency, loc, name
+            return currency, loc, name, source_post
         person = await db.get(Person, ident.person_id)
         u = (await db.execute(select(User).where(
             User.person_id == ident.person_id))).scalar_one_or_none()
@@ -209,9 +214,26 @@ async def _meta_market(db: AsyncSession, channel: str, key: str) -> tuple[str, d
             loc = {"country_iso": iso, "country": location}
             if iso == "KE":
                 currency = "KES"
+        # Source post: this identity first, then siblings on the same person
+        # (a facebook comment identity funnels into a messenger DM identity),
+        # then the person state (stamped by the WhatsApp handover link).
+        rp = getattr(ident, "raw_profile", None) or {}
+        src, comment = rp.get("source_post"), rp.get("comment")
+        if not src:
+            sibs = (await db.execute(select(Identity).where(
+                Identity.person_id == ident.person_id))).scalars().all()
+            for s in sibs:
+                rp2 = getattr(s, "raw_profile", None) or {}
+                if rp2.get("source_post"):
+                    src, comment = rp2["source_post"], rp2.get("comment")
+                    break
+        if not src and person is not None:
+            src = (person.state or {}).get("source_post")
+        if src:
+            source_post = {"post_id": str(src), "comment": comment}
     except Exception:
         _log.warning("meta market lookup failed for %s/%s", channel, key, exc_info=True)
-    return currency, loc, name
+    return currency, loc, name, source_post
 
 
 async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM,
@@ -232,13 +254,14 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     # prefix; Meta channels know it from the captured location.
     if is_meta:
         user = None
-        currency, loc, customer_name = await _meta_market(db, channel, key)
+        currency, loc, customer_name, source_post = await _meta_market(db, channel, key)
     else:
         user = (await db.execute(
             select(User).where(User.wa_id == wa_id))).scalar_one_or_none()
         loc = resolve_country(wa_id) or {}
         currency = "KES" if (loc.get("country_iso") or "").upper() == "KE" else "USD"
         customer_name = (user.name if user else "") or ""
+        source_post = None
     system = build_system_prompt(
         customer_name=customer_name,
         country=loc.get("country") or "",
@@ -291,14 +314,46 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                     "to describe the item in words so you can help.)")
         messages.append({"role": "user", "content": text or "(empty message)"})
 
-    # Cross-conversation memory: prepend as a leading context turn so it stays
-    # behind the cached system prefix and ahead of the real transcript, and
-    # never touches the dedup check above (which only looks at the last message).
+    # Leading context turn: prepended so it stays behind the cached system
+    # prefix and ahead of the real transcript, and never touches the dedup
+    # check above (which only looks at the last message).
+    lead_ctx: list[str] = []
+    post_img = None
+    if source_post:
+        # The customer funnelled in from a specific post — their "How much?"
+        # refers to THAT product. Give the agent the post context (and, on the
+        # first engagement, the post image itself — native vision) so it never
+        # asks "what are you looking for?".
+        pctx = {}
+        try:
+            from app.routers.meta_webhook import _post_context
+            pctx = await _post_context(source_post.get("post_id"), redis=redis) or {}
+        except Exception:
+            pass
+        line = "(Context — this customer reached us from our Facebook/Instagram post"
+        if pctx.get("title"):
+            line += f' "{pctx["title"]}"'
+        if source_post.get("comment"):
+            line += f'; their comment there was: "{source_post["comment"]}"'
+        line += (". Unless they say otherwise, their questions refer to the product "
+                 "in that post — identify it, find it with search_catalog, and "
+                 "answer about THAT item. Do not ask what they are looking for.)")
+        lead_ctx.append(line)
+        if (settings.tier2_vision and not img_block and pctx.get("thumb")
+                and not any(m["role"] == "assistant" for m in messages)):
+            from app.agent.media import load_image_block
+            post_img = await asyncio.to_thread(load_image_block, pctx["thumb"])
     if settings.tier2_memory:
         mem_ctx = await build_memory_context(db, redis, key, user=user, channel=channel)
         if mem_ctx:
-            messages.insert(0, {"role": "user",
-                                "content": f"(Context — what you know about this customer:\n{mem_ctx})"})
+            lead_ctx.append(f"(Context — what you know about this customer:\n{mem_ctx})")
+    if lead_ctx:
+        content = "\n\n".join(lead_ctx)
+        if post_img:
+            messages.insert(0, {"role": "user", "content": [post_img,
+                                                            {"type": "text", "text": content}]})
+        else:
+            messages.insert(0, {"role": "user", "content": content})
 
     ctx = ToolContext(db=db, redis=redis, wa_id=key, channel=channel,
                       currency=currency, usd_rate=settings.usd_kes_rate)
