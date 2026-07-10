@@ -521,14 +521,25 @@ async def _capture_contact(args: dict, ctx: ToolContext) -> dict:
     person = await ctx.db.get(Person, ident.person_id)
 
     if name:
-        ident.display_name = ident.display_name or name[:200]
-        if person is not None and not person.display_name:
-            person.display_name = name[:200]
+        # Fuller name wins everywhere: a self-stated "Meshack" must never shadow
+        # the profile's "Meshack Munyao" — and a fuller self-stated name upgrades
+        # a partial one. All three stores end up showing the SAME name.
+        full = name[:200]
+        for existing in ((ident.display_name or ""),
+                         ((person.display_name or "") if person is not None else "")):
+            e = existing.strip()
+            if e and full.lower() in e.lower() and len(e) > len(full):
+                full = e
+        ident.display_name = full
+        if person is not None:
+            person.display_name = full
         _u = (await ctx.db.execute(
             select(User).where(User.person_id == ident.person_id))).scalar_one_or_none()
-        if _u is not None and not (_u.name or "").strip():
-            _u.name = name[:100]                  # the CRM panel reads user.name
-        out["name"] = name
+        if _u is not None:
+            cur = (_u.name or "").strip()
+            if not cur or (cur.lower() in full.lower() and len(full) > len(cur)):
+                _u.name = full[:100]              # the CRM panel reads user.name
+        out["name"] = full
 
     if location and person is not None:
         from sqlalchemy.orm.attributes import flag_modified
@@ -537,6 +548,15 @@ async def _capture_contact(args: dict, ctx: ToolContext) -> dict:
         person.state = state
         flag_modified(person, "state")
         out["location"] = location
+        # "Kenya money" case: the moment their location resolves to Kenya, this
+        # very turn switches to the Kenyan market — the next search_catalog call
+        # returns real KES catalogue prices (never a USD conversion).
+        from app.core.countries import iso_from_text
+        if iso_from_text(location) == "KE" and ctx.currency != "KES":
+            ctx.currency = "KES"
+            out["currency_now"] = "KES"
+            out["note"] = ("Customer is in Kenya — re-run search_catalog and quote "
+                           "the real KES catalogue prices; do NOT convert from USD.")
 
     if phone:
         from app.core.countries import iso_from_text

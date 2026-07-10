@@ -74,9 +74,13 @@ def _meta_addendum(currency: str = "USD") -> str:
     local = ""
     if currency == "USD":
         local = (
-            " If they explicitly ask for their own local currency, convert from the "
-            "USD amount (never from KES) at the country's current central-bank rate, "
-            "rounding UP to the nearest 10; state it confidently, not as a guess."
+            " If they ask for Kenyan Shillings or say they're in Kenya, do NOT "
+            "convert — call capture_contact with their location (even just "
+            "'Kenya'), then re-run search_catalog: it returns our real KES "
+            "prices. For any OTHER local currency they ask for, convert from the "
+            "USD amount (never from KES) at the country's current central-bank "
+            "rate, rounding UP to the nearest 10; state it confidently, not as a "
+            "guess."
         )
     return (
         "\n\n## This conversation is on Facebook Messenger / Instagram (not WhatsApp)\n"
@@ -86,9 +90,15 @@ def _meta_addendum(currency: str = "USD") -> str:
         "- Write PLAIN TEXT here — Messenger/Instagram show no bold, so use no "
         "asterisks, no `**`, no markdown; use short lines and hyphen lists.\n"
         "- We can't see their name here, so early on warmly ask their name and their "
-        "city & country (we ship worldwide from Nairobi) and save both with "
-        "capture_contact. If they share a phone/WhatsApp number, pass it too — it "
-        "links their Messenger and WhatsApp into one customer.\n"
+        "city & country (we ship worldwide from Nairobi).\n"
+        "- HARD RULE: the MOMENT the customer states their name, city, country, or "
+        "phone — even partially ('Machakos', just a first name) — call "
+        "capture_contact IN THAT SAME TURN with everything they said. A stated "
+        "detail that goes unsaved is a lost customer record.\n"
+        "- Once the item and price are settled, warmly ask for their WhatsApp/phone "
+        "number for ease of communication and pass it to capture_contact — it links "
+        "their Messenger and WhatsApp into one customer and lets us finish the "
+        "order there.\n"
         "- You CANNOT take payment or place an order here — checkout is on WhatsApp. "
         "The MOMENT the customer shows buying intent ('I'll take it', 'how do I "
         "pay', a clear yes), call whatsapp_checkout_link with the product(s) and "
@@ -170,6 +180,40 @@ async def _history(db: AsyncSession, key: str, limit: int = 20,
     return msgs
 
 
+async def _meta_market(db: AsyncSession, channel: str, key: str) -> tuple[str, dict, str]:
+    """(currency, loc, customer_name) for a Meta contact. Messenger/IG carry no
+    phone, so the default market is USD/worldwide — but a customer whose
+    captured location (their own words via capture_contact, or a panel edit)
+    resolves to Kenya IS the Kenyan market: real KES catalogue prices, M-Pesa,
+    local delivery — never a USD conversion. The name comes from the person /
+    identity so a known customer is greeted by name from turn one."""
+    from app.core.countries import iso_from_text
+    from app.models.person import Person, Identity
+    currency, loc, name = "USD", {}, ""
+    try:
+        ident = (await db.execute(select(Identity).where(
+            Identity.channel == channel,
+            Identity.external_id == key))).scalar_one_or_none()
+        if ident is None:
+            return currency, loc, name
+        person = await db.get(Person, ident.person_id)
+        u = (await db.execute(select(User).where(
+            User.person_id == ident.person_id))).scalar_one_or_none()
+        location = (((person.state or {}).get("location") if person else None)
+                    or (u.location if u else None) or "")
+        name = ((person.display_name if person else None)
+                or getattr(ident, "display_name", None)
+                or (u.name if u else None) or "")
+        iso = iso_from_text(location)
+        if iso:
+            loc = {"country_iso": iso, "country": location}
+            if iso == "KE":
+                currency = "KES"
+    except Exception:
+        _log.warning("meta market lookup failed for %s/%s", channel, key, exc_info=True)
+    return currency, loc, name
+
+
 async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM,
                    media: dict | None = None,
                    *, channel: str = "whatsapp", external_id: str | None = None,
@@ -183,15 +227,20 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     is_meta = channel in META_CHANNELS
     key = external_id if is_meta else wa_id
 
-    user = None if is_meta else (
-        await db.execute(select(User).where(User.wa_id == wa_id))).scalar_one_or_none()
-    loc = {} if is_meta else (resolve_country(wa_id) or {})
-    # Currency display gate: Kenya (+254) → KES; everyone else, and all
-    # Messenger/IG (no phone), → USD (= KES / usd_kes_rate, done in the tools).
-    currency = "USD" if is_meta else (
-        "KES" if (loc.get("country_iso") or "").upper() == "KE" else "USD")
+    # Currency display gate: Kenya → KES; everyone else → USD (= KES /
+    # usd_kes_rate, done in the tools). WhatsApp knows Kenya from the +254
+    # prefix; Meta channels know it from the captured location.
+    if is_meta:
+        user = None
+        currency, loc, customer_name = await _meta_market(db, channel, key)
+    else:
+        user = (await db.execute(
+            select(User).where(User.wa_id == wa_id))).scalar_one_or_none()
+        loc = resolve_country(wa_id) or {}
+        currency = "KES" if (loc.get("country_iso") or "").upper() == "KE" else "USD"
+        customer_name = (user.name if user else "") or ""
     system = build_system_prompt(
-        customer_name=(user.name if user else "") or "",
+        customer_name=customer_name,
         country=loc.get("country") or "",
         country_iso=loc.get("country_iso") or "",
         currency=currency,
