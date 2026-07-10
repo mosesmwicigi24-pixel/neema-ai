@@ -140,6 +140,7 @@ def _build_profile(
     hub: dict | None = None,
     identities: list | None = None,
     person_state: dict | None = None,
+    person_name: str | None = None,
 ) -> dict:
     # Orders + spend: the hub is the source of truth (every channel — POS, web
     # AND WhatsApp). Fall back to Neema's local WhatsApp order_events only when
@@ -219,7 +220,7 @@ def _build_profile(
     return {
         "id":             str(user.id),
         "wa_id":          user.wa_id,
-        "name":           user.name,
+        "name":           user.name or person_name,
         "name_confirmed": user.name_confirmed,
         "email":          user.email,
         "phone":          user.phone or (user.wa_id if is_plausible_phone(user.wa_id) else None),
@@ -389,9 +390,11 @@ async def get_customer(
         hub = None
 
     person_state = None
+    person_name = None
     if user.person_id is not None:
         _p = await db.get(Person, user.person_id)
         person_state = (_p.state or None) if _p is not None else None
+        person_name = _p.display_name if _p is not None else None
         # A captured phone (Messenger customer shared their number) shows as a
         # clickable WhatsApp entry in Cross-Channel Identity — unless a real
         # whatsapp identity already covers it.
@@ -407,7 +410,8 @@ async def get_customer(
                     display_name=user.name, source=ph.source,
                     confidence=ph.confidence)]
     return _build_profile(user, orders, conversations, history, hub=hub,
-                          identities=identities, person_state=person_state)
+                          identities=identities, person_state=person_state,
+                          person_name=person_name)
 
 
 # ── Identity spine health (ops trust the backfill in prod) ────────────────────

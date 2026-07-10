@@ -473,6 +473,10 @@ async def _capture_contact(args: dict, ctx: ToolContext) -> dict:
         ident.display_name = ident.display_name or name[:200]
         if person is not None and not person.display_name:
             person.display_name = name[:200]
+        _u = (await ctx.db.execute(
+            select(User).where(User.person_id == ident.person_id))).scalar_one_or_none()
+        if _u is not None and not (_u.name or "").strip():
+            _u.name = name[:100]                  # the CRM panel reads user.name
         out["name"] = name
 
     if location and person is not None:
@@ -490,8 +494,11 @@ async def _capture_contact(args: dict, ctx: ToolContext) -> dict:
         # A number shared without a country code ("0799223329") must be resolved
         # against THEIR country, not Kenya's — we know it from their captured
         # location (this turn's or the profile's).
+        _user = (await ctx.db.execute(
+            select(User).where(User.person_id == ident.person_id))).scalar_one_or_none()
         region = (iso_from_text(location)
                   or iso_from_text((person.state or {}).get("location") if person else None)
+                  or iso_from_text(_user.location if _user else None)   # panel-edited location
                   or "KE")
         e164 = to_e164(phone, region)
         if e164:

@@ -71,6 +71,11 @@ export function formatPhone(raw: string | null | undefined): string {
 
     if (!digits) return cleaned;
 
+    // A real phone is at most 15 digits (E.164). Meta PSIDs/IGSIDs are 16-18
+    // digits — phone-formatting them invents a fake country ("+257 522…" from a
+    // Messenger id). Show those as a plain id, never as a phone.
+    if (digits.length > 15) return "Messenger ID " + cleaned.replace(/^\+/, "");
+
     // Ensure we always work with the full E.164 digit string (no leading +)
     const e164Digits = digits;
 

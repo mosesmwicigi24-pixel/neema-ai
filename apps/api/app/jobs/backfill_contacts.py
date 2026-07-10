@@ -54,26 +54,67 @@ async def run(apply: bool) -> None:
         idents = (await db.execute(select(Identity).where(
             Identity.channel.in_(META)))).scalars().all()
         for ident in idents:
-            # Skip anyone already covered by a phone.
-            has_phone = (await db.execute(select(Identifier.id).where(
-                Identifier.person_id == ident.person_id,
-                Identifier.type == "phone").limit(1))).scalar_one_or_none()
-            has_wa = (await db.execute(select(Identity.id).where(
-                Identity.person_id == ident.person_id,
-                Identity.channel == "whatsapp").limit(1))).scalar_one_or_none()
-            if has_phone or has_wa:
-                continue
-
-            msgs = (await db.execute(select(Message.text).where(
-                Message.channel == ident.channel,
-                Message.external_id == ident.external_id,
-                Message.direction == MsgDirection.inbound))).scalars().all()
             person = await db.get(Person, ident.person_id)
             user = (await db.execute(select(User).where(
                 User.person_id == ident.person_id))).scalar_one_or_none()
             location = ((person.state or {}).get("location") if person else None) \
                 or (user.location if user else None)
             region = iso_from_text(location) or "KE"
+
+            # Already has a phone? Verify its country matches the known location —
+            # early captures defaulted to Kenya (+254799… for a South African).
+            existing = (await db.execute(select(Identifier).where(
+                Identifier.person_id == ident.person_id,
+                Identifier.type == "phone"))).scalars().all()
+            if existing:
+                from app.core.countries import resolve_country
+                for idf in existing:
+                    cur_iso = (resolve_country(idf.value) or {}).get("country_iso")
+                    if not location or not region or cur_iso == region:
+                        continue
+                    # Re-normalize the national part against the RIGHT country.
+                    national = (idf.value or "").lstrip("+")
+                    for cc, _n, iso in [("254", None, "KE"), ("27", None, "ZA")]:
+                        pass
+                    digits = national
+                    # strip the wrong dial code by re-parsing: take the stored number's
+                    # national digits via to_e164 of "0"+tail heuristics — simplest robust
+                    # path: try re-normalizing the ORIGINAL chat candidates below.
+                    fixed = None
+                    msgs0 = (await db.execute(select(Message.text).where(
+                        Message.channel == ident.channel,
+                        Message.external_id == ident.external_id,
+                        Message.direction == MsgDirection.inbound))).scalars().all()
+                    for t in msgs0:
+                        for cand in _candidates(t or ""):
+                            if is_plausible_phone(cand):
+                                got = to_e164(cand, region)
+                                if got and got != idf.value:
+                                    fixed = got
+                                    break
+                        if fixed:
+                            break
+                    if fixed:
+                        found += 1
+                        who = (person.display_name if person else None) or ident.external_id
+                        print(f"{ident.channel}/{who}: REGION FIX {idf.value} → {fixed} "
+                              f"(location '{location}')")
+                        if apply:
+                            idf.value = fixed
+                            idf.confidence = "self_reported"
+                            if user is not None and user.phone in (None, "", idf.value):
+                                user.phone = fixed
+                continue
+            has_wa = (await db.execute(select(Identity.id).where(
+                Identity.person_id == ident.person_id,
+                Identity.channel == "whatsapp").limit(1))).scalar_one_or_none()
+            if has_wa:
+                continue
+
+            msgs = (await db.execute(select(Message.text).where(
+                Message.channel == ident.channel,
+                Message.external_id == ident.external_id,
+                Message.direction == MsgDirection.inbound))).scalars().all()
 
             e164 = None
             for text in msgs:
