@@ -72,14 +72,8 @@ async def run(apply: bool) -> None:
                     cur_iso = (resolve_country(idf.value) or {}).get("country_iso")
                     if not location or not region or cur_iso == region:
                         continue
-                    # Re-normalize the national part against the RIGHT country.
-                    national = (idf.value or "").lstrip("+")
-                    for cc, _n, iso in [("254", None, "KE"), ("27", None, "ZA")]:
-                        pass
-                    digits = national
-                    # strip the wrong dial code by re-parsing: take the stored number's
-                    # national digits via to_e164 of "0"+tail heuristics — simplest robust
-                    # path: try re-normalizing the ORIGINAL chat candidates below.
+                    # Re-normalize from the ORIGINAL chat candidates against the
+                    # right country (safer than surgery on the stored value).
                     fixed = None
                     msgs0 = (await db.execute(select(Message.text).where(
                         Message.channel == ident.channel,

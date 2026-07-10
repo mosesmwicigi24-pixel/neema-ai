@@ -308,11 +308,22 @@ async def _resolve_customer_user(
     if user or not create:
         return user
 
-    # 3. Provision a shim User for this person. wa_id holds the channel handle (a
-    #    PSID/IGSID never collides with a phone wa_id); phone is left BLANK for the
-    #    operator to fill — never defaulted to the opaque id.
-    user = User(wa_id=ident, phone=None, person_id=identity.person_id,
-                name=identity.display_name or None)
+    # 3. Provision a shim User for this person, enriched from the identity spine
+    #    so the panel is complete no matter what was captured before it was first
+    #    opened: name from the person, phone from a captured phone identifier,
+    #    location from person.state. wa_id holds the channel handle (a PSID/IGSID
+    #    never collides with a phone wa_id) — never shown as a phone.
+    person = await db.get(Person, identity.person_id)
+    phone_idf = (await db.execute(
+        select(Identifier).where(Identifier.person_id == identity.person_id,
+                                 Identifier.type == "phone"))).scalars().first()
+    user = User(
+        wa_id=ident, person_id=identity.person_id,
+        name=(identity.display_name
+              or (person.display_name if person else None) or None),
+        phone=(phone_idf.value if phone_idf else None),
+        location=((person.state or {}).get("location") if person else None),
+    )
     db.add(user)
     await db.flush()
     return user
