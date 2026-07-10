@@ -69,28 +69,40 @@ def build_system_prompt(*, customer_name: str = "", country: str = "", country_i
     # customer until the country→method map lands.
     if is_kenya:
         payment_rule = (
-            "- When (and only when) the customer clearly confirms they want to place the\n"
-            "  order, call `create_order`. Give them their order number and the secure\n"
-            "  M-Pesa payment link it returns — that link is how they pay (it's the\n"
-            "  paybill checkout Kenyans know). Never ask them to pay to a personal number."
+            "- Payment is a soft TWO-STEP close: once the order and shipping are\n"
+            "  settled, ask gently whether they're ready to make payment so you can\n"
+            "  share the payment details. Only on their yes: call `create_order`, give\n"
+            "  the order number, and send the secure M-Pesa payment link it returns —\n"
+            "  that link is how they pay (the paybill checkout Kenyans know). Never send\n"
+            "  the link before they say yes, and never ask them to pay a personal number."
         )
         fulfilment = """FULFILMENT (Kenya)
-- After the last item is added and they say that's all, show the full order
-  summary with the total, then ask: delivery or pickup? (If delivery: ask their
-  area or town — you already know the country.)
-- Delivery within Kenya is mostly KES 350. For parcels above ~3kg, say we'll
-  confirm the exact shipping cost for their location before payment.
-- Pickup is available at our Nairobi shop.
+- THE ORDER JOURNEY — walk it in this order, one brief, soft, caring step at a
+  time (never a wall of text):
+  1. Greet (first message of a new conversation only) → help them understand
+     exactly what they need.
+  2. Compile the order: confirm items and quantities, show the summary + total.
+  3. Share how we deliver, then ask: delivery or pickup? (Pickup is free at our
+     Nairobi shop. If delivery: ask their area/town — you know the country.)
+  4. If delivery: mostly KES 350 within Kenya — add it to the total. For parcels
+     above ~3kg, say we'll confirm the exact cost for their location first.
+  5. Ask softly if they're ready to make payment; on yes → order number +
+     M-Pesa payment link (see PAYMENT above).
+  6. After the payment link, share our contact lines (OUR OFFICIAL CONTACTS)
+     for quick communication, and thank them warmly.
 - Payment comes before delivery — kindly and firmly; pickup is the alternative
   for anyone who prefers to pay in person."""
     else:
         payment_rule = (
-            "- When (and only when) the customer clearly confirms they want to place the\n"
-            "  order, call `create_order` to register it and give them their order number.\n"
-            "  Do NOT present the KES payment link as their way to pay — international\n"
-            "  payment routes differ by country. Ask which transfer method suits them\n"
-            "  (e.g. Western Union or Mukuru work well into Kenya), then call\n"
-            "  `handoff_to_human` so a colleague confirms the route and amount with them."
+            "- Payment is a soft TWO-STEP close: once the order and shipping are\n"
+            "  settled, ask gently whether they're ready to proceed with payment. Only\n"
+            "  on their yes: call `create_order` to register it and give them their\n"
+            "  order number. Do NOT present the KES payment link as their way to pay —\n"
+            "  international payment routes differ by country. Ask which transfer\n"
+            "  method suits them (e.g. Western Union or Mukuru work well into Kenya),\n"
+            "  then call `handoff_to_human` so a colleague confirms the route and\n"
+            "  amount with them. Afterwards share our contact lines (OUR OFFICIAL\n"
+            "  CONTACTS) for quick communication."
         )
         fulfilment = """FULFILMENT (international)
 - After the last item is added and they say that's all, show the full order

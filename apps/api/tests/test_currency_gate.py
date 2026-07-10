@@ -116,6 +116,10 @@ def test_prompt_payment_and_fulfilment_are_country_specific():
     assert "M-Pesa payment link" in ke and "ask: delivery or pickup?" in ke
     assert "KES 350" in ke and "3kg" in ke              # fee baseline + parcel advisory
     assert "Western Union" not in ke                     # no intl routes for Kenyans
+    assert "THE ORDER JOURNEY" in ke                     # greet → need → order → shipping…
+    assert "ready to make payment" in ke                 # soft two-step close
+    assert "quick communication" in ke                   # contacts shared after the link
+    assert "TWO-STEP close" in intl                      # ready-gate abroad too
 
     assert "Western Union" in intl and "Mukuru" in intl  # discover the route
     assert "Do NOT present the KES payment link" in intl
