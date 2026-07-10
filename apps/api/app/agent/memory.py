@@ -116,6 +116,13 @@ async def build_memory_context(db: AsyncSession, redis, wa_id: str, user: User |
     store = user if (user is not None and channel == "whatsapp") else (
         await _load_store(db, wa_id, channel))
     facts = read_memory(getattr(store, "state", None) if store else None)
+    if channel == "whatsapp" and store is not None and getattr(store, "person_id", None):
+        # A customer who started on Messenger carries facts on their PERSON
+        # (merged across by the waref/phone link) — surface them here so the
+        # WhatsApp conversation continues where Messenger left off.
+        person = await db.get(Person, store.person_id)
+        pfacts = read_memory(person.state if person else None)
+        facts = facts + [f for f in pfacts if f not in facts]
     person_id = store.id if (channel != "whatsapp" and isinstance(store, Person)) else None
     orders = await _recent_orders_summary(db, wa_id, person_id=person_id)
     if not facts and not orders:

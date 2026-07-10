@@ -72,8 +72,25 @@ async def merge_persons(
                 .values(person_id=primary_person_id)
             )
 
-    # 3. Tombstone the secondary person (kept, never deleted → reversible).
+    # 3. Carry the secondary's conversation knowledge onto the primary — the
+    #    Messenger-side memory (facts, location, lead source) must survive the
+    #    merge so WhatsApp turns continue where Messenger left off.
     secondary = await db.get(Person, secondary_person_id)
+    primary = await db.get(Person, primary_person_id)
+    if secondary is not None and primary is not None:
+        from sqlalchemy.orm.attributes import flag_modified
+        s, pst = (secondary.state or {}), dict(primary.state or {})
+        sf, pf = (s.get("agent_memory") or []), (pst.get("agent_memory") or [])
+        merged_facts = pf + [f for f in sf if f not in pf]
+        if merged_facts:
+            pst["agent_memory"] = merged_facts[-20:]
+        for k in ("location", "lead_source", "source_post"):
+            if s.get(k) and not pst.get(k):
+                pst[k] = s[k]
+        primary.state = pst
+        flag_modified(primary, "state")
+
+    # 4. Tombstone the secondary person (kept, never deleted → reversible).
     if secondary is not None:
         secondary.merged_into_id = primary_person_id
         secondary.merged_at = datetime.now(timezone.utc)

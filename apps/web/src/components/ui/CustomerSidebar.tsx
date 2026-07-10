@@ -869,7 +869,11 @@ export function CustomerSidebar({
                                     style={{ width: 16, height: 12, objectFit: "cover" }}
                                 />
                             )}
-                            <span>{formatPhone(profile.wa_id)}</span>
+                            <span>{formatPhone(
+                                (profile.phone || "").replace(/\D/g, "").length >= 7
+                                    ? profile.phone!
+                                    : profile.wa_id,
+                            )}</span>
                         </div>
                         <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
                             <span
@@ -952,10 +956,12 @@ export function CustomerSidebar({
 
                 <div className="flex flex-wrap gap-1 mt-2">
                     {(profile.channels || []).map((ch) => (
-                        <span
+                        <button
                             key={ch.channel + ch.identifier}
-                            title={`${ch.channel}: ${ch.identifier} · ${ch.conversation_count} conv`}
-                            className="inline-flex items-center gap-0.5 text-[10px] rounded px-1.5 py-0.5 capitalize"
+                            type="button"
+                            onClick={() => onOpenIdentity?.(ch.channel, ch.identifier)}
+                            title={`Open ${ch.channel} conversation`}
+                            className="inline-flex items-center gap-0.5 text-[10px] rounded px-1.5 py-0.5 capitalize cursor-pointer hover:brightness-95"
                             style={{
                                 backgroundColor: "#f1f5f9",
                                 border: "1px solid #b5da8b",
@@ -963,8 +969,36 @@ export function CustomerSidebar({
                             }}
                         >
                             <ChannelBadge channel={ch.channel} /> {ch.channel}
-                        </span>
+                        </button>
                     ))}
+                    {(() => {
+                        // A captured phone gives this customer a WhatsApp door even
+                        // before their first WhatsApp message — one tap to wa.me.
+                        const digits = (profile.phone || "").replace(/\D/g, "");
+                        const hasWaChannel = (profile.channels || []).some(
+                            (c) => c.channel === "whatsapp",
+                        );
+                        if (!hasWaChannel && digits.length >= 7 && digits.length <= 15) {
+                            return (
+                                <button
+                                    type="button"
+                                    onClick={() =>
+                                        window.open(`https://wa.me/${digits}`, "_blank", "noopener")
+                                    }
+                                    title="Open WhatsApp chat"
+                                    className="inline-flex items-center gap-0.5 text-[10px] rounded px-1.5 py-0.5 capitalize cursor-pointer hover:brightness-95"
+                                    style={{
+                                        backgroundColor: "#f0fdf4",
+                                        border: "1px solid #b5da8b",
+                                        color: "#1e293b",
+                                    }}
+                                >
+                                    <ChannelBadge channel="whatsapp" /> whatsapp
+                                </button>
+                            );
+                        }
+                        return null;
+                    })()}
                     {profile.merged_ids.length > 0 && (
                         <span className="text-[10px] text-violet-600 font-medium">
                             +{profile.merged_ids.length} merged
