@@ -245,15 +245,23 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
     catalog = await svc.catalog_items(ctx.db, ctx.redis)
     toks = [t for t in query.split() if t]
 
+    def _hay(p: dict) -> str:
+        return " ".join([p.get("name", ""), p.get("category", ""),
+                         " ".join(p.get("aliases") or [])]).lower()
+
     def hit(p: dict) -> bool:
-        hay = " ".join([p.get("name", ""), p.get("category", ""),
-                        " ".join(p.get("aliases") or [])]).lower()
-        return all(t in hay for t in toks) if toks else True
+        return all(t in _hay(p) for t in toks) if toks else True
+
+    matched = [p for p in catalog if hit(p)]
+    if not matched and len(toks) > 1:
+        # All-token match found nothing ("clerical shirt", "cassock set") — fall
+        # back to any-token so the model gets candidates instead of a dead end,
+        # best matches (most tokens hit) first.
+        scored = [(sum(t in _hay(p) for t in toks), p) for p in catalog]
+        matched = [p for s, p in sorted(scored, key=lambda x: -x[0]) if s > 0]
 
     results = []
-    for p in catalog:
-        if not hit(p):
-            continue
+    for p in matched:
         mto = p.get("product_type") == "variable" and bool(p.get("is_producible"))
         row = {
             "name": p.get("name"),

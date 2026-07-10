@@ -118,3 +118,29 @@ def test_prompt_greets_by_nairobi_time():
     assert _nairobi_daypart() in ("morning", "afternoon", "evening", "late night")
     p = build_system_prompt(currency="KES")
     assert "in Nairobi right now" in p and "Greet ONCE" in p
+
+
+def test_search_catalog_any_token_fallback(monkeypatch):
+    """'clerical shirt' matched nothing all-tokens (eval finding) — the fallback
+    returns any-token candidates, best matches first, instead of a dead end."""
+    from app.agent.tools import _search_catalog, ToolContext
+
+    async def fake_catalog(db, redis):
+        return [
+            {"name": "White Shirt - Normal", "sku": "S1", "price": 2500, "price_usd": 25,
+             "category": "Clergy Vestments", "in_stock": True},
+            {"name": "Cassock", "sku": "C1", "price": 12000, "price_usd": 120,
+             "category": "Vestments", "product_type": "variable", "is_producible": True},
+        ]
+
+    monkeypatch.setattr(tools.svc, "catalog_items", fake_catalog)
+    ctx = ToolContext(db=None, redis=None, wa_id="254700", currency="KES")
+
+    out = asyncio.run(_search_catalog({"query": "clerical shirt"}, ctx))
+    assert [r["name"] for r in out["results"]] == ["White Shirt - Normal"]   # fallback hit
+
+    out2 = asyncio.run(_search_catalog({"query": "cassock set"}, ctx))
+    assert [r["name"] for r in out2["results"]] == ["Cassock"]
+
+    out3 = asyncio.run(_search_catalog({"query": "thurible"}, ctx))          # truly absent
+    assert out3["count"] == 0
