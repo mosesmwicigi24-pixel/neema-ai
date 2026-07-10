@@ -76,8 +76,8 @@ def build_system_prompt(*, customer_name: str = "", country: str = "", country_i
         fulfilment = """FULFILMENT (international)
 - After the last item is added and they say that's all, show the full order
   summary with the total, then discuss shipping — never ask "delivery or pickup?".
-- We ship worldwide from Nairobi via couriers (DHL, EMS/Posta and others). The
-  cost depends on the courier, parcel weight and speed — say it will be confirmed
+- We ship worldwide from Nairobi with DHL — fast, secure and reliable. The cost
+  depends on the destination, parcel weight and speed — say it will be confirmed
   once the destination and order are settled; never invent a shipping fee.
 - Only mention pickup if THEY say someone will collect on their behalf in Nairobi."""
 
