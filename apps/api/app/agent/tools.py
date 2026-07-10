@@ -74,7 +74,7 @@ TOOLS: list[dict] = [
     {
         "name": "search_catalog",
         "description": "Search the live Bethany House catalogue for products by name, "
-                       "category or keyword. Use this before quoting any price or stock — "
+                       "category or keyword. Use this before quoting any price — "
                        "never invent products, prices or availability.",
         "input_schema": {
             "type": "object",
@@ -268,15 +268,14 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
             "sku": p.get("sku"),
             "category": p.get("category"),
             "made_to_order": mto,
-            # Made-to-order items are produced on demand — they are ALWAYS
-            # available and carry no stock. Only surface stock for ready goods,
-            # so the agent never wrongly tells a customer a garment is sold out.
-            "availability": "made_to_order" if mto else ("in_stock" if p.get("in_stock") else "out_of_stock"),
+            # Stock is an internal SOURCING concern, never a sales answer: the
+            # business produces and sources on demand, so every item is sold as
+            # available and no counts are ever exposed to the model. A hub
+            # shortfall is flagged to the team at order time (_sourcing_gaps).
+            "availability": "available",
         }
         row["price"] = _to_display(p.get("price"), ctx, p.get("price_usd"))
         row["currency"] = ctx.currency
-        if not mto:
-            row["available_qty"] = p.get("available_qty")
         results.append(row)
         if len(results) >= 8:
             break
@@ -291,9 +290,11 @@ async def _cart_display(cart: dict, ctx: ToolContext) -> tuple[list, object]:
     sum the converted lines so the shown total matches the shown unit prices. The
     catalogue is only loaded for the USD path (and it's cached), so the common
     Kenyan turn does no extra work."""
-    items = cart.get("items", [])
+    # `in_stock` on a cart line is bookkeeping for the order-time sourcing flag —
+    # never shown to the model, so it can never blurt "that's out of stock".
+    items = [{k: v for k, v in i.items() if k != "in_stock"} for i in cart.get("items", [])]
     if ctx.currency != "USD":
-        return list(items), cartmod.cart_total(cart)
+        return items, cartmod.cart_total(cart)
     catalog = await svc.catalog_items(ctx.db, ctx.redis)
     usd_by_id = {p.get("hub_product_id"): p.get("price_usd") for p in catalog}
     out, total = [], 0
@@ -369,6 +370,34 @@ async def _update_cart(args: dict, ctx: ToolContext) -> dict:
     return {"ok": True, "items": items, "total": total, "currency": ctx.currency}
 
 
+def _sourcing_gaps(cart_items: list, catalog: list) -> list[str]:
+    """Lines the hub can't currently cover (out of stock, or fewer than ordered).
+    The customer is NEVER told — these become a team flag so the item is sourced
+    before delivery/pickup. Made-to-order lines are produced, never a gap."""
+    by_id = {p.get("hub_product_id"): p for p in catalog}
+    gaps = []
+    for i in cart_items:
+        p = by_id.get(i.get("hub_product_id"))
+        if not p:
+            continue
+        if p.get("product_type") == "variable" and bool(p.get("is_producible")):
+            continue
+        try:
+            qty = max(int(i.get("qty") or 1), 1)
+        except (TypeError, ValueError):
+            qty = 1
+        avail = p.get("available_qty")
+        try:
+            avail = int(avail) if avail is not None else None
+        except (TypeError, ValueError):
+            avail = None
+        if not p.get("in_stock", True):
+            gaps.append(f"{i.get('name')} ×{qty} (hub: out of stock)")
+        elif avail is not None and avail < qty:
+            gaps.append(f"{i.get('name')} ×{qty} (hub: only {avail} on hand)")
+    return gaps
+
+
 async def _create_order(args: dict, ctx: ToolContext) -> dict:
     cart = await cartmod.get_cart(ctx.db, ctx.wa_id)
     if not cart["items"]:
@@ -394,6 +423,28 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
         payment_url = await hub_client.fetch_payment_link(hub_order_id)
     except Exception as exc:
         _log.warning("payment link fetch failed for order %s: %s", hub_order_id, exc)
+
+    # A hub shortfall never reaches the customer — it becomes a SOURCING flag in
+    # the Activity log so the team buys/produces it before delivery or pickup.
+    gaps = _sourcing_gaps(cart["items"], catalog)
+    if gaps:
+        try:
+            from sqlalchemy import or_
+            from app.models.conversation import Conversation
+            from app.models.intercept import Intercept, InterceptAction
+            conv = (await ctx.db.execute(select(Conversation).where(
+                Conversation.channel == ctx.channel,
+                or_(Conversation.external_id == ctx.wa_id,
+                    Conversation.wa_id == ctx.wa_id)))).scalars().first()
+            if conv is not None:
+                ctx.db.add(Intercept(
+                    conversation_id=conv.id, action=InterceptAction.flag,
+                    note=f"SOURCING NEEDED — order {pushed.get('order_number') or hub_order_id}: "
+                         + "; ".join(gaps)
+                         + ". Customer was told it's available; please source before "
+                           "delivery/pickup."))
+        except Exception:
+            _log.warning("sourcing flag failed for order %s", hub_order_id, exc_info=True)
 
     # Persist the order-event with hub linkage (feeds check_order_status + /profile openOrder).
     event_id = f"{ctx.wa_id}_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
