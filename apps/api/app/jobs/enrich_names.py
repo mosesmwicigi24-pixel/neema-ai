@@ -27,18 +27,18 @@ from app.services.meta_enrich import backfill_unknown_profiles
 _log = logging.getLogger("neema.enrich")
 
 
-async def run(batch: int = 100, max_batches: int = 60) -> None:
+async def run(batch: int = 100, max_batches: int = 60, retry_marked: bool = False) -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     named = tried = 0
     for i in range(max_batches):
         async with AsyncSessionLocal() as db:
-            res = await backfill_unknown_profiles(db, limit=batch)
+            res = await backfill_unknown_profiles(db, limit=batch, retry_marked=retry_marked)
         named += res["enriched"]
         tried += res["attempted"]
         print(f"batch {i + 1}: attempted={res['attempted']} "
               f"named={res['enriched']} no-profile={res['marked']}")
-        if res["scanned"] == 0:          # nothing nameless-and-untried left
-            break
+        if res["scanned"] == 0 or (retry_marked and res["enriched"] == 0):
+            break                            # nothing left, or retries aren't landing
     print(f"── done: named {named} contact(s) out of {tried} tried ──")
     if tried and named == 0:
         print("NOTE: the Profile API returned NO names — check the api logs for "
@@ -46,4 +46,8 @@ async def run(batch: int = 100, max_batches: int = 60) -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(run())
+    import argparse
+    ap = argparse.ArgumentParser(description="Name the Unknown Meta contacts via the Profile API.")
+    ap.add_argument("--retry-marked", action="store_true",
+                    help="also retry contacts previously marked no-profile (run after App Review)")
+    asyncio.run(run(retry_marked=ap.parse_args().retry_marked))

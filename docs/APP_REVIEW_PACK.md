@@ -60,7 +60,7 @@ App roles → Testers, and note its credentials in the instructions field.
   and degrades gracefully; on approval they simply start succeeding.
 - Then run the backlog namer to retro-name old contacts:
   `docker compose -f docker-compose.yml -f docker-compose.vps.yml exec -T api python -m app.jobs.enrich_names`
-  (clear the tried-marks first if needed — identities are stamped
-  `raw_profile.no_profile=true`; the job README explains.)
+  — add `--retry-marked` so contacts previously stamped no-profile are tried
+  again now that the API answers.
 - Comment replies will start saying "check your inbox" automatically when the DM
   actually delivers (the honest-reply logic keys on the real send result).

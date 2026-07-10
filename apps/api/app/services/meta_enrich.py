@@ -25,23 +25,27 @@ _log = logging.getLogger("neema.meta")
 _META_CHANNELS = ("messenger", "instagram", "facebook")
 
 
-async def backfill_unknown_profiles(db: AsyncSession, limit: int = 50) -> dict:
+async def backfill_unknown_profiles(db: AsyncSession, limit: int = 50,
+                                    retry_marked: bool = False) -> dict:
     """Enrich up to `limit` still-nameless Meta contacts. Contacts the Profile API
     returns nothing for are stamped raw_profile.no_profile=true so repeated runs
-    ADVANCE through the backlog instead of re-hammering the same dead ids. Returns
-    {attempted, enriched, marked, scanned}; commits once at the end."""
-    untried = or_(
-        Identity.raw_profile["no_profile"].astext.is_(None),
-        Identity.raw_profile["no_profile"].astext != "true",
-    )
-    rows = (await db.execute(
+    ADVANCE through the backlog instead of re-hammering the same dead ids; pass
+    retry_marked=True to try them again (e.g. right after App Review approval).
+    Returns {attempted, enriched, marked, scanned}; commits once at the end."""
+    q = (
         select(Identity, Person)
         .join(Person, Person.id == Identity.person_id)
         .where(Identity.channel.in_(_META_CHANNELS))
         .where(or_(Person.display_name.is_(None), Person.display_name == ""))
         .where(Person.merged_into_id.is_(None))       # skip tombstoned duplicates
-        .where(untried)                                # skip ids we already tried + missed
-        .order_by(Identity.created_at.desc())          # newest (most likely to matter) first
+    )
+    if not retry_marked:
+        q = q.where(or_(                               # skip ids we already tried + missed
+            Identity.raw_profile["no_profile"].astext.is_(None),
+            Identity.raw_profile["no_profile"].astext != "true",
+        ))
+    rows = (await db.execute(
+        q.order_by(Identity.created_at.desc())         # newest (most likely to matter) first
         .limit(limit)
     )).all()
 
@@ -56,6 +60,10 @@ async def backfill_unknown_profiles(db: AsyncSession, limit: int = 50) -> dict:
             ident.raw_profile = {**(ident.raw_profile or {}), "no_profile": True}
             marked += 1
             continue
+        if (ident.raw_profile or {}).get("no_profile"):
+            # A retry succeeded (e.g. post-App-Review) — clear the dead-id mark.
+            ident.raw_profile = {k: v for k, v in (ident.raw_profile or {}).items()
+                                 if k != "no_profile"}
         if name:
             if not person.display_name:
                 person.display_name = name[:200]
