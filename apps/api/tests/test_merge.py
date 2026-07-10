@@ -65,8 +65,9 @@ def test_merge_moves_identities_tombstones_and_audits():
     # both identities recorded; only the whatsapp handle indexes the wa_id cache
     assert len(audit.moved_identity_ids) == 2
     assert audit.moved_external_ids == ["254722222222"]
-    # one bulk update per wa_id-keyed table (5) since there were whatsapp handles
-    assert db.update_count == 5
+    # one bulk update per wa_id-keyed table (5) for the whatsapp handle, plus
+    # Conversation + Message repointed for the moved instagram identity (2)
+    assert db.update_count == 7
     # secondary tombstoned + audit persisted
     assert sec_person.merged_into_id == primary and sec_person.merged_at is not None
     assert audit in db.added
@@ -95,7 +96,9 @@ def test_merge_with_no_whatsapp_handle_skips_cache_refresh():
     audit = asyncio.run(merge_persons(db, primary, secondary))
 
     assert audit.moved_external_ids == []
-    assert db.update_count == 0            # nothing to refresh in the wa_id tables
+    # no wa_id cache refresh (0 whatsapp handles), but the instagram identity's
+    # Conversation + Message rows are repointed to the surviving person (2)
+    assert db.update_count == 2
     assert ig.person_id == primary
 
 

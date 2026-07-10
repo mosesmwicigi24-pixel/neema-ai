@@ -98,6 +98,41 @@ def test_resolve_creates_linked_person_and_identity_for_new_handle():
     assert i.source == "whatsapp_inbound" and i.confidence == "deterministic"
 
 
+class _SiblingDB(_FakeDB):
+    """Scripted: identity lookup misses, then the meta-sibling lookup hits."""
+    def __init__(self, sibling):
+        super().__init__(existing_identity=None)
+        self._sibling = sibling
+        self._calls = 0
+
+    async def execute(self, *a, **k):
+        self._calls += 1
+        if self._calls == 1:                       # (channel, external_id) lookup → miss
+            return _Res(one=None)
+        sib = self._sibling                        # sibling-channel lookup → hit
+        import types
+        return types.SimpleNamespace(
+            scalars=lambda: types.SimpleNamespace(first=lambda: sib))
+
+
+def test_meta_sibling_identity_adopts_same_person():
+    """The Meshack split: the id that commented (facebook) and the id that DMs
+    (messenger) are the SAME page-scoped account — the new channel identity must
+    adopt the existing person, never mint a second customer."""
+    pid = uuid.uuid4()
+    sib = Identity(person_id=pid, channel="facebook",
+                   external_id="26414904614761138", display_name="Meshack Munyao")
+    db = _SiblingDB(sib)
+
+    got = asyncio.run(idmod.resolve_or_create_person(
+        db, "messenger", "26414904614761138", source="messenger_inbound"))
+
+    assert got.person_id == pid                              # adopted, not split
+    assert [o for o in db.added if isinstance(o, Person)] == []   # no new person
+    idents = [o for o in db.added if isinstance(o, Identity)]
+    assert len(idents) == 1 and idents[0].channel == "messenger"
+
+
 def test_resolve_person_id_normalizes_plus_and_guards_empty():
     db = _FakeDB(existing_identity=None)
 

@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.person import Person, Identity
 
 WHATSAPP = "whatsapp"
+_META_SIBLINGS = ("messenger", "instagram", "facebook")
 
 
 async def _select_identity(db: AsyncSession, channel: str, external_id: str) -> Identity | None:
@@ -76,13 +77,35 @@ async def resolve_or_create_person(
                 person.display_name = display_name[:200]
         return ident
 
+    # Meta page-scoped IDs are the SAME account across surfaces: the id that
+    # commented on the page's post (facebook) and the id that DMs the page
+    # (messenger) arrive on different channels but with an identical
+    # external_id. Adopt the sibling's person instead of minting a new one —
+    # otherwise the commenter and the DM sender become two customers (the
+    # Meshack split: name, location, and source post scattered over two people).
+    adopt = None
+    if channel in _META_SIBLINGS:
+        adopt = (await db.execute(
+            select(Identity).where(
+                Identity.external_id == external_id,
+                Identity.channel.in_([c for c in _META_SIBLINGS if c != channel]),
+            ).limit(1)
+        )).scalars().first()
+
     try:
         async with db.begin_nested():          # SAVEPOINT — isolates the unique race
-            person = Person(display_name=display_name[:200] if display_name else None)
-            db.add(person)
-            await db.flush()                    # assign person.id
+            if adopt is not None:
+                person_id = adopt.person_id
+                person = await db.get(Person, person_id)
+                if person is not None and display_name and not person.display_name:
+                    person.display_name = display_name[:200]
+            else:
+                person = Person(display_name=display_name[:200] if display_name else None)
+                db.add(person)
+                await db.flush()                # assign person.id
+                person_id = person.id
             ident = Identity(
-                person_id=person.id,
+                person_id=person_id,
                 channel=channel,
                 external_id=external_id,
                 display_name=display_name[:200] if display_name else None,

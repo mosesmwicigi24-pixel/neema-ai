@@ -49,10 +49,45 @@ def _candidates(text: str) -> list[str]:
 async def run(apply: bool) -> None:
     mode = "APPLY" if apply else "DRY RUN (pass --apply to save)"
     print(f"── contact backfill · {mode} ──")
-    found = linked = names_fixed = 0
+    found = linked = names_fixed = id_links = 0
     async with AsyncSessionLocal() as db:
         idents = (await db.execute(select(Identity).where(
             Identity.channel.in_(META)))).scalars().all()
+
+        # ── ID LINK: the same Meta page-scoped id on two channels is ONE person
+        # (the id that commented on a post = the id that DMs the page). Splits
+        # happened before the resolver adopted siblings — merge them: the person
+        # with the CRM User row survives; names/location/source post carry over.
+        by_ext: dict[str, list] = {}
+        for i in idents:
+            by_ext.setdefault(i.external_id, []).append(i)
+        for ext, group in by_ext.items():
+            pids = list({i.person_id for i in group})
+            if len(pids) < 2:
+                continue
+            primary = None
+            for pid in pids:
+                u = (await db.execute(select(User).where(
+                    User.person_id == pid))).scalar_one_or_none()
+                if u is not None:
+                    primary = pid
+                    break
+            primary = primary or pids[0]
+            chans = ", ".join(sorted({i.channel for i in group}))
+            who = next((i.display_name for i in group if i.display_name), ext)
+            for pid in pids:
+                if pid == primary:
+                    continue
+                id_links += 1
+                print(f"ID LINK {who} ({chans}): merge person {pid} → {primary}")
+                if apply:
+                    from app.services.merge import merge_persons
+                    try:
+                        await merge_persons(db, primary_person_id=primary,
+                                            secondary_person_id=pid)
+                    except Exception as exc:
+                        print(f"  link failed: {exc}")
+
         for ident in idents:
             person = await db.get(Person, ident.person_id)
             user = (await db.execute(select(User).where(
@@ -175,7 +210,7 @@ async def run(apply: bool) -> None:
         if apply:
             await db.commit()
     print(f"── {'saved' if apply else 'found'}: {found} phone(s), {linked} cross-channel "
-          f"link(s), {names_fixed} name sync(s) ──")
+          f"link(s), {names_fixed} name sync(s), {id_links} id link(s) ──")
 
 
 if __name__ == "__main__":

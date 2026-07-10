@@ -72,6 +72,20 @@ async def merge_persons(
                 .values(person_id=primary_person_id)
             )
 
+    # 2b. Meta rows are keyed by (channel, external_id) and carry a denormalized
+    #     person_id too — repoint the moved identities' conversations + messages
+    #     so the inbox resolves them to the surviving person, not the tombstone.
+    for i in idents:
+        if i.channel == "whatsapp":
+            continue
+        for model in (Conversation, Message):
+            await db.execute(
+                update(model)
+                .where(model.channel == i.channel,
+                       model.external_id == i.external_id)
+                .values(person_id=primary_person_id)
+            )
+
     # 3. Carry the secondary's conversation knowledge onto the primary — the
     #    Messenger-side memory (facts, location, lead source) must survive the
     #    merge so WhatsApp turns continue where Messenger left off.
