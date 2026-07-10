@@ -91,6 +91,19 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   screencast script, reviewer steps. Submit to unlock DMs + private replies +
   profile names in one review.
 
+## Tier-1 design port (2026-07-10, `9f92055` + `5478f3d`) — LIVE
+Moses's ChatGPT/n8n two-stage design reviewed. NOT ported (superseded by Tier 2
+architecture): state extractor, mood/commercial JSON, control lines, cart-text
+reconstruction, image-caption pipeline. PORTED: clergy-wear expertise (full-set
+composition, overlay base-garment-first, colour→gender→set→customer-led qty),
+country-aware payment (KE→M-Pesa link; intl→discover route WU/Mukuru + handoff)
+and fulfilment (KE: delivery/pickup, KES 350, >3kg advisory, pay-before-delivery;
+intl: couriers, no unprompted pickup), live Nairobi-daypart greeting + clergy
+titles, anti-nag rules, and a code-enforced `pause_conversation` tool (2h redis
+cooldown honored by both schedulers). DEFERRED pending Moses: country→payment-
+method map (he'll supply), catalogue pass (full-set SKUs + colour/material
+variants — hub doesn't expose variant lists yet; agent captures via remember).
+
 ## Next build (queued)
 - **Attribution reporting view** — revenue-by-source. Data link exists now
   (`person.state.source_post` + hub orders → person). Backend aggregation + a small
