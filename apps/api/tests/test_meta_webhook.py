@@ -283,17 +283,22 @@ def test_capture_schedules_agent_reply_only_when_enabled(monkeypatch):
     async def fake_conv(db, channel, external_id, **kw):
         return _FakeConv()
 
-    async def fake_sched(redis, channel, external_id, text, dedup_id=None, page_id=None):
-        calls.append((channel, external_id, text, dedup_id))
+    async def fake_sched(redis, channel, external_id, text, dedup_id=None, page_id=None,
+                         media=None):
+        calls.append((channel, external_id, text, dedup_id, media))
 
     monkeypatch.setattr("app.services.identity.resolve_or_create_person", fake_person)
     monkeypatch.setattr("app.services.channel.get_or_create_conversation", fake_conv)
+    monkeypatch.setattr("app.services.meta_media.schedule_media_rehost", lambda *a, **kw: None)
     import app.agent.runtime as rt
     monkeypatch.setattr(rt, "schedule_meta_reply", fake_sched)
 
+    cdn = "https://scontent.xx.fbcdn.net/v/t1/photo.jpg?oh=sig"
     payload = {"object": "page", "entry": [{"messaging": [
         {"sender": {"id": "PSID_1"}, "message": {"mid": "m1", "text": "how much for a cassock?"}},
-        {"sender": {"id": "PSID_2"}, "message": {"mid": "m2", "attachments": [{"type": "image"}]}},  # no text → no reply
+        {"sender": {"id": "PSID_2"}, "message": {"mid": "m2", "attachments": [{"type": "image"}]}},  # no URL → nothing to act on
+        {"sender": {"id": "PSID_3"}, "message": {"mid": "m3", "attachments": [
+            {"type": "image", "payload": {"url": cdn}}]}},                    # image-only → VISION turn
     ]}]}
 
     # disabled (default) → no agent reply
@@ -301,10 +306,13 @@ def test_capture_schedules_agent_reply_only_when_enabled(monkeypatch):
     asyncio.run(mw._capture_events(_FakeDB(), "messenger", payload))
     assert calls == []
 
-    # enabled → replies only to the real-text turn
+    # enabled → the text turn replies, and the photo-only turn replies WITH the image
     monkeypatch.setattr(settings, "meta_agent_reply", True, raising=False)
     asyncio.run(mw._capture_events(_FakeDB(), "messenger", payload))
-    assert calls == [("messenger", "PSID_1", "how much for a cassock?", "m1")]
+    assert calls == [
+        ("messenger", "PSID_1", "how much for a cassock?", "m1", None),
+        ("messenger", "PSID_3", "", "m3", {"type": "image", "url": cdn, "caption": ""}),
+    ]
 
 
 # ── Facebook/Instagram comment engagement ────────────────────────────────────

@@ -38,3 +38,45 @@ def test_load_image_block_rejects_oversized(tmp_path, monkeypatch):
     monkeypatch.setattr(media, "_MAX_BYTES", 10)
     (tmp_path / "big.jpg").write_bytes(b"x" * 100)
     assert media.load_image_block("http://x/api/admin/media/big.jpg") is None
+
+
+# ── Remote fetch: Meta CDN attachments & post thumbnails ─────────────────────
+
+class _FakeResp:
+    def __init__(self, content=b"jpegbytes", ct="image/jpeg", ok=True):
+        self.content = content
+        self.headers = {"content-type": ct}
+        self.is_success = ok
+        self.status_code = 200 if ok else 404
+
+
+def test_remote_url_is_fetched_when_not_local(tmp_path, monkeypatch):
+    import httpx
+    monkeypatch.setattr(media, "MEDIA_DIR", str(tmp_path))   # nothing on disk
+    monkeypatch.setattr(httpx, "get", lambda url, **kw: _FakeResp())
+    block = media.load_image_block("https://scontent.xx.fbcdn.net/v/t1/photo.jpg?oh=sig")
+    assert block["source"]["media_type"] == "image/jpeg"
+    assert base64.standard_b64decode(block["source"]["data"]) == b"jpegbytes"
+
+
+def test_local_file_wins_over_remote_fetch(tmp_path, monkeypatch):
+    import httpx
+    monkeypatch.setattr(media, "MEDIA_DIR", str(tmp_path))
+    (tmp_path / "meta_messenger_m1.jpg").write_bytes(b"localbytes")
+    monkeypatch.setattr(httpx, "get", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("no fetch")))
+    block = media.load_image_block("https://cdn.neema/api/admin/media/meta_messenger_m1.jpg")
+    assert base64.standard_b64decode(block["source"]["data"]) == b"localbytes"
+
+
+def test_remote_fetch_guards(tmp_path, monkeypatch):
+    import httpx
+    monkeypatch.setattr(media, "MEDIA_DIR", str(tmp_path))
+    monkeypatch.setattr(httpx, "get", lambda url, **kw: _FakeResp(ct="text/html"))
+    assert media.load_image_block("https://x.example/page.jpg") is None      # not an image
+    monkeypatch.setattr(httpx, "get", lambda url, **kw: _FakeResp(ok=False))
+    assert media.load_image_block("https://x.example/gone.jpg") is None      # 404
+    monkeypatch.setattr(httpx, "get", lambda url, **kw: _FakeResp(content=b"x" * 5_000_000))
+    assert media.load_image_block("https://x.example/huge.jpg") is None      # oversized
+    monkeypatch.setattr(httpx, "get", lambda *a, **kw: (_ for _ in ()).throw(httpx.ConnectError("boom")))
+    assert media.load_image_block("https://x.example/err.jpg") is None       # network error
+    assert media.load_image_block("ftp://x.example/a.jpg") is None           # non-http scheme

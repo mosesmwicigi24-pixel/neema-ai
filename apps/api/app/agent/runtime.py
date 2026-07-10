@@ -208,18 +208,39 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     img_block = None
     if settings.tier2_vision and media and (media.get("type") == "image"):
         from app.agent.media import load_image_block
-        img_block = load_image_block(media.get("url"))
+        # to_thread: the loader does blocking I/O (local disk, or an HTTPS fetch
+        # of a Meta CDN attachment / post thumbnail) — keep the event loop free.
+        img_block = await asyncio.to_thread(load_image_block, media.get("url"))
     if img_block:
         caption = (media.get("caption") or "").strip()
+        # The inbound row is often already at the tail of history — as an
+        # "[image]" placeholder (Meta path) and/or the bare caption. Fold it
+        # into the one multimodal turn so the model sees a single clean photo
+        # message and roles keep alternating.
+        lead = ""
+        if messages and messages[-1]["role"] == "user" and isinstance(messages[-1]["content"], str):
+            lead = messages[-1]["content"].strip()
+            if lead.endswith("[image]"):
+                lead = lead[: -len("[image]")].strip()
+            if lead == caption:
+                lead = ""
+            messages.pop()
+        text = "\n".join(p for p in (lead, caption) if p)
         messages.append({"role": "user", "content": [
             img_block,
-            {"type": "text", "text": caption or
+            {"type": "text", "text": text or
              "(The customer sent this photo. Identify the item and search our catalogue for it.)"},
         ]})
     # The just-received message is already persisted by /message; only append it
     # if history didn't capture it (defensive) so the model always sees it last.
     elif not messages or messages[-1]["role"] != "user" or user_text.strip() not in messages[-1]["content"]:
-        messages.append({"role": "user", "content": user_text})
+        text = user_text.strip()
+        if not text and media:
+            # Image-only turn whose photo couldn't be loaded — never send an
+            # empty turn; tell the model what happened so it asks, warmly.
+            text = ("(The customer sent a photo that could not be loaded. Ask them "
+                    "to describe the item in words so you can help.)")
+        messages.append({"role": "user", "content": text or "(empty message)"})
 
     # Cross-conversation memory: prepend as a leading context turn so it stays
     # behind the cached system prefix and ahead of the real transcript, and
@@ -324,9 +345,12 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None)
     from app.database import AsyncSessionLocal
     from app.services import n8n_bridge as svc
     try:
+        # A photo turn always takes the main model — vision + catalogue matching
+        # is never "light" work, whatever the caption says.
+        model = settings.tier2_model if media else route_model(text)
         async with AsyncSessionLocal() as db:
             reply = await run_turn(db, redis, wa_id, text,
-                                   build_llm(model=route_model(text)), media=media)
+                                   build_llm(model=model), media=media)
         await svc._send_waba(wa_id, reply)
         async with AsyncSessionLocal() as db2:
             await svc.save_outbound_message(db2, redis, wa_id, reply)
@@ -359,15 +383,18 @@ async def schedule_reply(redis, wa_id: str, text: str, dedup_id: str | None,
 # channel message. Deduped on the Meta message id.
 
 async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
-                             page_id: str | None = None) -> None:
+                             page_id: str | None = None,
+                             media: dict | None = None) -> None:
     from app.database import AsyncSessionLocal
     from app.services.meta_send import send_to_channel
     from app.services import n8n_bridge as svc
     try:
+        model = settings.tier2_model if media else route_model(text)
         async with AsyncSessionLocal() as db:
             reply = await run_turn(db, redis, wa_id=external_id, user_text=text,
-                                   llm=build_llm(model=route_model(text)),
-                                   channel=channel, external_id=external_id)
+                                   llm=build_llm(model=model),
+                                   channel=channel, external_id=external_id,
+                                   media=media)
         await send_to_channel(channel, external_id, reply, page_id=page_id)
         async with AsyncSessionLocal() as db2:
             await svc.save_outbound_channel_message(db2, redis, channel, external_id, reply)
@@ -377,9 +404,11 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
 
 
 async def schedule_meta_reply(redis, channel: str, external_id: str, text: str,
-                              dedup_id: str | None, page_id: str | None = None) -> bool:
-    """Fire the agent for one inbound Messenger/IG message. Deduped on the Meta
-    message id so a redelivered webhook never double-replies."""
+                              dedup_id: str | None, page_id: str | None = None,
+                              media: dict | None = None) -> bool:
+    """Fire the agent for one inbound Messenger/IG message (text, photo, or
+    both — the agent sees images natively). Deduped on the Meta message id so a
+    redelivered webhook never double-replies."""
     if await _is_paused(redis, channel, external_id):
         return False
     if redis is not None and dedup_id:
@@ -389,7 +418,8 @@ async def schedule_meta_reply(redis, channel: str, external_id: str, text: str,
                 return False
         except Exception:
             pass
-    task = asyncio.create_task(_run_and_send_meta(redis, channel, external_id, text, page_id))
+    task = asyncio.create_task(_run_and_send_meta(redis, channel, external_id, text,
+                                                  page_id, media))
     _bg_tasks.add(task)
     task.add_done_callback(_bg_tasks.discard)
     return True

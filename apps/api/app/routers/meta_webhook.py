@@ -226,10 +226,15 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
             # locate the row afterward).
             if media_url and mid:
                 media_rehosts.append((mid, media_url, media_type))
-            # Only hand the agent a real text turn (skip attachment placeholders),
-            # and only when the conversation is AI-mode (never talk over a human).
-            if message.get("text") and conv.intercept_mode == InterceptMode.ai:
-                replies.append((sender, message["text"].strip(), mid, page_id))
+            # Hand the agent every turn it can act on — text, a photo, or both
+            # (the agent sees images natively; the caption rides along). Other
+            # attachment types (video/audio/file) still need text to react to.
+            # Only when the conversation is AI-mode (never talk over a human).
+            turn_text = (message.get("text") or "").strip()
+            turn_media = ({"type": "image", "url": media_url, "caption": turn_text}
+                          if media_url and media_type == "image" else None)
+            if (turn_text or turn_media) and conv.intercept_mode == InterceptMode.ai:
+                replies.append((sender, turn_text, mid, page_id, turn_media))
             captured += 1
 
     if captured:
@@ -259,10 +264,10 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
         # Send API. Fires after the inbound is persisted; deduped on the Meta mid.
         if settings.meta_agent_reply:
             from app.agent import runtime
-            for sender, text, mid, page_id in replies:
+            for sender, text, mid, page_id, media in replies:
                 try:
                     await runtime.schedule_meta_reply(redis, channel, sender, text, dedup_id=mid,
-                                                      page_id=page_id or None)
+                                                      page_id=page_id or None, media=media)
                 except Exception as exc:
                     _log.warning("meta agent reply failed to schedule for %s: %s", sender, exc)
 
