@@ -193,3 +193,25 @@ def test_search_catalog_any_token_fallback(monkeypatch):
 
     out3 = asyncio.run(_search_catalog({"query": "thurible"}, ctx))          # truly absent
     assert out3["count"] == 0
+
+
+def test_search_catalog_currency_override_for_declared_kenyan(monkeypatch):
+    """A Messenger customer (channel default USD) who says "Kenyan money plz" gets
+    our NATIVE KES prices via search_catalog(currency="KES") — never a conversion,
+    and never the "what item were you asking about?" dead end."""
+    from app.agent import tools
+    from app.agent.tools import _search_catalog, ToolContext
+
+    async def fake_catalog(db, redis):
+        return [{"name": "Clerical Shirt", "sku": "CS1", "price": 3100, "price_usd": 31,
+                 "category": "shirts", "product_type": "simple", "in_stock": True}]
+
+    monkeypatch.setattr(tools.svc, "catalog_items", fake_catalog)
+    meta_ctx = ToolContext(db=None, redis=None, wa_id="PSID", currency="USD", channel="messenger")
+
+    default = asyncio.run(_search_catalog({"query": "shirt"}, meta_ctx))["results"][0]
+    assert default["price"] == 31 and default["currency"] == "USD"     # channel default
+
+    kes = asyncio.run(_search_catalog({"query": "shirt", "currency": "KES"}, meta_ctx))["results"][0]
+    assert kes["price"] == 3100 and kes["currency"] == "KES"           # native KES, not USD*rate
+    assert meta_ctx.currency == "USD"                                  # ctx untouched (replace, not mutate)

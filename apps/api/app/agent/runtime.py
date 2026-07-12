@@ -77,12 +77,13 @@ def _meta_addendum(currency: str = "USD") -> str:
     if currency == "USD":
         local = (
             " If they ask for Kenyan Shillings or say they're in Kenya, do NOT "
-            "convert — call capture_contact with their location (even just "
-            "'Kenya'), then re-run search_catalog: it returns our real KES "
-            "prices. For any OTHER local currency they ask for, convert from the "
-            "USD amount (never from KES) at the country's current central-bank "
-            "rate, rounding UP to the nearest 10; state it confidently, not as a "
-            "guess."
+            "convert — save it with capture_contact (location, even just "
+            "'Kenya'), then call search_catalog again with currency=\"KES\" and "
+            "quote our real KES prices for the SAME items already under "
+            "discussion. For any OTHER local currency they ask for, convert from "
+            "the USD amount (never from KES) at the country's current "
+            "central-bank rate, rounding UP to the nearest 10; state it "
+            "confidently, not as a guess."
         )
     return (
         "\n\n## This conversation is on Facebook Messenger / Instagram (not WhatsApp)\n"

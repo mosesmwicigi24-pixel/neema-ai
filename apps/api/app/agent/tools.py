@@ -83,7 +83,11 @@ TOOLS: list[dict] = [
                        "never invent products, prices or availability.",
         "input_schema": {
             "type": "object",
-            "properties": {"query": {"type": "string", "description": "What the customer is looking for, e.g. 'cassock', 'communion cups', 'anointing oil'"}},
+            "properties": {
+                "query": {"type": "string", "description": "What the customer is looking for, e.g. 'cassock', 'communion cups', 'anointing oil'"},
+                "currency": {"type": "string", "enum": ["KES", "USD"],
+                             "description": "Override the display currency: set 'KES' when the customer says they are in Kenya or asks for Kenyan shillings (our native prices); otherwise leave unset."},
+            },
             "required": ["query"],
         },
     },
@@ -247,6 +251,13 @@ async def run_tool(name: str, args: dict, ctx: ToolContext) -> dict:
 
 
 async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
+    # A customer can tell us where they are mid-conversation ("Kenyan money plz")
+    # — the model then re-fetches with currency="KES"/"USD" instead of being
+    # trapped by the channel default (Meta defaults to USD).
+    cur = (args.get("currency") or "").upper()
+    if cur in ("KES", "USD") and cur != ctx.currency:
+        from dataclasses import replace as _dc_replace
+        ctx = _dc_replace(ctx, currency=cur)
     query = (args.get("query") or "").lower().strip()
     catalog = await svc.catalog_items(ctx.db, ctx.redis)
     toks = [t for t in query.split() if t]
