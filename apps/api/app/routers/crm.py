@@ -254,9 +254,9 @@ def _build_profile(
         "first_seen_at":  user.created_at.isoformat() if user.created_at else None,
         "notes":          notes,
         "created_at":     user.created_at.isoformat() if user.created_at else None,
-        "country_iso":    user.country_iso,
-        "country":        user.country,
-        "flag_url":       user.flag_url,
+        "country_iso":    user.country_iso or (person_state or {}).get("country_iso"),
+        "country":        user.country or (person_state or {}).get("country"),
+        "flag_url":       user.flag_url or (person_state or {}).get("flag_url"),
     }
 
 

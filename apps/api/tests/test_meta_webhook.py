@@ -458,3 +458,32 @@ def test_capture_stamps_owning_page_on_identity(monkeypatch):
     ]}]}
     asyncio.run(mw._capture_events(_FakeDB(), "messenger", payload))
     assert calls["raw"][0].get("page_id") == "103756315006608"
+
+
+def test_capture_contact_location_sets_country(monkeypatch):
+    """MSG customer says where they are → the profile gets the country code,
+    name and flag (from their words; a shared phone prefix would overwrite)."""
+    import uuid as _uuid
+    from app.agent.tools import run_tool, ToolContext
+    from app.models.person import Person
+
+    person = Person(display_name=None, state={})
+    person.id = _uuid.uuid4()
+    ident = types.SimpleNamespace(person_id=person.id, channel="messenger",
+                                  external_id="PSID_9", display_name=None,
+                                  raw_profile={})
+
+    class _DB:
+        async def execute(self, stmt):
+            # identity select → ident; any User select → none
+            return types.SimpleNamespace(scalar_one_or_none=lambda: (
+                ident if "identities" in str(stmt) else None))
+        async def get(self, model, pk): return person
+        async def commit(self): pass
+
+    ctx = ToolContext(db=_DB(), redis=None, wa_id="PSID_9", channel="messenger", currency="USD")
+    out = asyncio.run(run_tool("capture_contact",
+                               {"location": "Kampala, Uganda"}, ctx))
+    assert out["ok"] and out["country"] == "Uganda"
+    assert person.state["country_iso"] == "UG"
+    assert person.state["flag_url"].endswith("/ug.svg")

@@ -297,3 +297,14 @@ def iso_from_text(text: str | None) -> str | None:
         if n in t and (best is None or len(n) > best[0]):
             best = (len(n), iso)
     return best[1] if best else None
+
+
+def name_for_iso(iso: str | None) -> str | None:
+    """Country display name for an ISO alpha-2 code ('UG' → 'Uganda')."""
+    if not iso:
+        return None
+    up = iso.upper()
+    for _code, name, code2 in _COUNTRY_TABLE:
+        if code2 == up:
+            return name
+    return None

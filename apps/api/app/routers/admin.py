@@ -89,6 +89,10 @@ async def list_conversations(
             if pic and idn.person_id not in avatar_map:
                 avatar_map[idn.person_id] = pic
 
+    def _pstate(c: Conversation) -> dict:
+        p = person_map.get(getattr(c, "person_id", None))
+        return (getattr(p, "state", None) or {}) if p else {}
+
     def _name_for(c: Conversation):
         u = user_map.get(c.wa_id)
         if u and u.name:
@@ -175,11 +179,10 @@ async def list_conversations(
         {
             "id":                   str(c.id),
             "wa_id":                c.wa_id,
-            "external_id":          getattr(c, "external_id", None),
             # Channel-native handle (wa_id | PSID | IGSID). == wa_id for WhatsApp,
             # but the ONLY customer key for Messenger/IG/FB (whose wa_id is null),
             # so the panel can load + save their profile.
-            "external_id":          c.external_id,
+            "external_id":          getattr(c, "external_id", None),
             "intercept_mode":       c.intercept_mode,
             "assigned_agent_id":    str(c.assigned_agent_id) if c.assigned_agent_id else None,
             "assigned_agent_name":  agent_map.get(str(c.assigned_agent_id), "") if c.assigned_agent_id else None,
@@ -194,8 +197,10 @@ async def list_conversations(
             "updated_at":           c.updated_at.isoformat() if c.updated_at else None,
             "name":                 _name_for(c),
             "avatar_url":           avatar_map.get(getattr(c, "person_id", None)),
-            "country_iso":          user_map[c.wa_id].country_iso if c.wa_id in user_map else None,
-            "flag_url":             user_map[c.wa_id].flag_url if c.wa_id in user_map else None,
+            "country_iso":          (user_map[c.wa_id].country_iso if c.wa_id in user_map else None)
+                                        or _pstate(c).get("country_iso"),
+            "flag_url":             (user_map[c.wa_id].flag_url if c.wa_id in user_map else None)
+                                        or _pstate(c).get("flag_url"),
             "channel":              getattr(c, "channel", "whatsapp") or "whatsapp",
             "unread":               unread_map.get(str(c.id), 0),
             "tags":                 (user_map[c.wa_id].state or {}).get("tags", []) if c.wa_id in user_map else [],

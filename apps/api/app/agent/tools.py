@@ -560,8 +560,23 @@ async def _capture_contact(args: dict, ctx: ToolContext) -> dict:
 
     if location and person is not None:
         from sqlalchemy.orm.attributes import flag_modified
+        from app.core.countries import iso_from_text as _iso_txt, name_for_iso, flag_url_for
         state = dict(person.state or {})
         state["location"] = location[:200]
+        loc_iso = _iso_txt(location)
+        if loc_iso:
+            # Country derived from what THEY said — fills the profile (a later
+            # shared phone prefix, a stronger signal, may overwrite it).
+            state["country_iso"] = loc_iso
+            state["country"] = name_for_iso(loc_iso)
+            state["flag_url"] = flag_url_for(loc_iso)
+            _shim = (await ctx.db.execute(
+                select(User).where(User.person_id == ident.person_id))).scalar_one_or_none()
+            if _shim is not None and not _shim.country_iso:
+                _shim.country_iso = loc_iso
+                _shim.country = state["country"]
+                _shim.flag_url = state["flag_url"]
+            out["country"] = state["country"]
         person.state = state
         flag_modified(person, "state")
         out["location"] = location
@@ -611,6 +626,22 @@ async def _capture_contact(args: dict, ctx: ToolContext) -> dict:
                 select(User).where(User.person_id == ident.person_id))).scalar_one_or_none()
             if user is not None and not user.phone:
                 user.phone = e164
+            # The dialing prefix is the strongest country signal — set the
+            # profile's country from it (overwrites a location-derived guess).
+            loc = resolve_country(e164)
+            if loc.get("country_iso"):
+                if person is not None:
+                    from sqlalchemy.orm.attributes import flag_modified as _fm
+                    st = dict(person.state or {})
+                    st.update({"country_iso": loc["country_iso"],
+                               "country": loc["country"], "flag_url": loc["flag_url"]})
+                    person.state = st
+                    _fm(person, "state")
+                if user is not None:
+                    user.country_iso = loc["country_iso"]
+                    user.country = loc["country"]
+                    user.flag_url = loc["flag_url"]
+                out["country"] = loc["country"]
             out["phone"] = e164
 
     await ctx.db.commit()
