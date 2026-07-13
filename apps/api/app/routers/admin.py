@@ -1282,6 +1282,18 @@ async def list_calls(
     """Recent WhatsApp calls (newest first) for the Calls view — like a phone's
     recents. Joins the caller's person name/avatar when linked."""
     from app.models.call import Call
+    from datetime import datetime, timezone, timedelta
+    # Lazy cleanup: a call still "ringing" after 2 min never got its terminate
+    # event — treat it as missed so it stops ringing the softphone.
+    stale = (await db.execute(
+        select(Call).where(Call.status == "ringing",
+                           Call.started_at < datetime.now(timezone.utc) - timedelta(minutes=2))
+    )).scalars().all()
+    if stale:
+        for s in stale:
+            s.status = "missed"
+            s.ended_at = datetime.now(timezone.utc)
+        await db.commit()
     rows = (await db.execute(
         select(Call).order_by(Call.started_at.desc()).limit(min(max(limit, 1), 200))
     )).scalars().all()

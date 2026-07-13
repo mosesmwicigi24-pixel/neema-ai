@@ -44,13 +44,19 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
     const ringtoneRef = useRef<HTMLAudioElement | null>(null);
     const phaseRef = useRef<CallPhase>("idle");
-    const handledRef = useRef<string | null>(null);   // last call id we already rang/handled
+    const activeIdRef = useRef<string | null>(null);          // the call currently on screen
+    const endedAtRef = useRef<Record<string, number>>({});    // callId → when we last dismissed it
     useEffect(() => { phaseRef.current = phase; }, [phase]);
 
     // Start ringing for a given call (shared by the WS event + the poll fallback).
+    // Rings whenever we're idle and this isn't a call we just dismissed (a short
+    // cooldown stops a still-"ringing" record from instantly re-ringing after a
+    // decline / failed answer, while still allowing a genuine retry after ~12s).
     const startRinging = useCallback((callId: string, from: string, name?: string | null) => {
-        if (phaseRef.current !== "idle" || handledRef.current === callId) return;
-        handledRef.current = callId;
+        if (phaseRef.current !== "idle") return;
+        const endedAt = endedAtRef.current[callId];
+        if (endedAt && Date.now() - endedAt < 12000) return;
+        activeIdRef.current = callId;
         setCall({ callId, from, name });
         ringtoneRef.current?.play().catch(() => {});
         setPhase("ringing");
@@ -65,6 +71,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
     const finish = useCallback((noteText?: string) => {
         cleanup();
+        if (activeIdRef.current) endedAtRef.current[activeIdRef.current] = Date.now();
+        activeIdRef.current = null;
         if (noteText) setNote(noteText);
         setPhase("ended");
         setTimeout(() => {
@@ -152,15 +160,14 @@ export function CallProvider({ children }: { children: ReactNode }) {
                 // While we're RINGING, if the caller hung up (row no longer
                 // "ringing") tear the card down — in case the WS end event was missed.
                 if (phaseRef.current === "ringing") {
-                    const cur = calls.find((c) => c.call_id === handledRef.current);
-                    if (cur && cur.status !== "ringing") { cleanup(); setPhase("idle"); setCall(null); }
+                    const cur = calls.find((c) => c.call_id === activeIdRef.current);
+                    if (cur && cur.status !== "ringing") { cleanup(); activeIdRef.current = null; setPhase("idle"); setCall(null); }
                     return;
                 }
                 if (phaseRef.current !== "idle") return;
                 const ringing = calls.find((c) =>
                     c.status === "ringing" &&
-                    c.call_id !== handledRef.current &&
-                    c.started_at && (now - new Date(c.started_at).getTime()) < 60000);
+                    c.started_at && (now - new Date(c.started_at).getTime()) < 90000);
                 if (ringing) {
                     console.debug("[call] poll fallback caught ringing call:", ringing.call_id);
                     startRinging(ringing.call_id, ringing.wa_id || "", ringing.name);
