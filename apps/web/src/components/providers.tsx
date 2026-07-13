@@ -3,7 +3,7 @@
 import { SessionProvider } from "next-auth/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { WsProvider } from "@/lib/websocket";
-import { WhatsAppSoftphone } from "@/components/WhatsAppSoftphone";
+import { CallProvider } from "@/lib/callContext";
 import { ReactNode, useState } from "react";
 
 export default function Providers({ children }: { children: ReactNode }) {
@@ -13,9 +13,9 @@ export default function Providers({ children }: { children: ReactNode }) {
         <SessionProvider>
             <QueryClientProvider client={queryClient}>
                 <WsProvider>
-                    {children}
-                    {/* Global — rings anywhere in the dashboard on an inbound WhatsApp call. */}
-                    <WhatsAppSoftphone />
+                    {/* Call state is app-global; the call CARD renders inside the
+                        dashboard content area (CallStage) so the sidebar stays visible. */}
+                    <CallProvider>{children}</CallProvider>
                 </WsProvider>
             </QueryClientProvider>
         </SessionProvider>

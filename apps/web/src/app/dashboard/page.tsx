@@ -31,6 +31,7 @@ import { CatalogView } from "@/components/views/CatalogView";
 import { OverviewView } from "@/components/views/OverviewView";
 import { LeadsView } from "@/components/views/LeadsView";
 import { CallsView } from "@/components/views/CallsView";
+import { CallStage } from "@/components/CallStage";
 import { ReportsView } from "@/components/views/ReportsView";
 import { ProfileView } from "@/components/views/ProfileView";
 import { SettingsView } from "@/components/views/SettingsView";
@@ -564,10 +565,13 @@ export default function NeemaDashboard(): React.ReactElement {
                     />
                 )}
                 <main
-                    className="flex flex-1 overflow-hidden"
+                    className="relative flex flex-1 overflow-hidden"
                     style={{ marginTop: isMobile ? 56 : 0 }}
                 >
                     {viewComponents[view]}
+                    {/* Incoming/active call takes over the content area — sidebar
+                        stays visible, matching the Figma. */}
+                    <CallStage />
                 </main>
                 {isMobile && (
                     <MobileBottomNav
