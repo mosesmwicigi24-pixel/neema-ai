@@ -448,6 +448,17 @@ export const whatsappApi = {
         post<{ ok: boolean; wa_id: string }>("/admin/whatsapp-invite", { phone, name }),
 };
 
+// WhatsApp voice calling — the dashboard softphone's backend.
+export const callsApi = {
+    iceConfig: () => get<{ ice_servers: RTCIceServer[] }>("/admin/calls/ice-config"),
+    offer: (callId: string) =>
+        get<{ call_id: string; sdp: string; from: string }>(`/admin/calls/${encodeURIComponent(callId)}/offer`),
+    answer: (callId: string, sdp: string) =>
+        post<{ ok: boolean }>(`/admin/calls/${encodeURIComponent(callId)}/answer`, { sdp }),
+    terminate: (callId: string) =>
+        post<{ ok: boolean }>(`/admin/calls/${encodeURIComponent(callId)}/terminate`, {}),
+};
+
 // ── Attribution (which source/post drives leads + revenue) ───────────────────
 
 export interface AttributionRow {

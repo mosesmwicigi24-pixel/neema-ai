@@ -114,6 +114,9 @@ async def _handle_calls(request: Request, payload: dict) -> None:
             _log.warning("WA calls webhook received: %s", json.dumps(change.get("value") or {})[:400])
             value = change.get("value") or {}
             phone_number_id = (value.get("metadata") or {}).get("phone_number_id")
+            # Caller name from the WABA contacts block (e.g. "Pastor Mwicigi").
+            _contacts = {str(c.get("wa_id")): (c.get("profile") or {}).get("name")
+                         for c in (value.get("contacts") or [])}
             for call in value.get("calls", []):
                 cid = call.get("id")
                 event = call.get("event")
@@ -139,15 +142,17 @@ async def _handle_calls(request: Request, payload: dict) -> None:
                             }),
                             ex=300,
                         )
-                        await redis.publish("ws:calls", json.dumps({
+                        await redis.publish("ws:channel:calls", json.dumps({
                             "type": "incoming_call", "call_id": cid,
-                            "from": call.get("from"), "at": call.get("timestamp"),
+                            "from": call.get("from"),
+                            "name": _contacts.get(str(call.get("from"))),
+                            "at": call.get("timestamp"),
                         }))
                 elif event == "terminate":
                     _log.info("WA call %s terminated (status=%s, dur=%ss)",
                               cid, call.get("status"), (call.get("duration") or "?"))
                     if redis is not None:
-                        await redis.publish("ws:calls", json.dumps({
+                        await redis.publish("ws:channel:calls", json.dumps({
                             "type": "call_ended", "call_id": cid,
                             "status": call.get("status"), "duration": call.get("duration"),
                         }))
