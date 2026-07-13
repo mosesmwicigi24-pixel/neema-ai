@@ -973,27 +973,39 @@ export function CustomerSidebar({
                     ))}
                     {(() => {
                         // A captured phone gives this customer a WhatsApp door even
-                        // before their first WhatsApp message — one tap to wa.me.
+                        // before their first WhatsApp message — one tap opens WhatsApp
+                        // with a warm invite prefilled, continuing the chat there (where
+                        // we can take payment). Shown only when no WhatsApp thread
+                        // exists yet — otherwise the channel chip above opens it.
                         const digits = (profile.phone || "").replace(/\D/g, "");
                         const hasWaChannel = (profile.channels || []).some(
                             (c) => c.channel === "whatsapp",
                         );
                         if (!hasWaChannel && digits.length >= 7 && digits.length <= 15) {
+                            const first = (profile.name || "").trim().split(/\s+/)[0] || "";
+                            const invite =
+                                `Hello${first ? " " + first : ""}, this is Bethany House 🙏 ` +
+                                `Continuing our chat here on WhatsApp so we can finalise your order. ` +
+                                `How may we help?`;
                             return (
                                 <button
                                     type="button"
                                     onClick={() =>
-                                        window.open(`https://wa.me/${digits}`, "_blank", "noopener")
+                                        window.open(
+                                            `https://wa.me/${digits}?text=${encodeURIComponent(invite)}`,
+                                            "_blank",
+                                            "noopener",
+                                        )
                                     }
-                                    title="Open WhatsApp chat"
-                                    className="inline-flex items-center gap-0.5 text-[10px] rounded px-1.5 py-0.5 capitalize cursor-pointer hover:brightness-95"
+                                    title="Invite this customer to WhatsApp (opens WhatsApp with a prefilled message)"
+                                    className="inline-flex items-center gap-0.5 text-[10px] font-semibold rounded px-1.5 py-0.5 cursor-pointer hover:brightness-95"
                                     style={{
-                                        backgroundColor: "#f0fdf4",
-                                        border: "1px solid #b5da8b",
-                                        color: "#1e293b",
+                                        backgroundColor: "#25D366",
+                                        border: "1px solid #1da851",
+                                        color: "#fff",
                                     }}
                                 >
-                                    <ChannelBadge channel="whatsapp" /> whatsapp
+                                    <ChannelBadge channel="whatsapp" /> Invite to WhatsApp
                                 </button>
                             );
                         }
