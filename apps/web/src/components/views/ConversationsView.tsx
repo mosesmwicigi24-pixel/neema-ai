@@ -279,8 +279,7 @@ const CHANNEL_TABS: { id: "all" | Channel; label: string; short: string }[] = [
     { id: "facebook", label: "Facebook", short: "FB" },
     { id: "messenger", label: "Messenger", short: "MSG" },
     { id: "instagram", label: "Instagram", short: "IG" },
-    { id: "email", label: "Email", short: "Email" },
-    { id: "sms", label: "SMS", short: "SMS" },
+    // Email + SMS hidden for now — no traffic on those channels yet.
 ];
 
 // Accent for the "All" tab (gold) — channels use their own brand colour.
