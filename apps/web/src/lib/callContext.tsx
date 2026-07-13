@@ -112,8 +112,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }, [muted]);
 
     useEffect(() => {
-        if (!ws) return;
+        if (!ws) { console.debug("[call] waiting for WebSocket…"); return; }
+        console.debug("[call] listening for incoming calls");
         const onEvent = (evt: any) => {
+            if (evt?.type === "incoming_call" || evt?.type === "call_ended") {
+                console.debug("[call] event received:", evt);
+            }
             if (evt?.type === "incoming_call") {
                 setPhase((p) => {
                     if (p !== "idle") return p;

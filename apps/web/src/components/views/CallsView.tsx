@@ -114,11 +114,11 @@ export function CallsView({ isMobile }: SharedViewProps): React.ReactElement {
                                         </div>
                                         {c.wa_id && (
                                             <a href={`https://wa.me/${c.wa_id}`} target="_blank" rel="noopener noreferrer"
-                                                title="Message on WhatsApp"
+                                                title="Message on WhatsApp (opens WhatsApp)"
                                                 className="flex-shrink-0 flex items-center justify-center rounded-full transition-transform hover:scale-105"
-                                                style={{ width: 34, height: 34, backgroundColor: "#25D366", color: "#04220f" }}>
-                                                <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                                                    <path d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                                                style={{ width: 34, height: 34, backgroundColor: "rgba(37,211,102,0.16)", color: "#2ad17f", border: "1px solid rgba(37,211,102,0.3)" }}>
+                                                <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                                                    <path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z" />
                                                 </svg>
                                             </a>
                                         )}
