@@ -121,8 +121,12 @@ export function WhatsAppSoftphone(): React.ReactElement | null {
     }, [muted]);
 
     useEffect(() => {
-        if (!ws) return;
+        if (!ws) { console.debug("[softphone] no ws yet"); return; }
+        console.debug("[softphone] listening for call events");
         const onEvent = (evt: any) => {
+            if (evt?.type === "incoming_call" || evt?.type === "call_ended") {
+                console.debug("[softphone] call event:", evt);
+            }
             if (evt?.type === "incoming_call") {
                 setPhase((p) => {
                     if (p !== "idle") return p;
