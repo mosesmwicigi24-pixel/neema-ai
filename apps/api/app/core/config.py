@@ -20,6 +20,14 @@ class Settings(BaseSettings):
     # "Hello {{1}}, this is Bethany House…". Name + language must match the
     # approved template exactly.
     wa_invite_template: str = "whatsapp_invite"
+    # WhatsApp voice calling: TURN/STUN for the browser softphone's WebRTC media.
+    # The dashboard fetches these to build its RTCPeerConnection. coturn on our own
+    # box supplies turn_url/username/credential; a public STUN is the always-on
+    # fallback for same-network testing.
+    turn_url: str = ""
+    turn_username: str = ""
+    turn_credential: str = ""
+    stun_url: str = "stun:stun.l.google.com:19302"
     wa_invite_lang: str = "en"
     n8n_api_secret: str = ""
     # ── Meta Messenger / Instagram webhook (multichannel ingestion) ──────────

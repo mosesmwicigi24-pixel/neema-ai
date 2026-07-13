@@ -95,3 +95,49 @@ def test_forward_relays_raw_body(monkeypatch):
     assert captured["content"] == raw                       # byte-for-byte
     assert captured["url"] == "https://n8n.example/wa"
     assert "X-Hub-Signature-256" in captured["headers"]     # signature preserved
+
+
+# ── Voice-calling accept flow ────────────────────────────────────────────────
+
+def test_ice_servers_builds_from_config(monkeypatch):
+    from app.services.wa_calling import ice_servers
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "turn_url", "turn:turn.bethanyhouse.co.ke:3478", raising=False)
+    monkeypatch.setattr(settings, "turn_username", "neema", raising=False)
+    monkeypatch.setattr(settings, "turn_credential", "sec", raising=False)
+    monkeypatch.setattr(settings, "stun_url", "stun:stun.l.google.com:19302", raising=False)
+    s = ice_servers()
+    assert s[0] == {"urls": "turn:turn.bethanyhouse.co.ke:3478", "username": "neema", "credential": "sec"}
+    assert {"urls": "stun:stun.l.google.com:19302"} in s
+    # No TURN configured → just STUN (same-network fallback).
+    monkeypatch.setattr(settings, "turn_url", "", raising=False)
+    assert ice_servers() == [{"urls": "stun:stun.l.google.com:19302"}]
+
+
+def test_call_action_posts_pre_accept_then_accept(monkeypatch):
+    from app.services import wa_calling
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "waba_token", "T", raising=False)
+    monkeypatch.setattr(settings, "waba_phone_number_id", "752950797900067", raising=False)
+    sent = []
+
+    class _Resp:
+        is_success = True
+        status_code = 200
+        content = b"{}"
+        def json(self): return {}
+
+    class _Client:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, url, headers=None, json=None, timeout=None):
+            sent.append(json)
+            return _Resp()
+
+    monkeypatch.setattr(wa_calling.httpx, "AsyncClient", lambda *a, **k: _Client())
+    asyncio.run(wa_calling.pre_accept("wacid.1", "v=0 answer"))
+    asyncio.run(wa_calling.accept("wacid.1", "v=0 answer"))
+    asyncio.run(wa_calling.terminate("wacid.1"))
+    assert sent[0]["action"] == "pre_accept" and sent[0]["session"]["sdp_type"] == "answer"
+    assert sent[1]["action"] == "accept"
+    assert sent[2] == {"messaging_product": "whatsapp", "call_id": "wacid.1", "action": "terminate"}

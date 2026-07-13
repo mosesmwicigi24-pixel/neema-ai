@@ -1195,3 +1195,74 @@ async def whatsapp_invite(
         await db.rollback()   # the template already went out; recording is best-effort
 
     return {"ok": True, "wa_id": wa_id}
+
+
+# ── WhatsApp voice calling — the softphone's backend ─────────────────────────
+
+@router.get("/calls/ice-config")
+async def calls_ice_config(agent: Agent = Depends(get_current_agent)):
+    """ICE servers (coturn + STUN) for the dashboard's RTCPeerConnection."""
+    from app.services.wa_calling import ice_servers
+    return {"ice_servers": ice_servers()}
+
+
+@router.get("/calls/{call_id}/offer")
+async def calls_get_offer(
+    call_id: str,
+    request: Request,
+    agent: Agent = Depends(get_current_agent),
+):
+    """The caller's SDP offer, stashed by the webhook on `connect`. The softphone
+    sets this as its remote description before building an answer."""
+    redis = getattr(request.app.state, "redis", None)
+    if redis is None:
+        raise HTTPException(status_code=503, detail="calling unavailable")
+    raw = await redis.get(f"wa:call:offer:{call_id}")
+    if not raw:
+        raise HTTPException(status_code=404, detail="call offer expired or not found")
+    import json
+    data = json.loads(raw)
+    return {"call_id": call_id, "sdp": data.get("sdp"), "from": data.get("from")}
+
+
+@router.post("/calls/{call_id}/answer")
+async def calls_answer(
+    call_id: str,
+    body: dict,
+    request: Request,
+    agent: Agent = Depends(get_current_agent),
+):
+    """Accept the call with the softphone's SDP answer: pre_accept (establish
+    media) then accept (audio flows). One agent wins a call via a redis lock so
+    two dashboards can't both answer."""
+    sdp = (body or {}).get("sdp")
+    if not sdp:
+        raise HTTPException(status_code=400, detail="sdp answer is required")
+    redis = getattr(request.app.state, "redis", None)
+    if redis is not None:
+        won = await redis.set(f"wa:call:answered:{call_id}", str(agent.id), nx=True, ex=3600)
+        if not won:
+            raise HTTPException(status_code=409, detail="call already answered")
+    from app.services import wa_calling
+    try:
+        await wa_calling.pre_accept(call_id, sdp)
+        await wa_calling.accept(call_id, sdp)
+    except Exception as exc:
+        if redis is not None:
+            await redis.delete(f"wa:call:answered:{call_id}")   # let another try
+        raise HTTPException(status_code=502, detail=f"accept failed: {exc}")
+    return {"ok": True, "call_id": call_id}
+
+
+@router.post("/calls/{call_id}/terminate")
+async def calls_terminate(
+    call_id: str,
+    agent: Agent = Depends(get_current_agent),
+):
+    """Hang up or decline the call."""
+    from app.services import wa_calling
+    try:
+        await wa_calling.terminate(call_id)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"terminate failed: {exc}")
+    return {"ok": True, "call_id": call_id}
