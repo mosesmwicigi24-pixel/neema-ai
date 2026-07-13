@@ -78,3 +78,44 @@ async def backfill_unknown_profiles(db: AsyncSession, limit: int = 50,
     _log.info("meta profile backfill: enriched %d, marked %d of %d nameless contact(s)",
               enriched, marked, attempted)
     return {"attempted": attempted, "enriched": enriched, "marked": marked, "scanned": len(rows)}
+
+
+async def sweep_conversation_names(db: AsyncSession) -> int:
+    """Name nameless Meta contacts from the page-level Conversations API — the
+    participant list carries names for everyone who has messaged the page, and
+    it works where the per-user Profile API 400s (recently-active-only). Applies
+    the {PSID: name} map to every still-nameless identity+person. Commits; returns
+    the number named. Best-effort — never raises."""
+    from app.services.meta_send import fetch_conversation_names
+    from app.core.config import settings
+    try:
+        names: dict = {}
+        for pg in (list(settings.page_token_map().keys()) or [None]):
+            names.update(await fetch_conversation_names(pg))
+        if not names:
+            return 0
+        rows = (await db.execute(
+            select(Identity, Person)
+            .join(Person, Person.id == Identity.person_id)
+            .where(Identity.channel.in_(_META_CHANNELS))
+            .where(or_(Person.display_name.is_(None), Person.display_name == ""))
+            .where(Person.merged_into_id.is_(None))
+        )).all()
+        named = 0
+        for ident, person in rows:
+            nm = names.get(str(ident.external_id))
+            if not nm:
+                continue
+            person.display_name = nm[:200]
+            if not ident.display_name:
+                ident.display_name = nm[:200]
+            rp = dict(ident.raw_profile or {})
+            rp.pop("no_profile", None)
+            ident.raw_profile = rp
+            named += 1
+        if named:
+            await db.commit()
+        return named
+    except Exception:
+        _log.warning("conversation-name sweep failed", exc_info=True)
+        return 0

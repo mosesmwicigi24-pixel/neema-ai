@@ -153,25 +153,35 @@ async def lifespan(app: FastAPI):
     # Run schema migrations before serving any traffic
     await run_migrations()
 
-    # ── Drain the "Unknown" Meta contact backlog (best-effort, gated) ─────────
-    # Now that the Meta app is approved for the Profile API, retro-name the
-    # contacts that came in anonymous. Redis-gated so only one worker runs it and
-    # only every few hours; bounded so it never hammers the Graph API. Never
-    # blocks startup — fire-and-forget, and any failure is swallowed.
-    async def _meta_backfill_once():
-        try:
-            if redis is not None:
-                got = await redis.set("meta:backfill:lock", "1", nx=True, ex=6 * 3600)
-                if not got:
-                    return
-            from app.services.meta_enrich import backfill_unknown_profiles
-            async with AsyncSessionLocal() as db:
-                await backfill_unknown_profiles(db, limit=50)
-        except Exception as exc:
-            logger.warning("meta profile backfill (startup) skipped: %s", exc)
-
+    # ── Auto-name "Unknown" Meta contacts, forever ────────────────────────────
+    # The app names itself — no manual jobs. A background loop periodically (1) sweeps
+    # the page-level Conversations API for participant names (works even when the
+    # per-user Profile API is blocked) and (2) backfills profile pics/locale. Each
+    # tick is redis-locked so only ONE worker across the fleet runs it; failures are
+    # swallowed and never touch request handling. New Unknowns get named within a
+    # tick of arriving — the operator never runs enrich_names by hand.
     import asyncio as _asyncio
-    app.state._meta_backfill_task = _asyncio.create_task(_meta_backfill_once())
+
+    async def _meta_enrich_loop(interval: int = 900):
+        # Small initial delay so startup (migrations, redis check) settles first.
+        await _asyncio.sleep(20)
+        while True:
+            try:
+                if redis is None or await redis.set("meta:enrich:tick", "1", nx=True, ex=interval - 30):
+                    from app.services.meta_enrich import (
+                        sweep_conversation_names, backfill_unknown_profiles,
+                    )
+                    async with AsyncSessionLocal() as db:
+                        named = await sweep_conversation_names(db)
+                    async with AsyncSessionLocal() as db:
+                        await backfill_unknown_profiles(db, limit=50)
+                    if named:
+                        logger.info("meta auto-enrich: named %s contact(s) this tick", named)
+            except Exception as exc:
+                logger.warning("meta auto-enrich tick failed: %s", exc)
+            await _asyncio.sleep(interval)
+
+    app.state._meta_enrich_task = _asyncio.create_task(_meta_enrich_loop())
 
     yield
 
