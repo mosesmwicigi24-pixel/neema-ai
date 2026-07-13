@@ -1145,6 +1145,14 @@ async def whatsapp_invite(
         raise HTTPException(status_code=503, detail="WhatsApp sending is not configured.")
 
     first = (name.split()[0] if name else "there")
+    # The FULL message the customer receives — recorded verbatim so the Neema chat
+    # view shows the whole invite, not a truncated placeholder. Mirrors the
+    # approved `whatsapp_invite` template body (keep in sync if the template edits).
+    full_body = (
+        f"Hello {first}, this is Bethany House. We saw your message on "
+        "Facebook/Messenger. May we continue here on WhatsApp to finalise your "
+        "order? Reply and we'll help right away."
+    )
     try:
         await bridge.send_wa_template(
             wa_id, settings.wa_invite_template, settings.wa_invite_lang,
@@ -1153,7 +1161,10 @@ async def whatsapp_invite(
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"WhatsApp invite failed: {exc}")
 
-    # Record it so the WhatsApp thread appears with the invite already sent.
+    # Record it so the WhatsApp thread appears with the full invite already sent,
+    # and TAG the customer `whatsapp-invited` so the inbox tag filter can show
+    # everyone we've invited (the "[WhatsApp invite sent]" marker becomes a
+    # filterable label instead of inline text).
     try:
         ident = await resolve_or_create_person(db, "whatsapp", wa_id,
                                                display_name=name or None,
@@ -1164,8 +1175,21 @@ async def whatsapp_invite(
             channel="whatsapp", external_id=wa_id, wa_id=wa_id,
             person_id=ident.person_id, conversation_id=conv.id,
             direction=MsgDirection.outbound, sender=MsgSender.human_agent,
-            text=f"[WhatsApp invite sent] Hello {first}, this is Bethany House…",
+            text=full_body,
         ))
+        # Tag on the WhatsApp User row (the inbox tag filter reads user.state.tags).
+        from sqlalchemy.orm.attributes import flag_modified
+        u = (await db.execute(select(User).where(User.wa_id == wa_id))).scalar_one_or_none()
+        if u is None:
+            u = User(wa_id=wa_id, phone=wa_id, name=name or None, person_id=ident.person_id)
+            db.add(u)
+        st = dict(u.state or {})
+        tags = list(st.get("tags") or [])
+        if "whatsapp-invited" not in tags:
+            tags.append("whatsapp-invited")
+        st["tags"] = tags
+        u.state = st
+        flag_modified(u, "state")
         await db.commit()
     except Exception:
         await db.rollback()   # the template already went out; recording is best-effort
