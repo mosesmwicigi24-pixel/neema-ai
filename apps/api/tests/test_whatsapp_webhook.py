@@ -109,9 +109,12 @@ def test_ice_servers_builds_from_config(monkeypatch):
     s = ice_servers()
     assert s[0] == {"urls": "turn:turn.bethanyhouse.co.ke:3478", "username": "neema", "credential": "sec"}
     assert {"urls": "stun:stun.l.google.com:19302"} in s
-    # No TURN configured → just STUN (same-network fallback).
+    assert any("openrelay" in str(e.get("urls")) for e in s)   # public relay fallback present
+    # No TURN configured → STUN + the public relay fallback (never empty).
     monkeypatch.setattr(settings, "turn_url", "", raising=False)
-    assert ice_servers() == [{"urls": "stun:stun.l.google.com:19302"}]
+    s2 = ice_servers()
+    assert {"urls": "stun:stun.l.google.com:19302"} in s2
+    assert any("openrelay" in str(e.get("urls")) for e in s2)
 
 
 def test_call_action_posts_pre_accept_then_accept(monkeypatch):

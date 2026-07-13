@@ -42,7 +42,34 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const pcRef = useRef<RTCPeerConnection | null>(null);
     const localStreamRef = useRef<MediaStream | null>(null);
     const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
-    const ringtoneRef = useRef<HTMLAudioElement | null>(null);
+    const ringRef = useRef<{ ctx: AudioContext; timer: ReturnType<typeof setInterval> } | null>(null);
+
+    // Generated ringtone (no asset file → no 404). Best-effort; browser autoplay
+    // policy may mute it until a gesture, which is fine — the card is the alert.
+    const startRing = useCallback(() => {
+        try {
+            const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+            const beep = () => {
+                const o = ctx.createOscillator(), g = ctx.createGain();
+                o.frequency.value = 480; o.type = "sine";
+                o.connect(g); g.connect(ctx.destination);
+                const t = ctx.currentTime;
+                g.gain.setValueAtTime(0.0001, t);
+                g.gain.exponentialRampToValueAtTime(0.18, t + 0.05);
+                g.gain.exponentialRampToValueAtTime(0.0001, t + 0.7);
+                o.start(t); o.stop(t + 0.75);
+            };
+            beep();
+            ringRef.current = { ctx, timer: setInterval(beep, 2200) };
+        } catch { /* ignore */ }
+    }, []);
+    const stopRing = useCallback(() => {
+        if (ringRef.current) {
+            clearInterval(ringRef.current.timer);
+            ringRef.current.ctx.close().catch(() => {});
+            ringRef.current = null;
+        }
+    }, []);
     const phaseRef = useRef<CallPhase>("idle");
     const activeIdRef = useRef<string | null>(null);          // the call currently on screen
     const endedAtRef = useRef<Record<string, number>>({});    // callId → when we last dismissed it
@@ -58,16 +85,16 @@ export function CallProvider({ children }: { children: ReactNode }) {
         if (endedAt && Date.now() - endedAt < 12000) return;
         activeIdRef.current = callId;
         setCall({ callId, from, name });
-        ringtoneRef.current?.play().catch(() => {});
+        startRing();
         setPhase("ringing");
-    }, []);
+    }, [startRing]);
 
     const cleanup = useCallback(() => {
         pcRef.current?.close(); pcRef.current = null;
         localStreamRef.current?.getTracks().forEach((t) => t.stop());
         localStreamRef.current = null;
-        ringtoneRef.current?.pause();
-    }, []);
+        stopRing();
+    }, [stopRing]);
 
     const finish = useCallback((noteText?: string) => {
         cleanup();
@@ -95,17 +122,30 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
     const answer = useCallback(async () => {
         if (!call) return;
-        setError(null); setPhase("connecting"); ringtoneRef.current?.pause();
+        setError(null); setPhase("connecting"); stopRing();
         try {
             const [{ ice_servers }, offer] = await Promise.all([callsApi.iceConfig(), callsApi.offer(call.callId)]);
+            console.debug("[call] ICE servers:", ice_servers);
             const pc = new RTCPeerConnection({ iceServers: ice_servers });
             pcRef.current = pc;
             pc.ontrack = (e) => { if (remoteAudioRef.current) remoteAudioRef.current.srcObject = e.streams[0]; };
             pc.onconnectionstatechange = () => {
+                console.debug("[call] connectionState:", pc.connectionState);
                 if (pc.connectionState === "connected") setPhase("in_call");
                 if (["failed", "disconnected", "closed"].includes(pc.connectionState)) finish();
             };
-            const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+            pc.oniceconnectionstatechange = () => {
+                console.debug("[call] iceConnectionState:", pc.iceConnectionState);
+                if (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed") setPhase("in_call");
+            };
+            pc.onicecandidate = (e) => {
+                if (e.candidate && e.candidate.candidate.includes("typ relay")) console.debug("[call] got TURN relay candidate ✓");
+            };
+            pc.onicecandidateerror = (e: any) => console.warn("[call] ICE candidate error:", e?.errorText || e?.url);
+            // Studio-ish mic: echo cancellation + noise suppression + auto gain.
+            const mic = await navigator.mediaDevices.getUserMedia({
+                audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+            });
             localStreamRef.current = mic;
             mic.getTracks().forEach((t) => pc.addTrack(t, mic));
             await pc.setRemoteDescription({ type: "offer", sdp: offer.sdp });
@@ -188,7 +228,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
         <Ctx.Provider value={{ phase, call, muted, seconds, error, note, answer, hangup, callback, toggleMute }}>
             {children}
             <audio ref={remoteAudioRef} autoPlay className="hidden" />
-            <audio ref={ringtoneRef} loop src="/ringtone.mp3" className="hidden" />
         </Ctx.Provider>
     );
 }

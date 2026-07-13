@@ -56,15 +56,26 @@ async def terminate(call_id: str) -> dict:
 
 
 def ice_servers() -> list[dict]:
-    """ICE server list for the browser's RTCPeerConnection: our coturn (if
-    configured) plus a public STUN fallback for same-network testing."""
+    """ICE servers for the browser's RTCPeerConnection. Our own coturn is primary;
+    a public STUN + a public TURN (openrelay) are added as fallbacks so media can
+    still relay if coturn is unreachable — voice needs a working relay to traverse
+    NAT/mobile networks in both directions (browser ↔ Meta)."""
     servers: list[dict] = []
     if settings.turn_url:
-        entry = {"urls": settings.turn_url}
+        entry: dict = {"urls": settings.turn_url}
         if settings.turn_username:
             entry["username"] = settings.turn_username
             entry["credential"] = settings.turn_credential
         servers.append(entry)
     if settings.stun_url:
         servers.append({"urls": settings.stun_url})
+    # Public relay fallback (free, widely used) — over UDP:80, TCP:80 and TLS:443
+    # so it survives restrictive networks. Ensures a relay candidate exists even
+    # before our coturn is fully proven.
+    servers.append({
+        "urls": ["turn:openrelay.metered.ca:80",
+                 "turn:openrelay.metered.ca:443",
+                 "turn:openrelay.metered.ca:443?transport=tcp"],
+        "username": "openrelayproject", "credential": "openrelayproject",
+    })
     return servers

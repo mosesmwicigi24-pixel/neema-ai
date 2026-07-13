@@ -1259,7 +1259,8 @@ async def calls_answer(
             raise HTTPException(status_code=409, detail="call already answered")
     from app.services import wa_calling
     try:
-        await wa_calling.pre_accept(call_id, sdp)
+        # accept directly with the SDP answer. (pre_accept+accept back-to-back
+        # raced and 502'd — accept alone establishes media fine.)
         await wa_calling.accept(call_id, sdp)
     except Exception as exc:
         if redis is not None:
