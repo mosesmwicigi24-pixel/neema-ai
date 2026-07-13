@@ -1056,21 +1056,24 @@ export function ConversationsView({
                                 key={tab.id}
                                 onClick={() => setChannelTab(tab.id)}
                                 title={tab.label}
-                                className="relative flex-1 min-w-0 flex flex-col items-center justify-center gap-0.5 h-10 rounded-lg border transition-all"
+                                className="relative flex-1 min-w-0 flex flex-col items-center justify-center gap-0.5 h-10 rounded-lg border transition-all hover:brightness-[0.97]"
                                 style={{
-                                    backgroundColor: active ? accent : "#f6f7f5",
-                                    borderColor: active ? accent : "#e6e9e3",
+                                    // Each channel wears its own brand hue: full fill when
+                                    // active, a soft tint of the same colour when not — so
+                                    // the tabs read as distinct, coloured, and attractive.
+                                    backgroundColor: active ? accent : accent + "14",
+                                    borderColor: active ? accent : accent + "33",
                                 }}
                             >
                                 <span
-                                    className="flex items-center justify-center [&>svg]:w-3 [&>svg]:h-3"
+                                    className="flex items-center justify-center [&>svg]:w-3.5 [&>svg]:h-3.5"
                                     style={{ color: active ? "#ffffff" : accent }}
                                 >
                                     {tab.id === "all" ? <SparkleIcon /> : cfg!.icon}
                                 </span>
                                 <span
-                                    className="text-[8px] font-semibold leading-none tracking-tight"
-                                    style={{ color: active ? "#ffffff" : "#94a3b8" }}
+                                    className="text-[8px] font-bold leading-none tracking-tight"
+                                    style={{ color: active ? "#ffffff" : accent }}
                                 >
                                     {tab.short}
                                 </span>
@@ -1264,9 +1267,13 @@ export function ConversationsView({
                                                                 : undefined
                                                         }
                                                         title={multi ? `Open ${sib.channel}` : undefined}
-                                                        className="text-[10px] font-bold px-1.5 h-[16px] rounded flex items-center leading-none relative"
+                                                        className="text-[10px] font-bold px-1.5 h-[16px] rounded border flex items-center leading-none relative"
                                                         style={{
-                                                            backgroundColor: open ? scfg.color : scfg.color + "1a",
+                                                            // Matches the channel-tab palette:
+                                                            // filled brand colour when open, a soft
+                                                            // tint of the same hue otherwise.
+                                                            backgroundColor: open ? scfg.color : scfg.color + "14",
+                                                            borderColor: open ? scfg.color : scfg.color + "33",
                                                             color: open ? "#fff" : scfg.color,
                                                             cursor: multi ? "pointer" : "default",
                                                         }}
