@@ -47,6 +47,19 @@ returns duration + status.
 5. **TURN server**: stand up `coturn` (a VPS box + a domain/IP + TLS). Modest
    resources; needed for reliable media across mobile networks.
 
+## ✅ Phase 0 DONE (2026-07-13) — pipe proven with a real call
+- Our API is the WABA front door (`/api/wa/webhook`), transparent-forwarding to
+  n8n (`whatsapp_forward_url`); messaging verified unbroken. Verify token
+  `GerdPatience@2017`. `calls` + `messages` fields subscribed. "Allow voice
+  calls" enabled; call hours Mon–Sat 08:00–19:00 Africa/Nairobi.
+- A REAL call (Pastor Mwicigi 254700706875 → 254785490805) hit the webhook and
+  logged `WA calls webhook received`. Real ids look like
+  `wacid.Ihgg…VAgAVHAA=`. Payload carries contacts[].profile.name +
+  from_user_id (`KE.…`). NOTE: confirm the exact `event` value + `session.sdp`
+  offer on the real connect payload (our WARNING log truncates at 400 chars —
+  bump temporarily when building the accept step).
+- Phone number id: 752950797900067.
+
 ## Phased build
 - **Phase 0 — signaling proof** (testable only after gates 1-4): `calls` webhook
   handler on our API — parse `connect`/`terminate`, create a Call record, WS-
