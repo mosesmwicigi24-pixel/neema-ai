@@ -1,38 +1,46 @@
 "use client";
 
-// Calls — a phone-style "recents" list of WhatsApp voice calls: who called,
-// when, missed/answered, duration, who picked up. Polls the /admin/calls log and
-// refreshes live when the softphone fires call events over the WebSocket.
+// Calls — the "Calls · History" panel from the Figma "WhatsApp Softphone" board.
+// A dark, premium call-console: header with a live missed badge, and phone-style
+// rows — colour-coded outcome (answered / missed / callback), duration, the agent
+// who took it, timestamp, and a green call-back shortcut. Polls the call log and
+// live-refreshes on WebSocket call events.
 import React, { useCallback, useEffect, useState } from "react";
-import { Avatar } from "@/components/ui/Avatar";
 import { timeAgo } from "@/lib/utils";
 import { callsApi, type ApiCall } from "@/lib/api";
 import { useWs } from "@/lib/websocket";
 import type { SharedViewProps } from "@/types";
 
-function fmtDur(s: number | null): string {
-    if (!s) return "";
-    const m = Math.floor(s / 60);
-    return `${m}:${(s % 60).toString().padStart(2, "0")}`;
-}
+const fmtDur = (s: number | null) => (!s ? "" : `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`);
 
-const STATUS_META: Record<string, { label: string; color: string; icon: string }> = {
-    answered: { label: "Answered",  color: "#16a34a", icon: "↙" },
-    ended:    { label: "Answered",  color: "#16a34a", icon: "↙" },
-    missed:   { label: "Missed",    color: "#ef4444", icon: "↙" },
-    declined: { label: "Declined",  color: "#f59e0b", icon: "↙" },
-    callback: { label: "Callback ↩", color: "#f59e0b", icon: "↩" },
-    ringing:  { label: "Ringing…",  color: "#25D366", icon: "●" },
+const OUTCOME: Record<string, { label: string; color: string; dir: "in" | "out" | "back" }> = {
+    answered: { label: "Answered", color: "#2ad17f", dir: "in" },
+    ended:    { label: "Answered", color: "#2ad17f", dir: "in" },
+    missed:   { label: "Missed",   color: "#f2555a", dir: "in" },
+    declined: { label: "Declined", color: "#f5a623", dir: "in" },
+    callback: { label: "Callback", color: "#f5a623", dir: "back" },
+    ringing:  { label: "Ringing…", color: "#2ad17f", dir: "in" },
 };
+
+const AV = ["#3b6ea5", "#a5417d", "#b5892f", "#3c8c5a", "#8a4fc4", "#b24a4a"];
+const avatarColor = (s: string) => AV[[...(s || "?")].reduce((a, c) => a + c.charCodeAt(0), 0) % AV.length];
+
+function DirIcon({ dir, color }: { dir: "in" | "out" | "back"; color: string }) {
+    const d = dir === "back"
+        ? "M9 14l-4-4 4-4M5 10h10a4 4 0 014 4v2"
+        : "M17 7L7 17M7 17h7M7 17V10";   // incoming arrow
+    return (
+        <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+            <path d={d} />
+        </svg>
+    );
+}
 
 export function CallsView({ isMobile }: SharedViewProps): React.ReactElement {
     const ws = useWs();
     const [calls, setCalls] = useState<ApiCall[] | null>(null);
 
-    const load = useCallback(() => {
-        callsApi.list().then(setCalls).catch(() => setCalls([]));
-    }, []);
-
+    const load = useCallback(() => { callsApi.list().then(setCalls).catch(() => setCalls([])); }, []);
     useEffect(() => {
         load();
         const t = setInterval(() => {
@@ -40,83 +48,86 @@ export function CallsView({ isMobile }: SharedViewProps): React.ReactElement {
         }, 20000);
         return () => clearInterval(t);
     }, [load]);
-
-    // Live refresh when a call starts/ends.
     useEffect(() => {
         if (!ws) return;
-        const onEvent = (e: any) => {
-            if (e?.type === "incoming_call" || e?.type === "call_ended") setTimeout(load, 500);
-        };
-        ws.on("event", onEvent);
-        return () => ws.off("event", onEvent);
+        const on = (e: any) => { if (e?.type === "incoming_call" || e?.type === "call_ended") setTimeout(load, 500); };
+        ws.on("event", on);
+        return () => ws.off("event", on);
     }, [ws, load]);
 
-    const missedCount = (calls ?? []).filter((c) => c.status === "missed").length;
+    const missed = (calls ?? []).filter((c) => c.status === "missed").length;
 
     return (
-        <div className="h-full overflow-y-auto bg-[#fafcf7]">
-            <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6">
-                <div className="flex items-center justify-between mb-5">
+        <div className="h-full overflow-y-auto w-full" style={{ backgroundColor: "#f6f7f2" }}>
+            <div className="mx-auto px-4 sm:px-6 py-6" style={{ maxWidth: 560 }}>
+                <div className="rounded-2xl overflow-hidden"
+                    style={{ background: "radial-gradient(120% 60% at 50% 0%, #123626 0%, #0b1410 60%)", border: "1px solid rgba(37,211,102,0.14)", boxShadow: "0 20px 50px rgba(0,0,0,0.25)" }}>
+
+                    <div className="px-6 pt-6 pb-4 flex items-start justify-between">
+                        <div>
+                            <div className="text-white" style={{ fontSize: 22, fontWeight: 500 }}>Calls</div>
+                            <div style={{ fontSize: 13, color: "#7f9b8b", marginTop: 2 }}>
+                                WhatsApp voice calls · {calls?.length ?? 0} total
+                            </div>
+                        </div>
+                        {missed > 0 && (
+                            <span style={{ fontSize: 12, fontWeight: 500, color: "#ff8a8d", backgroundColor: "rgba(242,85,90,0.16)", padding: "5px 11px", borderRadius: 999 }}>
+                                {missed} missed
+                            </span>
+                        )}
+                    </div>
+
                     <div>
-                        <h1 className="text-xl font-bold text-[#16270c]">Calls</h1>
-                        <p className="text-xs text-[#8a9e80] mt-0.5">
-                            WhatsApp voice calls · {calls?.length ?? 0} total
-                            {missedCount > 0 && (
-                                <span className="text-red-500 font-semibold"> · {missedCount} missed</span>
-                            )}
-                        </p>
+                        {calls === null ? (
+                            <div style={{ color: "#7f9b8b", fontSize: 14 }} className="px-6 py-10 text-center">Loading…</div>
+                        ) : calls.length === 0 ? (
+                            <div className="px-6 py-14 text-center">
+                                <div style={{ color: "#cfe9d9", fontSize: 15, fontWeight: 500 }}>No calls yet</div>
+                                <div style={{ color: "#7f9b8b", fontSize: 13, marginTop: 6 }}>
+                                    Incoming WhatsApp voice calls appear here. Keep the dashboard open — a call
+                                    takes over the screen when it rings.
+                                </div>
+                            </div>
+                        ) : (
+                            calls.map((c) => {
+                                const o = OUTCOME[c.status] ?? OUTCOME.ended;
+                                const who = c.name || (c.wa_id ? `+${c.wa_id}` : "Unknown");
+                                const initials = who.replace("+", "").split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+                                return (
+                                    <div key={c.id} className="flex items-center gap-3 px-6 py-3.5"
+                                        style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+                                        <div className="flex items-center justify-center rounded-full flex-shrink-0"
+                                            style={{ width: 40, height: 40, backgroundColor: avatarColor(who), color: "#fff", fontSize: 13, fontWeight: 500 }}>
+                                            {initials || "?"}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="truncate" style={{ fontSize: 14, fontWeight: 500, color: "#e9edef" }}>{who}</div>
+                                            <div className="flex items-center gap-1.5" style={{ fontSize: 12, color: o.color, marginTop: 1 }}>
+                                                <DirIcon dir={o.dir} color={o.color} />
+                                                <span>{o.label}</span>
+                                                {c.duration ? <span style={{ color: "#7f9b8b" }}>· {fmtDur(c.duration)}</span> : null}
+                                                {c.agent_name ? <span style={{ color: "#7f9b8b" }}>· {c.agent_name.split(" ")[0]}</span> : null}
+                                            </div>
+                                        </div>
+                                        <div style={{ fontSize: 11, color: "#6b8577" }} className="flex-shrink-0">
+                                            {c.started_at ? timeAgo(c.started_at) : ""}
+                                        </div>
+                                        {c.wa_id && (
+                                            <a href={`https://wa.me/${c.wa_id}`} target="_blank" rel="noopener noreferrer"
+                                                title="Message on WhatsApp"
+                                                className="flex-shrink-0 flex items-center justify-center rounded-full transition-transform hover:scale-105"
+                                                style={{ width: 34, height: 34, backgroundColor: "#25D366", color: "#04220f" }}>
+                                                <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                                                    <path d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                                                </svg>
+                                            </a>
+                                        )}
+                                    </div>
+                                );
+                            })
+                        )}
                     </div>
                 </div>
-
-                {calls === null ? (
-                    <div className="text-sm text-[#8a9e80] py-10 text-center">Loading…</div>
-                ) : calls.length === 0 ? (
-                    <div className="bg-white rounded-xl border border-[#cee6b2] p-10 text-center">
-                        <div className="text-3xl mb-2">📞</div>
-                        <div className="text-sm font-semibold text-[#1c2917]">No calls yet</div>
-                        <div className="text-xs text-[#8a9e80] mt-1">
-                            Incoming WhatsApp voice calls will appear here. Keep the dashboard open —
-                            the softphone rings anywhere in Neema.
-                        </div>
-                    </div>
-                ) : (
-                    <div className="bg-white rounded-xl border border-[#cee6b2] overflow-hidden divide-y divide-[#f2f4ef]">
-                        {calls.map((c) => {
-                            const meta = STATUS_META[c.status] ?? STATUS_META.ended;
-                            const who = c.name || (c.wa_id ? `+${c.wa_id}` : "Unknown");
-                            const missed = c.status === "missed";
-                            return (
-                                <div key={c.id} className="flex items-center gap-3 px-4 py-3 hover:bg-[#fbfaf6]">
-                                    <Avatar name={who} size={38} />
-                                    <div className="flex-1 min-w-0">
-                                        <div className={`text-sm font-medium truncate ${missed ? "text-red-600" : "text-[#1c2917]"}`}>
-                                            {who}
-                                        </div>
-                                        <div className="text-[11px] flex items-center gap-1.5" style={{ color: meta.color }}>
-                                            <span>{meta.icon}</span>
-                                            <span>{meta.label}</span>
-                                            {c.duration ? <span className="text-[#8a9e80]">· {fmtDur(c.duration)}</span> : null}
-                                            {c.agent_name ? <span className="text-[#8a9e80]">· {c.agent_name}</span> : null}
-                                        </div>
-                                    </div>
-                                    <div className="text-[10px] text-[#b5c9a8] flex-shrink-0">
-                                        {c.started_at ? timeAgo(c.started_at) : ""}
-                                    </div>
-                                    {c.wa_id && (
-                                        <a
-                                            href={`https://wa.me/${c.wa_id}`}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            title="Open WhatsApp chat"
-                                            className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-white text-sm hover:brightness-95"
-                                            style={{ backgroundColor: "#25D366" }}
-                                        >💬</a>
-                                    )}
-                                </div>
-                            );
-                        })}
-                    </div>
-                )}
             </div>
         </div>
     );
