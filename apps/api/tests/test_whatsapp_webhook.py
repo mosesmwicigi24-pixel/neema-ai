@@ -62,7 +62,7 @@ def test_incoming_call_rings_and_dedupes(monkeypatch):
         }}]}],
     }
     asyncio.run(ww._handle_calls(_req(r), payload))
-    assert any(t == "ws:calls" and json.loads(m)["type"] == "incoming_call"
+    assert any(t == "ws:channel:calls" and json.loads(m)["type"] == "incoming_call"
                for t, m in r.published)
     assert json.loads(r.store["wa:call:offer:wacid.1"])["sdp"] == "v=0..."   # offer stashed
 
