@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Avatar } from "@/components/ui/Avatar";
 import {
     InterceptBadge,
@@ -296,6 +296,10 @@ const CH_SHORT: Record<Channel, string> = {
     email: "Email",
     sms: "SMS",
 };
+
+// Chip order for a unified (multi-channel) customer row — WhatsApp first (it can
+// transact), then the social channels.
+const CHAN_ORDER: Channel[] = ["whatsapp", "messenger", "facebook", "instagram", "email", "sms"];
 const SparkleIcon = () => (
     <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
         <path d="M12 2l1.9 5.6L19.5 9l-5.6 1.9L12 16.5 10.1 10.9 4.5 9l5.6-1.4L12 2zm6.5 11l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9.9-2.6z" />
@@ -879,6 +883,48 @@ export function ConversationsView({
             return bTime - aTime;
         });
 
+    // ── Collapse siblings into one row per person ─────────────────────────────
+    // Conversations sharing a person_id are the SAME customer across channels
+    // (Doctors West on Facebook + Messenger + WhatsApp). filteredConvs is already
+    // sorted newest-first, so the first occurrence of each person is the
+    // representative row; the rest become channel chips on it. A conversation
+    // with no person_id stands alone. On a specific channel tab there's nothing
+    // to collapse, so grouping only changes the "All" view.
+    const groupedConvs = useMemo(() => {
+        const repByPerson = new Map<string, Conversation>();
+        const siblings = new Map<string, Conversation[]>();
+        const order: Conversation[] = [];
+        for (const c of filteredConvs) {
+            const pid = c.person_id;
+            if (!pid) {
+                order.push(c);
+                siblings.set(c.id, [c]);
+                continue;
+            }
+            if (!repByPerson.has(pid)) {
+                repByPerson.set(pid, c);
+                order.push(c);
+                siblings.set(c.id, [c]);
+            } else {
+                siblings.get(repByPerson.get(pid)!.id)!.push(c);
+            }
+        }
+        return order.map((rep) => {
+            const sibs = (siblings.get(rep.id) ?? [rep])
+                .slice()
+                .sort((a, b) => CHAN_ORDER.indexOf(a.channel) - CHAN_ORDER.indexOf(b.channel));
+            return {
+                rep,
+                siblings: sibs,
+                unread: sibs.reduce((n, s) => n + (s.unread || 0), 0),
+                lastAt: sibs.reduce<string | null>(
+                    (m, s) => (s.last_message_at && (!m || s.last_message_at > m) ? s.last_message_at : m),
+                    null,
+                ),
+            };
+        });
+    }, [filteredConvs]);
+
     const humanCount = conversations.filter(
         (c) => c.intercept_mode === "human",
     ).length;
@@ -1104,15 +1150,18 @@ export function ConversationsView({
                         </p>
                     </div>
                 )}
-                {filteredConvs.map((conv) => {
-                    const isActive = conv.id === activeConvId;
-                    const hasUnread = conv.unread > 0;
-                    const cfg = conv.channel
-                        ? CHANNEL_CONFIG[conv.channel as Channel]
-                        : null;
+                {groupedConvs.map((group) => {
+                    // The row shows the person; the ACTIVE conversation is whichever
+                    // sibling (channel) is open — default to the representative.
+                    const activeSib =
+                        group.siblings.find((s) => s.id === activeConvId) ?? group.rep;
+                    const conv = activeSib;
+                    const isActive = group.siblings.some((s) => s.id === activeConvId);
+                    const hasUnread = group.unread > 0;
+                    const multi = group.siblings.length > 1;
                     return (
                         <button
-                            key={conv.id}
+                            key={group.rep.person_id ?? group.rep.id}
                             onClick={() => handleSelectConv(conv.id)}
                             className="w-full text-left px-4 py-3 transition-colors relative"
                             style={{
@@ -1168,8 +1217,8 @@ export function ConversationsView({
                                                 color: hasUnread ? "#427425" : "#b5c9a8",
                                             }}
                                         >
-                                            {conv.last_message_at
-                                                ? timeAgo(conv.last_message_at)
+                                            {group.lastAt
+                                                ? timeAgo(group.lastAt)
                                                 : ""}
                                         </span>
                                     </div>
@@ -1185,15 +1234,45 @@ export function ConversationsView({
                                                 "No messages yet"}
                                         </p>
                                         <div className="flex items-center gap-1 flex-shrink-0 mt-0.5">
-                                            {/* Channel pill — Figma WA/FB/IG tag */}
-                                            {cfg && (
-                                                <span
-                                                    className="text-[10px] font-bold px-1.5 h-[16px] rounded flex items-center leading-none"
-                                                    style={{ backgroundColor: cfg.color + "1a", color: cfg.color }}
-                                                >
-                                                    {CH_SHORT[conv.channel as Channel]}
-                                                </span>
-                                            )}
+                                            {/* Channel chips — one per linked channel for
+                                                this person. Click loads THAT channel's
+                                                thread. The open one is filled; the rest are
+                                                tinted. A lone channel is just a pill. */}
+                                            {group.siblings.map((sib) => {
+                                                const scfg = CHANNEL_CONFIG[sib.channel as Channel];
+                                                if (!scfg) return null;
+                                                const open = sib.id === activeConvId;
+                                                const chipUnread = (sib.unread || 0) > 0;
+                                                return (
+                                                    <span
+                                                        key={sib.id}
+                                                        role={multi ? "button" : undefined}
+                                                        onClick={
+                                                            multi
+                                                                ? (e) => {
+                                                                      e.stopPropagation();
+                                                                      handleSelectConv(sib.id);
+                                                                  }
+                                                                : undefined
+                                                        }
+                                                        title={multi ? `Open ${sib.channel}` : undefined}
+                                                        className="text-[10px] font-bold px-1.5 h-[16px] rounded flex items-center leading-none relative"
+                                                        style={{
+                                                            backgroundColor: open ? scfg.color : scfg.color + "1a",
+                                                            color: open ? "#fff" : scfg.color,
+                                                            cursor: multi ? "pointer" : "default",
+                                                        }}
+                                                    >
+                                                        {CH_SHORT[sib.channel as Channel]}
+                                                        {multi && chipUnread && !open && (
+                                                            <span
+                                                                className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full"
+                                                                style={{ backgroundColor: "#589b31" }}
+                                                            />
+                                                        )}
+                                                    </span>
+                                                );
+                                            })}
                                             {conv.intercept_mode !== "ai" && (
                                                 <div className="flex items-center gap-1">
                                                     <InterceptBadge
@@ -1222,9 +1301,9 @@ export function ConversationsView({
                                             )}
                                             {hasUnread && (
                                                 <span className="min-w-[18px] h-[18px] px-1 text-white text-[10px] font-bold rounded-full flex items-center justify-center" style={{ backgroundColor: "#589b31" }}>
-                                                    {conv.unread > 99
+                                                    {group.unread > 99
                                                         ? "99+"
-                                                        : conv.unread}
+                                                        : group.unread}
                                                 </span>
                                             )}
                                         </div>

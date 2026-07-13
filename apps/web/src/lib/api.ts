@@ -109,6 +109,7 @@ const del = <T>(path: string) => req<T>("DELETE", path);
 export interface ApiConversation {
     id: string;
     wa_id: string;
+    person_id?: string | null;
     external_id?: string | null;
     intercept_mode: "ai" | "human" | "paused";
     assigned_agent_id: string | null;
@@ -503,6 +504,7 @@ export function mapConversation(c: ApiConversation): Conversation {
     return {
         id: c.id,
         wa_id: c.wa_id,
+        person_id: c.person_id ?? null,
         external_id: c.external_id ?? c.wa_id ?? null,
         name: c.name ?? null,
         contact_name: c.name ?? null,

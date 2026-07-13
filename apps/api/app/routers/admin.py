@@ -196,6 +196,10 @@ async def list_conversations(
         {
             "id":                   str(c.id),
             "wa_id":                c.wa_id,
+            # The resolved human. Conversations sharing a person_id are the SAME
+            # customer across channels (Doctors West on Facebook + Messenger +
+            # WhatsApp) — the inbox collapses them into one row with channel chips.
+            "person_id":            str(c.person_id) if getattr(c, "person_id", None) else None,
             # Channel-native handle (wa_id | PSID | IGSID). == wa_id for WhatsApp,
             # but the ONLY customer key for Messenger/IG/FB (whose wa_id is null),
             # so the panel can load + save their profile.

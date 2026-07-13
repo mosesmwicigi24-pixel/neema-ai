@@ -22,6 +22,8 @@ export interface Conversation {
     // Channel-native handle (wa_id | Messenger PSID | IG IGSID). == wa_id for
     // WhatsApp; the only customer key for channels whose wa_id is null.
     external_id?: string | null;
+    // The resolved human — conversations sharing it are one customer across channels.
+    person_id?: string | null;
     name: string | null;
     avatar_url?: string | null;
     channel: Channel;
