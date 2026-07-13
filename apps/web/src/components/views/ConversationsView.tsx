@@ -1044,8 +1044,8 @@ export function ConversationsView({
                     />
                 </div>
 
-                {/* Channel tabs — compact icon pills per channel */}
-                <div className="flex gap-1.5 overflow-x-auto scrollbar-none pt-2 pb-1">
+                {/* Channel tabs — icon pills per channel, spread evenly across the row */}
+                <div className="flex gap-1.5 pt-2 pb-1">
                     {CHANNEL_TABS.map((tab) => {
                         const active = channelTab === tab.id;
                         const cfg = tab.id === "all" ? null : CHANNEL_CONFIG[tab.id as Channel];
@@ -1056,7 +1056,7 @@ export function ConversationsView({
                                 key={tab.id}
                                 onClick={() => setChannelTab(tab.id)}
                                 title={tab.label}
-                                className="relative flex-shrink-0 flex flex-col items-center justify-center gap-0.5 w-10 h-10 rounded-lg border transition-all"
+                                className="relative flex-1 min-w-0 flex flex-col items-center justify-center gap-0.5 h-10 rounded-lg border transition-all"
                                 style={{
                                     backgroundColor: active ? accent : "#f6f7f5",
                                     borderColor: active ? accent : "#e6e9e3",
