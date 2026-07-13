@@ -109,6 +109,9 @@ async def _handle_calls(request: Request, payload: dict) -> None:
         for change in entry.get("changes", []):
             if change.get("field") != "calls":
                 continue
+            # WARNING level so it's always visible in prod logs (INFO may be
+            # filtered). Calls are rare + important, so this is fine.
+            _log.warning("WA calls webhook received: %s", json.dumps(change.get("value") or {})[:400])
             value = change.get("value") or {}
             phone_number_id = (value.get("metadata") or {}).get("phone_number_id")
             for call in value.get("calls", []):
