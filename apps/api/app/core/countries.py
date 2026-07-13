@@ -308,3 +308,12 @@ def name_for_iso(iso: str | None) -> str | None:
         if code2 == up:
             return name
     return None
+
+
+def iso_from_locale(locale: str | None) -> str | None:
+    """Country ISO from a Meta profile locale ('sw_KE' → 'KE', 'en_ZA' → 'ZA').
+    Validated against the country table; None for bare-language locales ('en')."""
+    if not locale or "_" not in str(locale):
+        return None
+    suffix = str(locale).rsplit("_", 1)[-1].upper()
+    return suffix if name_for_iso(suffix) else None

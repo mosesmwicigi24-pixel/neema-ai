@@ -205,6 +205,23 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
                 display_name=(prof.get("name") or None),
                 raw_profile=raw or None,
             )
+            # Profile locale ("sw_KE") → automatic country hint. WEAKEST signal:
+            # fills an EMPTY country only — a stated location or a shared phone
+            # prefix (capture_contact) overrides it.
+            if prof.get("locale"):
+                from app.core.countries import iso_from_locale, name_for_iso, flag_url_for
+                loc_iso = iso_from_locale(prof["locale"])
+                if loc_iso:
+                    from app.models.person import Person as _Person
+                    _p = await db.get(_Person, ident.person_id)
+                    if _p is not None and not (_p.state or {}).get("country_iso"):
+                        from sqlalchemy.orm.attributes import flag_modified as _fm
+                        st = dict(_p.state or {})
+                        st.update({"country_iso": loc_iso,
+                                   "country": name_for_iso(loc_iso),
+                                   "flag_url": flag_url_for(loc_iso)})
+                        _p.state = st
+                        _fm(_p, "state")
             conv = await get_or_create_conversation(db, channel, sender, person_id=ident.person_id)
 
             db.add(Message(

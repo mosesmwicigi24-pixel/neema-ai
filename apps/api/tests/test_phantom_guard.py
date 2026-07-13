@@ -67,3 +67,13 @@ def test_shared_number_normalizes_against_their_country():
     from app.core.phone import to_e164
     assert to_e164("0799223329", "ZA") == "+27799223329"
     assert to_e164("0712345678", "KE") == "+254712345678"
+
+
+def test_iso_from_locale():
+    from app.core.countries import iso_from_locale
+    assert iso_from_locale("sw_KE") == "KE"
+    assert iso_from_locale("en_ZA") == "ZA"
+    assert iso_from_locale("en_US") == "US"
+    assert iso_from_locale("en") is None        # bare language — no country
+    assert iso_from_locale("xx_QQ") is None     # not a real country
+    assert iso_from_locale(None) is None and iso_from_locale("") is None

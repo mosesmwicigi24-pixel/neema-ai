@@ -96,7 +96,22 @@ async def fetch_profile(external_id: str, channel: str = "messenger") -> dict:
             d = resp.json()
             name = (d.get("name") or d.get("username")
                     or f"{d.get('first_name', '')} {d.get('last_name', '')}".strip())
-            return {"name": name or None, "profile_pic": d.get("profile_pic")}
+            out = {"name": name or None, "profile_pic": d.get("profile_pic")}
+            # Best-effort SECOND call for locale (e.g. "sw_KE") — a free country
+            # hint. Separate request so an unapproved field can never break the
+            # name fetch; any failure is silently ignored.
+            try:
+                async with httpx.AsyncClient() as client:
+                    r2 = await client.get(
+                        url, params={"fields": "locale"},
+                        headers={"Authorization": f"Bearer {settings.meta_page_token}"},
+                        timeout=10.0,
+                    )
+                if r2.is_success and r2.json().get("locale"):
+                    out["locale"] = r2.json()["locale"]
+            except Exception:
+                pass
+            return out
         _log.info("profile fetch for %s (%s) → %s: %s",
                   external_id, channel, resp.status_code, resp.text[:200])
     except Exception as exc:
