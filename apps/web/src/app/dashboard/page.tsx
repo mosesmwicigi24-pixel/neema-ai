@@ -96,6 +96,11 @@ export default function NeemaDashboard(): React.ReactElement {
 
     const [theme, setTheme] = useState<ThemeMode>("light");
     const [view, setView] = useState<ViewId>("conversations");
+    // Cross-view request to open a specific customer's conversation in the inbox
+    // (e.g. from the Calls view "message" action → open the thread in-app, not a
+    // WhatsApp popup). Holds a wa_id / external_id; ConversationsView consumes it.
+    const [openConvKey, setOpenConvKey] = useState<string | null>(null);
+    const openConversationFor = (key: string) => { setOpenConvKey(key); setView("conversations"); };
     const [messages, setMessages] = useState<MessagesMap>({});
     const [toast, setToast] = useState<ToastState | null>(null);
     // ── Sidebar expanded by default (Figma) — collapsible to an icon rail ──────
@@ -444,6 +449,8 @@ export default function NeemaDashboard(): React.ReactElement {
                 agents={agents}
                 orders={orders}
                 refetchConversations={refetchConversations}
+                openConvKey={openConvKey}
+                onConsumeOpenConvKey={() => setOpenConvKey(null)}
                 {...viewProps}
             />
         ),
@@ -455,7 +462,7 @@ export default function NeemaDashboard(): React.ReactElement {
                 {...viewProps}
             />
         ),
-        calls: <CallsView {...viewProps} />,
+        calls: <CallsView onOpenConversation={openConversationFor} {...viewProps} />,
         leads: <LeadsView {...viewProps} />,
         reports: (
             <ReportsView

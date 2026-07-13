@@ -271,6 +271,9 @@ interface ConversationsViewProps extends SharedViewProps {
     agents: Agent[];
     orders?: Order[];
     refetchConversations?: () => void;
+    // A wa_id/external_id another view (Calls) asked us to open in-app.
+    openConvKey?: string | null;
+    onConsumeOpenConvKey?: () => void;
 }
 
 const CHANNEL_TABS: { id: "all" | Channel; label: string; short: string }[] = [
@@ -315,6 +318,8 @@ export function ConversationsView({
     onToast,
     isMobile,
     refetchConversations,
+    openConvKey,
+    onConsumeOpenConvKey,
 }: ConversationsViewProps): React.ReactElement {
     const [activeConvId, setActiveConvId] = useState<string>("");
     const [mobilePanel, setMobilePanel] = useState<MobilePanel>("list");
@@ -440,6 +445,20 @@ export function ConversationsView({
     // Jump to the same person's conversation on another channel (clicking a
     // linked identity in the customer panel). WhatsApp real numbers open wa.me in
     // the sidebar itself; everything else lands here and we switch the thread.
+    // Open a conversation another view requested (Calls → "message in Neema").
+    // Match by wa_id/external_id, preferring a WhatsApp thread for a caller.
+    useEffect(() => {
+        if (!openConvKey) return;
+        const key = openConvKey.replace(/^\+/, "");
+        const matches = conversations.filter(
+            (c) => c.wa_id === key || c.external_id === key || c.wa_id === openConvKey,
+        );
+        const conv = matches.find((c) => c.channel === "whatsapp") ?? matches[0];
+        if (conv) setActiveConvId(conv.id);
+        else onToast?.("No conversation yet — they haven't messaged. Use Invite to WhatsApp.", "warning");
+        onConsumeOpenConvKey?.();
+    }, [openConvKey, conversations, onConsumeOpenConvKey, onToast]);
+
     const openIdentityConversation = (channel: string, externalId: string) => {
         const conv = conversations.find(
             (c) =>

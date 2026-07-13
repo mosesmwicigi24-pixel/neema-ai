@@ -36,7 +36,11 @@ function DirIcon({ dir, color }: { dir: "in" | "out" | "back"; color: string }) 
     );
 }
 
-export function CallsView({ isMobile }: SharedViewProps): React.ReactElement {
+interface CallsViewProps extends SharedViewProps {
+    onOpenConversation?: (key: string) => void;
+}
+
+export function CallsView({ isMobile, onOpenConversation }: CallsViewProps): React.ReactElement {
     const ws = useWs();
     const [calls, setCalls] = useState<ApiCall[] | null>(null);
 
@@ -94,8 +98,12 @@ export function CallsView({ isMobile }: SharedViewProps): React.ReactElement {
                                 const who = c.name || (c.wa_id ? `+${c.wa_id}` : "Unknown");
                                 const initials = who.replace("+", "").split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
                                 return (
-                                    <div key={c.id} className="flex items-center gap-3 px-6 py-3.5"
-                                        style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+                                    <div key={c.id}
+                                        onClick={() => c.wa_id && onOpenConversation?.(c.wa_id)}
+                                        className="flex items-center gap-3 px-6 py-3.5 transition-colors"
+                                        style={{ borderTop: "1px solid rgba(255,255,255,0.05)", cursor: c.wa_id ? "pointer" : "default" }}
+                                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.03)")}
+                                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}>
                                         <div className="flex items-center justify-center rounded-full flex-shrink-0"
                                             style={{ width: 40, height: 40, backgroundColor: avatarColor(who), color: "#fff", fontSize: 13, fontWeight: 500 }}>
                                             {initials || "?"}
@@ -113,15 +121,17 @@ export function CallsView({ isMobile }: SharedViewProps): React.ReactElement {
                                             {c.started_at ? timeAgo(c.started_at) : ""}
                                         </div>
                                         {c.wa_id && (
-                                            <a href={`https://wa.me/${c.wa_id}`} target="_blank" rel="noopener noreferrer"
-                                                title="Message on WhatsApp (opens WhatsApp)"
+                                            <button type="button"
+                                                onClick={() => onOpenConversation?.(c.wa_id!)}
+                                                title="Open the conversation in Neema"
                                                 className="flex-shrink-0 flex items-center justify-center rounded-full transition-transform hover:scale-105"
                                                 style={{ width: 34, height: 34, backgroundColor: "rgba(37,211,102,0.16)", color: "#2ad17f", border: "1px solid rgba(37,211,102,0.3)" }}>
                                                 <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                                                     <path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z" />
                                                 </svg>
-                                            </a>
+                                            </button>
                                         )}
+                                        {/* Whole row is also clickable to open the thread in-app. */}
                                     </div>
                                 );
                             })
