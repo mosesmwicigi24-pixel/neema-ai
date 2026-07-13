@@ -174,7 +174,11 @@ async def lifespan(app: FastAPI):
                     async with AsyncSessionLocal() as db:
                         named = await sweep_conversation_names(db)
                     async with AsyncSessionLocal() as db:
-                        await backfill_unknown_profiles(db, limit=50)
+                        # pages_messaging is approved, so the per-user Profile API now
+                        # answers for everyone — retry_marked drains the contacts we
+                        # gave up on while it was blocked (photos + any names the
+                        # inbox sweep missed). Bounded per tick.
+                        await backfill_unknown_profiles(db, limit=50, retry_marked=True)
                     if named:
                         logger.info("meta auto-enrich: named %s contact(s) this tick", named)
             except Exception as exc:
