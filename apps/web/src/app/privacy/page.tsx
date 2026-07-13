@@ -58,7 +58,7 @@ export default function PrivacyPage() {
 
             <H>Contact</H>
             <p>
-                Message us on WhatsApp at +254 727 891 989 or through our Facebook
+                Message us on WhatsApp at +254 785 490 805 or through our Facebook
                 page (Bethany House) with any privacy question or request.
             </p>
         </LegalPage>

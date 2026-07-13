@@ -50,7 +50,7 @@ export default function TermsPage() {
 
             <H>Contact & law</H>
             <p>
-                Questions: WhatsApp +254 727 891 989 or our Facebook page. These terms
+                Questions: WhatsApp +254 785 490 805 or our Facebook page. These terms
                 are governed by the laws of Kenya.
             </p>
         </LegalPage>

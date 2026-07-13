@@ -17,7 +17,7 @@ export default function DataDeletionPage() {
                 of these channels:
             </p>
             <ul className="list-disc pl-6 space-y-1">
-                <li>WhatsApp: <strong>+254 727 891 989</strong></li>
+                <li>WhatsApp: <strong>+254 785 490 805</strong></li>
                 <li>Facebook Messenger: message our page, <strong>Bethany House</strong></li>
                 <li>Instagram: DM <strong>@bethanyhouse</strong></li>
             </ul>
