@@ -329,6 +329,10 @@ export function ConversationsView({
     );
     const [searchQ, setSearchQ] = useState<string>("");
     const [replyText, setReplyText] = useState<string>("");
+    // Cross-channel quote: a message the agent grabbed from one channel to answer
+    // from another (see the Facebook message, reply on WhatsApp). View-level so it
+    // survives switching channel chips; prepended to the reply when sent.
+    const [quoted, setQuoted] = useState<{ text: string; channel: string } | null>(null);
     const [draftVisible, setDraftVisible] = useState<boolean>(false);
     const [draftExpanded, setDraftExpanded] = useState<boolean>(false);
     const [draftText, setDraftText] = useState<string>("");
@@ -665,7 +669,11 @@ export function ConversationsView({
     const sendReply = async () => {
         if (!replyText.trim() || !activeConvId) return;
         setSending(true);
-        const text = replyText;
+        // Prepend the cross-channel quote so the customer sees what we're answering.
+        const q = quoted
+            ? `↩ Re (${CHANNEL_CONFIG[quoted.channel as Channel]?.label ?? quoted.channel}): "${quoted.text.slice(0, 180)}"\n\n`
+            : "";
+        const text = q + replyText;
         try {
             const optimisticMsg: Message = {
                 id: `optimistic-${Date.now()}`,
@@ -679,6 +687,7 @@ export function ConversationsView({
                 [activeConvId]: [...(m[activeConvId] ?? []), optimisticMsg],
             }));
             setReplyText("");
+            setQuoted(null);
             await conversationsApi.sendReply(activeConvId, text);
             const msgs = await conversationsApi.messages(activeConvId);
             setMessages((m) => ({ ...m, [activeConvId]: msgs }));
@@ -2144,7 +2153,7 @@ export function ConversationsView({
                                                         );
                                                     })()}
                                                     <div
-                                                        className={`text-[10px] mt-1 ${isInbound ? "" : "opacity-60"}`}
+                                                        className={`text-[10px] mt-1 flex items-center gap-2 ${isInbound ? "" : "opacity-60 justify-end"}`}
                                                         style={{ color: isInbound ? "#b5c9a8" : undefined }}
                                                     >
                                                         {msg.created_at
@@ -2152,6 +2161,23 @@ export function ConversationsView({
                                                                   msg.created_at,
                                                               )
                                                             : ""}
+                                                        {/* Cross-channel quote: grab this
+                                                            message to answer from another of
+                                                            the customer's channels. */}
+                                                        {isInbound && (msg.text || "").trim() && (
+                                                            <button
+                                                                onClick={() =>
+                                                                    setQuoted({
+                                                                        text: (msg.text || "").replace(/^\[comment\]\s*/, "").slice(0, 300),
+                                                                        channel: activeConv.channel || "whatsapp",
+                                                                    })
+                                                                }
+                                                                title="Quote this to reply from another channel"
+                                                                className="text-[#b5c9a8] hover:text-[#f59e0b] font-medium"
+                                                            >
+                                                                ↩ Quote
+                                                            </button>
+                                                        )}
                                                     </div>
                                                 </div>
                                             </div>
@@ -2326,6 +2352,24 @@ export function ConversationsView({
                                                 </button>
                                             </div>
                                         )}
+
+                                    {/* Cross-channel quote preview — what we're
+                                        answering, grabbed from another channel */}
+                                    {quoted && (
+                                        <div className="flex items-start gap-2 mb-2 px-3 py-2 rounded-lg bg-[#f1f5f9] border-l-2 border-[#f59e0b]">
+                                            <div className="flex-1 min-w-0">
+                                                <span className="text-[10px] font-semibold text-[#f59e0b] uppercase tracking-wide">
+                                                    Replying to {CHANNEL_CONFIG[quoted.channel as Channel]?.label ?? quoted.channel}
+                                                </span>
+                                                <p className="text-xs text-[#475569] truncate">{quoted.text}</p>
+                                            </div>
+                                            <button
+                                                onClick={() => setQuoted(null)}
+                                                title="Remove quote"
+                                                className="text-[#94a3b8] hover:text-[#475569] text-sm leading-none flex-shrink-0"
+                                            >✕</button>
+                                        </div>
+                                    )}
 
                                     <div className="flex gap-2 items-end">
                                         {/* Hidden file input */}
