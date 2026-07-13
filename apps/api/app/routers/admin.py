@@ -605,6 +605,13 @@ async def upload_media(
     else:
         waba_type = "document"
 
+    # Per-type size ceilings — match WhatsApp Cloud API's hard limits (anything
+    # larger is rejected downstream anyway) and stay under the 20 MB nginx body
+    # cap. Enforced server-side so a direct API call can't bypass the UI check.
+    MB = 1024 * 1024
+    MAX_BYTES = {"image": 5 * MB, "video": 16 * MB, "audio": 16 * MB, "document": 18 * MB}
+    MAX_LABEL = {"image": "5 MB", "video": "16 MB", "audio": "16 MB", "document": "18 MB"}
+
     from app.routers.media import MEDIA_DIR
     media_dir = MEDIA_DIR
     os.makedirs(media_dir, exist_ok=True)
@@ -612,8 +619,14 @@ async def upload_media(
     saved_name = f"{uuid.uuid4().hex}{ext}"
     file_path  = os.path.join(media_dir, saved_name)
 
+    content = await file.read()
+    limit = MAX_BYTES[waba_type]
+    if len(content) > limit:
+        raise HTTPException(
+            status_code=413,
+            detail=f"{waba_type.capitalize()} too large — max {MAX_LABEL[waba_type]}.",
+        )
     async with aiofiles.open(file_path, "wb") as f:
-        content = await file.read()
         await f.write(content)
 
     public_base = getattr(settings, "media_public_url", "").rstrip("/")

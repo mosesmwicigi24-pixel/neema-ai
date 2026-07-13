@@ -396,10 +396,12 @@ export function ConversationsView({
     const isAdminOrSuper = isSuperuser || currentRole === "admin";
     const canHandleConversations = isAdminOrSuper || currentRole === "agent";
 
-    // ── Media attachment state ────────────────────────────────────────────────
-    const [mediaFile, setMediaFile] = useState<File | null>(null);
+    // ── Media attachment state (multi-select) ─────────────────────────────────
+    // Each picked file carries its own object-URL preview; one shared caption
+    // rides on the FIRST image so we don't repeat the same text under every one.
+    type MediaItem = { id: string; file: File; previewUrl: string | null };
+    const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
     const [mediaCaption, setMediaCaption] = useState<string>("");
-    const [mediaPreviewUrl, setMediaPreviewUrl] = useState<string | null>(null);
     const [uploadingMedia, setUploadingMedia] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -786,43 +788,99 @@ export function ConversationsView({
         "video/mp4,video/3gpp," +
         "audio/ogg,audio/aac,audio/mpeg";
 
+    // Per-type ceilings enforced BEFORE upload (nginx also caps the request body
+    // at 20 MB). Images match WhatsApp Cloud API's hard 5 MB limit — anything
+    // larger is rejected by WhatsApp anyway, so we stop it here with a clear msg.
+    const MB = 1024 * 1024;
+    const MAX_IMAGE_BYTES = 5 * MB;      // WhatsApp image limit
+    const MAX_VIDEO_BYTES = 16 * MB;     // WhatsApp video limit
+    const MAX_AUDIO_BYTES = 16 * MB;     // WhatsApp audio limit
+    const MAX_DOC_BYTES = 18 * MB;       // under the 20 MB nginx body cap
+
+    const limitFor = (file: File): { bytes: number; label: string } => {
+        if (file.type.startsWith("image/")) return { bytes: MAX_IMAGE_BYTES, label: "5 MB" };
+        if (file.type.startsWith("video/")) return { bytes: MAX_VIDEO_BYTES, label: "16 MB" };
+        if (file.type.startsWith("audio/")) return { bytes: MAX_AUDIO_BYTES, label: "16 MB" };
+        return { bytes: MAX_DOC_BYTES, label: "18 MB" };
+    };
+
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        setMediaFile(file);
-        if (file.type.startsWith("image/")) {
-            setMediaPreviewUrl(URL.createObjectURL(file));
-        } else {
-            setMediaPreviewUrl(null);
+        const picked = Array.from(e.target.files ?? []);
+        if (fileInputRef.current) fileInputRef.current.value = ""; // allow re-pick same file
+        if (!picked.length) return;
+
+        const accepted: MediaItem[] = [];
+        for (const file of picked) {
+            const { bytes, label } = limitFor(file);
+            if (file.size > bytes) {
+                onToast(`${file.name} is too large (max ${label})`, "error");
+                continue;
+            }
+            accepted.push({
+                id: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2, 8)}`,
+                file,
+                previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
+            });
         }
+        if (accepted.length) setMediaItems((prev) => [...prev, ...accepted]);
+    };
+
+    const removeMediaItem = (id: string) => {
+        setMediaItems((prev) => {
+            const gone = prev.find((it) => it.id === id);
+            if (gone?.previewUrl) URL.revokeObjectURL(gone.previewUrl);
+            return prev.filter((it) => it.id !== id);
+        });
     };
 
     const clearMediaAttachment = () => {
-        setMediaFile(null);
+        setMediaItems((prev) => {
+            prev.forEach((it) => it.previewUrl && URL.revokeObjectURL(it.previewUrl));
+            return [];
+        });
         setMediaCaption("");
-        if (mediaPreviewUrl) URL.revokeObjectURL(mediaPreviewUrl);
-        setMediaPreviewUrl(null);
         if (fileInputRef.current) fileInputRef.current.value = "";
     };
 
     const sendMedia = async () => {
-        if (!mediaFile || !activeConvId) return;
+        if (!mediaItems.length || !activeConvId) return;
         setUploadingMedia(true);
+        const sent: Message[] = [];
+        let failed = 0;
         try {
-            const msg = await conversationsApi.uploadMedia(
-                activeConvId,
-                mediaFile,
-                mediaCaption || undefined,
-            );
-            setMessages((m) => ({
-                ...m,
-                [activeConvId]: [...(m[activeConvId] ?? []), msg],
-            }));
-            clearMediaAttachment();
-            refetchConversations?.();
-            onToast("Media sent");
-        } catch (err: any) {
-            onToast(err?.message ?? "Failed to send media", "error");
+            // Send sequentially; the caption rides on the first item only.
+            for (let i = 0; i < mediaItems.length; i++) {
+                try {
+                    const msg = await conversationsApi.uploadMedia(
+                        activeConvId,
+                        mediaItems[i].file,
+                        i === 0 ? mediaCaption || undefined : undefined,
+                    );
+                    sent.push(msg);
+                } catch (err: any) {
+                    failed++;
+                    onToast(
+                        `${mediaItems[i].file.name}: ${err?.message ?? "failed"}`,
+                        "error",
+                    );
+                }
+            }
+            if (sent.length) {
+                setMessages((m) => ({
+                    ...m,
+                    [activeConvId]: [...(m[activeConvId] ?? []), ...sent],
+                }));
+                clearMediaAttachment();
+                refetchConversations?.();
+                onToast(
+                    failed
+                        ? `Sent ${sent.length}, ${failed} failed`
+                        : sent.length > 1
+                          ? `${sent.length} files sent`
+                          : "Media sent",
+                    failed ? "error" : "success",
+                );
+            }
         } finally {
             setUploadingMedia(false);
         }
@@ -2383,6 +2441,7 @@ export function ConversationsView({
                                             ref={fileInputRef}
                                             type="file"
                                             accept={ACCEPT_TYPES}
+                                            multiple
                                             className="hidden"
                                             onChange={handleFileSelect}
                                         />
@@ -2391,7 +2450,7 @@ export function ConversationsView({
                                             onClick={() =>
                                                 fileInputRef.current?.click()
                                             }
-                                            title="Attach image or file"
+                                            title="Attach images or files (up to 5 MB each for images)"
                                             className="h-10 w-10 rounded-xl bg-[#f1f3f5] hover:bg-[#e5e8eb] flex items-center justify-center text-[#64748b] transition-colors flex-shrink-0"
                                         >
                                             <svg
@@ -2461,94 +2520,92 @@ export function ConversationsView({
                                         </button>
                                     </div>
 
-                                    {/* Media attachment preview panel */}
-                                    {mediaFile && (
-                                        <div className="mt-2 p-2.5 rounded-xl flex items-start gap-2" style={{ backgroundColor: "#f5f7f2", border: "1px solid #e8ebe3" }}>
-                                            {mediaPreviewUrl ? (
-                                                <img
-                                                    src={mediaPreviewUrl}
-                                                    alt="preview"
-                                                    className="w-14 h-14 rounded-lg object-cover border border-[#edf0ea] flex-shrink-0"
-                                                />
-                                            ) : (
-                                                <div className="w-14 h-14 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: "#e8ebe3" }}>
-                                                    <svg
-                                                        className="w-6 h-6"
-                                                        style={{ color: "#8a9e80" }}
-                                                        fill="none"
-                                                        stroke="currentColor"
-                                                        viewBox="0 0 24 24"
-                                                    >
-                                                        <path
-                                                            strokeLinecap="round"
-                                                            strokeLinejoin="round"
-                                                            strokeWidth={1.5}
-                                                            d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"
-                                                        />
-                                                    </svg>
-                                                </div>
-                                            )}
-                                            <div className="flex-1 min-w-0 space-y-1.5">
-                                                <p className="text-xs font-medium text-[#1c2917] truncate">
-                                                    {mediaFile.name}
-                                                </p>
-                                                <input
-                                                    value={mediaCaption}
-                                                    onChange={(e) =>
-                                                        setMediaCaption(
-                                                            e.target.value,
-                                                        )
-                                                    }
-                                                    placeholder="Add a caption (optional)…"
-                                                    className="w-full px-2 py-1 text-xs rounded-lg focus:outline-none focus:ring-1 focus:ring-[#589b31]"
-                                                    style={{
-                                                        backgroundColor: "#ffffff",
-                                                        border: "1px solid #e8ebe3",
-                                                        color: "#1c2917",
-                                                    }}
-                                                />
-                                                <div className="flex gap-1.5">
-                                                    <button
-                                                        onClick={sendMedia}
-                                                        disabled={
-                                                            uploadingMedia
-                                                        }
-                                                        className="flex items-center gap-1 h-7 px-3 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors"
-                                                        style={{ backgroundColor: "#589b31" }}
-                                                    >
-                                                        {uploadingMedia ? (
-                                                            <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                    {/* Media attachment preview panel (multi-select) */}
+                                    {mediaItems.length > 0 && (
+                                        <div className="mt-2 p-2.5 rounded-xl space-y-2" style={{ backgroundColor: "#f5f7f2", border: "1px solid #e8ebe3" }}>
+                                            {/* Thumbnail grid — each removable */}
+                                            <div className="flex flex-wrap gap-2">
+                                                {mediaItems.map((it) => (
+                                                    <div key={it.id} className="relative group">
+                                                        {it.previewUrl ? (
+                                                            <img
+                                                                src={it.previewUrl}
+                                                                alt={it.file.name}
+                                                                title={it.file.name}
+                                                                className="w-16 h-16 rounded-lg object-cover border border-[#edf0ea]"
+                                                            />
                                                         ) : (
-                                                            <>
-                                                                <svg
-                                                                    className="w-3 h-3"
-                                                                    fill="none"
-                                                                    stroke="currentColor"
-                                                                    viewBox="0 0 24 24"
-                                                                >
-                                                                    <path
-                                                                        strokeLinecap="round"
-                                                                        strokeLinejoin="round"
-                                                                        strokeWidth={
-                                                                            2
-                                                                        }
-                                                                        d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-                                                                    />
+                                                            <div className="w-16 h-16 rounded-lg flex flex-col items-center justify-center gap-0.5 px-1" style={{ backgroundColor: "#e8ebe3" }} title={it.file.name}>
+                                                                <svg className="w-5 h-5" style={{ color: "#8a9e80" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                                                                 </svg>
-                                                                Send
-                                                            </>
+                                                                <span className="text-[9px] leading-tight text-[#5f6f57] truncate max-w-[56px]">{it.file.name}</span>
+                                                            </div>
                                                         )}
-                                                    </button>
-                                                    <button
-                                                        onClick={
-                                                            clearMediaAttachment
-                                                        }
-                                                        className="h-7 px-3 text-xs rounded-lg transition-colors"
-                                                        style={{ color: "#8a9e80", border: "1px solid #e8ebe3" }}
-                                                    >
-                                                        Cancel
-                                                    </button>
-                                                </div>
+                                                        <button
+                                                            onClick={() => removeMediaItem(it.id)}
+                                                            disabled={uploadingMedia}
+                                                            title="Remove"
+                                                            className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-[#1c2917] text-white text-xs leading-none flex items-center justify-center shadow disabled:opacity-40 hover:bg-black"
+                                                        >
+                                                            ✕
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                                {/* Add-more tile */}
+                                                <button
+                                                    onClick={() => fileInputRef.current?.click()}
+                                                    disabled={uploadingMedia}
+                                                    title="Add more"
+                                                    className="w-16 h-16 rounded-lg border border-dashed border-[#c7cec0] flex items-center justify-center text-[#8a9e80] hover:bg-[#eef1ea] disabled:opacity-40"
+                                                >
+                                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                                    </svg>
+                                                </button>
+                                            </div>
+
+                                            <input
+                                                value={mediaCaption}
+                                                onChange={(e) => setMediaCaption(e.target.value)}
+                                                placeholder={
+                                                    mediaItems.length > 1
+                                                        ? "Add a caption (shown on the first image)…"
+                                                        : "Add a caption (optional)…"
+                                                }
+                                                className="w-full px-2 py-1 text-xs rounded-lg focus:outline-none focus:ring-1 focus:ring-[#589b31]"
+                                                style={{ backgroundColor: "#ffffff", border: "1px solid #e8ebe3", color: "#1c2917" }}
+                                            />
+
+                                            <div className="flex items-center gap-1.5">
+                                                <button
+                                                    onClick={sendMedia}
+                                                    disabled={uploadingMedia}
+                                                    className="flex items-center gap-1 h-7 px-3 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors"
+                                                    style={{ backgroundColor: "#589b31" }}
+                                                >
+                                                    {uploadingMedia ? (
+                                                        <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                                    ) : (
+                                                        <>
+                                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                                                            </svg>
+                                                            {mediaItems.length > 1 ? `Send ${mediaItems.length}` : "Send"}
+                                                        </>
+                                                    )}
+                                                </button>
+                                                <button
+                                                    onClick={clearMediaAttachment}
+                                                    disabled={uploadingMedia}
+                                                    className="h-7 px-3 text-xs rounded-lg transition-colors disabled:opacity-40"
+                                                    style={{ color: "#8a9e80", border: "1px solid #e8ebe3" }}
+                                                >
+                                                    Cancel
+                                                </button>
+                                                <span className="ml-auto text-[10px] text-[#8a9e80]">
+                                                    Images up to 5 MB each
+                                                </span>
                                             </div>
                                         </div>
                                     )}
