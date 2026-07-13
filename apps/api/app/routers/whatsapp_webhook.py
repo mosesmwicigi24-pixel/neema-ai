@@ -129,6 +129,12 @@ async def _handle_calls(request: Request, payload: dict) -> None:
                         continue
                 if event == "connect":
                     _log.info("WA incoming call %s from %s", cid, call.get("from"))
+                    try:
+                        from app.services import call_log
+                        await call_log.record_ringing(cid, call.get("from"),
+                                                      _contacts.get(str(call.get("from"))))
+                    except Exception:
+                        pass
                     if redis is not None:
                         # Stash the SDP offer + metadata for the accept step.
                         await redis.set(
@@ -151,6 +157,11 @@ async def _handle_calls(request: Request, payload: dict) -> None:
                 elif event == "terminate":
                     _log.info("WA call %s terminated (status=%s, dur=%ss)",
                               cid, call.get("status"), (call.get("duration") or "?"))
+                    try:
+                        from app.services import call_log
+                        await call_log.mark_ended(cid, duration=call.get("duration"))
+                    except Exception:
+                        pass
                     if redis is not None:
                         await redis.publish("ws:channel:calls", json.dumps({
                             "type": "call_ended", "call_id": cid,

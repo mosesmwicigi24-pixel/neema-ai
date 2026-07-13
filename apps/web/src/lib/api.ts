@@ -448,8 +448,21 @@ export const whatsappApi = {
         post<{ ok: boolean; wa_id: string }>("/admin/whatsapp-invite", { phone, name }),
 };
 
+export interface ApiCall {
+    id: string;
+    call_id: string;
+    wa_id: string | null;
+    name: string | null;
+    direction: string;
+    status: string;            // ringing | answered | ended | missed | declined
+    duration: number | null;
+    agent_name: string | null;
+    started_at: string | null;
+}
+
 // WhatsApp voice calling — the dashboard softphone's backend.
 export const callsApi = {
+    list: () => get<ApiCall[]>("/admin/calls"),
     iceConfig: () => get<{ ice_servers: RTCIceServer[] }>("/admin/calls/ice-config"),
     offer: (callId: string) =>
         get<{ call_id: string; sdp: string; from: string }>(`/admin/calls/${encodeURIComponent(callId)}/offer`),

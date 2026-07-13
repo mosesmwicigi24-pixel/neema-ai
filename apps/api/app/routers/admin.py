@@ -7,6 +7,7 @@ from app.models.message import Message
 from app.models.agent import Agent
 from app.models.user import User
 from app.models.person import Person, Identity
+from app.models.call import Call  # noqa: F401 — register the mapper at boot
 from app.models.intercept import Intercept, InterceptAction
 from app.schemas.conversation import ConversationListItem, InterceptRequest
 from app.services.conversation import (
@@ -1251,7 +1252,47 @@ async def calls_answer(
         if redis is not None:
             await redis.delete(f"wa:call:answered:{call_id}")   # let another try
         raise HTTPException(status_code=502, detail=f"accept failed: {exc}")
+    try:
+        from app.services import call_log
+        await call_log.mark_answered(call_id, agent.id)
+    except Exception:
+        pass
     return {"ok": True, "call_id": call_id}
+
+
+@router.get("/calls")
+async def list_calls(
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Recent WhatsApp calls (newest first) for the Calls view — like a phone's
+    recents. Joins the caller's person name/avatar when linked."""
+    from app.models.call import Call
+    rows = (await db.execute(
+        select(Call).order_by(Call.started_at.desc()).limit(min(max(limit, 1), 200))
+    )).scalars().all()
+    person_ids = [c.person_id for c in rows if c.person_id]
+    pmap: dict = {}
+    if person_ids:
+        for p in (await db.execute(select(Person).where(Person.id.in_(person_ids)))).scalars().all():
+            pmap[p.id] = p
+    agent_ids = [c.agent_id for c in rows if c.agent_id]
+    amap: dict = {}
+    if agent_ids:
+        for a in (await db.execute(select(Agent).where(Agent.id.in_(agent_ids)))).scalars().all():
+            amap[a.id] = a.name
+    out = []
+    for c in rows:
+        p = pmap.get(c.person_id)
+        out.append({
+            "id": str(c.id), "call_id": c.call_id, "wa_id": c.wa_id,
+            "name": c.caller_name or (p.display_name if p else None),
+            "direction": c.direction, "status": c.status, "duration": c.duration,
+            "agent_name": amap.get(c.agent_id),
+            "started_at": c.started_at.isoformat() if c.started_at else None,
+        })
+    return out
 
 
 @router.post("/calls/{call_id}/terminate")
