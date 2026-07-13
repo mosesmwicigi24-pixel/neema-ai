@@ -93,6 +93,23 @@ async def list_conversations(
         p = person_map.get(getattr(c, "person_id", None))
         return (getattr(p, "state", None) or {}) if p else {}
 
+    def _list_country(c: Conversation) -> tuple:
+        """(country_iso, flag_url) for the row: stored User → person.state → the
+        contact's own phone prefix (external_id/wa_id). The phone fallback fills
+        the flag for a Meta contact whose number is their key, with no backfill."""
+        from app.core.countries import resolve_country
+        from app.core.phone import is_plausible_phone
+        u = user_map.get(c.wa_id)
+        ps = _pstate(c)
+        iso = (u.country_iso if u else None) or ps.get("country_iso")
+        flag = (u.flag_url if u else None) or ps.get("flag_url")
+        if not iso:
+            handle = (u.phone if u and u.phone else None) or c.wa_id or getattr(c, "external_id", None)
+            if handle and is_plausible_phone(handle):
+                loc = resolve_country(handle)
+                iso, flag = loc.get("country_iso"), loc.get("flag_url")
+        return iso, flag
+
     def _name_for(c: Conversation):
         u = user_map.get(c.wa_id)
         if u and u.name:
@@ -197,10 +214,8 @@ async def list_conversations(
             "updated_at":           c.updated_at.isoformat() if c.updated_at else None,
             "name":                 _name_for(c),
             "avatar_url":           avatar_map.get(getattr(c, "person_id", None)),
-            "country_iso":          (user_map[c.wa_id].country_iso if c.wa_id in user_map else None)
-                                        or _pstate(c).get("country_iso"),
-            "flag_url":             (user_map[c.wa_id].flag_url if c.wa_id in user_map else None)
-                                        or _pstate(c).get("flag_url"),
+            "country_iso":          _list_country(c)[0],
+            "flag_url":             _list_country(c)[1],
             "channel":              getattr(c, "channel", "whatsapp") or "whatsapp",
             "unread":               unread_map.get(str(c.id), 0),
             "tags":                 (user_map[c.wa_id].state or {}).get("tags", []) if c.wa_id in user_map else [],

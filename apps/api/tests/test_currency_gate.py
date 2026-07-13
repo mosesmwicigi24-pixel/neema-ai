@@ -215,3 +215,25 @@ def test_search_catalog_currency_override_for_declared_kenyan(monkeypatch):
     kes = asyncio.run(_search_catalog({"query": "shirt", "currency": "KES"}, meta_ctx))["results"][0]
     assert kes["price"] == 3100 and kes["currency"] == "KES"           # native KES, not USD*rate
     assert meta_ctx.currency == "USD"                                  # ctx untouched (replace, not mutate)
+
+
+def test_crm_country_falls_back_to_phone_prefix():
+    """A contact with a phone but no stored country (e.g. a Nigerian Messenger
+    contact captured before country-derivation shipped) shows the country derived
+    from the +234 prefix — retroactive, no backfill."""
+    from app.routers.crm import _country_fields
+    from types import SimpleNamespace
+    u = SimpleNamespace(country_iso=None, country=None, flag_url=None, location=None)
+    out = _country_fields(u, {}, "+2349166071007")     # Nigeria
+    assert out["country_iso"] == "NG" and out["country"] == "Nigeria"
+    assert out["flag_url"].endswith("/ng.svg")
+
+    # Stored country always wins over the phone guess.
+    u2 = SimpleNamespace(country_iso="KE", country="Kenya",
+                         flag_url="https://flagcdn.com/ke.svg", location=None)
+    assert _country_fields(u2, {}, "+2349166071007")["country_iso"] == "KE"
+
+    # No phone, no stored country → location text is the last resort.
+    u3 = SimpleNamespace(country_iso=None, country=None, flag_url=None,
+                         location="Ekeremor, Bayelsa State, Nigeria")
+    assert _country_fields(u3, {}, None)["country_iso"] == "NG"

@@ -217,13 +217,15 @@ def _build_profile(
         for i in (identities or [])
     ]
 
+    phone_display = user.phone or (user.wa_id if is_plausible_phone(user.wa_id) else None)
+
     return {
         "id":             str(user.id),
         "wa_id":          user.wa_id,
         "name":           user.name or person_name,
         "name_confirmed": user.name_confirmed,
         "email":          user.email,
-        "phone":          user.phone or (user.wa_id if is_plausible_phone(user.wa_id) else None),
+        "phone":          phone_display,
         "location":       user.location or (person_state or {}).get("location"),
         "age":            user.age,
         "tags":           tags,
@@ -254,10 +256,30 @@ def _build_profile(
         "first_seen_at":  user.created_at.isoformat() if user.created_at else None,
         "notes":          notes,
         "created_at":     user.created_at.isoformat() if user.created_at else None,
-        "country_iso":    user.country_iso or (person_state or {}).get("country_iso"),
-        "country":        user.country or (person_state or {}).get("country"),
-        "flag_url":       user.flag_url or (person_state or {}).get("flag_url"),
+        **_country_fields(user, person_state, phone_display),
     }
+
+
+def _country_fields(user, person_state: dict | None, phone: str | None) -> dict:
+    """Country for the profile, layered strongest-first:
+    stored User fields → person.state → the PHONE's dialing prefix → the free-text
+    location. The phone fallback retroactively fills every existing contact that
+    has a number but a blank country (e.g. a +234 contact captured before country
+    derivation shipped), with no backfill job."""
+    from app.core.countries import resolve_country, iso_from_text, name_for_iso, flag_url_for
+    ps = person_state or {}
+    iso = user.country_iso or ps.get("country_iso")
+    country = user.country or ps.get("country")
+    flag = user.flag_url or ps.get("flag_url")
+    if not iso and phone and is_plausible_phone(phone):
+        loc = resolve_country(phone)
+        iso, country, flag = loc.get("country_iso"), loc.get("country"), loc.get("flag_url")
+    if not iso:
+        loc_txt = (user.location or ps.get("location") or "")
+        t_iso = iso_from_text(loc_txt)
+        if t_iso:
+            iso, country, flag = t_iso, name_for_iso(t_iso), flag_url_for(t_iso)
+    return {"country_iso": iso, "country": country, "flag_url": flag}
 
 
 # ── Customer profile ──────────────────────────────────────────────────────────
