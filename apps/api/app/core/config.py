@@ -15,6 +15,12 @@ class Settings(BaseSettings):
     waba_token: str = ""
     waba_phone_number_id: str = ""
     waba_api_version: str = "v21.0"
+    # Approved WhatsApp template used to open a thread with a customer who reached
+    # us on Messenger/Facebook (Meta requires a template to message first). Body:
+    # "Hello {{1}}, this is Bethany House…". Name + language must match the
+    # approved template exactly.
+    wa_invite_template: str = "whatsapp_invite"
+    wa_invite_lang: str = "en"
     n8n_api_secret: str = ""
     # ── Meta Messenger / Instagram webhook (multichannel ingestion) ──────────
     # meta_verify_token: the arbitrary secret you also paste into the Meta app's

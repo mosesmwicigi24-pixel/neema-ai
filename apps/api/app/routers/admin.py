@@ -1116,3 +1116,58 @@ async def backfill_meta_profiles(
 ):
     from app.services.meta_enrich import backfill_unknown_profiles
     return await backfill_unknown_profiles(db, limit=min(max(limit, 1), 200))
+
+
+@router.post("/whatsapp-invite")
+async def whatsapp_invite(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Open a WhatsApp thread with a customer who reached us on Messenger/Facebook,
+    by sending the approved `whatsapp_invite` template to their number. Meta
+    requires a template to message first (no open session). Records the outbound
+    invite on the WhatsApp conversation so it shows in the inbox; their reply lands
+    via the WABA webhook and continues the thread. Returns {ok, wa_id}."""
+    from app.core.phone import is_plausible_phone
+    from app.services.identity import resolve_or_create_person
+    from app.services.channel import get_or_create_conversation
+    from app.services import n8n_bridge as bridge
+    from app.models.message import Message, MsgDirection, MsgSender
+    from app.core.config import settings
+
+    phone = str(body.get("phone") or "").strip()
+    name = str(body.get("name") or "").strip()
+    wa_id = phone.lstrip("+").strip()
+    if not is_plausible_phone(wa_id):
+        raise HTTPException(status_code=400, detail="A valid phone number is required to invite to WhatsApp.")
+    if not settings.waba_token or not settings.waba_phone_number_id:
+        raise HTTPException(status_code=503, detail="WhatsApp sending is not configured.")
+
+    first = (name.split()[0] if name else "there")
+    try:
+        await bridge.send_wa_template(
+            wa_id, settings.wa_invite_template, settings.wa_invite_lang,
+            body_params=[first],
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"WhatsApp invite failed: {exc}")
+
+    # Record it so the WhatsApp thread appears with the invite already sent.
+    try:
+        ident = await resolve_or_create_person(db, "whatsapp", wa_id,
+                                               display_name=name or None,
+                                               source="whatsapp_invite")
+        conv = await get_or_create_conversation(db, "whatsapp", wa_id,
+                                                person_id=ident.person_id, wa_id=wa_id)
+        db.add(Message(
+            channel="whatsapp", external_id=wa_id, wa_id=wa_id,
+            person_id=ident.person_id, conversation_id=conv.id,
+            direction=MsgDirection.outbound, sender=MsgSender.human_agent,
+            text=f"[WhatsApp invite sent] Hello {first}, this is Bethany House…",
+        ))
+        await db.commit()
+    except Exception:
+        await db.rollback()   # the template already went out; recording is best-effort
+
+    return {"ok": True, "wa_id": wa_id}

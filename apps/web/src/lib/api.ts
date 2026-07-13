@@ -441,6 +441,13 @@ export const statsApi = {
     overview: () => get<ApiStats>("/admin/stats"),
 };
 
+// Send the approved WhatsApp invite template to a customer's number, opening a
+// WhatsApp thread with someone who reached us on Messenger/Facebook.
+export const whatsappApi = {
+    invite: (phone: string, name?: string) =>
+        post<{ ok: boolean; wa_id: string }>("/admin/whatsapp-invite", { phone, name }),
+};
+
 // ── Attribution (which source/post drives leads + revenue) ───────────────────
 
 export interface AttributionRow {

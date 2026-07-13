@@ -302,6 +302,43 @@ async def _send_waba(wa_id: str, text: str) -> None:
             resp.raise_for_status()
 
 
+async def send_wa_template(wa_id: str, template: str, lang: str,
+                           body_params: list[str] | None = None) -> dict:
+    """Send an APPROVED WhatsApp template (the only way to message a customer
+    who hasn't opened a session with us). `body_params` fill the body's {{1}}…
+    placeholders in order. Returns the Graph response; raises on failure so the
+    caller can surface a clear error."""
+    components = []
+    if body_params:
+        components.append({
+            "type": "body",
+            "parameters": [{"type": "text", "text": p} for p in body_params],
+        })
+    url = (f"https://graph.facebook.com/{settings.waba_api_version}"
+           f"/{settings.waba_phone_number_id}/messages")
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            url,
+            headers={"Authorization": f"Bearer {settings.waba_token}"},
+            json={
+                "messaging_product": "whatsapp",
+                "to": wa_id,
+                "type": "template",
+                "template": {
+                    "name": template,
+                    "language": {"code": lang},
+                    **({"components": components} if components else {}),
+                },
+            },
+            timeout=30.0,
+        )
+    if not resp.is_success:
+        import logging
+        logging.error("WABA template error %s: %s", resp.status_code, resp.text)
+        raise RuntimeError(f"WhatsApp template send failed ({resp.status_code}): {resp.text[:300]}")
+    return resp.json() if resp.content else {}
+
+
 # ── Redis Broadcast ───────────────────────────────────────
 
 async def _broadcast(redis, channel: str, payload: dict) -> None:

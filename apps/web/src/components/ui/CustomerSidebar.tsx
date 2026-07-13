@@ -16,6 +16,7 @@ import {
     displayName,
 } from "@/lib/utils";
 import type { Conversation, Order } from "@/types";
+import { whatsappApi } from "@/lib/api";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -982,22 +983,31 @@ export function CustomerSidebar({
                             (c) => c.channel === "whatsapp",
                         );
                         if (!hasWaChannel && digits.length >= 7 && digits.length <= 15) {
-                            const first = (profile.name || "").trim().split(/\s+/)[0] || "";
-                            const invite =
-                                `Hello${first ? " " + first : ""}, this is Bethany House 🙏 ` +
-                                `Continuing our chat here on WhatsApp so we can finalise your order. ` +
-                                `How may we help?`;
                             return (
                                 <button
                                     type="button"
-                                    onClick={() =>
-                                        window.open(
-                                            `https://wa.me/${digits}?text=${encodeURIComponent(invite)}`,
-                                            "_blank",
-                                            "noopener",
-                                        )
-                                    }
-                                    title="Invite this customer to WhatsApp (opens WhatsApp with a prefilled message)"
+                                    onClick={async () => {
+                                        try {
+                                            await whatsappApi.invite(
+                                                profile.phone || digits,
+                                                profile.name || "",
+                                            );
+                                            onToast("WhatsApp invite sent ✓");
+                                        } catch {
+                                            // Fallback: open WhatsApp manually if the
+                                            // template send fails (not configured, etc.).
+                                            const first = (profile.name || "").trim().split(/\s+/)[0] || "";
+                                            const invite =
+                                                `Hello${first ? " " + first : ""}, this is Bethany House. ` +
+                                                `Continuing our chat here on WhatsApp so we can finalise your order.`;
+                                            window.open(
+                                                `https://wa.me/${digits}?text=${encodeURIComponent(invite)}`,
+                                                "_blank",
+                                                "noopener",
+                                            );
+                                        }
+                                    }}
+                                    title="Send this customer a WhatsApp invite (delivers the approved template to their number)"
                                     className="inline-flex items-center gap-0.5 text-[10px] font-semibold rounded px-1.5 py-0.5 cursor-pointer hover:brightness-95"
                                     style={{
                                         backgroundColor: "#25D366",
