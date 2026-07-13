@@ -27,9 +27,53 @@ from app.services.meta_enrich import backfill_unknown_profiles
 _log = logging.getLogger("neema.enrich")
 
 
+async def _sweep_conversation_names() -> int:
+    """Phase 1: name the backlog from the page-level Conversations API — the
+    participant list carries names for the WHOLE history, where the per-user
+    Profile API only answers for recently-active people (the 0/100 run)."""
+    from sqlalchemy import select, or_
+    from app.models.person import Person, Identity
+    from app.services.meta_send import fetch_conversation_names
+    from app.core.config import settings
+
+    names: dict = {}
+    pages = list(settings.page_token_map().keys()) or [None]
+    for pg in pages:
+        names.update(await fetch_conversation_names(pg))
+    print(f"conversation sweep: {len(names)} named participant(s) from the page inbox")
+    if not names:
+        return 0
+
+    named = 0
+    async with AsyncSessionLocal() as db:
+        rows = (await db.execute(
+            select(Identity, Person)
+            .join(Person, Person.id == Identity.person_id)
+            .where(Identity.channel.in_(("messenger", "facebook", "instagram")))
+            .where(or_(Person.display_name.is_(None), Person.display_name == ""))
+            .where(Person.merged_into_id.is_(None))
+        )).all()
+        for ident, person in rows:
+            name = names.get(str(ident.external_id))
+            if not name:
+                continue
+            person.display_name = name[:200]
+            if not ident.display_name:
+                ident.display_name = name[:200]
+            rp = dict(ident.raw_profile or {})
+            rp.pop("no_profile", None)          # it's nameable after all
+            ident.raw_profile = rp
+            named += 1
+        if named:
+            await db.commit()
+    print(f"conversation sweep: named {named} backlog contact(s)")
+    return named
+
+
 async def run(batch: int = 100, max_batches: int = 60, retry_marked: bool = False) -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     named = tried = 0
+    named += await _sweep_conversation_names()   # phase 1: one paged sweep, no per-user calls
     for i in range(max_batches):
         async with AsyncSessionLocal() as db:
             res = await backfill_unknown_profiles(db, limit=batch, retry_marked=retry_marked)

@@ -204,3 +204,44 @@ async def send_to_channel(channel: str, recipient: str, text: str,
         # WhatsApp — the existing WABA sender expects a bare number (no '+').
         from app.services.n8n_bridge import _send_waba
         await _send_waba((recipient or "").lstrip("+"), text)
+
+
+async def fetch_conversation_names(page_id: str | None = None, max_pages: int = 50) -> dict:
+    """PSID → display name for everyone who has EVER messaged the page, from the
+    page-level Conversations API (`/me/conversations?fields=participants`).
+
+    This works where the per-user Profile API 400s: Meta only serves individual
+    profile lookups for recently-active users, but the conversation participant
+    list carries names for the whole history. One paged sweep names the entire
+    backlog. Best-effort — returns {} on any failure."""
+    token = token_for_page(page_id)
+    if not token:
+        return {}
+    names: dict[str, str] = {}
+    url = f"https://graph.facebook.com/{settings.meta_graph_version}/me/conversations"
+    params = {"fields": "participants", "limit": "100"}
+    try:
+        async with httpx.AsyncClient() as client:
+            for _ in range(max_pages):
+                resp = await client.get(url, params=params,
+                                        headers={"Authorization": f"Bearer {token}"},
+                                        timeout=30.0)
+                if not resp.is_success:
+                    _log.info("conversation-names sweep → %s: %s",
+                              resp.status_code, resp.text[:200])
+                    break
+                d = resp.json()
+                for conv in d.get("data", []):
+                    for part in ((conv.get("participants") or {}).get("data") or []):
+                        pid, name = str(part.get("id") or ""), (part.get("name") or "").strip()
+                        # Skip the page itself (it participates in every thread).
+                        if pid and name and pid not in settings.page_token_map() \
+                                and pid != str(page_id or ""):
+                            names.setdefault(pid, name)
+                nxt = ((d.get("paging") or {}).get("next"))
+                if not nxt:
+                    break
+                url, params = nxt, None          # `next` is a full URL
+    except Exception as exc:
+        _log.info("conversation-names sweep failed: %s", exc)
+    return names
