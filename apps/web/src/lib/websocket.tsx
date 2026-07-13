@@ -4,6 +4,7 @@ import {
     useContext,
     useEffect,
     useRef,
+    useState,
     useCallback,
     ReactNode,
 } from "react";
@@ -112,7 +113,10 @@ const WsContext = createContext<NativeWs | null>(null);
 
 export function WsProvider({ children }: { children: ReactNode }) {
     const { data: session } = useSession();
-    const wsRef = useRef<NativeWs | null>(null);
+    // State (not a ref) so the socket PROPAGATES to context consumers the moment
+    // it's created — otherwise components that don't re-render on their own (the
+    // softphone) never see it and never attach their listeners.
+    const [ws, setWs] = useState<NativeWs | null>(null);
 
     useEffect(() => {
         const agentId = (session as any)?.user?.id;
@@ -124,21 +128,20 @@ export function WsProvider({ children }: { children: ReactNode }) {
             return;
         }
 
-        const ws = createNativeWs(url);
-        wsRef.current = ws;
-
-        ws.on("connect",    () => console.log("[WS] connected →", url));
-        ws.on("disconnect", () => console.log("[WS] disconnected"));
-        ws.on("error",      () => console.warn("[WS] error — will reconnect"));
+        const conn = createNativeWs(url);
+        conn.on("connect",    () => console.log("[WS] connected →", url));
+        conn.on("disconnect", () => console.log("[WS] disconnected"));
+        conn.on("error",      () => console.warn("[WS] error — will reconnect"));
+        setWs(conn);
 
         return () => {
-            ws.close();
-            wsRef.current = null;
+            conn.close();
+            setWs(null);
         };
     }, [(session as any)?.user?.id]);
 
     return (
-        <WsContext.Provider value={wsRef.current}>
+        <WsContext.Provider value={ws}>
             {children}
         </WsContext.Provider>
     );

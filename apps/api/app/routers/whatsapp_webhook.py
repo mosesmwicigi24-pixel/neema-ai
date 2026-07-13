@@ -120,6 +120,9 @@ async def _handle_calls(request: Request, payload: dict) -> None:
             for call in value.get("calls", []):
                 cid = call.get("id")
                 event = call.get("event")
+                _log.warning("WA call event=%s id=%s from=%s has_sdp=%s",
+                             event, cid, call.get("from"),
+                             bool((call.get("session") or {}).get("sdp")))
                 if not cid:
                     continue
                 # Dedup: process each (call id, event) once.
@@ -154,6 +157,7 @@ async def _handle_calls(request: Request, payload: dict) -> None:
                             "name": _contacts.get(str(call.get("from"))),
                             "at": call.get("timestamp"),
                         }))
+                        _log.warning("WA published incoming_call ring for %s", cid)
                 elif event == "terminate":
                     _log.info("WA call %s terminated (status=%s, dur=%ss)",
                               cid, call.get("status"), (call.get("duration") or "?"))
