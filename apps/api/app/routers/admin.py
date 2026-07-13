@@ -1307,3 +1307,19 @@ async def calls_terminate(
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"terminate failed: {exc}")
     return {"ok": True, "call_id": call_id}
+
+
+@router.post("/calls/{call_id}/callback")
+async def calls_callback(
+    call_id: str,
+    agent: Agent = Depends(get_current_agent),
+):
+    """Decline now, but flag the customer for a call-back — ends the ringing call
+    and marks it `callback` so it surfaces in the Calls view as a follow-up."""
+    from app.services import wa_calling, call_log
+    try:
+        await wa_calling.terminate(call_id)
+    except Exception:
+        pass   # may already be gone; still record the intent
+    await call_log.mark_callback(call_id)
+    return {"ok": True, "call_id": call_id}

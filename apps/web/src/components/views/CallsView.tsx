@@ -17,11 +17,12 @@ function fmtDur(s: number | null): string {
 }
 
 const STATUS_META: Record<string, { label: string; color: string; icon: string }> = {
-    answered: { label: "Answered", color: "#16a34a", icon: "↙" },
-    ended:    { label: "Answered", color: "#16a34a", icon: "↙" },
-    missed:   { label: "Missed",   color: "#ef4444", icon: "↙" },
-    declined: { label: "Declined", color: "#f59e0b", icon: "↙" },
-    ringing:  { label: "Ringing…", color: "#25D366", icon: "●" },
+    answered: { label: "Answered",  color: "#16a34a", icon: "↙" },
+    ended:    { label: "Answered",  color: "#16a34a", icon: "↙" },
+    missed:   { label: "Missed",    color: "#ef4444", icon: "↙" },
+    declined: { label: "Declined",  color: "#f59e0b", icon: "↙" },
+    callback: { label: "Callback ↩", color: "#f59e0b", icon: "↩" },
+    ringing:  { label: "Ringing…",  color: "#25D366", icon: "●" },
 };
 
 export function CallsView({ isMobile }: SharedViewProps): React.ReactElement {

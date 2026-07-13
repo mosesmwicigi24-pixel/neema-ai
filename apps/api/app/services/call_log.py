@@ -50,13 +50,27 @@ async def mark_answered(call_id: str, agent_id) -> None:
         _log.warning("call_log answered failed: %s", exc)
 
 
+async def mark_callback(call_id: str) -> None:
+    """The agent declined the live call but wants to ring the customer back — mark
+    it `callback` so the Calls view surfaces it as a follow-up."""
+    try:
+        async with AsyncSessionLocal() as db:
+            c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
+            if c:
+                c.status = "callback"
+                c.ended_at = datetime.now(timezone.utc)
+                await db.commit()
+    except Exception as exc:
+        _log.warning("call_log callback failed: %s", exc)
+
+
 async def mark_ended(call_id: str, status: str | None = None, duration: int | None = None) -> None:
     """Close the call on `terminate`. A call that was never answered becomes
     `missed` (or `declined` if we hung up); an answered one becomes `ended`."""
     try:
         async with AsyncSessionLocal() as db:
             c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
-            if not c or c.status in ("ended", "missed", "declined"):
+            if not c or c.status in ("ended", "missed", "declined", "callback"):
                 return
             c.ended_at = datetime.now(timezone.utc)
             if duration is not None:

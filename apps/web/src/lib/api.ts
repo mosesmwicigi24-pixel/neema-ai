@@ -470,6 +470,8 @@ export const callsApi = {
         post<{ ok: boolean }>(`/admin/calls/${encodeURIComponent(callId)}/answer`, { sdp }),
     terminate: (callId: string) =>
         post<{ ok: boolean }>(`/admin/calls/${encodeURIComponent(callId)}/terminate`, {}),
+    callback: (callId: string) =>
+        post<{ ok: boolean }>(`/admin/calls/${encodeURIComponent(callId)}/callback`, {}),
 };
 
 // ── Attribution (which source/post drives leads + revenue) ───────────────────
