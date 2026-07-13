@@ -149,6 +149,22 @@ def test_prompt_carries_official_contacts_verbatim(monkeypatch):
     assert "OUR OFFICIAL CONTACTS" not in build_system_prompt(currency="USD")
 
 
+def test_prompt_location_answers_build_rapport_never_open_negative():
+    """'Where are you?' gets warmth + worldwide reach + an invitation for their
+    city — never 'we have no branch in…'. Naming their place earns one warm line
+    of appreciation, then confident specifics (DHL, 3–7 days from Nairobi)."""
+    for currency in ("KES", "USD"):
+        p = build_system_prompt(currency=currency)
+        assert "ONE HOME, WORLDWIDE REACH" in p
+        assert "NEVER" in p and "what we don't have" in p
+        assert "grateful you chose to be served by us" in p
+        assert "3–7 days" in p and "DHL" in p
+        assert "rapport without gushing" in p            # the balance rule
+    # the within-Kenya delivery example rides only in the Kenyan prompt
+    assert "{their town}" in build_system_prompt(currency="KES")
+    assert "{their town}" not in build_system_prompt(currency="USD")
+
+
 def test_prompt_sells_with_keen_reading_not_menu_dumps():
     """The Jacky Ebot transcript: 'wine cups' split into wine + cups, full menu
     dumped twice, wine bottles pushed uninvited. The consultant rules forbid all
