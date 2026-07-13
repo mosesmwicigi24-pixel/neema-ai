@@ -43,6 +43,18 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const localStreamRef = useRef<MediaStream | null>(null);
     const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
     const ringtoneRef = useRef<HTMLAudioElement | null>(null);
+    const phaseRef = useRef<CallPhase>("idle");
+    const handledRef = useRef<string | null>(null);   // last call id we already rang/handled
+    useEffect(() => { phaseRef.current = phase; }, [phase]);
+
+    // Start ringing for a given call (shared by the WS event + the poll fallback).
+    const startRinging = useCallback((callId: string, from: string, name?: string | null) => {
+        if (phaseRef.current !== "idle" || handledRef.current === callId) return;
+        handledRef.current = callId;
+        setCall({ callId, from, name });
+        ringtoneRef.current?.play().catch(() => {});
+        setPhase("ringing");
+    }, []);
 
     const cleanup = useCallback(() => {
         pcRef.current?.close(); pcRef.current = null;
@@ -111,27 +123,53 @@ export function CallProvider({ children }: { children: ReactNode }) {
         setMuted(next);
     }, [muted]);
 
+    // Primary path: the live WebSocket event (instant).
     useEffect(() => {
         if (!ws) { console.debug("[call] waiting for WebSocket…"); return; }
         console.debug("[call] listening for incoming calls");
         const onEvent = (evt: any) => {
             if (evt?.type === "incoming_call" || evt?.type === "call_ended") {
-                console.debug("[call] event received:", evt);
+                console.debug("[call] WS event:", evt);
             }
             if (evt?.type === "incoming_call") {
-                setPhase((p) => {
-                    if (p !== "idle") return p;
-                    setCall({ callId: evt.call_id, from: evt.from, name: evt.name });
-                    ringtoneRef.current?.play().catch(() => {});
-                    return "ringing";
-                });
+                startRinging(evt.call_id, evt.from, evt.name);
             } else if (evt?.type === "call_ended") {
                 setCall((c) => { if (c && c.callId === evt.call_id) { cleanup(); setPhase("ended"); } return c; });
             }
         };
         ws.on("event", onEvent);
         return () => ws.off("event", onEvent);
-    }, [ws, cleanup]);
+    }, [ws, cleanup, startRinging]);
+
+    // Fallback path: poll the call log for a fresh "ringing" call, so the card
+    // appears even if the WS event was missed. The backend writes the ringing row
+    // the instant a call connects; we ring on it within ~2.5s regardless of WS.
+    useEffect(() => {
+        const poll = async () => {
+            try {
+                const calls = await callsApi.list();
+                const now = Date.now();
+                // While we're RINGING, if the caller hung up (row no longer
+                // "ringing") tear the card down — in case the WS end event was missed.
+                if (phaseRef.current === "ringing") {
+                    const cur = calls.find((c) => c.call_id === handledRef.current);
+                    if (cur && cur.status !== "ringing") { cleanup(); setPhase("idle"); setCall(null); }
+                    return;
+                }
+                if (phaseRef.current !== "idle") return;
+                const ringing = calls.find((c) =>
+                    c.status === "ringing" &&
+                    c.call_id !== handledRef.current &&
+                    c.started_at && (now - new Date(c.started_at).getTime()) < 60000);
+                if (ringing) {
+                    console.debug("[call] poll fallback caught ringing call:", ringing.call_id);
+                    startRinging(ringing.call_id, ringing.wa_id || "", ringing.name);
+                }
+            } catch { /* ignore */ }
+        };
+        const t = setInterval(poll, 2500);
+        return () => clearInterval(t);
+    }, [startRinging]);
 
     useEffect(() => {
         if (phase !== "in_call") return;
