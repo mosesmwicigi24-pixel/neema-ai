@@ -55,6 +55,14 @@ class Settings(BaseSettings):
     # webhook stays ingestion-only until you flip it on. Needs meta_page_token set.
     meta_agent_reply: bool = False
     # Optional WhatsApp number the Messenger/IG agent invites buyers to for checkout.
+    # WhatsApp webhook front door (Option A): our API becomes the Cloud API
+    # callback and TRANSPARENTLY forwards every event to n8n (messaging keeps
+    # working exactly as before), while tapping `calls` events for voice. Set
+    # whatsapp_forward_url to n8n's current WhatsApp webhook URL. verify token
+    # falls back to meta_verify_token if unset (must match the value pasted into
+    # the Meta app's WhatsApp webhook config).
+    whatsapp_forward_url: str = ""
+    whatsapp_verify_token: str = ""
     whatsapp_handoff_number: str = ""
     # Second official line (calls) — quoted verbatim in prompts alongside the above.
     whatsapp_handoff_alt: str = ""
