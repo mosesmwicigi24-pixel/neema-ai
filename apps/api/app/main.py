@@ -187,6 +187,25 @@ async def lifespan(app: FastAPI):
 
     app.state._meta_enrich_task = _asyncio.create_task(_meta_enrich_loop())
 
+    # ── Self-heal missed auto-replies ─────────────────────────────────────────
+    # Auto-replies are fire-and-forget tasks — a deploy (every push) or a
+    # transient LLM/Graph error loses the ones in flight, and the customer's DM
+    # sits unanswered. This loop answers any Meta DM whose latest message is an
+    # unattended inbound, so no sale is dropped just because a reply got orphaned.
+    async def _missed_reply_loop(interval: int = 120):
+        await _asyncio.sleep(45)                # let startup + the normal path settle
+        while True:
+            try:
+                if redis is None or await redis.set("meta:missed:tick", "1", nx=True,
+                                                    ex=interval - 20):
+                    from app.services.reply_sweeper import sweep_missed_replies
+                    await sweep_missed_replies(redis)
+            except Exception as exc:
+                logger.warning("missed-reply sweep tick failed: %s", exc)
+            await _asyncio.sleep(interval)
+
+    app.state._missed_reply_task = _asyncio.create_task(_missed_reply_loop())
+
     yield
 
     # Shutdown
