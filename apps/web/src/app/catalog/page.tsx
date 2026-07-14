@@ -213,7 +213,7 @@ export default function CatalogPage(): React.ReactElement {
                 <div
                     style={{
                         display: "grid",
-                        gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
+                        gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
                         gap: 14,
                         marginTop: 8,
                     }}
@@ -242,17 +242,38 @@ export default function CatalogPage(): React.ReactElement {
                                 }}
                             >
                                 {p.image_url ? (
-                                    // eslint-disable-next-line @next/next/no-img-element
-                                    <img
-                                        src={p.thumbnail_url || p.image_url}
-                                        alt={p.name}
-                                        style={{
-                                            width: "100%",
-                                            height: "100%",
-                                            objectFit: "contain",
-                                            padding: 8,
-                                        }}
-                                    />
+                                    <>
+                                        {/* soft blurred fill so the holder is never empty */}
+                                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                                        <img
+                                            src={p.thumbnail_url || p.image_url}
+                                            alt=""
+                                            aria-hidden
+                                            style={{
+                                                position: "absolute",
+                                                inset: 0,
+                                                width: "100%",
+                                                height: "100%",
+                                                objectFit: "cover",
+                                                filter: "blur(22px)",
+                                                transform: "scale(1.25)",
+                                                opacity: 0.3,
+                                            }}
+                                        />
+                                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                                        <img
+                                            src={p.thumbnail_url || p.image_url}
+                                            alt={p.name}
+                                            style={{
+                                                position: "relative",
+                                                zIndex: 1,
+                                                width: "100%",
+                                                height: "100%",
+                                                objectFit: "contain",
+                                                padding: 10,
+                                            }}
+                                        />
+                                    </>
                                 ) : (
                                     <div
                                         style={{

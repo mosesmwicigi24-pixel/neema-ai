@@ -44,23 +44,34 @@ const catColors: Record<string, string> = {
     apparel: "from-blue-50 to-indigo-50",
 };
 
-// A product image that FITS its holder (object-contain, never cropped) and
-// gracefully falls back to the category glyph when the hub URL is missing or
-// 404s — so a broken image never shows raw alt text on the card.
+// A product image that FILLS its holder while staying WHOLE (never cropped): the
+// product sits object-contain over a soft, blurred, cover-scaled copy of itself,
+// so the holder is richly filled edge-to-edge with no dead bars — and the item
+// still reads large. Falls back to the category glyph when the hub URL is
+// missing or 404s, so a broken image never shows raw alt text.
 function ProductThumb({ src, alt, glyph }: { src: string | null; alt: string; glyph: string }) {
     const [errored, setErrored] = useState(false);
     if (!src || errored) {
-        return <span className="text-3xl">{glyph}</span>;
+        return <span className="text-6xl opacity-90">{glyph}</span>;
     }
     return (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-            src={src}
-            alt={alt}
-            onError={() => setErrored(true)}
-            className="w-full h-full object-contain p-1.5"
-            loading="lazy"
-        />
+        <div className="relative w-full h-full overflow-hidden">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+                src={src}
+                alt=""
+                aria-hidden
+                className="absolute inset-0 w-full h-full object-cover blur-2xl scale-125 opacity-30"
+            />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+                src={src}
+                alt={alt}
+                onError={() => setErrored(true)}
+                className="relative z-10 w-full h-full object-contain p-2.5"
+                loading="lazy"
+            />
+        </div>
     );
 }
 
@@ -207,7 +218,7 @@ export function CatalogView({
             </div>
 
             {/* Grid — read-only product cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-5">
                 {filtered.map((item) => {
                     const gradient =
                         catColors[item.category ?? ""] ??
@@ -219,7 +230,7 @@ export function CatalogView({
                             className={`bg-white rounded-xl border border-[#e6f3d8] overflow-hidden shadow-sm transition-all duration-200 ${!item.in_stock ? "opacity-60" : ""}`}
                         >
                             <div
-                                className={`h-28 bg-gradient-to-br ${gradient} flex items-center justify-center text-3xl overflow-hidden`}
+                                className={`aspect-square bg-gradient-to-br ${gradient} flex items-center justify-center overflow-hidden`}
                             >
                                 <ProductThumb
                                     src={item.thumbnail_url || item.image_url || null}
