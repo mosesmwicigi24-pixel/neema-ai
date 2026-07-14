@@ -304,6 +304,48 @@ def test_messenger_addendum_currency_and_routes_to_whatsapp():
     assert "kes" in kes and "whatsapp" in kes
 
 
+def test_messenger_addendum_closes_here_whatsapp_only_for_payment():
+    """Sell and close IN Messenger; capture the phone quietly; move to WhatsApp
+    only for the final payment — never rush them across early."""
+    from app.agent.runtime import _meta_addendum
+    p = _meta_addendum()
+    assert "CLOSE THE SALE RIGHT HERE" in p
+    assert "do NOT point them to WhatsApp early" in p
+    assert "ONLY once the full order is agreed" in p
+    assert "BEHIND THE SCENES" in p and "capture_contact" in p
+
+
+def test_public_comment_addendum_is_warm_and_pulls_to_inbox():
+    """The Facebook/IG comment reply reads like a warm shopkeeper and continues
+    in the DM — it must NOT push WhatsApp or write links itself."""
+    from app.agent.runtime import _public_comment_addendum
+    p = _public_comment_addendum()
+    assert "warm, human" in p.lower()
+    assert "continue in their inbox" in p and "real selling happens there" in p
+    assert "Do NOT write any link" in p
+
+
+def test_comment_public_reply_prefers_inbox_over_whatsapp():
+    """DM delivered → pull to inbox, never a WhatsApp link. DM failed → fall back
+    to the order link so a buyer isn't stranded. No answer → warm light invite."""
+    from app.agent import runtime as rt
+    answer = "This purple cope is $150, made to your size."
+
+    # DM landed: inbox nudge, and NO WhatsApp/order link in the public comment
+    got = rt._comment_public_reply(answer, True, "https://neema/api/o/ABC", " Jane", "seed1")
+    assert answer in got
+    assert "wa.me" not in got and "Order here" not in got and "neema/api/o" not in got
+    assert got != answer                                   # a nudge was appended
+
+    # DM failed: fall back to the tap-to-order WhatsApp link
+    got2 = rt._comment_public_reply(answer, False, "https://neema/api/o/ABC", " Jane", "seed1")
+    assert "Order here 👉 https://neema/api/o/ABC" in got2
+
+    # No answer at all → a warm light invite (no crash, non-empty)
+    got3 = rt._comment_public_reply("", False, "", " Jane", "seed1")
+    assert got3.strip() and "{name}" not in got3
+
+
 def test_capture_schedules_agent_reply_only_when_enabled(monkeypatch):
     calls = []
 

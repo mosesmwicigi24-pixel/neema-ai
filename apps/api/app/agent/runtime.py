@@ -45,32 +45,31 @@ PUBLIC_COMMENT_TOOLS = [t for t in TOOLS if t["name"] in _PUBLIC_COMMENT_TOOL_NA
 
 
 def _public_comment_addendum(currency: str = "USD") -> str:
-    """System addendum for a PUBLIC comment reply — SELL, don't tell stories.
-    Straight to the point: identify the product from the post image, quote the real
-    price, offer to order. The customer wants the answer, not a paragraph."""
+    """System addendum for a PUBLIC comment reply — warm, human, and helpful, so
+    it reads like a friendly shopkeeper, not a price bot. Answer the question with
+    the real price, then invite them to continue in the inbox (a call-to-action is
+    added after your text). The full sale is closed 1:1 in the DM that follows."""
     money = "Kenyan Shillings (KES)" if currency == "KES" else "US Dollars (USD)"
     example = "'This gown is KES 13,000.'" if currency == "KES" else "'This gown is $130.'"
     return (
-        "\n\n## Replying PUBLICLY under a Facebook/Instagram comment — SELL, don't chat\n"
-        "- STRAIGHT to the point. NO preamble, NO congratulations, NO backstory, NO "
-        "scripture, NO 'that's a big milestone / years of work' — cut ALL of it. The "
-        "customer wants a straight answer.\n"
-        f"- If they ask the price, the FIRST words are the item + price, e.g. "
-        f"{example} Quote the price in {money} (the `price` from "
-        f"search_catalog is already in {money}) — never invent it.\n"
+        "\n\n## Replying under a Facebook/Instagram comment — warm, human, helpful\n"
+        f"- Lead with the answer: the item + its real price in the first line, e.g. "
+        f"{example} Quote in {money} (the `price` from search_catalog is already in "
+        f"{money}) — never invent it.\n"
         "- Recognise the product from the POST IMAGE (you can see it) and find it in "
         "the catalogue with search_catalog; if they name a different item, price that.\n"
-        "- ONE short line. Plain text — no markdown, no asterisks, no headings.\n"
-        "- Made-to-order? Say it in ≤3 words ('made to your size'), never a paragraph.\n"
-        "- End with a 3–4 word nudge to order (e.g. 'Order yours 👇'). Do NOT write "
-        "any link or phone number — a tap-to-order link is appended after your text.\n"
-        "- Praise / emoji only → a 3–4 word genuine thanks, nothing salesy."
+        "- Be genuinely warm and human — a brief friendly word is welcome — but "
+        "CONCISE: this is a public comment, so 1–2 short lines, plain text, no "
+        "markdown or asterisks.\n"
+        "- Made-to-order? Say it in a few words ('made to your size').\n"
+        "- Do NOT write any link, phone number, or 'order on WhatsApp' — a friendly "
+        "invitation to continue in their inbox is added after your text, and the "
+        "real selling happens there.\n"
+        "- Praise / emoji only → a short, genuine, warm thanks — nothing salesy."
     )
 
 
 def _meta_addendum(currency: str = "USD") -> str:
-    wa = (settings.whatsapp_handoff_number or "").strip()
-    where = f"on WhatsApp at {wa}" if wa else "on WhatsApp"
     money = "Kenyan Shillings (KES)" if currency == "KES" else "US Dollars (USD)"
     # Local-currency conversion only for the USD-quoted customer, and only on request.
     local = ""
@@ -100,16 +99,21 @@ def _meta_addendum(currency: str = "USD") -> str:
         "phone — even partially ('Machakos', just a first name) — call "
         "capture_contact IN THAT SAME TURN with everything they said. A stated "
         "detail that goes unsaved is a lost customer record.\n"
-        "- Once the item and price are settled, warmly ask for their WhatsApp/phone "
-        "number for ease of communication and pass it to capture_contact — it links "
-        "their Messenger and WhatsApp into one customer and lets us finish the "
-        "order there.\n"
-        "- You CANNOT take payment or place an order here — checkout is on WhatsApp. "
-        "The MOMENT the customer shows buying intent ('I'll take it', 'how do I "
-        "pay', a clear yes), call whatsapp_checkout_link with the product(s) and "
+        "- CLOSE THE SALE RIGHT HERE — do not rush them to another app. Walk the "
+        "whole order in Messenger, one warm step at a time: item → colour/design "
+        "→ size → quantity → their city, then confirm the items and the total. "
+        "Keep it moving until the order is fully agreed.\n"
+        "- BEHIND THE SCENES, once the item is settled, warmly ask for their "
+        "WhatsApp/phone number for ease of communication and to confirm delivery, "
+        "and pass it to capture_contact — it links their Messenger and WhatsApp "
+        "into one customer. Frame it as staying in touch, never as sending them "
+        "away.\n"
+        "- Payment is the ONLY step that happens on WhatsApp (our secure "
+        "M-Pesa/checkout lives there). So ONLY once the full order is agreed AND "
+        "they're ready to pay, call whatsapp_checkout_link with the product(s) and "
         "share the link it returns EXACTLY as given — never hand-type a wa.me link "
-        "or number.\n"
-        f"- If they're not ready yet, keep helping and gently point them {where} when it's time.\n"
+        "or number. Until that moment, keep selling here; do NOT point them to "
+        "WhatsApp early — WhatsApp is only for the final payment.\n"
         "- Keep replies short, precise, and friendly; you are the same Bethany House assistant."
     )
 
@@ -616,12 +620,38 @@ _WA_INVITE_POOL = [
     "We'd love to help{name}! 🙏 Continue on WhatsApp to get yours 💛",
     "Karibu{name} 🙏 Tap through to WhatsApp and we'll take it from there 💛",
 ]
+# Public-comment CTA when we've opened a DM: pull them to their inbox (where the
+# real, unrushed selling happens) — NOT to WhatsApp.
+_DM_NUDGE_POOL = [
+    "I've sent you a message — let's finish there 💬",
+    "Check your inbox 💬 I've messaged you the details 💛",
+    "Replied in your inbox — let's sort it out there 💛",
+    "Sent you a DM so we can get you sorted 💬",
+]
+# The line that continues the sale INSIDE the DM the comment opens.
+_DM_CONTINUE_POOL = [
+    "Reply here and I'll help you get yours — we'll sort out colour, size and delivery together. 💛",
+    "Just reply here and we'll get you sorted — colour, size and delivery, step by step. 💛",
+    "Tell me a little more here and I'll guide you all the way to your order. 💛",
+]
 
 
 def _pick(pool: list, seed: str) -> str:
     import hashlib
     i = int(hashlib.sha1((seed or "x").encode()).hexdigest(), 16) % len(pool)
     return pool[i]
+
+
+def _comment_public_reply(answer: str, dm_sent: bool, link: str, name_tag: str, seed: str) -> str:
+    """The PUBLIC comment text, given the agent's answer and whether the DM
+    landed. DM delivered → pull them to their inbox (never push WhatsApp in the
+    comment). DM failed → fall back to the tap-to-order WhatsApp link so a buyer
+    isn't stranded. No answer (over cap / agent failed) → a warm light invite."""
+    if answer and dm_sent:
+        return f"{answer}\n{_pick(_DM_NUDGE_POOL, seed)}"
+    if answer:
+        return f"{answer}\nOrder here 👉 {link}" if link else answer
+    return _pick(_WA_INVITE_POOL, seed).replace("{name}", name_tag)
 
 
 async def _order_link(redis, channel: str, ext: str, product: str = "") -> str:
@@ -718,9 +748,12 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
                 _log.warning("route-to-human failed for comment %s: %s", cid, exc)
         return
 
-    # ── High intent: the comment reply IS the sale. Give a real, personalised,
-    # catalogue-accurate answer (with the true price) and a tap-to-order link,
-    # right in the comment. The DM is a silent bonus, not the value.
+    # ── High intent: answer warmly in the public comment, then CONTINUE THE SALE
+    # in the DM the comment opens — that Messenger thread is where we sell,
+    # close, and capture the phone, unrushed. WhatsApp is NOT pushed in the
+    # comment; the public CTA pulls them to their inbox instead. We only fall
+    # back to a WhatsApp order link when the DM couldn't be delivered, so a real
+    # buyer is never left with no way to reach us.
     prompt_text = comment_text or "How much?"
     post_ctx = comment.get("post_context") or {}
     post_id = comment.get("post_id") or post_ctx.get("post_id") or ""
@@ -729,25 +762,35 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # (they rarely name the item — "how much?" under a photo is meaningless alone).
     media = {"type": "image", "url": thumb} if thumb else None
 
-    link = await _order_link(redis, channel, ext)   # clean generic opener; agent carries the context
     over_cap = await _post_over_cap(redis, post_id)
 
-    public_text = ""
+    answer = ""
     if not over_cap:
-        # Full agent reply — SEES the post image, quotes the REAL price, one line.
+        # Full agent reply — SEES the post image, quotes the REAL price, warm + short.
         try:
             async with AsyncSessionLocal() as db:
-                public_text = (await run_turn(
+                answer = (await run_turn(
                     db, redis, wa_id=ext, user_text=prompt_text, llm=build_llm(),
                     media=media, channel=channel, external_id=ext,
                     public_comment=True)).strip()
         except Exception as exc:
             _log.warning("public agent reply failed for %s: %s", cid, exc)
-    if not public_text:                          # over cap OR agent failed → light warm line
-        public_text = _pick(_WA_INVITE_POOL, ext).replace("{name}", name_tag)
 
-    if link and "wa.me" not in public_text:      # append the tap-to-order link once
-        public_text = f"{public_text}\nOrder here 👉 {link}"
+    # Open the DM first (so the public CTA can honestly point to the inbox). The DM
+    # carries the answer + a warm invitation to continue the sale right there.
+    dm_sent = False
+    if answer:
+        dm_text = f"{answer}\n\n{_pick(_DM_CONTINUE_POOL, ext)}"
+        try:
+            await send_private_reply(cid, dm_text, page_id=comment.get("page_id"))
+            dm_sent = True
+        except Exception as exc:
+            _log.info("comment DM not delivered for %s: %s", cid, exc)
+
+    # Build the PUBLIC reply CTA (see _comment_public_reply). Only mint the
+    # WhatsApp order link when it's actually the fallback (answer but no DM).
+    link = await _order_link(redis, channel, ext) if (answer and not dm_sent) else ""
+    public_text = _comment_public_reply(answer, dm_sent, link, name_tag, ext)
 
     await _post_public(public_text)
 
@@ -760,15 +803,6 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     except Exception as exc:
         _log.warning("saving public reply to thread failed for %s: %s", cid, exc)
 
-    # Bonus: also open the DM with the same answer (best-effort; Meta blocks private
-    # replies to non-testers until App Review). Silent either way — the comment
-    # already delivered the answer, and it's the SAME text, so we don't re-save it.
-    dm_sent = False
-    try:
-        await send_private_reply(cid, public_text, page_id=comment.get("page_id"))
-        dm_sent = True
-    except Exception as exc:
-        _log.info("comment DM (bonus) not delivered for %s: %s", cid, exc)
     _log.info("comment %s engaged: agent=%s over_cap=%s dm=%s", cid, not over_cap, over_cap, dm_sent)
 
 
