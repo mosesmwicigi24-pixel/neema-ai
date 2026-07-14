@@ -80,7 +80,10 @@ TOOLS: list[dict] = [
         "name": "search_catalog",
         "description": "Search the live Bethany House catalogue for products by name, "
                        "category or keyword. Use this before quoting any price — "
-                       "never invent products, prices or availability.",
+                       "never invent products, prices or availability. Some products "
+                       "return a `variants` list (size/colour, each with its OWN price): "
+                       "quote the variant the customer picks, or give the `price_range` "
+                       "and ask which one — never a single flat price for a varied item.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -104,7 +107,9 @@ TOOLS: list[dict] = [
             "type": "object",
             "properties": {
                 "action": {"type": "string", "enum": ["add", "set", "remove", "clear"]},
-                "product": {"type": "string", "description": "Product name or SKU (ignored for clear)"},
+                "product": {"type": "string", "description": "Product name or SKU (ignored for clear). "
+                            "For a product with variants, pass the chosen variant's SKU (e.g. "
+                            "'COM-T-001-L-GOL') so the cart is priced for that exact size/colour."},
                 "quantity": {"type": "integer", "description": "Quantity for add/set (default 1)"},
             },
             "required": ["action"],
@@ -293,6 +298,22 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
         }
         row["price"] = _to_display(p.get("price"), ctx, p.get("price_usd"))
         row["currency"] = ctx.currency
+        # Variants each carry their OWN price (a Thurible in S ≠ L). Surface them
+        # so the agent quotes the exact size/colour the customer wants — and a
+        # price range when they haven't chosen yet — instead of one flat number.
+        variants = p.get("variants") or []
+        if variants:
+            row["variants"] = [
+                {"options": v.get("attributes") or v.get("name"),
+                 "sku": v.get("sku"),
+                 "price": _to_display(v.get("price_kes"), ctx, v.get("price_usd"))}
+                for v in variants
+            ]
+            prices = [vr["price"] for vr in row["variants"] if isinstance(vr["price"], (int, float))]
+            if prices and min(prices) != max(prices):
+                row["price_range"] = {"from": min(prices), "to": max(prices)}
+                row["price_note"] = ("price depends on the variant — quote the one the "
+                                     "customer picks, or give the range and ask")
         results.append(row)
         if len(results) >= 8:
             break
@@ -307,16 +328,20 @@ async def _cart_display(cart: dict, ctx: ToolContext) -> tuple[list, object]:
     sum the converted lines so the shown total matches the shown unit prices. The
     catalogue is only loaded for the USD path (and it's cached), so the common
     Kenyan turn does no extra work."""
-    # `in_stock` on a cart line is bookkeeping for the order-time sourcing flag —
-    # never shown to the model, so it can never blurt "that's out of stock".
-    items = [{k: v for k, v in i.items() if k != "in_stock"} for i in cart.get("items", [])]
+    # `in_stock`/`price_usd` on a cart line are internal bookkeeping — never shown
+    # to the model (in_stock feeds the sourcing flag; price_usd feeds USD display).
+    _hidden = ("in_stock", "price_usd")
+    items = [{k: v for k, v in i.items() if k not in _hidden} for i in cart.get("items", [])]
+    raw = cart.get("items", [])
     if ctx.currency != "USD":
         return items, cartmod.cart_total(cart)
     catalog = await svc.catalog_items(ctx.db, ctx.redis)
     usd_by_id = {p.get("hub_product_id"): p.get("price_usd") for p in catalog}
     out, total = [], 0
-    for i in items:
-        unit = _to_display(i.get("unit_price"), ctx, usd_by_id.get(i.get("hub_product_id")))
+    for i, r in zip(items, raw):
+        # Prefer the line's OWN usd (a variant's price) over the product default.
+        line_usd = r.get("price_usd") or usd_by_id.get(i.get("hub_product_id"))
+        unit = _to_display(i.get("unit_price"), ctx, line_usd)
         d = dict(i)
         d["unit_price"] = unit
         out.append(d)
@@ -370,9 +395,13 @@ async def _update_cart(args: dict, ctx: ToolContext) -> dict:
         row = {
             "hub_product_id": line["product_id"],
             "name": line["name"],
-            "sku": (cat.get("sku") or ""),
+            # Store the VARIANT sku when this line is a variant, so order-time
+            # re-resolution finds the exact variant (its price + variant_id) and
+            # the order total matches what was quoted.
+            "sku": (line.get("variant_sku") or cat.get("sku") or ""),
             "qty": new_qty,
             "unit_price": line["unit_price"],
+            "price_usd": line.get("unit_price_usd"),   # variant's own USD (for USD display)
             "in_stock": bool(cat.get("in_stock", True)),
             "made_to_order": line.get("product_type") == "variable" and bool(line.get("is_producible")),
         }

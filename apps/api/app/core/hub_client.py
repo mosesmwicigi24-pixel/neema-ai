@@ -49,6 +49,24 @@ def _map_images(p: dict) -> list[dict]:
     return out
 
 
+def _map_variant(v: dict) -> dict:
+    """One product variant → the compact shape the agent quotes from: its own
+    SKU, human name ('S / GOLD'), attributes ({Size, Colour}), and per-currency
+    price. Each variant carries its OWN price — a Thurible in S is KES 9,000 but
+    L is KES 15,000 — so the agent must quote the variant, not the product."""
+    prices = {pr.get("currency_code"): pr for pr in (v.get("prices") or [])}
+    return {
+        "variant_id": v.get("id"),
+        "sku":        v.get("sku") or "",
+        "name":       v.get("variant_name") or "",
+        "attributes": v.get("attributes") or {},
+        "price_kes":  _price(prices, "KES"),
+        "price_usd":  _price(prices, "USD"),
+        "is_default": bool(v.get("is_default")),
+        "in_stock":   bool(v.get("is_active", True)),
+    }
+
+
 def _map_product(p: dict) -> dict:
     trans = p.get("translations") or []
     en = next((t for t in trans if t.get("language_code") == "en"),
@@ -84,7 +102,44 @@ def _map_product(p: dict) -> dict:
         # are pushed via production_items[] instead — no variant, no stock check.
         "product_type":   p.get("product_type") or "simple",
         "is_producible":  bool(p.get("is_producible")),
+        # Filled in by fetch_hub_catalog for variable products (each with its own
+        # price); empty for simple products.
+        "variants":       [],
     }
+
+
+async def _fetch_variants(client: "httpx.AsyncClient", base: str, product_id) -> list[dict]:
+    """The variants for one variable product, mapped. Best-effort: on any error
+    return [] so the product still sells at its base price."""
+    try:
+        resp = await client.get(f"{base}/api/v1/products/{product_id}/variants")
+        resp.raise_for_status()
+        data = resp.json()
+        rows = data.get("data", data) if isinstance(data, dict) else data
+        return [_map_variant(v) for v in (rows or []) if v.get("is_active", True)]
+    except Exception as exc:
+        _log.warning("hub variants fetch failed for product %s: %s", product_id, exc)
+        return []
+
+
+def _apply_variant_pricing(prod: dict) -> None:
+    """Give a variable product a sensible base price + range from its variants,
+    so a bare quote is never 0 and the agent can say 'from KES 9,000'. The
+    default variant sets the base; min/max frame the range."""
+    vs = prod.get("variants") or []
+    kes = [v["price_kes"] for v in vs if v.get("price_kes") is not None]
+    usd = [v["price_usd"] for v in vs if v.get("price_usd") is not None]
+    default = next((v for v in vs if v.get("is_default")), vs[0] if vs else None)
+    if default:
+        if not prod.get("price_kes"):
+            prod["price_kes"] = default.get("price_kes")
+            prod["price"] = default.get("price_kes") or prod.get("price") or 0.0
+        if not prod.get("price_usd"):
+            prod["price_usd"] = default.get("price_usd")
+    if kes:
+        prod["price_min_kes"], prod["price_max_kes"] = min(kes), max(kes)
+    if usd:
+        prod["price_min_usd"], prod["price_max_usd"] = min(usd), max(usd)
 
 
 async def fetch_hub_catalog(redis) -> list[dict]:
@@ -118,6 +173,21 @@ async def fetch_hub_catalog(redis) -> list[dict]:
             if page >= last:
                 break
             page += 1
+
+        # Variable products carry per-variant prices on a separate endpoint —
+        # pull them (concurrently, bounded) so the agent can quote the right
+        # size/colour, then derive each product's base price + range.
+        import asyncio
+        variable = [p for p in items if p.get("product_type") == "variable" and p.get("hub_product_id")]
+        sem = asyncio.Semaphore(8)
+
+        async def _load(p):
+            async with sem:
+                p["variants"] = await _fetch_variants(client, base, p["hub_product_id"])
+            _apply_variant_pricing(p)
+
+        if variable:
+            await asyncio.gather(*[_load(p) for p in variable])
 
     if not items:
         raise RuntimeError("hub returned zero products")
@@ -167,17 +237,21 @@ def resolve_hub_line(item: dict, catalog: list[dict]) -> dict | None:
     except (TypeError, ValueError):
         qty = 1
 
-    def _line(p: dict, matched_by: str) -> dict:
+    def _line(p: dict, matched_by: str, variant: dict | None = None) -> dict:
         # Hub price is authoritative; fall back to the AI's quoted unit only if
-        # the catalogue has no price (shouldn't happen for a sellable item).
-        price = p.get("price")
+        # the catalogue has no price (shouldn't happen for a sellable item). For a
+        # matched VARIANT, the variant's own KES price is the source of truth.
+        price = (variant or {}).get("price_kes") if variant else p.get("price")
         if price in (None, 0, 0.0):
-            price = item.get("unit") or item.get("price") or item.get("unit_price") or 0
+            price = p.get("price") or item.get("unit") or item.get("price") or item.get("unit_price") or 0
         return {
             "product_id": p.get("hub_product_id"),
             "quantity": qty,
             "unit_price": float(price or 0),
-            "name": p.get("name"),
+            "name": (f"{p.get('name')} ({variant.get('name')})" if variant else p.get("name")),
+            "variant_sku": (variant or {}).get("sku"),
+            "variant_id": (variant or {}).get("variant_id"),
+            "unit_price_usd": (variant or {}).get("price_usd") if variant else p.get("price_usd"),
             "matched_by": matched_by,
             "product_type": p.get("product_type") or "simple",
             "is_producible": bool(p.get("is_producible")),
@@ -185,9 +259,21 @@ def resolve_hub_line(item: dict, catalog: list[dict]) -> dict | None:
 
     by_sku = {_norm(p.get("sku")): p for p in catalog if p.get("sku")}
     by_name = {_norm(p.get("name")): p for p in catalog if p.get("name")}
+    # Variant lookups: a variant SKU ("COM-T-001-S-GOL") or full name ("thurible
+    # s / gold") resolves to its parent product at the VARIANT's price.
+    by_var_sku = {_norm(v.get("sku")): (p, v)
+                  for p in catalog for v in (p.get("variants") or []) if v.get("sku")}
+    by_var_name = {_norm(f"{p.get('name')} {v.get('name')}"): (p, v)
+                   for p in catalog for v in (p.get("variants") or []) if v.get("name")}
 
+    if sku and sku in by_var_sku:
+        p, v = by_var_sku[sku]
+        return _line(p, "variant_sku", v)
     if sku and sku in by_sku and by_sku[sku].get("hub_product_id"):
         return _line(by_sku[sku], "sku")
+    if name and name in by_var_name:
+        p, v = by_var_name[name]
+        return _line(p, "variant_name", v)
     if name and name in by_name and by_name[name].get("hub_product_id"):
         return _line(by_name[name], "name")
     for p in catalog:                       # alias exact
@@ -296,7 +382,13 @@ async def push_pending_order(
     }
     if stock_lines:
         payload["items"] = [
-            {"product_id": l["product_id"], "quantity": l["quantity"], "unit_price": l["unit_price"]}
+            {
+                "product_id": l["product_id"], "quantity": l["quantity"],
+                "unit_price": l["unit_price"],
+                # Variable stock products track inventory per-variant, so the hub
+                # needs the variant_id (a bare product_id fails its stock check).
+                **({"variant_id": l["variant_id"]} if l.get("variant_id") else {}),
+            }
             for l in stock_lines
         ]
     if mto_lines:
@@ -305,8 +397,11 @@ async def push_pending_order(
                 "product_id": l["product_id"],
                 "quantity": l["quantity"],
                 "unit_price": l["unit_price"],
-                # Size/measurements aren't captured on WhatsApp yet — prompt staff.
-                "production_notes": "WhatsApp order via Neema — confirm size/measurements with the customer.",
+                **({"variant_id": l["variant_id"]} if l.get("variant_id") else {}),
+                # Name carries the chosen variant (e.g. "… (L / GOLD)"); staff
+                # still confirm exact measurements with the customer.
+                "production_notes": f"WhatsApp order via Neema — {l['name']}. "
+                                    "Confirm size/measurements with the customer.",
             }
             for l in mto_lines
         ]
