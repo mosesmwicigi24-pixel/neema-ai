@@ -36,3 +36,10 @@ anthropic
 aiofiles
 # Phone parsing/normalization (country-aware E.164 for identity matching)
 phonenumbers==8.13.45
+
+# ── Call transcription (OPTIONAL — self-hosted, zero per-call cost) ──────────
+# Uncomment to enable local Swahili/English call transcription on the box, then
+# set WHISPER_ENABLED=1 (and WHISPER_AUTO=1 for automatic transcription). Ships
+# manylinux wheels bundling ffmpeg (via PyAV) — no system packages needed. Left
+# commented so it doesn't bloat the image until you turn transcription on.
+# faster-whisper==1.0.3

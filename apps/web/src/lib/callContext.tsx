@@ -44,8 +44,17 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
     const pcRef = useRef<RTCPeerConnection | null>(null);
     const localStreamRef = useRef<MediaStream | null>(null);
+    const remoteStreamRef = useRef<MediaStream | null>(null);
     const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
     const ringRef = useRef<{ ctx: AudioContext; timer: ReturnType<typeof setInterval> } | null>(null);
+
+    // Call recording — mix both sides in the browser (free), upload on hangup so
+    // the server can transcribe + summarise. recEnabledRef is a server kill switch.
+    const recorderRef = useRef<MediaRecorder | null>(null);
+    const recChunksRef = useRef<Blob[]>([]);
+    const recCtxRef = useRef<AudioContext | null>(null);
+    const recCallIdRef = useRef<string | null>(null);
+    const recEnabledRef = useRef<boolean>(true);
 
     // Generated ringtone (no asset file → no 404). Best-effort; browser autoplay
     // policy may mute it until a gesture, which is fine — the card is the alert.
@@ -92,12 +101,65 @@ export function CallProvider({ children }: { children: ReactNode }) {
         setPhase("ringing");
     }, [startRing]);
 
+    // Record the call by mixing the agent mic + the customer's remote audio into a
+    // single stream (Web Audio API) and capturing it with MediaRecorder. Free — the
+    // audio already flows through this browser. Started when the call connects.
+    const startRecording = useCallback(() => {
+        if (recorderRef.current || recEnabledRef.current === false) return;
+        if (typeof MediaRecorder === "undefined") return;
+        const local = localStreamRef.current;
+        if (!local) return;
+        try {
+            const AC = (window.AudioContext || (window as any).webkitAudioContext);
+            const ctx = new AC();
+            const dest = ctx.createMediaStreamDestination();
+            ctx.createMediaStreamSource(local).connect(dest);
+            const remote = remoteStreamRef.current;
+            if (remote && remote.getAudioTracks().length) {
+                try { ctx.createMediaStreamSource(remote).connect(dest); } catch { /* not audio */ }
+            }
+            recCtxRef.current = ctx;
+            const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus"
+                : MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "";
+            const rec = mime ? new MediaRecorder(dest.stream, { mimeType: mime }) : new MediaRecorder(dest.stream);
+            recChunksRef.current = [];
+            rec.ondataavailable = (e) => { if (e.data && e.data.size) recChunksRef.current.push(e.data); };
+            rec.start(1000);   // 1s chunks so nothing is lost if the call ends abruptly
+            recorderRef.current = rec;
+            recCallIdRef.current = activeIdRef.current || call?.callId || null;
+            console.debug("[call] recording started");
+        } catch (e) { console.warn("[call] recording unavailable:", e); }
+    }, [call]);
+
+    // Stop + upload. Called at the top of cleanup() so it flushes on EVERY end path
+    // (user hangup, remote hangup, failed connection) before the mic tracks stop.
+    const stopRecording = useCallback(() => {
+        const rec = recorderRef.current;
+        const callId = recCallIdRef.current;
+        recorderRef.current = null;
+        recCallIdRef.current = null;
+        if (!rec) { recCtxRef.current?.close().catch(() => {}); recCtxRef.current = null; return; }
+        try {
+            rec.onstop = () => {
+                recCtxRef.current?.close().catch(() => {}); recCtxRef.current = null;
+                const chunks = recChunksRef.current; recChunksRef.current = [];
+                if (!callId || callId === "pending" || !chunks.length) return;
+                const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
+                if (blob.size < 2000) return;   // skip near-silent / empty recordings
+                callsApi.uploadRecording(callId, blob).catch((e) => console.warn("[call] recording upload failed:", e));
+            };
+            rec.stop();
+        } catch (e) { console.warn("[call] recording stop failed:", e); }
+    }, []);
+
     const cleanup = useCallback(() => {
+        stopRecording();
         pcRef.current?.close(); pcRef.current = null;
         localStreamRef.current?.getTracks().forEach((t) => t.stop());
         localStreamRef.current = null;
+        remoteStreamRef.current = null;
         stopRing();
-    }, [stopRing]);
+    }, [stopRing, stopRecording]);
 
     const finish = useCallback((noteText?: string) => {
         cleanup();
@@ -127,11 +189,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
         if (!call) return;
         setError(null); setPhase("connecting"); stopRing();
         try {
-            const [{ ice_servers }, offer] = await Promise.all([callsApi.iceConfig(), callsApi.offer(call.callId)]);
+            const [cfg, offer] = await Promise.all([callsApi.iceConfig(), callsApi.offer(call.callId)]);
+            const { ice_servers } = cfg;
+            recEnabledRef.current = cfg.record !== false;
             console.debug("[call] ICE servers:", ice_servers);
             const pc = new RTCPeerConnection({ iceServers: ice_servers });
             pcRef.current = pc;
-            pc.ontrack = (e) => { if (remoteAudioRef.current) remoteAudioRef.current.srcObject = e.streams[0]; };
+            pc.ontrack = (e) => { remoteStreamRef.current = e.streams[0]; if (remoteAudioRef.current) remoteAudioRef.current.srcObject = e.streams[0]; };
             pc.onconnectionstatechange = () => {
                 console.debug("[call] connectionState:", pc.connectionState);
                 if (pc.connectionState === "connected") setPhase("in_call");
@@ -176,7 +240,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
     const buildPc = useCallback((iceServers: RTCIceServer[]) => {
         const pc = new RTCPeerConnection({ iceServers });
-        pc.ontrack = (e) => { if (remoteAudioRef.current) remoteAudioRef.current.srcObject = e.streams[0]; };
+        pc.ontrack = (e) => { remoteStreamRef.current = e.streams[0]; if (remoteAudioRef.current) remoteAudioRef.current.srcObject = e.streams[0]; };
         pc.onconnectionstatechange = () => {
             console.debug("[call] connectionState:", pc.connectionState);
             if (pc.connectionState === "connected") setPhase("in_call");
@@ -209,7 +273,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
         setCall({ callId: "pending", from: to.replace(/^\+/, ""), name: name ?? null });
         setPhase("connecting");
         try {
-            const { ice_servers } = await callsApi.iceConfig();
+            const cfg = await callsApi.iceConfig();
+            const { ice_servers } = cfg;
+            recEnabledRef.current = cfg.record !== false;
             const pc = buildPc(ice_servers);
             pcRef.current = pc;
             const mic = await navigator.mediaDevices.getUserMedia({
@@ -287,9 +353,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
     useEffect(() => {
         if (phase !== "in_call") return;
+        startRecording();   // begins once (guarded); the remote stream has arrived by now
         const t = setInterval(() => setSeconds((s) => s + 1), 1000);
         return () => clearInterval(t);
-    }, [phase]);
+    }, [phase, startRecording]);
 
     return (
         <Ctx.Provider value={{ phase, call, muted, seconds, error, note, answer, hangup, callback, toggleMute, initiateCall, outbound }}>

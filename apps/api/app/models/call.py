@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, Integer, DateTime, ForeignKey
+from sqlalchemy import String, Integer, DateTime, ForeignKey, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models import Base
@@ -30,3 +30,12 @@ class Call(Base):
     started_at   : Mapped[datetime]         = mapped_column(DateTime(timezone=True), default=datetime.utcnow, index=True)
     answered_at  : Mapped[datetime | None]  = mapped_column(DateTime(timezone=True), nullable=True)
     ended_at     : Mapped[datetime | None]  = mapped_column(DateTime(timezone=True), nullable=True)
+    # Recording + transcript + AI summary (self-hosted Whisper → Claude). Populated
+    # post-call: the browser records both sides and uploads on hangup; transcription
+    # runs on our box; the summary is saved here AND as a customer note by phone.
+    recording_url    : Mapped[str | None]   = mapped_column(String(500), nullable=True)  # served audio URL
+    transcript       : Mapped[str | None]   = mapped_column(Text, nullable=True)          # full STT text
+    transcript_lang  : Mapped[str | None]   = mapped_column(String(12), nullable=True)    # detected language
+    summary          : Mapped[str | None]   = mapped_column(Text, nullable=True)          # LLM call brief
+    # none | recorded | pending | processing | done | failed
+    transcript_status: Mapped[str]          = mapped_column(String(20), default="none")

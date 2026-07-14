@@ -125,6 +125,17 @@ class Settings(BaseSettings):
     tier2_prompt_cache: bool = True  # cache the system+tools+conversation prefix (~90% cheaper input)
     tier2_memory: bool = True        # cross-conversation customer memory (facts + past orders)
     tier2_vision: bool = True         # let the agent SEE product photos natively (Claude vision)
+    # ── Call recording + transcription (self-hosted Whisper = zero marginal cost) ──
+    # Audio is recorded in the agent's browser (both sides mixed) and uploaded on
+    # hangup — free. Transcription runs on OUR box via faster-whisper (no per-call
+    # API cost); swap to a cloud provider later by flipping whisper_provider.
+    call_recording_enabled: bool = True    # let the softphone record calls (browser-side)
+    whisper_enabled: bool = False          # can we transcribe at all (provider installed/configured)
+    whisper_auto: bool = False             # auto-transcribe every call on hangup vs. on-demand only
+    whisper_provider: str = "faster_whisper"  # "faster_whisper" (self-hosted, free) | "openai" | "groq"
+    whisper_model: str = "base"            # base (light) | small | medium — bigger = better Swahili, slower
+    whisper_compute_type: str = "int8"     # ctranslate2 compute type for faster-whisper on CPU
+    groq_api_key: str = ""                 # only used when whisper_provider="groq"
 
     def tier2_wa_ids(self) -> set[str]:
         return {w.strip() for w in self.tier2_enabled_wa_ids.split(",") if w.strip()}

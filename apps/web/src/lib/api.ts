@@ -458,12 +458,25 @@ export interface ApiCall {
     duration: number | null;
     agent_name: string | null;
     started_at: string | null;
+    summary?: string | null;
+    transcript_status?: string | null;  // none | recorded | pending | processing | done | failed
+    has_recording?: boolean;
+}
+
+export interface CallTranscriptResp {
+    call_id: string;
+    status: string;
+    transcript: string | null;
+    summary: string | null;
+    language: string | null;
+    has_recording: boolean;
+    recording_url: string | null;
 }
 
 // WhatsApp voice calling — the dashboard softphone's backend.
 export const callsApi = {
     list: () => get<ApiCall[]>("/admin/calls"),
-    iceConfig: () => get<{ ice_servers: RTCIceServer[] }>("/admin/calls/ice-config"),
+    iceConfig: () => get<{ ice_servers: RTCIceServer[]; record?: boolean }>("/admin/calls/ice-config"),
     offer: (callId: string) =>
         get<{ call_id: string; sdp: string; from: string }>(`/admin/calls/${encodeURIComponent(callId)}/offer`),
     answer: (callId: string, sdp: string) =>
@@ -476,6 +489,38 @@ export const callsApi = {
         post<{ ok: boolean; call_id: string }>("/admin/calls/connect", { to, sdp, name }),
     requestPermission: (to: string) =>
         post<{ ok: boolean }>("/admin/calls/request-permission", { to }),
+    transcript: (callId: string) =>
+        get<CallTranscriptResp>(`/admin/calls/${encodeURIComponent(callId)}/transcript`),
+    transcribe: (callId: string) =>
+        post<{ ok: boolean; status: string }>(`/admin/calls/${encodeURIComponent(callId)}/transcribe`, {}),
+    /** Upload the recorded call audio (both sides mixed) on hangup. Multipart —
+     *  bypasses the JSON req() helper, mirroring conversationsApi.uploadMedia. */
+    uploadRecording: async (callId: string, blob: Blob): Promise<{ ok: boolean; will_transcribe?: boolean }> => {
+        const token = await authToken();
+        const form  = new FormData();
+        form.append("file", blob, `${callId}.webm`);
+        const res = await fetch(
+            `${BASE}/admin/calls/${encodeURIComponent(callId)}/recording`,
+            {
+                method: "POST",
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+                credentials: "include",
+                body: form,
+            },
+        );
+        if (res.status === 401) {
+            if (typeof window !== "undefined") {
+                delete (window as any).__neema_token;
+                window.dispatchEvent(new CustomEvent("neema:session-expired"));
+            }
+            throw new Error("recording → 401: Session expired");
+        }
+        if (!res.ok) {
+            const err = await res.text();
+            throw new Error(`recording → ${res.status}: ${err}`);
+        }
+        return res.json();
+    },
 };
 
 // ── Attribution (which source/post drives leads + revenue) ───────────────────

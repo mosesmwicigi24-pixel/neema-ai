@@ -1215,9 +1215,11 @@ async def whatsapp_invite(
 
 @router.get("/calls/ice-config")
 async def calls_ice_config(agent: Agent = Depends(get_current_agent)):
-    """ICE servers (coturn + STUN) for the dashboard's RTCPeerConnection."""
+    """ICE servers (coturn + STUN) for the dashboard's RTCPeerConnection, plus
+    whether the softphone should record the call (server-side kill switch)."""
     from app.services.wa_calling import ice_servers
-    return {"ice_servers": ice_servers()}
+    from app.core.config import settings
+    return {"ice_servers": ice_servers(), "record": settings.call_recording_enabled}
 
 
 @router.get("/calls/{call_id}/offer")
@@ -1386,6 +1388,9 @@ async def list_calls(
             "direction": c.direction, "status": c.status, "duration": c.duration,
             "agent_name": amap.get(c.agent_id),
             "started_at": c.started_at.isoformat() if c.started_at else None,
+            "summary": c.summary,
+            "transcript_status": c.transcript_status,
+            "has_recording": bool(c.recording_url),
         })
     return out
 
@@ -1418,3 +1423,106 @@ async def calls_callback(
         pass   # may already be gone; still record the intent
     await call_log.mark_callback(call_id)
     return {"ok": True, "call_id": call_id}
+
+
+@router.post("/calls/{call_id}/recording")
+async def calls_upload_recording(
+    call_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """The softphone uploads the recorded call audio (both sides mixed) on hangup.
+    Saved to disk; then (if whisper_auto) transcription is scheduled immediately,
+    otherwise it waits for an on-demand /transcribe. Gated by call_recording_enabled."""
+    import aiofiles, os, uuid
+    from app.core.config import settings
+    from app.models.call import Call
+    from app.routers.media import MEDIA_DIR
+
+    if not settings.call_recording_enabled:
+        raise HTTPException(status_code=403, detail="Call recording is disabled.")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Empty recording.")
+    MB = 1024 * 1024
+    if len(content) > 60 * MB:
+        raise HTTPException(status_code=413, detail="Recording too large — max 60 MB.")
+
+    os.makedirs(MEDIA_DIR, exist_ok=True)
+    ext = os.path.splitext(file.filename or "")[1] or ".webm"
+    saved_name = f"call_{uuid.uuid4().hex}{ext}"
+    file_path = os.path.join(MEDIA_DIR, saved_name)
+    async with aiofiles.open(file_path, "wb") as f:
+        await f.write(content)
+
+    public_base = getattr(settings, "media_public_url", "").rstrip("/")
+    recording_url = f"{public_base}/api/admin/media/{saved_name}" if public_base else saved_name
+
+    auto = bool(settings.whisper_enabled and settings.whisper_auto)
+    c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
+    if c is None:
+        # A recording implies the call happened; keep a row so it can be transcribed.
+        c = Call(call_id=call_id, status="ended")
+        db.add(c)
+    c.recording_url = recording_url
+    c.transcript_status = "pending" if auto else "recorded"
+    await db.commit()
+
+    if auto:
+        from app.services.call_transcribe import schedule_transcription
+        schedule_transcription(call_id)
+    return {"ok": True, "call_id": call_id, "will_transcribe": auto}
+
+
+@router.get("/calls/{call_id}/transcript")
+async def calls_get_transcript(
+    call_id: str,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """The transcript + AI summary + status for a call (the Calls-view expander)."""
+    from app.models.call import Call
+    c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
+    if c is None:
+        raise HTTPException(status_code=404, detail="Call not found")
+    return {
+        "call_id": c.call_id,
+        "status": c.transcript_status,
+        "transcript": c.transcript,
+        "summary": c.summary,
+        "language": c.transcript_lang,
+        "has_recording": bool(c.recording_url),
+        "recording_url": c.recording_url,
+    }
+
+
+@router.post("/calls/{call_id}/transcribe")
+async def calls_transcribe(
+    call_id: str,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Transcribe + summarise a recorded call on demand — the free path: spend the
+    box's CPU only on the calls you care about. Needs a recording and Whisper on."""
+    from app.core.config import settings
+    from app.models.call import Call
+    if not settings.whisper_enabled:
+        raise HTTPException(
+            status_code=409,
+            detail="Transcription isn't enabled yet. Set WHISPER_ENABLED=1 (self-hosted "
+                   "faster-whisper) on the server to turn it on.")
+    c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
+    if c is None:
+        raise HTTPException(status_code=404, detail="Call not found")
+    if not c.recording_url:
+        raise HTTPException(status_code=409, detail="No recording was captured for this call.")
+    if c.transcript_status in ("pending", "processing"):
+        return {"ok": True, "call_id": call_id, "status": c.transcript_status}
+    c.transcript_status = "pending"
+    await db.commit()
+    from app.services.call_transcribe import schedule_transcription
+    schedule_transcription(call_id)
+    return {"ok": True, "call_id": call_id, "status": "pending"}

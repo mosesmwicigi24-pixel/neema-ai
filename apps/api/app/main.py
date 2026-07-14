@@ -56,6 +56,13 @@ MIGRATION_STATEMENTS = [
     """,
     "CREATE INDEX IF NOT EXISTS ix_prod_enq_conv ON production_enquiries (conversation_id)",
     "CREATE INDEX IF NOT EXISTS ix_prod_enq_status ON production_enquiries (status)",
+    # Call recording + transcript + AI summary (see models/call.py). Idempotent so
+    # the columns exist even if the alembic state on the box is behind.
+    "ALTER TABLE calls ADD COLUMN IF NOT EXISTS recording_url VARCHAR(500)",
+    "ALTER TABLE calls ADD COLUMN IF NOT EXISTS transcript TEXT",
+    "ALTER TABLE calls ADD COLUMN IF NOT EXISTS transcript_lang VARCHAR(12)",
+    "ALTER TABLE calls ADD COLUMN IF NOT EXISTS summary TEXT",
+    "ALTER TABLE calls ADD COLUMN IF NOT EXISTS transcript_status VARCHAR(20) DEFAULT 'none'",
     # Seed: Super Admin (protected, cannot be modified)
     """
     INSERT INTO custom_roles (id, name, description, color, permissions, protected)

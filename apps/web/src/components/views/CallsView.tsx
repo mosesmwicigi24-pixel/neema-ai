@@ -7,7 +7,7 @@
 // live-refreshes on WebSocket call events.
 import React, { useCallback, useEffect, useState } from "react";
 import { timeAgo } from "@/lib/utils";
-import { callsApi, type ApiCall } from "@/lib/api";
+import { callsApi, type ApiCall, type CallTranscriptResp } from "@/lib/api";
 import { useWs } from "@/lib/websocket";
 import type { SharedViewProps } from "@/types";
 
@@ -40,9 +40,86 @@ interface CallsViewProps extends SharedViewProps {
     onOpenConversation?: (key: string) => void;
 }
 
+// The expandable transcript + AI summary panel under a call row. Lazily fetches
+// the transcript, offers on-demand transcription (the free path — CPU is spent
+// only when you ask), and polls while it runs.
+function CallTranscript({ callId }: { callId: string }): React.ReactElement {
+    const [data, setData] = useState<CallTranscriptResp | null>(null);
+    const [showFull, setShowFull] = useState(false);
+    const [busy, setBusy] = useState(false);
+    const [err, setErr] = useState<string | null>(null);
+
+    const load = useCallback(() => {
+        callsApi.transcript(callId).then(setData).catch(() => setData(null));
+    }, [callId]);
+    useEffect(() => { load(); }, [load]);
+    useEffect(() => {
+        if (!data || (data.status !== "pending" && data.status !== "processing")) return;
+        const t = setInterval(load, 3000);
+        return () => clearInterval(t);
+    }, [data, load]);
+
+    const runTranscribe = useCallback(async () => {
+        setBusy(true); setErr(null);
+        try { await callsApi.transcribe(callId); await load(); }
+        catch (e: any) {
+            setErr(String(e?.message || "").includes("409")
+                ? "Turn on transcription on the server first (WHISPER_ENABLED)."
+                : "Couldn't start transcription.");
+        } finally { setBusy(false); }
+    }, [callId, load]);
+
+    const box: React.CSSProperties = { padding: "0 24px 16px 68px" };
+    if (!data) return <div style={{ ...box, color: "#7f9b8b", fontSize: 12 }}>Loading…</div>;
+    const st = data.status;
+
+    return (
+        <div style={box}>
+            {data.summary && (
+                <div style={{ background: "rgba(37,211,102,0.06)", border: "1px solid rgba(37,211,102,0.15)", borderRadius: 10, padding: "10px 12px", marginBottom: 8 }}>
+                    <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, color: "#2ad17f", marginBottom: 4 }}>Call summary</div>
+                    <div style={{ fontSize: 13, color: "#cfe9d9", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{data.summary}</div>
+                </div>
+            )}
+            {st === "done" && data.transcript && (
+                <>
+                    <button type="button" onClick={() => setShowFull((v) => !v)}
+                        style={{ fontSize: 11, color: "#7f9b8b", background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+                        {showFull ? "Hide" : "Show"} full transcript{data.language ? ` · ${data.language}` : ""}
+                    </button>
+                    {showFull && (
+                        <div style={{ fontSize: 12, color: "#9fb3a8", whiteSpace: "pre-wrap", lineHeight: 1.6, marginTop: 6 }}>{data.transcript}</div>
+                    )}
+                </>
+            )}
+            {(st === "pending" || st === "processing") && (
+                <div style={{ fontSize: 12, color: "#f5c451" }}>Transcribing… this runs on our server, usually ~1–2 min.</div>
+            )}
+            {st === "recorded" && (
+                <button type="button" onClick={runTranscribe} disabled={busy}
+                    style={{ fontSize: 12, fontWeight: 500, color: "#0b1410", background: "#2ad17f", border: "none", borderRadius: 8, padding: "7px 14px", cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1 }}>
+                    {busy ? "Starting…" : "Transcribe & summarise"}
+                </button>
+            )}
+            {st === "failed" && (
+                <div style={{ fontSize: 12, color: "#f2555a" }}>
+                    Transcription failed.{" "}
+                    <button type="button" onClick={runTranscribe} disabled={busy}
+                        style={{ color: "#2ad17f", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>Retry</button>
+                </div>
+            )}
+            {st === "none" && !data.has_recording && (
+                <div style={{ fontSize: 12, color: "#7f9b8b" }}>No recording was captured for this call.</div>
+            )}
+            {err && <div style={{ fontSize: 12, color: "#f2555a", marginTop: 6 }}>{err}</div>}
+        </div>
+    );
+}
+
 export function CallsView({ isMobile, onOpenConversation }: CallsViewProps): React.ReactElement {
     const ws = useWs();
     const [calls, setCalls] = useState<ApiCall[] | null>(null);
+    const [openId, setOpenId] = useState<string | null>(null);
 
     const load = useCallback(() => { callsApi.list().then(setCalls).catch(() => setCalls([])); }, []);
     useEffect(() => {
@@ -97,11 +174,14 @@ export function CallsView({ isMobile, onOpenConversation }: CallsViewProps): Rea
                                 const o = OUTCOME[c.status] ?? OUTCOME.ended;
                                 const who = c.name || (c.wa_id ? `+${c.wa_id}` : "Unknown");
                                 const initials = who.replace("+", "").split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+                                const open = openId === c.call_id;
+                                const hasNote = !!c.summary;
                                 return (
-                                    <div key={c.id}
+                                    <div key={c.id} style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+                                    <div
                                         onClick={() => c.wa_id && onOpenConversation?.(c.wa_id)}
                                         className="flex items-center gap-3 px-6 py-3.5 transition-colors"
-                                        style={{ borderTop: "1px solid rgba(255,255,255,0.05)", cursor: c.wa_id ? "pointer" : "default" }}
+                                        style={{ cursor: c.wa_id ? "pointer" : "default" }}
                                         onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.03)")}
                                         onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}>
                                         <div className="flex items-center justify-center rounded-full flex-shrink-0"
@@ -120,9 +200,23 @@ export function CallsView({ isMobile, onOpenConversation }: CallsViewProps): Rea
                                         <div style={{ fontSize: 11, color: "#6b8577" }} className="flex-shrink-0">
                                             {c.started_at ? timeAgo(c.started_at) : ""}
                                         </div>
+                                        {c.has_recording && (
+                                            <button type="button"
+                                                onClick={(e) => { e.stopPropagation(); setOpenId(open ? null : c.call_id); }}
+                                                title={hasNote ? "Call summary & transcript" : "Call recording — transcribe & summarise"}
+                                                className="flex-shrink-0 flex items-center justify-center rounded-full transition-transform hover:scale-105"
+                                                style={{ width: 34, height: 34,
+                                                    backgroundColor: open ? "rgba(37,211,102,0.22)" : hasNote ? "rgba(37,211,102,0.12)" : "rgba(255,255,255,0.06)",
+                                                    color: open || hasNote ? "#2ad17f" : "#9fb3a8",
+                                                    border: "1px solid rgba(255,255,255,0.1)" }}>
+                                                <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                                                    <path d="M4 6h16M4 12h16M4 18h10" />
+                                                </svg>
+                                            </button>
+                                        )}
                                         {c.wa_id && (
                                             <button type="button"
-                                                onClick={() => onOpenConversation?.(c.wa_id!)}
+                                                onClick={(e) => { e.stopPropagation(); onOpenConversation?.(c.wa_id!); }}
                                                 title="Open the conversation in Neema"
                                                 className="flex-shrink-0 flex items-center justify-center rounded-full transition-transform hover:scale-105"
                                                 style={{ width: 34, height: 34, backgroundColor: "rgba(37,211,102,0.16)", color: "#2ad17f", border: "1px solid rgba(37,211,102,0.3)" }}>
@@ -132,6 +226,8 @@ export function CallsView({ isMobile, onOpenConversation }: CallsViewProps): Rea
                                             </button>
                                         )}
                                         {/* Whole row is also clickable to open the thread in-app. */}
+                                    </div>
+                                    {open && <CallTranscript callId={c.call_id} />}
                                     </div>
                                 );
                             })
