@@ -52,10 +52,17 @@ async def _page_id_for(db, channel: str, ext: str) -> str | None:
     return (getattr(ident, "raw_profile", None) or {}).get("page_id") if ident else None
 
 
-async def sweep_missed_replies(redis, *, min_age_s: int = 90, max_age_h: int = 24,
+async def sweep_missed_replies(redis, *, min_age_s: int = 90, max_age_h: int = 23,
                                limit: int = 20) -> int:
     """Answer Meta DMs whose latest message is an unanswered inbound. Returns the
-    number of replies sent this pass. Best-effort per conversation."""
+    number of replies actually delivered this pass. Best-effort per conversation.
+
+    max_age_h defaults to 23h ON PURPOSE: Meta's Messenger Platform only allows a
+    message within 24h of the customer's last message ('standard messaging'
+    window). Beyond that, a send is rejected with error (#10) — so there's no
+    point generating a reply we can't deliver. 23h leaves a margin under the
+    boundary. Older backlog can only be reached by a human within the 7-day
+    HUMAN_AGENT-tag window, or once the customer messages again."""
     from app.agent.runtime import _run_and_send_meta, _is_paused
 
     now = datetime.now(timezone.utc)
@@ -110,8 +117,9 @@ async def sweep_missed_replies(redis, *, min_age_s: int = 90, max_age_h: int = 2
                 continue
             page_id = await _page_id_for(db2, channel, ext)
         try:
-            await _run_and_send_meta(redis, channel, ext, text or "", page_id=page_id, media=media)
-            sent += 1
+            if await _run_and_send_meta(redis, channel, ext, text or "",
+                                        page_id=page_id, media=media):
+                sent += 1                       # count only messages that truly went out
         except Exception as exc:
             _log.warning("missed-reply send failed for %s/%s: %s", channel, ext, exc)
     if sent:

@@ -496,7 +496,9 @@ async def schedule_reply(redis, wa_id: str, text: str, dedup_id: str | None,
 
 async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
                              page_id: str | None = None,
-                             media: dict | None = None) -> None:
+                             media: dict | None = None) -> bool:
+    """Generate + send one Meta reply. Returns True only when it actually
+    reached the customer (so the sweep counts real sends, not attempts)."""
     from app.database import AsyncSessionLocal
     from app.services.meta_send import send_to_channel
     from app.services import n8n_bridge as svc
@@ -511,8 +513,10 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
         async with AsyncSessionLocal() as db2:
             await svc.save_outbound_channel_message(db2, redis, channel, external_id, reply)
         _log.info("tier2 replied on %s to %s (%d chars)", channel, external_id, len(reply))
+        return True
     except Exception:
         _log.exception("tier2 meta turn failed for %s/%s", channel, external_id)
+        return False
 
 
 async def schedule_meta_reply(redis, channel: str, external_id: str, text: str,
