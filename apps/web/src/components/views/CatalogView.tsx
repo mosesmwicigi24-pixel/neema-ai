@@ -217,7 +217,7 @@ export function CatalogView({
                     return (
                         <div
                             key={item.id}
-                            className={`bg-white rounded-xl border border-[#e6f3d8] overflow-hidden shadow-sm transition-all duration-200 ${!item.in_stock ? "opacity-60" : ""}`}
+                            className="bg-white rounded-xl border border-[#e6f3d8] overflow-hidden shadow-sm transition-all duration-200"
                         >
                             <div
                                 className={`aspect-square bg-gradient-to-br ${gradient} flex items-center justify-center overflow-hidden`}
