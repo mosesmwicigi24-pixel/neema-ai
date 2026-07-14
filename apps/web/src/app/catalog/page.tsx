@@ -242,38 +242,16 @@ export default function CatalogPage(): React.ReactElement {
                                 }}
                             >
                                 {p.image_url ? (
-                                    <>
-                                        {/* soft blurred fill so the holder is never empty */}
-                                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                                        <img
-                                            src={p.thumbnail_url || p.image_url}
-                                            alt=""
-                                            aria-hidden
-                                            style={{
-                                                position: "absolute",
-                                                inset: 0,
-                                                width: "100%",
-                                                height: "100%",
-                                                objectFit: "cover",
-                                                filter: "blur(22px)",
-                                                transform: "scale(1.25)",
-                                                opacity: 0.3,
-                                            }}
-                                        />
-                                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                                        <img
-                                            src={p.thumbnail_url || p.image_url}
-                                            alt={p.name}
-                                            style={{
-                                                position: "relative",
-                                                zIndex: 1,
-                                                width: "100%",
-                                                height: "100%",
-                                                objectFit: "contain",
-                                                padding: 10,
-                                            }}
-                                        />
-                                    </>
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img
+                                        src={p.thumbnail_url || p.image_url}
+                                        alt={p.name}
+                                        style={{
+                                            width: "100%",
+                                            height: "100%",
+                                            objectFit: "cover",
+                                        }}
+                                    />
                                 ) : (
                                     <div
                                         style={{
