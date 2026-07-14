@@ -130,6 +130,24 @@ async def _handle_calls(request: Request, payload: dict) -> None:
                     fresh = await redis.set(f"wa:call:{cid}:{event}", "1", nx=True, ex=3600)
                     if not fresh:
                         continue
+                sdp_type = (call.get("session") or {}).get("sdp_type")
+                # Our OUTBOUND call was accepted: the customer's SDP ANSWER arrives
+                # as a connect event with sdp_type=answer. Relay it to the browser
+                # that placed the call so it can complete the WebRTC connection.
+                if event == "connect" and sdp_type == "answer":
+                    if redis is not None:
+                        await redis.publish("ws:channel:calls", json.dumps({
+                            "type": "outbound_answer", "call_id": cid,
+                            "sdp": (call.get("session") or {}).get("sdp"),
+                        }))
+                        _log.warning("WA outbound call %s answered by customer", cid)
+                    try:
+                        from app.services import call_log
+                        await call_log.mark_answered(cid, None)
+                    except Exception:
+                        pass
+                    continue
+
                 if event == "connect":
                     _log.info("WA incoming call %s from %s", cid, call.get("from"))
                     try:

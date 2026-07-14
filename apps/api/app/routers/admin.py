@@ -1274,6 +1274,55 @@ async def calls_answer(
     return {"ok": True, "call_id": call_id}
 
 
+@router.post("/calls/connect")
+async def calls_connect(
+    body: dict,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Business-initiated call: the softphone hands us its SDP offer; we ask Meta
+    to place the call. Returns {call_id}. The customer's SDP answer arrives on the
+    calls webhook and is relayed to the browser. Records an outbound Call row so
+    it shows in the Calls log."""
+    from app.core.phone import is_plausible_phone
+    to = str((body or {}).get("to") or "").lstrip("+").strip()
+    sdp = (body or {}).get("sdp")
+    name = str((body or {}).get("name") or "").strip() or None
+    if not is_plausible_phone(to):
+        raise HTTPException(status_code=400, detail="A valid phone number is required.")
+    if not sdp:
+        raise HTTPException(status_code=400, detail="sdp offer is required")
+    from app.services import wa_calling
+    try:
+        resp = await wa_calling.connect(to, sdp)
+    except Exception as exc:
+        msg = str(exc)
+        if "138006" in msg:
+            raise HTTPException(status_code=409,
+                detail="This customer hasn't granted call permission yet. Send the "
+                       "WhatsApp template first, or wait until they message/call us.")
+        raise HTTPException(status_code=502, detail=f"call failed: {exc}")
+    call_id = ((resp.get("calls") or [{}])[0]).get("id")
+    if not call_id:
+        raise HTTPException(status_code=502, detail="Meta did not return a call id")
+    # Stash offer meta + record an outbound row (best-effort).
+    redis = getattr(request.app.state, "redis", None)
+    if redis is not None:
+        import json as _json
+        await redis.set(f"wa:call:answered:{call_id}", str(agent.id), ex=3600)  # we own it
+    try:
+        from app.services.identity import resolve_person_id_for_wa_id
+        from app.models.call import Call
+        pid = await resolve_person_id_for_wa_id(db, to, source="whatsapp_call")
+        db.add(Call(call_id=call_id, wa_id=to, caller_name=name, direction="outbound",
+                    status="ringing", person_id=pid, agent_id=agent.id))
+        await db.commit()
+    except Exception:
+        await db.rollback()
+    return {"ok": True, "call_id": call_id}
+
+
 @router.get("/calls")
 async def list_calls(
     limit: int = 50,

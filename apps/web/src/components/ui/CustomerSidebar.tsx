@@ -17,6 +17,7 @@ import {
 } from "@/lib/utils";
 import type { Conversation, Order } from "@/types";
 import { whatsappApi } from "@/lib/api";
+import { useCall } from "@/lib/callContext";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -564,6 +565,8 @@ export function CustomerSidebar({
     className,
     hideHeader,
 }: Props) {
+    const callCtx = useCall();
+    const [templateBusy, setTemplateBusy] = useState(false);
     const [activeTab, setActiveTab] = useState<
         "profile" | "insights" | "activity"
     >("profile");
@@ -1027,6 +1030,55 @@ export function CustomerSidebar({
                         </span>
                     )}
                 </div>
+
+                {/* Reach-out actions — Call (WhatsApp voice) + Send template (to
+                    re-open a chat / request call permission). Shown for a customer
+                    with a valid phone. */}
+                {(() => {
+                    const digits = (profile.phone || "").replace(/\D/g, "");
+                    if (digits.length < 7 || digits.length > 15) return null;
+                    return (
+                        <div className="flex gap-2 mt-3">
+                            <button
+                                type="button"
+                                onClick={async () => {
+                                    if (!callCtx) return onToast("Calling unavailable", "error");
+                                    const r = await callCtx.initiateCall(digits, profile.name);
+                                    if (!r.ok) onToast(r.error || "Couldn't place the call", "error");
+                                }}
+                                title="Call this customer on WhatsApp"
+                                className="flex-1 inline-flex items-center justify-center gap-1.5 h-9 rounded-lg text-xs font-semibold text-white transition-transform hover:brightness-95 active:scale-95"
+                                style={{ backgroundColor: "#25D366" }}
+                            >
+                                <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                                </svg>
+                                Call
+                            </button>
+                            <button
+                                type="button"
+                                disabled={templateBusy}
+                                onClick={async () => {
+                                    setTemplateBusy(true);
+                                    try {
+                                        await whatsappApi.invite(profile.phone || digits, profile.name || "");
+                                        onToast("Template sent ✓");
+                                    } catch {
+                                        onToast("Couldn't send the template", "error");
+                                    } finally { setTemplateBusy(false); }
+                                }}
+                                title="Send the approved WhatsApp template (re-opens the chat / requests call permission)"
+                                className="flex-1 inline-flex items-center justify-center gap-1.5 h-9 rounded-lg text-xs font-semibold transition-transform hover:brightness-95 active:scale-95 disabled:opacity-60"
+                                style={{ backgroundColor: "#eef2e8", color: "#3d5a30", border: "1px solid #cee6b2" }}
+                            >
+                                <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M4 4h16v12H5.17L4 17.17V4z" />
+                                </svg>
+                                {templateBusy ? "Sending…" : "Send template"}
+                            </button>
+                        </div>
+                    );
+                })()}
             </div>
 
             {/* Quick stats */}

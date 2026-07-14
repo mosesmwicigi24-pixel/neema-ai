@@ -55,6 +55,18 @@ async def terminate(call_id: str) -> dict:
     return await _call_action({"call_id": call_id, "action": "terminate"}, "terminate")
 
 
+async def connect(to: str, sdp_offer: str) -> dict:
+    """Business-INITIATED call: place a call to a customer with our SDP offer.
+    Returns {calls:[{id}]}. Requires the customer to have granted call permission
+    (they called us, or we sent a call-permission request) — else Meta returns
+    error 138006. The customer's SDP answer arrives later via a `connect` webhook
+    with sdp_type=answer."""
+    return await _call_action(
+        {"to": to.lstrip("+"), "action": "connect",
+         "session": {"sdp_type": "offer", "sdp": sdp_offer}},
+        "connect")
+
+
 def ice_servers() -> list[dict]:
     """ICE servers for the browser's RTCPeerConnection. Our own coturn is primary;
     a public STUN + a public TURN (openrelay) are added as fallbacks so media can

@@ -25,6 +25,8 @@ interface CallCtx {
     hangup: () => void;
     callback: () => void;
     toggleMute: () => void;
+    initiateCall: (to: string, name?: string | null) => Promise<{ ok: boolean; error?: string }>;
+    outbound: boolean;   // true while we placed the call (ringing THEM)
 }
 
 const Ctx = createContext<CallCtx | null>(null);
@@ -38,6 +40,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const [seconds, setSeconds] = useState(0);
     const [error, setError] = useState<string | null>(null);
     const [note, setNote] = useState<string | null>(null);
+    const [outbound, setOutbound] = useState(false);
 
     const pcRef = useRef<RTCPeerConnection | null>(null);
     const localStreamRef = useRef<MediaStream | null>(null);
@@ -104,7 +107,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
         setPhase("ended");
         setTimeout(() => {
             setPhase("idle"); setCall(null); setSeconds(0);
-            setMuted(false); setError(null); setNote(null);
+            setMuted(false); setError(null); setNote(null); setOutbound(false);
         }, noteText ? 1600 : 1000);
     }, [cleanup]);
 
@@ -171,6 +174,66 @@ export function CallProvider({ children }: { children: ReactNode }) {
         setMuted(next);
     }, [muted]);
 
+    const buildPc = useCallback((iceServers: RTCIceServer[]) => {
+        const pc = new RTCPeerConnection({ iceServers });
+        pc.ontrack = (e) => { if (remoteAudioRef.current) remoteAudioRef.current.srcObject = e.streams[0]; };
+        pc.onconnectionstatechange = () => {
+            console.debug("[call] connectionState:", pc.connectionState);
+            if (pc.connectionState === "connected") setPhase("in_call");
+            if (["failed", "disconnected", "closed"].includes(pc.connectionState)) finish();
+        };
+        pc.oniceconnectionstatechange = () => {
+            console.debug("[call] iceConnectionState:", pc.iceConnectionState);
+            if (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed") setPhase("in_call");
+        };
+        pc.onicecandidate = (e) => {
+            if (e.candidate?.candidate.includes("typ relay")) console.debug("[call] got TURN relay candidate ✓");
+        };
+        pc.onicecandidateerror = (e: any) => console.warn("[call] ICE candidate error:", e?.errorText || e?.url);
+        return pc;
+    }, [finish]);
+
+    const gatherThenReady = useCallback((pc: RTCPeerConnection) => new Promise<void>((resolve) => {
+        if (pc.iceGatheringState === "complete") return resolve();
+        const check = () => { if (pc.iceGatheringState === "complete") { pc.removeEventListener("icegatheringstatechange", check); resolve(); } };
+        pc.addEventListener("icegatheringstatechange", check);
+        setTimeout(resolve, 2500);
+    }), []);
+
+    // Business-initiated call: WE call the customer. Build an offer, ask Meta to
+    // place the call; the customer's SDP answer arrives as an outbound_answer WS
+    // event (handled below). Needs the customer's call permission (409 otherwise).
+    const initiateCall = useCallback(async (to: string, name?: string | null): Promise<{ ok: boolean; error?: string }> => {
+        if (phaseRef.current !== "idle") return { ok: false, error: "Already in a call" };
+        setError(null); setOutbound(true);
+        setCall({ callId: "pending", from: to.replace(/^\+/, ""), name: name ?? null });
+        setPhase("connecting");
+        try {
+            const { ice_servers } = await callsApi.iceConfig();
+            const pc = buildPc(ice_servers);
+            pcRef.current = pc;
+            const mic = await navigator.mediaDevices.getUserMedia({
+                audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+            });
+            localStreamRef.current = mic;
+            mic.getTracks().forEach((t) => pc.addTrack(t, mic));
+            await pc.setLocalDescription(await pc.createOffer());
+            await gatherThenReady(pc);
+            const { call_id } = await callsApi.connect(to, pc.localDescription!.sdp, name || undefined);
+            activeIdRef.current = call_id;
+            setCall((c) => (c ? { ...c, callId: call_id } : c));
+            return { ok: true };
+        } catch (e: any) {
+            const msg = String(e?.message || "");
+            const friendly = msg.includes("Permission") ? "Microphone blocked — allow it and try again"
+                : msg.includes("409") ? "Customer hasn't granted call permission. Send the WhatsApp template first."
+                : "Couldn't place the call";
+            setError(friendly);
+            setTimeout(() => { cleanup(); setOutbound(false); setPhase("idle"); setCall(null); }, 2200);
+            return { ok: false, error: friendly };
+        }
+    }, [buildPc, gatherThenReady, cleanup]);
+
     // Primary path: the live WebSocket event (instant).
     useEffect(() => {
         if (!ws) { console.debug("[call] waiting for WebSocket…"); return; }
@@ -181,6 +244,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
             }
             if (evt?.type === "incoming_call") {
                 startRinging(evt.call_id, evt.from, evt.name);
+            } else if (evt?.type === "outbound_answer" && evt.call_id === activeIdRef.current) {
+                // The customer accepted OUR call — apply their SDP answer to connect.
+                console.debug("[call] outbound answered");
+                pcRef.current?.setRemoteDescription({ type: "answer", sdp: evt.sdp }).catch(() => {});
             } else if (evt?.type === "call_ended") {
                 setCall((c) => { if (c && c.callId === evt.call_id) { cleanup(); setPhase("ended"); } return c; });
             }
@@ -225,7 +292,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }, [phase]);
 
     return (
-        <Ctx.Provider value={{ phase, call, muted, seconds, error, note, answer, hangup, callback, toggleMute }}>
+        <Ctx.Provider value={{ phase, call, muted, seconds, error, note, answer, hangup, callback, toggleMute, initiateCall, outbound }}>
             {children}
             <audio ref={remoteAudioRef} autoPlay className="hidden" />
         </Ctx.Provider>
