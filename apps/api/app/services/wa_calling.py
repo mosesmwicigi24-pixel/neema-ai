@@ -55,6 +55,36 @@ async def terminate(call_id: str) -> dict:
     return await _call_action({"call_id": call_id, "action": "terminate"}, "terminate")
 
 
+async def request_call_permission(to: str, text: str | None = None) -> dict:
+    """Ask a customer for permission to call them — an interactive
+    `call_permission_request` message they can tap "Allow" on. A
+    `call_permission_reply` webhook confirms (accept/reject). Once accepted,
+    permission lasts 7 days (temporary) or until revoked (permanent), and
+    business-initiated calls to them succeed. Posts to the messages endpoint."""
+    if not settings.waba_token or not settings.waba_phone_number_id:
+        raise RuntimeError("WABA not configured — cannot request call permission")
+    body_text = text or ("Hi! Bethany House would like to call you to help with your "
+                         "order. Tap Allow to let us call you here on WhatsApp.")
+    url = (f"https://graph.facebook.com/{settings.waba_api_version}"
+           f"/{settings.waba_phone_number_id}/messages")
+    payload = {
+        "messaging_product": "whatsapp", "recipient_type": "individual",
+        "to": to.lstrip("+"), "type": "interactive",
+        "interactive": {
+            "type": "call_permission_request",
+            "action": {"name": "call_permission_request"},
+            "body": {"text": body_text},
+        },
+    }
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(url, headers={"Authorization": f"Bearer {settings.waba_token}"},
+                                 json=payload, timeout=30.0)
+    if not resp.is_success:
+        _log.error("WA call-permission request failed %s: %s", resp.status_code, resp.text)
+        raise RuntimeError(f"call-permission request failed ({resp.status_code}): {resp.text[:300]}")
+    return resp.json() if resp.content else {}
+
+
 async def connect(to: str, sdp_offer: str) -> dict:
     """Business-INITIATED call: place a call to a customer with our SDP offer.
     Returns {calls:[{id}]}. Requires the customer to have granted call permission

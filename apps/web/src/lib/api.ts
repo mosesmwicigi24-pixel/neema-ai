@@ -474,6 +474,8 @@ export const callsApi = {
         post<{ ok: boolean }>(`/admin/calls/${encodeURIComponent(callId)}/callback`, {}),
     connect: (to: string, sdp: string, name?: string) =>
         post<{ ok: boolean; call_id: string }>("/admin/calls/connect", { to, sdp, name }),
+    requestPermission: (to: string) =>
+        post<{ ok: boolean }>("/admin/calls/request-permission", { to }),
 };
 
 // ── Attribution (which source/post drives leads + revenue) ───────────────────

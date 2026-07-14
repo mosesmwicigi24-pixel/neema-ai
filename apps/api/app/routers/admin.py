@@ -1274,6 +1274,26 @@ async def calls_answer(
     return {"ok": True, "call_id": call_id}
 
 
+@router.post("/calls/request-permission")
+async def calls_request_permission(
+    body: dict,
+    agent: Agent = Depends(get_current_agent),
+):
+    """Ask a customer for permission to call them (interactive
+    call_permission_request). Needed before a business-initiated call to someone
+    who hasn't called us first."""
+    from app.core.phone import is_plausible_phone
+    from app.services import wa_calling
+    to = str((body or {}).get("to") or "").lstrip("+").strip()
+    if not is_plausible_phone(to):
+        raise HTTPException(status_code=400, detail="A valid phone number is required.")
+    try:
+        await wa_calling.request_call_permission(to)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"permission request failed: {exc}")
+    return {"ok": True}
+
+
 @router.post("/calls/connect")
 async def calls_connect(
     body: dict,

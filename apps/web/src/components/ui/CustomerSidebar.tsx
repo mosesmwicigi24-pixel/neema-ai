@@ -16,7 +16,7 @@ import {
     displayName,
 } from "@/lib/utils";
 import type { Conversation, Order } from "@/types";
-import { whatsappApi } from "@/lib/api";
+import { whatsappApi, callsApi } from "@/lib/api";
 import { useCall } from "@/lib/callContext";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1044,7 +1044,19 @@ export function CustomerSidebar({
                                 onClick={async () => {
                                     if (!callCtx) return onToast("Calling unavailable", "error");
                                     const r = await callCtx.initiateCall(digits, profile.name);
-                                    if (!r.ok) onToast(r.error || "Couldn't place the call", "error");
+                                    if (r.ok) return;
+                                    // No call permission yet → request it automatically,
+                                    // so the agent's next click can go through.
+                                    if ((r.error || "").toLowerCase().includes("permission")) {
+                                        try {
+                                            await callsApi.requestPermission(digits);
+                                            onToast(`Asked ${profile.name?.split(" ")[0] || "them"} for permission to call — you can call once they tap Allow.`);
+                                        } catch {
+                                            onToast("Couldn't send the call request", "error");
+                                        }
+                                    } else {
+                                        onToast(r.error || "Couldn't place the call", "error");
+                                    }
                                 }}
                                 title="Call this customer on WhatsApp"
                                 className="flex-1 inline-flex items-center justify-center gap-1.5 h-9 rounded-lg text-xs font-semibold text-white transition-transform hover:brightness-95 active:scale-95"
