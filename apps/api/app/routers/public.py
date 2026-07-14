@@ -36,15 +36,47 @@ def _order_url(name: str | None) -> str | None:
     return f"https://wa.me/{num}?text={quote(msg)}"
 
 
-def _card(p: dict) -> dict:
-    """The customer-safe projection of a catalogue product."""
+def _usd_price(kes, usd):
+    """USD for the storefront: the hub's own USD when it's a real positive
+    number, else an approximation from KES so an international viewer NEVER sees
+    $0. Small items keep cents (a KES 30 cup shows $0.30, not $0)."""
+    try:
+        u = float(usd) if usd not in (None, "") else 0.0
+    except (TypeError, ValueError):
+        u = 0.0
+    if u > 0:
+        return round(u) if u >= 1 else round(u, 2)
+    try:
+        k = float(kes) if kes not in (None, "") else 0.0
+    except (TypeError, ValueError):
+        return None
+    if k <= 0:
+        return None
+    approx = k / (settings.usd_kes_rate or 100)
+    return round(approx) if approx >= 1 else max(round(approx, 2), 0.01)
+
+
+def _variant_card(v: dict) -> dict:
+    attrs = v.get("attributes") or {}
+    label = v.get("name") or " / ".join(str(x) for x in attrs.values())
     return {
+        "label":     label,
+        "price_kes": v.get("price_kes"),
+        "price_usd": _usd_price(v.get("price_kes"), v.get("price_usd")),
+    }
+
+
+def _card(p: dict) -> dict:
+    """The customer-safe projection of a catalogue product — with a real USD
+    price (never $0) and, for varied products, the size/colour options + a price
+    range so a shared catalog shows the true choices and their prices."""
+    card = {
         "slug":          p.get("slug"),
         "name":          p.get("name"),
         "category":      p.get("category"),
         "description":   p.get("description"),
         "price_kes":     p.get("price_kes"),
-        "price_usd":     p.get("price_usd"),
+        "price_usd":     _usd_price(p.get("price_kes"), p.get("price_usd")),
         "image_url":     p.get("image_url"),
         "thumbnail_url": p.get("thumbnail_url"),
         # Producible items are made-to-order — the catalog shows "Made to order"
@@ -53,6 +85,15 @@ def _card(p: dict) -> dict:
         "in_stock":      bool(p.get("in_stock", True)),
         "order_url":     _order_url(p.get("name")),
     }
+    variants = p.get("variants") or []
+    if variants:
+        card["variants"] = [_variant_card(v) for v in variants]
+        lo, hi = p.get("price_min_kes"), p.get("price_max_kes")
+        if lo is not None and hi is not None and lo != hi:
+            card["price_from_kes"], card["price_to_kes"] = lo, hi
+            card["price_from_usd"] = _usd_price(lo, None)
+            card["price_to_usd"] = _usd_price(hi, None)
+    return card
 
 
 async def _catalog(request: Request) -> list[dict]:

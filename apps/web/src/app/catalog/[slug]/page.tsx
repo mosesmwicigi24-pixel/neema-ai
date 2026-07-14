@@ -19,6 +19,11 @@ interface Image {
     thumb: string;
     alt: string;
 }
+interface Variant {
+    label: string;
+    price_kes: number | null;
+    price_usd: number | null;
+}
 interface Product {
     slug: string;
     name: string;
@@ -31,11 +36,19 @@ interface Product {
     in_stock: boolean;
     order_url: string | null;
     images: Image[];
+    variants?: Variant[];
+    price_from_kes?: number | null;
+    price_to_kes?: number | null;
 }
 
-function fmtKes(v: number | null): string {
+function fmtKes(v: number | null | undefined): string {
     if (v == null) return "";
     return "KES " + Math.round(v).toLocaleString("en-KE");
+}
+
+function fmtUsd(v: number | null | undefined): string {
+    if (v == null) return "";
+    return v >= 1 ? "$" + Math.round(v).toLocaleString("en-US") : "$" + v.toFixed(2);
 }
 
 export default function ProductPage(): React.ReactElement {
@@ -204,8 +217,15 @@ export default function ProductPage(): React.ReactElement {
 
                     <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                         <span style={{ fontSize: 22, fontWeight: 800, color: MOSS_DK }}>
-                            {fmtKes(p.price_kes) || "Price on enquiry"}
+                            {p.price_from_kes != null && p.price_to_kes != null
+                                ? `${fmtKes(p.price_from_kes)} – ${fmtKes(p.price_to_kes)}`
+                                : fmtKes(p.price_kes) || "Price on enquiry"}
                         </span>
+                        {p.price_usd != null && (
+                            <span style={{ fontSize: 14, color: "#8aa07a", fontWeight: 600 }}>
+                                ≈ {fmtUsd(p.price_usd)}
+                            </span>
+                        )}
                         {p.made_to_order ? (
                             <span
                                 style={{
@@ -221,6 +241,41 @@ export default function ProductPage(): React.ReactElement {
                             </span>
                         ) : null}
                     </div>
+
+                    {/* Variant options with their own prices (size / colour). */}
+                    {p.variants && p.variants.length > 0 && (
+                        <div style={{ marginTop: 16 }}>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: MOSS,
+                                          textTransform: "uppercase", letterSpacing: "0.05em",
+                                          marginBottom: 8 }}>
+                                Options
+                            </div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                                {p.variants.map((v, i) => (
+                                    <div key={i} style={{
+                                        display: "flex", justifyContent: "space-between",
+                                        alignItems: "center", gap: 10,
+                                        padding: "9px 12px", borderRadius: 10,
+                                        background: "#f4f8ef", border: "1px solid #e4eede",
+                                    }}>
+                                        <span style={{ fontSize: 14, fontWeight: 600, color: INK }}>
+                                            {v.label}
+                                        </span>
+                                        <span style={{ fontSize: 14, fontWeight: 700, color: MOSS_DK,
+                                                       whiteSpace: "nowrap" }}>
+                                            {fmtKes(v.price_kes)}
+                                            {v.price_usd != null && (
+                                                <span style={{ color: "#8aa07a", fontWeight: 600,
+                                                               fontSize: 12 }}>
+                                                    {"  ≈ " + fmtUsd(v.price_usd)}
+                                                </span>
+                                            )}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
 
                     {p.description && (
                         <p

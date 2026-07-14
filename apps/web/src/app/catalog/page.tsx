@@ -13,6 +13,11 @@ const MOSS = "#589b31";
 const MOSS_DK = "#427425";
 const INK = "#16270c";
 
+interface Variant {
+    label: string;
+    price_kes: number | null;
+    price_usd: number | null;
+}
 interface Product {
     slug: string;
     name: string;
@@ -25,11 +30,37 @@ interface Product {
     made_to_order: boolean;
     in_stock: boolean;
     order_url: string | null;
+    variants?: Variant[];
+    price_from_kes?: number | null;
+    price_to_kes?: number | null;
+    price_from_usd?: number | null;
+    price_to_usd?: number | null;
 }
 
-function fmtKes(v: number | null): string {
+function fmtKes(v: number | null | undefined): string {
     if (v == null) return "";
     return "KES " + Math.round(v).toLocaleString("en-KE");
+}
+
+function fmtUsd(v: number | null | undefined): string {
+    if (v == null) return "";
+    return v >= 1 ? "$" + Math.round(v).toLocaleString("en-US") : "$" + v.toFixed(2);
+}
+
+// Card price line: a range ("from KES 9,000") for varied products, else a
+// single price — with an approximate USD under it so international clients see
+// their money too. Returns { kes, usd } strings ("" when unknown).
+function priceLine(p: Product): { kes: string; usd: string } {
+    if (p.price_from_kes != null && p.price_to_kes != null) {
+        return {
+            kes: "from " + fmtKes(p.price_from_kes),
+            usd: p.price_from_usd != null ? "≈ from " + fmtUsd(p.price_from_usd) : "",
+        };
+    }
+    return {
+        kes: fmtKes(p.price_kes) || "Enquire",
+        usd: p.price_usd != null ? "≈ " + fmtUsd(p.price_usd) : "",
+    };
 }
 
 export default function CatalogPage(): React.ReactElement {
@@ -259,8 +290,13 @@ export default function CatalogPage(): React.ReactElement {
                                         marginTop: 4,
                                     }}
                                 >
-                                    {fmtKes(p.price_kes) || "Enquire"}
+                                    {priceLine(p).kes}
                                 </div>
+                                {priceLine(p).usd && (
+                                    <div style={{ color: "#8aa07a", fontSize: 11.5, marginTop: 1 }}>
+                                        {priceLine(p).usd}
+                                    </div>
+                                )}
                             </div>
                         </Link>
                     ))}
