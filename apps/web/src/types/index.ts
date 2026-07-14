@@ -142,6 +142,14 @@ export interface Agent {
     role_permissions?: string[] | null;
 }
 
+export interface CatalogVariant {
+    variant_id?: number | null;
+    sku?: string;
+    name?: string;
+    attributes?: Record<string, string>;
+    price_kes?: number | null;
+    price_usd?: number | null;
+}
 export interface CatalogItem {
     id: string;
     sku: string;
@@ -155,6 +163,16 @@ export interface CatalogItem {
     // Present when sourced from the Bethany House hub (the live source of truth).
     hub_product_id?: number | null;
     available_qty?: number | null;
+    // Hub product imagery + per-variant pricing (so the operator sees exactly the
+    // photo, price range and options the customer sees).
+    image_url?: string | null;
+    thumbnail_url?: string | null;
+    price_kes?: number | null;
+    price_usd?: number | null;
+    product_type?: string | null;
+    variants?: CatalogVariant[];
+    price_min_kes?: number | null;
+    price_max_kes?: number | null;
 }
 
 export interface ActivityEntry {

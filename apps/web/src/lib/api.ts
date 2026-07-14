@@ -336,6 +336,15 @@ export interface ApiCatalogItem {
     description: string | null;
     in_stock: boolean;
     updated_at?: string;
+    // Hub imagery + per-variant pricing (present for hub-sourced rows).
+    image_url?: string | null;
+    thumbnail_url?: string | null;
+    price_kes?: number | null;
+    price_usd?: number | null;
+    product_type?: string | null;
+    variants?: import("@/types").CatalogVariant[];
+    price_min_kes?: number | null;
+    price_max_kes?: number | null;
 }
 
 export interface CreateCatalogPayload {
@@ -648,6 +657,14 @@ export function mapCatalogItem(c: ApiCatalogItem): CatalogItem {
         in_stock: c.in_stock,
         hub_product_id: c.hub_product_id ?? null,
         available_qty: c.available_qty ?? null,
+        image_url: c.image_url ?? null,
+        thumbnail_url: c.thumbnail_url ?? null,
+        price_kes: c.price_kes ?? null,
+        price_usd: c.price_usd ?? null,
+        product_type: c.product_type ?? null,
+        variants: c.variants ?? [],
+        price_min_kes: c.price_min_kes ?? null,
+        price_max_kes: c.price_max_kes ?? null,
     };
 }
 

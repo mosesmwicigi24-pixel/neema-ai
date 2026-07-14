@@ -199,9 +199,19 @@ export function CatalogView({
                             className={`bg-white rounded-xl border border-[#e6f3d8] overflow-hidden shadow-sm transition-all duration-200 ${!item.in_stock ? "opacity-60" : ""}`}
                         >
                             <div
-                                className={`h-20 bg-gradient-to-br ${gradient} flex items-center justify-center text-3xl`}
+                                className={`h-24 bg-gradient-to-br ${gradient} flex items-center justify-center text-3xl overflow-hidden`}
                             >
-                                {catEmoji[item.category ?? ""] ?? "📦"}
+                                {item.thumbnail_url || item.image_url ? (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img
+                                        src={item.thumbnail_url || item.image_url || ""}
+                                        alt={item.name}
+                                        className="w-full h-full object-cover"
+                                        loading="lazy"
+                                    />
+                                ) : (
+                                    catEmoji[item.category ?? ""] ?? "📦"
+                                )}
                             </div>
                             <div className="p-3">
                                 <div className="flex items-start justify-between gap-1 mb-1">
@@ -226,8 +236,17 @@ export function CatalogView({
                                     </p>
                                 )}
                                 <div className="text-sm font-bold text-[#2c4e18]">
-                                    {fmtCurrency(item.price)}
+                                    {item.price_min_kes != null &&
+                                    item.price_max_kes != null &&
+                                    item.price_min_kes !== item.price_max_kes
+                                        ? `${fmtCurrency(item.price_min_kes)} – ${fmtCurrency(item.price_max_kes)}`
+                                        : fmtCurrency(item.price)}
                                 </div>
+                                {(item.variants?.length ?? 0) > 0 && (
+                                    <div className="text-[10px] text-[#699a32] mt-0.5">
+                                        {item.variants!.length} variants
+                                    </div>
+                                )}
                                 {(item.aliases ?? []).length > 0 && (
                                     <div className="flex flex-wrap gap-1 mt-2">
                                         {(item.aliases ?? [])

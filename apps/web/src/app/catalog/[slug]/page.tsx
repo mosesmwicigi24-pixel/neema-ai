@@ -51,6 +51,23 @@ function fmtUsd(v: number | null | undefined): string {
     return v >= 1 ? "$" + Math.round(v).toLocaleString("en-US") : "$" + v.toFixed(2);
 }
 
+// A fitting liturgical glyph for a product with no photo (mirrors the grid).
+function catGlyph(category: string | null, name: string): string {
+    const s = ((category || "") + " " + (name || "")).toLowerCase();
+    const rules: [RegExp, string][] = [
+        [/wine|chalice|cup|communion|eucharist/, "🍷"],
+        [/wafer|bread|host/, "🍞"],
+        [/tray/, "🫙"],
+        [/oil|anoint|candle|refill/, "🕯️"],
+        [/cassock|vestment|gown|shirt|stole|cope|chasuble|alb|robe|shawl|tallit|apparel|cap/, "👘"],
+        [/bell/, "🔔"],
+        [/bible|book|missal/, "📖"],
+        [/ring|cross|crozier|staff|rod|mitre|pectoral|accessor/, "✝️"],
+    ];
+    for (const [re, glyph] of rules) if (re.test(s)) return glyph;
+    return "✝️";
+}
+
 export default function ProductPage(): React.ReactElement {
     const params = useParams();
     const slug = Array.isArray(params.slug) ? params.slug[0] : params.slug;
@@ -151,12 +168,11 @@ export default function ProductPage(): React.ReactElement {
                                     display: "flex",
                                     alignItems: "center",
                                     justifyContent: "center",
-                                    color: "#b6c9a6",
-                                    fontFamily: "'DM Serif Display', serif",
-                                    fontSize: 64,
+                                    fontSize: 96,
+                                    opacity: 0.85,
                                 }}
                             >
-                                {p.name.slice(0, 1)}
+                                {catGlyph(p.category, p.name)}
                             </div>
                         )}
                     </div>

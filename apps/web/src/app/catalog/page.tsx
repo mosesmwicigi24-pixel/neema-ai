@@ -47,6 +47,25 @@ function fmtUsd(v: number | null | undefined): string {
     return v >= 1 ? "$" + Math.round(v).toLocaleString("en-US") : "$" + v.toFixed(2);
 }
 
+// A fitting liturgical glyph for a product with no photo — so the tile reads as
+// a designed catalogue entry, not a broken box. Keyword-matched on category +
+// name; a cross is the on-brand default for a church supplier.
+function catGlyph(category: string | null, name: string): string {
+    const s = ((category || "") + " " + (name || "")).toLowerCase();
+    const rules: [RegExp, string][] = [
+        [/wine|chalice|cup|communion|eucharist/, "🍷"],
+        [/wafer|bread|host/, "🍞"],
+        [/tray/, "🫙"],
+        [/oil|anoint|candle|refill/, "🕯️"],
+        [/cassock|vestment|gown|shirt|stole|cope|chasuble|alb|robe|shawl|tallit|apparel|cap/, "👘"],
+        [/bell/, "🔔"],
+        [/bible|book|missal/, "📖"],
+        [/ring|cross|crozier|staff|rod|mitre|pectoral|accessor/, "✝️"],
+    ];
+    for (const [re, glyph] of rules) if (re.test(s)) return glyph;
+    return "✝️";
+}
+
 // Card price line: a range ("from KES 9,000") for varied products, else a
 // single price — with an approximate USD under it so international clients see
 // their money too. Returns { kes, usd } strings ("" when unknown).
@@ -241,12 +260,11 @@ export default function CatalogPage(): React.ReactElement {
                                             display: "flex",
                                             alignItems: "center",
                                             justifyContent: "center",
-                                            color: "#b6c9a6",
-                                            fontSize: 34,
-                                            fontFamily: "'DM Serif Display', serif",
+                                            fontSize: 44,
+                                            opacity: 0.85,
                                         }}
                                     >
-                                        {p.name.slice(0, 1)}
+                                        {catGlyph(p.category, p.name)}
                                     </div>
                                 )}
                                 {p.made_to_order && (
