@@ -158,7 +158,7 @@ export default function ProductPage(): React.ReactElement {
                             <img
                                 src={hero}
                                 alt={p.name}
-                                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                                style={{ width: "100%", height: "100%", objectFit: "contain", padding: 16 }}
                             />
                         ) : (
                             <div
@@ -197,7 +197,7 @@ export default function ProductPage(): React.ReactElement {
                                     <img
                                         src={g.thumb || g.url}
                                         alt=""
-                                        style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                                        style={{ width: "100%", height: "100%", objectFit: "contain", padding: 4 }}
                                     />
                                 </button>
                             ))}

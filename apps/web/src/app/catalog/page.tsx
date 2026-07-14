@@ -249,7 +249,8 @@ export default function CatalogPage(): React.ReactElement {
                                         style={{
                                             width: "100%",
                                             height: "100%",
-                                            objectFit: "cover",
+                                            objectFit: "contain",
+                                            padding: 8,
                                         }}
                                     />
                                 ) : (

@@ -44,6 +44,26 @@ const catColors: Record<string, string> = {
     apparel: "from-blue-50 to-indigo-50",
 };
 
+// A product image that FITS its holder (object-contain, never cropped) and
+// gracefully falls back to the category glyph when the hub URL is missing or
+// 404s — so a broken image never shows raw alt text on the card.
+function ProductThumb({ src, alt, glyph }: { src: string | null; alt: string; glyph: string }) {
+    const [errored, setErrored] = useState(false);
+    if (!src || errored) {
+        return <span className="text-3xl">{glyph}</span>;
+    }
+    return (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+            src={src}
+            alt={alt}
+            onError={() => setErrored(true)}
+            className="w-full h-full object-contain p-1.5"
+            loading="lazy"
+        />
+    );
+}
+
 interface CatalogViewProps extends SharedViewProps {
     catalog: CatalogItem[];
     // Kept for prop-compatibility with the dashboard; unused (read-only view).
@@ -199,19 +219,13 @@ export function CatalogView({
                             className={`bg-white rounded-xl border border-[#e6f3d8] overflow-hidden shadow-sm transition-all duration-200 ${!item.in_stock ? "opacity-60" : ""}`}
                         >
                             <div
-                                className={`h-24 bg-gradient-to-br ${gradient} flex items-center justify-center text-3xl overflow-hidden`}
+                                className={`h-28 bg-gradient-to-br ${gradient} flex items-center justify-center text-3xl overflow-hidden`}
                             >
-                                {item.thumbnail_url || item.image_url ? (
-                                    // eslint-disable-next-line @next/next/no-img-element
-                                    <img
-                                        src={item.thumbnail_url || item.image_url || ""}
-                                        alt={item.name}
-                                        className="w-full h-full object-cover"
-                                        loading="lazy"
-                                    />
-                                ) : (
-                                    catEmoji[item.category ?? ""] ?? "📦"
-                                )}
+                                <ProductThumb
+                                    src={item.thumbnail_url || item.image_url || null}
+                                    alt={item.name}
+                                    glyph={catEmoji[item.category ?? ""] ?? "📦"}
+                                />
                             </div>
                             <div className="p-3">
                                 <div className="flex items-start justify-between gap-1 mb-1">
