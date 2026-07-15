@@ -85,11 +85,57 @@ function AudioBubble({
     );
 }
 
+// ── Lightbox ──────────────────────────────────────────────────────────────────
+// A full-screen in-app viewer so the agent sees a shared photo, or plays a reel,
+// WITHOUT leaving to Facebook/WhatsApp. Click the backdrop or ✕ to close.
+function Lightbox({
+    src,
+    kind,
+    onClose,
+}: {
+    src: string;
+    kind: "image" | "video";
+    onClose: () => void;
+}) {
+    return (
+        <div
+            onClick={onClose}
+            className="fixed inset-0 z-[200] bg-black/85 flex items-center justify-center p-4"
+        >
+            <button
+                onClick={onClose}
+                className="absolute top-4 right-5 text-white/80 hover:text-white text-3xl leading-none"
+                aria-label="Close"
+            >
+                ✕
+            </button>
+            {kind === "video" ? (
+                <video
+                    src={src}
+                    controls
+                    autoPlay
+                    onClick={(e) => e.stopPropagation()}
+                    className="max-w-full max-h-[90vh] rounded-lg shadow-2xl"
+                />
+            ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                    src={src}
+                    alt=""
+                    onClick={(e) => e.stopPropagation()}
+                    className="max-w-full max-h-[90vh] rounded-lg object-contain shadow-2xl"
+                />
+            )}
+        </div>
+    );
+}
+
 // ── CommentContextCard ────────────────────────────────────────────────────────
 // A Facebook/Instagram comment is a reply to one of our posts — but the comment
-// text alone ("how much?", "where are you located?") is meaningless without it.
-// This card tells the responder WHAT the comment is on: the post thumbnail, its
-// caption, and a "View on Facebook" link straight to the original post.
+// text alone ("how much?") is meaningless without it. This card shows WHAT the
+// comment is on: a big poster of the post/reel that PLAYS INLINE (video source
+// fetched on demand) or opens a photo lightbox — so the agent sees the reel and
+// responds without ever leaving for Facebook.
 function CommentContextCard({
     ctx,
     isInbound,
@@ -99,88 +145,127 @@ function CommentContextCard({
         title?: string;
         permalink?: string;
         thumb?: string;
+        media_type?: string;
+        has_video?: boolean;
     };
     isInbound: boolean;
 }) {
     const title = (ctx.title || "").trim() || "a post";
     const permalink = ctx.permalink || "";
     const thumb = ctx.thumb || "";
+    const postId = ctx.post_id || "";
+    // Unknown media_type (old rows) → still try to play; the endpoint 404s for a photo.
+    const maybeVideo = ctx.has_video === true || ctx.media_type === "video" || ctx.media_type === undefined;
 
-    const body = (
+    const [videoUrl, setVideoUrl] = React.useState<string | null>(null);
+    const [lightbox, setLightbox] = React.useState<{ src: string; kind: "image" | "video" } | null>(null);
+    const [loading, setLoading] = React.useState(false);
+    const [thumbOk, setThumbOk] = React.useState(true);
+
+    const openMedia = async () => {
+        if (videoUrl || loading) return;
+        if (postId && maybeVideo) {
+            setLoading(true);
+            try {
+                const { video_url } = await conversationsApi.postVideo(postId);
+                setLoading(false);
+                if (video_url) {
+                    setVideoUrl(video_url);
+                    return;
+                }
+            } catch {
+                setLoading(false); // not a video → fall through to the photo lightbox
+            }
+        }
+        if (thumb) setLightbox({ src: thumb, kind: "image" });
+        else if (permalink) window.open(permalink, "_blank");
+    };
+
+    const showPreview = thumb && thumbOk;
+
+    return (
         <div
             className={[
-                "flex items-center gap-2 rounded-lg px-2 py-1.5",
-                isInbound
-                    ? "bg-[#f0f4ec] border border-[#dde8d5]"
-                    : "bg-white/15 border border-white/20",
+                "rounded-lg p-2",
+                isInbound ? "bg-[#f0f4ec] border border-[#dde8d5]" : "bg-white/15 border border-white/20",
             ].join(" ")}
         >
-            {thumb ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                    src={thumb}
-                    alt=""
-                    className="w-8 h-8 rounded object-cover flex-shrink-0"
-                    onError={(e) => {
-                        (e.currentTarget as HTMLImageElement).style.display = "none";
-                    }}
-                />
-            ) : (
-                <div
-                    className={[
-                        "w-8 h-8 rounded flex-shrink-0 flex items-center justify-center",
-                        isInbound ? "bg-[#dde8d5]" : "bg-white/20",
-                    ].join(" ")}
-                >
-                    {/* comment glyph */}
-                    <svg className="w-4 h-4 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                            d="M8 12h.01M12 12h.01M16 12h.01M21 12a9 9 0 1 1-4.5-7.8L21 3l-1.2 3.5A8.96 8.96 0 0 1 21 12z" />
-                    </svg>
-                </div>
-            )}
-            <div className="min-w-0 flex-1">
-                <div
-                    className={[
-                        "text-[9px] font-semibold uppercase tracking-wide leading-none mb-0.5",
-                        isInbound ? "text-[#699a32]" : "text-white/70",
-                    ].join(" ")}
-                >
-                    Commented on your post
-                </div>
-                <div
-                    className={[
-                        "text-[11px] leading-snug truncate",
-                        isInbound ? "text-[#3a5c28]" : "text-white/90",
-                    ].join(" ")}
-                    title={title}
-                >
-                    {title}
-                </div>
+            <div
+                className={[
+                    "text-[9px] font-semibold uppercase tracking-wide leading-none mb-1",
+                    isInbound ? "text-[#699a32]" : "text-white/70",
+                ].join(" ")}
+            >
+                Commented on your post
             </div>
-            {permalink && (
-                <svg
-                    className={["w-3 h-3 flex-shrink-0", isInbound ? "text-[#699a32]" : "text-white/70"].join(" ")}
-                    fill="none" stroke="currentColor" viewBox="0 0 24 24"
+            <div
+                className={[
+                    "text-[11px] leading-snug line-clamp-2 mb-1.5",
+                    isInbound ? "text-[#3a5c28]" : "text-white/90",
+                ].join(" ")}
+                title={title}
+            >
+                {title}
+            </div>
+
+            {videoUrl ? (
+                <video src={videoUrl} controls autoPlay className="w-full max-w-[260px] rounded-lg border border-black/10" />
+            ) : showPreview ? (
+                <button
+                    onClick={openMedia}
+                    className="relative block w-full max-w-[260px] rounded-lg overflow-hidden group"
+                    aria-label={maybeVideo ? "Play reel" : "View post"}
                 >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                        d="M10 6H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                </svg>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                        src={thumb}
+                        alt=""
+                        className="w-full aspect-video object-cover"
+                        onError={() => setThumbOk(false)}
+                    />
+                    <span className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/30 transition-colors">
+                        <span className="w-10 h-10 rounded-full bg-white/90 flex items-center justify-center shadow">
+                            {loading ? (
+                                <span className="w-4 h-4 border-2 border-[#427425] border-t-transparent rounded-full animate-spin" />
+                            ) : maybeVideo ? (
+                                // play triangle
+                                <svg className="w-5 h-5 text-[#1c2917] ml-0.5" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M8 5v14l11-7z" />
+                                </svg>
+                            ) : (
+                                // expand
+                                <svg className="w-4 h-4 text-[#1c2917]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                        d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                                </svg>
+                            )}
+                        </span>
+                    </span>
+                </button>
+            ) : null}
+
+            {permalink && (
+                <a
+                    href={permalink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={[
+                        "inline-flex items-center gap-1 mt-1.5 text-[10px] font-medium",
+                        isInbound ? "text-[#699a32] hover:text-[#427425]" : "text-white/70 hover:text-white",
+                    ].join(" ")}
+                >
+                    View on Facebook
+                    <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                            d="M10 6H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                </a>
+            )}
+
+            {lightbox && (
+                <Lightbox src={lightbox.src} kind={lightbox.kind} onClose={() => setLightbox(null)} />
             )}
         </div>
-    );
-
-    return permalink ? (
-        <a
-            href={permalink}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="block hover:opacity-80 transition-opacity"
-        >
-            {body}
-        </a>
-    ) : (
-        body
     );
 }
 
@@ -202,19 +287,21 @@ function ImageBubble({
     isInbound: boolean;
 }) {
     const [open, setOpen] = React.useState(false);
+    const [zoom, setZoom] = React.useState(false);
     const hasAnalysis = !!analysis;
 
     return (
         <div className="flex flex-col gap-1.5">
-            {/* Clickable thumbnail */}
-            <a href={src} target="_blank" rel="noopener noreferrer">
+            {/* Click to view large IN-APP (lightbox) — no leaving the inbox */}
+            <button type="button" onClick={() => setZoom(true)} className="block">
                 <img
                     src={src}
                     alt={caption || "image"}
                     className="max-w-full rounded-xl border border-black/10 object-cover cursor-zoom-in"
                     style={{ maxHeight: 240 }}
                 />
-            </a>
+            </button>
+            {zoom && <Lightbox src={src} kind="image" onClose={() => setZoom(false)} />}
 
             {/* Analysis toggle — same pill style as audio transcript toggle */}
             {hasAnalysis && (
@@ -2025,6 +2112,8 @@ export function ConversationsView({
                                                                   title?: string;
                                                                   permalink?: string;
                                                                   thumb?: string;
+                                                                  media_type?: string;
+                                                                  has_video?: boolean;
                                                                   reply_to?: string;
                                                               }
                                                             | null

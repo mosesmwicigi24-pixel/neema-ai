@@ -230,6 +230,11 @@ export const conversationsApi = {
     clearHistory: (id: string) =>
         del<{ ok: boolean }>(`/admin/conversations/${id}/messages`),
 
+    /** A fresh direct video URL for a page reel/video post, so the inbox can
+     * play the commented-on reel inline (source URLs expire → fetched on play). */
+    postVideo: (postId: string) =>
+        get<{ video_url: string }>(`/admin/post-video/${encodeURIComponent(postId)}`),
+
     /**
      * Upload a file (image / document / video / audio) from the agent's
      * device and send it to the customer via WABA.

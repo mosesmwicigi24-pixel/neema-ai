@@ -649,6 +649,36 @@ async def upload_media(
     )
 
 
+@router.get("/post-video/{post_id}")
+async def post_video(
+    post_id: str,
+    request: Request,
+    agent: Agent = Depends(get_current_agent),
+):
+    """A fresh direct video URL for one of our page's reels/video posts, so the
+    inbox can play the commented-on reel INLINE (no leaving to Facebook). Source
+    URLs are short-lived, so we cache only ~30 min and re-fetch after."""
+    redis = getattr(request.app.state, "redis", None)
+    key = f"meta:postvid:{post_id}"
+    if redis is not None:
+        try:
+            cached = await redis.get(key)
+            if cached:
+                return {"video_url": cached}
+        except Exception:
+            pass
+    from app.services.meta_send import fetch_post_video_url
+    url = await fetch_post_video_url(post_id)
+    if not url:
+        raise HTTPException(status_code=404, detail="No playable video for this post")
+    if redis is not None:
+        try:
+            await redis.set(key, url, ex=1800)
+        except Exception:
+            pass
+    return {"video_url": url}
+
+
 @router.post("/conversations/{conv_id}/reply-media")
 async def reply_media(
     conv_id: str,

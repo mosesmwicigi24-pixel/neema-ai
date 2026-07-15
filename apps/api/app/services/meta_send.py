@@ -153,18 +153,57 @@ async def fetch_post_context(post_id: str) -> dict:
 
     att = ((d.get("attachments") or {}).get("data") or [{}])[0]
     title = (d.get("message") or att.get("title") or att.get("description") or "").strip()
+    mt = (att.get("media_type") or "").lower()
     if not title:
         _MEDIA_LABEL = {"photo": "Photo post", "video": "Video post",
                         "share": "Shared link", "album": "Photo album"}
-        title = _MEDIA_LABEL.get((att.get("media_type") or "").lower(), "a post")
+        title = _MEDIA_LABEL.get(mt, "a post")
     thumb = (d.get("full_picture")
              or (((att.get("media") or {}).get("image") or {}).get("src")))
+    is_video = "video" in mt or "reel" in mt
     return {
-        "post_id":   post_id,
-        "title":     title[:200],
-        "permalink": d.get("permalink_url") or "",
-        "thumb":     thumb or "",
+        "post_id":    post_id,
+        "title":      title[:200],
+        "permalink":  d.get("permalink_url") or "",
+        "thumb":      thumb or "",
+        # So the inbox can offer inline playback for a reel/video vs a photo.
+        # The direct source URL expires, so it's fetched fresh on play (see
+        # fetch_post_video_url), never cached with this stable context.
+        "media_type": "video" if is_video else ("photo" if mt in ("photo", "album") else ""),
+        "has_video":  is_video,
     }
+
+
+async def fetch_post_video_url(post_id: str) -> str | None:
+    """Fresh direct video source (MP4) for one of OUR page's video posts/reels,
+    so the inbox can play it inline — the agent never leaves to Facebook. The
+    URL is a short-lived signed CDN link, so callers cache it only briefly and
+    re-fetch on demand. None when the post has no video or on any error."""
+    if not settings.meta_page_token or not post_id:
+        return None
+    base = f"https://graph.facebook.com/{settings.meta_graph_version}"
+    hdr = {"Authorization": f"Bearer {settings.meta_page_token}"}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"{base}/{post_id}",
+                params={"fields": "attachments{media_type,media{source},target{id}}"},
+                headers=hdr,
+            )
+            if not resp.is_success:
+                return None
+            att = ((resp.json().get("attachments") or {}).get("data") or [{}])[0]
+            src = ((att.get("media") or {}).get("source"))
+            if src:
+                return src
+            vid = (att.get("target") or {}).get("id")   # fall back: the video object's source
+            if vid:
+                r2 = await client.get(f"{base}/{vid}", params={"fields": "source"}, headers=hdr)
+                if r2.is_success:
+                    return r2.json().get("source")
+    except Exception as exc:
+        _log.info("post video fetch for %s failed: %s", post_id, exc)
+    return None
 
 
 async def page_of_contact(channel: str, external_id: str) -> str | None:
