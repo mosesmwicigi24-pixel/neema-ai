@@ -244,7 +244,8 @@ export default function CatalogPage(): React.ReactElement {
                                 {p.image_url ? (
                                     // eslint-disable-next-line @next/next/no-img-element
                                     <img
-                                        src={p.thumbnail_url || p.image_url}
+                                        // full-res, not the tiny *_thumb — sharp on big cards
+                                        src={p.image_url}
                                         alt={p.name}
                                         style={{
                                             width: "100%",

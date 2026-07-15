@@ -223,7 +223,10 @@ export function CatalogView({
                                 className={`aspect-square bg-gradient-to-br ${gradient} flex items-center justify-center overflow-hidden`}
                             >
                                 <ProductThumb
-                                    src={item.thumbnail_url || item.image_url || null}
+                                    // Prefer the FULL-res image — the hub's
+                                    // *_thumb.webp is tiny and looks soft/pixelated
+                                    // upscaled onto these big cards.
+                                    src={item.image_url || item.thumbnail_url || null}
                                     alt={item.name}
                                     glyph={catEmoji[item.category ?? ""] ?? "📦"}
                                 />
