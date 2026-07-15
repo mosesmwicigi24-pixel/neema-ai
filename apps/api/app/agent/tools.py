@@ -785,16 +785,46 @@ async def _whatsapp_checkout_link(args: dict, ctx: ToolContext) -> dict:
                     "their order message ready to send."}
 
 
+async def _customer_currency(ctx: ToolContext) -> str:
+    """This customer's own currency for the shared catalog: Kenya → KES, Zambia
+    → ZMW, etc., from their phone prefix (WhatsApp) or captured country (Meta).
+    USD for anyone we can't place. The catalog shows their currency where the
+    hub prices it, else USD."""
+    from app.core.countries import currency_for_country, iso_from_text
+    iso = None
+    if ctx.channel == "whatsapp":
+        iso = (resolve_country(ctx.wa_id) or {}).get("country_iso")
+    else:
+        try:
+            from app.models.person import Identity, Person
+            ident = (await ctx.db.execute(select(Identity).where(
+                Identity.channel == ctx.channel,
+                Identity.external_id == ctx.wa_id))).scalar_one_or_none()
+            if ident is not None:
+                person = await ctx.db.get(Person, ident.person_id)
+                st = (person.state or {}) if person else {}
+                iso = st.get("country_iso") or iso_from_text(st.get("location"))
+        except Exception:
+            pass
+    if iso:
+        return currency_for_country(iso)
+    return "KES" if ctx.currency == "KES" else "USD"
+
+
 async def _share_catalog(args: dict, ctx: ToolContext) -> dict:
     """Return a shareable catalog link — the whole storefront, or a deep link to
-    one product when named. The customer sees photos + prices and orders in a tap."""
+    one product when named. The link carries the customer's currency so they see
+    prices in their own money (KES / USD / ZMW …). Photos + prices, order in a tap."""
     base = (settings.media_public_url or "").rstrip("/")
     if not base:
         return {"error": "catalog URL not configured"}
+    ccy = await _customer_currency(ctx)
+    q = f"?ccy={ccy}"
     product = (args.get("product") or "").strip()
     if not product:
-        return {"link": f"{base}/catalog",
-                "note": "Share this so the customer can browse our products with photos and prices."}
+        return {"link": f"{base}/catalog{q}",
+                "note": f"Share this so the customer can browse our products with photos "
+                        f"and prices (shown in {ccy})."}
 
     catalog = await svc.catalog_items(ctx.db, ctx.redis)
     pn = product.lower().strip()
@@ -810,9 +840,9 @@ async def _share_catalog(args: dict, ctx: ToolContext) -> dict:
         match = cands[0] if cands else None
 
     if match:
-        return {"link": f"{base}/catalog/{match['slug']}", "product": match.get("name"),
+        return {"link": f"{base}/catalog/{match['slug']}{q}", "product": match.get("name"),
                 "note": "Share this so the customer can see this product's photos and price, and order in one tap."}
-    return {"link": f"{base}/catalog",
+    return {"link": f"{base}/catalog{q}",
             "note": "Couldn't find that exact product — sharing the full catalog instead."}
 
 

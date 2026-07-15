@@ -31,6 +31,27 @@ def _price(prices_by_ccy: dict, ccy: str):
         return None
 
 
+def _all_prices(prices_list) -> dict:
+    """Every currency the hub prices this item in → {code: amount}, keeping only
+    real 3-letter ISO codes and POSITIVE amounts (the hub sends 0.00 duplicates
+    and stray codes). Last positive wins per currency. This is the multi-currency
+    source of truth the catalog quotes from — KES, USD, ZMW, and whatever's added
+    next flow through automatically."""
+    by: dict = {}
+    for pr in (prices_list or []):
+        code = (pr.get("currency_code") or "").upper()
+        if not (code.isalpha() and len(code) == 3):
+            continue
+        val = pr.get("sale_price") or pr.get("regular_price")
+        try:
+            v = float(val) if val not in (None, "") else 0.0
+        except (TypeError, ValueError):
+            v = 0.0
+        if v > 0:
+            by[code] = v
+    return by
+
+
 def _map_images(p: dict) -> list[dict]:
     """Ordered {url, thumb, alt} list from the hub's product images (primary
     first). Empty list when the product has no images."""
@@ -54,14 +75,15 @@ def _map_variant(v: dict) -> dict:
     SKU, human name ('S / GOLD'), attributes ({Size, Colour}), and per-currency
     price. Each variant carries its OWN price — a Thurible in S is KES 9,000 but
     L is KES 15,000 — so the agent must quote the variant, not the product."""
-    prices = {pr.get("currency_code"): pr for pr in (v.get("prices") or [])}
+    prices = _all_prices(v.get("prices"))
     return {
         "variant_id": v.get("id"),
         "sku":        v.get("sku") or "",
         "name":       v.get("variant_name") or "",
         "attributes": v.get("attributes") or {},
-        "price_kes":  _price(prices, "KES"),
-        "price_usd":  _price(prices, "USD"),
+        "price_kes":  prices.get("KES"),
+        "price_usd":  prices.get("USD"),
+        "prices":     prices,               # full multi-currency map
         "is_default": bool(v.get("is_default")),
         "in_stock":   bool(v.get("is_active", True)),
     }
@@ -71,9 +93,9 @@ def _map_product(p: dict) -> dict:
     trans = p.get("translations") or []
     en = next((t for t in trans if t.get("language_code") == "en"),
               trans[0] if trans else {})
-    prices = {pr.get("currency_code"): pr for pr in (p.get("prices") or [])}
-    kes = _price(prices, "KES")
-    usd = _price(prices, "USD")
+    prices = _all_prices(p.get("prices"))
+    kes = prices.get("KES")
+    usd = prices.get("USD")
     images = _map_images(p)
     return {
         "hub_product_id": p.get("id"),
@@ -82,11 +104,13 @@ def _map_product(p: dict) -> dict:
         "slug":           p.get("slug") or "",
         "name":           en.get("name") or "",
         "category":       (p.get("category") or {}).get("name_en") or "",
-        # `price` stays KES for backward-compat with the current prompt; both
-        # currencies are carried so quoting can be made currency-correct next.
+        # `price` stays KES for backward-compat with the current prompt; the full
+        # multi-currency map is carried so the catalog quotes each customer's own
+        # money (KES / USD / ZMW / whatever the hub adds next).
         "price":          kes if kes is not None else 0.0,
         "price_kes":      kes,
         "price_usd":      usd,
+        "prices":         prices,
         "unit":           "",
         "description":    en.get("short_description") or en.get("description") or "",
         "aliases":        p.get("aliases") or [],

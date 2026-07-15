@@ -21,34 +21,31 @@ interface Image {
 }
 interface Variant {
     label: string;
-    price_kes: number | null;
-    price_usd: number | null;
+    price: number | null;
+    currency: string;
 }
 interface Product {
     slug: string;
     name: string;
     category: string | null;
     description: string | null;
-    price_kes: number | null;
-    price_usd: number | null;
+    price: number | null;
+    currency: string;
     image_url: string | null;
     made_to_order: boolean;
     in_stock: boolean;
     order_url: string | null;
     images: Image[];
     variants?: Variant[];
-    price_from_kes?: number | null;
-    price_to_kes?: number | null;
+    price_from?: number | null;
+    price_to?: number | null;
 }
 
-function fmtKes(v: number | null | undefined): string {
+// $ for USD, the ISO code otherwise (KES 12,000 · ZMW 1,260); cents below a unit.
+function fmtMoney(v: number | null | undefined, currency: string): string {
     if (v == null) return "";
-    return "KES " + Math.round(v).toLocaleString("en-KE");
-}
-
-function fmtUsd(v: number | null | undefined): string {
-    if (v == null) return "";
-    return v >= 1 ? "$" + Math.round(v).toLocaleString("en-US") : "$" + v.toFixed(2);
+    const amt = v >= 1 ? Math.round(v).toLocaleString("en-US") : v.toFixed(2);
+    return currency === "USD" ? "$" + amt : currency + " " + amt;
 }
 
 // A fitting liturgical glyph for a product with no photo (mirrors the grid).
@@ -79,7 +76,9 @@ export default function ProductPage(): React.ReactElement {
         if (!slug) return;
         (async () => {
             try {
-                const res = await fetch(`${BASE}/public/catalog/${slug}`);
+                const params = new URLSearchParams(window.location.search);
+                const qs = params.toString() ? `?${params.toString()}` : "";
+                const res = await fetch(`${BASE}/public/catalog/${slug}${qs}`);
                 if (!res.ok) throw new Error();
                 const data: Product = await res.json();
                 setP(data);
@@ -233,15 +232,10 @@ export default function ProductPage(): React.ReactElement {
 
                     <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                         <span style={{ fontSize: 22, fontWeight: 800, color: MOSS_DK }}>
-                            {p.price_from_kes != null && p.price_to_kes != null
-                                ? `${fmtKes(p.price_from_kes)} – ${fmtKes(p.price_to_kes)}`
-                                : fmtKes(p.price_kes) || "Price on enquiry"}
+                            {p.price_from != null && p.price_to != null
+                                ? `${fmtMoney(p.price_from, p.currency)} – ${fmtMoney(p.price_to, p.currency)}`
+                                : fmtMoney(p.price, p.currency) || "Price on enquiry"}
                         </span>
-                        {p.price_usd != null && (
-                            <span style={{ fontSize: 14, color: "#8aa07a", fontWeight: 600 }}>
-                                ≈ {fmtUsd(p.price_usd)}
-                            </span>
-                        )}
                         {p.made_to_order ? (
                             <span
                                 style={{
@@ -279,13 +273,7 @@ export default function ProductPage(): React.ReactElement {
                                         </span>
                                         <span style={{ fontSize: 14, fontWeight: 700, color: MOSS_DK,
                                                        whiteSpace: "nowrap" }}>
-                                            {fmtKes(v.price_kes)}
-                                            {v.price_usd != null && (
-                                                <span style={{ color: "#8aa07a", fontWeight: 600,
-                                                               fontSize: 12 }}>
-                                                    {"  ≈ " + fmtUsd(v.price_usd)}
-                                                </span>
-                                            )}
+                                            {fmtMoney(v.price, v.currency)}
                                         </span>
                                     </div>
                                 ))}

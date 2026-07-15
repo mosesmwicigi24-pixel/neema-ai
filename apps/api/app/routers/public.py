@@ -36,47 +36,59 @@ def _order_url(name: str | None) -> str | None:
     return f"https://wa.me/{num}?text={quote(msg)}"
 
 
-def _usd_price(kes, usd):
-    """USD for the storefront: the hub's own USD when it's a real positive
-    number, else an approximation from KES so an international viewer NEVER sees
-    $0. Small items keep cents (a KES 30 cup shows $0.30, not $0)."""
+def _money(v):
+    """Whole units for anything ≥ 1 (KES 12,000 · ZMW 1,260 · $130), cents below
+    a unit so a small item never shows as 0 (a $0.30 cup, not $0)."""
+    if v is None:
+        return None
     try:
-        u = float(usd) if usd not in (None, "") else 0.0
-    except (TypeError, ValueError):
-        u = 0.0
-    if u > 0:
-        return round(u) if u >= 1 else round(u, 2)
-    try:
-        k = float(kes) if kes not in (None, "") else 0.0
+        v = float(v)
     except (TypeError, ValueError):
         return None
-    if k <= 0:
+    if v <= 0:
         return None
-    approx = k / (settings.usd_kes_rate or 100)
-    return round(approx) if approx >= 1 else max(round(approx, 2), 0.01)
+    return round(v) if v >= 1 else max(round(v, 2), 0.01)
 
 
-def _variant_card(v: dict) -> dict:
+def _resolve_price(prices: dict, ccy: str):
+    """(amount, currency) to show a customer whose money is `ccy`, from the hub's
+    multi-currency map. Kenya → KES (converting from USD only if KES is missing).
+    Everyone else → THEIR currency when the hub prices it (a Zambian sees ZMW),
+    otherwise USD — real when the hub has it, else approximated from KES so an
+    international viewer is never shown shillings or a $0. This is how one shared
+    catalog speaks each customer's money."""
+    prices = prices or {}
+    ccy = (ccy or "USD").upper()
+    rate = settings.usd_kes_rate or 100
+    if ccy == "KES":
+        kes = prices.get("KES") or (prices.get("USD") and prices["USD"] * rate)
+        return _money(kes), "KES"
+    if prices.get(ccy):                       # their own currency, priced by the hub
+        return _money(prices[ccy]), ccy
+    usd = prices.get("USD") or (prices.get("KES") and prices["KES"] / rate)
+    return _money(usd), "USD"
+
+
+def _variant_card(v: dict, ccy: str) -> dict:
     attrs = v.get("attributes") or {}
     label = v.get("name") or " / ".join(str(x) for x in attrs.values())
-    return {
-        "label":     label,
-        "price_kes": v.get("price_kes"),
-        "price_usd": _usd_price(v.get("price_kes"), v.get("price_usd")),
-    }
+    price, cur = _resolve_price(v.get("prices") or {}, ccy)
+    return {"label": label, "price": price, "currency": cur}
 
 
-def _card(p: dict) -> dict:
-    """The customer-safe projection of a catalogue product — with a real USD
-    price (never $0) and, for varied products, the size/colour options + a price
-    range so a shared catalog shows the true choices and their prices."""
+def _card(p: dict, ccy: str = "USD") -> dict:
+    """The customer-safe projection of a catalogue product, priced in the
+    viewer's own currency (`ccy`). Varied products carry their size/colour
+    options + a price range, all in that currency."""
+    prices = p.get("prices") or {}
+    price, cur = _resolve_price(prices, ccy)
     card = {
         "slug":          p.get("slug"),
         "name":          p.get("name"),
         "category":      p.get("category"),
         "description":   p.get("description"),
-        "price_kes":     p.get("price_kes"),
-        "price_usd":     _usd_price(p.get("price_kes"), p.get("price_usd")),
+        "price":         price,
+        "currency":      cur,
         "image_url":     p.get("image_url"),
         "thumbnail_url": p.get("thumbnail_url"),
         # Producible items are made-to-order — the catalog shows "Made to order"
@@ -87,12 +99,11 @@ def _card(p: dict) -> dict:
     }
     variants = p.get("variants") or []
     if variants:
-        card["variants"] = [_variant_card(v) for v in variants]
-        lo, hi = p.get("price_min_kes"), p.get("price_max_kes")
-        if lo is not None and hi is not None and lo != hi:
-            card["price_from_kes"], card["price_to_kes"] = lo, hi
-            card["price_from_usd"] = _usd_price(lo, None)
-            card["price_to_usd"] = _usd_price(hi, None)
+        vcards = [_variant_card(v, ccy) for v in variants]
+        card["variants"] = vcards
+        amts = [vc["price"] for vc in vcards if isinstance(vc["price"], (int, float))]
+        if amts and min(amts) != max(amts):
+            card["price_from"], card["price_to"] = min(amts), max(amts)
     return card
 
 
@@ -104,11 +115,26 @@ async def _catalog(request: Request) -> list[dict]:
         raise HTTPException(status_code=503, detail="Catalog temporarily unavailable")
 
 
+def _ccy_param(request: Request) -> str:
+    """The currency to price the catalog in — `?ccy=` (or `?country=` ISO) from
+    the link Neema shared, so each customer sees their own money. USD default."""
+    from app.core.countries import currency_for_country
+    q = request.query_params
+    ccy = (q.get("ccy") or "").strip().upper()
+    if ccy.isalpha() and len(ccy) == 3:
+        return ccy
+    country = (q.get("country") or q.get("c") or "").strip()
+    if country:
+        return currency_for_country(country)
+    return "USD"
+
+
 @router.get("/catalog")
 async def public_catalog(request: Request):
-    """Every sellable product as a customer card (name + price + image)."""
+    """Every sellable product as a customer card, priced in the viewer's currency."""
     items = await _catalog(request)
-    return [_card(p) for p in items if p.get("name") and p.get("slug")]
+    ccy = _ccy_param(request)
+    return [_card(p, ccy) for p in items if p.get("name") and p.get("slug")]
 
 
 @router.get("/catalog/{slug}")
@@ -118,7 +144,7 @@ async def public_product(slug: str, request: Request):
     p = next((x for x in items if x.get("slug") == slug), None)
     if not p:
         raise HTTPException(status_code=404, detail="Product not found")
-    card = _card(p)
+    card = _card(p, _ccy_param(request))
     card["images"] = p.get("images") or []
     return card
 

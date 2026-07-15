@@ -1,43 +1,61 @@
-"""The shared customer catalog card: a real USD price (never $0 for an
-international viewer), and — for varied products — the size/colour options with
-their own prices plus a price range."""
-from app.routers.public import _card, _usd_price
+"""The shared customer catalog speaks each customer's own money: Kenya → KES,
+Zambia → ZMW, everyone else → USD — from the hub's multi-currency price map,
+falling back to USD (real or approximated) when the hub doesn't price their
+currency, so an international viewer never sees shillings or a $0."""
+from app.routers.public import _card, _resolve_price
+from app.core.countries import currency_for_country
+from app.core.hub_client import _all_prices
 
 
-def test_usd_price_prefers_hub_else_approximates_never_zero(monkeypatch):
+def test_currency_for_country():
+    assert currency_for_country("KE") == "KES"
+    assert currency_for_country("ZM") == "ZMW"
+    assert currency_for_country("ug") == "UGX"
+    assert currency_for_country("US") == "USD"
+    assert currency_for_country("XX") == "USD"          # unknown → USD
+    assert currency_for_country(None) == "USD"
+
+
+def test_all_prices_drops_zero_and_bogus_codes():
+    raw = [{"currency_code": "KES", "regular_price": "3500.00"},
+           {"currency_code": "USD", "regular_price": "0.00"},      # zero → dropped
+           {"currency_code": "ZMW", "regular_price": "1260.00"},
+           {"currency_code": "260", "regular_price": "5.00"},      # not a 3-letter code
+           {"currency_code": "KES", "regular_price": "2500.03"}]   # last positive wins
+    assert _all_prices(raw) == {"KES": 2500.03, "ZMW": 1260.0}
+
+
+def test_resolve_price_speaks_each_customers_currency(monkeypatch):
     from app.core.config import settings
     monkeypatch.setattr(settings, "usd_kes_rate", 100, raising=False)
-    assert _usd_price(13000, 130) == 130       # hub USD wins
-    assert _usd_price(13000, 0) == 130         # $0 in hub → approx from KES, not 0
-    assert _usd_price(13000, None) == 130      # missing → approx
-    assert _usd_price(30, 0) == 0.3            # small item keeps cents, never $0
-    assert _usd_price(None, None) is None      # genuinely unknown
-    assert _usd_price(0, 0) is None
+    prices = {"KES": 12000, "USD": 120, "ZMW": 1680}
+    assert _resolve_price(prices, "KES") == (12000, "KES")
+    assert _resolve_price(prices, "USD") == (120, "USD")
+    assert _resolve_price(prices, "ZMW") == (1680, "ZMW")
+    assert _resolve_price(prices, "UGX") == (120, "USD")        # not priced → USD
+    # only KES priced: a Kenyan sees KES; a non-Kenyan sees approx USD (never KES/$0)
+    assert _resolve_price({"KES": 5000}, "KES") == (5000, "KES")
+    assert _resolve_price({"KES": 5000}, "ZMW") == (50, "USD")  # 5000/100
+    assert _resolve_price({"KES": 30}, "USD") == (0.3, "USD")   # small item keeps cents
+    # Kenyan but only USD priced → converted to KES
+    assert _resolve_price({"USD": 10}, "KES") == (1000, "KES")
 
 
-def test_card_has_nonzero_usd_and_no_variants_for_simple():
-    p = {"slug": "bell", "name": "BELL", "category": "Accessories",
-         "description": "An altar bell", "price_kes": 2500, "price_usd": 0.0,
-         "image_url": "http://x/bell.webp", "is_producible": False, "in_stock": True}
-    card = _card(p)
-    assert card["price_usd"] == 25 and "variants" not in card   # 2500/100, not $0
-
-
-def test_card_surfaces_variants_and_range_for_varied_product():
+def test_card_prices_product_and_variants_in_customer_currency():
     p = {"slug": "thurible", "name": "Thurible", "category": "Communion",
-         "description": "Incense burner", "price_kes": 12000, "price_usd": 120,
-         "image_url": "http://x/t.webp", "is_producible": False, "in_stock": True,
-         "price_min_kes": 9000, "price_max_kes": 15000,
+         "description": "x", "prices": {"KES": 12000, "USD": 120, "ZMW": 1680},
+         "image_url": "http://x", "is_producible": False, "in_stock": True,
          "variants": [
-             {"name": "S / GOLD", "attributes": {"Size": "S", "Colour": "GOLD"},
-              "price_kes": 9000, "price_usd": 90},
-             {"name": "L / GOLD", "attributes": {"Size": "L", "Colour": "GOLD"},
-              "price_kes": 15000, "price_usd": 150},
+             {"name": "S / GOLD", "attributes": {"Size": "S"},
+              "prices": {"KES": 9000, "USD": 90, "ZMW": 1260}},
+             {"name": "L / GOLD", "attributes": {"Size": "L"},
+              "prices": {"KES": 15000, "USD": 150, "ZMW": 2100}},
          ]}
-    card = _card(p)
-    assert card["price_from_kes"] == 9000 and card["price_to_kes"] == 15000
-    assert card["price_from_usd"] == 90 and card["price_to_usd"] == 150
-    labels = {v["label"]: v for v in card["variants"]}
-    assert set(labels) == {"S / GOLD", "L / GOLD"}
-    assert labels["S / GOLD"]["price_kes"] == 9000 and labels["S / GOLD"]["price_usd"] == 90
-    assert labels["L / GOLD"]["price_usd"] == 150
+    z = _card(p, "ZMW")
+    assert z["currency"] == "ZMW" and z["price"] == 1680
+    labels = {v["label"]: v for v in z["variants"]}
+    assert labels["S / GOLD"]["price"] == 1260 and labels["S / GOLD"]["currency"] == "ZMW"
+    assert z["price_from"] == 1260 and z["price_to"] == 2100
+
+    u = _card(p, "USD")
+    assert u["currency"] == "USD" and u["price"] == 120 and u["price_from"] == 90

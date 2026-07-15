@@ -317,3 +317,26 @@ def iso_from_locale(locale: str | None) -> str | None:
         return None
     suffix = str(locale).rsplit("_", 1)[-1].upper()
     return suffix if name_for_iso(suffix) else None
+
+
+# Country ISO → its official currency (ISO 4217). A stable geographic fact — NOT
+# business config: it says "a Zambian's money is ZMW", independent of whether the
+# hub prices anything in ZMW yet. The catalog uses this to pick a customer's
+# currency, then shows it only when the hub actually has that price (else USD).
+# Covers Bethany House's markets (Africa + common diaspora); everyone else → USD.
+_CURRENCY_BY_ISO = {
+    "KE": "KES", "ZM": "ZMW", "UG": "UGX", "TZ": "TZS", "ZA": "ZAR",
+    "NG": "NGN", "GH": "GHS", "RW": "RWF", "MW": "MWK", "ZW": "USD",
+    "SS": "SSP", "ET": "ETB", "CD": "CDF", "CM": "XAF", "CI": "XOF",
+    "BI": "BIF", "SL": "SLE", "LR": "USD", "BW": "BWP", "NA": "NAD",
+    "GB": "GBP", "US": "USD", "CA": "CAD", "AU": "AUD",
+}
+# Currencies the EU / eurozone diaspora may want; kept for future hub pricing.
+for _iso in ("DE", "FR", "IT", "ES", "NL", "IE", "PT", "BE"):
+    _CURRENCY_BY_ISO[_iso] = "EUR"
+
+
+def currency_for_country(iso: str | None) -> str:
+    """The customer's own currency for a country ISO — USD for anywhere we don't
+    map (the safe, universally-accepted default)."""
+    return _CURRENCY_BY_ISO.get((iso or "").upper(), "USD")

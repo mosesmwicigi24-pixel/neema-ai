@@ -15,36 +15,32 @@ const INK = "#16270c";
 
 interface Variant {
     label: string;
-    price_kes: number | null;
-    price_usd: number | null;
+    price: number | null;
+    currency: string;
 }
 interface Product {
     slug: string;
     name: string;
     category: string | null;
     description: string | null;
-    price_kes: number | null;
-    price_usd: number | null;
+    price: number | null;
+    currency: string;
     image_url: string | null;
     thumbnail_url: string | null;
     made_to_order: boolean;
     in_stock: boolean;
     order_url: string | null;
     variants?: Variant[];
-    price_from_kes?: number | null;
-    price_to_kes?: number | null;
-    price_from_usd?: number | null;
-    price_to_usd?: number | null;
+    price_from?: number | null;
+    price_to?: number | null;
 }
 
-function fmtKes(v: number | null | undefined): string {
+// Format any currency the hub prices in — $ for USD, the ISO code otherwise
+// (KES 12,000 · ZMW 1,260). Cents only below a unit so a small item never reads 0.
+function fmtMoney(v: number | null | undefined, currency: string): string {
     if (v == null) return "";
-    return "KES " + Math.round(v).toLocaleString("en-KE");
-}
-
-function fmtUsd(v: number | null | undefined): string {
-    if (v == null) return "";
-    return v >= 1 ? "$" + Math.round(v).toLocaleString("en-US") : "$" + v.toFixed(2);
+    const amt = v >= 1 ? Math.round(v).toLocaleString("en-US") : v.toFixed(2);
+    return currency === "USD" ? "$" + amt : currency + " " + amt;
 }
 
 // A fitting liturgical glyph for a product with no photo — so the tile reads as
@@ -66,20 +62,13 @@ function catGlyph(category: string | null, name: string): string {
     return "✝️";
 }
 
-// Card price line: a range ("from KES 9,000") for varied products, else a
-// single price — with an approximate USD under it so international clients see
-// their money too. Returns { kes, usd } strings ("" when unknown).
-function priceLine(p: Product): { kes: string; usd: string } {
-    if (p.price_from_kes != null && p.price_to_kes != null) {
-        return {
-            kes: "from " + fmtKes(p.price_from_kes),
-            usd: p.price_from_usd != null ? "≈ from " + fmtUsd(p.price_from_usd) : "",
-        };
+// Card price line, in the customer's currency: a range ("from ZMW 1,260") for
+// varied products, else the single price.
+function priceLine(p: Product): string {
+    if (p.price_from != null && p.price_to != null) {
+        return "from " + fmtMoney(p.price_from, p.currency);
     }
-    return {
-        kes: fmtKes(p.price_kes) || "Enquire",
-        usd: p.price_usd != null ? "≈ " + fmtUsd(p.price_usd) : "",
-    };
+    return fmtMoney(p.price, p.currency) || "Enquire";
 }
 
 export default function CatalogPage(): React.ReactElement {
@@ -90,9 +79,13 @@ export default function CatalogPage(): React.ReactElement {
 
     useEffect(() => {
         document.title = "Catalog | Bethany House";
+        // The link Neema shared carries the customer's currency (?ccy=KES|ZMW|…)
+        // so the whole catalog is priced in their own money.
+        const params = new URLSearchParams(window.location.search);
+        const qs = params.toString() ? `?${params.toString()}` : "";
         (async () => {
             try {
-                const res = await fetch(`${BASE}/public/catalog`);
+                const res = await fetch(`${BASE}/public/catalog${qs}`);
                 if (!res.ok) throw new Error();
                 setProducts(await res.json());
             } catch {
@@ -309,13 +302,8 @@ export default function CatalogPage(): React.ReactElement {
                                         marginTop: 4,
                                     }}
                                 >
-                                    {priceLine(p).kes}
+                                    {priceLine(p)}
                                 </div>
-                                {priceLine(p).usd && (
-                                    <div style={{ color: "#8aa07a", fontSize: 11.5, marginTop: 1 }}>
-                                        {priceLine(p).usd}
-                                    </div>
-                                )}
                             </div>
                         </Link>
                     ))}
