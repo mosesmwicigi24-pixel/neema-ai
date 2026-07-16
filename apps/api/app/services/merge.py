@@ -101,6 +101,13 @@ async def merge_persons(
         for k in ("location", "lead_source", "source_post"):
             if s.get(k) and not pst.get(k):
                 pst[k] = s[k]
+        # An in-progress CART must survive too: a Messenger buyer who moves to
+        # WhatsApp mid-order would otherwise lose everything they'd picked. Only
+        # when the primary hasn't started their own cart — never clobber that.
+        s_items = ((s.get("agent_cart") or {}).get("items")) or []
+        p_items = ((pst.get("agent_cart") or {}).get("items")) or []
+        if s_items and not p_items:
+            pst["agent_cart"] = s["agent_cart"]
         primary.state = pst
         flag_modified(primary, "state")
 

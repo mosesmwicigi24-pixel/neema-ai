@@ -88,6 +88,88 @@ def test_whatsapp_order_identity_is_the_wa_id():
     assert phone == "254700111222" and name == "Moses" and pid == "p-1"
 
 
+def test_meta_handoff_never_mints_a_phantom_conversation():
+    """A Meta thread is keyed on (channel, external_id). Looking it up by wa_id
+    misses and would CREATE Conversation(wa_id=PSID) — exactly how phantom
+    contacts were born. Never invent one."""
+    from app.agent.tools import _handoff_to_human
+
+    class _NoConvDB(_DB):
+        def __init__(self):
+            super().__init__([None])
+            self.added = []
+        def add(self, obj):
+            self.added.append(obj)
+
+    db = _NoConvDB()
+    ctx = ToolContext(db=db, redis=None, wa_id=PSID, currency="USD", channel="messenger")
+    out = asyncio.run(_handoff_to_human({"reason": "wants a human"}, ctx))
+    assert out["ok"] is False
+    assert db.added == []                               # no phantom conversation
+
+
+def test_meta_order_status_found_by_phone_not_psid(monkeypatch):
+    """Orders are keyed on the PHONE; a Messenger buyer's handle is a PSID, so
+    status lookup must go via their phone/person or their order is invisible."""
+    from app.agent import tools
+    captured = {}
+
+    async def fake_identity(ctx):
+        return "254712345678", "Meshack", "person-1"
+
+    class _RowDB(_DB):
+        async def execute(self, stmt):
+            captured["stmt"] = str(stmt)
+            return SimpleNamespace(scalar_one_or_none=lambda: None)
+
+    monkeypatch.setattr(tools, "_order_identity", fake_identity)
+    ctx = ToolContext(db=_RowDB([]), redis=None, wa_id=PSID, currency="KES",
+                      channel="messenger")
+    out = asyncio.run(tools._check_order_status({}, ctx))
+    assert out == {"found": False}
+    # the query must filter on person_id / wa_id — never on the raw PSID handle
+    assert "person_id" in captured["stmt"] and "wa_id" in captured["stmt"]
+
+
+def test_merge_carries_an_in_progress_cart_to_the_phone_person():
+    """A Messenger buyer moving to WhatsApp mid-order keeps the items they picked."""
+    import types, uuid as _uuid
+    from app.services.merge import merge_persons
+    from app.models.person import Person as P
+
+    primary, secondary = _uuid.uuid4(), _uuid.uuid4()
+    sec = P(state={"agent_cart": {"items": [{"name": "Thurible", "qty": 1}]}})
+    sec.id = secondary
+    pri = P(state={})
+    pri.id = primary
+
+    class _MDB:
+        def __init__(self): self.added = []
+        async def execute(self, stmt):
+            if type(stmt).__name__ == "Select":
+                return types.SimpleNamespace(
+                    scalars=lambda: types.SimpleNamespace(all=lambda: []))
+            return None
+        async def get(self, model, pk):
+            return {primary: pri, secondary: sec}.get(pk)
+        def add(self, obj): self.added.append(obj)
+        async def flush(self): pass
+
+    asyncio.run(merge_persons(_MDB(), primary, secondary))
+    assert pri.state["agent_cart"]["items"][0]["name"] == "Thurible"   # cart survived
+
+    # …but a cart the primary already started is never clobbered
+    sec2 = P(state={"agent_cart": {"items": [{"name": "Thurible"}]}}); sec2.id = secondary
+    pri2 = P(state={"agent_cart": {"items": [{"name": "Cassock"}]}}); pri2.id = primary
+
+    class _MDB2(_MDB):
+        async def get(self, model, pk):
+            return {primary: pri2, secondary: sec2}.get(pk)
+
+    asyncio.run(merge_persons(_MDB2(), primary, secondary))
+    assert pri2.state["agent_cart"]["items"][0]["name"] == "Cassock"
+
+
 def test_meta_cart_lives_on_the_person_not_a_missing_user_row():
     """A Meta contact has no User row — the cart must persist on their Person or
     every item silently vanishes between turns."""

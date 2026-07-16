@@ -566,9 +566,21 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
 
 
 async def _check_order_status(args: dict, ctx: ToolContext) -> dict:
+    # Orders are keyed on the customer's PHONE and stamped with their person — a
+    # Messenger/IG buyer's handle is a PSID, so look them up by either, or their
+    # own order comes back "not found".
+    from sqlalchemy import or_
+    phone, _name, person_id = await _order_identity(ctx)
+    conds = []
+    if person_id is not None:
+        conds.append(OrderEvent.person_id == person_id)
+    if phone:
+        conds.append(OrderEvent.wa_id == phone)
+    if not conds:
+        return {"found": False}
     row = (await ctx.db.execute(
         select(OrderEvent)
-        .where(OrderEvent.wa_id == ctx.wa_id, OrderEvent.hub_order_id.isnot(None))
+        .where(or_(*conds), OrderEvent.hub_order_id.isnot(None))
         .order_by(OrderEvent.created_at.desc()).limit(1)
     )).scalar_one_or_none()
     if row is None:
@@ -782,13 +794,22 @@ async def _add_tags(args: dict, ctx: ToolContext) -> dict:
 
 
 async def _handoff_to_human(args: dict, ctx: ToolContext) -> dict:
+    """Route this conversation to a person. Channel-aware: a Meta contact's handle
+    is a page-scoped PSID, so we match on (channel, external_id) — never mint a
+    Conversation with a PSID in wa_id, which is how phantom contacts were born."""
+    from sqlalchemy import or_
     from app.models.conversation import Conversation, InterceptMode
-    conv = (await ctx.db.execute(
-        select(Conversation).where(Conversation.wa_id == ctx.wa_id)
-    )).scalar_one_or_none()
-    if conv is None:
-        conv = Conversation(wa_id=ctx.wa_id)
+    conv = (await ctx.db.execute(select(Conversation).where(
+        Conversation.channel == ctx.channel,
+        or_(Conversation.external_id == ctx.wa_id, Conversation.wa_id == ctx.wa_id),
+    ))).scalars().first()
+    if conv is None and ctx.channel == "whatsapp":
+        conv = Conversation(wa_id=ctx.wa_id, channel="whatsapp", external_id=ctx.wa_id)
         ctx.db.add(conv)
+    if conv is None:                      # Meta thread we can't find — never invent one
+        _log.warning("handoff: no %s conversation for %s", ctx.channel, ctx.wa_id)
+        return {"ok": False, "reason": args.get("reason"),
+                "note": "conversation not found — tell the customer a colleague will follow up"}
     conv.intercept_mode = InterceptMode.human
     await ctx.db.commit()
     return {"ok": True, "reason": args.get("reason")}
