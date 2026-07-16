@@ -52,6 +52,61 @@ async def _page_id_for(db, channel: str, ext: str) -> str | None:
     return (getattr(ident, "raw_profile", None) or {}).get("page_id") if ident else None
 
 
+async def _unanswered_dms(since, until, limit: int):
+    """Meta DM conversations (never comment threads) still in AI mode whose LATEST
+    message is an inbound the customer is waiting on, created in (since, until)."""
+    async with AsyncSessionLocal() as db:
+        latest = (
+            select(Message.conversation_id, func.max(Message.created_at).label("m"))
+            .where(Message.channel.in_(_META_DM))
+            .group_by(Message.conversation_id).subquery()
+        )
+        q = (
+            select(Message, Conversation)
+            .join(latest, and_(Message.conversation_id == latest.c.conversation_id,
+                               Message.created_at == latest.c.m))
+            .join(Conversation, Conversation.id == Message.conversation_id)
+            .where(
+                Message.direction == MsgDirection.inbound,
+                Message.comment_context.is_(None),
+                Message.created_at < since,
+                Message.created_at > until,
+                Conversation.intercept_mode == InterceptMode.ai,
+            )
+            .order_by(Message.created_at.desc()).limit(limit)
+        )
+        return (await db.execute(q)).all()
+
+
+async def escalate_window_closed(*, window_h: int = 23, reachable_d: int = 7,
+                                 limit: int = 20) -> int:
+    """Hand a human every DM whose Meta 24-hour window shut with the customer
+    still unanswered — Neema physically cannot reply, but a human can (Meta gives
+    human agents a 7-day window). Past 7 days even a human is locked out, so we
+    stop there rather than flag something nobody can action.
+
+    Idempotent: escalation routes the thread out of AI mode, so each is handed
+    over once, not every tick."""
+    from app.agent.runtime import escalate_to_human
+    now = datetime.now(timezone.utc)
+    rows = await _unanswered_dms(now - timedelta(hours=window_h),
+                                 now - timedelta(days=reachable_d), limit)
+    n = 0
+    for msg, conv in rows:
+        text, media = _answerable_turn(msg.text, msg.media_type, msg.media_url)
+        if text is None and media is None:
+            continue                       # a bare sticker/file — nothing to answer
+        if await escalate_to_human(
+            conv.channel, msg.external_id,
+            "Customer is waiting and Meta's 24-hour window has closed — Neema can't "
+            "reply. Please respond from here (human agents get a 7-day window).",
+        ):
+            n += 1
+    if n:
+        _log.info("window-closed sweep: handed %d unanswered DM(s) to a human", n)
+    return n
+
+
 async def sweep_missed_replies(redis, *, min_age_s: int = 90, max_age_h: int = 23,
                                limit: int = 20) -> int:
     """Answer Meta DMs whose latest message is an unanswered inbound. Returns the

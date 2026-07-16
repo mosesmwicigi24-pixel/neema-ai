@@ -494,6 +494,48 @@ async def schedule_reply(redis, wa_id: str, text: str, dedup_id: str | None,
 # catalogue; the reply goes out via the Graph Send API and is saved as a
 # channel message. Deduped on the Meta message id.
 
+# Meta rejects a send more than 24h after the customer's last message:
+# "(#10) This message is sent outside of allowed window", subcode 2018278.
+_WINDOW_MARKERS = ("outside of allowed window", "2018278")
+
+
+def is_outside_window(exc_or_text) -> bool:
+    """True when Meta refused a send because its 24-hour messaging window closed
+    — a policy wall, not a bug: no retry can fix it, only a human can reply."""
+    s = str(exc_or_text or "").lower()
+    return any(m in s for m in _WINDOW_MARKERS)
+
+
+async def escalate_to_human(channel: str, ext: str, note: str) -> bool:
+    """Hand this conversation to a person: route it out of AI mode and leave the
+    reason in the Activity log, so the team sees it needs them. Used when Meta's
+    24-hour window has closed — Neema physically cannot reply, but a human still
+    can (Meta allows human agents a 7-day window). Best-effort; never raises.
+
+    Idempotent by construction: once the thread is in human mode the sweep no
+    longer selects it, so it's flagged once, not every tick."""
+    from sqlalchemy import or_
+    from app.database import AsyncSessionLocal
+    from app.models.conversation import Conversation, InterceptMode
+    from app.models.intercept import Intercept, InterceptAction
+    try:
+        async with AsyncSessionLocal() as db:
+            conv = (await db.execute(select(Conversation).where(
+                Conversation.channel == channel,
+                or_(Conversation.external_id == ext,
+                    Conversation.wa_id == ext)))).scalars().first()
+            if conv is None:
+                return False
+            conv.intercept_mode = InterceptMode.human
+            db.add(Intercept(conversation_id=conv.id,
+                             action=InterceptAction.flag, note=note[:500]))
+            await db.commit()
+            return True
+    except Exception:
+        _log.warning("human escalation failed for %s/%s", channel, ext, exc_info=True)
+        return False
+
+
 async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
                              page_id: str | None = None,
                              media: dict | None = None) -> bool:
@@ -502,6 +544,7 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
     from app.database import AsyncSessionLocal
     from app.services.meta_send import send_to_channel
     from app.services import n8n_bridge as svc
+    reply = ""
     try:
         model = settings.tier2_model if media else route_model(text)
         async with AsyncSessionLocal() as db:
@@ -514,8 +557,18 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
             await svc.save_outbound_channel_message(db2, redis, channel, external_id, reply)
         _log.info("tier2 replied on %s to %s (%d chars)", channel, external_id, len(reply))
         return True
-    except Exception:
-        _log.exception("tier2 meta turn failed for %s/%s", channel, external_id)
+    except Exception as exc:
+        if is_outside_window(exc):
+            # Meta's 24h window shut before we could answer. Ask a human to take
+            # it — and hand them Neema's drafted reply so they can just send it.
+            draft = " ".join((reply or "").split())[:220]
+            note = ("Outside Meta's 24-hour window — Neema can't reply. Please respond "
+                    "from here (human agents get a 7-day window)."
+                    + (f' Neema had drafted: "{draft}"' if draft else ""))
+            _log.info("meta 24h window closed for %s/%s — routing to a human", channel, external_id)
+            await escalate_to_human(channel, external_id, note)
+        else:
+            _log.exception("tier2 meta turn failed for %s/%s", channel, external_id)
         return False
 
 

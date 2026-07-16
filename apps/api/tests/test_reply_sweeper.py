@@ -1,6 +1,21 @@
 """The missed-reply sweep decides what an unanswered last-inbound message needs.
 Pure logic — no DB — so the answerable/skip rules can't silently regress."""
 from app.services.reply_sweeper import _answerable_turn
+from app.agent.runtime import is_outside_window
+
+
+def test_detects_metas_closed_window_only():
+    """Meta refuses a send >24h after the customer's last message. That's a policy
+    wall (a human must reply), not a bug to retry — so it must be told apart from
+    ordinary send failures."""
+    assert is_outside_window(
+        'Meta send message failed (400): {"error":{"message":"(#10) This message is '
+        'sent outside of allowed window","code":10,"error_subcode":2018278}}') is True
+    assert is_outside_window(RuntimeError("... error_subcode\":2018278 ...")) is True
+    # ordinary failures must NOT be mistaken for a closed window
+    assert is_outside_window("Meta send message failed (500): server error") is False
+    assert is_outside_window("connection timeout") is False
+    assert is_outside_window(None) is False
 
 
 def test_plain_text_is_answered():

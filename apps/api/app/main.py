@@ -205,8 +205,13 @@ async def lifespan(app: FastAPI):
             try:
                 if redis is None or await redis.set("meta:missed:tick", "1", nx=True,
                                                     ex=interval - 20):
-                    from app.services.reply_sweeper import sweep_missed_replies
+                    from app.services.reply_sweeper import (
+                        sweep_missed_replies, escalate_window_closed,
+                    )
                     await sweep_missed_replies(redis)
+                    # Past Meta's 24h window Neema can't reply at all — hand
+                    # those waiting customers to a human, who still can.
+                    await escalate_window_closed()
             except Exception as exc:
                 logger.warning("missed-reply sweep tick failed: %s", exc)
             await _asyncio.sleep(interval)
