@@ -747,14 +747,40 @@ async def _handoff_to_human(args: dict, ctx: ToolContext) -> dict:
     return {"ok": True, "reason": args.get("reason")}
 
 
+async def _resolve_cart_items(product: str, ctx: ToolContext) -> list[dict]:
+    """The product the customer agreed to, as a REAL cart line (hub product id,
+    variant SKU, hub price) — never free text. Empty when it can't be matched."""
+    if not product:
+        return []
+    try:
+        catalog = await svc.catalog_items(ctx.db, ctx.redis)
+        line = hub_client.resolve_hub_line({"name": product, "sku": product, "qty": 1}, catalog)
+    except Exception:
+        return []
+    if not line:
+        return []
+    return [{
+        "hub_product_id": line["product_id"],
+        "name":           line["name"],
+        "sku":            line.get("variant_sku") or "",
+        "qty":            line["quantity"],
+        "unit_price":     line["unit_price"],
+        "made_to_order":  bool(line.get("is_producible")),
+    }]
+
+
 async def _whatsapp_checkout_link(args: dict, ctx: ToolContext) -> dict:
-    """A TINY tap-to-order link that opens WhatsApp with the order message
-    pre-filled. Returns our own short URL (…/api/o/{ref}) that 302-redirects to
-    the real wa.me target stored in redis — a 500-char wa.me?text=… monster in
-    a chat scares customers and burns tokens. Falls back to the raw wa.me link
-    only when no public host is configured (or redis is down, so the pre-filled
-    message isn't lost). The ref ties the resulting WhatsApp lead back to THIS
-    social contact for identity reconciliation + sale attribution."""
+    """A TINY tap-to-order link that opens WhatsApp with the order READY — not
+    order details typed into a message.
+
+    The item is resolved to a real CART LINE here (hub product id + variant SKU +
+    hub price) and stored with the ref. When the customer lands on WhatsApp, that
+    ref rebuilds their cart server-side (reconcile_waref), so Neema confirms and
+    pushes a proper order to the hub — no re-parsing text, no lost details.
+
+    Returns our own short URL (…/api/o/{ref}) that 302-redirects to the wa.me
+    target; falls back to the raw wa.me link when no public host is configured
+    (or redis is down, so nothing is lost)."""
     import secrets
     from urllib.parse import quote
     num = (settings.whatsapp_handoff_number or "").lstrip("+").strip()
@@ -766,13 +792,15 @@ async def _whatsapp_checkout_link(args: dict, ctx: ToolContext) -> dict:
     body = (f"Hi Bethany House! I'd like to order {hint}. (ref {ref})"
             if hint else f"Hi Bethany House! I'd like to order. (ref {ref})")
     target = f"https://wa.me/{num}?text={quote(body)}"
+    items = await _resolve_cart_items(product, ctx)
     stored = False
     try:
         if ctx.redis is not None:
             await ctx.redis.set(
                 f"waref:{ref}",
                 json.dumps({"channel": ctx.channel, "external_id": ctx.wa_id,
-                            "target": target, "product": product[:200]}),
+                            "target": target, "product": product[:200],
+                            "items": items}),
                 ex=14 * 24 * 3600,
             )
             stored = True
@@ -780,9 +808,9 @@ async def _whatsapp_checkout_link(args: dict, ctx: ToolContext) -> dict:
         pass                                     # attribution is best-effort
     base = (settings.media_public_url or "").rstrip("/")
     link = f"{base}/api/o/{ref}" if (base and stored) else target
-    return {"link": link, "ref": ref,
-            "note": "Share this exact short link — one tap opens WhatsApp with "
-                    "their order message ready to send."}
+    return {"link": link, "ref": ref, "cart_prepared": bool(items),
+            "note": "Share this exact short link — one tap opens WhatsApp with their "
+                    "cart already built, ready to confirm and pay."}
 
 
 async def _customer_currency(ctx: ToolContext) -> str:

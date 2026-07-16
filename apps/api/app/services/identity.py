@@ -14,11 +14,15 @@ Callers own the transaction (this only flushes). The create is guarded by a
 SAVEPOINT so a rare concurrent insert that wins `UNIQUE(channel, external_id)`
 never poisons the caller's transaction — we just adopt the winner.
 """
+import logging
+
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.person import Person, Identity
+
+_log = logging.getLogger("neema.identity")
 
 WHATSAPP = "whatsapp"
 _META_SIBLINGS = ("messenger", "instagram", "facebook")
@@ -164,6 +168,26 @@ import re    # noqa: E402
 _WAREF_RE = re.compile(r"\bref[:#\s]*([0-9A-Fa-f]{6})\b", re.IGNORECASE)
 
 
+async def _build_cart_from_ref(db: AsyncSession, wa_id: str, items: list) -> bool:
+    """Seed this WhatsApp customer's cart with the line(s) they already agreed to
+    on Messenger/IG — real hub lines (product id, variant SKU, hub price) carried
+    by the ref, NOT order details re-parsed from their opening text. Never
+    clobbers a cart they've already started. Best-effort; never raises."""
+    if not items:
+        return False
+    try:
+        from app.agent import cart as cartmod
+        cart = await cartmod.get_cart(db, wa_id)
+        if cart.get("items"):
+            return False                       # they already have a cart — leave it
+        cart["items"] = items
+        await cartmod.save_cart(db, wa_id, cart)   # commits
+        _log.info("waref: seeded cart for %s with %d line(s)", wa_id, len(items))
+        return True
+    except Exception:
+        return False
+
+
 async def reconcile_waref(db: AsyncSession, redis, wa_id: str, text: str) -> bool:
     """When a WhatsApp buyer arrives via a wa.me deep link we generated inside
     their Messenger/IG DM, its `ref` token ties them back to that social contact.
@@ -194,6 +218,13 @@ async def reconcile_waref(db: AsyncSession, redis, wa_id: str, text: str) -> boo
         data = json.loads(raw)
     except Exception:
         data = {}
+
+    # Build the CART first — independent of the identity merge below, so a
+    # returning (already-linked) customer still arrives with their order ready.
+    # This is what makes the handover a real order pushed to the hub, rather
+    # than order details typed into a WhatsApp message.
+    await _build_cart_from_ref(db, wa_id, data.get("items") or [])
+
     channel, ext = data.get("channel"), str(data.get("external_id") or "")
     if not channel or not ext:
         await _consume()
