@@ -129,6 +129,9 @@ def test_checkout_link_stores_a_resolved_cart_line(monkeypatch):
                                "prices": {"KES": 15000.0}}]}]
 
     monkeypatch.setattr(tools.svc, "catalog_items", fake_catalog)
+    # No cart yet → the link resolves the named item into a real line.
+    async def empty_cart(db, wa_id, channel="whatsapp"): return {"items": []}
+    monkeypatch.setattr(tools.cartmod, "get_cart", empty_cart)
 
     class _R:
         def __init__(self): self.saved = {}
@@ -144,3 +147,32 @@ def test_checkout_link_stores_a_resolved_cart_line(monkeypatch):
     assert item["hub_product_id"] == 85           # a real hub line…
     assert item["sku"] == "COM-T-001-L-GOL"       # …at the exact variant…
     assert item["unit_price"] == 15000.0          # …and the hub's own price
+
+
+def test_checkout_link_carries_the_whole_cart_not_just_one_item(monkeypatch):
+    """When the customer already built a multi-item cart, the fallback link must
+    carry ALL of it — dropping the rest would lose part of their order."""
+    from app.core.config import settings
+    from app.agent import tools
+    from app.agent.tools import _whatsapp_checkout_link
+    monkeypatch.setattr(settings, "whatsapp_handoff_number", "+254700111222", raising=False)
+    monkeypatch.setattr(settings, "media_public_url", "https://neema.example", raising=False)
+
+    full_cart = {"items": [
+        {"hub_product_id": 85, "name": "Thurible", "qty": 1, "unit_price": 12000},
+        {"hub_product_id": 60, "name": "Stole", "qty": 2, "unit_price": 2500},
+    ]}
+    async def cart_with_items(db, wa_id, channel="whatsapp"): return full_cart
+    async def boom(*a, **k): raise AssertionError("must use the cart, not re-resolve")
+    monkeypatch.setattr(tools.cartmod, "get_cart", cart_with_items)
+    monkeypatch.setattr(tools, "_resolve_cart_items", boom)
+
+    class _R:
+        def __init__(self): self.saved = {}
+        async def set(self, k, v, ex=None): self.saved[k] = v
+
+    r = _R()
+    ctx = SimpleNamespace(db=None, redis=r, wa_id="PSID1", channel="messenger")
+    out = asyncio.run(_whatsapp_checkout_link({"product": "Thurible"}, ctx))
+    items = json.loads(r.saved[f"waref:{out['ref']}"])["items"]
+    assert {i["name"] for i in items} == {"Thurible", "Stole"}   # the WHOLE cart

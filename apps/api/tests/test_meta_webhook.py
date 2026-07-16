@@ -254,16 +254,24 @@ def test_whatsapp_checkout_link_is_a_tiny_short_link(monkeypatch):
     pre-filled order message) lives in redis behind the redirect."""
     import json as _json
     from types import SimpleNamespace
+    from app.agent import tools
     from app.agent.tools import _whatsapp_checkout_link
     monkeypatch.setattr(settings, "whatsapp_handoff_number", "+254700111222", raising=False)
     monkeypatch.setattr(settings, "media_public_url", "https://neema.example", raising=False)
+
+    # No cart built → the link falls back to resolving the named product (here,
+    # nothing matches, so it's a bare opener). Isolate from the DB/catalogue.
+    async def empty_cart(db, wa_id, channel="whatsapp"): return {"items": []}
+    async def no_match(product, ctx): return []
+    monkeypatch.setattr(tools.cartmod, "get_cart", empty_cart)
+    monkeypatch.setattr(tools, "_resolve_cart_items", no_match)
 
     class _R:
         def __init__(self): self.saved = {}
         async def set(self, k, v, ex=None): self.saved[k] = v
 
     r = _R()
-    ctx = SimpleNamespace(redis=r, wa_id="PSID1", channel="messenger")
+    ctx = SimpleNamespace(db=None, redis=r, wa_id="PSID1", channel="messenger")
     long_order = ("Men's cassock full set: white cassock with black trim/collar/sleeves "
                   "(Kwa Shingo), grey round collar clerical shirt, double-sided stole "
                   "(green & purple), 2 cincture belts (black & grey) - Total $249.")
@@ -283,7 +291,7 @@ def test_whatsapp_checkout_link_is_a_tiny_short_link(monkeypatch):
     # redis down → raw link too, so the pre-filled message isn't lost behind
     # a redirect that would forget it
     monkeypatch.setattr(settings, "media_public_url", "https://neema.example", raising=False)
-    ctx2 = SimpleNamespace(redis=None, wa_id="PSID1", channel="messenger")
+    ctx2 = SimpleNamespace(db=None, redis=None, wa_id="PSID1", channel="messenger")
     out3 = asyncio.run(_whatsapp_checkout_link({}, ctx2))
     assert out3["link"].startswith("https://wa.me/254700111222?text=")
 
@@ -313,6 +321,9 @@ def test_messenger_addendum_closes_the_whole_order_in_thread():
     assert "capture_contact" in p
     assert "Do NOT push them to WhatsApp" in p
     assert "fallback, not the plan" in p
+    # payment must DEFER to the country rule — never blanket-send the M-Pesa link
+    assert "follows the PAYMENT rule above" in p
+    assert "Never send a Kenyan M-Pesa link to a customer outside Kenya" in p
 
 
 def test_public_comment_addendum_is_warm_and_pulls_to_inbox():

@@ -860,7 +860,10 @@ async def _whatsapp_checkout_link(args: dict, ctx: ToolContext) -> dict:
     body = (f"Hi Bethany House! I'd like to order {hint}. (ref {ref})"
             if hint else f"Hi Bethany House! I'd like to order. (ref {ref})")
     target = f"https://wa.me/{num}?text={quote(body)}"
-    items = await _resolve_cart_items(product, ctx)
+    # Carry the WHOLE cart they built, not just the one named item — so the
+    # fallback WhatsApp handover rebuilds the complete order, nothing dropped.
+    cart = await cartmod.get_cart(ctx.db, ctx.wa_id, ctx.channel)
+    items = cart.get("items") or await _resolve_cart_items(product, ctx)
     stored = False
     try:
         if ctx.redis is not None:
