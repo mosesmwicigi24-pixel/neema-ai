@@ -653,13 +653,16 @@ async def upload_media(
 async def post_video(
     post_id: str,
     request: Request,
+    channel: str = "facebook",
     agent: Agent = Depends(get_current_agent),
 ):
     """A fresh direct video URL for one of our page's reels/video posts, so the
     inbox can play the commented-on reel INLINE (no leaving to Facebook). Source
-    URLs are short-lived, so we cache only ~30 min and re-fetch after."""
+    URLs are short-lived, so we cache only ~30 min and re-fetch after. `channel`
+    picks the right read — an IG media exposes media_url, a FB post attachments."""
+    channel = "instagram" if channel == "instagram" else "facebook"
     redis = getattr(request.app.state, "redis", None)
-    key = f"meta:postvid:{post_id}"
+    key = f"meta:postvid:{channel}:{post_id}"
     if redis is not None:
         try:
             cached = await redis.get(key)
@@ -668,7 +671,7 @@ async def post_video(
         except Exception:
             pass
     from app.services.meta_send import fetch_post_video_url
-    url = await fetch_post_video_url(post_id)
+    url = await fetch_post_video_url(post_id, channel=channel)
     if not url:
         raise HTTPException(status_code=404, detail="No playable video for this post")
     if redis is not None:

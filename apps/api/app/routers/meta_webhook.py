@@ -299,13 +299,15 @@ def _own_page_ids() -> set[str]:
     return {p.strip() for p in (settings.meta_page_id or "").split(",") if p.strip()}
 
 
-async def _post_context(post_id: str, redis=None) -> dict:
-    """Source-post context for a comment ({post_id,title,permalink,thumb}), cached
-    by post_id in Redis (posts don't change) so a burst of comments on one post
-    costs a single Graph call. Empty dict on no post id / fetch failure."""
+async def _post_context(post_id: str, redis=None, channel: str = "facebook") -> dict:
+    """Source-post context for a comment ({post_id,title,permalink,thumb,…}),
+    cached by (channel, post_id) in Redis (posts don't change) so a burst of
+    comments on one post costs a single Graph call. The channel is part of the key
+    because Facebook and Instagram return different shapes for the same read.
+    Empty dict on no post id / fetch failure."""
     if not post_id:
         return {}
-    key = f"meta:postctx:{post_id}"
+    key = f"meta:postctx:{channel}:{post_id}"
     if redis is not None:
         try:
             import json
@@ -315,7 +317,7 @@ async def _post_context(post_id: str, redis=None) -> dict:
         except Exception:
             pass
     from app.services.meta_send import fetch_post_context
-    ctx = await fetch_post_context(post_id)
+    ctx = await fetch_post_context(post_id, channel=channel)
     if ctx and redis is not None:
         try:
             import json
@@ -391,7 +393,7 @@ async def _capture_comment_events(db: AsyncSession, channel: str, payload: dict,
             # / "where are you?") is meaningless without the post it sits under, so
             # we pull the source-post context and carry it on the message + into the
             # AI reply. Cached per post_id; best-effort (empty context → no card).
-            ctx = await _post_context(c["post_id"], redis=redis)
+            ctx = await _post_context(c["post_id"], redis=redis, channel=comment_channel)
             c["post_context"] = ctx           # rides into the engage → AI reply path
 
             ident = await resolve_or_create_person(

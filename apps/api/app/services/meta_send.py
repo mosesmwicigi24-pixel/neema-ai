@@ -62,16 +62,36 @@ async def send_meta_message(recipient_id: str, text: str, page_id: str | None = 
     }, "send message", page_id=page_id)
 
 
-async def reply_to_comment(comment_id: str, text: str, page_id: str | None = None) -> None:
-    """Public reply posted under a Facebook/Instagram comment."""
-    await _graph_post(f"{comment_id}/comments", {"message": text}, "reply to comment", page_id=page_id)
+async def reply_to_comment(comment_id: str, text: str, page_id: str | None = None,
+                           channel: str = "facebook") -> None:
+    """Public reply posted under a Facebook/Instagram comment.
+
+    The endpoint DIFFERS by platform: Facebook nests a reply as a comment-on-a-
+    comment (`/{comment-id}/comments`), while Instagram has a dedicated replies
+    edge (`/{ig-comment-id}/replies`). Posting the Facebook shape to an IG comment
+    fails, which is why IG replies must route here."""
+    edge = "replies" if channel == "instagram" else "comments"
+    await _graph_post(f"{comment_id}/{edge}", {"message": text},
+                      "reply to comment", page_id=page_id)
 
 
-async def send_private_reply(comment_id: str, text: str, page_id: str | None = None) -> None:
-    """Private reply to a comment — opens a Messenger thread with the commenter.
-    One-shot per comment and time-limited by Meta; after it, the conversation
-    continues as a normal Messenger DM (which the agent already handles)."""
-    await _graph_post(f"{comment_id}/private_replies", {"message": text}, "send private reply", page_id=page_id)
+async def send_private_reply(comment_id: str, text: str, page_id: str | None = None,
+                             channel: str = "facebook") -> None:
+    """Private reply to a comment — opens a DM thread with the commenter. One-shot
+    per comment and time-limited by Meta; after it the conversation continues as a
+    normal DM (which the agent already handles).
+
+    Facebook uses the comment's own `/private_replies` edge. Instagram instead
+    goes through the Send API, addressing the COMMENT as the recipient
+    (`recipient: {comment_id: …}`) — the FB shape 400s on an IG comment."""
+    if channel == "instagram":
+        await _graph_post("me/messages", {
+            "recipient": {"comment_id": comment_id},
+            "message": {"text": text},
+        }, "send private reply (ig)", page_id=page_id)
+        return
+    await _graph_post(f"{comment_id}/private_replies", {"message": text},
+                      "send private reply", page_id=page_id)
 
 
 async def fetch_profile(external_id: str, channel: str = "messenger") -> dict:
@@ -119,22 +139,27 @@ async def fetch_profile(external_id: str, channel: str = "messenger") -> dict:
     return {}
 
 
-async def fetch_post_context(post_id: str) -> dict:
+async def fetch_post_context(post_id: str, channel: str = "facebook") -> dict:
     """Best-effort: the source post a comment is replying to, so the inbox can
     show WHAT the customer is commenting on (they never say — "how much?" under a
     photo is meaningless without the photo).
 
     One Graph read on the post id with the Page token; returns a compact dict:
-        {post_id, title, permalink, thumb}
-    `title` is the post caption, else the first attachment's title/description,
-    else a type label ("Photo", "Video", "Shared link"). `thumb` is the post's
-    picture when there is one. Returns {} on any error — the caller treats an
+        {post_id, title, permalink, thumb, media_type, has_video}
+    The FIELDS DIFFER by platform: a Facebook post has message/permalink_url/
+    full_picture/attachments, an Instagram MEDIA object has caption/permalink/
+    media_url/thumbnail_url/media_type. Meta rejects the whole call on unknown
+    fields, so asking Facebook's shape of an IG media id returns nothing — which
+    is why this is channel-aware. Returns {} on any error — the caller treats an
     empty context as "no card", never a failure. Callers should cache by post_id
     (posts don't change) to avoid re-fetching for every comment on the same post."""
     if not settings.meta_page_token or not post_id:
         return {}
+    is_ig = channel == "instagram"
     url = f"https://graph.facebook.com/{settings.meta_graph_version}/{post_id}"
-    fields = "message,permalink_url,full_picture,created_time,attachments{title,description,media_type,media{image{src}}}"
+    fields = ("caption,permalink,media_url,media_type,thumbnail_url,timestamp" if is_ig else
+              "message,permalink_url,full_picture,created_time,"
+              "attachments{title,description,media_type,media{image{src}}}")
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
@@ -150,6 +175,24 @@ async def fetch_post_context(post_id: str) -> dict:
     except Exception as exc:
         _log.info("post context fetch for %s failed: %s", post_id, exc)
         return {}
+
+    if is_ig:
+        # IG media_type: IMAGE | VIDEO | CAROUSEL_ALBUM. A VIDEO's media_url IS
+        # the mp4; thumbnail_url is its poster (images have no thumbnail_url).
+        mt = (d.get("media_type") or "").lower()
+        is_video = "video" in mt
+        title = (d.get("caption") or "").strip() or (
+            {"video": "Video post", "image": "Photo post",
+             "carousel_album": "Photo album"}.get(mt, "a post"))
+        thumb = d.get("thumbnail_url") or (None if is_video else d.get("media_url"))
+        return {
+            "post_id":    post_id,
+            "title":      title[:200],
+            "permalink":  d.get("permalink") or "",
+            "thumb":      thumb or "",
+            "media_type": "video" if is_video else ("photo" if mt else ""),
+            "has_video":  is_video,
+        }
 
     att = ((d.get("attachments") or {}).get("data") or [{}])[0]
     title = (d.get("message") or att.get("title") or att.get("description") or "").strip()
@@ -174,17 +217,27 @@ async def fetch_post_context(post_id: str) -> dict:
     }
 
 
-async def fetch_post_video_url(post_id: str) -> str | None:
+async def fetch_post_video_url(post_id: str, channel: str = "facebook") -> str | None:
     """Fresh direct video source (MP4) for one of OUR page's video posts/reels,
-    so the inbox can play it inline — the agent never leaves to Facebook. The
-    URL is a short-lived signed CDN link, so callers cache it only briefly and
-    re-fetch on demand. None when the post has no video or on any error."""
+    so the inbox can play it inline — the agent never leaves to Facebook. The URL
+    is a short-lived signed CDN link, so callers cache it only briefly and
+    re-fetch on demand. On Instagram the media object's `media_url` IS the mp4
+    (there is no attachments edge). None when the post has no video or on error."""
     if not settings.meta_page_token or not post_id:
         return None
     base = f"https://graph.facebook.com/{settings.meta_graph_version}"
     hdr = {"Authorization": f"Bearer {settings.meta_page_token}"}
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
+            if channel == "instagram":
+                r = await client.get(f"{base}/{post_id}",
+                                     params={"fields": "media_type,media_url"}, headers=hdr)
+                if not r.is_success:
+                    return None
+                d = r.json()
+                if "video" in (d.get("media_type") or "").lower():
+                    return d.get("media_url")
+                return None
             resp = await client.get(
                 f"{base}/{post_id}",
                 params={"fields": "attachments{media_type,media{source},target{id}}"},

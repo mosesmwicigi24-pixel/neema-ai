@@ -139,6 +139,7 @@ function Lightbox({
 function CommentContextCard({
     ctx,
     isInbound,
+    channel,
 }: {
     ctx: {
         post_id?: string;
@@ -149,6 +150,9 @@ function CommentContextCard({
         has_video?: boolean;
     };
     isInbound: boolean;
+    // The post lives on the channel that owns the comment — Instagram media and
+    // Facebook posts are read differently, so playback needs to say which.
+    channel?: string;
 }) {
     const title = (ctx.title || "").trim() || "a post";
     const permalink = ctx.permalink || "";
@@ -167,7 +171,7 @@ function CommentContextCard({
         if (postId && maybeVideo) {
             setLoading(true);
             try {
-                const { video_url } = await conversationsApi.postVideo(postId);
+                const { video_url } = await conversationsApi.postVideo(postId, channel);
                 setLoading(false);
                 if (video_url) {
                     setVideoUrl(video_url);
@@ -2146,6 +2150,7 @@ export function ConversationsView({
                                                                         <CommentContextCard
                                                                             ctx={cctx}
                                                                             isInbound={isInbound}
+                                                                            channel={activeConv?.channel}
                                                                         />
                                                                     )}
                                                                     {body && (

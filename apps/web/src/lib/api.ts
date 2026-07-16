@@ -232,8 +232,11 @@ export const conversationsApi = {
 
     /** A fresh direct video URL for a page reel/video post, so the inbox can
      * play the commented-on reel inline (source URLs expire → fetched on play). */
-    postVideo: (postId: string) =>
-        get<{ video_url: string }>(`/admin/post-video/${encodeURIComponent(postId)}`),
+    postVideo: (postId: string, channel?: string) =>
+        get<{ video_url: string }>(
+            `/admin/post-video/${encodeURIComponent(postId)}` +
+            (channel ? `?channel=${encodeURIComponent(channel)}` : ""),
+        ),
 
     /**
      * Upload a file (image / document / video / audio) from the agent's

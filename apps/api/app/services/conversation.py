@@ -300,7 +300,9 @@ async def _deliver_agent_reply(db: AsyncSession, conv: Conversation, text: str) 
     comment_id = latest_in.waba_msg_id if latest_in else None
     if is_comment and comment_id:
         from app.services.meta_send import reply_to_comment
-        await reply_to_comment(comment_id, text)      # public reply under the comment
+        # Instagram replies on a different edge (/replies) than Facebook
+        # (/comments) — pass the channel or an IG comment reply 400s.
+        await reply_to_comment(comment_id, text, channel=channel)   # public reply under the comment
     else:
         await send_to_channel(channel, conv.external_id or conv.wa_id, text)
 

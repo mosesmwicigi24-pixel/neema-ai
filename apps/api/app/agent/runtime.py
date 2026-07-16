@@ -347,7 +347,12 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         pctx = {}
         try:
             from app.routers.meta_webhook import _post_context
-            pctx = await _post_context(source_post.get("post_id"), redis=redis) or {}
+            # The post lives on the channel that owns the comment: an Instagram DM
+            # came from IG media, a Messenger DM from a Facebook post. Reading an
+            # IG media with Facebook's fields returns nothing, so this must match.
+            post_channel = "instagram" if channel == "instagram" else "facebook"
+            pctx = await _post_context(source_post.get("post_id"), redis=redis,
+                                       channel=post_channel) or {}
         except Exception:
             pass
         line = "(Context — this customer reached us from our Facebook/Instagram post"
@@ -790,7 +795,8 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
             _log.warning("META_PAGE_ID unset — skipping public reply for %s", cid)
             return
         try:
-            await reply_to_comment(cid, (text or "").strip(), page_id=comment.get("page_id"))
+            await reply_to_comment(cid, (text or "").strip(),
+                                   page_id=comment.get("page_id"), channel=channel)
         except Exception as exc:
             _log.warning("public comment reply failed for %s: %s", cid, exc)
 
@@ -851,7 +857,8 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     if answer:
         dm_text = f"{answer}\n\n{_pick(_DM_CONTINUE_POOL, ext)}"
         try:
-            await send_private_reply(cid, dm_text, page_id=comment.get("page_id"))
+            await send_private_reply(cid, dm_text, page_id=comment.get("page_id"),
+                                     channel=channel)
             dm_sent = True
         except Exception as exc:
             _log.info("comment DM not delivered for %s: %s", cid, exc)

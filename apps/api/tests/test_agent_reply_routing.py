@@ -28,8 +28,9 @@ class _FakeDB:
 def test_facebook_comment_replies_on_the_comment_edge(monkeypatch):
     calls = {}
 
-    async def fake_reply_to_comment(cid, text):
+    async def fake_reply_to_comment(cid, text, page_id=None, channel="facebook"):
         calls["comment"] = (cid, text)
+        calls["channel"] = channel
 
     async def fake_send_to_channel(ch, rec, text):
         calls["dm"] = (ch, rec, text)
@@ -41,7 +42,9 @@ def test_facebook_comment_replies_on_the_comment_edge(monkeypatch):
     conv = SimpleNamespace(id="c1", channel="facebook", external_id="U1", wa_id=None)
     asyncio.run(convmod._deliver_agent_reply(_FakeDB(latest), conv, "We're in Nairobi"))
 
-    assert calls == {"comment": ("POST_COMMENT_ID", "We're in Nairobi")}   # public comment reply, no DM
+    assert calls["comment"] == ("POST_COMMENT_ID", "We're in Nairobi")   # public comment reply…
+    assert "dm" not in calls                                             # …never a DM
+    assert calls["channel"] == "facebook"        # routed on the right platform's edge
 
 
 def test_messenger_dm_uses_send_to_channel(monkeypatch):
