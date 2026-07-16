@@ -133,7 +133,7 @@ def test_meta_addendum_kenya_rule_only_while_usd():
     usd = _meta_addendum("USD")
     assert "do NOT convert" in usd and "capture_contact" in usd
     assert "IN THAT SAME TURN" in usd                      # hard capture rule
-    assert "ease of communication" in usd                  # ask the number to close
+    assert "order confirmation" in usd                     # ask the number to close here
     kes = _meta_addendum("KES")
     assert "do NOT convert" not in kes                     # already the Kenyan market
 

@@ -154,16 +154,14 @@ def test_capture_no_senders_does_not_commit(monkeypatch):
 
 # ── Neema-answers-Messenger (agent auto-reply) ───────────────────────────────
 
-def test_messenger_agent_tool_set_has_no_order_tools():
-    """Messenger must NOT expose the phone/hub order tools — checkout happens on
-    WhatsApp. It answers from the catalogue, hands off, and can mint a one-tap
-    WhatsApp checkout link. Prevents phone-less bad orders."""
+def test_messenger_runs_the_same_order_flow_as_whatsapp():
+    """Messenger/Instagram close the whole sale in-thread: build the cart, place
+    the order in the hub, send payment details. The phone (capture_contact) is
+    what makes it a real order; whatsapp_checkout_link stays only as a fallback."""
     from app.agent.runtime import MESSENGER_TOOLS
     names = {t["name"] for t in MESSENGER_TOOLS}
-    assert names == {"search_catalog", "remember", "handoff_to_human",
-                     "whatsapp_checkout_link", "share_catalog", "capture_contact",
-                     "pause_conversation"}
-    assert "create_order" not in names and "update_cart" not in names
+    assert {"update_cart", "get_cart", "create_order", "capture_contact"} <= names
+    assert "whatsapp_checkout_link" in names          # fallback, not the plan
 
 
 def test_plan_comment_actions_by_intent():
@@ -304,15 +302,17 @@ def test_messenger_addendum_currency_and_routes_to_whatsapp():
     assert "kes" in kes and "whatsapp" in kes
 
 
-def test_messenger_addendum_closes_here_whatsapp_only_for_payment():
-    """Sell and close IN Messenger; capture the phone quietly; move to WhatsApp
-    only for the final payment — never rush them across early."""
+def test_messenger_addendum_closes_the_whole_order_in_thread():
+    """The whole sale happens in Messenger/IG — cart, phone, order, payment —
+    the same flow as WhatsApp. The link is a fallback, not the plan."""
     from app.agent.runtime import _meta_addendum
     p = _meta_addendum()
     assert "CLOSE THE SALE RIGHT HERE" in p
-    assert "do NOT point them to WhatsApp early" in p
-    assert "ONLY once the full order is agreed" in p
-    assert "BEHIND THE SCENES" in p and "capture_contact" in p
+    assert "update_cart" in p and "`create_order`" in p        # builds + places the order
+    assert "THE PHONE IS WHAT MAKES THE ORDER REAL" in p       # phone gates the order
+    assert "capture_contact" in p
+    assert "Do NOT push them to WhatsApp" in p
+    assert "fallback, not the plan" in p
 
 
 def test_public_comment_addendum_is_warm_and_pulls_to_inbox():

@@ -353,18 +353,18 @@ async def _cart_display(cart: dict, ctx: ToolContext) -> tuple[list, object]:
 
 
 async def _get_cart(args: dict, ctx: ToolContext) -> dict:
-    cart = await cartmod.get_cart(ctx.db, ctx.wa_id)
+    cart = await cartmod.get_cart(ctx.db, ctx.wa_id, ctx.channel)
     items, total = await _cart_display(cart, ctx)
     return {"items": items, "total": total, "currency": ctx.currency}
 
 
 async def _update_cart(args: dict, ctx: ToolContext) -> dict:
     action = (args.get("action") or "").lower()
-    cart = await cartmod.get_cart(ctx.db, ctx.wa_id)
+    cart = await cartmod.get_cart(ctx.db, ctx.wa_id, ctx.channel)
     items = cart["items"]
 
     if action == "clear":
-        cart = await cartmod.clear_cart(ctx.db, ctx.wa_id)
+        cart = await cartmod.clear_cart(ctx.db, ctx.wa_id, ctx.channel)
         return {"ok": True, "items": [], "total": 0, "currency": ctx.currency}
 
     prod = (args.get("product") or "").strip()
@@ -411,7 +411,7 @@ async def _update_cart(args: dict, ctx: ToolContext) -> dict:
             items.append(row)
         cart["items"] = items
 
-    cart = await cartmod.save_cart(ctx.db, ctx.wa_id, cart)
+    cart = await cartmod.save_cart(ctx.db, ctx.wa_id, cart, ctx.channel)
     items, total = await _cart_display(cart, ctx)
     return {"ok": True, "items": items, "total": total, "currency": ctx.currency}
 
@@ -444,19 +444,63 @@ def _sourcing_gaps(cart_items: list, catalog: list) -> list[str]:
     return gaps
 
 
+async def _order_identity(ctx: ToolContext):
+    """(phone, first_name, person_id) to bill this order to. WhatsApp IS the
+    phone. A Meta customer has only a page-scoped PSID — never a phone — so we
+    use the number they shared (capture_contact stored it on their person).
+    Returns phone=None when we don't have one yet: the order CANNOT be created,
+    because a PSID as the hub's customer phone is exactly the phantom-contact bug."""
+    if ctx.channel == "whatsapp":
+        user = (await ctx.db.execute(
+            select(User).where(User.wa_id == ctx.wa_id))).scalar_one_or_none()
+        name = ((user.name if user else None) or "WhatsApp Customer").split()[0]
+        return ctx.wa_id, name, (user.person_id if user else None)
+
+    from app.models.person import Person, Identity, Identifier
+    name, phone = "Customer", None
+    ident = (await ctx.db.execute(select(Identity).where(
+        Identity.channel == ctx.channel,
+        Identity.external_id == ctx.wa_id))).scalar_one_or_none()
+    if ident is None:
+        return None, name, None
+    person = await ctx.db.get(Person, ident.person_id)
+    if person is not None and person.display_name:
+        name = person.display_name.split()[0]
+    ph = (await ctx.db.execute(select(Identifier).where(
+        Identifier.person_id == ident.person_id,
+        Identifier.type == "phone"))).scalars().first()
+    if ph and ph.value:
+        phone = ph.value.lstrip("+")
+    else:
+        u = (await ctx.db.execute(select(User).where(
+            User.person_id == ident.person_id))).scalar_one_or_none()
+        if u is not None and u.phone:
+            phone = u.phone.lstrip("+")
+        if u is not None and u.name and name == "Customer":
+            name = u.name.split()[0]
+    return phone, name, ident.person_id
+
+
 async def _create_order(args: dict, ctx: ToolContext) -> dict:
-    cart = await cartmod.get_cart(ctx.db, ctx.wa_id)
+    cart = await cartmod.get_cart(ctx.db, ctx.wa_id, ctx.channel)
     if not cart["items"]:
         return {"error": "cart is empty — add items before creating an order"}
 
-    user = (await ctx.db.execute(select(User).where(User.wa_id == ctx.wa_id))).scalar_one_or_none()
-    first_name = ((user.name if user else None) or "WhatsApp Customer").split()[0]
-    country_iso = (resolve_country(ctx.wa_id) or {}).get("country_iso")
+    # Every order — WhatsApp, Messenger or Instagram — is billed to a real phone
+    # and lands in the hub's WhatsApp Orders. No phone, no order.
+    order_wa_id, first_name, order_person_id = await _order_identity(ctx)
+    if not order_wa_id:
+        return {"error": "no phone number for this customer yet",
+                "next_step": "Warmly ask for their WhatsApp/phone number (for the order "
+                             "confirmation and delivery), save it with capture_contact, "
+                             "then call create_order again."}
+
+    country_iso = (resolve_country(order_wa_id) or {}).get("country_iso")
     catalog = await svc.catalog_items(ctx.db, ctx.redis)
 
     try:
         pushed = await hub_client.push_pending_order(
-            catalog, wa_id=ctx.wa_id, first_name=first_name,
+            catalog, wa_id=order_wa_id, first_name=first_name,
             country_iso=country_iso, items=cart["items"],
         )
     except ValueError as exc:
@@ -492,20 +536,23 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
         except Exception:
             _log.warning("sourcing flag failed for order %s", hub_order_id, exc_info=True)
 
-    # Persist the order-event with hub linkage (feeds check_order_status + /profile openOrder).
-    event_id = f"{ctx.wa_id}_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+    # Persist the order-event with hub linkage (feeds check_order_status + /profile
+    # openOrder). Keyed on the PHONE (so a Messenger buyer's order is found again
+    # on WhatsApp — one customer), tagged with the channel that actually sold it.
+    event_id = f"{order_wa_id}_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
     ctx.db.add(OrderEvent(
-        id=event_id, wa_id=ctx.wa_id, event_type="confirmed",
+        id=event_id, wa_id=order_wa_id, event_type="confirmed",
+        person_id=order_person_id,
         items=cart["items"], subtotal=cartmod.cart_total(cart),
         currency=pushed.get("currency_code") or "KES",
-        status="pending", channel="whatsapp",
+        status="pending", channel=ctx.channel,
         hub_order_id=hub_order_id, hub_order_number=pushed.get("order_number"),
         hub_currency=pushed.get("currency_code"), hub_total=pushed.get("total_amount"),
         hub_payment_url=payment_url, hub_push_status="pushed",
         hub_pushed_at=datetime.now(timezone.utc),
     ))
     await ctx.db.commit()
-    await cartmod.clear_cart(ctx.db, ctx.wa_id)
+    await cartmod.clear_cart(ctx.db, ctx.wa_id, ctx.channel)
 
     return {
         "ok": True,

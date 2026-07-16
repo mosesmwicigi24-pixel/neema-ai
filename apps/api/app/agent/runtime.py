@@ -28,13 +28,17 @@ _log = logging.getLogger("neema.agent")
 # conversations — treated like Messenger for history keying + prompt formatting.
 META_CHANNELS = ("messenger", "facebook", "instagram")
 
-# On Messenger/Instagram the customer has no phone, so we can't take payment or
-# push an order to the hub. The agent answers product questions from the SAME
-# hub catalogue (KES) — one source of truth, never USD, never invented items —
-# and moves serious buyers to WhatsApp to check out. So it gets a read-only tool
-# set (no cart / order / hub tools).
-_META_TOOL_NAMES = {"search_catalog", "remember", "handoff_to_human", "whatsapp_checkout_link",
-                    "share_catalog", "capture_contact", "pause_conversation"}
+# Messenger/Instagram run the SAME order flow as WhatsApp — enquire, build the
+# cart, confirm, push the order to the hub (it lands in WhatsApp Orders), send
+# the payment details — all in-thread. The one thing a Meta contact lacks is a
+# phone, and that's the key to a hub customer: create_order asks for it rather
+# than inventing one (a PSID as a phone is the phantom-contact bug). Same hub
+# catalogue, one source of truth. whatsapp_checkout_link stays as the FALLBACK
+# for a buyer who won't share a number.
+_META_TOOL_NAMES = {"search_catalog", "get_cart", "update_cart", "create_order",
+                    "check_order_status", "remember", "handoff_to_human",
+                    "whatsapp_checkout_link", "share_catalog", "capture_contact",
+                    "pause_conversation"}
 MESSENGER_TOOLS = [t for t in TOOLS if t["name"] in _META_TOOL_NAMES]
 
 # A PUBLIC comment reply is short and read-only — it just needs the real price, so
@@ -99,21 +103,25 @@ def _meta_addendum(currency: str = "USD") -> str:
         "phone — even partially ('Machakos', just a first name) — call "
         "capture_contact IN THAT SAME TURN with everything they said. A stated "
         "detail that goes unsaved is a lost customer record.\n"
-        "- CLOSE THE SALE RIGHT HERE — do not rush them to another app. Walk the "
-        "whole order in Messenger, one warm step at a time: item → colour/design "
-        "→ size → quantity → their city, then confirm the items and the total. "
-        "Keep it moving until the order is fully agreed.\n"
-        "- BEHIND THE SCENES, once the item is settled, warmly ask for their "
-        "WhatsApp/phone number for ease of communication and to confirm delivery, "
-        "and pass it to capture_contact — it links their Messenger and WhatsApp "
-        "into one customer. Frame it as staying in touch, never as sending them "
-        "away.\n"
-        "- Payment is the ONLY step that happens on WhatsApp (our secure "
-        "M-Pesa/checkout lives there). So ONLY once the full order is agreed AND "
-        "they're ready to pay, call whatsapp_checkout_link with the product(s) and "
-        "share the link it returns EXACTLY as given — never hand-type a wa.me link "
-        "or number. Until that moment, keep selling here; do NOT point them to "
-        "WhatsApp early — WhatsApp is only for the final payment.\n"
+        "- CLOSE THE SALE RIGHT HERE — the WHOLE order happens in this chat, the "
+        "same way it does on WhatsApp. Walk it one warm step at a time: item → "
+        "colour/design → size → quantity → their city. Build the cart as they "
+        "decide (`update_cart`), then show the items + total and confirm.\n"
+        "- THE PHONE IS WHAT MAKES THE ORDER REAL. Once the items are settled, "
+        "warmly ask for their WhatsApp/phone number — for the order confirmation "
+        "and delivery — and pass it to capture_contact IN THAT SAME TURN. It also "
+        "links their Messenger and WhatsApp into one customer. Frame it as "
+        "staying in touch, never as sending them away. Without it we cannot place "
+        "the order.\n"
+        "- Then CLOSE IT HERE: ask if they're ready to pay; on their yes call "
+        "`create_order` — it registers the order and returns the order number and "
+        "payment details. Send those right here, in this chat.\n"
+        "- If `create_order` says there's no phone yet, don't apologise for a "
+        "system — simply ask for the number warmly, save it, and try again.\n"
+        "- Do NOT push them to WhatsApp. Only if they decline to share a number "
+        "(or you genuinely cannot place the order) call whatsapp_checkout_link "
+        "and share the link it returns EXACTLY as given — never hand-type a wa.me "
+        "link or number. That is a fallback, not the plan.\n"
         "- Keep replies short, precise, and friendly; you are the same Bethany House assistant."
     )
 
