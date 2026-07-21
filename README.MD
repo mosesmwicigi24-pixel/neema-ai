@@ -284,6 +284,11 @@ alembic upgrade head
 | POST | `/api/n8n/log-message` | Persist message |
 | GET | `/api/n8n/check-intercept/{wa_id}` | Check if conversation is intercepted |
 
+### Web storefront chat (`web` channel)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/web/chat` | Storefront chat widget → this agent as the `web` channel. Auth: `X-Storefront-Key` header. Cart/payment stay on the storefront; returns product cards (hub slugs), actions, quick replies, and a `wa.me` handoff. See [`docs/WEB_CHAT_ENDPOINT.md`](docs/WEB_CHAT_ENDPOINT.md). |
+
 ### WebSocket
 ```
 wss://your-domain.com/ws/{agent_id}

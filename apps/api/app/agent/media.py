@@ -63,10 +63,34 @@ def _fetch_remote(url: str) -> dict | None:
     return {"type": "image", "source": {"type": "base64", "media_type": mime, "data": data}}
 
 
+def _from_data_url(data_url: str) -> dict | None:
+    """Parse a `data:image/…;base64,…` URL (the web chat widget uploads photos
+    this way) into a base64 image block. None if it isn't a base64 image data
+    URL, has an unsupported type, or is too large."""
+    try:
+        header, _, payload = data_url.partition(",")
+        if not payload or "base64" not in header:
+            return None
+        mime = header[5:].split(";")[0].strip().lower()   # strip 'data:'
+        if mime not in _REMOTE_MIME:
+            return None
+        raw = base64.b64decode(payload, validate=False)
+        if not raw or len(raw) > _MAX_BYTES:
+            return None
+        data = base64.standard_b64encode(raw).decode("ascii")
+    except Exception as exc:
+        _log.warning("data-url image decode failed: %s", exc)
+        return None
+    return {"type": "image", "source": {"type": "base64", "media_type": mime, "data": data}}
+
+
 def load_image_block(media_url: str | None) -> dict | None:
-    """An Anthropic base64 image block for the image at `media_url` — read from
-    the local media store when the URL maps to a file there, fetched over HTTPS
-    otherwise. None if missing, not an image, unreadable, or too large."""
+    """An Anthropic base64 image block for the image at `media_url` — decoded
+    inline from a `data:` URL, read from the local media store when the URL maps
+    to a file there, or fetched over HTTPS otherwise. None if missing, not an
+    image, unreadable, or too large."""
+    if media_url and media_url.startswith("data:"):
+        return _from_data_url(media_url)
     path = _local_path(media_url)
     if path and os.path.isfile(path):
         mime = _IMAGE_MIME.get(os.path.splitext(path)[1].lower())
