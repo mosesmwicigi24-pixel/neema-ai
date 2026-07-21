@@ -91,6 +91,12 @@ class Settings(BaseSettings):
     # to a lighter (still warm, varied) reply — caps AI cost + Graph rate on a
     # viral post. Buying comments beyond this still get a friendly WhatsApp nudge.
     meta_comment_agent_cap: int = 30
+    # ── Web storefront channel (bethanyhouse.co.ke chat widget) ──────────────
+    # Shared secret the storefront server sends in the X-Storefront-Key header on
+    # every POST /web/chat call — server-to-server auth (the widget's browser
+    # never sees it). Unset → the /web/chat endpoint is INERT (503), so the web
+    # channel stays off until you set the same value here and on the storefront.
+    storefront_key: str = ""
     # ── Business facts Neema answers logistics/FAQ questions from ─────────────
     # Free text (location/branches, hours, delivery, payment, contacts) injected
     # into the system prompt. Without it Neema only knows the catalogue and can't

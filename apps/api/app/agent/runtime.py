@@ -47,6 +47,18 @@ MESSENGER_TOOLS = [t for t in TOOLS if t["name"] in _META_TOOL_NAMES]
 _PUBLIC_COMMENT_TOOL_NAMES = {"search_catalog", "remember"}
 PUBLIC_COMMENT_TOOLS = [t for t in TOOLS if t["name"] in _PUBLIC_COMMENT_TOOL_NAMES]
 
+# The website chat widget (bethanyhouse.co.ke storefront). Same brain + one KES
+# hub catalogue, but the CART and PAYMENT live on the storefront — so the web tool
+# set deliberately EXCLUDES update_cart / create_order / whatsapp_checkout_link:
+# instead of transacting here, the agent calls recommend_products to hand the site
+# product cards (with the hub slug) that its own cart + M-Pesa/Card checkout
+# render. handoff_to_human still works — the endpoint turns it into a wa.me link,
+# since the web widget can't send WhatsApp itself.
+WEB_CHANNEL = "web"
+_WEB_TOOL_NAMES = {"search_catalog", "recommend_products", "handoff_to_human",
+                   "remember", "capture_contact", "check_order_status"}
+WEB_TOOLS = [t for t in TOOLS if t["name"] in _WEB_TOOL_NAMES]
+
 
 def _public_comment_addendum(currency: str = "USD") -> str:
     """System addendum for a PUBLIC comment reply — warm, human, and helpful, so
@@ -127,6 +139,33 @@ def _meta_addendum(currency: str = "USD") -> str:
         "and share the link it returns EXACTLY as given — never hand-type a wa.me "
         "link or number. That is a fallback, not the plan.\n"
         "- Keep replies short, precise, and friendly; you are the same Bethany House assistant."
+    )
+
+
+def _web_addendum(currency: str = "KES") -> str:
+    money = "Kenyan Shillings (KES)" if currency == "KES" else "US Dollars (USD)"
+    return (
+        "\n\n## This conversation is the Bethany House WEBSITE chat (not WhatsApp)\n"
+        f"- Answer product questions using the catalogue via search_catalog. Prices from "
+        f"the tool are already in {money} — quote them exactly, and never invent a product "
+        f"or price; if something isn't in the catalogue, say so.\n"
+        "- The shopper is on our storefront, which shows product cards and runs its OWN "
+        "cart and checkout (M-Pesa / card). So you do NOT build a cart or take payment "
+        "here — there is no update_cart or create_order on this channel.\n"
+        "- WHENEVER you mention or suggest specific products, call `recommend_products` "
+        "with their exact catalogue names so the website renders matching cards the "
+        "shopper can tap. Use action 'view_product' to open the page, 'add_to_cart' when "
+        "they clearly want to buy it, or 'request_quote' for a made-to-order item. Offer "
+        "2-4 short `quick_replies` to keep the chat moving.\n"
+        "- Don't paste product links, image URLs or a wa.me number into your text — the "
+        "site renders the cards and buttons. Just talk naturally and recommend.\n"
+        "- If they use the PAGE they're viewing as context (their questions usually refer "
+        "to the product on that page), answer about THAT item unless they say otherwise.\n"
+        "- If they want a human, a refund, a bespoke request, or anything you can't do, "
+        "call `handoff_to_human` — the site will offer them a WhatsApp link to continue "
+        "with a colleague (you can't message WhatsApp from here).\n"
+        "- Keep replies short, warm and helpful — plain sentences, no markdown headings. "
+        "You are the same Bethany House assistant, now serving on the website."
     )
 
 
@@ -256,23 +295,105 @@ async def _meta_market(db: AsyncSession, channel: str, key: str) -> tuple[str, d
     return currency, loc, name, source_post
 
 
+def _sanitize_history(history: list[dict] | None) -> list[dict]:
+    """Turn the storefront-supplied transcript into a clean alternating message
+    list (the web widget owns the conversation, so its `history` is the source of
+    truth — not the DB). Same rules as `_history`: keep only user/assistant text
+    turns, collapse consecutive same-role turns, and start on a user turn."""
+    msgs: list[dict] = []
+    for h in (history or []):
+        role = "assistant" if (h.get("role") == "assistant") else "user"
+        text = str(h.get("content") or "").strip()
+        if not text:
+            continue
+        if msgs and msgs[-1]["role"] == role:
+            msgs[-1]["content"] += "\n" + text
+        else:
+            msgs.append({"role": role, "content": text})
+    while msgs and msgs[0]["role"] != "user":
+        msgs.pop(0)
+    return msgs
+
+
+async def _web_identity_name(db: AsyncSession, session_id: str) -> str:
+    """The shopper's name for a web session, if we've learned it (a returning
+    visitor, or one whose phone linked them to a known WhatsApp customer). Empty
+    when unknown — the agent then greets without a name."""
+    from app.models.person import Person, Identity
+    try:
+        ident = (await db.execute(select(Identity).where(
+            Identity.channel == WEB_CHANNEL,
+            Identity.external_id == session_id))).scalar_one_or_none()
+        if ident is None:
+            return ""
+        person = await db.get(Person, ident.person_id)
+        return ((person.display_name if person else None)
+                or getattr(ident, "display_name", None) or "")
+    except Exception:
+        return ""
+
+
+def _web_page_line(page_context: dict | None, product_name: str | None) -> str | None:
+    """A leading-context line describing the page the shopper is on, so the agent
+    grounds on it (a 'how much?' on a product page is about THAT product)."""
+    if not page_context:
+        return None
+    path = str(page_context.get("path") or "").strip()
+    category = str(page_context.get("category") or "").strip()
+    bits = []
+    if product_name:
+        bits.append(f'the product "{product_name}"')
+    elif page_context.get("product_slug"):
+        bits.append(f'a product (slug "{str(page_context.get("product_slug")).strip()}")')
+    if category:
+        bits.append(f'category "{category}"')
+    where = f" (page {path})" if path else ""
+    if not bits:
+        if not path:
+            return None
+        return (f"(Context — the shopper is browsing our website{where}. Their questions "
+                "usually refer to what they are viewing; answer about it unless they say "
+                "otherwise.)")
+    return (f"(Context — the shopper is on our website{where} viewing " + ", ".join(bits) +
+            ". Unless they say otherwise, their questions refer to it — identify it with "
+            "search_catalog and answer about THAT item. Do not ask what they're looking for.)")
+
+
 async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM,
                    media: dict | None = None,
                    *, channel: str = "whatsapp", external_id: str | None = None,
-                   public_comment: bool = False) -> str:
+                   public_comment: bool = False,
+                   history: list[dict] | None = None,
+                   page_context: dict | None = None,
+                   currency: str | None = None,
+                   web_sink: dict | None = None) -> str:
     """Run one agent turn and return the reply text (does NOT send it).
 
     WhatsApp is the default and unchanged. For Messenger/Instagram, pass
     channel + external_id (the PSID/IGSID): the agent keys history on that,
     skips phone/hub-bound context, uses a read-only catalogue tool set, and is
-    told to route checkout to WhatsApp — one brain, one KES catalogue."""
+    told to route checkout to WhatsApp — one brain, one KES catalogue.
+
+    For the website widget pass channel="web", external_id=session_id, the
+    storefront's `history`/`page_context`/`currency`, and a mutable `web_sink`
+    dict the web tools write product cards + quick replies + a handoff into.
+    Cart and payment live on the storefront, so web uses a transact-free tool set
+    (recommend_products instead of update_cart/create_order)."""
     is_meta = channel in META_CHANNELS
-    key = external_id if is_meta else wa_id
+    is_web = channel == WEB_CHANNEL
+    key = external_id if (is_meta or is_web) else wa_id
 
     # Currency display gate: Kenya → KES; everyone else → USD (= KES /
     # usd_kes_rate, done in the tools). WhatsApp knows Kenya from the +254
-    # prefix; Meta channels know it from the captured location.
-    if is_meta:
+    # prefix; Meta channels know it from the captured location; web is told by
+    # the storefront (from the shopper's phone prefix / locale).
+    source_post = None
+    if is_web:
+        user = None
+        currency = currency or "KES"
+        loc = {}
+        customer_name = await _web_identity_name(db, key)
+    elif is_meta:
         user = None
         currency, loc, customer_name, source_post = await _meta_market(db, channel, key)
     else:
@@ -281,17 +402,20 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         loc = resolve_country(wa_id) or {}
         currency = "KES" if (loc.get("country_iso") or "").upper() == "KE" else "USD"
         customer_name = (user.name if user else "") or ""
-        source_post = None
     system = build_system_prompt(
         customer_name=customer_name,
         country=loc.get("country") or "",
         country_iso=loc.get("country_iso") or "",
         currency=currency,
     )
-    if is_meta:
+    if is_web:
+        system += _web_addendum(currency)
+    elif is_meta:
         system += _public_comment_addendum(currency) if public_comment else _meta_addendum(currency)
 
-    messages = await _history(db, key, channel=channel)
+    # Web owns its transcript (the storefront sends `history`); every other
+    # channel reconstructs it from the DB, keyed on the channel handle.
+    messages = _sanitize_history(history) if is_web else await _history(db, key, channel=channel)
 
     # Current inbound turn. An image message has empty text (skipped by _history),
     # so build a multimodal turn — the agent SEES the photo (Claude vision) and
@@ -368,6 +492,23 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                 and not any(m["role"] == "assistant" for m in messages)):
             from app.agent.media import load_image_block
             post_img = await asyncio.to_thread(load_image_block, pctx["thumb"])
+    if is_web:
+        # Ground on the storefront page the shopper is viewing — resolve the
+        # page's product_slug to its catalogue name so the agent knows the item
+        # by name (a "how much?" on a product page is about THAT product).
+        product_name = None
+        slug = str((page_context or {}).get("product_slug") or "").strip()
+        if slug:
+            try:
+                from app.services import n8n_bridge as _svc
+                catalog = await _svc.catalog_items(db, redis)
+                match = next((p for p in catalog if p.get("slug") == slug), None)
+                product_name = (match or {}).get("name")
+            except Exception:
+                pass
+        page_line = _web_page_line(page_context, product_name)
+        if page_line:
+            lead_ctx.append(page_line)
     if settings.tier2_memory:
         mem_ctx = await build_memory_context(db, redis, key, user=user, channel=channel)
         if mem_ctx:
@@ -381,14 +522,16 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             messages.insert(0, {"role": "user", "content": content})
 
     ctx = ToolContext(db=db, redis=redis, wa_id=key, channel=channel,
-                      currency=currency, usd_rate=settings.usd_kes_rate)
+                      currency=currency, usd_rate=settings.usd_kes_rate, sink=web_sink)
     totals = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0}
 
     def _accumulate(u: dict) -> None:
         for k in totals:
             totals[k] += int(u.get(k, 0) or 0)
 
-    if is_meta and public_comment:
+    if is_web:
+        base = WEB_TOOLS                  # transact-free: recommend_products, not update_cart/create_order
+    elif is_meta and public_comment:
         base = PUBLIC_COMMENT_TOOLS       # read-only: just enough to quote a real price
     elif is_meta:
         base = MESSENGER_TOOLS
@@ -430,8 +573,8 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
 
     # Let the AI keep the lead stage + country tag current (forward-only).
     # WhatsApp only — lead_signals is keyed on wa_id/OrderEvent, which a
-    # phone-less Meta conversation has none of.
-    if not is_meta:
+    # phone-less Meta or web conversation has none of.
+    if not is_meta and not is_web:
         from app.services.lead_signals import refresh_lead_signals
         await refresh_lead_signals(db, wa_id)
     return reply

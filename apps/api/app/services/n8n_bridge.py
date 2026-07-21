@@ -381,7 +381,10 @@ async def log_agent_usage(db: AsyncSession, wa_id: str, model: str, totals: dict
     prompt_total = inp + cread + cwrite
     cost = estimate_cost_usd(model, prompt_total, out, cached_tokens=cread, cache_write_tokens=cwrite)
     db.add(AiUsage(
-        wa_id=_normalize_wa_id(wa_id) if wa_id else None,
+        # Truncated to the column width: a web session_id is longer than any
+        # phone, and an over-length value would fail the insert (poisoning the
+        # turn's session). Usage attribution tolerates the truncation.
+        wa_id=(_normalize_wa_id(wa_id)[:30] if wa_id else None),
         workflow="tier2-agent", node="run_turn", model=model,
         prompt_tokens=prompt_total, completion_tokens=out,
         cached_tokens=cread, cost_usd=cost,

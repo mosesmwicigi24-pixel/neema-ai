@@ -33,7 +33,12 @@ class ToolContext:
     wa_id: str
     currency: str = "KES"   # display currency for THIS customer (KES | USD)
     usd_rate: int = 100     # KES per 1 USD (config.usd_kes_rate)
-    channel: str = "whatsapp"  # source channel (whatsapp | messenger | instagram)
+    channel: str = "whatsapp"  # source channel (whatsapp | messenger | instagram | web)
+    # Web channel only: a mutable dict the web-specific tools write structured
+    # output into (recommended product cards, quick replies, a handoff request),
+    # so POST /web/chat can return them alongside the reply text. None on every
+    # other channel — those tools then no-op their sink writes.
+    sink: dict | None = None
 
 
 def _display(kes, ctx: "ToolContext"):
@@ -236,6 +241,48 @@ TOOLS: list[dict] = [
             "type": "object",
             "properties": {"product": {"type": "string",
                                        "description": "a specific product to link to, e.g. 'black cassock'; omit for the full catalog"}},
+            "required": [],
+        },
+    },
+    {
+        "name": "recommend_products",
+        "description": "WEB CHANNEL ONLY. Surface product cards for the website to render "
+                       "next to your reply, plus optional one-tap quick replies. Call this "
+                       "whenever you mention or suggest specific products so the site shows "
+                       "matching cards with the correct hub slug. Every product MUST come "
+                       "from search_catalog results — pass its catalogue name or SKU exactly; "
+                       "never invent one. Payment and the cart live on the storefront, so the "
+                       "action is how the shopper proceeds THERE: 'view_product' (default) opens "
+                       "the product page, 'add_to_cart' drops it in the site cart, "
+                       "'request_quote' for a made-to-order item. Do NOT try to take payment or "
+                       "place an order here.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "products": {
+                    "type": "array",
+                    "description": "The products to show as cards, best match first (max 6).",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "product": {"type": "string",
+                                        "description": "product name or SKU exactly as returned by search_catalog"},
+                            "reason": {"type": "string",
+                                       "description": "one short line on why it fits this shopper"},
+                            "action": {"type": "string",
+                                       "enum": ["view_product", "add_to_cart", "request_quote"],
+                                       "description": "how the shopper proceeds on the storefront (default view_product)"},
+                        },
+                        "required": ["product"],
+                    },
+                },
+                "quick_replies": {
+                    "type": "array",
+                    "description": "2-4 very short (max ~4 words) one-tap replies the shopper "
+                                   "might send next, e.g. 'Show colours', 'How much?'.",
+                    "items": {"type": "string"},
+                },
+            },
             "required": [],
         },
     },
@@ -806,10 +853,15 @@ async def _handoff_to_human(args: dict, ctx: ToolContext) -> dict:
     if conv is None and ctx.channel == "whatsapp":
         conv = Conversation(wa_id=ctx.wa_id, channel="whatsapp", external_id=ctx.wa_id)
         ctx.db.add(conv)
+    # Web: the widget can't send WhatsApp, so the reply carries a wa.me handoff
+    # link (built by the endpoint from this reason). Record it whether or not a
+    # Conversation row exists yet.
+    if ctx.sink is not None:
+        ctx.sink["handoff"] = {"reason": (args.get("reason") or "").strip()}
     if conv is None:                      # Meta thread we can't find — never invent one
         _log.warning("handoff: no %s conversation for %s", ctx.channel, ctx.wa_id)
-        return {"ok": False, "reason": args.get("reason"),
-                "note": "conversation not found — tell the customer a colleague will follow up"}
+        return {"ok": bool(ctx.sink is not None), "reason": args.get("reason"),
+                "note": "a colleague will follow up (on web, the shopper is handed a WhatsApp link)"}
     conv.intercept_mode = InterceptMode.human
     await ctx.db.commit()
     return {"ok": True, "reason": args.get("reason")}
@@ -945,6 +997,52 @@ async def _share_catalog(args: dict, ctx: ToolContext) -> dict:
             "note": "Couldn't find that exact product — sharing the full catalog instead."}
 
 
+_WEB_ACTIONS = {"view_product", "add_to_cart", "request_quote"}
+
+
+async def _recommend_products(args: dict, ctx: ToolContext) -> dict:
+    """Web channel: resolve the model's chosen products to REAL hub products and
+    stash them (with the hub slug the storefront/POS use) on the sink, so the
+    endpoint can return product cards + one-tap actions the site renders. Slugs
+    are resolved server-side against the same catalogue the agent sold from, so a
+    hallucinated name simply drops out — the site never renders an invented card."""
+    if ctx.sink is None:                      # not the web channel — nothing to render
+        return {"ok": False, "note": "recommend_products is only available on the web channel"}
+    catalog = await svc.catalog_items(ctx.db, ctx.redis)
+    by_id = {p.get("hub_product_id"): p for p in catalog}
+    cards, dropped, seen = [], [], set()
+    for raw in (args.get("products") or [])[:6]:
+        name = (raw.get("product") or "").strip()
+        if not name:
+            continue
+        line = hub_client.resolve_hub_line({"name": name, "sku": name, "qty": 1}, catalog)
+        prod = by_id.get(line["product_id"]) if line else None
+        slug = (prod or {}).get("slug")
+        if not slug:                          # couldn't tie it to a real hub product → skip
+            dropped.append(name)
+            continue
+        if slug in seen:
+            continue
+        seen.add(slug)
+        action = (raw.get("action") or "view_product").strip()
+        cards.append({
+            "slug": slug,
+            "name": prod.get("name") or name,
+            "reason": (raw.get("reason") or "").strip(),
+            "action": action if action in _WEB_ACTIONS else "view_product",
+        })
+    if cards:
+        ctx.sink["products"] = cards          # last call wins (the final set to show)
+    qr = [str(q).strip() for q in (args.get("quick_replies") or []) if str(q).strip()][:4]
+    if qr:
+        ctx.sink["quick_replies"] = qr
+    return {"ok": True, "shown": [c["slug"] for c in cards],
+            "dropped": dropped,               # tell the model which names didn't match
+            "note": "Cards will be rendered by the website. Do not paste links or prices for "
+                    "these — the site shows them. If something was dropped, it isn't in our "
+                    "catalogue; don't invent it."}
+
+
 async def _pause_conversation(args: dict, ctx: ToolContext) -> dict:
     """Code-enforced cooldown: the reply schedulers skip this contact while the
     key lives, so drift costs zero tokens for 2 hours. Best-effort — no redis,
@@ -990,4 +1088,5 @@ _HANDLERS = {
     "capture_contact": _capture_contact,
     "whatsapp_checkout_link": _whatsapp_checkout_link,
     "share_catalog": _share_catalog,
+    "recommend_products": _recommend_products,
 }

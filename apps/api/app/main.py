@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import redis.asyncio as aioredis
 
 from app.core.config import settings
-from app.routers import auth, admin, n8n_bridge, websocket, health, crm, roles, media, agent, meta_webhook, public, short_link, whatsapp_webhook
+from app.routers import auth, admin, n8n_bridge, websocket, health, crm, roles, media, agent, meta_webhook, public, short_link, whatsapp_webhook, web_chat
 from app.database import AsyncSessionLocal
 from sqlalchemy import text
 
@@ -254,6 +254,9 @@ app.include_router(short_link.router, prefix="/api",       tags=["Short Link"])
 app.include_router(websocket.router,  prefix="",           tags=["WebSocket"])
 app.include_router(media.router,      prefix="/api",       tags=["Media"])
 app.include_router(public.router,     prefix="/api/public", tags=["Public Catalog"])
+# Storefront chat widget → this agent as the "web" channel. Mounted at /web so the
+# public path is POST /web/chat (front it via nginx: location /web/ → api:8000).
+app.include_router(web_chat.router,   prefix="/web",       tags=["Web Chat"])
 
 
 @app.get("/api/health")
