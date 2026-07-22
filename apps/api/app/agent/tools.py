@@ -73,6 +73,19 @@ def _to_display(kes, ctx: "ToolContext", price_usd=None):
     return _display(kes, ctx)
 
 
+def _fmt_price(v, currency: str) -> str:
+    """Human price string for a card body: 'KES 4,000', '$40', '$0.50'."""
+    if v is None:
+        return ""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return str(v)
+    if currency == "USD":
+        return f"${f:,.0f}" if f >= 1 else f"${f:,.2f}"
+    return f"{currency} {f:,.0f}"
+
+
 # ── Tool schemas (Anthropic format) ──────────────────────────────────────────
 
 TOOLS: list[dict] = [
@@ -237,6 +250,25 @@ TOOLS: list[dict] = [
             "properties": {"product": {"type": "string",
                                        "description": "a specific product to link to, e.g. 'black cassock'; omit for the full catalog"}},
             "required": [],
+        },
+    },
+    {
+        "name": "send_product_cards",
+        "description": "Show the customer PRODUCT CARDS — each with the product photo, name, "
+                       "price and a 'View' button that opens the product page. This is the "
+                       "visual way to present products on WhatsApp (like a mini shop): use it "
+                       "instead of typing product names/prices/links as text whenever you show "
+                       "catalogue items, alternatives, or what's in their cart. Call "
+                       "search_catalog first, then pass the EXACT product names (or SKUs) to "
+                       "display. After the cards are sent, add only a short line (e.g. ask which "
+                       "one, or their size) — never re-list the names, prices or links in text.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "products": {"type": "array", "items": {"type": "string"},
+                             "description": "Exact product names or SKUs to show as cards, in order (max 6)."},
+            },
+            "required": ["products"],
         },
     },
 ]
@@ -945,6 +977,88 @@ async def _share_catalog(args: dict, ctx: ToolContext) -> dict:
             "note": "Couldn't find that exact product — sharing the full catalog instead."}
 
 
+def _match_product(query: str, catalog: list[dict]) -> dict | None:
+    """Find the catalogue product for a name/SKU: exact name or SKU first, then the
+    longest substring match. Only products with a storefront `slug` are eligible."""
+    ql = (query or "").lower().strip()
+    if not ql:
+        return None
+    for p in catalog:                                    # exact name / sku
+        if not p.get("slug"):
+            continue
+        if (p.get("name") or "").lower().strip() == ql or (p.get("sku") or "").lower().strip() == ql:
+            return p
+    cands = [p for p in catalog if p.get("slug") and                     # substring
+             (ql in (p.get("name") or "").lower() or (p.get("name") or "").lower() in ql)]
+    cands.sort(key=lambda p: len(p.get("name") or ""), reverse=True)
+    return cands[0] if cands else None
+
+
+async def _send_product_cards(args: dict, ctx: ToolContext) -> dict:
+    """Show the customer product cards (photo + name + price + a View link to the
+    product page). On WhatsApp these go out as rich interactive cards immediately;
+    on other channels (or if no photo/host is available) the card details are
+    returned so the model can share them as a short list of links instead."""
+    from app.core.phone import is_plausible_phone
+
+    raw = args.get("products")
+    if isinstance(raw, str):
+        raw = [raw]
+    names = [str(n).strip() for n in (raw or []) if str(n).strip()][:6]   # cap to 6 cards
+    if not names:
+        return {"error": "no products given — pass the exact product names to show"}
+
+    base = (settings.media_public_url or "").rstrip("/")
+    ccy = await _customer_currency(ctx)
+    catalog = await svc.catalog_items(ctx.db, ctx.redis)
+
+    cards, seen = [], set()
+    for q in names:
+        p = _match_product(q, catalog)
+        if not p or p.get("slug") in seen:
+            continue
+        seen.add(p.get("slug"))
+        price = _to_display(p.get("price"), ctx, p.get("price_usd"))
+        cards.append({
+            "name": p.get("name"),
+            "price_text": _fmt_price(price, ctx.currency),
+            "image": p.get("thumbnail_url") or p.get("image_url"),
+            "url": f"{base}/catalog/{p['slug']}?ccy={ccy}" if base else None,
+            "slug": p.get("slug"),
+        })
+
+    if not cards:
+        return {"error": "none of those products were found in the catalogue",
+                "hint": "call search_catalog first, then pass the exact product names it returns"}
+
+    # Rich WhatsApp cards — only for a real WhatsApp phone (never a Meta PSID or a
+    # web session key), and only when we have a storefront URL to link to.
+    if ctx.channel == "whatsapp" and is_plausible_phone(ctx.wa_id):
+        sent = 0
+        for c in cards:
+            if not c["url"]:
+                continue
+            try:
+                await svc._send_waba_product_card(
+                    ctx.wa_id, image_url=c["image"], title=c["name"],
+                    body=c["price_text"], url=c["url"])
+                sent += 1
+            except Exception as exc:
+                _log.warning("send_product_cards: card failed for %s: %s", c["slug"], exc)
+        if sent:
+            return {"ok": True, "sent_cards": sent,
+                    "note": "Cards with photo, price and a View button were delivered to the "
+                            "customer. Reply with only a short line (ask which one, or their "
+                            "size/quantity) — do NOT repeat the names, prices or links as text."}
+
+    # Non-WhatsApp channel, or nothing could be sent: hand the details back so the
+    # model shares them as a short text list with links.
+    return {"ok": True, "sent_cards": 0,
+            "products": [{"name": c["name"], "price": c["price_text"], "link": c["url"]} for c in cards],
+            "note": "Rich cards aren't available here — share these as a short list, each with "
+                    "its price and link so the customer can tap through."}
+
+
 async def _pause_conversation(args: dict, ctx: ToolContext) -> dict:
     """Code-enforced cooldown: the reply schedulers skip this contact while the
     key lives, so drift costs zero tokens for 2 hours. Best-effort — no redis,
@@ -990,4 +1104,5 @@ _HANDLERS = {
     "capture_contact": _capture_contact,
     "whatsapp_checkout_link": _whatsapp_checkout_link,
     "share_catalog": _share_catalog,
+    "send_product_cards": _send_product_cards,
 }
