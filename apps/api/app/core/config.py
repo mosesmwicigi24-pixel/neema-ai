@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     meta_page_tokens: str = ""
     meta_graph_version: str = "v21.0"
 
+    # Shared secret for the server-to-server analytics rollup the Bethany hub
+    # pulls (per-person × per-channel message counts). INERT until set — the
+    # endpoint 503s when empty, so it is off by default.
+    analytics_api_key: str = ""
+
     def page_token_map(self) -> dict[str, str]:
         out: dict[str, str] = {}
         for pair in (self.meta_page_tokens or "").split(","):
