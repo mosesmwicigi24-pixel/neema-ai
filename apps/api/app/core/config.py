@@ -106,6 +106,10 @@ class Settings(BaseSettings):
     usd_kes_rate: int = 100
     environment: str = "production"
     openai_api_key: str = ""
+    # Website storefront → Neema web chat. The storefront server calls POST
+    # /api/web/chat with header X-Storefront-Key: <this>. Keep it server-side only
+    # (never ship it to the browser). Empty = the web-chat endpoint is disabled.
+    storefront_key: str = ""
     # Media file serving
     media_public_url: str = ""      # e.g. https://neema.bethanyhouse.co.ke
     media_storage_path: str = "/tmp/neema_media"

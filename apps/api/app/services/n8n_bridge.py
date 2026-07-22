@@ -302,6 +302,53 @@ async def _send_waba(wa_id: str, text: str) -> None:
             resp.raise_for_status()
 
 
+async def _send_waba_product_card(wa_id: str, *, image_url: str | None, title: str,
+                                  body: str, url: str, button: str = "View") -> None:
+    """Send a WhatsApp PRODUCT CARD — the visual equivalent of the web-chat card:
+    the product photo as the header, name + price in the body, and a tappable
+    "View" button that opens the product page on the storefront.
+
+    Implemented as an interactive `cta_url` message. Falls back to an
+    image+caption (then plain text) message if the interactive send is rejected
+    — e.g. the header image isn't reachable by Meta, or the 24h window quirks —
+    so the customer always gets the photo, price and link, never nothing."""
+    import logging
+    _l = logging.getLogger("neema.wa")
+    endpoint = (f"https://graph.facebook.com/{settings.waba_api_version}"
+                f"/{settings.waba_phone_number_id}/messages")
+    headers = {"Authorization": f"Bearer {settings.waba_token}"}
+
+    interactive: dict = {
+        "type": "cta_url",
+        "body": {"text": f"*{title}*\n{body}"[:1024]},
+        "action": {"name": "cta_url",
+                   "parameters": {"display_text": (button or "View")[:20], "url": url}},
+    }
+    if image_url:
+        interactive["header"] = {"type": "image", "image": {"link": image_url}}
+    payload = {"messaging_product": "whatsapp", "recipient_type": "individual",
+               "to": wa_id, "type": "interactive", "interactive": interactive}
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(endpoint, headers=headers, json=payload, timeout=30.0)
+    if resp.is_success:
+        return
+    _l.warning("WA product card (cta_url) %s: %s — falling back to image+caption",
+               resp.status_code, resp.text[:200])
+
+    caption = f"*{title}*\n{body}\n{url}"[:1024]
+    if image_url:
+        fb = {"messaging_product": "whatsapp", "to": wa_id, "type": "image",
+              "image": {"link": image_url, "caption": caption}}
+    else:
+        fb = {"messaging_product": "whatsapp", "to": wa_id, "type": "text",
+              "text": {"body": caption}}
+    async with httpx.AsyncClient() as client:
+        r2 = await client.post(endpoint, headers=headers, json=fb, timeout=30.0)
+    if not r2.is_success:
+        _l.error("WA product card fallback %s: %s", r2.status_code, r2.text[:200])
+        r2.raise_for_status()
+
+
 async def send_wa_template(wa_id: str, template: str, lang: str,
                            body_params: list[str] | None = None) -> dict:
     """Send an APPROVED WhatsApp template (the only way to message a customer
