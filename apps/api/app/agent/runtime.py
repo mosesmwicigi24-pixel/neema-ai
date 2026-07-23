@@ -47,6 +47,11 @@ MESSENGER_TOOLS = [t for t in TOOLS if t["name"] in _META_TOOL_NAMES]
 _PUBLIC_COMMENT_TOOL_NAMES = {"search_catalog", "remember"}
 PUBLIC_COMMENT_TOOLS = [t for t in TOOLS if t["name"] in _PUBLIC_COMMENT_TOOL_NAMES]
 
+# Read-only, non-sending tools for DRAFT mode: the agent may look things up (real
+# prices, the cart, order status) to compose an informed draft, but must never
+# create an order, change the cart, or send anything (no send_product_cards).
+_READONLY_TOOL_NAMES = {"search_catalog", "get_cart", "check_order_status"}
+
 
 def _public_comment_addendum(currency: str = "USD") -> str:
     """System addendum for a PUBLIC comment reply — warm, human, and helpful, so
@@ -259,7 +264,7 @@ async def _meta_market(db: AsyncSession, channel: str, key: str) -> tuple[str, d
 async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM,
                    media: dict | None = None,
                    *, channel: str = "whatsapp", external_id: str | None = None,
-                   public_comment: bool = False) -> str:
+                   public_comment: bool = False, read_only: bool = False) -> str:
     """Run one agent turn and return the reply text (does NOT send it).
 
     WhatsApp is the default and unchanged. For Messenger/Instagram, pass
@@ -395,6 +400,10 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     else:
         base = TOOLS
     tools = base if settings.tier2_memory else [t for t in base if t["name"] != "remember"]
+    if read_only:
+        # Draft mode: strip to read-only tools so composing a suggestion never
+        # creates an order, edits the cart, or sends a message.
+        tools = [t for t in tools if t["name"] in _READONLY_TOOL_NAMES]
 
     reply = None
     for _ in range(settings.tier2_max_iterations):
@@ -431,7 +440,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     # Let the AI keep the lead stage + country tag current (forward-only).
     # WhatsApp only — lead_signals is keyed on wa_id/OrderEvent, which a
     # phone-less Meta conversation has none of.
-    if not is_meta:
+    if not is_meta and not read_only:
         from app.services.lead_signals import refresh_lead_signals
         await refresh_lead_signals(db, wa_id)
     return reply

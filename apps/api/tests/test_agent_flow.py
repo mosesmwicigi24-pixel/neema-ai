@@ -72,3 +72,33 @@ def test_full_order_turn(monkeypatch):
     names = [c[0] for c in calls]
     assert names == ["search_catalog", "update_cart", "create_order"]
     assert "ORD-250707-ABCD" in r2 and "hub.example/pay/tok123" in r2
+
+
+def test_readonly_tool_set_never_mutates_or_sends():
+    """Draft mode must never offer a tool that creates an order, edits the cart,
+    or sends a message to the customer."""
+    from app.agent.runtime import _READONLY_TOOL_NAMES
+    for bad in ("create_order", "update_cart", "send_product_cards", "capture_customer",
+                "capture_contact", "handoff_to_human", "pause_conversation",
+                "set_lead_source", "add_tags", "whatsapp_checkout_link", "share_catalog"):
+        assert bad not in _READONLY_TOOL_NAMES
+    assert "search_catalog" in _READONLY_TOOL_NAMES
+
+
+def test_run_turn_read_only_offers_only_readonly_tools():
+    from app.agent.runtime import _READONLY_TOOL_NAMES
+    seen = {}
+
+    class _RecLLM:
+        async def complete(self, *, system, messages, tools):
+            seen["tools"] = [t["name"] for t in tools]
+            return types.SimpleNamespace(text="Here's a suggested reply.",
+                                         tool_calls=[], assistant_content=[], usage={})
+
+    user = types.SimpleNamespace(name="Moses")
+    db = _FakeDB([_Res(one=user), _Res(many=[])])
+    out = asyncio.run(runtime.run_turn(db, None, "254700000001", "how much is a mitre?",
+                                       _RecLLM(), read_only=True))
+    assert out == "Here's a suggested reply."
+    assert set(seen["tools"]) <= _READONLY_TOOL_NAMES        # nothing mutating offered
+    assert "search_catalog" in seen["tools"]

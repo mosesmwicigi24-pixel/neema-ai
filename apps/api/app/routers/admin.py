@@ -411,71 +411,57 @@ async def get_latest_draft(
 @router.post("/conversations/{conv_id}/generate-draft")
 async def generate_draft(
     conv_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
 ):
-    """
-    Generate a fresh AI draft reply based on the last 10 messages
-    in the conversation. Uses the OpenAI API directly.
-    """
-    from openai import OpenAI
-    from app.core.config import settings
+    """Generate a fresh AI draft reply for the human agent — the SAME Neema brain a
+    live reply uses. It reads the conversation, SEES the post / product images
+    (vision), and looks up real catalogue prices, then composes a suggestion in
+    Neema's voice. Runs READ-ONLY (never creates an order, edits the cart, or sends
+    anything) and routes the model per-turn to keep cost down (the light model for
+    simple turns, the full model when the turn is complex)."""
+    from app.agent import runtime
 
-    conv_result = await db.execute(
-        select(Conversation).where(Conversation.id == conv_id)
-    )
-    conv = conv_result.scalar_one_or_none()
+    conv = (await db.execute(
+        select(Conversation).where(Conversation.id == conv_id))).scalar_one_or_none()
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    msg_result = await db.execute(
+    recent = list(reversed((await db.execute(
         select(Message)
         .where(Message.conversation_id == conv_id)
         .order_by(Message.created_at.desc())
-        .limit(10)
-    )
-    recent = list(reversed(msg_result.scalars().all()))
-
+        .limit(10))).scalars().all()))
     if not recent:
         raise HTTPException(status_code=422, detail="No messages to draft from")
 
-    history_lines = []
-    for m in recent:
-        role = "Customer" if m.direction == "inbound" else "Agent/AI"
-        history_lines.append(f"{role}: {m.text}")
-    history = "\n".join(history_lines)
+    # Draft a reply to the customer's latest message (the last inbound one). If it
+    # carried a photo, hand it to the vision model so the draft is informed by it.
+    last_in = next((m for m in reversed(recent) if m.direction == "inbound"), None)
+    user_text = ((last_in.text if last_in else None) or recent[-1].text or "").strip()
+    media = None
+    if last_in and last_in.media_type == "image" and last_in.media_url:
+        media = {"type": "image", "url": last_in.media_url,
+                 "caption": last_in.media_caption or ""}
+
+    channel = conv.channel or "whatsapp"
+    is_comment = channel == "facebook" or bool(last_in and getattr(last_in, "comment_context", None))
 
     try:
-        client = OpenAI(api_key=settings.openai_api_key)
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            max_tokens=500,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are assisting a human support agent at Bethany House, "
-                        "a Catholic goods supplier in Nairobi. "
-                        "Based on the conversation history below, draft a helpful, "
-                        "warm, and concise WhatsApp reply the agent can send to the customer. "
-                        "Write only the reply text — no preamble, no labels, no explanation. "
-                        "UK spelling. Max 300 characters."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": f"Conversation so far:\n\n{history}\n\nDraft a reply for the agent to send next.",
-                },
-            ],
+        llm = runtime.build_llm(model=runtime.route_model(user_text))
+        draft = await runtime.run_turn(
+            db, request.app.state.redis,
+            wa_id=conv.wa_id or (conv.external_id or ""),
+            user_text=user_text or "(compose the next reply)",
+            llm=llm, media=media,
+            channel=channel, external_id=conv.external_id,
+            public_comment=is_comment, read_only=True,
         )
-        draft = response.choices[0].message.content.strip()
     except Exception as e:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Draft generation failed: {str(e)}"
-        )
+        raise HTTPException(status_code=502, detail=f"Draft generation failed: {str(e)}")
 
-    return {"draft": draft}
+    return {"draft": (draft or "").strip()}
 
 
 @router.post("/conversations/{conv_id}/note")
