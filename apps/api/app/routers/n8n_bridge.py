@@ -325,6 +325,23 @@ async def n8n_download_media(body: dict, request: Request):
     }
 
 
+# Words that signal a PRODUCT-PHOTO request (Neema sends these itself now) vs a
+# document/file request (a human still handles those). Used by /escalate.
+_IMG_REQUEST_WORDS = ("image", "images", "photo", "photos", "picture", "pictures",
+                      "pic", "pics", "snap", "see it", "look like", "show me",
+                      "how does it look", "how it looks")
+_DOC_REQUEST_WORDS = ("pdf", "document", "invoice", "receipt", "brochure", "form",
+                      "quotation", "statement", "flyer", "attachment",
+                      "catalogue pdf", "catalog pdf", "price list pdf")
+
+
+def _is_image_request(text: str | None) -> bool:
+    """True when the customer is asking for a product PHOTO (not a document/file)."""
+    low = (text or "").lower()
+    return (any(w in low for w in _IMG_REQUEST_WORDS)
+            and not any(w in low for w in _DOC_REQUEST_WORDS))
+
+
 # ── Media Escalation (system-triggered intercept by wa_id) ───────────────────
 @router.post("/escalate", dependencies=[Depends(verify_n8n_secret)])
 async def escalate_to_human(body: dict, request: Request, db: AsyncSession = Depends(get_db)):
@@ -380,9 +397,36 @@ async def escalate_to_human(body: dict, request: Request, db: AsyncSession = Dep
         conv.last_message_at      = msg_created_at
         conv.last_message_preview = msg_text[:100]
 
-    # ── 2. Intercept only if not already in human mode ────────────────────────
     already_human = conv.intercept_mode == InterceptMode.human
 
+    # ── Images: Neema sends product photos itself — don't park them for a human ──
+    # This escalation was built when the AI couldn't send images. A request for a
+    # PRODUCT PHOTO now goes to Neema (it replies with a photo card); only genuine
+    # document/file requests — or chats not on the agent — still wait for a human.
+    if not already_human and _is_image_request(msg_text):
+        from app.agent import runtime
+        if runtime.is_tier2(wa_id):
+            await db.commit()   # persist the inbound message saved above
+            try:
+                await _broadcast(redis, str(conv.id), {
+                    "type": "new_message", "conversationId": str(conv.id), "waId": wa_id,
+                    "direction": "inbound", "sender": "user", "text": msg_text,
+                    "created_at": msg_created_at.isoformat()})
+            except Exception:
+                pass
+            try:
+                await runtime.schedule_reply(
+                    redis, wa_id, msg_text,
+                    f"imgreq:{wa_id}:{int(msg_created_at.timestamp())}")
+            except Exception as exc:
+                import logging
+                logging.getLogger("neema.inbox").warning(
+                    "image-request → AI reply failed for %s: %s", wa_id, exc)
+            return {"ok": True, "wa_id": wa_id, "conv_id": str(conv.id),
+                    "handled_by": "ai", "escalated": False,
+                    "note": "Image request handled by Neema — product photo card."}
+
+    # ── 2. Intercept only if not already in human mode ────────────────────────
     if not already_human:
         # Switch to human mode, but leave assigned_agent_id as NULL so
         # any available agent can freely pick up the conversation.
