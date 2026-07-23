@@ -104,11 +104,6 @@ class Settings(BaseSettings):
     # Currency display gate: Kenya (+254) customers are quoted KES; everyone else
     # (and all Messenger/IG, which have no phone) is quoted USD = round(KES / rate).
     usd_kes_rate: int = 100
-    # Optional USD→local exchange-rate overrides for the pricing fallback, as JSON:
-    # {"UGX": 3800, "ZMW": 27}. Merged over app/core/pricing.py defaults; used ONLY
-    # when the hub doesn't price a product in the customer's currency. Never
-    # overrides a real hub price. Empty = use the built-in defaults.
-    fx_usd_rates: str = ""
     environment: str = "production"
     openai_api_key: str = ""
     # Website storefront → Neema web chat. The storefront server calls POST

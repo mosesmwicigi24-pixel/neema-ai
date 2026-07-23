@@ -18,7 +18,7 @@ from app.agent.memory import build_memory_context
 from app.agent.prompt import build_system_prompt
 from app.agent.tools import TOOLS, ToolContext, run_tool
 from app.core.config import settings
-from app.core.countries import resolve_country, currency_for_country
+from app.core.countries import resolve_country
 from app.models.message import Message, MsgDirection
 from app.models.user import User
 
@@ -53,12 +53,8 @@ def _public_comment_addendum(currency: str = "USD") -> str:
     it reads like a friendly shopkeeper, not a price bot. Answer the question with
     the real price, then invite them to continue in the inbox (a call-to-action is
     added after your text). The full sale is closed 1:1 in the DM that follows."""
-    money = ("Kenyan Shillings (KES)" if currency == "KES"
-             else "US Dollars (USD)" if currency == "USD"
-             else f"their own local currency ({currency})")
-    example = ("'This gown is KES 13,000.'" if currency == "KES"
-               else "'This gown is $130.'" if currency == "USD"
-               else "'This gown is " + currency + " …' (the exact figure search_catalog returns)")
+    money = "Kenyan Shillings (KES)" if currency == "KES" else "US Dollars (USD)"
+    example = "'This gown is KES 13,000.'" if currency == "KES" else "'This gown is $130.'"
     return (
         "\n\n## Replying under a Facebook/Instagram comment — warm, human, helpful\n"
         f"- Lead with the answer: the item + its real price in the first line, e.g. "
@@ -78,17 +74,19 @@ def _public_comment_addendum(currency: str = "USD") -> str:
 
 
 def _meta_addendum(currency: str = "USD") -> str:
-    money = ("Kenyan Shillings (KES)" if currency == "KES"
-             else "US Dollars (USD)" if currency == "USD"
-             else f"their own local currency ({currency})")
-    # The tools already price in the customer's currency; the model quotes as-is.
+    money = "Kenyan Shillings (KES)" if currency == "KES" else "US Dollars (USD)"
+    # Local-currency conversion only for the USD-quoted customer, and only on request.
     local = ""
-    if currency != "KES":
+    if currency == "USD":
         local = (
-            " If they say they're in Kenya, save it with capture_contact "
-            "(location, even just 'Kenya'), then call search_catalog again with "
-            "currency=\"KES\" and quote our real KES prices for the SAME items. "
-            "Prices already come in their own currency — never convert one yourself."
+            " If they ask for Kenyan Shillings or say they're in Kenya, do NOT "
+            "convert — save it with capture_contact (location, even just "
+            "'Kenya'), then call search_catalog again with currency=\"KES\" and "
+            "quote our real KES prices for the SAME items already under "
+            "discussion. For any OTHER local currency they ask for, convert from "
+            "the USD amount (never from KES) at the country's current "
+            "central-bank rate, rounding UP to the nearest 10; state it "
+            "confidently, not as a guess."
         )
     return (
         "\n\n## This conversation is on Facebook Messenger / Instagram (not WhatsApp)\n"
@@ -234,8 +232,8 @@ async def _meta_market(db: AsyncSession, channel: str, key: str) -> tuple[str, d
         iso = iso_from_text(location)
         if iso:
             loc = {"country_iso": iso, "country": location}
-            # Kenya → KES; any other placed country → its own currency (else USD).
-            currency = currency_for_country(iso)
+            if iso == "KE":
+                currency = "KES"
         # Source post: this identity first, then siblings on the same person
         # (a facebook comment identity funnels into a messenger DM identity),
         # then the person state (stamped by the WhatsApp handover link).
@@ -281,9 +279,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         user = (await db.execute(
             select(User).where(User.wa_id == wa_id))).scalar_one_or_none()
         loc = resolve_country(wa_id) or {}
-        # Kenya → KES; every other country → its own currency (the tools quote the
-        # hub's local price if there is one, else convert; unknown → USD).
-        currency = currency_for_country(loc.get("country_iso"))
+        currency = "KES" if (loc.get("country_iso") or "").upper() == "KE" else "USD"
         customer_name = (user.name if user else "") or ""
         source_post = None
     system = build_system_prompt(

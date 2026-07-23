@@ -22,9 +22,7 @@ def build_system_prompt(*, customer_name: str = "", country: str = "", country_i
                         currency: str = "KES") -> str:
     who = f"You are speaking with {customer_name}. " if customer_name else ""
     where = f"They appear to be in {country}. " if country else ""
-    money = ("Kenyan Shillings (KES)" if currency == "KES"
-             else "US Dollars (USD)" if currency == "USD"
-             else f"their own local currency ({currency})")
+    money = "Kenyan Shillings (KES)" if currency == "KES" else "US Dollars (USD)"
     daypart = _nairobi_daypart()
     is_kenya = currency == "KES"
     # Business facts (location, hours, delivery, payment, contacts) so Neema can
@@ -54,17 +52,17 @@ def build_system_prompt(*, customer_name: str = "", country: str = "", country_i
             "If asked for our number, give the ones above verbatim."
         )
     business += contacts
-    # The catalogue tools already price every item in the customer's OWN currency
-    # (Kenya → KES; elsewhere → their local currency when we can, else USD). The
-    # model just quotes what the tool hands back, with the currency it names.
+    # Local-currency conversion only makes sense for the USD-quoted (non-Kenyan)
+    # customer. Convert FROM the USD figure — never from KES — and only on request.
     local_ccy = ""
-    if not is_kenya:
+    if currency == "USD":
         local_ccy = (
-            f" Prices from the catalogue tools are ALREADY in the customer's own "
-            f"currency ({currency}) — quote them EXACTLY as returned, with that "
-            "currency, and never convert a price yourself. If they explicitly ask "
-            "for US dollars or Kenyan shillings, call search_catalog again with "
-            "currency=\"USD\"/\"KES\" and quote what it returns."
+            " The one exception: if the customer explicitly asks for prices in "
+            "their OWN local currency, convert from the USD amount (never from KES) "
+            "using the most current central-bank exchange rate for their country, "
+            "and round each figure UP to the nearest 10 (e.g. 82 → 90). Give the "
+            "local figure plainly and with confidence — never say you're estimating "
+            "or that you lack a live rate. USD stays the order's currency of record."
         )
     # Payment + fulfilment are COUNTRY-SPECIFIC (same gate as currency): paying via
     # paybill/M-Pesa link is a Kenyan thing; international routes are discovered per

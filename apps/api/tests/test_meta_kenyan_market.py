@@ -65,12 +65,11 @@ def test_meta_market_defaults_usd_without_location():
     db = _FakeDB([_ident(person), None, []], person=person)
     currency, loc, _, _ = asyncio.run(_meta_market(db, "messenger", PSID))
     assert currency == "USD" and loc == {}
-    # A placed country now speaks its OWN currency: South Africa → ZAR (Kenya → KES;
-    # a country with no known currency/rate still quotes USD downstream).
+    # South Africa stays USD too — only Kenya is the KES market
     person2 = _person(location="Somerset East, South Africa")
     db2 = _FakeDB([_ident(person2), None, []], person=person2)
     currency2, loc2, _, _ = asyncio.run(_meta_market(db2, "messenger", PSID))
-    assert currency2 == "ZAR" and loc2["country_iso"] == "ZA"
+    assert currency2 == "USD" and loc2["country_iso"] == "ZA"
 
 
 def test_meta_market_surfaces_source_post_from_identity_and_siblings():
@@ -132,11 +131,11 @@ def test_capture_name_fuller_wins_both_directions():
 
 def test_meta_addendum_kenya_rule_only_while_usd():
     usd = _meta_addendum("USD")
-    assert "never convert" in usd and "capture_contact" in usd
+    assert "do NOT convert" in usd and "capture_contact" in usd
     assert "IN THAT SAME TURN" in usd                      # hard capture rule
     assert "order confirmation" in usd                     # ask the number to close here
     kes = _meta_addendum("KES")
-    assert "never convert" not in kes                      # already the Kenyan market
+    assert "do NOT convert" not in kes                     # already the Kenyan market
 
 
 def test_public_comment_addendum_follows_currency():

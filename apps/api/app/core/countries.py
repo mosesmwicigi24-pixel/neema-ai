@@ -327,10 +327,8 @@ def iso_from_locale(locale: str | None) -> str | None:
 _CURRENCY_BY_ISO = {
     "KE": "KES", "ZM": "ZMW", "UG": "UGX", "TZ": "TZS", "ZA": "ZAR",
     "NG": "NGN", "GH": "GHS", "RW": "RWF", "MW": "MWK", "ZW": "USD",
-    # SS/CD/BI/SL: currencies too volatile/thin to fallback-rate reliably, so we
-    # quote USD (as with ZW/LR) until the hub prices them or a rate is configured.
-    "SS": "USD", "ET": "ETB", "CD": "USD", "CM": "XAF", "CI": "XOF",
-    "BI": "USD", "SL": "USD", "LR": "USD", "BW": "BWP", "NA": "NAD",
+    "SS": "SSP", "ET": "ETB", "CD": "CDF", "CM": "XAF", "CI": "XOF",
+    "BI": "BIF", "SL": "SLE", "LR": "USD", "BW": "BWP", "NA": "NAD",
     "GB": "GBP", "US": "USD", "CA": "CAD", "AU": "AUD",
 }
 # Currencies the EU / eurozone diaspora may want; kept for future hub pricing.
