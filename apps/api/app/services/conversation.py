@@ -475,14 +475,17 @@ async def send_agent_media(
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    if (conv.channel or "whatsapp") in META_CHANNELS:
-        from fastapi import HTTPException
-        raise HTTPException(
-            status_code=400,
-            detail="Media replies to Messenger/Instagram aren't supported yet — send text.",
-        )
-    wa_id = conv.wa_id.lstrip("+")
-    await _send_waba_media(wa_id, media_type, media_url, caption, filename)
+    channel = conv.channel or "whatsapp"
+    if channel in META_CHANNELS:
+        # Messenger / Instagram / Facebook DM — send via the Meta Send API
+        # (attachment by URL), acting as the page that owns this contact.
+        from app.services.meta_send import send_meta_media, page_of_contact
+        recipient = conv.external_id or conv.wa_id
+        page_id = await page_of_contact(channel, recipient)
+        await send_meta_media(recipient, media_type, media_url, caption, page_id=page_id)
+    else:
+        wa_id = conv.wa_id.lstrip("+")
+        await _send_waba_media(wa_id, media_type, media_url, caption, filename)
 
     preview = caption or filename or f"[{media_type}]"
     msg = Message(

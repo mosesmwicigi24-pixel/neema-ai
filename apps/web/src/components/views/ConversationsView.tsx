@@ -493,11 +493,11 @@ export function ConversationsView({
     const canHandleConversations = isAdminOrSuper || currentRole === "agent";
 
     // ── Media attachment state (multi-select) ─────────────────────────────────
-    // Each picked file carries its own object-URL preview; one shared caption
-    // rides on the FIRST image so we don't repeat the same text under every one.
-    type MediaItem = { id: string; file: File; previewUrl: string | null };
+    // Each picked file carries its own object-URL preview AND its own caption —
+    // like WhatsApp: attach several, write a caption under each (or leave blank),
+    // then send them all in one go.
+    type MediaItem = { id: string; file: File; previewUrl: string | null; caption: string };
     const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
-    const [mediaCaption, setMediaCaption] = useState<string>("");
     const [uploadingMedia, setUploadingMedia] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -930,9 +930,14 @@ export function ConversationsView({
                 id: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2, 8)}`,
                 file,
                 previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
+                caption: "",
             });
         }
         if (accepted.length) setMediaItems((prev) => [...prev, ...accepted]);
+    };
+
+    const updateMediaCaption = (id: string, caption: string) => {
+        setMediaItems((prev) => prev.map((it) => (it.id === id ? { ...it, caption } : it)));
     };
 
     const removeMediaItem = (id: string) => {
@@ -948,7 +953,6 @@ export function ConversationsView({
             prev.forEach((it) => it.previewUrl && URL.revokeObjectURL(it.previewUrl));
             return [];
         });
-        setMediaCaption("");
         if (fileInputRef.current) fileInputRef.current.value = "";
     };
 
@@ -958,13 +962,13 @@ export function ConversationsView({
         const sent: Message[] = [];
         let failed = 0;
         try {
-            // Send sequentially; the caption rides on the first item only.
+            // Send sequentially; each file carries its OWN caption (or none).
             for (let i = 0; i < mediaItems.length; i++) {
                 try {
                     const msg = await conversationsApi.uploadMedia(
                         activeConvId,
                         mediaItems[i].file,
-                        i === 0 ? mediaCaption || undefined : undefined,
+                        mediaItems[i].caption.trim() || undefined,
                     );
                     sent.push(msg);
                 } catch (err: any) {
@@ -2636,33 +2640,43 @@ export function ConversationsView({
                                     {/* Media attachment preview panel (multi-select) */}
                                     {mediaItems.length > 0 && (
                                         <div className="mt-2 p-2.5 rounded-xl space-y-2" style={{ backgroundColor: "#f5f7f2", border: "1px solid #e8ebe3" }}>
-                                            {/* Thumbnail grid — each removable */}
-                                            <div className="flex flex-wrap gap-2">
+                                            {/* Per-file rows — each with its OWN caption (WhatsApp-style) */}
+                                            <div className="space-y-2">
                                                 {mediaItems.map((it) => (
-                                                    <div key={it.id} className="relative group">
-                                                        {it.previewUrl ? (
-                                                            <img
-                                                                src={it.previewUrl}
-                                                                alt={it.file.name}
-                                                                title={it.file.name}
-                                                                className="w-16 h-16 rounded-lg object-cover border border-[#edf0ea]"
-                                                            />
-                                                        ) : (
-                                                            <div className="w-16 h-16 rounded-lg flex flex-col items-center justify-center gap-0.5 px-1" style={{ backgroundColor: "#e8ebe3" }} title={it.file.name}>
-                                                                <svg className="w-5 h-5" style={{ color: "#8a9e80" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                                                                </svg>
-                                                                <span className="text-[9px] leading-tight text-[#5f6f57] truncate max-w-[56px]">{it.file.name}</span>
-                                                            </div>
-                                                        )}
-                                                        <button
-                                                            onClick={() => removeMediaItem(it.id)}
+                                                    <div key={it.id} className="flex items-center gap-2">
+                                                        <div className="relative flex-shrink-0">
+                                                            {it.previewUrl ? (
+                                                                <img
+                                                                    src={it.previewUrl}
+                                                                    alt={it.file.name}
+                                                                    title={it.file.name}
+                                                                    className="w-14 h-14 rounded-lg object-cover border border-[#edf0ea]"
+                                                                />
+                                                            ) : (
+                                                                <div className="w-14 h-14 rounded-lg flex flex-col items-center justify-center gap-0.5 px-1" style={{ backgroundColor: "#e8ebe3" }} title={it.file.name}>
+                                                                    <svg className="w-5 h-5" style={{ color: "#8a9e80" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                                                                    </svg>
+                                                                    <span className="text-[9px] leading-tight text-[#5f6f57] truncate max-w-[52px]">{it.file.name}</span>
+                                                                </div>
+                                                            )}
+                                                            <button
+                                                                onClick={() => removeMediaItem(it.id)}
+                                                                disabled={uploadingMedia}
+                                                                title="Remove"
+                                                                className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-[#1c2917] text-white text-xs leading-none flex items-center justify-center shadow disabled:opacity-40 hover:bg-black"
+                                                            >
+                                                                ✕
+                                                            </button>
+                                                        </div>
+                                                        <input
+                                                            value={it.caption}
+                                                            onChange={(e) => updateMediaCaption(it.id, e.target.value)}
                                                             disabled={uploadingMedia}
-                                                            title="Remove"
-                                                            className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-[#1c2917] text-white text-xs leading-none flex items-center justify-center shadow disabled:opacity-40 hover:bg-black"
-                                                        >
-                                                            ✕
-                                                        </button>
+                                                            placeholder="Add a caption (optional)…"
+                                                            className="flex-1 min-w-0 px-2 py-1.5 text-xs rounded-lg focus:outline-none focus:ring-1 focus:ring-[#589b31]"
+                                                            style={{ backgroundColor: "#ffffff", border: "1px solid #e8ebe3", color: "#1c2917" }}
+                                                        />
                                                     </div>
                                                 ))}
                                                 {/* Add-more tile */}
@@ -2670,25 +2684,13 @@ export function ConversationsView({
                                                     onClick={() => fileInputRef.current?.click()}
                                                     disabled={uploadingMedia}
                                                     title="Add more"
-                                                    className="w-16 h-16 rounded-lg border border-dashed border-[#c7cec0] flex items-center justify-center text-[#8a9e80] hover:bg-[#eef1ea] disabled:opacity-40"
+                                                    className="w-14 h-14 rounded-lg border border-dashed border-[#c7cec0] flex items-center justify-center text-[#8a9e80] hover:bg-[#eef1ea] disabled:opacity-40"
                                                 >
                                                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                                                     </svg>
                                                 </button>
                                             </div>
-
-                                            <input
-                                                value={mediaCaption}
-                                                onChange={(e) => setMediaCaption(e.target.value)}
-                                                placeholder={
-                                                    mediaItems.length > 1
-                                                        ? "Add a caption (shown on the first image)…"
-                                                        : "Add a caption (optional)…"
-                                                }
-                                                className="w-full px-2 py-1 text-xs rounded-lg focus:outline-none focus:ring-1 focus:ring-[#589b31]"
-                                                style={{ backgroundColor: "#ffffff", border: "1px solid #e8ebe3", color: "#1c2917" }}
-                                            />
 
                                             <div className="flex items-center gap-1.5">
                                                 <button

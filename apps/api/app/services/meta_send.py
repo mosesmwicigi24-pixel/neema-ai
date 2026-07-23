@@ -62,6 +62,28 @@ async def send_meta_message(recipient_id: str, text: str, page_id: str | None = 
     }, "send message", page_id=page_id)
 
 
+# Our media_type → Meta Send API attachment type.
+_MEDIA_TYPE_TO_META = {"image": "image", "video": "video", "audio": "audio", "document": "file"}
+
+
+async def send_meta_media(recipient_id: str, media_type: str, media_url: str,
+                          caption: str | None = None, page_id: str | None = None) -> None:
+    """Send an image / video / audio / file to a Messenger PSID or Instagram IGSID
+    via the Send API (attachment by URL). Meta attachments carry no caption, so a
+    caption follows as a short text message — the same way Messenger shows an image
+    with a caption. (Instagram DMs accept images; other types may be rejected by
+    Meta and surface as a send error, which the caller handles.)"""
+    meta_type = _MEDIA_TYPE_TO_META.get(media_type, "file")
+    await _graph_post("me/messages", {
+        "recipient": {"id": recipient_id},
+        "messaging_type": "RESPONSE",
+        "message": {"attachment": {"type": meta_type,
+                                   "payload": {"url": media_url, "is_reusable": True}}},
+    }, "send media", page_id=page_id)
+    if caption:
+        await send_meta_message(recipient_id, caption, page_id=page_id)
+
+
 async def reply_to_comment(comment_id: str, text: str, page_id: str | None = None,
                            channel: str = "facebook") -> None:
     """Public reply posted under a Facebook/Instagram comment.
