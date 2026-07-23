@@ -1046,6 +1046,8 @@ async def _send_product_cards(args: dict, ctx: ToolContext) -> dict:
                     ctx.wa_id, image_url=img, title=c["name"],
                     body=c["price_text"], url=c["url"])
                 sent += 1
+                _log.info("product card sent to %s: %s (img=%s)", ctx.wa_id, c["slug"],
+                          "yes" if img else "no")
             except Exception as exc:
                 _log.warning("send_product_cards: card failed for %s: %s", c["slug"], exc)
         if sent:
@@ -1077,6 +1079,8 @@ async def _send_product_cards(args: dict, ctx: ToolContext) -> dict:
                 from app.services.meta_send import send_meta_carousel, page_of_contact
                 page_id = await page_of_contact(ctx.channel, ctx.wa_id)
                 await send_meta_carousel(ctx.wa_id, elements, page_id=page_id)
+                _log.info("product carousel sent to %s (%s cards) on %s",
+                          ctx.wa_id, len(elements), ctx.channel)
                 return {"ok": True, "sent_cards": len(elements),
                         "note": "A swipeable carousel of product cards (photo, price, View "
                                 "button) was sent. Add only a short line — do NOT re-list the "
