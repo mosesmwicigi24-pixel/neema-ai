@@ -36,6 +36,9 @@ anthropic
 aiofiles
 # Phone parsing/normalization (country-aware E.164 for identity matching)
 phonenumbers==8.13.45
+# Image conversion — hub product photos are .webp; WhatsApp image messages accept
+# only JPEG/PNG, so we convert on send (app/services/media_convert.py).
+Pillow==11.0.0
 
 # ── Call transcription (OPTIONAL — self-hosted, zero per-call cost) ──────────
 # Uncomment to enable local Swahili/English call transcription on the box, then

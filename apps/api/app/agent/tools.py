@@ -1034,13 +1034,16 @@ async def _send_product_cards(args: dict, ctx: ToolContext) -> dict:
     # Rich WhatsApp cards — only for a real WhatsApp phone (never a Meta PSID or a
     # web session key), and only when we have a storefront URL to link to.
     if ctx.channel == "whatsapp" and is_plausible_phone(ctx.wa_id):
+        from app.services.media_convert import to_sendable_image
         sent = 0
         for c in cards:
             if not c["url"]:
                 continue
             try:
+                # WhatsApp image messages reject .webp — convert the hub photo to jpg.
+                img = await to_sendable_image(c["image"])
                 await svc._send_waba_product_card(
-                    ctx.wa_id, image_url=c["image"], title=c["name"],
+                    ctx.wa_id, image_url=img, title=c["name"],
                     body=c["price_text"], url=c["url"])
                 sent += 1
             except Exception as exc:
@@ -1054,6 +1057,7 @@ async def _send_product_cards(args: dict, ctx: ToolContext) -> dict:
     # Rich cards on Messenger / Instagram — a NATIVE generic-template carousel
     # (photo + name + price + View button, swipeable), the web-chat card look.
     if ctx.channel in ("messenger", "instagram"):
+        from app.services.media_convert import to_sendable_image
         elements = []
         for c in cards:
             if not c["url"]:
@@ -1064,8 +1068,9 @@ async def _send_product_cards(args: dict, ctx: ToolContext) -> dict:
                 "default_action": {"type": "web_url", "url": c["url"]},
                 "buttons": [{"type": "web_url", "url": c["url"], "title": "View"}],
             }
-            if c["image"]:
-                el["image_url"] = c["image"]
+            img = await to_sendable_image(c["image"])
+            if img:
+                el["image_url"] = img
             elements.append(el)
         if elements:
             try:
