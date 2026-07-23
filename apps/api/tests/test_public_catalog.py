@@ -27,15 +27,21 @@ def test_all_prices_drops_zero_and_bogus_codes():
 
 def test_resolve_price_speaks_each_customers_currency(monkeypatch):
     from app.core.config import settings
+    from app.core.pricing import usd_rate_for
     monkeypatch.setattr(settings, "usd_kes_rate", 100, raising=False)
+    monkeypatch.setattr(settings, "fx_usd_rates", "", raising=False)
     prices = {"KES": 12000, "USD": 120, "ZMW": 1680}
     assert _resolve_price(prices, "KES") == (12000, "KES")
     assert _resolve_price(prices, "USD") == (120, "USD")
-    assert _resolve_price(prices, "ZMW") == (1680, "ZMW")
-    assert _resolve_price(prices, "UGX") == (120, "USD")        # not priced → USD
-    # only KES priced: a Kenyan sees KES; a non-Kenyan sees approx USD (never KES/$0)
+    assert _resolve_price(prices, "ZMW") == (1680, "ZMW")        # hub-priced local wins
+    # Not priced in UGX but we know a rate → convert USD → UGX (the fallback rule).
+    assert _resolve_price(prices, "UGX") == (round(120 * usd_rate_for("UGX")), "UGX")
+    # A currency with no rate → USD (never a wrong local number).
+    assert _resolve_price(prices, "XYZ") == (120, "USD")
+    # only KES priced: Kenyan sees KES; a Zambian sees converted ZMW; unknown → USD
     assert _resolve_price({"KES": 5000}, "KES") == (5000, "KES")
-    assert _resolve_price({"KES": 5000}, "ZMW") == (50, "USD")  # 5000/100
+    assert _resolve_price({"KES": 5000}, "ZMW") == (round(50 * usd_rate_for("ZMW")), "ZMW")
+    assert _resolve_price({"KES": 5000}, "XYZ") == (50, "USD")   # 5000/100, no rate
     assert _resolve_price({"KES": 30}, "USD") == (0.3, "USD")   # small item keeps cents
     # Kenyan but only USD priced → converted to KES
     assert _resolve_price({"USD": 10}, "KES") == (1000, "KES")

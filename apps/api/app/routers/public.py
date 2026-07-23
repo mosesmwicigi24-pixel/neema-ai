@@ -52,21 +52,11 @@ def _money(v):
 
 def _resolve_price(prices: dict, ccy: str):
     """(amount, currency) to show a customer whose money is `ccy`, from the hub's
-    multi-currency map. Kenya → KES (converting from USD only if KES is missing).
-    Everyone else → THEIR currency when the hub prices it (a Zambian sees ZMW),
-    otherwise USD — real when the hub has it, else approximated from KES so an
-    international viewer is never shown shillings or a $0. This is how one shared
-    catalog speaks each customer's money."""
-    prices = prices or {}
-    ccy = (ccy or "USD").upper()
-    rate = settings.usd_kes_rate or 100
-    if ccy == "KES":
-        kes = prices.get("KES") or (prices.get("USD") and prices["USD"] * rate)
-        return _money(kes), "KES"
-    if prices.get(ccy):                       # their own currency, priced by the hub
-        return _money(prices[ccy]), ccy
-    usd = prices.get("USD") or (prices.get("KES") and prices["KES"] / rate)
-    return _money(usd), "USD"
+    multi-currency map — the one shared pricing rule (app/core/pricing.py):
+    Kenya → KES; their own currency when the hub prices it; otherwise their local
+    currency converted from USD (KES/rate) when we know a rate, else USD."""
+    from app.core.pricing import resolve_price
+    return resolve_price(prices, ccy, kes_rate=settings.usd_kes_rate)
 
 
 def _variant_card(v: dict, ccy: str) -> dict:

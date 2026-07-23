@@ -83,7 +83,31 @@ def _fmt_price(v, currency: str) -> str:
         return str(v)
     if currency == "USD":
         return f"${f:,.0f}" if f >= 1 else f"${f:,.2f}"
-    return f"{currency} {f:,.0f}"
+    # Whole units ≥ 1; keep cents below a unit so a small item in a near-parity
+    # currency (GBP/EUR/…) never reads as free ("EUR 0").
+    return f"{currency} {f:,.0f}" if f >= 1 else f"{currency} {f:,.2f}"
+
+
+def _prices_of(d: dict) -> dict:
+    """The hub multi-currency price map for a catalogue/cart/variant dict, falling
+    back to its KES/USD scalars so anything with a price still resolves."""
+    pr = dict(d.get("prices") or {})
+    if "KES" not in pr:
+        k = d.get("price_kes")
+        if k is None:
+            k = d.get("price")
+        if k is not None:
+            pr["KES"] = k
+    if "USD" not in pr and d.get("price_usd") is not None:
+        pr["USD"] = d["price_usd"]
+    return pr
+
+
+def _price_ccy(d: dict, ctx: "ToolContext"):
+    """(amount, currency) for a product/variant in THIS customer's currency, via
+    the one shared pricing rule (app/core/pricing.py)."""
+    from app.core.pricing import resolve_price
+    return resolve_price(_prices_of(d), ctx.currency, kes_rate=ctx.usd_rate)
 
 
 # ── Tool schemas (Anthropic format) ──────────────────────────────────────────
@@ -328,8 +352,9 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
             # shortfall is flagged to the team at order time (_sourcing_gaps).
             "availability": "available",
         }
-        row["price"] = _to_display(p.get("price"), ctx, p.get("price_usd"))
-        row["currency"] = ctx.currency
+        amount, row_ccy = _price_ccy(p, ctx)
+        row["price"] = amount
+        row["currency"] = row_ccy
         # Variants each carry their OWN price (a Thurible in S ≠ L). Surface them
         # so the agent quotes the exact size/colour the customer wants — and a
         # price range when they haven't chosen yet — instead of one flat number.
@@ -338,7 +363,7 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
             row["variants"] = [
                 {"options": v.get("attributes") or v.get("name"),
                  "sku": v.get("sku"),
-                 "price": _to_display(v.get("price_kes"), ctx, v.get("price_usd"))}
+                 "price": _price_ccy(v, ctx)[0]}
                 for v in variants
             ]
             prices = [vr["price"] for vr in row["variants"] if isinstance(vr["price"], (int, float))]
@@ -349,7 +374,10 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
         results.append(row)
         if len(results) >= 8:
             break
-    return {"count": len(results), "currency": ctx.currency, "results": results}
+    # Effective display currency: their own if we can quote it, else USD.
+    from app.core.pricing import resolve_price as _rp
+    disp_ccy = _rp({"KES": 1}, ctx.currency, kes_rate=ctx.usd_rate)[1]
+    return {"count": len(results), "currency": disp_ccy, "results": results}
 
 
 async def _cart_display(cart: dict, ctx: ToolContext) -> tuple[list, object]:
@@ -365,15 +393,22 @@ async def _cart_display(cart: dict, ctx: ToolContext) -> tuple[list, object]:
     _hidden = ("in_stock", "price_usd")
     items = [{k: v for k, v in i.items() if k not in _hidden} for i in cart.get("items", [])]
     raw = cart.get("items", [])
-    if ctx.currency != "USD":
-        return items, cartmod.cart_total(cart)
+    if ctx.currency == "KES":
+        return items, cartmod.cart_total(cart)   # native — unchanged
+    # Non-KES: price each line in the customer's currency via the one shared rule,
+    # preferring the hub's own price map (explicit local, else converted from USD).
+    from app.core.pricing import resolve_price
     catalog = await svc.catalog_items(ctx.db, ctx.redis)
-    usd_by_id = {p.get("hub_product_id"): p.get("price_usd") for p in catalog}
+    prices_by_id = {p.get("hub_product_id"): _prices_of(p) for p in catalog}
     out, total = [], 0
     for i, r in zip(items, raw):
-        # Prefer the line's OWN usd (a variant's price) over the product default.
-        line_usd = r.get("price_usd") or usd_by_id.get(i.get("hub_product_id"))
-        unit = _to_display(i.get("unit_price"), ctx, line_usd)
+        prices = dict(r.get("prices") or prices_by_id.get(i.get("hub_product_id")) or {})
+        # Anchor to the line's own KES/USD so a line always prices, even off-catalog.
+        if "KES" not in prices and i.get("unit_price") is not None:
+            prices["KES"] = i["unit_price"]
+        if "USD" not in prices and r.get("price_usd"):
+            prices["USD"] = r["price_usd"]
+        unit, _cur = resolve_price(prices, ctx.currency, kes_rate=ctx.usd_rate)
         d = dict(i)
         d["unit_price"] = unit
         out.append(d)
@@ -385,9 +420,11 @@ async def _cart_display(cart: dict, ctx: ToolContext) -> tuple[list, object]:
 
 
 async def _get_cart(args: dict, ctx: ToolContext) -> dict:
+    from app.core.pricing import resolve_price
     cart = await cartmod.get_cart(ctx.db, ctx.wa_id, ctx.channel)
     items, total = await _cart_display(cart, ctx)
-    return {"items": items, "total": total, "currency": ctx.currency}
+    disp_ccy = resolve_price({"KES": 1}, ctx.currency, kes_rate=ctx.usd_rate)[1]
+    return {"items": items, "total": total, "currency": disp_ccy}
 
 
 async def _update_cart(args: dict, ctx: ToolContext) -> dict:
@@ -445,7 +482,9 @@ async def _update_cart(args: dict, ctx: ToolContext) -> dict:
 
     cart = await cartmod.save_cart(ctx.db, ctx.wa_id, cart, ctx.channel)
     items, total = await _cart_display(cart, ctx)
-    return {"ok": True, "items": items, "total": total, "currency": ctx.currency}
+    from app.core.pricing import resolve_price
+    disp_ccy = resolve_price({"KES": 1}, ctx.currency, kes_rate=ctx.usd_rate)[1]
+    return {"ok": True, "items": items, "total": total, "currency": disp_ccy}
 
 
 def _sourcing_gaps(cart_items: list, catalog: list) -> list[str]:
@@ -1018,10 +1057,10 @@ async def _send_product_cards(args: dict, ctx: ToolContext) -> dict:
         if not p or p.get("slug") in seen:
             continue
         seen.add(p.get("slug"))
-        price = _to_display(p.get("price"), ctx, p.get("price_usd"))
+        amount, pccy = _price_ccy(p, ctx)
         cards.append({
             "name": p.get("name"),
-            "price_text": _fmt_price(price, ctx.currency),
+            "price_text": _fmt_price(amount, pccy),
             "image": p.get("thumbnail_url") or p.get("image_url"),
             "url": f"{base}/catalog/{p['slug']}?ccy={ccy}" if base else None,
             "slug": p.get("slug"),
