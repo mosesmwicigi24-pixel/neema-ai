@@ -1051,6 +1051,35 @@ async def _send_product_cards(args: dict, ctx: ToolContext) -> dict:
                             "customer. Reply with only a short line (ask which one, or their "
                             "size/quantity) — do NOT repeat the names, prices or links as text."}
 
+    # Rich cards on Messenger / Instagram — a NATIVE generic-template carousel
+    # (photo + name + price + View button, swipeable), the web-chat card look.
+    if ctx.channel in ("messenger", "instagram"):
+        elements = []
+        for c in cards:
+            if not c["url"]:
+                continue
+            el = {
+                "title": (c["name"] or "")[:80],
+                "subtitle": (c["price_text"] or "")[:80],
+                "default_action": {"type": "web_url", "url": c["url"]},
+                "buttons": [{"type": "web_url", "url": c["url"], "title": "View"}],
+            }
+            if c["image"]:
+                el["image_url"] = c["image"]
+            elements.append(el)
+        if elements:
+            try:
+                from app.services.meta_send import send_meta_carousel, page_of_contact
+                page_id = await page_of_contact(ctx.channel, ctx.wa_id)
+                await send_meta_carousel(ctx.wa_id, elements, page_id=page_id)
+                return {"ok": True, "sent_cards": len(elements),
+                        "note": "A swipeable carousel of product cards (photo, price, View "
+                                "button) was sent. Add only a short line — do NOT re-list the "
+                                "names, prices or links as text."}
+            except Exception as exc:
+                _log.warning("send_product_cards: meta carousel failed: %s", exc)
+                # fall through to the text-link list
+
     # Non-WhatsApp channel, or nothing could be sent: hand the details back so the
     # model shares them as a short text list with links.
     return {"ok": True, "sent_cards": 0,

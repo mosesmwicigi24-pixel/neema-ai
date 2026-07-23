@@ -69,6 +69,57 @@ def test_send_product_cards_whatsapp_sends_rich_cards(monkeypatch):
     assert sent[1]["url"].endswith("/catalog/ring?ccy=KES")
 
 
+def test_send_meta_carousel_builds_generic_template(monkeypatch):
+    from app.services import meta_send as ms
+    calls = []
+
+    async def fake_graph(path, body, what, page_id=None):
+        calls.append(body)
+        return {}
+
+    monkeypatch.setattr(ms, "_graph_post", fake_graph)
+    els = [{"title": "Cross", "subtitle": "KES 4,000", "image_url": "https://i/x.jpg",
+            "buttons": [{"type": "web_url", "url": "https://s/p", "title": "View"}]}]
+    asyncio.run(ms.send_meta_carousel("PSID", els, page_id="P1"))
+    payload = calls[0]["message"]["attachment"]["payload"]
+    assert payload["template_type"] == "generic"
+    assert payload["elements"][0]["title"] == "Cross"
+
+
+def test_send_product_cards_messenger_sends_native_carousel(monkeypatch):
+    monkeypatch.setattr(settings, "media_public_url", "https://shop.example", raising=False)
+    monkeypatch.setattr(tools, "_customer_currency", _acoro("USD"))
+
+    async def fake_catalog(db, redis):
+        return [{"name": "Ring", "sku": "R1", "slug": "ring",
+                 "prices": {"KES": 1500, "USD": 15}, "price": 1500, "price_usd": 15,
+                 "thumbnail_url": "https://i/r.jpg"}]
+
+    monkeypatch.setattr(svc, "catalog_items", fake_catalog)
+    sent = {}
+
+    async def fake_carousel(recipient, elements, page_id=None):
+        sent.update(recipient=recipient, elements=elements, page=page_id)
+
+    async def fake_page(channel, ext):
+        return "P1"
+
+    monkeypatch.setattr("app.services.meta_send.send_meta_carousel", fake_carousel)
+    monkeypatch.setattr("app.services.meta_send.page_of_contact", fake_page)
+
+    ctx = ToolContext(db=object(), redis=None, wa_id="26414904614761138",
+                      channel="messenger", currency="USD")
+    out = asyncio.run(tools._send_product_cards({"products": ["Ring"]}, ctx))
+
+    assert out["sent_cards"] == 1
+    assert sent["recipient"] == "26414904614761138"
+    el = sent["elements"][0]
+    assert el["title"] == "Ring"
+    assert el["image_url"] == "https://i/r.jpg"
+    assert el["buttons"][0]["url"].endswith("/catalog/ring?ccy=USD")
+    assert el["subtitle"] == "$15"
+
+
 def test_send_product_cards_non_whatsapp_returns_links(monkeypatch):
     """Web session keys / Meta PSIDs are not phones → no WhatsApp send; the tool
     hands back the product details so the model shares them as text links."""

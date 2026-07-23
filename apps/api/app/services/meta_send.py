@@ -84,6 +84,22 @@ async def send_meta_media(recipient_id: str, media_type: str, media_url: str,
         await send_meta_message(recipient_id, caption, page_id=page_id)
 
 
+async def send_meta_carousel(recipient_id: str, elements: list[dict],
+                             page_id: str | None = None) -> None:
+    """Send a horizontal carousel of product cards (photo + title + subtitle + a
+    'View' button) via the Send API generic template — the NATIVE Messenger /
+    Instagram equivalent of the web-chat product cards. Up to 10 cards.
+
+    Each element: {title, subtitle?, image_url?, default_action?, buttons?}."""
+    await _graph_post("me/messages", {
+        "recipient": {"id": recipient_id},
+        "message": {"attachment": {"type": "template", "payload": {
+            "template_type": "generic",
+            "elements": elements[:10],
+        }}},
+    }, "send carousel", page_id=page_id)
+
+
 async def reply_to_comment(comment_id: str, text: str, page_id: str | None = None,
                            channel: str = "facebook") -> None:
     """Public reply posted under a Facebook/Instagram comment.
