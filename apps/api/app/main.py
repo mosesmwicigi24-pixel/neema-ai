@@ -63,6 +63,10 @@ MIGRATION_STATEMENTS = [
     "ALTER TABLE calls ADD COLUMN IF NOT EXISTS transcript_lang VARCHAR(12)",
     "ALTER TABLE calls ADD COLUMN IF NOT EXISTS summary TEXT",
     "ALTER TABLE calls ADD COLUMN IF NOT EXISTS transcript_status VARCHAR(20) DEFAULT 'none'",
+    # Reply-to (quote) on messages (see models/message.py). Idempotent.
+    "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_id UUID REFERENCES messages(id) ON DELETE SET NULL",
+    "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_text TEXT",
+    "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_sender VARCHAR(20)",
     # Seed: Super Admin (protected, cannot be modified)
     """
     INSERT INTO custom_roles (id, name, description, color, permissions, protected)

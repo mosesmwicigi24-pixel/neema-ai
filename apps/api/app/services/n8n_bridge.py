@@ -282,19 +282,23 @@ async def _send_waba_audio(wa_id: str, audio_url: str) -> None:
 
 # ── WABA Sender ───────────────────────────────────────────
 
-async def _send_waba(wa_id: str, text: str) -> None:
+async def _send_waba(wa_id: str, text: str, context_wamid: str | None = None) -> None:
     url = (f"https://graph.facebook.com/{settings.waba_api_version}"
            f"/{settings.waba_phone_number_id}/messages")
+    body: dict = {
+        "messaging_product": "whatsapp",
+        "to": wa_id,
+        "type": "text",
+        "text": {"body": text},
+    }
+    # Native reply-quote: the customer sees this message quoting theirs.
+    if context_wamid:
+        body["context"] = {"message_id": context_wamid}
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             url,
             headers={"Authorization": f"Bearer {settings.waba_token}"},
-            json={
-                "messaging_product": "whatsapp",
-                "to": wa_id,
-                "type": "text",
-                "text": {"body": text},
-            },
+            json=body,
         )
         if not resp.is_success:
             import logging
@@ -926,6 +930,18 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
         filename=filename,
         ts_ms=ts_ms,
     )
+    # Recover the customer's WhatsApp message id (wamid), captured by the API front
+    # door keyed on (wa_id, text-hash), so a human reply can quote it natively (the
+    # n8n path itself doesn't carry the wamid). Best-effort.
+    if direction == MsgDirection.inbound and (body.text or "").strip() and redis is not None:
+        try:
+            import hashlib as _hl
+            _h = _hl.sha1((body.text or "").strip().encode("utf-8")).hexdigest()[:16]
+            _wamid = await redis.get(f"wa:wamid:{body.wa_id}:{_h}")
+            if _wamid:
+                msg.waba_msg_id = _wamid
+        except Exception:
+            pass
     db.add(msg)
 
     # ── Selective auto-escalation for inbound media ───────────────────────────

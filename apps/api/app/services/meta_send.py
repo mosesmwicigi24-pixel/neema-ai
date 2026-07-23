@@ -307,9 +307,12 @@ async def page_of_contact(channel: str, external_id: str) -> str | None:
 
 
 async def send_to_channel(channel: str, recipient: str, text: str,
-                          page_id: str | None = None) -> None:
+                          page_id: str | None = None,
+                          context_wamid: str | None = None) -> None:
     """Dispatch an outbound text reply to the right transport for `channel`.
-    `recipient` is the conversation's external_id (wa_id | PSID | IGSID)."""
+    `recipient` is the conversation's external_id (wa_id | PSID | IGSID).
+    `context_wamid` (WhatsApp only) makes the message a native reply-quote of the
+    customer's message — Meta's DM Send API has no equivalent, so it's ignored there."""
     if channel in META_CHANNELS:
         if page_id is None:
             page_id = await page_of_contact(channel, recipient)
@@ -317,7 +320,7 @@ async def send_to_channel(channel: str, recipient: str, text: str,
     else:
         # WhatsApp — the existing WABA sender expects a bare number (no '+').
         from app.services.n8n_bridge import _send_waba
-        await _send_waba((recipient or "").lstrip("+"), text)
+        await _send_waba((recipient or "").lstrip("+"), text, context_wamid=context_wamid)
 
 
 async def fetch_conversation_names(page_id: str | None = None, max_pages: int = 50) -> dict:

@@ -20,7 +20,7 @@ def test_send_to_channel_routes_meta_channels(monkeypatch):
 def test_send_to_channel_routes_whatsapp_and_strips_plus(monkeypatch):
     sent = []
 
-    async def fake_waba(num, text):
+    async def fake_waba(num, text, context_wamid=None):
         sent.append((num, text))
 
     import app.services.n8n_bridge as nb

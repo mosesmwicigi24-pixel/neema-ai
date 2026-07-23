@@ -32,7 +32,7 @@ def test_facebook_comment_replies_on_the_comment_edge(monkeypatch):
         calls["comment"] = (cid, text)
         calls["channel"] = channel
 
-    async def fake_send_to_channel(ch, rec, text):
+    async def fake_send_to_channel(ch, rec, text, page_id=None, context_wamid=None):
         calls["dm"] = (ch, rec, text)
 
     monkeypatch.setattr("app.services.meta_send.reply_to_comment", fake_reply_to_comment)
@@ -50,7 +50,7 @@ def test_facebook_comment_replies_on_the_comment_edge(monkeypatch):
 def test_messenger_dm_uses_send_to_channel(monkeypatch):
     calls = {}
 
-    async def fake_send_to_channel(ch, rec, text):
+    async def fake_send_to_channel(ch, rec, text, page_id=None, context_wamid=None):
         calls["dm"] = (ch, rec, text)
 
     monkeypatch.setattr(convmod, "send_to_channel", fake_send_to_channel)
@@ -65,7 +65,7 @@ def test_messenger_dm_uses_send_to_channel(monkeypatch):
 def test_whatsapp_unchanged(monkeypatch):
     calls = {}
 
-    async def fake_send_to_channel(ch, rec, text):
+    async def fake_send_to_channel(ch, rec, text, page_id=None, context_wamid=None):
         calls["dm"] = (ch, rec, text)
 
     monkeypatch.setattr(convmod, "send_to_channel", fake_send_to_channel)

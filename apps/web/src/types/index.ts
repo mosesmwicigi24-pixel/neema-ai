@@ -89,6 +89,13 @@ export interface Message {
         thumb?: string;
         reply_to?: string;
     } | null;
+    // When this message is a reply to an earlier one in the same conversation:
+    // the quoted message's id + a snippet + who sent it, so the bubble shows it.
+    reply_to?: {
+        id: string;
+        text: string | null;
+        sender: string | null;
+    } | null;
 }
 
 export type MessagesMap = Record<string, Message[]>;

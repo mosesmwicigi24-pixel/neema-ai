@@ -86,16 +86,44 @@ async def receive(request: Request):
     #    fails, tell Meta to retry (non-200) so no message is lost.
     forwarded = await _forward_to_n8n(raw, sig)
 
-    # 2) TAP calls — best-effort; never let it affect the messaging forward result.
+    # 2) TAP calls + capture inbound message ids — best-effort; never let it affect
+    #    the messaging forward result.
     try:
         payload = json.loads(raw)
         await _handle_calls(request, payload)
+        await _tap_inbound_wamids(payload, getattr(request.app.state, "redis", None))
     except Exception as exc:
         _log.warning("WA calls handling failed (acking anyway): %s", exc)
 
     if not forwarded:
         return Response(status_code=502)      # Meta retries; message not dropped
     return PlainTextResponse("EVENT_RECEIVED")
+
+
+async def _tap_inbound_wamids(payload: dict, redis) -> None:
+    """Stash inbound WhatsApp message ids (wamid) keyed by (wa_id, text-hash), TTL
+    1 day. The n8n /message upsert recovers them to set Message.waba_msg_id, so a
+    human reply can quote the customer's message natively (Cloud API context). The
+    n8n path doesn't carry the wamid, but the raw webhook — which we front — does.
+    Best-effort and side-effect-free on the messaging forward."""
+    if redis is None:
+        return
+    import hashlib
+    for entry in payload.get("entry", []):
+        for change in entry.get("changes", []):
+            if change.get("field") != "messages":
+                continue
+            for m in (change.get("value") or {}).get("messages", []):
+                wamid = m.get("id")
+                frm = m.get("from")
+                body = ((m.get("text") or {}).get("body") or "").strip()
+                if not (wamid and frm and body):
+                    continue
+                h = hashlib.sha1(body.encode("utf-8")).hexdigest()[:16]
+                try:
+                    await redis.set(f"wa:wamid:{frm}:{h}", wamid, ex=86400)
+                except Exception:
+                    pass
 
 
 async def _handle_calls(request: Request, payload: dict) -> None:

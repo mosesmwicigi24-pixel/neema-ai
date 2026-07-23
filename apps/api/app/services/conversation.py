@@ -286,14 +286,18 @@ async def _latest_inbound(db: AsyncSession, conv_id) -> Message | None:
     )).scalar_one_or_none()
 
 
-async def _deliver_agent_reply(db: AsyncSession, conv: Conversation, text: str) -> None:
+async def _deliver_agent_reply(db: AsyncSession, conv: Conversation, text: str,
+                               quoted: "Message | None" = None) -> None:
     """Send a human reply on the conversation's channel, raising on failure.
 
     A Facebook/Instagram COMMENT conversation must reply on the COMMENT edge —
     the commenter may have no open DM thread, and a Send-API DM to them 400s
     (that was the 500). FB comments live on their own `facebook` channel; IG
     comments carry `comment_context`. Everything else (Messenger/IG DMs,
-    WhatsApp) uses the normal transport."""
+    WhatsApp) uses the normal transport.
+
+    `quoted` is the message being replied to: on WhatsApp we pass its platform id
+    as the native reply context so the customer sees the quote."""
     channel = conv.channel or "whatsapp"
     latest_in = await _latest_inbound(db, conv.id)
     is_comment = channel == "facebook" or bool(getattr(latest_in, "comment_context", None))
@@ -304,7 +308,11 @@ async def _deliver_agent_reply(db: AsyncSession, conv: Conversation, text: str) 
         # (/comments) — pass the channel or an IG comment reply 400s.
         await reply_to_comment(comment_id, text, channel=channel)   # public reply under the comment
     else:
-        await send_to_channel(channel, conv.external_id or conv.wa_id, text)
+        context_wamid = None
+        if channel not in META_CHANNELS and quoted is not None:
+            context_wamid = getattr(quoted, "waba_msg_id", None)   # customer's wamid, if we have it
+        await send_to_channel(channel, conv.external_id or conv.wa_id, text,
+                              context_wamid=context_wamid)
 
 
 async def send_agent_reply(
@@ -313,12 +321,20 @@ async def send_agent_reply(
     agent: Agent,
     text: str,
     redis=None,
+    reply_to_id: str | None = None,
 ) -> dict:
     result = await db.execute(select(Conversation).where(Conversation.id == conv_id))
     conv = result.scalar_one_or_none()
     if not conv:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # Resolve the quoted message (for native WhatsApp reply-context + thread render).
+    quoted = None
+    if reply_to_id:
+        quoted = (await db.execute(
+            select(Message).where(Message.id == reply_to_id,
+                                  Message.conversation_id == conv.id))).scalar_one_or_none()
 
     # ── Ownership lock ────────────────────────────────────────────────────────
     if (
@@ -338,7 +354,7 @@ async def send_agent_reply(
     # Deliver first; only persist the outbound if it actually went out. A send
     # failure returns a clean error (not a 500) so the inbox can surface it.
     try:
-        await _deliver_agent_reply(db, conv, text)
+        await _deliver_agent_reply(db, conv, text, quoted=quoted)
     except Exception as exc:
         import logging
         logging.getLogger("neema.inbox").warning(
@@ -346,6 +362,9 @@ async def send_agent_reply(
             conv.id, conv.channel, exc)
         return {"ok": False, "error": f"Couldn't send the reply: {str(exc)[:200]}"}
 
+    q_sender = None
+    if quoted is not None:
+        q_sender = quoted.sender.value if hasattr(quoted.sender, "value") else str(quoted.sender)
     msg = Message(
         wa_id=conv.wa_id,
         external_id=conv.external_id,
@@ -356,6 +375,9 @@ async def send_agent_reply(
         sender=MsgSender.human_agent,
         text=text,
         agent_id=agent.id,
+        reply_to_id=(quoted.id if quoted is not None else None),
+        reply_to_text=((quoted.text or "")[:200] if quoted is not None else None),
+        reply_to_sender=q_sender,
     )
     db.add(msg)
 
@@ -365,12 +387,17 @@ async def send_agent_reply(
     await db.commit()
     await db.refresh(msg)
 
+    reply_to = None
+    if quoted is not None:
+        reply_to = {"id": str(quoted.id), "text": msg.reply_to_text, "sender": q_sender}
+
     if redis:
         await _broadcast(redis, str(conv.id), {
             "type": "new_message",
             "conversationId": str(conv.id),
             "sender": "human_agent",
             "text": text,
+            "replyTo": reply_to,
         })
 
     return {
@@ -378,6 +405,7 @@ async def send_agent_reply(
         "direction": "outbound",
         "sender": "human_agent",
         "text": text,
+        "reply_to": reply_to,
         "created_at": msg.created_at.isoformat() if msg.created_at else None,
     }
 

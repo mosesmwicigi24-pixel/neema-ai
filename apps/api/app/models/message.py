@@ -51,6 +51,13 @@ class Message(Base):
     # NULL for every non-comment message. Kept as one JSONB blob so new context
     # fields (ad id, parent comment, …) never need another migration.
     comment_context : Mapped[dict | None]      = mapped_column(JSONB, nullable=True)
+    # Reply-to (quote): when this message is a reply to an earlier one, the source
+    # message id + a cached snippet of its text + who sent it, so the thread renders
+    # the quoted bubble without a join. On WhatsApp the reply is also delivered
+    # natively (Cloud API context.message_id, resolved from the source's waba_msg_id).
+    reply_to_id     : Mapped[uuid.UUID | None] = mapped_column(ForeignKey("messages.id", ondelete="SET NULL"), nullable=True)
+    reply_to_text   : Mapped[str | None]       = mapped_column(Text, nullable=True)
+    reply_to_sender : Mapped[str | None]       = mapped_column(String(20), nullable=True)
     created_at      : Mapped[datetime]         = mapped_column(DateTime(timezone=True), default=datetime.utcnow, index=True)
 
     conversation = relationship("Conversation", back_populates="messages")

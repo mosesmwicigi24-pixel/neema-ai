@@ -424,10 +424,11 @@ export function ConversationsView({
     );
     const [searchQ, setSearchQ] = useState<string>("");
     const [replyText, setReplyText] = useState<string>("");
-    // Cross-channel quote: a message the agent grabbed from one channel to answer
-    // from another (see the Facebook message, reply on WhatsApp). View-level so it
-    // survives switching channel chips; prepended to the reply when sent.
-    const [quoted, setQuoted] = useState<{ text: string; channel: string } | null>(null);
+    // The message the agent is replying to. Same-channel → a native threaded reply
+    // (reply_to id, shown as a quoted strip on the bubble; WhatsApp delivers it as a
+    // native reply too). A quote grabbed from ANOTHER channel keeps the old
+    // prepend-as-text behaviour. View-level so it survives switching channel chips.
+    const [quoted, setQuoted] = useState<{ msgId?: string; sender?: string; text: string; channel: string } | null>(null);
     const [draftVisible, setDraftVisible] = useState<boolean>(false);
     const [draftExpanded, setDraftExpanded] = useState<boolean>(false);
     const [draftText, setDraftText] = useState<string>("");
@@ -781,7 +782,11 @@ export function ConversationsView({
         if (!replyText.trim() || !activeConvId) return;
         setSending(true);
         // Prepend the cross-channel quote so the customer sees what we're answering.
-        const q = quoted
+        // Same-channel reply → a native threaded reply (reply_to id). A quote from
+        // ANOTHER channel can't be threaded, so it rides as a text prefix (as before).
+        const sameChannel = !!quoted && quoted.channel === (activeConv?.channel || "whatsapp");
+        const replyToId = sameChannel ? quoted?.msgId : undefined;
+        const q = quoted && !sameChannel
             ? `↩ Re (${CHANNEL_CONFIG[quoted.channel as Channel]?.label ?? quoted.channel}): "${quoted.text.slice(0, 180)}"\n\n`
             : "";
         const text = q + replyText;
@@ -792,6 +797,9 @@ export function ConversationsView({
                 sender: "human_agent",
                 text,
                 created_at: new Date().toISOString(),
+                reply_to: replyToId && quoted
+                    ? { id: replyToId, text: quoted.text, sender: quoted.sender ?? null }
+                    : null,
             };
             setMessages((m) => ({
                 ...m,
@@ -799,7 +807,7 @@ export function ConversationsView({
             }));
             setReplyText("");
             setQuoted(null);
-            await conversationsApi.sendReply(activeConvId, text);
+            await conversationsApi.sendReply(activeConvId, text, replyToId);
             const msgs = await conversationsApi.messages(activeConvId);
             setMessages((m) => ({ ...m, [activeConvId]: msgs }));
             refetchConversations?.();
@@ -816,6 +824,35 @@ export function ConversationsView({
             setSending(false);
         }
     };
+
+    // Start replying to a specific message (from the Reply button or a swipe).
+    const beginReplyTo = (msg: Message) => {
+        if (!(msg.text || "").trim()) return;
+        setQuoted({
+            msgId: msg.id,
+            sender: msg.sender,
+            text: (msg.text || "").replace(/^\[comment\]\s*/, "").slice(0, 300),
+            channel: activeConv?.channel || "whatsapp",
+        });
+    };
+
+    // Swipe a bubble left→right (like WhatsApp) to reply to it — touch devices.
+    const swipeStart = useRef<{ x: number; y: number } | null>(null);
+    const makeSwipeHandlers = (msg: Message) => ({
+        onTouchStart: (e: React.TouchEvent) => {
+            const t = e.touches[0];
+            swipeStart.current = { x: t.clientX, y: t.clientY };
+        },
+        onTouchEnd: (e: React.TouchEvent) => {
+            const s = swipeStart.current;
+            swipeStart.current = null;
+            if (!s) return;
+            const t = e.changedTouches[0];
+            const dx = t.clientX - s.x;
+            const dy = t.clientY - s.y;
+            if (dx > 55 && Math.abs(dy) < 40) beginReplyTo(msg);
+        },
+    });
 
     const approveDraft = async () => {
         if (!activeConvId) return;
@@ -2067,6 +2104,7 @@ export function ConversationsView({
                                             )}
                                             <div
                                                 className={`flex ${isInbound ? "justify-start" : "justify-end"}`}
+                                                {...makeSwipeHandlers(msg)}
                                             >
                                                 <div
                                                     className={`rounded-2xl text-xs ${
@@ -2103,6 +2141,27 @@ export function ConversationsView({
                                                                   ? (msg as any)
                                                                         .agent_name
                                                                   : "Agent"}
+                                                        </div>
+                                                    )}
+                                                    {/* Quoted message this bubble replies to */}
+                                                    {msg.reply_to && (
+                                                        <div
+                                                            className="mb-1.5 pl-2 pr-1 rounded-sm border-l-2"
+                                                            style={{
+                                                                borderColor: isInbound ? "#589b31" : "rgba(255,255,255,0.55)",
+                                                                backgroundColor: isInbound ? "#f2f7ee" : "rgba(255,255,255,0.14)",
+                                                            }}
+                                                        >
+                                                            <div className="text-[9px] font-semibold uppercase tracking-wide opacity-70 px-1 pt-0.5">
+                                                                {msg.reply_to.sender === "user"
+                                                                    ? "Customer"
+                                                                    : msg.reply_to.sender === "ai"
+                                                                      ? "Neema"
+                                                                      : "You"}
+                                                            </div>
+                                                            <div className="text-[11px] opacity-80 px-1 pb-1 whitespace-pre-wrap line-clamp-2">
+                                                                {msg.reply_to.text || "(media)"}
+                                                            </div>
                                                         </div>
                                                     )}
                                                     {(() => {
@@ -2342,21 +2401,15 @@ export function ConversationsView({
                                                                   msg.created_at,
                                                               )
                                                             : ""}
-                                                        {/* Cross-channel quote: grab this
-                                                            message to answer from another of
-                                                            the customer's channels. */}
+                                                        {/* Reply to this message — a threaded
+                                                            quote (native on WhatsApp). */}
                                                         {isInbound && (msg.text || "").trim() && (
                                                             <button
-                                                                onClick={() =>
-                                                                    setQuoted({
-                                                                        text: (msg.text || "").replace(/^\[comment\]\s*/, "").slice(0, 300),
-                                                                        channel: activeConv.channel || "whatsapp",
-                                                                    })
-                                                                }
-                                                                title="Quote this to reply from another channel"
+                                                                onClick={() => beginReplyTo(msg)}
+                                                                title="Reply to this message"
                                                                 className="text-[#b5c9a8] hover:text-[#f59e0b] font-medium"
                                                             >
-                                                                ↩ Quote
+                                                                ↩ Reply
                                                             </button>
                                                         )}
                                                     </div>
@@ -2534,13 +2587,14 @@ export function ConversationsView({
                                             </div>
                                         )}
 
-                                    {/* Cross-channel quote preview — what we're
-                                        answering, grabbed from another channel */}
+                                    {/* Reply preview — the message we're answering. */}
                                     {quoted && (
                                         <div className="flex items-start gap-2 mb-2 px-3 py-2 rounded-lg bg-[#f1f5f9] border-l-2 border-[#f59e0b]">
                                             <div className="flex-1 min-w-0">
                                                 <span className="text-[10px] font-semibold text-[#f59e0b] uppercase tracking-wide">
-                                                    Replying to {CHANNEL_CONFIG[quoted.channel as Channel]?.label ?? quoted.channel}
+                                                    {quoted.msgId
+                                                        ? `Replying to ${quoted.sender === "user" ? "Customer" : quoted.sender === "ai" ? "Neema" : "you"}`
+                                                        : `Replying to ${CHANNEL_CONFIG[quoted.channel as Channel]?.label ?? quoted.channel}`}
                                                 </span>
                                                 <p className="text-xs text-[#475569] truncate">{quoted.text}</p>
                                             </div>

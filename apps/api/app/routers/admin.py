@@ -310,6 +310,10 @@ async def get_thread(
             "filename":      m.filename,
             # Source-post context for FB/IG comment messages (what it replies to)
             "comment_context": m.comment_context,
+            # Reply-to (quote): the message this one replies to, for the thread strip.
+            "reply_to": ({"id": str(m.reply_to_id), "text": m.reply_to_text,
+                          "sender": m.reply_to_sender}
+                         if getattr(m, "reply_to_id", None) else None),
         })
 
     # ── 4. Shape intercept events into system_event thread items ──────────────
@@ -527,7 +531,8 @@ async def reply(conv_id: str, request: Request, body: dict, db: AsyncSession = D
     text = body.get("text", "")
     if not text:
         raise HTTPException(status_code=422, detail="text is required")
-    return await send_agent_reply(db, conv_id, agent, text, request.app.state.redis)
+    return await send_agent_reply(db, conv_id, agent, text, request.app.state.redis,
+                                  reply_to_id=body.get("reply_to"))
 
 
 @router.post("/conversations/{conv_id}/approve-draft")

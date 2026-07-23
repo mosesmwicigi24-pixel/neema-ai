@@ -152,6 +152,7 @@ export interface ApiThreadItem {
     mime_type?: string | null;
     filename?: string | null;
     comment_context?: Message["comment_context"];
+    reply_to?: { id: string; text: string | null; sender: string | null } | null;
     // System-event-specific
     event_kind?: SystemEventKind | null;
     event_reason?: string | null;
@@ -179,6 +180,7 @@ function mapThreadItem(raw: ApiThreadItem): Message {
         mime_type:     raw.mime_type ?? null,
         filename:      raw.filename ?? null,
         comment_context: raw.comment_context ?? null,
+        reply_to:      raw.reply_to ?? null,
     };
 }
 
@@ -208,8 +210,8 @@ export const conversationsApi = {
         post<ApiConversation>(`/admin/conversations/${id}/transfer`, {
             agent_id: agentId,
         }),
-    sendReply: (id: string, text: string) =>
-        post<Message>(`/admin/conversations/${id}/reply`, { text }),
+    sendReply: (id: string, text: string, replyTo?: string) =>
+        post<Message>(`/admin/conversations/${id}/reply`, { text, reply_to: replyTo }),
     approveDraft: (id: string, text?: string) =>
         post<{ ok: boolean }>(`/admin/conversations/${id}/approve-draft`, {
             text: text ?? null,
