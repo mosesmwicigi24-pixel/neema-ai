@@ -916,6 +916,16 @@ async def _whatsapp_checkout_link(args: dict, ctx: ToolContext) -> dict:
                     "cart already built, ready to confirm and pay."}
 
 
+def _storefront_base() -> str:
+    return (settings.storefront_url or "https://bethanyhouse.co.ke").rstrip("/")
+
+
+def _product_url(slug: str | None) -> str | None:
+    """Public product page on the Bethany House storefront (where items are sold):
+    https://bethanyhouse.co.ke/product/<slug>. This is the link Neema shares."""
+    return f"{_storefront_base()}/product/{slug}" if slug else None
+
+
 async def _customer_currency(ctx: ToolContext) -> str:
     """This customer's own currency for the shared catalog: Kenya → KES, Zambia
     → ZMW, etc., from their phone prefix (WhatsApp) or captured country (Meta).
@@ -946,16 +956,11 @@ async def _share_catalog(args: dict, ctx: ToolContext) -> dict:
     """Return a shareable catalog link — the whole storefront, or a deep link to
     one product when named. The link carries the customer's currency so they see
     prices in their own money (KES / USD / ZMW …). Photos + prices, order in a tap."""
-    base = (settings.media_public_url or "").rstrip("/")
-    if not base:
-        return {"error": "catalog URL not configured"}
-    ccy = await _customer_currency(ctx)
-    q = f"?ccy={ccy}"
+    store = _storefront_base()
     product = (args.get("product") or "").strip()
     if not product:
-        return {"link": f"{base}/catalog{q}",
-                "note": f"Share this so the customer can browse our products with photos "
-                        f"and prices (shown in {ccy})."}
+        return {"link": store,
+                "note": "Share this so the customer can browse our products with photos and prices."}
 
     catalog = await svc.catalog_items(ctx.db, ctx.redis)
     pn = product.lower().strip()
@@ -971,9 +976,9 @@ async def _share_catalog(args: dict, ctx: ToolContext) -> dict:
         match = cands[0] if cands else None
 
     if match:
-        return {"link": f"{base}/catalog/{match['slug']}{q}", "product": match.get("name"),
+        return {"link": _product_url(match["slug"]), "product": match.get("name"),
                 "note": "Share this so the customer can see this product's photos and price, and order in one tap."}
-    return {"link": f"{base}/catalog{q}",
+    return {"link": store,
             "note": "Couldn't find that exact product — sharing the full catalog instead."}
 
 
@@ -994,6 +999,49 @@ def _match_product(query: str, catalog: list[dict]) -> dict | None:
     return cands[0] if cands else None
 
 
+async def _record_shared_media(ctx: "ToolContext", *, media_url: str | None, caption: str) -> None:
+    """Mirror an image Neema sent to the customer into the dashboard thread, so a
+    human following the conversation SEES exactly what was shared (and it lands in
+    history). Best-effort — never breaks the send if this fails."""
+    if not media_url:
+        return
+    try:
+        from datetime import datetime, timezone
+        from sqlalchemy import select, or_
+        from app.models.conversation import Conversation
+        from app.models.message import Message, MsgDirection, MsgSender
+
+        q = select(Conversation)
+        if ctx.channel == "whatsapp":
+            q = q.where(Conversation.wa_id == ctx.wa_id)
+        else:
+            q = q.where(Conversation.channel == ctx.channel,
+                        or_(Conversation.external_id == ctx.wa_id,
+                            Conversation.wa_id == ctx.wa_id))
+        conv = (await ctx.db.execute(q)).scalars().first()
+        if conv is None:
+            return
+        ctx.db.add(Message(
+            wa_id=conv.wa_id, external_id=conv.external_id, conversation_id=conv.id,
+            person_id=conv.person_id, channel=conv.channel or ctx.channel,
+            direction=MsgDirection.outbound, sender=MsgSender.ai,
+            text=caption or None, media_type="image", media_url=media_url,
+        ))
+        conv.last_message_at = datetime.now(timezone.utc)
+        conv.last_message_preview = (caption or "📷 Photo")[:100]
+        await ctx.db.commit()
+        if ctx.redis is not None:
+            from app.services.redis import broadcast
+            await broadcast(ctx.redis, str(conv.id), {
+                "type": "new_message", "conversationId": str(conv.id),
+                "waId": conv.wa_id or conv.external_id, "direction": "outbound",
+                "sender": "ai", "text": caption or "", "mediaType": "image",
+                "mediaUrl": media_url,
+            })
+    except Exception as exc:
+        _log.warning("record shared image failed for %s: %s", ctx.wa_id, exc)
+
+
 async def _send_product_cards(args: dict, ctx: ToolContext) -> dict:
     """Show the customer product cards (photo + name + price + a View link to the
     product page). On WhatsApp these go out as rich interactive cards immediately;
@@ -1008,8 +1056,6 @@ async def _send_product_cards(args: dict, ctx: ToolContext) -> dict:
     if not names:
         return {"error": "no products given — pass the exact product names to show"}
 
-    base = (settings.media_public_url or "").rstrip("/")
-    ccy = await _customer_currency(ctx)
     catalog = await svc.catalog_items(ctx.db, ctx.redis)
 
     cards, seen = [], set()
@@ -1023,7 +1069,7 @@ async def _send_product_cards(args: dict, ctx: ToolContext) -> dict:
             "name": p.get("name"),
             "price_text": _fmt_price(price, ctx.currency),
             "image": p.get("thumbnail_url") or p.get("image_url"),
-            "url": f"{base}/catalog/{p['slug']}?ccy={ccy}" if base else None,
+            "url": _product_url(p.get("slug")),   # Bethany House storefront product page
             "slug": p.get("slug"),
         })
 
@@ -1048,6 +1094,10 @@ async def _send_product_cards(args: dict, ctx: ToolContext) -> dict:
                 sent += 1
                 _log.info("product card sent to %s: %s (img=%s)", ctx.wa_id, c["slug"],
                           "yes" if img else "no")
+                # Mirror the photo into the dashboard thread so a human sees it too.
+                await _record_shared_media(
+                    ctx, media_url=img,
+                    caption=" — ".join(x for x in (c["name"], c["price_text"]) if x))
             except Exception as exc:
                 _log.warning("send_product_cards: card failed for %s: %s", c["slug"], exc)
         if sent:
@@ -1073,6 +1123,7 @@ async def _send_product_cards(args: dict, ctx: ToolContext) -> dict:
             img = await to_sendable_image(c["image"])
             if img:
                 el["image_url"] = img
+            c["_img"] = img
             elements.append(el)
         if elements:
             try:
@@ -1081,6 +1132,12 @@ async def _send_product_cards(args: dict, ctx: ToolContext) -> dict:
                 await send_meta_carousel(ctx.wa_id, elements, page_id=page_id)
                 _log.info("product carousel sent to %s (%s cards) on %s",
                           ctx.wa_id, len(elements), ctx.channel)
+                # Mirror each photo into the dashboard thread so a human sees them too.
+                for c in cards:
+                    if c.get("_img"):
+                        await _record_shared_media(
+                            ctx, media_url=c["_img"],
+                            caption=" — ".join(x for x in (c["name"], c["price_text"]) if x))
                 return {"ok": True, "sent_cards": len(elements),
                         "note": "A swipeable carousel of product cards (photo, price, View "
                                 "button) was sent. Add only a short line — do NOT re-list the "

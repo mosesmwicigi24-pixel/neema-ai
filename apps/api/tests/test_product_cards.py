@@ -65,8 +65,8 @@ def test_send_product_cards_whatsapp_sends_rich_cards(monkeypatch):
     assert sent[0]["title"] == "Pectoral Cross — Gold Finish"
     assert sent[0]["body"] == "KES 4,000"
     assert sent[0]["image"] == "https://img/pc.jpg"      # thumbnail preferred
-    assert sent[0]["url"] == "https://shop.example/catalog/pectoral-cross-gold?ccy=KES"
-    assert sent[1]["url"].endswith("/catalog/ring?ccy=KES")
+    assert sent[0]["url"] == "https://bethanyhouse.co.ke/product/pectoral-cross-gold"
+    assert sent[1]["url"].endswith("/product/ring")
 
 
 def test_send_meta_carousel_builds_generic_template(monkeypatch):
@@ -116,7 +116,7 @@ def test_send_product_cards_messenger_sends_native_carousel(monkeypatch):
     el = sent["elements"][0]
     assert el["title"] == "Ring"
     assert el["image_url"] == "https://i/r.jpg"
-    assert el["buttons"][0]["url"].endswith("/catalog/ring?ccy=USD")
+    assert el["buttons"][0]["url"].endswith("/product/ring")
     assert el["subtitle"] == "$15"
 
 
@@ -137,7 +137,7 @@ def test_send_product_cards_non_whatsapp_returns_links(monkeypatch):
 
     assert out["sent_cards"] == 0
     assert calls["n"] == 0
-    assert out["products"][0]["link"] == "https://shop.example/catalog/ring?ccy=USD"
+    assert out["products"][0]["link"] == "https://bethanyhouse.co.ke/product/ring"
     assert out["products"][0]["price"] == "$15"
 
 

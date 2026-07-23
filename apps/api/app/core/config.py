@@ -110,6 +110,10 @@ class Settings(BaseSettings):
     # /api/web/chat with header X-Storefront-Key: <this>. Keep it server-side only
     # (never ship it to the browser). Empty = the web-chat endpoint is disabled.
     storefront_key: str = ""
+    # Public storefront where customers view/buy a product. Product-share links
+    # Neema sends point here: <storefront_url>/product/<slug>. Separate from
+    # media_public_url (which only serves images/media on the Neema host).
+    storefront_url: str = "https://bethanyhouse.co.ke"
     # Media file serving
     media_public_url: str = ""      # e.g. https://neema.bethanyhouse.co.ke
     media_storage_path: str = "/tmp/neema_media"
