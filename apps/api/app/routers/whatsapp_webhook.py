@@ -82,6 +82,24 @@ async def receive(request: Request):
         _log.warning("WA webhook POST rejected: bad signature")
         return Response(status_code=403)
 
+    redis = getattr(request.app.state, "redis", None)
+
+    if settings.whatsapp_native:
+        # NATIVE MODE — the full n8n replacement (app/services/wa_native.py):
+        # parse, persist, debounce and reply in-process. No forward — forwarding
+        # too would double-process every message (two replies per customer).
+        try:
+            payload = json.loads(raw)
+            await _handle_calls(request, payload)
+            await _tap_inbound_wamids(payload, redis)
+            from app.services import wa_native
+            await wa_native.handle_webhook(payload, redis)
+        except Exception as exc:
+            # Ack anyway: the wamid dedup already burned, so a Meta retry would
+            # be dropped — better to log loudly than to bounce the webhook.
+            _log.exception("WA native handling failed (acking): %s", exc)
+        return PlainTextResponse("EVENT_RECEIVED")
+
     # 1) TRANSPARENT FORWARD — messaging must keep flowing to n8n untouched. If it
     #    fails, tell Meta to retry (non-200) so no message is lost.
     forwarded = await _forward_to_n8n(raw, sig)
@@ -91,7 +109,7 @@ async def receive(request: Request):
     try:
         payload = json.loads(raw)
         await _handle_calls(request, payload)
-        await _tap_inbound_wamids(payload, getattr(request.app.state, "redis", None))
+        await _tap_inbound_wamids(payload, redis)
     except Exception as exc:
         _log.warning("WA calls handling failed (acking anyway): %s", exc)
 

@@ -81,6 +81,15 @@ class Settings(BaseSettings):
     # whatsapp_forward_url to n8n's current WhatsApp webhook URL. verify token
     # falls back to meta_verify_token if unset (must match the value pasted into
     # the Meta app's WhatsApp webhook config).
+    # NATIVE WhatsApp pipeline (app/services/wa_native.py): when ON, the front door
+    # parses + persists + replies in-process and STOPS forwarding to n8n — the
+    # complete n8n replacement. OFF (default) = today's behaviour, forward to n8n.
+    # Cutover is this one flag; rollback is flipping it back and unpausing n8n.
+    whatsapp_native: bool = False
+    # Rapid-fire messages are combined for this long and answered ONCE. 15s is the
+    # value the n8n debounce ACTUALLY executed in production (its node names said
+    # 12/30/35 — the parameter that ran was 15).
+    whatsapp_debounce_seconds: int = 15
     whatsapp_forward_url: str = ""
     whatsapp_verify_token: str = ""
     whatsapp_handoff_number: str = ""
