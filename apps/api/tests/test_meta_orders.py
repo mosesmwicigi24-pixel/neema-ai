@@ -105,7 +105,11 @@ def test_meta_handoff_never_mints_a_phantom_conversation():
     ctx = ToolContext(db=db, redis=None, wa_id=PSID, currency="USD", channel="messenger")
     out = asyncio.run(_handoff_to_human({"reason": "wants a human"}, ctx))
     assert out["ok"] is False
-    assert db.added == []                               # no phantom conversation
+    # No phantom Conversation. (A DemandSignal may be written — the escalation
+    # reason is captured as unmet demand — but a PSID must never become a
+    # Conversation, which is the phantom-contact bug this guards.)
+    from app.models.conversation import Conversation
+    assert not [o for o in db.added if isinstance(o, Conversation)]
 
 
 def test_meta_order_status_found_by_phone_not_psid(monkeypatch):

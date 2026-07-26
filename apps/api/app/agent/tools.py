@@ -389,6 +389,12 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
             ctx.seen_products.append(p)
         if len(results) >= 8:
             break
+    if not results and query:
+        # Nothing in the catalogue answers this. That's unmet demand — the most
+        # valuable thing a shop can learn — so log it instead of losing it.
+        from app.services import demand
+        await demand.record(ctx.db, query, kind="no_match", channel=ctx.channel,
+                            wa_id=ctx.wa_id)
     return {"count": len(results), "currency": ctx.currency, "results": results}
 
 
@@ -871,6 +877,13 @@ async def _handoff_to_human(args: dict, ctx: ToolContext) -> dict:
     Conversation with a PSID in wa_id, which is how phantom contacts were born."""
     from sqlalchemy import or_
     from app.models.conversation import Conversation, InterceptMode
+    # An escalation usually means "they want something we don't carry" — capture it
+    # as demand before routing, so the reason becomes stock/production evidence.
+    reason = str(args.get("reason") or "")
+    if reason:
+        from app.services import demand
+        await demand.record(ctx.db, reason, kind="out_of_catalogue",
+                            channel=ctx.channel, wa_id=ctx.wa_id)
     conv = (await ctx.db.execute(select(Conversation).where(
         Conversation.channel == ctx.channel,
         or_(Conversation.external_id == ctx.wa_id, Conversation.wa_id == ctx.wa_id),

@@ -63,6 +63,24 @@ MIGRATION_STATEMENTS = [
     "ALTER TABLE calls ADD COLUMN IF NOT EXISTS transcript_lang VARCHAR(12)",
     "ALTER TABLE calls ADD COLUMN IF NOT EXISTS summary TEXT",
     "ALTER TABLE calls ADD COLUMN IF NOT EXISTS transcript_status VARCHAR(20) DEFAULT 'none'",
+    # Unmet demand — what customers asked for that we couldn't sell (models/demand_signal.py).
+    """
+    CREATE TABLE IF NOT EXISTS demand_signals (
+        id         UUID PRIMARY KEY,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        query      VARCHAR(200) NOT NULL,
+        raw_query  TEXT,
+        kind       VARCHAR(20) NOT NULL DEFAULT 'no_match',
+        channel    VARCHAR(20),
+        person_id  UUID REFERENCES persons(id) ON DELETE SET NULL,
+        wa_id      VARCHAR(64),
+        detail     TEXT
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS ix_demand_created ON demand_signals (created_at)",
+    "CREATE INDEX IF NOT EXISTS ix_demand_query ON demand_signals (query)",
+    "CREATE INDEX IF NOT EXISTS ix_demand_kind ON demand_signals (kind)",
+    "CREATE INDEX IF NOT EXISTS ix_demand_wa_id ON demand_signals (wa_id)",
     # Reply-to (quote) on messages (see models/message.py). Idempotent.
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_id UUID REFERENCES messages(id) ON DELETE SET NULL",
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_text TEXT",

@@ -1229,3 +1229,35 @@ async def attribution(
             "revenue": sum(b["revenue"] for b in rows) + unattributed["revenue"],
         },
     }
+
+
+# ── Unmet demand ──────────────────────────────────────────
+# What customers asked for that we could NOT sell them. The most valuable data the
+# shop generates and, until now, the only data it threw away: real requests, in the
+# customer's own words, from people who wanted to pay. Answers "what should we
+# stock or make next?" with evidence rather than instinct.
+
+@router.get("/demand")
+async def demand_report(
+    days: int = 30,
+    limit: int = 25,
+    kind: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Most-wanted things we don't have, ranked by how many DIFFERENT people asked.
+
+    `kind`: no_match (searched, nothing found) · out_of_catalogue (escalated to a
+    human) · sourcing_gap (sold, but the hub couldn't cover it). Omit for all.
+    """
+    from app.services import demand as demand_svc
+    rows = await demand_svc.top_demand(db, days=days, limit=limit, kind=kind)
+    return {
+        "days": days,
+        "kind": kind,
+        "items": rows,
+        "totals": {
+            "distinct_requests": len(rows),
+            "people": sum(r["people"] for r in rows),
+        },
+    }
