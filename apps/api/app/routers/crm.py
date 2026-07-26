@@ -53,26 +53,58 @@ def _phone_verified(user: User, identities=None) -> bool:
     return False
 
 
+def _days_since(dt) -> float | None:
+    d = _parse_dt(dt)
+    return (datetime.now(timezone.utc) - d).total_seconds() / 86400 if d else None
+
+
+def _cart_size(*states) -> int:
+    """Items sitting in this customer's cart, from whichever store holds it."""
+    for st in states:
+        items = ((st or {}).get("agent_cart") or {}).get("items") or []
+        if items:
+            return len(items)
+    return 0
+
+
+def _lead_score_parts(user: User, order_count: int, total_spent: float,
+                      channel_count: int, phone_verified: bool = False,
+                      cart_items: int = 0, days_since_contact: float | None = None) -> list[dict]:
+    """The lead score, itemised — ONE definition, returned to the panel so the
+    breakdown can never drift from the maths that ranks the list.
+
+    Tuned to answer "who should I call TODAY?", not "who has already bought?".
+    Past purchase is still the strongest proof of a real customer, but it no
+    longer dominates: a live buying signal — items sitting in their cart, and a
+    conversation that is still warm — now outweighs a dormant past buyer. Reach
+    (a verified phone, more than one channel) breaks the ties."""
+    spend_pts = 15 if total_spent > 10000 else 8 if total_spent > 3000 else 0
+    if days_since_contact is None:
+        recency = 0
+    elif days_since_contact <= 7:
+        recency = 15
+    elif days_since_contact <= 30:
+        recency = 7
+    else:
+        recency = 0
+    return [
+        {"label": "Active cart",     "pts": 25 if cart_items else 0,        "max": 25},
+        {"label": "Orders",          "pts": min(order_count * 10, 25),      "max": 25},
+        {"label": "Recent contact",  "pts": recency,                        "max": 15},
+        {"label": "Spend level",     "pts": spend_pts,                      "max": 15},
+        {"label": "Phone verified",  "pts": 10 if phone_verified else 0,    "max": 10},
+        {"label": "Multi-channel",   "pts": 10 if channel_count > 1 else 0, "max": 10},
+        {"label": "Name known",      "pts": 5 if user.name else 0,          "max": 5},
+        {"label": "Location known",  "pts": 5 if user.location else 0,      "max": 5},
+    ]
+
+
 def _compute_lead_score(user: User, order_count: int, total_spent: float,
-                        channel_count: int, phone_verified: bool = False) -> int:
-    """How real is this lead? Tuned for a WhatsApp-first business: a REACHABLE
-    phone is worth points, an email is not — we sell on WhatsApp, and an email we
-    never ask for was quietly costing every good customer 10 points."""
-    score = 0
-    score += min(order_count * 15, 45)
-    if total_spent > 10000:
-        score += 30
-    elif total_spent > 3000:
-        score += 15
-    if phone_verified:
-        score += 10
-    if user.name:
-        score += 10
-    if user.location:
-        score += 5
-    if channel_count > 1:
-        score += 15
-    return min(score, 100)
+                        channel_count: int, phone_verified: bool = False,
+                        cart_items: int = 0, days_since_contact: float | None = None) -> int:
+    return min(sum(p["pts"] for p in _lead_score_parts(
+        user, order_count, total_spent, channel_count, phone_verified,
+        cart_items, days_since_contact)), 100)
 
 
 def _cadence_label(days: float) -> str:
@@ -220,8 +252,16 @@ def _build_profile(
 
     channels = list(channel_map.values())
     phone_verified = _phone_verified(user, identities)
-    lead_score = _compute_lead_score(user, order_count, total_spent, len(channels),
-                                     phone_verified=phone_verified)
+    # Live buying signals: what's sitting in their cart right now, and how warm the
+    # conversation still is — the difference between "has bought" and "is buying".
+    cart_items = _cart_size(person_state, user.state)
+    last_contact = max((c.last_message_at for c in conversations if c.last_message_at),
+                       default=None)
+    days_since_contact = _days_since(last_contact)
+    score_parts = _lead_score_parts(user, order_count, total_spent, len(channels),
+                                    phone_verified=phone_verified, cart_items=cart_items,
+                                    days_since_contact=days_since_contact)
+    lead_score = min(sum(p["pts"] for p in score_parts), 100)
     rhythm = _buying_rhythm(order_dates)
     tier = _customer_tier(order_count, total_spent, rhythm["days_since_last"])
     # Suggested stage stays on the local WhatsApp order_events — a pending
@@ -268,6 +308,11 @@ def _build_profile(
         "lead_source":    state.get("lead_source"),
         "lead_score":     lead_score,
         "phone_verified": phone_verified,
+        "cart_items":     cart_items,
+        # The itemised score, straight from the scoring function — the panel renders
+        # this instead of re-deriving it (which had already drifted: it omitted the
+        # location points entirely).
+        "lead_score_breakdown": score_parts,
         "channels":       channels,
         "merged_ids":     merged_ids,
         "person_id":         str(getattr(user, "person_id", None)) if getattr(user, "person_id", None) else None,
@@ -871,8 +916,13 @@ async def list_leads(
         convs = convs_result.scalars().all()
         channels = list({getattr(c, "channel", "whatsapp") or "whatsapp" for c in convs})
 
-        lead_score = _compute_lead_score(user, order_count, total_spent, len(channels),
-                                         phone_verified=_phone_verified(user))
+        lead_score = _compute_lead_score(
+            user, order_count, total_spent, len(channels),
+            phone_verified=_phone_verified(user),
+            cart_items=_cart_size(state),
+            days_since_contact=_days_since(
+                max((c.last_message_at for c in convs if c.last_message_at), default=None)),
+        )
         rhythm = _buying_rhythm([o.created_at for o in orders])
         tier = _customer_tier(order_count, total_spent, rhythm["days_since_last"])
 

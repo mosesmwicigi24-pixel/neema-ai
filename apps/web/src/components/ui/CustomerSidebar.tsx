@@ -78,6 +78,10 @@ export interface CustomerProfile {
     /** A phone we can actually reach them on, proven (WhatsApp or a
      *  deterministically-captured number) — scores 10, replacing "email known". */
     phone_verified?: boolean;
+    /** Items sitting in their cart right now — the strongest "call them today" signal. */
+    cart_items?: number;
+    /** The itemised score, computed server-side so the panel matches the ranking. */
+    lead_score_breakdown?: { label: string; pts: number; max: number }[];
     channels: CustomerChannel[];
     merged_ids: string[];
     // Identity spine (real cross-channel data from the backend).
@@ -1937,47 +1941,9 @@ export function CustomerSidebar({
                         )}
 
                         <Section title="Lead Score Breakdown">
-                            {[
-                                {
-                                    label: "Orders",
-                                    pts: Math.min(
-                                        (profile.total_orders ||
-                                            customerOrders.length) * 15,
-                                        45,
-                                    ),
-                                    max: 45,
-                                },
-                                {
-                                    label: "Spend level",
-                                    pts:
-                                        totalSpent > 10000
-                                            ? 30
-                                            : totalSpent > 3000
-                                              ? 15
-                                              : 0,
-                                    max: 30,
-                                },
-                                {
-                                    // A reachable, proven phone — not an email we
-                                    // never ask for. WhatsApp-first business.
-                                    label: "Phone verified",
-                                    pts: profile.phone_verified ? 10 : 0,
-                                    max: 10,
-                                },
-                                {
-                                    label: "Name known",
-                                    pts: profile.name ? 10 : 0,
-                                    max: 10,
-                                },
-                                {
-                                    label: "Multi-channel",
-                                    pts:
-                                        (profile.channels?.length ?? 0) > 1
-                                            ? 15
-                                            : 0,
-                                    max: 15,
-                                },
-                            ].map((row) => (
+                            {/* Straight from the API — the server owns the scoring,
+                                so this panel can never drift from the ranking. */}
+                            {(profile.lead_score_breakdown ?? []).map((row) => (
                                 <div key={row.label} className="mb-2">
                                     <div className="flex justify-between mb-0.5">
                                         <span className="text-[10px] text-stone-500">
