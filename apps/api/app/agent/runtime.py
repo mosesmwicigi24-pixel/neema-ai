@@ -65,6 +65,11 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         f"- Lead with the answer: the item + its real price in the first line, e.g. "
         f"{example} Quote in {money} (the `price` from search_catalog is already in "
         f"{money}) — never invent it.\n"
+        "- ANSWER THE QUESTION THEY ACTUALLY ASKED. If it isn't about price — where we "
+        "are, delivery, opening hours, whether we ship to their country — answer THAT "
+        "first, briefly, and only add a price if it's relevant.\n"
+        "- Reply in the SAME language the comment is written in (French → French, "
+        "Swahili → Swahili, etc.). Never answer a French or Swahili comment in English.\n"
         "- Recognise the product from the POST IMAGE (you can see it) and find it in "
         "the catalogue with search_catalog; if they name a different item, price that.\n"
         "- Be genuinely warm and human — a brief friendly word is welcome — but "
@@ -636,17 +641,27 @@ _INTENTS = ("high", "low", "negative", "spam")
 async def classify_comment_intent(text: str) -> str:
     """Label a public comment so we react appropriately. Cheap light-model call.
     Errs toward 'high' (engage) on uncertainty — better to help than go silent —
-    but returns 'low' for an empty comment (emoji/sticker with no text)."""
+    but returns 'low' for an empty comment (emoji/sticker with no text).
+
+    `high` covers ANY genuine question, not just a price one: a location/delivery/
+    hours question ("where are you?", "are you in Kenya?") used to fit no bucket
+    and fell into `spam` by elimination, which meant total silence. `spam` is now
+    only actual spam, and a comment we can't read is never spam for that reason."""
     t = (text or "").strip()
     if not t:
         return "low"
     prompt = (
         "Classify this public comment on a Christian clergy/communion store's post "
         "into ONE word:\n"
-        "- high: buying interest — price, availability, sizes, how to order, 'I want this'\n"
+        "- high: buying interest OR any genuine question — price, availability, sizes, "
+        "how to order, where you are located, delivery, opening hours, 'I want this'\n"
         "- low: praise, emoji, tagging a friend, 'amen', generic positivity, no question\n"
         "- negative: a complaint, anger, an unresolved order, or criticism\n"
-        "- spam: bots, ads, links, abuse, or unrelated\n"
+        "- spam: ONLY bots, ads, promotional links, or abuse\n"
+        "Comments come in many languages (French, Swahili, Sheng, Chinese, Dutch…). "
+        "A comment you don't understand is NOT spam: if it asks anything, answer "
+        "'high'; if it's short and friendly or just a person's name, answer 'low'. "
+        "Never answer 'spam' merely because it isn't English.\n"
         f'Comment: "{t[:300]}"\n'
         "Answer with exactly one word: high, low, negative, or spam."
     )
@@ -685,6 +700,36 @@ async def _route_comment_to_human(channel: str, external_id: str) -> None:
         if conv is not None:
             conv.intercept_mode = InterceptMode.human
             await db.commit()
+
+
+async def _note_silent_decision(channel: str, ext: str, cid: str, intent: str) -> None:
+    """Record an operator-visible internal NOTE when Neema deliberately says nothing,
+    so silence is a decision a human can see and overrule — not a black hole that
+    looks identical to a crash. Written as media_type="note" (rendered as an internal
+    note, excluded from previews + unread counts), never broadcast: the live socket
+    payload carries no isNote flag, so a pushed note would render as a real reply."""
+    from sqlalchemy import select
+    from app.database import AsyncSessionLocal
+    from app.models.conversation import Conversation
+    from app.models.message import Message, MsgDirection, MsgSender
+    try:
+        async with AsyncSessionLocal() as db:
+            conv = (await db.execute(select(Conversation).where(
+                Conversation.channel == channel,
+                Conversation.external_id == ext))).scalar_one_or_none()
+            if conv is None:
+                return
+            db.add(Message(
+                channel=channel, external_id=ext, wa_id=None,
+                person_id=conv.person_id, conversation_id=conv.id,
+                direction=MsgDirection.outbound, sender=MsgSender.ai,
+                text=(f"🤖 Neema did not reply to this comment — classified “{intent}”. "
+                      "Reply here if it deserves an answer."),
+                media_type="note",
+            ))
+            await db.commit()
+    except Exception as exc:
+        _log.warning("silent-decision note failed for %s: %s", cid, exc)
 
 
 # Varied warm lines so a viral post's replies don't read identically. Picked
@@ -797,7 +842,10 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     plan = plan_comment_actions(intent)
     _log.info("comment %s intent=%s plan=%s", cid, intent, plan)
     if not (plan["public"] or plan["dm"] or plan["human"]):
-        return                                   # spam → silent
+        # Spam → stay silent publicly, but leave an internal note so the team can
+        # SEE that Neema decided not to reply (and step in if it misjudged).
+        await _note_silent_decision(channel, ext, cid, intent)
+        return
 
     async def _post_public(text: str) -> None:
         if not own_pages:                        # loop guard: can't tell our own reply apart
@@ -893,7 +941,15 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
 
 def schedule_comment_engage(redis, channel: str, comment: dict, own_pages: set) -> None:
     """Fire the intent-gated public + private replies for one comment, off the
-    webhook ack path."""
+    webhook ack path. A crash in the worker is logged (never silently swallowed by
+    asyncio) so "no reply appeared" is always explainable from the logs."""
     task = asyncio.create_task(_run_comment_engage(redis, channel, comment, own_pages))
     _bg_tasks.add(task)
-    task.add_done_callback(_bg_tasks.discard)
+
+    def _done(t: asyncio.Task) -> None:
+        _bg_tasks.discard(t)
+        if not t.cancelled() and t.exception() is not None:
+            _log.warning("comment engage crashed for %s: %s",
+                         comment.get("comment_id"), t.exception())
+
+    task.add_done_callback(_done)
