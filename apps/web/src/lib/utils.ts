@@ -15,8 +15,14 @@ export function displayName(
     return formatPhone(phoneOrId) || "Unknown";
 }
 
-export const timeAgo = (iso: string): string => {
-    const d = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+export const timeAgo = (iso?: string | null): string => {
+    // A missing date must read as "—", never as an epoch date: new Date(null) is
+    // 1970, which rendered a contact with no messages yet as "20660d ago".
+    if (!iso) return "—";
+    const t = new Date(iso).getTime();
+    if (!Number.isFinite(t) || t <= 0) return "—";
+    const d = Math.floor((Date.now() - t) / 1000);
+    if (d < 0) return "just now";
     if (d < 60) return `${d}s ago`;
     if (d < 3600) return `${Math.floor(d / 60)}m ago`;
     if (d < 86400) return `${Math.floor(d / 3600)}h ago`;

@@ -176,7 +176,12 @@ def _build_profile(
                 "channel": ch,
                 "identifier": conv.wa_id,
                 "first_seen": conv.created_at.isoformat() if conv.created_at else None,
-                "last_seen":  conv.last_message_at.isoformat() if conv.last_message_at else None,
+                # A conversation with no messages yet (opened by a call, an invite
+                # or an agent pick-up) has no last_message_at — fall back to when
+                # it started rather than emitting null, which the panel showed as
+                # a 1970 date ("20660d ago").
+                "last_seen":  (conv.last_message_at or conv.created_at).isoformat()
+                              if (conv.last_message_at or conv.created_at) else None,
                 "conversation_count": 1,
             }
         else:
@@ -417,10 +422,34 @@ async def get_customer(
     # we fall back to the local WhatsApp order_events. (Hub summary is fetched by
     # the requested handle; multi-number hub aggregation is a later slice.)
     redis = getattr(request.app.state, "redis", None)
-    try:
-        hub = await hub_client.fetch_customer_summary(wa_id, redis)
-    except Exception:
-        hub = None
+    hub = None
+    # Try EVERY phone we know for this person, not just the handle that was asked
+    # for: someone who bought at the shop under another number, or who reached us
+    # on Messenger and later shared their phone, still has hub purchase history —
+    # it just isn't filed under this handle. First hit with real orders wins.
+    hub_candidates: list[str] = []
+    for cand in [wa_id, user.phone, user.wa_id]:
+        if cand and is_plausible_phone(cand) and cand not in hub_candidates:
+            hub_candidates.append(cand)
+    if user.person_id is not None:
+        try:
+            for ph in (await db.execute(
+                select(Identifier).where(Identifier.person_id == user.person_id,
+                                         Identifier.type == "phone"))).scalars().all():
+                v = (ph.value or "").lstrip("+")
+                if v and is_plausible_phone(v) and v not in hub_candidates:
+                    hub_candidates.append(v)
+        except Exception:
+            pass
+    for cand in hub_candidates:
+        try:
+            found = await hub_client.fetch_customer_summary(cand, redis)
+        except Exception:
+            found = None
+        if found:
+            hub = found
+            if (found.get("total_orders") or 0) > 0:
+                break        # real purchase history — stop here
 
     person_state = None
     person_name = None

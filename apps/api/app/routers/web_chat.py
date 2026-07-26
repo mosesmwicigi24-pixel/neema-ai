@@ -46,6 +46,48 @@ class WebChatIn(BaseModel):
     message: str
     name: str | None = None    # optional — enrich the profile / inbox display
     phone: str | None = None   # optional — captured for follow-up / linking
+    # Handoff token from a Neema link the visitor clicked (…/product/<slug>?ref=X).
+    # It identifies WHO they are on the channel they came from (Facebook comment,
+    # Messenger, WhatsApp), so the website visit joins the SAME person — one
+    # customer across every platform, with their cart and history intact.
+    ref: str | None = None
+
+
+async def _adopt_person_from_ref(db: AsyncSession, redis, user: User, ref: str) -> bool:
+    """Bind this web visitor to the person behind a Neema handoff link.
+
+    A `?ref=` on a product link we posted (a Facebook comment, a DM, a WhatsApp
+    handover) resolves to {channel, external_id, items} in redis. We look up the
+    person who owns that channel identity and stamp it on the web visitor's User —
+    so the website is not a stranger: it is the SAME customer, with their history,
+    and their cart (which now lives on the person) travels with them.
+
+    Best-effort and idempotent: an unknown/expired ref simply leaves them
+    anonymous. Returns True when the visitor was linked."""
+    if not ref or redis is None or user.person_id is not None:
+        return False
+    try:
+        raw = await redis.get(f"waref:{ref.strip().upper()}")
+        if not raw:
+            return False
+        import json
+        data = json.loads(raw)
+        channel, ext = data.get("channel"), data.get("external_id")
+        if not channel or not ext:
+            return False
+        from app.models.person import Identity
+        ident = (await db.execute(select(Identity).where(
+            Identity.channel == channel,
+            Identity.external_id == str(ext)))).scalar_one_or_none()
+        if ident is None or ident.person_id is None:
+            return False
+        user.person_id = ident.person_id
+        _log.info("web visitor %s linked to person %s via ref %s",
+                  user.wa_id, ident.person_id, ref)
+        return True
+    except Exception as exc:
+        _log.warning("web ref adopt failed for %s: %s", ref, exc)
+        return False
 
 
 def _web_wa_id(session_id: str) -> str:
@@ -81,15 +123,23 @@ async def web_chat(body: WebChatIn, request: Request, db: AsyncSession = Depends
         if body.phone and not u.phone:
             u.phone = body.phone
 
+    # Came in from a Neema link (Facebook comment / DM / WhatsApp)? Join them to
+    # that same person, so the website isn't a new stranger — one customer, one
+    # cart, one history across every platform.
+    if body.ref:
+        await _adopt_person_from_ref(db, redis, u, body.ref)
+
     # Ensure a conversation + persist the inbound turn (so history + the inbox see it).
     conv = (await db.execute(
         select(Conversation).where(Conversation.wa_id == wa_id)
     )).scalar_one_or_none()
     if conv is None:
-        conv = Conversation(wa_id=wa_id)
+        conv = Conversation(wa_id=wa_id, person_id=u.person_id)
         db.add(conv)
         await db.flush()
-    db.add(Message(wa_id=wa_id, conversation_id=conv.id,
+    elif conv.person_id is None and u.person_id is not None:
+        conv.person_id = u.person_id          # linked later (e.g. by a ref click)
+    db.add(Message(wa_id=wa_id, conversation_id=conv.id, person_id=u.person_id,
                    direction=MsgDirection.inbound, sender=MsgSender.user, text=text))
     conv.last_message_at = datetime.now(timezone.utc)
     conv.last_message_preview = text[:100]

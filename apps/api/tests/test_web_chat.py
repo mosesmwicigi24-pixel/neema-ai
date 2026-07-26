@@ -118,6 +118,7 @@ def test_web_chat_holds_when_human_intercepted(monkeypatch):
     monkeypatch.setattr(runtime, "route_model", lambda t: "m")
 
     conv = types.SimpleNamespace(id="c1", intercept_mode=InterceptMode.human,
+                                 person_id=None,
                                  last_message_at=None, last_message_preview=None)
     db = _FakeDB([_Res(None), _Res(conv)])   # no User, existing HUMAN-intercepted conversation
     body = wc.WebChatIn(session_id="sess-2", message="hi")
