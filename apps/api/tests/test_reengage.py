@@ -62,9 +62,9 @@ class _FakeDB:
 
 
 def test_find_waiting_filters_to_customers_waiting_on_us():
-    convA = SimpleNamespace(id="A", channel="whatsapp", wa_id="254700", external_id="254700")
+    convA = SimpleNamespace(id="A", channel="whatsapp", wa_id="254700000001", external_id="254700000001")
     convB = SimpleNamespace(id="B", channel="messenger", wa_id=None, external_id="PSID_B")
-    convC = SimpleNamespace(id="C", channel="whatsapp", wa_id="254711", external_id="254711")
+    convC = SimpleNamespace(id="C", channel="whatsapp", wa_id="254711000002", external_id="254711000002")
     db = _FakeDB([
         _Res([convA, convB, convC]),                       # the conversation query
         _Res([_msg(MsgDirection.inbound, "still available?")]),   # A: waiting → keep

@@ -39,6 +39,15 @@ class ToolContext:
     # Lets a caller link to the EXACT product the agent priced instead of
     # re-guessing it from the reply text. Survives dataclasses.replace().
     seen_products: list = field(default_factory=list)
+    # Draft/preview mode: look-only. Tools must not write ANYTHING — not even a
+    # best-effort side log like a demand signal.
+    read_only: bool = False
+
+
+def _channel_label(ctx: "ToolContext") -> str:
+    """The honest channel for records: a web-chat session runs through the
+    WhatsApp code path but is NOT WhatsApp — label its data 'web'."""
+    return "web" if str(ctx.wa_id or "").startswith("web_") else ctx.channel
 
 
 def _display(kes, ctx: "ToolContext"):
@@ -406,12 +415,17 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
             ctx.seen_products.append(p)
         if len(results) >= 8:
             break
-    if not results and query:
+    if not results and query and not ctx.read_only:
         # Nothing in the catalogue answers this. That's unmet demand — the most
         # valuable thing a shop can learn — so log it instead of losing it.
+        # (Skipped in read-only/draft mode: previews must write nothing.)
         from app.services import demand
-        await demand.record(ctx.db, query, kind="no_match", channel=ctx.channel,
-                            wa_id=ctx.wa_id)
+        try:
+            pid = await _person_id_of(ctx)
+        except Exception:
+            pid = None
+        await demand.record(ctx.db, query, kind="no_match", channel=_channel_label(ctx),
+                            wa_id=ctx.wa_id, person_id=pid)
     return {"count": len(results), "currency": ctx.currency, "results": results}
 
 
@@ -549,6 +563,14 @@ async def _order_identity(ctx: ToolContext):
         user = (await ctx.db.execute(
             select(User).where(User.wa_id == ctx.wa_id))).scalar_one_or_none()
         name = ((user.name if user else None) or "WhatsApp Customer").split()[0]
+        # A WEB session key is not a phone. Billing an order to "web_<hash>" is the
+        # phantom-contact bug the Meta path explicitly guards against — fall back
+        # to the captured phone, or make the agent ask for one (phone=None).
+        from app.core.phone import is_plausible_phone as _plausible
+        if not _plausible(ctx.wa_id):
+            captured = (user.phone if user else None)
+            phone = captured.lstrip("+") if (captured and _plausible(captured)) else None
+            return phone, name, (user.person_id if user else None)
         return ctx.wa_id, name, (user.person_id if user else None)
 
     from app.models.person import Person, Identity, Identifier
@@ -897,10 +919,14 @@ async def _handoff_to_human(args: dict, ctx: ToolContext) -> dict:
     # An escalation usually means "they want something we don't carry" — capture it
     # as demand before routing, so the reason becomes stock/production evidence.
     reason = str(args.get("reason") or "")
-    if reason:
+    if reason and not ctx.read_only:
         from app.services import demand
+        try:
+            _pid = await _person_id_of(ctx)
+        except Exception:
+            _pid = None
         await demand.record(ctx.db, reason, kind="out_of_catalogue",
-                            channel=ctx.channel, wa_id=ctx.wa_id)
+                            channel=_channel_label(ctx), wa_id=ctx.wa_id, person_id=_pid)
     conv = (await ctx.db.execute(select(Conversation).where(
         Conversation.channel == ctx.channel,
         or_(Conversation.external_id == ctx.wa_id, Conversation.wa_id == ctx.wa_id),
@@ -1132,16 +1158,18 @@ async def _save_parish(args: dict, ctx: ToolContext) -> dict:
     name = str(args.get("name") or "").strip()
     if not name:
         return {"error": "pass the church/parish name"}
+    # Bank the fact FIRST, unconditionally — so even a contact with no person yet
+    # (a fresh web visitor) keeps the church name in memory. The old order skipped
+    # this on the no-person path while telling the model it was "noted in memory".
+    try:
+        await memorymod.add_fact(ctx.db, ctx.wa_id, f"church: {name}", channel=ctx.channel)
+    except Exception:
+        pass
     person_id = await _person_id_of(ctx)
     if person_id is None:
         return {"ok": False, "note": "no linked profile yet — the name was noted in memory only"}
     p = await parish_svc.attach_person(ctx.db, person_id, name,
                                        location=(args.get("location") or None))
-    # Bank it as a durable fact too, so it surfaces in context on every channel.
-    try:
-        await memorymod.add_fact(ctx.db, ctx.wa_id, f"church: {name}", channel=ctx.channel)
-    except Exception:
-        pass
     if p is None:
         return {"ok": False,
                 "note": "not recorded as a parish (unclear name, or they already "

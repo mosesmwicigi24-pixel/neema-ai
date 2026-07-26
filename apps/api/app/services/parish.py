@@ -66,19 +66,25 @@ async def attach_person(db: AsyncSession, person_id, name: str,
     church keeps the first until a human decides; same church is idempotent."""
     if person_id is None:
         return None
-    parish = await find_or_create(db, name, location)
-    if parish is None:
-        return None
     person = await db.get(Person, person_id)
     if person is None:
         return None
-    if person.parish_id is None or person.parish_id == parish.id:
-        person.parish_id = parish.id
-        await db.commit()
-        return parish
-    _log.info("person %s already in another parish — not reassigning to %s",
-              person_id, parish.name)
-    return None
+    # Refuse a DIFFERENT church BEFORE creating anything — the old order minted an
+    # orphan Parish row on the refusal path. Same church (by norm) stays idempotent.
+    if person.parish_id is not None:
+        current = await db.get(Parish, person.parish_id)
+        if current is not None and current.norm != normalise(name):
+            _log.info("person %s already in %s — not reassigning to %r",
+                      person_id, current.name, name)
+            return None
+        if current is not None:
+            return current
+    parish = await find_or_create(db, name, location)
+    if parish is None:
+        return None
+    person.parish_id = parish.id
+    await db.commit()
+    return parish
 
 
 async def parish_of_person(db: AsyncSession, person_id) -> Parish | None:

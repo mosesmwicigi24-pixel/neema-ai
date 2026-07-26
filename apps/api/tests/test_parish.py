@@ -34,12 +34,17 @@ def test_noise_is_not_a_parish():
 
 
 class _DB:
-    def __init__(self, existing=None, person=None):
+    def __init__(self, existing=None, person=None, parishes=None):
         self.existing, self.person = existing, person
+        self.parishes = parishes or {}          # id → Parish, for session.get
         self.added, self.commits, self.flushes = [], 0, 0
     async def execute(self, *a, **k):
         return types.SimpleNamespace(scalar_one_or_none=lambda: self.existing)
     async def get(self, model, pk):
+        # Route by model: attach_person now loads the Person AND (when already
+        # affiliated) the current Parish through the same session.get.
+        if model is Parish:
+            return self.parishes.get(pk, self.existing)
         return self.person
     def add(self, o):
         self.added.append(o)
@@ -83,7 +88,7 @@ def test_attach_is_idempotent_but_never_silently_reassigns():
     # a DIFFERENT church → refused (a human decides), affiliation unchanged
     other = Parish(name="Holy Trinity Parish", norm="holy trinity parish")
     other.id = "PARISH-2"
-    db2 = _DB(existing=other, person=person)
+    db2 = _DB(existing=other, person=person, parishes={"PARISH-1": parish})
     assert asyncio.run(ps.attach_person(db2, "P1", "Holy Trinity Parish")) is None
     assert person.parish_id == "PARISH-1"
 

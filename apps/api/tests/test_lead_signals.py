@@ -17,21 +17,21 @@ def test_derive_lead_stage_from_signals():
     assert derive_lead_stage(_U(), []) == "new"
     assert derive_lead_stage(_U(last=object()), []) == "contacted"
     assert derive_lead_stage(_U(name="Moses", country="Kenya"), []) == "qualified"
-    assert derive_lead_stage(_U(name="Moses", country="Kenya"), [_order(hub=92)]) == "negotiating"
+    assert derive_lead_stage(_U(name="Moses", country="Kenya"), [_order(hub=92)]) == "negotiation"
 
 
 def test_apply_advances_forward_only():
     s, ch = apply_signals({"lead_stage": "new"}, "qualified", None)
     assert ch and s["lead_stage"] == "qualified" and s["lead_stage_source"] == "auto"
     # never downgrade
-    s, ch = apply_signals({"lead_stage": "negotiating"}, "qualified", None)
-    assert not ch and s["lead_stage"] == "negotiating"
+    s, ch = apply_signals({"lead_stage": "negotiation"}, "qualified", None)
+    assert not ch and s["lead_stage"] == "negotiation"
 
 
 def test_apply_respects_manual_and_terminal():
-    s, ch = apply_signals({"lead_stage": "contacted", "lead_stage_source": "manual"}, "negotiating", None)
+    s, ch = apply_signals({"lead_stage": "contacted", "lead_stage_source": "manual"}, "negotiation", None)
     assert not ch and s["lead_stage"] == "contacted"
-    s, ch = apply_signals({"lead_stage": "won"}, "negotiating", None)
+    s, ch = apply_signals({"lead_stage": "won"}, "negotiation", None)
     assert not ch and s["lead_stage"] == "won"
 
 

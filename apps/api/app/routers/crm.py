@@ -282,7 +282,8 @@ def _build_profile(
 
     # Extra fields stored in user.state
     state       = user.state or {}
-    lead_stage  = state.get("lead_stage", "new")
+    from app.services.lead_signals import normalise_stage
+    lead_stage  = normalise_stage(state.get("lead_stage", "new"))
     tags        = state.get("tags", [])
     notes       = state.get("crm_notes")
     merged_ids  = state.get("merged_ids", [])
@@ -485,8 +486,14 @@ async def get_customer(
         if wa_handles:
             wa_ids = sorted(set(wa_handles) | {wa_id})
 
+    # Match orders by handle OR by person: a Messenger/IG order is keyed on the
+    # captured PHONE (which may not be a whatsapp identity yet) but carries
+    # person_id — without the person match those orders were invisible here.
+    order_filter = [OrderEvent.wa_id.in_(wa_ids)]
+    if user.person_id is not None:
+        order_filter.append(OrderEvent.person_id == user.person_id)
     orders_result = await db.execute(
-        select(OrderEvent).where(OrderEvent.wa_id.in_(wa_ids)).order_by(OrderEvent.created_at.desc())
+        select(OrderEvent).where(or_(*order_filter)).order_by(OrderEvent.created_at.desc())
     )
     orders = orders_result.scalars().all()
 
@@ -586,6 +593,8 @@ async def identity_spine_health(
     runs in prod, every wa_id-keyed row should have a person_id (orphans == 0)
     and there should be exactly one whatsapp identity per distinct wa_id. Lets
     ops confirm the backfill + resolver are healthy without opening the DB."""
+    from app.models.message import Message   # not imported at module scope — the
+    # missing import made this endpoint 500 on every call
     orphans: dict[str, int] = {}
     for model, name in (
         (User, "users"), (Conversation, "conversations"), (Message, "messages"),
@@ -922,7 +931,8 @@ async def list_leads(
         if state.get("merged_into") or (user.person_id in tombstoned):
             continue
 
-        lead_stage = state.get("lead_stage", "new")
+        from app.services.lead_signals import normalise_stage
+        lead_stage = normalise_stage(state.get("lead_stage", "new"))
         if stage and lead_stage != stage:
             continue
 
@@ -941,10 +951,20 @@ async def list_leads(
         convs = convs_result.scalars().all()
         channels = list({getattr(c, "channel", "whatsapp") or "whatsapp" for c in convs})
 
+        # Score on the SAME context the profile uses — the cart now lives on the
+        # PERSON, so scoring from users.state alone zeroed the strongest signal
+        # for exactly the hottest leads (and the list disagreed with the panel).
+        lead_person_state = None
+        if user.person_id is not None:
+            try:
+                _lp = await db.get(Person, user.person_id)
+                lead_person_state = (_lp.state or None) if _lp is not None else None
+            except Exception:
+                lead_person_state = None
         lead_score = _compute_lead_score(
             user, order_count, total_spent, len(channels),
             phone_verified=_phone_verified(user),
-            cart_items=_cart_size(state),
+            cart_items=_cart_size(lead_person_state, state),
             days_since_contact=_days_since(
                 max((c.last_message_at for c in convs if c.last_message_at), default=None)),
         )

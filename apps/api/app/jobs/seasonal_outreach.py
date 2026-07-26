@@ -115,19 +115,40 @@ async def find_audience(db, season: str, today: date | None = None) -> list[dict
         if liturgical.season_on(d) != season:
             continue
         key = o.wa_id
-        if not key or key in seen:
+        if not key:
             continue
-        seen[key] = {"wa_id": key, "last_bought": d.isoformat(),
-                     "items": [i.get("name") for i in (o.items or []) if i.get("name")][:3]}
+        # The scan is UNORDERED — keep the MOST RECENT same-season purchase, or
+        # the parish-spokesperson dedupe can crown the wrong member.
+        cur = seen.get(key)
+        if cur is None or d.isoformat() > cur["last_bought"]:
+            seen[key] = {"wa_id": key, "last_bought": d.isoformat(),
+                         "items": [i.get("name") for i in (o.items or []) if i.get("name")][:3]}
 
     out: list[dict] = []
     for key, info in seen.items():
+        user = (await db.execute(select(User).where(User.wa_id == key))).scalar_one_or_none()
+        # OrderEvent.wa_id is the PHONE. A WhatsApp thread matches it directly; a
+        # Messenger/IG buyer's thread is keyed by PSID, so resolve it through the
+        # PERSON — without this every Meta-channel repeat buyer was invisible.
         conv = (await db.execute(
-            select(Conversation).where(Conversation.wa_id == key))).scalars().first()
+            select(Conversation).where(Conversation.channel == "whatsapp",
+                                       Conversation.wa_id == key))).scalars().first()
+        if conv is None and user is not None and user.person_id is not None:
+            conv = (await db.execute(
+                select(Conversation).where(Conversation.person_id == user.person_id)
+            )).scalars().first()
         if conv is None or conv.intercept_mode != InterceptMode.ai \
                 or conv.status != ConvStatus.open:
             continue
-        user = (await db.execute(select(User).where(User.wa_id == key))).scalar_one_or_none()
+        recipient = conv.wa_id if (conv.channel or "whatsapp") == "whatsapp" \
+            else (conv.external_id or conv.wa_id)
+        if not recipient:
+            continue
+        # A web-chat conversation masquerades as WhatsApp with a "web_<hash>" key —
+        # never a WABA recipient.
+        from app.core.phone import is_plausible_phone
+        if (conv.channel or "whatsapp") == "whatsapp" and not is_plausible_phone(recipient):
+            continue
         parish_id = None
         if user is not None and user.person_id is not None:
             try:
@@ -136,7 +157,8 @@ async def find_audience(db, season: str, today: date | None = None) -> list[dict
                 parish_id = getattr(person, "parish_id", None)
             except Exception:
                 parish_id = None
-        out.append({**info, "conv": conv, "name": (user.name if user else None),
+        out.append({**info, "conv": conv, "wa_id": recipient,
+                    "name": (user.name if user else None),
                     "parish_id": parish_id,
                     "open_window": await _window_open(db, conv)})
     return out
@@ -246,6 +268,15 @@ async def _handle(redis, row: dict, season: dict, *, send: bool) -> dict:
             await svc.send_wa_template(to, settings.wa_seasonal_template,
                                        settings.wa_seasonal_lang,
                                        template_params(row, season, row.get("name")))
+            # Persist what went out — otherwise the inbox shows the customer
+            # replying to nothing and the record diverges from reality.
+            try:
+                async with AsyncSessionLocal() as db2:
+                    await svc.save_outbound_message(
+                        db2, redis, to,
+                        f"[template {settings.wa_seasonal_template}] " + text)
+            except Exception:
+                pass
         elif is_wa:
             await svc._send_waba(to, text)
             async with AsyncSessionLocal() as db2:

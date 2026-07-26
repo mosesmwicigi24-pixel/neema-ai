@@ -67,8 +67,12 @@ async def _make_redis():
 
 
 async def _latest_message(db, conv_id) -> Message | None:
+    # Internal notes (escalation records, call summaries) are NOT conversation
+    # turns — counting one as the newest message made the sweep skip customers
+    # who are genuinely waiting on us.
     return (await db.execute(
         select(Message).where(Message.conversation_id == conv_id)
+        .where(Message.media_type.is_(None) | (Message.media_type != "note"))
         .order_by(Message.created_at.desc()).limit(1))).scalar_one_or_none()
 
 
@@ -84,25 +88,42 @@ async def find_waiting(db) -> list[tuple[Conversation, Message]]:
             Conversation.last_message_at >= cutoff,
         ).order_by(Conversation.last_message_at.desc()))).scalars().all()
     out: list[tuple[Conversation, Message]] = []
+    from app.core.phone import is_plausible_phone
     for conv in convs:
+        # A web-chat session masquerades as a WhatsApp conversation but its key
+        # ("web_<hash>") is not a number — a WABA send would be a guaranteed
+        # Graph error. Web visitors reply in their own widget, not via sweeps.
+        if conv.channel == "whatsapp" and not is_plausible_phone(conv.wa_id):
+            continue
         msg = await _latest_message(db, conv.id)
-        if _qualifies(msg):
-            out.append((conv, msg))
+        if not _qualifies(msg):
+            continue
+        # COMMENT threads are not DMs: replying to an IG/FB comment through the
+        # DM send path fails or lands weirdly — the comment engine owns those.
+        if getattr(msg, "comment_context", None):
+            continue
+        out.append((conv, msg))
     return out
 
 
-async def _draft(redis, conv: Conversation, text: str) -> str:
-    """Generate the reply Neema should send, via the normal agent loop."""
+async def _draft(redis, conv: Conversation, text: str, *, live: bool = False) -> str:
+    """Generate the reply Neema should send, via the normal agent loop.
+
+    A DRY RUN must be look-only: previewing used to run the agent with full write
+    tools, so a "preview" could create real hub orders and mutate carts. Only a
+    live send (where the reply actually goes out) gets the acting tool set."""
     from app.agent import runtime
     from app.agent.runtime import build_llm, route_model
     is_wa = conv.channel == "whatsapp"
     async with AsyncSessionLocal() as db:
         if is_wa:
             return await runtime.run_turn(db, redis, conv.wa_id, text,
-                                          build_llm(model=route_model(text)))
+                                          build_llm(model=route_model(text)),
+                                          read_only=not live)
         return await runtime.run_turn(db, redis, wa_id=conv.external_id, user_text=text,
                                       llm=build_llm(model=route_model(text)),
-                                      channel=conv.channel, external_id=conv.external_id)
+                                      channel=conv.channel, external_id=conv.external_id,
+                                      read_only=not live)
 
 
 async def _handle(redis, conv: Conversation, msg: Message, *, send: bool) -> dict:
@@ -130,7 +151,7 @@ async def _handle(redis, conv: Conversation, msg: Message, *, send: bool) -> dic
             pass                           # guard is best-effort; don't block the sweep
 
     try:
-        reply = await _draft(redis, conv, text)
+        reply = await _draft(redis, conv, text, live=send)
     except Exception as e:
         res["error"] = f"draft failed: {str(e)[:160]}"
         return res

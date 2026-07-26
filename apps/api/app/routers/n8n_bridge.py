@@ -93,6 +93,10 @@ async def get_profile(wa_id: str, request: Request, db: AsyncSession = Depends(g
             select(Conversation).where(Conversation.wa_id == norm)
         )).scalar_one_or_none()
         if conv and conv.intercept_mode == InterceptMode.human:
+            # Tier 1 must ALSO stay silent — without this flag n8n would compose
+            # its own reply (from the stale Tier 1 cart) over the human agent.
+            profile["should_run_ai"] = False
+            profile["route_reason"] = "human_intercept"
             return profile
 
         last = await svc.latest_inbound_message(db, norm)
@@ -360,7 +364,7 @@ async def escalate_to_human(body: dict, request: Request, db: AsyncSession = Dep
     from app.models.intercept import Intercept, InterceptAction
     from datetime import datetime, timezone
 
-    wa_id      = str(body.get("wa_id", "")).strip()
+    wa_id      = svc._normalize_wa_id(str(body.get("wa_id", "")).strip())
     msg_text   = str(body.get("msg_text", "")).strip()
     reason     = str(body.get("reason", "Customer requested images or files"))
 
@@ -414,17 +418,21 @@ async def escalate_to_human(body: dict, request: Request, db: AsyncSession = Dep
                     "created_at": msg_created_at.isoformat()})
             except Exception:
                 pass
+            scheduled = False
             try:
-                await runtime.schedule_reply(
+                scheduled = await runtime.schedule_reply(
                     redis, wa_id, msg_text,
                     f"imgreq:{wa_id}:{int(msg_created_at.timestamp())}")
             except Exception as exc:
                 import logging
                 logging.getLogger("neema.inbox").warning(
                     "image-request → AI reply failed for %s: %s", wa_id, exc)
-            return {"ok": True, "wa_id": wa_id, "conv_id": str(conv.id),
-                    "handled_by": "ai", "escalated": False,
-                    "note": "Image request handled by Neema — product photo card."}
+            if scheduled:
+                return {"ok": True, "wa_id": wa_id, "conv_id": str(conv.id),
+                        "handled_by": "ai", "escalated": False,
+                        "note": "Image request handled by Neema — product photo card."}
+            # Scheduling failed/deduped — fall through to the HUMAN escalation
+            # below rather than leaving the customer in total silence.
 
     # ── 2. Intercept only if not already in human mode ────────────────────────
     if not already_human:

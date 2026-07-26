@@ -95,8 +95,11 @@ async def _make_redis():
 
 
 async def _latest_message(db, conv_id) -> Message | None:
+    # Internal notes are not turns: a note after the customer's message would hide
+    # that we OWE them a reply and wrongly turn a due-reply into a nudge.
     return (await db.execute(
         select(Message).where(Message.conversation_id == conv_id)
+        .where(Message.media_type.is_(None) | (Message.media_type != "note"))
         .order_by(Message.created_at.desc()).limit(1))).scalar_one_or_none()
 
 
@@ -117,12 +120,28 @@ async def find_abandoned(db) -> list[dict]:
             Conversation.last_message_at <= idle,
         ).order_by(Conversation.last_message_at.desc()))).scalars().all()
 
+    from app.core.phone import is_plausible_phone
+
     out: list[dict] = []
+    seen_owners: set = set()
     for conv in convs:
         key = conv.wa_id if conv.channel == "whatsapp" else (conv.external_id or conv.wa_id)
         if not key:
             continue
-        cart = await cartmod.get_cart(db, key, conv.channel or "whatsapp")
+        # Web-chat sessions masquerade as WhatsApp but "web_<hash>" is not a
+        # number — a WABA send is a guaranteed Graph error (and burns the guard).
+        if conv.channel == "whatsapp" and not is_plausible_phone(key):
+            continue
+        # The cart is PERSON-scoped: one human with WhatsApp + Messenger threads
+        # shares ONE cart — dedupe by the cart's OWNER so one basket gets ONE
+        # nudge, preferring the earlier (most recent conversation) row.
+        store = await cartmod._load_store(db, key, conv.channel or "whatsapp")
+        if store is None:
+            continue
+        owner = f"{type(store).__name__}:{store.id}"
+        if owner in seen_owners:
+            continue
+        cart = cartmod.read_cart(getattr(store, "state", None))
         items = (cart or {}).get("items") or []
         if not items:
             continue
@@ -130,7 +149,8 @@ async def find_abandoned(db) -> list[dict]:
         # If their message is the newest, we owe them a real reply — not a nudge.
         if last is not None and last.direction == MsgDirection.inbound:
             continue
-        out.append({"conv": conv, "to": key, "items": items,
+        seen_owners.add(owner)
+        out.append({"conv": conv, "to": key, "items": items, "owner": owner,
                     "total": cartmod.cart_total(cart)})
     return out
 
@@ -149,10 +169,11 @@ async def _draft(redis, conv: Conversation, to: str, items: list) -> str:
     )
     async with AsyncSessionLocal() as db:
         if conv.channel == "whatsapp":
-            return await runtime.run_turn(db, redis, to, prompt, build_llm())
+            return await runtime.run_turn(db, redis, to, prompt, build_llm(),
+                                          read_only=True)
         return await runtime.run_turn(db, redis, wa_id=to, user_text=prompt,
                                       llm=build_llm(), channel=conv.channel,
-                                      external_id=to)
+                                      external_id=to, read_only=True)
 
 
 async def _handle(redis, row: dict, *, send: bool) -> dict:
@@ -168,7 +189,8 @@ async def _handle(redis, row: dict, *, send: bool) -> dict:
     fp = cart_fingerprint(items)
     if send and redis is not None:
         try:
-            ok = await redis.set(f"cartnudge:{conv.id}:{fp}", "1", nx=True, ex=_GUARD_TTL)
+            owner = row.get("owner") or str(conv.id)
+            ok = await redis.set(f"cartnudge:{owner}:{fp}", "1", nx=True, ex=_GUARD_TTL)
             if not ok:
                 res["skipped"] = "already nudged for this cart"
                 return res

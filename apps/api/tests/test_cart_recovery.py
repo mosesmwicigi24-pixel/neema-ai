@@ -61,7 +61,7 @@ class _DB:
             scalar_one_or_none=lambda: self.latest.get(conv_id))
 
 
-def _conv(cid, channel="whatsapp", wa_id="254700000001"):
+def _conv(cid, channel="whatsapp", wa_id="254700000001"):  # noqa: E302
     return types.SimpleNamespace(
         id=cid, channel=channel, wa_id=wa_id, external_id=wa_id,
         intercept_mode=InterceptMode.ai, status=ConvStatus.open,
@@ -72,18 +72,23 @@ def _msg(direction):
     return types.SimpleNamespace(direction=direction, text="hi")
 
 
+def _store(owner_id="P1", items=None):
+    return types.SimpleNamespace(
+        id=owner_id, state={"agent_cart": {"items": items or []}})
+
+
 def test_skips_when_the_customer_is_the_one_waiting(monkeypatch):
     """If their message is newest we OWE them a reply — that's the re-engage
     sweep's job. Nudging instead would look like we ignored them."""
     conv = _conv("c1")
 
-    async def fake_get_cart(db, key, channel="whatsapp"):
-        return {"items": [{"name": "Chasuble", "qty": 1}]}
+    async def fake_store(db, key, channel="whatsapp"):
+        return _store(items=[{"name": "Chasuble", "qty": 1}])
 
     async def fake_latest(db, cid):
         return _msg(MsgDirection.inbound)          # customer spoke last
 
-    monkeypatch.setattr("app.agent.cart.get_cart", fake_get_cart)
+    monkeypatch.setattr("app.agent.cart._load_store", fake_store)
     monkeypatch.setattr("app.agent.cart.cart_total", lambda c: 15000)
     monkeypatch.setattr(cr, "_latest_message", fake_latest)
 
@@ -95,13 +100,13 @@ def test_skips_when_the_customer_is_the_one_waiting(monkeypatch):
 def test_picks_up_a_cart_we_are_not_owed_a_reply_on(monkeypatch):
     conv = _conv("c2")
 
-    async def fake_get_cart(db, key, channel="whatsapp"):
-        return {"items": [{"name": "Chasuble", "qty": 2}]}
+    async def fake_store(db, key, channel="whatsapp"):
+        return _store(items=[{"name": "Chasuble", "qty": 2}])
 
     async def fake_latest(db, cid):
         return _msg(MsgDirection.outbound)         # we spoke last; they went quiet
 
-    monkeypatch.setattr("app.agent.cart.get_cart", fake_get_cart)
+    monkeypatch.setattr("app.agent.cart._load_store", fake_store)
     monkeypatch.setattr("app.agent.cart.cart_total", lambda c: 24000)
     monkeypatch.setattr(cr, "_latest_message", fake_latest)
 
@@ -110,15 +115,50 @@ def test_picks_up_a_cart_we_are_not_owed_a_reply_on(monkeypatch):
     assert len(rows) == 1
     assert rows[0]["to"] == "254700000001"
     assert rows[0]["items"][0]["name"] == "Chasuble"
+    assert rows[0]["owner"]                         # owner travels with the row
+
+
+def test_one_person_two_channels_gets_ONE_nudge(monkeypatch):
+    """The cart is PERSON-scoped: a WhatsApp thread and a Messenger thread of the
+    SAME person share one basket — the sweep must produce one candidate, not two."""
+    wa = _conv("c-wa", channel="whatsapp", wa_id="254700000001")
+    ms = _conv("c-ms", channel="messenger", wa_id="26414904614761138")
+
+    async def fake_store(db, key, channel="whatsapp"):
+        return _store(owner_id="PERSON-1", items=[{"name": "Chasuble", "qty": 1}])
+
+    async def fake_latest(db, cid):
+        return _msg(MsgDirection.outbound)
+
+    monkeypatch.setattr("app.agent.cart._load_store", fake_store)
+    monkeypatch.setattr("app.agent.cart.cart_total", lambda c: 15000)
+    monkeypatch.setattr(cr, "_latest_message", fake_latest)
+
+    db = types.SimpleNamespace(execute=lambda *a, **k: _scalars([wa, ms]))
+    rows = asyncio.run(cr.find_abandoned(db))
+    assert len(rows) == 1                          # one basket → one nudge
+
+
+def test_web_chat_sessions_are_never_waba_recipients(monkeypatch):
+    """A web conversation masquerades as WhatsApp with key web_<hash> — a WABA
+    send to it is a guaranteed Graph error, so the sweep must skip it."""
+    web = _conv("c-web", wa_id="web_3fa47c19d2e8b105a44f")
+
+    async def fake_store(db, key, channel="whatsapp"):
+        raise AssertionError("web conversations must be skipped before the cart load")
+
+    monkeypatch.setattr("app.agent.cart._load_store", fake_store)
+    db = types.SimpleNamespace(execute=lambda *a, **k: _scalars([web]))
+    assert asyncio.run(cr.find_abandoned(db)) == []
 
 
 def test_empty_cart_is_never_a_candidate(monkeypatch):
     conv = _conv("c3")
 
-    async def fake_get_cart(db, key, channel="whatsapp"):
-        return {"items": []}                        # ordered → create_order cleared it
+    async def fake_store(db, key, channel="whatsapp"):
+        return _store(items=[])                     # ordered → create_order cleared it
 
-    monkeypatch.setattr("app.agent.cart.get_cart", fake_get_cart)
+    monkeypatch.setattr("app.agent.cart._load_store", fake_store)
     monkeypatch.setattr("app.agent.cart.cart_total", lambda c: 0)
     db = types.SimpleNamespace(execute=lambda *a, **k: _scalars([conv]))
     assert asyncio.run(cr.find_abandoned(db)) == []

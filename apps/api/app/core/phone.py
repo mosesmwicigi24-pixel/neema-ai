@@ -87,5 +87,14 @@ def is_plausible_phone(raw: str | None) -> bool:
     a wa_id-as-phone or minted as a (whatsapp, …) identity. Deliberately does NOT
     require full to_e164 validity (WhatsApp wa_ids are trusted), just plausibility.
     """
-    digits = "".join(ch for ch in str(raw or "") if ch.isdigit())
-    return 7 <= len(digits) <= 15
+    s = str(raw or "").strip()
+    # Strip common phone FORMATTING only ('+', spaces, dashes, dots, parens). Any
+    # OTHER character (letters, underscores…) means this is NOT a phone at all —
+    # a web session key like "web_3fa4…" carries 7-15 digits inside its hash and
+    # was passing the old digits-only extraction, minting phantom identities.
+    cleaned = s.lstrip("+")
+    for ch in " -.()":
+        cleaned = cleaned.replace(ch, "")
+    if not cleaned.isdigit():
+        return False
+    return 7 <= len(cleaned) <= 15

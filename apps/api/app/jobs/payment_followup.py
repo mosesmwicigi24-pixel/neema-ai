@@ -82,14 +82,34 @@ async def _make_redis():
         return None
 
 
-async def _conversation_for(db, order: OrderEvent) -> Conversation | None:
+async def _conversation_for(db, order: OrderEvent) -> tuple[Conversation | None, str | None]:
+    """(conversation, recipient) for an order.
+
+    OrderEvent.wa_id is always the PHONE (orders are keyed on it so a Messenger
+    buyer's order is found again on WhatsApp) — but a Meta conversation's handle
+    is the PSID/IGSID. Comparing phone to PSID never matched, so every
+    Meta-channel unpaid order was silently skipped. Resolve Meta conversations
+    through the PERSON instead, and return the right recipient for the channel."""
     ch = order.channel or "whatsapp"
-    q = select(Conversation).where(Conversation.channel == ch)
     if ch == "whatsapp":
-        q = q.where(Conversation.wa_id == order.wa_id)
-    else:
-        q = q.where(Conversation.external_id == order.wa_id)
-    return (await db.execute(q)).scalars().first()
+        conv = (await db.execute(
+            select(Conversation).where(Conversation.channel == ch,
+                                       Conversation.wa_id == order.wa_id)
+        )).scalars().first()
+        return conv, (conv.wa_id if conv else None)
+    if order.person_id is not None:
+        conv = (await db.execute(
+            select(Conversation).where(Conversation.channel == ch,
+                                       Conversation.person_id == order.person_id)
+        )).scalars().first()
+        if conv is not None:
+            return conv, (conv.external_id or conv.wa_id)
+    # Fallback: the buyer's phone may ALSO have a WhatsApp thread — remind there.
+    conv = (await db.execute(
+        select(Conversation).where(Conversation.channel == "whatsapp",
+                                   Conversation.wa_id == order.wa_id)
+    )).scalars().first()
+    return conv, (conv.wa_id if conv else None)
 
 
 async def find_unpaid(db, redis=None) -> list[dict]:
@@ -126,11 +146,12 @@ async def find_unpaid(db, redis=None) -> list[dict]:
             o.payment_status = "paid"
             await db.commit()
             continue
-        conv = await _conversation_for(db, o)
-        if conv is None or conv.intercept_mode != InterceptMode.ai \
+        conv, recipient = await _conversation_for(db, o)
+        if conv is None or recipient is None \
+                or conv.intercept_mode != InterceptMode.ai \
                 or conv.status != ConvStatus.open:
             continue                                   # human-handled / closed
-        out.append({"order": o, "conv": conv, "to": o.wa_id})
+        out.append({"order": o, "conv": conv, "to": recipient})
     return out
 
 

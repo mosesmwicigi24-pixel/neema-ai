@@ -51,7 +51,8 @@ PUBLIC_COMMENT_TOOLS = [t for t in TOOLS if t["name"] in _PUBLIC_COMMENT_TOOL_NA
 # Read-only, non-sending tools for DRAFT mode: the agent may look things up (real
 # prices, the cart, order status) to compose an informed draft, but must never
 # create an order, change the cart, or send anything (no send_product_cards).
-_READONLY_TOOL_NAMES = {"search_catalog", "get_cart", "check_order_status"}
+_READONLY_TOOL_NAMES = {"search_catalog", "get_cart", "check_order_status",
+                        "church_calendar"}   # pure computation — drafts may check the season
 
 
 def _public_comment_addendum(currency: str = "USD") -> str:
@@ -194,6 +195,10 @@ async def _history(db: AsyncSession, key: str, limit: int = 20,
         (Message.channel == channel) & (Message.external_id == key))
     rows = list(reversed((await db.execute(
         select(Message).where(where)
+        # Internal NOTES are operator-private (escalation notes, call summaries,
+        # silent-decision records) — they were never sent to the customer and must
+        # NEVER reach the model as assistant turns it could echo back.
+        .where(Message.media_type.is_(None) | (Message.media_type != "note"))
         .order_by(Message.created_at.desc()).limit(limit)
     )).scalars().all()))
     msgs: list[dict] = []
@@ -290,7 +295,10 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     else:
         user = (await db.execute(
             select(User).where(User.wa_id == wa_id))).scalar_one_or_none()
-        loc = resolve_country(wa_id) or {}
+        # A web session key ("web_<sha1>") is NOT a phone — its hex digits used to
+        # resolve to a random country/currency. No phone → no country claim.
+        from app.core.phone import is_plausible_phone as _plausible
+        loc = (resolve_country(wa_id) or {}) if _plausible(wa_id) else {}
         currency = "KES" if (loc.get("country_iso") or "").upper() == "KE" else "USD"
         customer_name = (user.name if user else "") or ""
         source_post = None
@@ -394,7 +402,8 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
 
     ctx = ToolContext(db=db, redis=redis, wa_id=key, channel=channel,
                       currency=currency, usd_rate=settings.usd_kes_rate,
-                      seen_products=(product_sink if product_sink is not None else []))
+                      seen_products=(product_sink if product_sink is not None else []),
+                      read_only=read_only)
     totals = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0}
 
     def _accumulate(u: dict) -> None:

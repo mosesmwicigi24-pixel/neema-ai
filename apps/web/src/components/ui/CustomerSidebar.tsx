@@ -768,17 +768,10 @@ export function CustomerSidebar({
             new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
     )[0];
 
-    const computedScore = Math.min(
-        100,
-        Math.round(
-            Math.min(customerOrders.length * 15, 45) +
-                (totalSpent > 10000 ? 30 : totalSpent > 3000 ? 15 : 0) +
-                (profile?.email ? 10 : 0) +
-                (profile?.name ? 10 : 0) +
-                (profile?.location ? 5 : 0) +
-                ((profile?.channels?.length ?? 0) > 1 ? 15 : 0),
-        ),
-    );
+    // The SERVER owns the score (it ranks the leads list on it). This hero used to
+    // re-derive it with the old email-based formula and contradicted the breakdown
+    // rendered further down the same panel.
+    const computedScore = Math.min(100, Math.round(profile?.lead_score ?? 0));
 
     if (loading) {
         return (

@@ -21,13 +21,21 @@ from app.models.user import User
 _log = logging.getLogger("neema.agent")
 
 # Forward-only rank; won/lost are terminal (handled separately).
-_STAGE_RANK = {"new": 0, "contacted": 1, "qualified": 2, "proposal": 3, "negotiating": 4, "won": 5}
+# NOTE: the stage id is "negotiation" — the dashboard Kanban's column id.
+# The old "negotiating" spelling made those leads vanish from the board.
+_STAGE_RANK = {"new": 0, "contacted": 1, "qualified": 2, "proposal": 3, "negotiation": 4, "won": 5}
+
+
+def normalise_stage(s: str | None) -> str:
+    """Map legacy spellings to the canonical stage ids."""
+    s = (s or "new").strip().lower()
+    return "negotiation" if s == "negotiating" else s
 
 
 def derive_lead_stage(user: User, orders: list) -> str:
     """A stage from concrete signals — the AI's read of where this lead is."""
     if any(getattr(o, "hub_order_id", None) for o in orders):
-        return "negotiating"                       # placed an order, awaiting payment
+        return "negotiation"                       # placed an order, awaiting payment
     if user and user.name and (user.email or user.country):
         return "qualified"                         # a real prospect with details
     if orders or (user and getattr(user, "last_message_at", None)):
@@ -40,7 +48,7 @@ def apply_signals(state: dict | None, derived_stage: str, country: str | None) -
     Respects a manual stage and terminal won/lost."""
     state = dict(state or {})
     changed = False
-    current = state.get("lead_stage", "new")
+    current = normalise_stage(state.get("lead_stage", "new"))
     if state.get("lead_stage_source") != "manual" and current not in ("won", "lost"):
         if _STAGE_RANK.get(derived_stage, 0) > _STAGE_RANK.get(current, 0):
             state["lead_stage"] = derived_stage

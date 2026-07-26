@@ -44,16 +44,24 @@ async def _load_store(db: AsyncSession, key: str, channel: str = "whatsapp"):
         user = await _load_user(db, key)
         if user is None:
             return None
-        person = await db.get(Person, user.person_id) if user.person_id else None
+        person = await _live_person(db, user.person_id) if user.person_id else None
         if person is None:
             return user
-        # Adopt a pre-existing WhatsApp-only cart onto the person, once.
+        # Adopt a pre-existing WhatsApp-only cart onto the person — as a MOVE, not
+        # a copy. Leaving the user-row copy behind re-armed the adoption after
+        # every clear: a bought basket resurrected on the next read (duplicate
+        # orders, post-purchase recovery nudges). Popping the old key makes the
+        # adoption genuinely once.
         if not read_cart(person.state).get("items") and read_cart(user.state).get("items"):
             from sqlalchemy.orm.attributes import flag_modified
             state = dict(person.state or {})
             state[_KEY] = read_cart(user.state)
             person.state = state
             flag_modified(person, "state")
+            u_state = dict(user.state or {})
+            u_state.pop(_KEY, None)
+            user.state = u_state
+            flag_modified(user, "state")
             await db.commit()
         return person
     ident = (await db.execute(
@@ -62,7 +70,19 @@ async def _load_store(db: AsyncSession, key: str, channel: str = "whatsapp"):
     )).scalar_one_or_none()
     if ident is None:
         return None
-    return await db.get(Person, ident.person_id)
+    return await _live_person(db, ident.person_id)
+
+
+async def _live_person(db: AsyncSession, person_id) -> Person | None:
+    """The SURVIVING person — follows the merge tombstone chain, so a contact
+    whose person was merged (e.g. a ref-linked web visitor pinned to the old row)
+    still reads and writes the one live cart/measurements store."""
+    person = await db.get(Person, person_id) if person_id else None
+    hops = 0
+    while person is not None and person.merged_into_id and hops < 5:
+        person = await db.get(Person, person.merged_into_id)
+        hops += 1
+    return person
 
 
 def read_cart(state: dict | None) -> dict:

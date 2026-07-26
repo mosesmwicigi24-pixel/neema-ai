@@ -118,6 +118,30 @@ async def merge_persons(
         if getattr(secondary, "parish_id", None) and not getattr(primary, "parish_id", None):
             primary.parish_id = secondary.parish_id
 
+    # CRM NOTES (incl. call-transcription summaries) live on the USER rows, and the
+    # secondary's user is hidden from the CRM after a merge — carry its notes onto
+    # the primary's user so nothing an operator (or a call summary) wrote is lost.
+    try:
+        from app.models.user import User as _User
+        sec_users = (await db.execute(select(_User).where(
+            _User.person_id == secondary_person_id))).scalars().all()
+        pri_user = (await db.execute(select(_User).where(
+            _User.person_id == primary_person_id))).scalars().first()
+        if pri_user is not None:
+            from sqlalchemy.orm.attributes import flag_modified as _fm
+            pstate = dict(pri_user.state or {})
+            existing = (pstate.get("crm_notes") or "").strip()
+            for su in sec_users:
+                extra = ((su.state or {}).get("crm_notes") or "").strip()
+                if extra and extra not in existing:
+                    existing = f"{existing}\n\n{extra}".strip() if existing else extra
+            if existing != (pstate.get("crm_notes") or "").strip():
+                pstate["crm_notes"] = existing
+                pri_user.state = pstate
+                _fm(pri_user, "state")
+    except Exception:
+        pass   # notes carry is best-effort — never block the merge
+
     # 4. Tombstone the secondary person (kept, never deleted → reversible).
     if secondary is not None:
         secondary.merged_into_id = primary_person_id
