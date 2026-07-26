@@ -125,12 +125,25 @@ async def build_memory_context(db: AsyncSession, redis, wa_id: str, user: User |
         facts = facts + [f for f in pfacts if f not in facts]
     person_id = store.id if (channel != "whatsapp" and isinstance(store, Person)) else None
     orders = await _recent_orders_summary(db, wa_id, person_id=person_id)
-    if not facts and not orders:
+    # Sizes already on file — so a returning customer is never re-measured. Read
+    # through the measurements service (person-first), not `store`, so figures taken
+    # on the website or Messenger surface on WhatsApp too.
+    sizes = ""
+    try:
+        from app.agent import measurements as mm
+        sizes = mm.describe(await mm.get_measurements(db, wa_id, channel))
+    except Exception:
+        sizes = ""
+    if not facts and not orders and not sizes:
         return None
 
     parts = []
     if facts:
         parts.append("Known facts:\n" + "\n".join(f"- {f}" for f in facts))
+    if sizes:
+        parts.append("Measurements on file: " + sizes +
+                     "\n(Confirm these instead of asking again — "
+                     "\"same measurements as last time?\")")
     if orders:
         parts.append("Past orders (most recent first):\n" + "\n".join(f"- {o}" for o in orders))
     return "\n\n".join(parts)

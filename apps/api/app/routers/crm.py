@@ -58,6 +58,16 @@ def _days_since(dt) -> float | None:
     return (datetime.now(timezone.utc) - d).total_seconds() / 86400 if d else None
 
 
+def _measurements_of(*states) -> dict:
+    """The customer's sizes from whichever store holds them (person first)."""
+    from app.agent.measurements import visible, read_measurements
+    for st in states:
+        m = visible(read_measurements(st))
+        if m:
+            return m
+    return {}
+
+
 def _cart_size(*states) -> int:
     """Items sitting in this customer's cart, from whichever store holds it."""
     for st in states:
@@ -309,6 +319,8 @@ def _build_profile(
         "lead_score":     lead_score,
         "phone_verified": phone_verified,
         "cart_items":     cart_items,
+        # Sizes on file — so the team can see them without digging through the chat.
+        "measurements":   _measurements_of(person_state, user.state),
         # The itemised score, straight from the scoring function — the panel renders
         # this instead of re-deriving it (which had already drifted: it omitted the
         # location points entirely).

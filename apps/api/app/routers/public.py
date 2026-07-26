@@ -239,6 +239,17 @@ async def submit_measurement(
     db.add(enq)
     await db.commit()
 
+    # Put the figures on the customer's file too, so Neema recalls them on ANY
+    # channel next time ("same measurements as last time?") instead of making a
+    # returning customer be measured all over again. Best-effort.
+    if isinstance(measurements, dict) and measurements:
+        try:
+            from app.agent import measurements as mm
+            await mm.save_measurements(db, user.wa_id, measurements,
+                                       channel="whatsapp", source="website form")
+        except Exception:
+            pass
+
     if redis is not None:
         try:
             import json

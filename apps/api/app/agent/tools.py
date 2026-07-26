@@ -258,6 +258,27 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "save_measurements",
+        "description": "Save the customer's body measurements so we NEVER ask for them "
+                       "again. Call this the moment they give you any figure — chest, "
+                       "length, sleeve, waist, shoulder, height, head size, collar, "
+                       "shoe — even one at a time, and even mid-sentence. Pass what "
+                       "they said, with units as they said them (e.g. chest '42in', "
+                       "height '5ft10'). Merges with what's already on file, so "
+                       "sending one corrected figure never wipes the rest.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "measurements": {
+                    "type": "object",
+                    "description": "Label → value, e.g. {\"chest\": \"42in\", \"length\": \"58in\"}",
+                    "additionalProperties": {"type": "string"},
+                },
+            },
+            "required": ["measurements"],
+        },
+    },
+    {
         "name": "send_product_cards",
         "description": "Show the customer PRODUCT CARDS — each with the product photo, name, "
                        "price and a 'View' button that opens the product page. This is the "
@@ -1051,6 +1072,21 @@ async def _record_shared_media(ctx: "ToolContext", *, media_url: str | None, cap
         _log.warning("record shared image failed for %s: %s", ctx.wa_id, exc)
 
 
+async def _save_measurements(args: dict, ctx: ToolContext) -> dict:
+    """Put the customer's sizes on file, on their PERSON — so the figures they gave
+    on Messenger are the figures Neema already knows on WhatsApp next time."""
+    from app.agent import measurements as mm
+    fields = args.get("measurements")
+    if not isinstance(fields, dict) or not fields:
+        return {"error": "pass the measurements as label → value, e.g. {\"chest\": \"42in\"}"}
+    saved = await mm.save_measurements(ctx.db, ctx.wa_id, fields, ctx.channel, source="chat")
+    if not saved:
+        return {"ok": False, "note": "couldn't save — no profile for this contact yet"}
+    return {"ok": True, "measurements": mm.visible(saved),
+            "note": "On file. Don't ask for these again — next time confirm them "
+                    "('same measurements as last time?') instead of re-asking."}
+
+
 async def _send_product_cards(args: dict, ctx: ToolContext) -> dict:
     """Show the customer product cards (photo + name + price + a View link to the
     product page). On WhatsApp these go out as rich interactive cards immediately;
@@ -1209,4 +1245,5 @@ _HANDLERS = {
     "whatsapp_checkout_link": _whatsapp_checkout_link,
     "share_catalog": _share_catalog,
     "send_product_cards": _send_product_cards,
+    "save_measurements": _save_measurements,
 }
