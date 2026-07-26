@@ -186,3 +186,30 @@ def test_order_identity_never_bills_a_web_key(monkeypatch):
     user.phone = "+254700706875"
     phone2, _, _ = asyncio.run(tools._order_identity(ctx))
     assert phone2 == "254700706875"
+
+
+# ── notes: the lost-update race is closed by a three-way merge ───────────────
+
+def test_notes_merge_keeps_concurrent_appends_and_respects_deletions():
+    from app.routers.crm import merge_notes
+    base = "Prefers black.\n\nOld note."
+    mine = "Prefers black cassocks."                      # edited + deleted "Old note."
+    current = base + "\n\n📞 Call (27 Jul): wants 2 mitres."   # appended meanwhile
+    merged = merge_notes(base, mine, current)
+    assert "Prefers black cassocks." in merged            # operator's edit kept
+    assert "📞 Call (27 Jul): wants 2 mitres." in merged  # concurrent append survives
+    assert "Old note." not in merged                      # deliberate deletion respected
+
+
+def test_notes_merge_plain_save_without_concurrency_is_identity():
+    from app.routers.crm import merge_notes
+    assert merge_notes("a", "a edited", "a") == "a edited"
+    assert merge_notes(None, "first note", None) == "first note"
+    assert merge_notes("", "", "") == ""
+
+
+def test_notes_merge_without_a_base_still_never_loses_appends():
+    from app.routers.crm import merge_notes
+    # An old client that sends no base: current-only paragraphs still survive.
+    merged = merge_notes(None, "my text", "📞 Call summary.")
+    assert "my text" in merged and "📞 Call summary." in merged

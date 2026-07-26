@@ -58,6 +58,23 @@ def _days_since(dt) -> float | None:
     return (datetime.now(timezone.utc) - d).total_seconds() / 86400 if d else None
 
 
+def merge_notes(base: str | None, mine: str | None, current: str | None) -> str:
+    """Three-way paragraph merge for the Notes field — closes the lost-update race.
+
+    The operator edits notes from a snapshot (`base`) while the server appends
+    concurrently (call-transcription summaries, merges). A plain overwrite threw
+    those appends away. Instead: keep the operator's text exactly as written
+    (their deletions of paragraphs that existed in `base` are respected — they
+    deleted them on purpose), then re-append any paragraph that appeared AFTER
+    their snapshot and isn't already in their text. Nothing concurrent is lost;
+    nothing deliberately deleted comes back."""
+    def paras(s):
+        return [p.strip() for p in (s or "").split("\n\n") if p.strip()]
+    base_p, mine_p, cur_p = paras(base), paras(mine), paras(current)
+    appended_since_base = [p for p in cur_p if p not in base_p and p not in mine_p]
+    return "\n\n".join(mine_p + appended_since_base)
+
+
 def _measurements_of(*states) -> dict:
     """The customer's sizes from whichever store holds them (person first)."""
     from app.agent.measurements import visible, read_measurements
@@ -743,7 +760,13 @@ async def update_customer(
     for field in ("lead_stage", "tags", "crm_notes", "notes", "lead_source"):
         if field in body:
             key = "crm_notes" if field == "notes" else field
-            state[key] = body[field]
+            if key == "crm_notes":
+                # Merge, don't overwrite — a call summary appended while the
+                # operator was typing must survive their save.
+                state[key] = merge_notes(body.get("notes_base"), body[field],
+                                         state.get("crm_notes"))
+            else:
+                state[key] = body[field]
     # An operator-set stage is authoritative — lock it so the AI won't re-advance it.
     if "lead_stage" in body:
         state["lead_stage_source"] = "manual"
@@ -1018,7 +1041,8 @@ async def update_lead(
     if "tags" in body:
         state["tags"] = body["tags"]
     if "notes" in body:
-        state["crm_notes"] = body["notes"]
+        state["crm_notes"] = merge_notes(body.get("notes_base"), body["notes"],
+                                         state.get("crm_notes"))
 
     user.state = state
     await db.commit()

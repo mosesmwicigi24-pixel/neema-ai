@@ -1476,7 +1476,14 @@ export function CustomerSidebar({
                                     <div className="flex gap-2 mt-1.5">
                                         <button
                                             onClick={() => {
-                                                patch({ notes: noteDraft });
+                                                // notes_base = the snapshot this edit started
+                                                // from, so the server can MERGE instead of
+                                                // overwriting anything appended meanwhile
+                                                // (e.g. a call summary).
+                                                patch({
+                                                    notes: noteDraft,
+                                                    notes_base: profile.notes ?? "",
+                                                } as any);
                                                 setEditNotes(false);
                                             }}
                                             className="text-[10px] text-emerald-600 font-semibold"
