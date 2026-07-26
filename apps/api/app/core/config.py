@@ -20,6 +20,13 @@ class Settings(BaseSettings):
     # "Hello {{1}}, this is Bethany House…". Name + language must match the
     # approved template exactly.
     wa_invite_template: str = "whatsapp_invite"
+    # Approved MARKETING template for seasonal outreach (app/jobs/seasonal_outreach.py).
+    # Messaging a customer who hasn't written in 24h REQUIRES an approved template —
+    # free-form is not allowed. Body should take {{1}}=first name, {{2}}=season,
+    # {{3}}=colour, {{4}}=weeks away. Empty (the default) means the sweep will not
+    # message anyone outside the window; it only lists them.
+    wa_seasonal_template: str = ""
+    wa_seasonal_lang: str = "en"
     # WhatsApp voice calling: TURN/STUN for the browser softphone's WebRTC media.
     # The dashboard fetches these to build its RTCPeerConnection. coturn on our own
     # box supplies turn_url/username/credential; a public STUN is the always-on
