@@ -258,6 +258,16 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "church_calendar",
+        "description": "The Church season right now, the vestment COLOUR it calls for, "
+                       "and which seasons are coming up soon. Use it whenever colour or "
+                       "timing matters — 'what colour for Advent?', 'will it be ready for "
+                       "Easter?', or when a customer is choosing a vestment and the next "
+                       "season is near. Never guess a season's date or colour: the dates "
+                       "move every year (Easter is a moveable feast) — call this.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
         "name": "save_measurements",
         "description": "Save the customer's body measurements so we NEVER ask for them "
                        "again. Call this the moment they give you any figure — chest, "
@@ -1072,6 +1082,18 @@ async def _record_shared_media(ctx: "ToolContext", *, media_url: str | None, cap
         _log.warning("record shared image failed for %s: %s", ctx.wa_id, exc)
 
 
+async def _church_calendar(args: dict, ctx: ToolContext) -> dict:
+    """Where we are in the Church year — the one demand signal this business can
+    know in advance. Pure computation, no network."""
+    from app.core import liturgical
+    s = liturgical.summary()
+    return {**s,
+            "note": "Colours are what the parish must WEAR that season. A season in "
+                    "`order_now` is close enough that made-to-order should be started "
+                    "now — mention it naturally if they're already shopping, never as "
+                    "a hard sell."}
+
+
 async def _save_measurements(args: dict, ctx: ToolContext) -> dict:
     """Put the customer's sizes on file, on their PERSON — so the figures they gave
     on Messenger are the figures Neema already knows on WhatsApp next time."""
@@ -1246,4 +1268,5 @@ _HANDLERS = {
     "share_catalog": _share_catalog,
     "send_product_cards": _send_product_cards,
     "save_measurements": _save_measurements,
+    "church_calendar": _church_calendar,
 }

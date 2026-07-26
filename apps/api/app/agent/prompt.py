@@ -24,6 +24,19 @@ def build_system_prompt(*, customer_name: str = "", country: str = "", country_i
     where = f"They appear to be in {country}. " if country else ""
     money = "Kenyan Shillings (KES)" if currency == "KES" else "US Dollars (USD)"
     daypart = _nairobi_daypart()
+    # The Church year is this business's demand signal: vestments are bought by
+    # season, and made-to-order must start weeks ahead. Neema should know it
+    # without being asked. Best-effort — never break a reply over a date.
+    try:
+        from app.core import liturgical
+        church = "\n\nTHE CHURCH YEAR — you know this without being told\n" + \
+                 "\n".join(f"- {ln}" for ln in liturgical.brief().split("\n")) + \
+                 "\n- Use it naturally: help them pick the RIGHT colour for the season " \
+                 "they're buying for, and when a season is close, ask (once, warmly) " \
+                 "whether they're ready for it. Never invent a date or colour — " \
+                 "`church_calendar` has the real ones."
+    except Exception:
+        church = ""
     is_kenya = currency == "KES"
     # Business facts (location, hours, delivery, payment, contacts) so Neema can
     # answer logistics/FAQ questions — not just the catalogue. Editable via config.
@@ -349,4 +362,4 @@ STYLE
 - If it's a piece we could make to order, offer that rather than turning them away.
 
 Move the conversation toward a confirmed order, but never pushy. Serve first.
-{business}"""
+{business}{church}"""

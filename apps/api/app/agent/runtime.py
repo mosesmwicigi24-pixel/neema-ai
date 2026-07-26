@@ -38,7 +38,8 @@ META_CHANNELS = ("messenger", "facebook", "instagram")
 _META_TOOL_NAMES = {"search_catalog", "get_cart", "update_cart", "create_order",
                     "check_order_status", "remember", "handoff_to_human",
                     "whatsapp_checkout_link", "share_catalog", "send_product_cards",
-                    "capture_contact", "pause_conversation", "save_measurements"}
+                    "capture_contact", "pause_conversation", "save_measurements",
+                    "church_calendar"}
 MESSENGER_TOOLS = [t for t in TOOLS if t["name"] in _META_TOOL_NAMES]
 
 # A PUBLIC comment reply is short and read-only — it just needs the real price, so
