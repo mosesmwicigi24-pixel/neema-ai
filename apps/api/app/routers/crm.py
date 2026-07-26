@@ -209,6 +209,7 @@ def _build_profile(
     identities: list | None = None,
     person_state: dict | None = None,
     person_name: str | None = None,
+    parish: dict | None = None,
 ) -> dict:
     # Orders + spend: the hub is the source of truth (every channel — POS, web
     # AND WhatsApp). Fall back to Neema's local WhatsApp order_events only when
@@ -319,6 +320,8 @@ def _build_profile(
         "lead_score":     lead_score,
         "phone_verified": phone_verified,
         "cart_items":     cart_items,
+        # The institution behind the individual — the priest orders, the parish buys.
+        "parish":         parish,
         # Sizes on file — so the team can see them without digging through the chat.
         "measurements":   _measurements_of(person_state, user.state),
         # The itemised score, straight from the scoring function — the panel renders
@@ -539,10 +542,20 @@ async def get_customer(
 
     person_state = None
     person_name = None
+    parish_info = None
     if user.person_id is not None:
         _p = await db.get(Person, user.person_id)
         person_state = (_p.state or None) if _p is not None else None
         person_name = _p.display_name if _p is not None else None
+        if _p is not None and getattr(_p, "parish_id", None):
+            try:
+                from app.models.parish import Parish
+                _par = await db.get(Parish, _p.parish_id)
+                if _par is not None:
+                    parish_info = {"id": str(_par.id), "name": _par.name,
+                                   "location": _par.location}
+            except Exception:
+                pass
         # A captured phone (Messenger customer shared their number) shows as a
         # clickable WhatsApp entry in Cross-Channel Identity — unless a real
         # whatsapp identity already covers it.
@@ -559,7 +572,7 @@ async def get_customer(
                     confidence=ph.confidence)]
     return _build_profile(user, orders, conversations, history, hub=hub,
                           identities=identities, person_state=person_state,
-                          person_name=person_name)
+                          person_name=person_name, parish=parish_info)
 
 
 # ── Identity spine health (ops trust the backfill in prod) ────────────────────
@@ -1261,3 +1274,44 @@ async def demand_report(
             "people": sum(r["people"] for r in rows),
         },
     }
+
+
+# ── Parish accounts ───────────────────────────────────────
+# The institution behind the individuals: who our biggest CHURCH customers are,
+# with every member's orders rolled up. The priest, the secretary and the choir
+# master are three contacts — one buyer.
+
+@router.get("/parishes")
+async def parish_report(
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    from app.models.parish import Parish
+    parishes = (await db.execute(select(Parish))).scalars().all()
+    out = []
+    for p in parishes:
+        people = (await db.execute(
+            select(Person).where(Person.parish_id == p.id,
+                                 Person.merged_into_id.is_(None)))).scalars().all()
+        pids = [x.id for x in people]
+        members = len(pids)
+        if not pids:
+            out.append({"id": str(p.id), "name": p.name, "location": p.location,
+                        "members": 0, "orders": 0, "spent": 0.0})
+            continue
+        users = (await db.execute(
+            select(User).where(User.person_id.in_(pids)))).scalars().all()
+        wa_ids = [u.wa_id for u in users if u.wa_id]
+        orders = []
+        if wa_ids:
+            orders = (await db.execute(
+                select(OrderEvent).where(OrderEvent.wa_id.in_(wa_ids)))).scalars().all()
+        out.append({
+            "id": str(p.id), "name": p.name, "location": p.location,
+            "members": members,
+            "orders": len(orders),
+            "spent": float(sum(float(o.subtotal or 0) for o in orders)),
+        })
+    out.sort(key=lambda r: (r["spent"], r["orders"], r["members"]), reverse=True)
+    return {"parishes": out[:max(1, min(limit, 200))]}

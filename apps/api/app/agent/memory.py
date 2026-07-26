@@ -134,10 +134,24 @@ async def build_memory_context(db: AsyncSession, redis, wa_id: str, user: User |
         sizes = mm.describe(await mm.get_measurements(db, wa_id, channel))
     except Exception:
         sizes = ""
-    if not facts and not orders and not sizes:
+    # Their parish — the institutional buyer behind this individual contact.
+    parish_line = ""
+    try:
+        pid = getattr(store, "person_id", None) if channel == "whatsapp" else (
+            store.id if isinstance(store, Person) else None)
+        if pid is not None:
+            from app.services.parish import parish_of_person
+            p = await parish_of_person(db, pid)
+            if p is not None:
+                parish_line = f"Parish: {p.name}" + (f" ({p.location})" if p.location else "")
+    except Exception:
+        parish_line = ""
+    if not facts and not orders and not sizes and not parish_line:
         return None
 
     parts = []
+    if parish_line:
+        parts.append(parish_line)
     if facts:
         parts.append("Known facts:\n" + "\n".join(f"- {f}" for f in facts))
     if sizes:

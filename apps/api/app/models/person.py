@@ -33,6 +33,11 @@ class Person(Base):
     # survivor and merged_at records when. The row is never deleted, so a merge
     # is reversible by audit. Filled by the real merge (crm merge_customers);
     # NULL for every live person.
+    # The institution this person belongs to (see models/parish.py) — the priest
+    # orders, the parish buys. NULL until captured in conversation.
+    parish_id     : Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("parishes.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     merged_into_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("persons.id", ondelete="SET NULL"), nullable=True, index=True
     )

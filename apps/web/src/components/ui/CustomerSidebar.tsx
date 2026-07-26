@@ -82,6 +82,8 @@ export interface CustomerProfile {
     cart_items?: number;
     /** The itemised score, computed server-side so the panel matches the ranking. */
     lead_score_breakdown?: { label: string; pts: number; max: number }[];
+    /** The institution behind the individual — the priest orders, the parish buys. */
+    parish?: { id: string; name: string; location?: string | null } | null;
     channels: CustomerChannel[];
     merged_ids: string[];
     // Identity spine (real cross-channel data from the backend).
@@ -1236,6 +1238,15 @@ export function CustomerSidebar({
                                 onChange={(v) => patch({ location: v })}
                                 placeholder="City / Estate"
                             />
+                            {profile.parish?.name && (
+                                <div className="flex items-start justify-between py-1.5 border-b border-stone-50">
+                                    <span className="text-[10px] text-stone-400 w-20 flex-shrink-0 pt-0.5">Parish</span>
+                                    <span className="text-[11px] text-stone-700 text-right flex-1">
+                                        ⛪ {profile.parish.name}
+                                        {profile.parish.location ? ` · ${profile.parish.location}` : ""}
+                                    </span>
+                                </div>
+                            )}
                             <EditableField
                                 label="Age"
                                 value={profile.age ? String(profile.age) : ""}

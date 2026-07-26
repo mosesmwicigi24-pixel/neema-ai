@@ -108,8 +108,15 @@ async def merge_persons(
         p_items = ((pst.get("agent_cart") or {}).get("items")) or []
         if s_items and not p_items:
             pst["agent_cart"] = s["agent_cart"]
+        # MEASUREMENTS must survive a merge — sizes given on Messenger are the
+        # sizes on WhatsApp. Only when the primary has none; never clobber.
+        if s.get("measurements") and not pst.get("measurements"):
+            pst["measurements"] = s["measurements"]
         primary.state = pst
         flag_modified(primary, "state")
+        # PARISH affiliation carries too: the institution follows the person.
+        if getattr(secondary, "parish_id", None) and not getattr(primary, "parish_id", None):
+            primary.parish_id = secondary.parish_id
 
     # 4. Tombstone the secondary person (kept, never deleted → reversible).
     if secondary is not None:

@@ -258,6 +258,23 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "save_parish",
+        "description": "Record which CHURCH/PARISH this customer belongs to, the moment "
+                       "they mention it ('I'm from St Mary's Nakuru', 'our cathedral needs "
+                       "…', 'kanisa letu…'). The parish is the real buyer behind many "
+                       "individual contacts — recording it groups the priest, the secretary "
+                       "and the choir master into one institutional customer. Pass the "
+                       "church name as they said it, and the town if mentioned.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "the church/parish name, e.g. \"St Mary's Nakuru\""},
+                "location": {"type": "string", "description": "town/area if they mentioned it"},
+            },
+            "required": ["name"],
+        },
+    },
+    {
         "name": "church_calendar",
         "description": "The Church season right now, the vestment COLOUR it calls for, "
                        "and which seasons are coming up soon. Use it whenever colour or "
@@ -1095,6 +1112,44 @@ async def _record_shared_media(ctx: "ToolContext", *, media_url: str | None, cap
         _log.warning("record shared image failed for %s: %s", ctx.wa_id, exc)
 
 
+async def _person_id_of(ctx: "ToolContext"):
+    """This contact's person_id: WhatsApp → the User row; Meta → the Identity."""
+    if ctx.channel == "whatsapp":
+        u = (await ctx.db.execute(
+            select(User).where(User.wa_id == ctx.wa_id))).scalar_one_or_none()
+        return u.person_id if u else None
+    from app.models.person import Identity
+    ident = (await ctx.db.execute(select(Identity).where(
+        Identity.channel == ctx.channel,
+        Identity.external_id == ctx.wa_id))).scalar_one_or_none()
+    return ident.person_id if ident else None
+
+
+async def _save_parish(args: dict, ctx: ToolContext) -> dict:
+    """Attach this customer to their church — the institutional buyer behind the
+    individual contact. Also banked as a memory fact so it survives everywhere."""
+    from app.services import parish as parish_svc
+    name = str(args.get("name") or "").strip()
+    if not name:
+        return {"error": "pass the church/parish name"}
+    person_id = await _person_id_of(ctx)
+    if person_id is None:
+        return {"ok": False, "note": "no linked profile yet — the name was noted in memory only"}
+    p = await parish_svc.attach_person(ctx.db, person_id, name,
+                                       location=(args.get("location") or None))
+    # Bank it as a durable fact too, so it surfaces in context on every channel.
+    try:
+        await memorymod.add_fact(ctx.db, ctx.wa_id, f"church: {name}", channel=ctx.channel)
+    except Exception:
+        pass
+    if p is None:
+        return {"ok": False,
+                "note": "not recorded as a parish (unclear name, or they already "
+                        "belong to a different one — a colleague can change it)"}
+    return {"ok": True, "parish": p.name,
+            "note": "Parish on file. Their orders now count toward this church's account."}
+
+
 async def _church_calendar(args: dict, ctx: ToolContext) -> dict:
     """Where we are in the Church year — the one demand signal this business can
     know in advance. Pure computation, no network."""
@@ -1282,4 +1337,5 @@ _HANDLERS = {
     "send_product_cards": _send_product_cards,
     "save_measurements": _save_measurements,
     "church_calendar": _church_calendar,
+    "save_parish": _save_parish,
 }

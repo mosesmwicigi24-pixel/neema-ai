@@ -8,6 +8,8 @@ from app.models.agent import Agent
 from app.models.user import User
 from app.models.person import Person, Identity
 from app.models.call import Call  # noqa: F401 — register the mapper at boot
+from app.models.parish import Parish  # noqa: F401 — Person.parish_id FK needs the table registered
+from app.models.demand_signal import DemandSignal  # noqa: F401 — register at boot
 from app.models.intercept import Intercept, InterceptAction
 from app.schemas.conversation import ConversationListItem, InterceptRequest
 from app.services.conversation import (

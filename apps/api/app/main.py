@@ -63,6 +63,18 @@ MIGRATION_STATEMENTS = [
     "ALTER TABLE calls ADD COLUMN IF NOT EXISTS transcript_lang VARCHAR(12)",
     "ALTER TABLE calls ADD COLUMN IF NOT EXISTS summary TEXT",
     "ALTER TABLE calls ADD COLUMN IF NOT EXISTS transcript_status VARCHAR(20) DEFAULT 'none'",
+    # Parishes — the institution behind the individual (models/parish.py). Idempotent.
+    """
+    CREATE TABLE IF NOT EXISTS parishes (
+        id         UUID PRIMARY KEY,
+        name       VARCHAR(200) NOT NULL,
+        norm       VARCHAR(200) NOT NULL UNIQUE,
+        location   VARCHAR(200),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    "ALTER TABLE persons ADD COLUMN IF NOT EXISTS parish_id UUID REFERENCES parishes(id) ON DELETE SET NULL",
+    "CREATE INDEX IF NOT EXISTS ix_persons_parish ON persons (parish_id)",
     # Unmet demand — what customers asked for that we couldn't sell (models/demand_signal.py).
     """
     CREATE TABLE IF NOT EXISTS demand_signals (

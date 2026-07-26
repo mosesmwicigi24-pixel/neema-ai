@@ -128,9 +128,44 @@ async def find_audience(db, season: str, today: date | None = None) -> list[dict
                 or conv.status != ConvStatus.open:
             continue
         user = (await db.execute(select(User).where(User.wa_id == key))).scalar_one_or_none()
+        parish_id = None
+        if user is not None and user.person_id is not None:
+            try:
+                from app.models.person import Person
+                person = await db.get(Person, user.person_id)
+                parish_id = getattr(person, "parish_id", None)
+            except Exception:
+                parish_id = None
         out.append({**info, "conv": conv, "name": (user.name if user else None),
+                    "parish_id": parish_id,
                     "open_window": await _window_open(db, conv)})
     return out
+
+
+def dedupe_by_parish(rows: list[dict]) -> tuple[list[dict], list[dict]]:
+    """One seasonal message per PARISH, not one per member. Three people from
+    St Mary's each getting the same Advent offer reads as spam and makes the
+    business look like it doesn't know they're one church — the MOST RECENT
+    buyer gets the message and speaks for the parish. People with no parish on
+    file are individuals and pass through untouched. Returns (keep, dropped)."""
+    # Pass 1: the winner per parish is the most recent buyer.
+    best: dict = {}
+    for r in rows:
+        pid = r.get("parish_id")
+        if pid is None:
+            continue
+        cur = best.get(pid)
+        if cur is None or (r.get("last_bought") or "") > (cur.get("last_bought") or ""):
+            best[pid] = r
+    # Pass 2: partition, preserving order.
+    keep, dropped = [], []
+    for r in rows:
+        pid = r.get("parish_id")
+        if pid is None or best.get(pid) is r:
+            keep.append(r)
+        else:
+            dropped.append(r)
+    return keep, dropped
 
 
 # Clergy titles are part of the name here — "Rev Grace", never "Grace", and never
@@ -242,6 +277,10 @@ async def run(send: bool, ignore_quiet_hours: bool = False,
         rows = await find_audience(db, season["season"])
     _log.info("%d customer(s) bought during %s in a previous year",
               len(rows), season["season"])
+    rows, same_parish = dedupe_by_parish(rows)
+    for d in same_parish:
+        _log.info("[SKIP (same parish)] %-9s %s — another member speaks for the parish",
+                  d["conv"].channel, d["to"] if "to" in d else d["wa_id"])
 
     if send and not ignore_quiet_hours and not within_quiet_hours():
         _log.warning("quiet hours (%02d:00-%02d:00 Nairobi) — nothing sent.",
