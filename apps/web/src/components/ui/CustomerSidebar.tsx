@@ -75,6 +75,9 @@ export interface CustomerProfile {
     hub_customer_id?: number | null;
     hub_customer_name?: string | null;
     lead_score: number;
+    /** A phone we can actually reach them on, proven (WhatsApp or a
+     *  deterministically-captured number) — scores 10, replacing "email known". */
+    phone_verified?: boolean;
     channels: CustomerChannel[];
     merged_ids: string[];
     // Identity spine (real cross-channel data from the backend).
@@ -1955,8 +1958,10 @@ export function CustomerSidebar({
                                     max: 30,
                                 },
                                 {
-                                    label: "Email known",
-                                    pts: profile.email ? 10 : 0,
+                                    // A reachable, proven phone — not an email we
+                                    // never ask for. WhatsApp-first business.
+                                    label: "Phone verified",
+                                    pts: profile.phone_verified ? 10 : 0,
                                     max: 10,
                                 },
                                 {

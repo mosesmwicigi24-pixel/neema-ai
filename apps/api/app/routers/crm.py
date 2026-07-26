@@ -31,14 +31,40 @@ router = APIRouter()
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _compute_lead_score(user: User, order_count: int, total_spent: float, channel_count: int) -> int:
+def _phone_verified(user: User, identities=None) -> bool:
+    """Do we have a phone we can ACTUALLY reach and sell to them on — proven, not
+    typed into a form?
+
+    WhatsApp is the proof: a wa_id is the number Meta verified when they messaged
+    us, so it can never be a typo or a fake. A phone captured deterministically
+    elsewhere (they told us on Messenger, or an M-Pesa payment matched it) counts
+    too. A Meta PSID is 16-17 digits and is_plausible_phone rejects it, so a
+    Messenger-only contact never counts as reachable by phone."""
+    if is_plausible_phone(getattr(user, "wa_id", None)):
+        return True
+    for i in (identities or []):
+        ext = getattr(i, "external_id", None)
+        if not is_plausible_phone(ext):
+            continue
+        if getattr(i, "channel", None) == "whatsapp":
+            return True
+        if getattr(i, "confidence", None) == "deterministic":
+            return True
+    return False
+
+
+def _compute_lead_score(user: User, order_count: int, total_spent: float,
+                        channel_count: int, phone_verified: bool = False) -> int:
+    """How real is this lead? Tuned for a WhatsApp-first business: a REACHABLE
+    phone is worth points, an email is not — we sell on WhatsApp, and an email we
+    never ask for was quietly costing every good customer 10 points."""
     score = 0
     score += min(order_count * 15, 45)
     if total_spent > 10000:
         score += 30
     elif total_spent > 3000:
         score += 15
-    if user.email:
+    if phone_verified:
         score += 10
     if user.name:
         score += 10
@@ -193,7 +219,9 @@ def _build_profile(
                 channel_map[ch]["last_seen"] = conv.last_message_at.isoformat()
 
     channels = list(channel_map.values())
-    lead_score = _compute_lead_score(user, order_count, total_spent, len(channels))
+    phone_verified = _phone_verified(user, identities)
+    lead_score = _compute_lead_score(user, order_count, total_spent, len(channels),
+                                     phone_verified=phone_verified)
     rhythm = _buying_rhythm(order_dates)
     tier = _customer_tier(order_count, total_spent, rhythm["days_since_last"])
     # Suggested stage stays on the local WhatsApp order_events — a pending
@@ -239,6 +267,7 @@ def _build_profile(
         "suggested_lead_stage": suggested_stage,
         "lead_source":    state.get("lead_source"),
         "lead_score":     lead_score,
+        "phone_verified": phone_verified,
         "channels":       channels,
         "merged_ids":     merged_ids,
         "person_id":         str(getattr(user, "person_id", None)) if getattr(user, "person_id", None) else None,
@@ -842,7 +871,8 @@ async def list_leads(
         convs = convs_result.scalars().all()
         channels = list({getattr(c, "channel", "whatsapp") or "whatsapp" for c in convs})
 
-        lead_score = _compute_lead_score(user, order_count, total_spent, len(channels))
+        lead_score = _compute_lead_score(user, order_count, total_spent, len(channels),
+                                         phone_verified=_phone_verified(user))
         rhythm = _buying_rhythm([o.created_at for o in orders])
         tier = _customer_tier(order_count, total_spent, rhythm["days_since_last"])
 
