@@ -31,11 +31,31 @@ async def _load_user(db: AsyncSession, wa_id: str) -> User | None:
 
 
 async def _load_store(db: AsyncSession, key: str, channel: str = "whatsapp"):
-    """The ORM object whose JSONB `state` owns this customer's cart: the User for
-    WhatsApp, the identity's Person for Meta. None when the contact doesn't
-    resolve (the cart then no-ops rather than silently losing items)."""
+    """The ORM object whose JSONB `state` owns this customer's cart.
+
+    ONE CART PER PERSON, wherever they are. Whenever the contact resolves to a
+    Person the cart lives on `persons.state` — so a cart started on Facebook or
+    Instagram is the SAME cart on WhatsApp (and vice versa) the moment identity
+    links them. A WhatsApp contact with no person yet falls back to its historical
+    home (`users.state`), and any cart already sitting there is carried onto the
+    person the first time one exists, so nothing in flight is ever lost.
+    None when the contact doesn't resolve (the cart no-ops rather than losing items)."""
     if channel == "whatsapp":
-        return await _load_user(db, key)
+        user = await _load_user(db, key)
+        if user is None:
+            return None
+        person = await db.get(Person, user.person_id) if user.person_id else None
+        if person is None:
+            return user
+        # Adopt a pre-existing WhatsApp-only cart onto the person, once.
+        if not read_cart(person.state).get("items") and read_cart(user.state).get("items"):
+            from sqlalchemy.orm.attributes import flag_modified
+            state = dict(person.state or {})
+            state[_KEY] = read_cart(user.state)
+            person.state = state
+            flag_modified(person, "state")
+            await db.commit()
+        return person
     ident = (await db.execute(
         select(Identity).where(Identity.channel == channel,
                                Identity.external_id == key)

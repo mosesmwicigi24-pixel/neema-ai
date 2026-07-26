@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -34,6 +34,11 @@ class ToolContext:
     currency: str = "KES"   # display currency for THIS customer (KES | USD)
     usd_rate: int = 100     # KES per 1 USD (config.usd_kes_rate)
     channel: str = "whatsapp"  # source channel (whatsapp | messenger | instagram)
+    # Catalogue rows the agent actually looked at this turn, in order — full hub
+    # dicts (so they carry `slug`, which the model's own view deliberately omits).
+    # Lets a caller link to the EXACT product the agent priced instead of
+    # re-guessing it from the reply text. Survives dataclasses.replace().
+    seen_products: list = field(default_factory=list)
 
 
 def _display(kes, ctx: "ToolContext"):
@@ -347,6 +352,10 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
                 row["price_note"] = ("price depends on the variant — quote the one the "
                                      "customer picks, or give the range and ask")
         results.append(row)
+        # Remember the FULL hub row (it has `slug`) so the caller can link to the
+        # exact product the agent priced — the model's row above omits the slug.
+        if p.get("slug"):
+            ctx.seen_products.append(p)
         if len(results) >= 8:
             break
     return {"count": len(results), "currency": ctx.currency, "results": results}

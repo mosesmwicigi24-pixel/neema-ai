@@ -269,7 +269,8 @@ async def _meta_market(db: AsyncSession, channel: str, key: str) -> tuple[str, d
 async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM,
                    media: dict | None = None,
                    *, channel: str = "whatsapp", external_id: str | None = None,
-                   public_comment: bool = False, read_only: bool = False) -> str:
+                   public_comment: bool = False, read_only: bool = False,
+                   product_sink: list | None = None) -> str:
     """Run one agent turn and return the reply text (does NOT send it).
 
     WhatsApp is the default and unchanged. For Messenger/Instagram, pass
@@ -391,7 +392,8 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             messages.insert(0, {"role": "user", "content": content})
 
     ctx = ToolContext(db=db, redis=redis, wa_id=key, channel=channel,
-                      currency=currency, usd_rate=settings.usd_kes_rate)
+                      currency=currency, usd_rate=settings.usd_kes_rate,
+                      seen_products=(product_sink if product_sink is not None else []))
     totals = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0}
 
     def _accumulate(u: dict) -> None:
@@ -770,16 +772,65 @@ def _pick(pool: list, seed: str) -> str:
     return pool[i]
 
 
-def _comment_public_reply(answer: str, dm_sent: bool, link: str, name_tag: str, seed: str) -> str:
-    """The PUBLIC comment text, given the agent's answer and whether the DM
-    landed. DM delivered → pull them to their inbox (never push WhatsApp in the
-    comment). DM failed → fall back to the tap-to-order WhatsApp link so a buyer
-    isn't stranded. No answer (over cap / agent failed) → a warm light invite."""
+def _comment_public_reply(answer: str, dm_sent: bool, link: str, name_tag: str, seed: str,
+                          product_link: str = "") -> str:
+    """The PUBLIC comment text, given the agent's answer and whether the DM landed.
+
+    When we know WHICH product they're asking about, the comment links straight to
+    that product on the Bethany House storefront — they can buy it right there, and
+    Neema is on the page to answer anything. That link is the primary CTA; the
+    inbox nudge still follows when the DM landed, and the tap-to-order WhatsApp
+    link remains the fallback for when we couldn't identify the product AND the DM
+    didn't land, so a real buyer is never stranded."""
+    if answer and product_link:
+        tail = ("Order here 👉 " + product_link +
+                "\nNeema can help you right there — or message us on WhatsApp 💬")
+        return f"{answer}\n{tail}"
     if answer and dm_sent:
         return f"{answer}\n{_pick(_DM_NUDGE_POOL, seed)}"
     if answer:
         return f"{answer}\nOrder here 👉 {link}" if link else answer
     return _pick(_WA_INVITE_POOL, seed).replace("{name}", name_tag)
+
+
+async def _storefront_product_link(redis, channel: str, ext: str, product: dict) -> str:
+    """A link to the product on the Bethany House storefront, carrying a handoff
+    ref: `https://bethanyhouse.co.ke/product/<slug>?ref=XXXXXX`.
+
+    The ref is the SAME `waref:` token the WhatsApp handover uses, and it now
+    carries the resolved hub CART LINE for this product — so when the shopper
+    continues (their inbox, WhatsApp, or the storefront's own Neema chat once it
+    forwards the ref), we know who they are AND rebuild the exact item they were
+    looking at. Returns "" when there's no slug or no storefront configured."""
+    import secrets
+    from app.agent import tools as _tools
+    slug = (product or {}).get("slug")
+    if not slug:
+        return ""
+    url = _tools._product_url(slug)
+    if not url:
+        return ""
+    ref = secrets.token_hex(3).upper()
+    try:
+        if redis is not None:
+            items = []
+            try:                                  # resolve the real hub cart line
+                from app.database import AsyncSessionLocal
+                async with AsyncSessionLocal() as db:
+                    ctx = _tools.ToolContext(db=db, redis=redis, wa_id=ext, channel=channel)
+                    items = await _tools._resolve_cart_items(product.get("name") or "", ctx)
+            except Exception:
+                items = []
+            await redis.set(
+                f"waref:{ref}",
+                json.dumps({"channel": channel, "external_id": ext, "target": url,
+                            "product": (product.get("name") or "")[:200], "items": items}),
+                ex=14 * 24 * 3600,
+            )
+            return f"{url}?ref={ref}"
+    except Exception:
+        pass
+    return url
 
 
 async def _order_link(redis, channel: str, ext: str, product: str = "") -> str:
@@ -897,6 +948,7 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     over_cap = await _post_over_cap(redis, post_id)
 
     answer = ""
+    seen_products: list = []          # the catalogue rows the agent actually priced
     if not over_cap:
         # Full agent reply — SEES the post image, quotes the REAL price, warm + short.
         try:
@@ -904,7 +956,7 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
                 answer = (await run_turn(
                     db, redis, wa_id=ext, user_text=prompt_text, llm=build_llm(),
                     media=media, channel=channel, external_id=ext,
-                    public_comment=True)).strip()
+                    public_comment=True, product_sink=seen_products)).strip()
         except Exception as exc:
             _log.warning("public agent reply failed for %s: %s", cid, exc)
 
@@ -920,10 +972,20 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
         except Exception as exc:
             _log.info("comment DM not delivered for %s: %s", cid, exc)
 
-    # Build the PUBLIC reply CTA (see _comment_public_reply). Only mint the
-    # WhatsApp order link when it's actually the fallback (answer but no DM).
-    link = await _order_link(redis, channel, ext) if (answer and not dm_sent) else ""
-    public_text = _comment_public_reply(answer, dm_sent, link, name_tag, ext)
+    # Build the PUBLIC reply CTA (see _comment_public_reply). Prefer a link to the
+    # EXACT product the agent priced on the Bethany House storefront — they can buy
+    # it there and Neema is on the page to help. The tap-to-order WhatsApp link is
+    # only the fallback: no product identified AND the DM didn't land.
+    product_link = ""
+    if answer and seen_products:
+        try:
+            product_link = await _storefront_product_link(redis, channel, ext, seen_products[0])
+        except Exception as exc:
+            _log.warning("product link failed for %s: %s", cid, exc)
+    link = (await _order_link(redis, channel, ext)
+            if (answer and not dm_sent and not product_link) else "")
+    public_text = _comment_public_reply(answer, dm_sent, link, name_tag, ext,
+                                        product_link=product_link)
 
     await _post_public(public_text)
 
