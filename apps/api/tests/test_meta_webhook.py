@@ -540,3 +540,38 @@ def test_capture_contact_location_sets_country(monkeypatch):
     assert out["ok"] and out["country"] == "Uganda"
     assert person.state["country_iso"] == "UG"
     assert person.state["flag_url"].endswith("/ug.svg")
+
+
+def test_public_cta_resolves_product_from_the_post_caption(monkeypatch):
+    """A comment that never names the product ("where is the shop?") must still
+    get a storefront product link — resolved from the POST's caption."""
+    import app.agent.runtime as rt
+    import app.database as adb
+
+    class _CM:
+        async def __aenter__(self): return object()
+        async def __aexit__(self, *a): return False
+    monkeypatch.setattr(adb, "AsyncSessionLocal", lambda: _CM())
+
+    calls = []
+    async def fake_run_tool(name, args, ctx):
+        calls.append((name, args["query"]))
+        ctx.seen_products.append({"name": "Cope Complete Set",
+                                  "slug": "cope-complete-set"})
+        return {"count": 1}
+    monkeypatch.setattr(rt, "run_tool", fake_run_tool)
+
+    sink: list = []
+    asyncio.run(rt._resolve_post_product(
+        None, "messenger", "PSID1",
+        {"title": "Cope complete set — beautiful purple, made to order in Nairobi "
+                  "and shipped worldwide, order today"},
+        sink))
+    assert calls and calls[0][0] == "search_catalog"
+    assert len(calls[0][1].split()) <= 8                 # trimmed caption query
+    assert sink and sink[0]["slug"] == "cope-complete-set"
+
+    # No caption → no search, no crash.
+    calls.clear()
+    asyncio.run(rt._resolve_post_product(None, "messenger", "PSID1", {}, sink))
+    assert calls == []

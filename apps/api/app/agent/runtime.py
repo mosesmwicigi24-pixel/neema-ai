@@ -844,6 +844,27 @@ async def _storefront_product_link(redis, channel: str, ext: str, product: dict)
     return url
 
 
+async def _resolve_post_product(redis, channel: str, ext: str,
+                                post_ctx: dict, sink: list) -> None:
+    """When the comment itself didn't price a product ("where is the shop?"),
+    identify it from the POST's caption so the public CTA still lands on the
+    exact storefront product page — never the bare wa.me fallback. Appends the
+    matched hub rows into `sink` (the same seen_products list)."""
+    title = (post_ctx.get("title") or "").strip()
+    if not title:
+        return
+    from app.database import AsyncSessionLocal
+    from app.agent import tools as _tools
+    q = " ".join(title.split()[:8])            # captions run long; lead words name the item
+    try:
+        async with AsyncSessionLocal() as db:
+            ctx = _tools.ToolContext(db=db, redis=redis, wa_id=ext, channel=channel,
+                                     seen_products=sink)
+            await run_tool("search_catalog", {"query": q}, ctx)
+    except Exception as exc:
+        _log.info("post-product resolve failed for %s: %s", ext, exc)
+
+
 async def _order_link(redis, channel: str, ext: str, product: str = "") -> str:
     """A SHORT tap-to-order link the commenter can tap to reach a pre-filled
     WhatsApp order in one tap. Returns our own short URL
@@ -987,6 +1008,11 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # EXACT product the agent priced on the Bethany House storefront — they can buy
     # it there and Neema is on the page to help. The tap-to-order WhatsApp link is
     # only the fallback: no product identified AND the DM didn't land.
+    # The comment may never name the product ("where is the shop?") — the POST
+    # did. Resolve it from the post caption so the CTA still lands on the exact
+    # bethanyhouse.co.ke product page with a ref.
+    if answer and not seen_products:
+        await _resolve_post_product(redis, channel, ext, post_ctx, seen_products)
     product_link = ""
     if answer and seen_products:
         try:
