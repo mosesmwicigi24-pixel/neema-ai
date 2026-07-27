@@ -11,7 +11,7 @@ the last channel flowing through n8n.
 |---|---|
 | webhook receive + parse | `wa_native.parse_events` — on the raw payload the front door already receives first |
 | message persistence (`POST /api/n8n/message`) | the **same** `n8n_bridge.upsert_message` — conversation upsert, profile name + country, previews, broadcasts, video/document escalation are identical by construction |
-| message-debounce-buffer | redis token buffer — rapid messages combined for `WHATSAPP_DEBOUNCE_SECONDS` (default 8) and answered once |
+| message-debounce-buffer | redis token buffer — rapid messages combined for `WHATSAPP_DEBOUNCE_SECONDS` (default 15, the value n8n actually ran) and answered once |
 | customer-profile-session-setup → `should_run_ai` → reply | `reconcile_waref` + `runtime.schedule_reply` directly (pause, dedup and human-intercept guards preserved) |
 | voice-note-transcription (OpenAI) | `call_transcribe` provider dispatch: faster-whisper when installed (free, private), OpenAI whisper-1 fallback when a key exists — cutover never loses transcription |
 | product-image-recognition (GPT-4o) | nothing needed — Claude vision reads the image natively in `run_turn`; the captioner was redundant spend |
