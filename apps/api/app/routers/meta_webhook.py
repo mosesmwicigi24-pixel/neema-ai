@@ -65,15 +65,38 @@ def _valid_signature(raw_body: bytes, header: str | None) -> bool:
 @router.post("/webhook")
 async def receive_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     """Receive Messenger/Instagram events. Verifies the signature, captures the
-    sender identity, logs, and always acks 200 (Meta retries on non-200)."""
+    sender identity, logs, and acks 200 (Meta retries on non-200). WhatsApp
+    payloads misrouted here are delegated to the WhatsApp front door under ITS
+    signature rules, and follow its ack/403/502 contract."""
     raw = await request.body()
-    if not _valid_signature(raw, request.headers.get("x-hub-signature-256")):
-        _log.warning("Meta webhook POST rejected: bad X-Hub-Signature-256")
-        return Response(status_code=403)
+    sig = request.headers.get("x-hub-signature-256")
 
     try:
         payload = await request.json()
     except Exception:
+        payload = None
+
+    if isinstance(payload, dict) and payload.get("object") == "whatsapp_business_account":
+        # The Meta app's WhatsApp callback URL points here instead of
+        # /api/wa/webhook. Handle it correctly anyway — one front door, wherever
+        # Meta delivers — but say so loudly so the config gets fixed.
+        # The WHATSAPP validator is authoritative for these payloads and must
+        # pass BEFORE any processing: this route's own check may use the wrong
+        # secret (WhatsApp product in a different Meta app → WHATSAPP_APP_SECRET)
+        # or no secret at all (META_APP_SECRET unset) — an unverified payload
+        # must never reach the pipeline.
+        from app.routers import whatsapp_webhook as wa
+        if not wa._valid_signature(raw, sig):
+            _log.warning("WhatsApp payload on /api/meta/webhook rejected: bad signature")
+            return Response(status_code=403)
+        _log.warning("WhatsApp event arrived on /api/meta/webhook — set the "
+                     "WhatsApp callback URL to /api/wa/webhook. Processing it natively.")
+        return await wa.process_payload(request, raw, sig)
+
+    if not _valid_signature(raw, sig):
+        _log.warning("Meta webhook POST rejected: bad X-Hub-Signature-256")
+        return Response(status_code=403)
+    if payload is None:
         return PlainTextResponse("EVENT_RECEIVED")
 
     # object=page → Messenger; object=instagram → Instagram DM. Same event shape.

@@ -338,19 +338,44 @@ async def _reply_after_debounce(redis, wa_id: str, token: int | None,
 
 
 async def _ingest_one(event: dict, redis) -> None:
+    wa_id, wamid = event["wa_id"], event["wamid"]
+    # Idempotency: Meta retries webhooks — each wamid is processed once. The
+    # permanent `seen` mark is set only AFTER the message is persisted; until
+    # then a short `inflight` guard absorbs concurrent duplicate deliveries.
+    # A crash mid-ingest releases the guard and propagates (the front door then
+    # returns 502), so Meta redelivers — a message is never acked-and-lost.
+    if redis is not None:
+        try:
+            if await redis.get(f"wa:native:seen:{wamid}"):
+                return
+            if not await redis.set(f"wa:native:inflight:{wamid}", "1", nx=True, ex=120):
+                return
+        except Exception:
+            pass
+    try:
+        await _ingest_guarded(event, redis)
+    except Exception:
+        if redis is not None:
+            try:
+                await redis.delete(f"wa:native:inflight:{wamid}")
+            except Exception:
+                pass
+        raise
+    if redis is not None:
+        try:
+            await redis.set(f"wa:native:seen:{wamid}", "1", ex=24 * 3600)
+            await redis.delete(f"wa:native:inflight:{wamid}")
+        except Exception:
+            pass
+
+
+async def _ingest_guarded(event: dict, redis) -> None:
+    """The actual ingest work — runs under _ingest_one's wamid guard."""
     from app.database import AsyncSessionLocal
     from app.schemas.n8n import MessageDto
     from app.services import n8n_bridge as svc
 
     wa_id, wamid = event["wa_id"], event["wamid"]
-    # Idempotency: Meta retries webhooks — each wamid is processed once.
-    if redis is not None:
-        try:
-            if not await redis.set(f"wa:native:seen:{wamid}", "1", nx=True, ex=24 * 3600):
-                return
-        except Exception:
-            pass
-
     text = event.get("text") or ""
     media = event.get("media")
     media_url, media_path, transcript = None, None, None
@@ -407,17 +432,21 @@ async def _ingest_one(event: dict, redis) -> None:
     task.add_done_callback(_bg_tasks.discard)
 
 
-async def handle_webhook(payload: dict, redis) -> int:
-    """Process one raw webhook payload natively. Returns how many inbound
-    messages were ingested. Never raises — the front door must always ack."""
-    n = 0
+async def handle_webhook(payload: dict, redis) -> tuple[int, int]:
+    """Process one raw webhook payload natively. Returns (ingested, failed).
+    Failed events have released their wamid guard, so the front door returns
+    non-200 for them and Meta redelivers. Never raises."""
+    n = failed = 0
     try:
         for event in parse_events(payload):
             try:
                 await _ingest_one(event, redis)
                 n += 1
             except Exception as exc:
-                _log.exception("native ingest failed for %s: %s", event.get("wamid"), exc)
+                failed += 1
+                _log.exception("native ingest failed for %s (Meta will retry): %s",
+                               event.get("wamid"), exc)
     except Exception as exc:
+        failed += 1
         _log.exception("native webhook handling failed: %s", exc)
-    return n
+    return n, failed

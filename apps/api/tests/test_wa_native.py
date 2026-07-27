@@ -218,13 +218,17 @@ def test_transcription_returns_none_when_nothing_works(monkeypatch):
 def test_front_door_forwards_when_flag_off_and_goes_native_when_on():
     import inspect
     from app.routers import whatsapp_webhook as ww
-    src = inspect.getsource(ww.receive)
+    # The flag branch lives in process_payload — shared by /api/wa/webhook and
+    # the /api/meta/webhook delegation, so behaviour is identical from either.
+    src = inspect.getsource(ww.process_payload)
     assert "settings.whatsapp_native" in src
     assert "_forward_to_n8n" in src               # off → today's behaviour
     assert "wa_native" in src                     # on → in-process pipeline
     # native mode must NOT also forward (double replies)
     native_block = src.split("settings.whatsapp_native:")[1].split("# 1) TRANSPARENT")[0]
     assert "_forward_to_n8n" not in native_block
+    # and the route itself must route through the shared front door
+    assert "process_payload" in inspect.getsource(ww.receive)
 
 
 def test_flag_defaults_off():

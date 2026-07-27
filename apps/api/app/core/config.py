@@ -92,6 +92,10 @@ class Settings(BaseSettings):
     whatsapp_debounce_seconds: int = 15
     whatsapp_forward_url: str = ""
     whatsapp_verify_token: str = ""
+    # Set only when the WhatsApp product lives in a DIFFERENT Meta app than
+    # Messenger (different X-Hub-Signature-256 secret). Falls back to
+    # meta_app_secret when empty.
+    whatsapp_app_secret: str = ""
     whatsapp_handoff_number: str = ""
     # Second official line (calls) — quoted verbatim in prompts alongside the above.
     whatsapp_handoff_alt: str = ""

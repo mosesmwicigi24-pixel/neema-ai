@@ -159,11 +159,22 @@ async def lifespan(app: FastAPI):
     # live turns are observable; the root logger otherwise sits at WARNING.
     _h = logging.StreamHandler()
     _h.setFormatter(logging.Formatter("%(levelname)s [%(name)s] %(message)s"))
-    for _name in ("neema.agent", "neema.hub"):
+    for _name in ("neema.agent", "neema.hub", "neema.wa", "neema.wa_native",
+                  "neema.meta", "neema.startup"):
         _lg = logging.getLogger(_name)
         _lg.setLevel(logging.INFO)
         _lg.addHandler(_h)
         _lg.propagate = False
+
+    # One unambiguous boot line for the WhatsApp pipeline mode — cutovers are
+    # verified by reading this, not by inferring from silence.
+    if settings.whatsapp_native:
+        logging.getLogger("neema.wa").info(
+            "WhatsApp NATIVE mode ON — in-process pipeline; n8n forward disabled")
+    else:
+        logging.getLogger("neema.wa").info(
+            "WhatsApp legacy mode — forwarding to n8n (%s)",
+            settings.whatsapp_forward_url or "no forward URL set")
 
     # ── Redis ─────────────────────────────────────────────────────────────────
     # Connect and immediately verify the node is writable (i.e. a primary, not

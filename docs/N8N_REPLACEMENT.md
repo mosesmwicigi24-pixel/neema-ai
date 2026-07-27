@@ -94,6 +94,50 @@ Deliberately dropped (with reasons):
 - Dead n8n branches (order_update notification, hold-path logging) that never
   executed.
 
+## Troubleshooting: test message never lands in the inbox
+
+Found at first cutover (2026-07-27). **Root cause: Meta's WhatsApp callback URL
+pointed at n8n's own webhook** (nginx exposes the n8n container at `/n8n/`), so
+WhatsApp traffic never touched the API — no `POST /api/wa/webhook` in the logs,
+and pausing n8n black-holed messages (Meta retries them for a while, so they
+trickle in once the callback is fixed).
+
+The one-time fix — repoint the callback:
+1. On the box, print the verify token the API accepts (never paste it anywhere
+   but the Meta dashboard):
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.vps.yml exec -T api \
+     python -c "from app.core.config import settings; print(settings.whatsapp_verify_token or settings.meta_verify_token)"
+   ```
+2. developers.facebook.com → the app that owns the WhatsApp product →
+   **WhatsApp → Configuration → Webhook → Edit**:
+   Callback URL `https://neema.bethanyhouse.co.ke/api/wa/webhook`, that verify
+   token, **Verify and save**. Under **Webhook fields** subscribe **messages**
+   (and **calls**).
+3. Send a test message and watch for the loud lines:
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.vps.yml logs --since 3m api | grep -E "neema.wa|POST /api"
+   ```
+
+Defenses added after this incident (so misdelivery can never be silent again):
+- A WhatsApp payload arriving on **/api/meta/webhook** is now detected, verified
+  against the **WhatsApp** signature rules (never processed unverified), logged
+  as a misconfiguration WARNING, and **processed natively anyway** — one front
+  door, wherever Meta delivers.
+- The API logs its WhatsApp mode at startup (`WhatsApp NATIVE mode ON …` /
+  `legacy … forwarding to n8n`), and every native webhook logs how many messages
+  it ingested — silence now means "no delivery", unambiguously.
+- `WHATSAPP_APP_SECRET` (optional) covers the case where the WhatsApp product
+  lives in a different Meta app than Messenger, whose payloads are signed with a
+  different secret; unset, it falls back to `META_APP_SECRET` as before. If the
+  logs show `WA webhook POST rejected: bad signature` after the repoint, set it
+  to the WhatsApp app's App Secret.
+- A message's dedup mark is burned only **after** it is persisted; a mid-ingest
+  failure (DB down) releases the guard and the webhook returns 502, so Meta
+  redelivers — an inbound message is never acked-and-lost. A redis blip in the
+  calls/wamid taps no longer aborts ingestion of the messages in the same
+  delivery.
+
 ## Notes
 - Statuses (delivered/read receipts) are parsed and dropped — parity with n8n.
 - Stickers ride the image path (Claude vision can see them).

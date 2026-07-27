@@ -45,11 +45,14 @@ async def verify(request: Request):
 
 
 def _valid_signature(raw: bytes, header: str | None) -> bool:
-    if not settings.meta_app_secret:
+    # WHATSAPP_APP_SECRET overrides for deployments where the WhatsApp product
+    # lives in a different Meta app (different signing secret) than Messenger.
+    secret = settings.whatsapp_app_secret or settings.meta_app_secret
+    if not secret:
         return True                       # dev only
     if not header or not header.startswith("sha256="):
         return False
-    expected = hmac.new(settings.meta_app_secret.encode(), raw, hashlib.sha256).hexdigest()
+    expected = hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, header.split("=", 1)[1])
 
 
@@ -81,7 +84,14 @@ async def receive(request: Request):
     if not _valid_signature(raw, sig):
         _log.warning("WA webhook POST rejected: bad signature")
         return Response(status_code=403)
+    return await process_payload(request, raw, sig)
 
+
+async def process_payload(request: Request, raw: bytes, sig: str | None) -> Response:
+    """Handle one signature-verified WhatsApp webhook delivery, from whichever
+    route it arrived on (/api/wa/webhook, or /api/meta/webhook when the Meta app's
+    WhatsApp callback was pointed there). Native mode processes in-process;
+    legacy mode forwards to n8n verbatim."""
     redis = getattr(request.app.state, "redis", None)
 
     if settings.whatsapp_native:
@@ -90,14 +100,26 @@ async def receive(request: Request):
         # too would double-process every message (two replies per customer).
         try:
             payload = json.loads(raw)
+        except Exception:
+            return PlainTextResponse("EVENT_RECEIVED")   # not JSON — nothing to do
+        # The taps are best-effort: a redis blip in the calls/wamid handling must
+        # never cost the customer messages riding in the same delivery.
+        try:
             await _handle_calls(request, payload)
-            await _tap_inbound_wamids(payload, redis)
-            from app.services import wa_native
-            await wa_native.handle_webhook(payload, redis)
         except Exception as exc:
-            # Ack anyway: the wamid dedup already burned, so a Meta retry would
-            # be dropped — better to log loudly than to bounce the webhook.
-            _log.exception("WA native handling failed (acking): %s", exc)
+            _log.warning("WA calls tap failed (continuing): %s", exc)
+        try:
+            await _tap_inbound_wamids(payload, redis)
+        except Exception as exc:
+            _log.warning("WA wamid tap failed (continuing): %s", exc)
+        from app.services import wa_native
+        n, failed = await wa_native.handle_webhook(payload, redis)
+        if n or failed:
+            _log.info("WA native webhook: %d message(s) ingested, %d failed", n, failed)
+        if failed:
+            # Failed events released their dedup guard — bounce so Meta
+            # redelivers them. Never acked-and-lost.
+            return Response(status_code=502)
         return PlainTextResponse("EVENT_RECEIVED")
 
     # 1) TRANSPARENT FORWARD — messaging must keep flowing to n8n untouched. If it
