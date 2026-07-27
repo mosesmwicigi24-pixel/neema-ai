@@ -293,7 +293,12 @@ async def get_thread(
     # ── 3. Shape messages into thread items ───────────────────────────────────
     thread: list[dict] = []
 
+    # Quoted messages live in the same thread — resolve their media locally so a
+    # reply-to-an-image quote can render the actual thumbnail (like WhatsApp),
+    # not an "[image]" placeholder. No extra query.
+    _by_id = {str(m.id): m for m in msgs}
     for m in msgs:
+        _q = _by_id.get(str(m.reply_to_id)) if getattr(m, "reply_to_id", None) else None
         thread.append({
             "id":            str(m.id),
             "type":          "message",
@@ -314,7 +319,9 @@ async def get_thread(
             "comment_context": m.comment_context,
             # Reply-to (quote): the message this one replies to, for the thread strip.
             "reply_to": ({"id": str(m.reply_to_id), "text": m.reply_to_text,
-                          "sender": m.reply_to_sender}
+                          "sender": m.reply_to_sender,
+                          "media_type": (_q.media_type if _q and _q.media_type != "note" else None),
+                          "media_url": (_q.media_url if _q and _q.media_type != "note" else None)}
                          if getattr(m, "reply_to_id", None) else None),
         })
 

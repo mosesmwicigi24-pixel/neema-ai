@@ -152,7 +152,8 @@ export interface ApiThreadItem {
     mime_type?: string | null;
     filename?: string | null;
     comment_context?: Message["comment_context"];
-    reply_to?: { id: string; text: string | null; sender: string | null } | null;
+    reply_to?: { id: string; text: string | null; sender: string | null;
+                 media_type?: string | null; media_url?: string | null } | null;
     // System-event-specific
     event_kind?: SystemEventKind | null;
     event_reason?: string | null;

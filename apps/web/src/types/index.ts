@@ -95,6 +95,10 @@ export interface Message {
         id: string;
         text: string | null;
         sender: string | null;
+        // Quoted media (resolved server-side from the quoted message) so a
+        // reply-to-an-image renders the actual thumbnail, WhatsApp-style.
+        media_type?: string | null;
+        media_url?: string | null;
     } | null;
 }
 

@@ -428,7 +428,8 @@ export function ConversationsView({
     // (reply_to id, shown as a quoted strip on the bubble; WhatsApp delivers it as a
     // native reply too). A quote grabbed from ANOTHER channel keeps the old
     // prepend-as-text behaviour. View-level so it survives switching channel chips.
-    const [quoted, setQuoted] = useState<{ msgId?: string; sender?: string; text: string; channel: string } | null>(null);
+    const [quoted, setQuoted] = useState<{ msgId?: string; sender?: string; text: string;
+        channel: string; mediaUrl?: string; mediaType?: string } | null>(null);
     const [draftVisible, setDraftVisible] = useState<boolean>(false);
     const [draftExpanded, setDraftExpanded] = useState<boolean>(false);
     const [draftText, setDraftText] = useState<string>("");
@@ -807,7 +808,8 @@ export function ConversationsView({
                 text,
                 created_at: new Date().toISOString(),
                 reply_to: replyToId && quoted
-                    ? { id: replyToId, text: quoted.text, sender: quoted.sender ?? null }
+                    ? { id: replyToId, text: quoted.text, sender: quoted.sender ?? null,
+                        media_type: quoted.mediaType ?? null, media_url: quoted.mediaUrl ?? null }
                     : null,
             };
             setMessages((m) => ({
@@ -835,13 +837,18 @@ export function ConversationsView({
     };
 
     // Start replying to a specific message (from the Reply button or a swipe).
+    // A pure image message (no text) is quotable too — like WhatsApp.
     const beginReplyTo = (msg: Message) => {
-        if (!(msg.text || "").trim()) return;
+        const mediaUrl = (msg as any).media_url as string | undefined;
+        const mediaType = (msg as any).media_type as string | undefined;
+        if (!(msg.text || "").trim() && !mediaUrl) return;
         setQuoted({
             msgId: msg.id,
             sender: msg.sender,
             text: (msg.text || "").replace(/^\[comment\]\s*/, "").slice(0, 300),
             channel: activeConv?.channel || "whatsapp",
+            mediaUrl: mediaType === "image" ? mediaUrl : undefined,
+            mediaType,
         });
     };
 
@@ -2154,26 +2161,47 @@ export function ConversationsView({
                                                         </div>
                                                     )}
                                                     {/* Quoted message this bubble replies to */}
-                                                    {msg.reply_to && (
+                                                    {msg.reply_to && (() => {
+                                                        // WhatsApp-style quote: text left, and when the quoted
+                                                        // message is an image, its real thumbnail on the right —
+                                                        // never an "[image]" placeholder.
+                                                        const qImg = msg.reply_to.media_type === "image" && msg.reply_to.media_url
+                                                            ? msg.reply_to.media_url : null;
+                                                        const rawQ = (msg.reply_to.text || "").trim();
+                                                        const qText = rawQ && rawQ !== "[image]"
+                                                            ? rawQ
+                                                            : qImg ? "📷 Photo"
+                                                            : msg.reply_to.media_type ? `[${msg.reply_to.media_type}]` : "(media)";
+                                                        return (
                                                         <div
-                                                            className="mb-1.5 pl-2 pr-1 rounded-sm border-l-2"
+                                                            className="mb-1.5 pl-2 pr-1 rounded-sm border-l-2 flex items-center gap-2"
                                                             style={{
                                                                 borderColor: isInbound ? "#589b31" : "rgba(255,255,255,0.55)",
                                                                 backgroundColor: isInbound ? "#f2f7ee" : "rgba(255,255,255,0.14)",
                                                             }}
                                                         >
-                                                            <div className="text-[9px] font-semibold uppercase tracking-wide opacity-70 px-1 pt-0.5">
-                                                                {msg.reply_to.sender === "user"
-                                                                    ? "Customer"
-                                                                    : msg.reply_to.sender === "ai"
-                                                                      ? "Neema"
-                                                                      : "You"}
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="text-[9px] font-semibold uppercase tracking-wide opacity-70 px-1 pt-0.5">
+                                                                    {msg.reply_to.sender === "user"
+                                                                        ? "Customer"
+                                                                        : msg.reply_to.sender === "ai"
+                                                                          ? "Neema"
+                                                                          : "You"}
+                                                                </div>
+                                                                <div className="text-[11px] opacity-80 px-1 pb-1 whitespace-pre-wrap line-clamp-2">
+                                                                    {qText}
+                                                                </div>
                                                             </div>
-                                                            <div className="text-[11px] opacity-80 px-1 pb-1 whitespace-pre-wrap line-clamp-2">
-                                                                {msg.reply_to.text || "(media)"}
-                                                            </div>
+                                                            {qImg && (
+                                                                <img
+                                                                    src={qImg}
+                                                                    alt="quoted"
+                                                                    className="w-10 h-10 rounded object-cover flex-shrink-0 my-1 mr-0.5"
+                                                                />
+                                                            )}
                                                         </div>
-                                                    )}
+                                                        );
+                                                    })()}
                                                     {(() => {
                                                         // ── Facebook/IG comment ──
                                                         // Show the source-post card
@@ -2606,8 +2634,17 @@ export function ConversationsView({
                                                         ? `Replying to ${quoted.sender === "user" ? "Customer" : quoted.sender === "ai" ? "Neema" : "you"}`
                                                         : `Replying to ${CHANNEL_CONFIG[quoted.channel as Channel]?.label ?? quoted.channel}`}
                                                 </span>
-                                                <p className="text-xs text-[#475569] truncate">{quoted.text}</p>
+                                                <p className="text-xs text-[#475569] truncate">
+                                                    {quoted.text.trim() && quoted.text.trim() !== "[image]"
+                                                        ? quoted.text
+                                                        : quoted.mediaUrl ? "📷 Photo"
+                                                        : quoted.mediaType ? `[${quoted.mediaType}]` : quoted.text}
+                                                </p>
                                             </div>
+                                            {quoted.mediaUrl && (
+                                                <img src={quoted.mediaUrl} alt="quoted"
+                                                     className="w-9 h-9 rounded object-cover flex-shrink-0" />
+                                            )}
                                             <button
                                                 onClick={() => setQuoted(null)}
                                                 title="Remove quote"
