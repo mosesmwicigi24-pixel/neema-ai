@@ -112,6 +112,16 @@ async def merge_persons(
         # sizes on WhatsApp. Only when the primary has none; never clobber.
         if s.get("measurements") and not pst.get("measurements"):
             pst["measurements"] = s["measurements"]
+        # Who they are + where they came from: fill-if-missing, never overwrite.
+        # Profile merges PER-KEY (primary's role + secondary's organization must
+        # both survive), matching the writer's per-key semantics.
+        if s.get("profile"):
+            merged_prof = {**s["profile"], **(pst.get("profile") or {})}
+            if merged_prof != (pst.get("profile") or {}):
+                pst["profile"] = merged_prof
+        for _k in ("lead_source", "ad_ref"):
+            if s.get(_k) and not pst.get(_k):
+                pst[_k] = s[_k]
         primary.state = pst
         flag_modified(primary, "state")
         # PARISH affiliation carries too: the institution follows the person.

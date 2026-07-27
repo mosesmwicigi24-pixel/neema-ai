@@ -152,6 +152,44 @@ def _event_media(message: dict) -> tuple[str | None, str | None]:
     return None, None
 
 
+async def _capture_ad_referral(db: AsyncSession, person_id, channel: str, ref: dict) -> None:
+    """First-touch ad attribution for Messenger/IG. Meta's referral block carries
+    source (ADS/SHORTLINK/…), ad_id, ref and ads_context_data.ad_title. Stored on
+    the person's state once; an established lead_source / stored ad stays."""
+    from sqlalchemy.orm.attributes import flag_modified
+    from app.models.person import Person
+    if person_id is None:
+        return
+    p = await db.get(Person, person_id)
+    if p is None:
+        return
+    is_ad = bool(ref.get("ad_id")) or (ref.get("source") or "").upper() == "ADS"
+    base = "instagram" if channel == "instagram" else "facebook"
+    source = f"{base}_ad" if is_ad else base
+    # Ad details are stored ONLY for genuine ads (an organic m.me shortlink must
+    # never render as "Came via ad"), and only while the ORIGIN is that ad —
+    # first touch, or backfilling an ad-attributed origin that lacks details.
+    details = {}
+    if is_ad:
+        details = {k: ref[k] for k in ("source", "type", "ad_id", "ref") if ref.get(k)}
+        title = (ref.get("ads_context_data") or {}).get("ad_title")
+        if title:
+            details["headline"] = title
+    st = dict(p.state or {})
+    changed = False
+    if not st.get("lead_source"):
+        st["lead_source"] = source
+        changed = True
+    ad_origin = str(st.get("lead_source") or "").endswith("_ad")
+    if details and ad_origin and not st.get("ad_ref"):
+        st["ad_ref"] = details
+        changed = True
+    if changed:
+        p.state = st
+        flag_modified(p, "state")
+        _log.info("meta: person %s attributed to %s", person_id, source)
+
+
 async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=None) -> None:
     """For each inbound Messenger/IG event: resolve the sender to a person/identity,
     get-or-create the (channel, sender) conversation, and store the inbound
@@ -169,13 +207,33 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
     replies: list[tuple[str, str, str | None, str]] = []   # (sender, text, mid, page_id)
     media_rehosts: list[tuple[str, str, str]] = []    # (mid, cdn_url, media_type) to re-host
     captured = 0
+    attributed = False
     for entry in payload.get("entry", []):
         for event in entry.get("messaging", []) or entry.get("standby", []):
             sender = (event.get("sender") or {}).get("id")
             message = event.get("message") or {}
-            if not sender or message.get("is_echo"):    # skip page echoes / non-message events
+            if not sender or message.get("is_echo"):    # skip page echoes
                 continue
             sender = str(sender)
+
+            # Message-less events (messaging_referrals, postbacks, delivery/read
+            # receipts) must NOT fall through the message path: they have no mid
+            # (so Meta redelivery dodges the dedup), and used to insert a blank
+            # Message row + phantom "[messenger message]" preview + broadcast.
+            # Capture any ad referral they carry, then skip.
+            if not event.get("message"):
+                referral = (event.get("referral")
+                            or (event.get("postback") or {}).get("referral"))
+                if referral:
+                    try:
+                        ident = await resolve_or_create_person(
+                            db, channel, sender, source=f"{channel}_referral",
+                            confidence="deterministic")
+                        await _capture_ad_referral(db, ident.person_id, channel, referral)
+                        attributed = True
+                    except Exception as exc:
+                        _log.warning("ad referral capture failed (%s): %s", channel, exc)
+                continue
             mid = message.get("mid")
 
             # Idempotency: a redelivered webhook must not create a duplicate.
@@ -245,6 +303,18 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
                                    "flag_url": flag_url_for(loc_iso)})
                         _p.state = st
                         _fm(_p, "state")
+            # Ad attribution: a DM opened from a Click-to-Messenger/IG ad carries
+            # a referral block on the message itself (message-less referral events
+            # are handled — and skipped — at the top of the loop). Record
+            # first-touch origin on the person — never overwrite an established one.
+            if message.get("referral"):
+                try:
+                    await _capture_ad_referral(db, ident.person_id, channel,
+                                               message["referral"])
+                    attributed = True
+                except Exception as exc:
+                    _log.warning("ad referral capture failed (%s): %s", channel, exc)
+
             conv = await get_or_create_conversation(db, channel, sender, person_id=ident.person_id)
 
             db.add(Message(
@@ -277,8 +347,9 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
                 replies.append((sender, turn_text, mid, page_id, turn_media))
             captured += 1
 
-    if captured:
+    if captured or attributed:
         await db.commit()
+    if captured:
         _log.info("meta webhook: captured %d %s message(s) into the inbox", captured, channel)
         if redis is not None:
             import json

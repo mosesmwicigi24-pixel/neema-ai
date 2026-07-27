@@ -69,6 +69,12 @@ export interface CustomerProfile {
     lead_stage_source?: "auto" | "manual" | null;
     suggested_lead_stage?: LeadStage;
     lead_source?: string | null;
+    /** First-touch ad attribution captured from the webhook referral block. */
+    ad_ref?: { headline?: string; ad_id?: string; source_type?: string;
+               source_id?: string; source_url?: string; source?: string } | null;
+    /** Who they are in the church: role/title + ministry/organization. */
+    role?: string | null;
+    organization?: string | null;
     orders?: PanelOrder[];
     orders_source?: "hub" | "whatsapp";
     hub_linked?: boolean;
@@ -1200,11 +1206,33 @@ export function CustomerSidebar({
                                     </span>
                                 </div>
                             )}
+                            {profile.ad_ref && (
+                                <div className="flex items-start justify-between py-1.5 border-b border-stone-50"
+                                     title="First-touch ad attribution captured from the webhook">
+                                    <span className="text-[10px] text-stone-400 w-20 flex-shrink-0 pt-0.5">Came via</span>
+                                    <span className="text-[11px] text-stone-700 text-right flex-1">
+                                        📣 {profile.ad_ref.headline
+                                            || (profile.ad_ref.ad_id ? `Ad ${profile.ad_ref.ad_id}` : profile.ad_ref.source_type || "ad")}
+                                    </span>
+                                </div>
+                            )}
                             <EditableField
                                 label="Name"
                                 value={profile.name || ""}
                                 onChange={(v) => patch({ name: v })}
                                 placeholder="Full name"
+                            />
+                            <EditableField
+                                label="Role"
+                                value={profile.role || ""}
+                                onChange={(v) => patch({ role: v })}
+                                placeholder="Bishop / Pastor / Founder…"
+                            />
+                            <EditableField
+                                label="Ministry"
+                                value={profile.organization || ""}
+                                onChange={(v) => patch({ organization: v })}
+                                placeholder="Church / ministry / organization"
                             />
                             <EditableField
                                 label="Email"

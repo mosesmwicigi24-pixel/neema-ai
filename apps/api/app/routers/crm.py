@@ -9,6 +9,8 @@ Customer CRM endpoints:
   PATCH /admin/leads/{wa_id}             — update lead stage / tags / notes
 """
 
+import re
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_
@@ -94,9 +96,18 @@ def _cart_size(*states) -> int:
     return 0
 
 
+# Leadership roles buy for whole congregations — a bishop's cassock order seeds
+# the parish's vestments, communion sets and choir robes.
+_LEADER_ROLE_RE = re.compile(
+    r"\b(bishop|archbishop|apostle|prophet|pastor|reverend|rev|founder|priest|"
+    r"father|canon|dean|moderator|chairman|overseer|evangelist|elder|deacon|ceo)\b",
+    re.IGNORECASE)
+
+
 def _lead_score_parts(user: User, order_count: int, total_spent: float,
                       channel_count: int, phone_verified: bool = False,
-                      cart_items: int = 0, days_since_contact: float | None = None) -> list[dict]:
+                      cart_items: int = 0, days_since_contact: float | None = None,
+                      role: str | None = None) -> list[dict]:
     """The lead score, itemised — ONE definition, returned to the panel so the
     breakdown can never drift from the maths that ranks the list.
 
@@ -123,15 +134,23 @@ def _lead_score_parts(user: User, order_count: int, total_spent: float,
         {"label": "Multi-channel",   "pts": 10 if channel_count > 1 else 0, "max": 10},
         {"label": "Name known",      "pts": 5 if user.name else 0,          "max": 5},
         {"label": "Location known",  "pts": 5 if user.location else 0,      "max": 5},
+        {"label": "Clergy leader",   "pts": 10 if (role and _LEADER_ROLE_RE.search(role)) else 0, "max": 10},
     ]
 
 
 def _compute_lead_score(user: User, order_count: int, total_spent: float,
                         channel_count: int, phone_verified: bool = False,
-                        cart_items: int = 0, days_since_contact: float | None = None) -> int:
+                        cart_items: int = 0, days_since_contact: float | None = None,
+                        role: str | None = None) -> int:
     return min(sum(p["pts"] for p in _lead_score_parts(
         user, order_count, total_spent, channel_count, phone_verified,
-        cart_items, days_since_contact)), 100)
+        cart_items, days_since_contact, role)), 100)
+
+
+def _profile_of(person_state: dict | None, user_state: dict | None) -> dict:
+    """Person-scoped role/organization (person first, user fallback)."""
+    return ((person_state or {}).get("profile")
+            or (user_state or {}).get("profile") or {})
 
 
 def _cadence_label(days: float) -> str:
@@ -288,7 +307,8 @@ def _build_profile(
     days_since_contact = _days_since(last_contact)
     score_parts = _lead_score_parts(user, order_count, total_spent, len(channels),
                                     phone_verified=phone_verified, cart_items=cart_items,
-                                    days_since_contact=days_since_contact)
+                                    days_since_contact=days_since_contact,
+                                    role=_profile_of(person_state, user.state).get("role"))
     lead_score = min(sum(p["pts"] for p in score_parts), 100)
     rhythm = _buying_rhythm(order_dates)
     tier = _customer_tier(order_count, total_spent, rhythm["days_since_last"])
@@ -334,7 +354,12 @@ def _build_profile(
         "lead_stage":     lead_stage,
         "lead_stage_source": state.get("lead_stage_source"),
         "suggested_lead_stage": suggested_stage,
-        "lead_source":    state.get("lead_source"),
+        "lead_source":    state.get("lead_source") or (person_state or {}).get("lead_source"),
+        # Which ad/post brought them (first-touch referral off the webhooks).
+        "ad_ref":         state.get("ad_ref") or (person_state or {}).get("ad_ref"),
+        # Who they are in the church: role/title + ministry/organization.
+        "role":           _profile_of(person_state, user.state).get("role"),
+        "organization":   _profile_of(person_state, user.state).get("organization"),
         "lead_score":     lead_score,
         "phone_verified": phone_verified,
         "cart_items":     cart_items,
@@ -771,6 +796,26 @@ async def update_customer(
     if "lead_stage" in body:
         state["lead_stage_source"] = "manual"
 
+    # Person-scoped role/organization (the sidebar's "who they are" fields).
+    # `""` clears a field (a mis-captured role must be removable); when no person
+    # row exists the edit lands on user.state so it still sticks.
+    if "role" in body or "organization" in body:
+        from app.agent.tools import _save_profile_fields
+        applied = None
+        if user.person_id is not None:
+            applied = await _save_profile_fields(
+                db, user.person_id, body.get("role"), body.get("organization"))
+        if applied is None:
+            prof = dict(state.get("profile") or {})
+            for key, limit in (("role", 100), ("organization", 200)):
+                if key in body and body[key] is not None:
+                    v = str(body[key]).strip()
+                    if v:
+                        prof[key] = v[:limit]
+                    else:
+                        prof.pop(key, None)
+            state["profile"] = prof
+
     user.state = state
     await db.commit()
     return {"ok": True}
@@ -990,6 +1035,7 @@ async def list_leads(
             cart_items=_cart_size(lead_person_state, state),
             days_since_contact=_days_since(
                 max((c.last_message_at for c in convs if c.last_message_at), default=None)),
+            role=_profile_of(lead_person_state, state).get("role"),
         )
         rhythm = _buying_rhythm([o.created_at for o in orders])
         tier = _customer_tier(order_count, total_spent, rhythm["days_since_last"])

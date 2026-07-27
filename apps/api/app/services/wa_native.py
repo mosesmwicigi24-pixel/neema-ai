@@ -107,8 +107,70 @@ def parse_events(payload: dict) -> list[dict]:
                     ts_ms = None
                 out.append({"wa_id": wa_id, "wamid": wamid,
                             "name": names.get(wa_id), "type": mtype,
-                            "text": _text_of(msg), "media": media, "ts_ms": ts_ms})
+                            "text": _text_of(msg), "media": media, "ts_ms": ts_ms,
+                            # Click-to-WhatsApp-ad attribution rides the message.
+                            "referral": msg.get("referral") or None})
     return out
+
+
+async def _capture_referral(db, wa_id: str, ref: dict) -> None:
+    """First-touch ad attribution. A message that arrives via a Click-to-WhatsApp
+    ad carries a `referral` block (source_type ad/post, source_id, source_url,
+    headline). Record where this customer ACTUALLY came from — once; an
+    established lead_source or stored ad is never overwritten."""
+    from sqlalchemy import select
+    from sqlalchemy.orm.attributes import flag_modified
+    from app.models.user import User
+    from app.models.person import Person
+
+    src_type = (ref.get("source_type") or "").lower()
+    source = "facebook_ad" if src_type == "ad" else "facebook"
+    # Ad details only for genuine ads (a post referral is organic — it must not
+    # render as "Came via ad" in the panel).
+    details = {}
+    if src_type == "ad":
+        details = {k: ref[k] for k in ("source_type", "source_id", "source_url", "headline")
+                   if ref.get(k)}
+
+    user = (await db.execute(select(User).where(User.wa_id == wa_id))).scalar_one_or_none()
+    if user is None:
+        return
+    changed = False
+    state = dict(user.state or {})
+    if not state.get("lead_source"):
+        state["lead_source"] = source
+        changed = True
+    # ad_ref is coupled to the origin: stored only while the recorded origin IS
+    # an ad (first touch, or backfilling details for an ad-attributed origin).
+    if details and not state.get("ad_ref") and \
+            str(state.get("lead_source") or "").endswith("_ad"):
+        state["ad_ref"] = details
+        changed = True
+    if changed:
+        user.state = state
+        flag_modified(user, "state")
+    # The person store MIRRORS the user store's final values (never a different
+    # decision), so the panel's user-first read and the person record agree.
+    final_source = state.get("lead_source")
+    final_ad = state.get("ad_ref")
+    if user.person_id:
+        p = await db.get(Person, user.person_id)
+        if p is not None:
+            ps = dict(p.state or {})
+            p_changed = False
+            if final_source and not ps.get("lead_source"):
+                ps["lead_source"] = final_source
+                p_changed = True
+            if final_ad and not ps.get("ad_ref"):
+                ps["ad_ref"] = final_ad
+                p_changed = True
+            if p_changed:
+                p.state = ps
+                flag_modified(p, "state")
+                changed = True
+    if changed:
+        await db.commit()
+        _log.info("native: %s attributed to %s", wa_id, final_source)
 
 
 # ── Media: download from the Graph, rehost, transcribe ───────────────────────
@@ -405,6 +467,12 @@ async def _ingest_guarded(event: dict, redis) -> None:
         # The SAME persistence n8n used: conversation upsert, provision_user
         # (name + country), previews, broadcast, video/document escalation.
         await svc.upsert_message(db, redis, dto)
+        # Click-to-WhatsApp-ad attribution (best-effort, never blocks ingest).
+        if event.get("referral"):
+            try:
+                await _capture_referral(db, svc._normalize_wa_id(wa_id), event["referral"])
+            except Exception as exc:
+                _log.warning("referral capture failed for %s: %s", wa_id, exc)
     if is_new and redis is not None:
         import json as _json
         try:

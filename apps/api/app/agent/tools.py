@@ -157,13 +157,17 @@ TOOLS: list[dict] = [
     },
     {
         "name": "capture_customer",
-        "description": "Save details the customer shares (their name and/or delivery location) "
-                       "so the order and receipt are correct.",
+        "description": "Save details the customer shares — their name, delivery location, "
+                       "role/title (Bishop, Rev, Pastor, Founder…) and church/ministry/"
+                       "organization — so orders are correct and the team knows who they "
+                       "serve. Capture what comes up naturally; never interrogate.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "name": {"type": "string"},
                 "location": {"type": "string"},
+                "role": {"type": "string", "description": "Their title/role, e.g. Bishop, Pastor, Founder & CEO"},
+                "organization": {"type": "string", "description": "Their church/ministry/organization name"},
             },
         },
     },
@@ -239,6 +243,8 @@ TOOLS: list[dict] = [
                 "name": {"type": "string", "description": "the customer's name"},
                 "phone": {"type": "string", "description": "phone/WhatsApp number if they shared it"},
                 "location": {"type": "string", "description": "city and/or country, e.g. 'Kampala, Uganda'"},
+                "role": {"type": "string", "description": "their title/role if mentioned, e.g. Bishop, Pastor, Founder"},
+                "organization": {"type": "string", "description": "their church/ministry/organization if mentioned"},
             },
             "required": [],
         },
@@ -713,6 +719,37 @@ async def _check_order_status(args: dict, ctx: ToolContext) -> dict:
     return out
 
 
+async def _save_profile_fields(db, person_id, role: str | None = None,
+                               organization: str | None = None) -> dict | None:
+    """Person-scoped role/organization (the human's title + ministry) — stored on
+    persons.state['profile'] so it survives channel hops and merges.
+
+    None = leave the field unchanged; an empty/whitespace string CLEARS it (the
+    sidebar's way to remove a mis-captured role). Returns the resulting profile
+    dict, or None when no person row was available to write to."""
+    from sqlalchemy.orm.attributes import flag_modified
+    from app.models.person import Person
+    if person_id is None or (role is None and organization is None):
+        return None
+    p = await db.get(Person, person_id)
+    if p is None:
+        return None
+    st = dict(p.state or {})
+    prof = dict(st.get("profile") or {})
+    for key, val, limit in (("role", role, 100), ("organization", organization, 200)):
+        if val is None:
+            continue
+        v = val.strip()
+        if v:
+            prof[key] = v[:limit]
+        else:
+            prof.pop(key, None)
+    st["profile"] = prof
+    p.state = st
+    flag_modified(p, "state")
+    return prof
+
+
 async def _capture_customer(args: dict, ctx: ToolContext) -> dict:
     user = (await ctx.db.execute(select(User).where(User.wa_id == ctx.wa_id))).scalar_one_or_none()
     if user is None:
@@ -722,8 +759,13 @@ async def _capture_customer(args: dict, ctx: ToolContext) -> dict:
         user.name_confirmed = True
     if args.get("location"):
         user.location = args["location"].strip()
+    prof = await _save_profile_fields(ctx.db, user.person_id,
+                                      args.get("role"), args.get("organization"))
     await ctx.db.commit()
-    return {"ok": True, "name": user.name, "location": user.location}
+    out = {"ok": True, "name": user.name, "location": user.location}
+    if prof:
+        out["profile"] = prof
+    return out
 
 
 async def _capture_contact(args: dict, ctx: ToolContext) -> dict:
@@ -741,6 +783,11 @@ async def _capture_contact(args: dict, ctx: ToolContext) -> dict:
                                                source=f"{ctx.channel}_capture")
     out = {"ok": True}
     person = await ctx.db.get(Person, ident.person_id)
+
+    prof = await _save_profile_fields(ctx.db, ident.person_id,
+                                      args.get("role"), args.get("organization"))
+    if prof:
+        out["profile"] = prof
 
     if name:
         # Fuller name wins everywhere: a self-stated "Meshack" must never shadow
@@ -881,6 +928,14 @@ async def _set_lead_source(args: dict, ctx: ToolContext) -> dict:
     if user is None:
         return {"ok": False}
     state = dict(user.state or {})
+    # FIRST TOUCH STANDS. A webhook-captured ad origin ("facebook_ad") is ground
+    # truth — the customer later SAYING "I saw you on Facebook" must not
+    # downgrade it. Only an empty origin is filled here; operators can correct
+    # via the CRM panel.
+    existing = state.get("lead_source")
+    if existing:
+        return {"ok": True, "lead_source": existing,
+                "note": "origin already recorded — kept the first touch"}
     state["lead_source"] = source
     user.state = state
     flag_modified(user, "state")
