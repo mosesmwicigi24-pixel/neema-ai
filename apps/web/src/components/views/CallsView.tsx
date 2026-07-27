@@ -10,6 +10,7 @@ import { timeAgo } from "@/lib/utils";
 import { callsApi, type ApiCall, type CallTranscriptResp } from "@/lib/api";
 import { useWs } from "@/lib/websocket";
 import type { SharedViewProps } from "@/types";
+import { CustomerSidebar } from "@/components/ui/CustomerSidebar";
 
 const fmtDur = (s: number | null) => (!s ? "" : `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`);
 
@@ -120,10 +121,16 @@ function CallTranscript({ callId }: { callId: string }): React.ReactElement {
     );
 }
 
-export function CallsView({ isMobile, onOpenConversation }: CallsViewProps): React.ReactElement {
+export function CallsView({ isMobile, onOpenConversation, onToast }: CallsViewProps): React.ReactElement {
     const ws = useWs();
     const [calls, setCalls] = useState<ApiCall[] | null>(null);
     const [openId, setOpenId] = useState<string | null>(null);
+    // Clicking a call opens the caller's FULL CRM panel right here (profile,
+    // lead score, orders, role/ministry) — no bouncing to the inbox. The chat
+    // button still jumps to the thread for those who want it.
+    const [selected, setSelected] = useState<ApiCall | null>(null);
+    // Clicking the "N missed" badge filters to missed calls only.
+    const [missedOnly, setMissedOnly] = useState(false);
 
     const load = useCallback(() => { callsApi.list().then(setCalls).catch(() => setCalls([])); }, []);
     useEffect(() => {
@@ -143,10 +150,30 @@ export function CallsView({ isMobile, onOpenConversation }: CallsViewProps): Rea
     }, [ws, load]);
 
     const missed = (calls ?? []).filter((c) => c.status === "missed").length;
+    const shownCalls = missedOnly ? (calls ?? []).filter((c) => c.status === "missed") : calls;
+
+    // The caller panel: a synthetic conversation handle is enough — the sidebar
+    // fetches the real CRM profile by wa_id itself.
+    const selConv = selected?.wa_id
+        ? ({
+              id: `call:${selected.call_id}`,
+              wa_id: selected.wa_id,
+              external_id: selected.wa_id,
+              channel: "whatsapp",
+              name: selected.name,
+              last_message_at: selected.started_at,
+          } as any)
+        : null;
+    const callerCalls = selected?.wa_id
+        ? (calls ?? []).filter((x) => x.wa_id === selected.wa_id) : [];
+    const callerMissed = callerCalls.filter((x) => x.status === "missed").length;
 
     return (
         <div className="h-full overflow-y-auto w-full" style={{ backgroundColor: "#f6f7f2" }}>
-            <div className="mx-auto px-4 sm:px-6 py-6" style={{ maxWidth: 560 }}>
+            <div className={`mx-auto px-4 sm:px-6 py-6 flex gap-6 ${selConv ? "justify-center" : ""}`}
+                 style={{ maxWidth: selConv && !isMobile ? 1000 : 560 }}>
+            {(!isMobile || !selConv) && (
+            <div className="flex-1 min-w-0" style={{ maxWidth: 560 }}>
                 <div className="rounded-2xl overflow-hidden"
                     style={{ background: "radial-gradient(120% 60% at 50% 0%, #123626 0%, #0b1410 60%)", border: "1px solid rgba(37,211,102,0.14)", boxShadow: "0 20px 50px rgba(0,0,0,0.25)" }}>
 
@@ -158,16 +185,22 @@ export function CallsView({ isMobile, onOpenConversation }: CallsViewProps): Rea
                             </div>
                         </div>
                         {missed > 0 && (
-                            <span style={{ fontSize: 12, fontWeight: 500, color: "#ff8a8d", backgroundColor: "rgba(242,85,90,0.16)", padding: "5px 11px", borderRadius: 999 }}>
-                                {missed} missed
-                            </span>
+                            <button type="button"
+                                onClick={() => setMissedOnly((v) => !v)}
+                                title={missedOnly ? "Show all calls" : "Show only missed calls"}
+                                style={{ fontSize: 12, fontWeight: 500, color: "#ff8a8d",
+                                         backgroundColor: missedOnly ? "rgba(242,85,90,0.35)" : "rgba(242,85,90,0.16)",
+                                         padding: "5px 11px", borderRadius: 999, cursor: "pointer",
+                                         border: missedOnly ? "1px solid rgba(242,85,90,0.6)" : "1px solid transparent" }}>
+                                {missed} missed{missedOnly ? " ✕" : ""}
+                            </button>
                         )}
                     </div>
 
                     <div>
-                        {calls === null ? (
+                        {shownCalls === null ? (
                             <div style={{ color: "#7f9b8b", fontSize: 14 }} className="px-6 py-10 text-center">Loading…</div>
-                        ) : calls.length === 0 ? (
+                        ) : shownCalls.length === 0 ? (
                             <div className="px-6 py-14 text-center">
                                 <div style={{ color: "#cfe9d9", fontSize: 15, fontWeight: 500 }}>No calls yet</div>
                                 <div style={{ color: "#7f9b8b", fontSize: 13, marginTop: 6 }}>
@@ -176,7 +209,7 @@ export function CallsView({ isMobile, onOpenConversation }: CallsViewProps): Rea
                                 </div>
                             </div>
                         ) : (
-                            calls.map((c) => {
+                            shownCalls.map((c) => {
                                 const o = OUTCOME[c.status] ?? OUTCOME.ended;
                                 const who = c.name || (c.wa_id ? `+${c.wa_id}` : "Unknown");
                                 const initials = who.replace("+", "").split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
@@ -185,9 +218,10 @@ export function CallsView({ isMobile, onOpenConversation }: CallsViewProps): Rea
                                 return (
                                     <div key={c.id} style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}>
                                     <div
-                                        onClick={() => c.wa_id && onOpenConversation?.(c.wa_id)}
+                                        onClick={() => c.wa_id && setSelected(c)}
                                         className="flex items-center gap-3 px-6 py-3.5 transition-colors"
-                                        style={{ cursor: c.wa_id ? "pointer" : "default" }}
+                                        style={{ cursor: c.wa_id ? "pointer" : "default",
+                                                 backgroundColor: selected?.id === c.id ? "rgba(37,211,102,0.08)" : undefined }}
                                         onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.03)")}
                                         onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}>
                                         <div className="flex items-center justify-center rounded-full flex-shrink-0"
@@ -240,6 +274,51 @@ export function CallsView({ isMobile, onOpenConversation }: CallsViewProps): Rea
                         )}
                     </div>
                 </div>
+            </div>
+            )}
+
+            {/* ── Caller panel — the full CRM profile, right here ─────────────── */}
+            {selConv && (
+                <div className={isMobile ? "flex-1 min-w-0" : "sticky top-6 self-start flex-shrink-0"}
+                     style={isMobile ? undefined : { width: 400 }}>
+                    {/* Call history strip for THIS caller */}
+                    <div className="rounded-2xl mb-3 px-4 py-3 flex items-center justify-between"
+                         style={{ background: "#0b1410", border: "1px solid rgba(37,211,102,0.14)" }}>
+                        <div style={{ fontSize: 12, color: "#9fb3a8" }}>
+                            <span style={{ color: "#e9edef", fontWeight: 500 }}>
+                                {callerCalls.length} call{callerCalls.length === 1 ? "" : "s"}
+                            </span>
+                            {callerMissed > 0 && (
+                                <span style={{ color: "#ff8a8d" }}> · {callerMissed} missed</span>
+                            )}
+                            {callerCalls[0]?.started_at && (
+                                <span> · last {timeAgo(callerCalls[0].started_at)}</span>
+                            )}
+                        </div>
+                        {selected?.wa_id && (
+                            <button type="button"
+                                onClick={() => onOpenConversation?.(selected.wa_id!)}
+                                style={{ fontSize: 12, fontWeight: 500, color: "#2ad17f",
+                                         background: "rgba(37,211,102,0.14)",
+                                         border: "1px solid rgba(37,211,102,0.3)",
+                                         borderRadius: 999, padding: "5px 12px", cursor: "pointer" }}>
+                                Open chat →
+                            </button>
+                        )}
+                    </div>
+                    <div className="rounded-2xl overflow-hidden shadow-xl"
+                         style={{ border: "1px solid #e7e5e4",
+                                  maxHeight: "calc(100vh - 160px)", display: "flex" }}>
+                        <CustomerSidebar
+                            conversation={selConv}
+                            onToast={onToast}
+                            onClose={() => setSelected(null)}
+                            onOpenIdentity={(channel, externalId) => onOpenConversation?.(externalId)}
+                            className="w-full flex flex-col overflow-hidden bg-white"
+                        />
+                    </div>
+                </div>
+            )}
             </div>
         </div>
     );
