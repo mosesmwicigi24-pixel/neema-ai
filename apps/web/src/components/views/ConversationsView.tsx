@@ -130,6 +130,83 @@ function Lightbox({
     );
 }
 
+// ── Album (WhatsApp-style) ───────────────────────────────────────────────────
+// Consecutive images from the same side collapse into ONE collage bubble;
+// clicking any cell opens the sequential viewer with ‹ › navigation.
+
+type AlbumItem = { src: string; caption: string | null };
+
+function AlbumGrid({ items, onOpen }: { items: AlbumItem[]; onOpen: (index: number) => void }) {
+    const n = items.length;
+    const shown = items.slice(0, 4);
+    const extra = n - 4;
+    return (
+        <div className="grid grid-cols-2 gap-1 w-64">
+            {shown.map((it, i) => {
+                const tallFirst = n === 3 && i === 0;         // 3 photos: big one on top
+                return (
+                    <button
+                        key={i}
+                        type="button"
+                        onClick={() => onOpen(i)}
+                        className={`relative block overflow-hidden rounded-lg ${tallFirst ? "col-span-2 h-40" : "h-32"}`}
+                    >
+                        <img src={it.src} alt={it.caption || `photo ${i + 1}`}
+                             className="w-full h-full object-cover cursor-zoom-in" />
+                        {i === 3 && extra > 0 && (
+                            <span className="absolute inset-0 bg-black/55 flex items-center justify-center text-white text-xl font-semibold">
+                                +{extra}
+                            </span>
+                        )}
+                    </button>
+                );
+            })}
+        </div>
+    );
+}
+
+function AlbumViewer({ items, start, onClose }: {
+    items: AlbumItem[]; start: number; onClose: () => void;
+}) {
+    const [i, setI] = React.useState(start);
+    const prev = React.useCallback(() => setI((v) => (v + items.length - 1) % items.length), [items.length]);
+    const next = React.useCallback(() => setI((v) => (v + 1) % items.length), [items.length]);
+    React.useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === "Escape") onClose();
+            else if (e.key === "ArrowLeft") prev();
+            else if (e.key === "ArrowRight") next();
+        };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [onClose, prev, next]);
+    const cur = items[i];
+    if (!cur) return null;
+    return (
+        <div onClick={onClose} className="fixed inset-0 z-[200] bg-black/90 flex flex-col items-center justify-center p-4">
+            <button onClick={onClose} aria-label="Close"
+                    className="absolute top-4 right-5 text-white/80 hover:text-white text-3xl leading-none">✕</button>
+            <span className="absolute top-5 left-1/2 -translate-x-1/2 text-white/70 text-sm">{i + 1} / {items.length}</span>
+            {items.length > 1 && (
+                <button aria-label="Previous"
+                        onClick={(e) => { e.stopPropagation(); prev(); }}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-white/70 hover:text-white text-4xl px-2">‹</button>
+            )}
+            <img src={cur.src} alt={cur.caption || ""} onClick={(e) => e.stopPropagation()}
+                 className="max-w-full max-h-[82vh] rounded-lg object-contain shadow-2xl" />
+            {items.length > 1 && (
+                <button aria-label="Next"
+                        onClick={(e) => { e.stopPropagation(); next(); }}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-white/70 hover:text-white text-4xl px-2">›</button>
+            )}
+            {cur.caption && (
+                <p onClick={(e) => e.stopPropagation()}
+                   className="mt-3 max-w-2xl text-center text-white/90 text-sm">{cur.caption}</p>
+            )}
+        </div>
+    );
+}
+
 // ── CommentContextCard ────────────────────────────────────────────────────────
 // A Facebook/Instagram comment is a reply to one of our posts — but the comment
 // text alone ("how much?") is meaningless without it. This card shows WHAT the
@@ -543,6 +620,40 @@ export function ConversationsView({
             (b.type === "system_event" && (b.event_kind === "escalated" || (b.event_kind === "intercept" && !b.agent_name)) ? 1 : 0);
         return tA - tB;
     }), [activeMessages]);
+
+    // WhatsApp-style albums: runs of ≥2 consecutive image messages from the same
+    // side collapse into one collage bubble (the first message renders the grid;
+    // the rest render nothing). Clicking opens the sequential viewer.
+    const albumOf = useMemo(() => {
+        const map = new Map<string, { lead: boolean; items: Message[] }>();
+        let run: Message[] = [];
+        const flush = () => {
+            if (run.length >= 2) {
+                const items = run;
+                items.forEach((m, i) => map.set(m.id, { lead: i === 0, items }));
+            }
+            run = [];
+        };
+        for (const m of sortedActiveMessages) {
+            const isImg = m.type !== "system_event" && !m.isNote &&
+                (m as any).media_type === "image" && (m as any).media_url;
+            const prevM = run[run.length - 1];
+            if (isImg && (!prevM || (prevM.direction === m.direction && prevM.sender === m.sender))) {
+                run.push(m);
+            } else {
+                flush();
+                if (isImg) run.push(m);
+            }
+        }
+        flush();
+        return map;
+    }, [sortedActiveMessages]);
+    const [albumViewer, setAlbumViewer] = useState<{ items: AlbumItem[]; start: number } | null>(null);
+    const albumItemsOf = (msgs: Message[]): AlbumItem[] => msgs.map((m) => ({
+        src: (m as any).media_url as string,
+        caption: (m.text || "").trim() && !(m.text || "").trim().startsWith("[")
+            ? (m.text || "").trim() : null,
+    }));
 
     // Jump to the same person's conversation on another channel (clicking a
     // linked identity in the customer panel). WhatsApp real numbers open wa.me in
@@ -967,17 +1078,54 @@ export function ConversationsView({
         return { bytes: MAX_DOC_BYTES, label: "18 MB" };
     };
 
-    const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // WhatsApp never rejects a normal photo — it downscales and re-encodes it.
+    // Same here: an oversized image is resized to max 2048px on its long side
+    // and saved as JPEG, stepping quality down until it fits the 5 MB Cloud API
+    // limit. Animated GIFs can't be re-encoded on a canvas (they'd freeze), so
+    // they keep the hard limit; so do videos/documents.
+    const compressImage = async (file: File): Promise<File | null> => {
+        try {
+            const bitmap = await createImageBitmap(file);
+            const MAX_SIDE = 2048;
+            const scale = Math.min(1, MAX_SIDE / Math.max(bitmap.width, bitmap.height));
+            const w = Math.max(1, Math.round(bitmap.width * scale));
+            const h = Math.max(1, Math.round(bitmap.height * scale));
+            const canvas = document.createElement("canvas");
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) return null;
+            ctx.drawImage(bitmap, 0, 0, w, h);
+            bitmap.close?.();
+            for (const q of [0.85, 0.7, 0.55, 0.4]) {
+                const blob: Blob | null = await new Promise((r) => canvas.toBlob(r, "image/jpeg", q));
+                if (blob && blob.size <= MAX_IMAGE_BYTES) {
+                    const name = file.name.replace(/\.[^.]+$/, "") + ".jpg";
+                    return new File([blob], name, { type: "image/jpeg" });
+                }
+            }
+            return null;
+        } catch {
+            return null;
+        }
+    };
+
+    const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const picked = Array.from(e.target.files ?? []);
         if (fileInputRef.current) fileInputRef.current.value = ""; // allow re-pick same file
         if (!picked.length) return;
 
         const accepted: MediaItem[] = [];
-        for (const file of picked) {
+        for (let file of picked) {
             const { bytes, label } = limitFor(file);
             if (file.size > bytes) {
-                onToast(`${file.name} is too large (max ${label})`, "error");
-                continue;
+                const compressible = file.type.startsWith("image/") && file.type !== "image/gif";
+                const smaller = compressible ? await compressImage(file) : null;
+                if (!smaller) {
+                    onToast(`${file.name} is too large (max ${label})`, "error");
+                    continue;
+                }
+                file = smaller;              // silently fitted, like WhatsApp
             }
             accepted.push({
                 id: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2, 8)}`,
@@ -1840,6 +1988,9 @@ export function ConversationsView({
                                     const isNote = msg.isNote;
                                     const showDivider =
                                         idx === dividerIdx && snap > 0;
+                                    // Album members render inside the lead's collage.
+                                    const album = albumOf.get(msg.id);
+                                    if (album && !album.lead) return null;
 
                                     // ── System event card ────────────────────
                                     if (msg.type === "system_event") {
@@ -2285,6 +2436,15 @@ export function ConversationsView({
                                                                 "image/",
                                                             )
                                                         ) {
+                                                            if (album?.lead) {
+                                                                const items = albumItemsOf(album.items);
+                                                                return (
+                                                                    <AlbumGrid
+                                                                        items={items}
+                                                                        onOpen={(i) => setAlbumViewer({ items, start: i })}
+                                                                    />
+                                                                );
+                                                            }
                                                             // media_caption = GPT-4o image analysis
                                                             // (Product Image Recognition sub-workflow).
                                                             // msg.text = customer's own caption only.
@@ -3324,6 +3484,13 @@ export function ConversationsView({
                     })()}
                 </div>
             )} */}
+            {albumViewer && (
+                <AlbumViewer
+                    items={albumViewer.items}
+                    start={albumViewer.start}
+                    onClose={() => setAlbumViewer(null)}
+                />
+            )}
         </div>
     );
 }
