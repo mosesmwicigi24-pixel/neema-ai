@@ -172,3 +172,13 @@ def test_clergy_leader_role_scores_ten():
     assert pts("Deanna") == 0
     # the cap still holds
     assert _compute_lead_score(u, 9, 99999, 3, True, 5, 1.0, "Bishop") == 100
+
+
+def test_merge_suggestions_route_is_registered_before_the_dynamic_merge_route():
+    """/customers/{wa_id}/merge_suggestions must be its own GET route and the
+    POST merge route must still exist — the suggestion endpoint was inserted
+    next to it."""
+    from app.routers.crm import router
+    paths = {(r.path, tuple(sorted(r.methods or []))) for r in router.routes}
+    assert ("/customers/{wa_id}/merge_suggestions", ("GET",)) in paths
+    assert ("/customers/{wa_id}/merge", ("POST",)) in paths

@@ -823,6 +823,93 @@ async def update_customer(
 
 # ── Merge profiles ────────────────────────────────────────────────────────────
 
+@router.get("/customers/{wa_id}/merge_suggestions")
+async def merge_suggestions(
+    wa_id: str,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+    channel: str | None = None,
+):
+    """Duplicate-profile candidates for the Merge panel, from evidence the system
+    already holds: a shared phone, a shared email, or the same full name (with
+    country agreement when both are known) on another profile.
+
+    Suggestions are operator-confirmed. Only DETERMINISTIC evidence merges
+    automatically elsewhere (a Messenger customer sharing their phone →
+    capture_contact; a wa.me ref click-through → reconcile_waref)."""
+    user = await _resolve_customer_user(db, wa_id, channel, create=False)
+    if not user:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    def _digits(s: str | None) -> str:
+        return re.sub(r"\D", "", s or "")
+
+    my_phones = {d for d in (
+        _digits(user.phone),
+        _digits(user.wa_id) if is_plausible_phone(user.wa_id) else "",
+    ) if len(d) >= 9}
+    my_email = (user.email or "").strip().lower()
+    my_name = (user.name or "").strip()
+
+    cands: dict[str, dict] = {}
+
+    def _consider(u: User, evidence: str, strong: bool) -> None:
+        if u.id == user.id:
+            return
+        if user.person_id and u.person_id and u.person_id == user.person_id:
+            return                       # already the same person — linked, not a duplicate
+        if (u.state or {}).get("merged_into"):
+            return
+        e = cands.setdefault(str(u.id), {
+            "merge_with": u.wa_id,
+            "name": u.name,
+            "phone": u.phone or (u.wa_id if is_plausible_phone(u.wa_id) else None),
+            "country": u.country,
+            "channel_hint": "whatsapp" if is_plausible_phone(u.wa_id) else "social",
+            "evidence": [],
+            "strength": "possible",
+        })
+        if evidence not in e["evidence"]:
+            e["evidence"].append(evidence)
+        if strong:
+            e["strength"] = "strong"
+
+    # a) Shared phone — exact digits or a matching 9-digit national tail.
+    for d in my_phones:
+        tail = d[-9:]
+        rows = (await db.execute(select(User).where(or_(
+            User.wa_id == d,
+            User.phone.in_([d, f"+{d}"]),
+            User.wa_id.like(f"%{tail}"),
+            User.phone.like(f"%{tail}"),
+        )).limit(10))).scalars().all()
+        for u in rows:
+            ud = _digits(u.phone) or _digits(u.wa_id)
+            if ud and (ud == d or ud.endswith(tail)):
+                _consider(u, f"Same phone ····{tail[-4:]}", True)
+
+    # b) Shared email.
+    if my_email:
+        rows = (await db.execute(select(User).where(
+            func.lower(User.email) == my_email).limit(5))).scalars().all()
+        for u in rows:
+            _consider(u, "Same email", True)
+
+    # c) Same full name on another profile (first names alone are noise); when
+    #    both countries are known they must agree.
+    if len(my_name) >= 5 and " " in my_name:
+        rows = (await db.execute(select(User).where(
+            func.lower(User.name) == my_name.lower()).limit(8))).scalars().all()
+        for u in rows:
+            if u.country_iso and user.country_iso and u.country_iso != user.country_iso:
+                continue
+            _consider(u, "Same name" + (" + country" if u.country_iso and user.country_iso else ""), False)
+
+    out = sorted(cands.values(),
+                 key=lambda c: (c["strength"] != "strong", c["name"] or ""))[:5]
+    return {"suggestions": out}
+
+
 @router.post("/customers/{wa_id}/merge")
 async def merge_customers(
     wa_id: str,

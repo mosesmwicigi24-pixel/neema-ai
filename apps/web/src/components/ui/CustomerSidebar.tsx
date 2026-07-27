@@ -667,6 +667,47 @@ export function CustomerSidebar({
         loadProfile();
     }, [loadProfile]);
 
+    // ── Merge suggestions — evidence the system already holds ────────────────
+    type MergeSug = { merge_with: string; name: string | null; phone: string | null;
+                      country: string | null; channel_hint: string;
+                      evidence: string[]; strength: "strong" | "possible" };
+    const [mergeSugs, setMergeSugs] = useState<MergeSug[] | null>(null);
+    useEffect(() => {
+        if (!showMerge) { setMergeSugs(null); return; }
+        let gone = false;
+        (async () => {
+            try {
+                const r = await crmReq<{ suggestions: MergeSug[] }>(
+                    "GET",
+                    `/admin/customers/${encodeURIComponent(profile?.wa_id || custId)}/merge_suggestions${chParam}`,
+                );
+                if (!gone) setMergeSugs(r.suggestions ?? []);
+            } catch {
+                if (!gone) setMergeSugs([]);
+            }
+        })();
+        return () => { gone = true; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [showMerge]);
+
+    const doMerge = useCallback(async (target: string) => {
+        if (!target.trim()) return;
+        try {
+            await crmReq(
+                "POST",
+                `/admin/customers/${encodeURIComponent(profile?.wa_id || custId)}/merge${chParam}`,
+                { merge_with: target.trim() },
+            );
+            onToast("Profiles merged successfully");
+            setShowMerge(false);
+            setMergeQuery("");
+            loadProfile();
+        } catch {
+            onToast("Failed to merge profiles", "error");
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [profile?.wa_id, custId, chParam, loadProfile, onToast]);
+
     const patch = useCallback(
         async (updates: Partial<CustomerProfile & { notes: string }>) => {
             if (!profile) return;
@@ -1721,6 +1762,48 @@ export function CustomerSidebar({
                                                 </div>
                                             </div>
                                         </div>
+                                        {/* Evidence-backed candidates — one click, no typing. */}
+                                        {mergeSugs === null ? (
+                                            <p className="text-[10px] mb-2 italic" style={{ color: "#64748b" }}>
+                                                Scanning for likely duplicates…
+                                            </p>
+                                        ) : mergeSugs.length > 0 ? (
+                                            <div className="mb-2.5 flex flex-col gap-1.5">
+                                                {mergeSugs.map((s) => (
+                                                    <div key={s.merge_with}
+                                                         className="flex items-center gap-2 rounded-lg px-2.5 py-2 bg-white"
+                                                         style={{ border: s.strength === "strong"
+                                                             ? "1.5px solid #86c95e" : "1px solid #e2e8f0" }}>
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="text-[11px] font-semibold text-[#16270c] truncate">
+                                                                {s.name || s.phone || s.merge_with}
+                                                                {s.country ? <span className="font-normal text-[#64748b]"> · {s.country}</span> : null}
+                                                            </div>
+                                                            <div className="flex flex-wrap gap-1 mt-0.5">
+                                                                {s.evidence.map((ev) => (
+                                                                    <span key={ev}
+                                                                          className="text-[9px] px-1.5 py-0.5 rounded-full"
+                                                                          style={{ backgroundColor: s.strength === "strong" ? "#e9f6df" : "#f1f5f9",
+                                                                                   color: s.strength === "strong" ? "#427425" : "#475569" }}>
+                                                                        {ev}
+                                                                    </span>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                        <button
+                                                            onClick={() => doMerge(s.merge_with)}
+                                                            className="text-[10px] font-bold px-2.5 py-1.5 rounded-lg text-white flex-shrink-0"
+                                                            style={{ backgroundColor: "#1e293b" }}>
+                                                            Merge
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <p className="text-[10px] mb-2 italic" style={{ color: "#64748b" }}>
+                                                No likely duplicates found — you can still merge manually below.
+                                            </p>
+                                        )}
                                         <p
                                             className="text-[10px] mb-2.5 leading-relaxed"
                                             style={{ color: "#1e293b" }}
@@ -1756,31 +1839,7 @@ export function CustomerSidebar({
                                         />
                                         <div className="flex gap-1.5">
                                             <button
-                                                onClick={async () => {
-                                                    if (!mergeQuery.trim())
-                                                        return;
-                                                    try {
-                                                        await crmReq(
-                                                            "POST",
-                                                            `/admin/customers/${encodeURIComponent(profile.wa_id || custId)}/merge${chParam}`,
-                                                            {
-                                                                merge_with:
-                                                                    mergeQuery.trim(),
-                                                            },
-                                                        );
-                                                        onToast(
-                                                            "Profiles merged successfully",
-                                                        );
-                                                        setShowMerge(false);
-                                                        setMergeQuery("");
-                                                        loadProfile();
-                                                    } catch {
-                                                        onToast(
-                                                            "Failed to merge profiles",
-                                                            "error",
-                                                        );
-                                                    }
-                                                }}
+                                                onClick={() => doMerge(mergeQuery)}
                                                 className="flex-1 text-[10px] font-bold py-1.5 rounded-lg text-white transition-colors"
                                                 style={{
                                                     backgroundColor: "#1e293b",
