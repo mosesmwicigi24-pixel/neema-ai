@@ -21,13 +21,27 @@ export function useApi<T>(
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const mountedRef = useRef(true);
+    // Fingerprint of the last stored payload: background refetches that return
+    // identical data must cause ZERO re-renders — flipping `loading` and always
+    // storing a fresh array identity re-rendered the entire dashboard (and the
+    // conversation list with it) on every poll tick, even with nothing new.
+    const fingerprintRef = useRef<string | null>(null);
+    const hasDataRef = useRef(false);
 
     const fetch = useCallback(async () => {
-        setLoading(true);
-        setError(null);
+        if (!hasDataRef.current) setLoading(true);   // spinner only on first load
         try {
             const result = await fetcher();
-            if (mountedRef.current) setData(result);
+            if (mountedRef.current) {
+                let fp: string | null = null;
+                try { fp = JSON.stringify(result); } catch { /* non-serializable */ }
+                if (fp === null || fp !== fingerprintRef.current) {
+                    fingerprintRef.current = fp;
+                    setData(result);
+                }
+                hasDataRef.current = true;
+                setError(null);
+            }
         } catch (e: any) {
             if (mountedRef.current) setError(e.message ?? "Unknown error");
         } finally {

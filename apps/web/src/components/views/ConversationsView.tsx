@@ -533,6 +533,15 @@ export function ConversationsView({
 
     const activeConv = conversations.find((c) => c.id === activeConvId);
     const activeMessages: Message[] = messages[activeConvId] ?? [];
+    // Memoized: this sort ran inline in the thread JSX on EVERY render of the
+    // view (each keystroke, poll, ws event), allocating Dates per comparison.
+    const sortedActiveMessages = useMemo(() => [...activeMessages].sort((a, b) => {
+        const tA = new Date(a.created_at ?? 0).getTime() +
+            (a.type === "system_event" && (a.event_kind === "escalated" || (a.event_kind === "intercept" && !a.agent_name)) ? 1 : 0);
+        const tB = new Date(b.created_at ?? 0).getTime() +
+            (b.type === "system_event" && (b.event_kind === "escalated" || (b.event_kind === "intercept" && !b.agent_name)) ? 1 : 0);
+        return tA - tB;
+    }), [activeMessages]);
 
     // Jump to the same person's conversation on another channel (clicking a
     // linked identity in the customer panel). WhatsApp real numbers open wa.me in
@@ -1039,7 +1048,11 @@ export function ConversationsView({
 
     // ── Filters ───────────────────────────────────────────────────────────────
 
-    const channelCounts = CHANNEL_TABS.reduce<Record<string, number>>(
+    // All derived list data is memoized: this component re-renders on every
+    // keystroke in the reply box and every websocket event, and recomputing
+    // these (especially the O(n log n) Date-allocating sort) inline made the
+    // names list stutter while scrolling.
+    const channelCounts = useMemo(() => CHANNEL_TABS.reduce<Record<string, number>>(
         (acc, tab) => {
             acc[tab.id] =
                 tab.id === "all"
@@ -1052,16 +1065,17 @@ export function ConversationsView({
             return acc;
         },
         {},
-    );
+    ), [conversations]);
 
     // Collect all unique tags across all conversations for the tag filter UI
-    const allTags = Array.from(
+    const allTags = useMemo(() => Array.from(
         new Set(conversations.flatMap((c) => (c as any).tags ?? [])),
-    ).sort() as string[];
+    ).sort() as string[], [conversations]);
 
-    const unreadCount = conversations.filter((c) => c.unread > 0).length;
+    const unreadCount = useMemo(
+        () => conversations.filter((c) => c.unread > 0).length, [conversations]);
 
-    const filteredConvs = conversations
+    const filteredConvs = useMemo(() => conversations
         .filter((c) => {
             if (channelTab !== "all" && c.channel !== channelTab) return false;
             // Tag filter: only show conversations whose customer has the selected tag
@@ -1098,7 +1112,7 @@ export function ConversationsView({
                   ? new Date(b.created_at).getTime()
                   : 0;
             return bTime - aTime;
-        });
+        }), [conversations, channelTab, tagFilter, interceptFilter, readFilter, searchQ]);
 
     // ── Collapse siblings into one row per person ─────────────────────────────
     // Conversations sharing a person_id are the SAME customer across channels
@@ -1142,9 +1156,9 @@ export function ConversationsView({
         });
     }, [filteredConvs]);
 
-    const humanCount = conversations.filter(
+    const humanCount = useMemo(() => conversations.filter(
         (c) => c.intercept_mode === "human",
-    ).length;
+    ).length, [conversations]);
 
     // ── Render ────────────────────────────────────────────────────────────────
 
@@ -1379,6 +1393,7 @@ export function ConversationsView({
                     const isActive = group.siblings.some((s) => s.id === activeConvId);
                     const hasUnread = group.unread > 0;
                     const multi = group.siblings.length > 1;
+                    const rowName = displayName(conv.name, conv.wa_id);
                     return (
                         <button
                             key={group.rep.person_id ?? group.rep.id}
@@ -1388,7 +1403,11 @@ export function ConversationsView({
                                 backgroundColor: isActive ? "#fdf6e9" : "transparent",
                                 borderBottom: "1px solid #f2f4ef",
                                 borderLeft: `3px solid ${isActive ? ROW_ACCENT : hasUnread ? "#fcd98a" : "transparent"}`,
-                            }}
+                                // Off-screen rows skip layout + paint entirely —
+                                // scrolling only ever renders the visible slice.
+                                contentVisibility: "auto",
+                                containIntrinsicSize: "auto 74px",
+                            } as React.CSSProperties}
                             onMouseEnter={(e) => {
                                 if (!isActive) (e.currentTarget as HTMLElement).style.backgroundColor = "#fbfaf6";
                             }}
@@ -1399,10 +1418,7 @@ export function ConversationsView({
                             <div className="flex items-start gap-3">
                                 <div className="relative flex-shrink-0">
                                     <Avatar
-                                        name={displayName(
-                                            conv.name,
-                                            conv.wa_id,
-                                        )}
+                                        name={rowName}
                                         src={conv.avatar_url}
                                         size={38}
                                     />
@@ -1428,7 +1444,7 @@ export function ConversationsView({
                                                 color: "#1c2917",
                                             }}
                                         >
-                                            {displayName(conv.name, conv.wa_id)}
+                                            {rowName}
                                         </span>
                                         <span
                                             className="text-[10px] flex-shrink-0 ml-2"
@@ -1805,13 +1821,7 @@ export function ConversationsView({
                                         : -1;
                                 // ── Sort: escalation system events nudged just after their
                                 // preceding inbound message so they always appear below it.
-                                const sortedMessages = [...activeMessages].sort((a, b) => {
-                                    const tA = new Date(a.created_at ?? 0).getTime() +
-                                        (a.type === "system_event" && (a.event_kind === "escalated" || (a.event_kind === "intercept" && !a.agent_name)) ? 1 : 0);
-                                    const tB = new Date(b.created_at ?? 0).getTime() +
-                                        (b.type === "system_event" && (b.event_kind === "escalated" || (b.event_kind === "intercept" && !b.agent_name)) ? 1 : 0);
-                                    return tA - tB;
-                                });
+                                const sortedMessages = sortedActiveMessages;
 
                                 // ── Dedup: only show the FIRST escalation/system-intercept per thread.
                                 // Repeat media requests after the first escalation are suppressed.

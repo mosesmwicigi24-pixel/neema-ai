@@ -67,11 +67,30 @@ export const cn = (...classes: (string | undefined | null | false)[]): string =>
  * Falls back gracefully: if the number can't be parsed it still prepends
  * "+" and groups digits in blocks of 3 for readability.
  */
+// Country-code → formatter map, at module scope: it is stateless, and building
+// it inside formatPhone reconstructed dozens of closures per call — the
+// conversation list calls this for every unnamed row on every render.
+type Fmt = (cc: string, sub: string) => string;
+
+const PHONE_RULES: Array<{ cc: string; fmt: Fmt }> = buildPhoneRules();
+
+// Phone ids are stable strings, so formatting is cached (bounded).
+const _phoneCache = new Map<string, string>();
+
 export function formatPhone(raw: string | null | undefined): string {
     if (!raw) return "";
+    const key = String(raw);
+    const hit = _phoneCache.get(key);
+    if (hit !== undefined) return hit;
+    const out = _formatPhoneUncached(key);
+    if (_phoneCache.size > 2000) _phoneCache.clear();
+    _phoneCache.set(key, out);
+    return out;
+}
 
+function _formatPhoneUncached(raw: string): string {
     // Normalise to digits only, then restore leading +
-    const cleaned = String(raw).trim();
+    const cleaned = raw.trim();
     const hasPlus = cleaned.startsWith("+");
     const digits = cleaned.replace(/\D/g, "");
 
@@ -85,12 +104,25 @@ export function formatPhone(raw: string | null | undefined): string {
     // Ensure we always work with the full E.164 digit string (no leading +)
     const e164Digits = digits;
 
-    // Country-code → formatter map.
-    // Each entry: [countryCodeLength, formatterFn]
-    // The formatter receives the subscriber digits (after the country code).
-    type Fmt = (cc: string, sub: string) => string;
+    // Try matching longest country code first (3-digit, 2-digit, 1-digit)
+    for (const prefixLen of [3, 2, 1]) {
+        const cc = e164Digits.slice(0, prefixLen);
+        const rule = PHONE_RULES.find((r) => r.cc === cc);
+        if (rule) {
+            const sub = e164Digits.slice(prefixLen);
+            return rule.fmt(cc, sub);
+        }
+    }
 
-    const rules: Array<{ cc: string; fmt: Fmt }> = [
+    // ── Generic fallback: +[cc?] then groups of 3 ────────────────────────────
+    void hasPlus;
+    // Group remaining digits in blocks of 3 for readability
+    const grouped = digits.replace(/(\d{3})(?=\d)/g, "$1 ");
+    return `+${grouped}`;
+}
+
+function buildPhoneRules(): Array<{ cc: string; fmt: Fmt }> {
+    return [
         // ── North America (NANP) +1 ───────────────────────────────────────
         {
             cc: "1",
@@ -212,20 +244,4 @@ export function formatPhone(raw: string | null | undefined): string {
                     : `+${cc} ${s}`,
         },
     ];
-
-    // Try matching longest country code first (3-digit, 2-digit, 1-digit)
-    for (const prefixLen of [3, 2, 1]) {
-        const cc = e164Digits.slice(0, prefixLen);
-        const rule = rules.find((r) => r.cc === cc);
-        if (rule) {
-            const sub = e164Digits.slice(prefixLen);
-            return rule.fmt(cc, sub);
-        }
-    }
-
-    // ── Generic fallback: +[cc?] then groups of 3 ────────────────────────────
-    const withPlus = hasPlus ? "+" + digits : digits;
-    // Group remaining digits in blocks of 3 for readability
-    const grouped = digits.replace(/(\d{3})(?=\d)/g, "$1 ");
-    return `+${grouped}`;
 }

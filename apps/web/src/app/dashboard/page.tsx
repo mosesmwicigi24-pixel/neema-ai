@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useCallback, useEffect, useRef } from "react";
+import React, { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 
@@ -208,36 +208,43 @@ export default function NeemaDashboard(): React.ReactElement {
     }, [nextAuthSession, accessToken]);
 
     // ── Live data polling — gated on hasToken ─────────────────────────────────
+    // The WebSocket is the primary transport (notification handler below
+    // refetches on relevant events); these polls are the missed-event fallback,
+    // so they run at a slow cadence.
     const { data: rawConversations, refetch: refetchConversations } =
         usePolling(
             () => hasToken ? conversationsApi.list() : Promise.resolve(null),
-            20000,
+            60000,
             [hasToken],
         );
 
     const { data: rawAgents, refetch: refetchAgents } = usePolling(
         () => (hasToken ? agentsApi.list() : Promise.resolve(null)),
-        45000,
+        180000,
         [hasToken],
     );
 
     const { data: rawCatalog, refetch: refetchCatalog } = usePolling(
         () => (hasToken ? catalogApi.list() : Promise.resolve(null)),
-        120000,
+        300000,
         [hasToken],
     );
 
     const { data: rawOrders, refetch: refetchOrders } = usePolling(
         () => (hasToken ? ordersApi.list() : Promise.resolve(null)),
-        30000,
+        90000,
         [hasToken],
     );
 
     // ── Map API data to UI types ──────────────────────────────────────────────
-    const mappedConversations: Conversation[] = (rawConversations ?? []).map(mapConversation);
-    const agents: Agent[]        = (rawAgents ?? []).map(mapAgent);
-    const catalog: CatalogItem[] = (rawCatalog ?? []).map(mapCatalogItem);
-    const orders: Order[]        = (rawOrders ?? []).map(mapOrder);
+    // Memoized on the raw poll payloads (which useApi only replaces when the
+    // data actually changed), so unchanged polls keep stable array identities
+    // and the views below skip re-rendering.
+    const mappedConversations: Conversation[] = useMemo(
+        () => (rawConversations ?? []).map(mapConversation), [rawConversations]);
+    const agents: Agent[]        = useMemo(() => (rawAgents ?? []).map(mapAgent), [rawAgents]);
+    const catalog: CatalogItem[] = useMemo(() => (rawCatalog ?? []).map(mapCatalogItem), [rawCatalog]);
+    const orders: Order[]        = useMemo(() => (rawOrders ?? []).map(mapOrder), [rawOrders]);
 
     // Sync local conversations whenever polling brings fresh data
     useEffect(() => {
@@ -309,6 +316,16 @@ export default function NeemaDashboard(): React.ReactElement {
                 // Show an in-app toast as well
                 showToast(`${n.title}: ${n.body}`, "info");
 
+                // Push events drive freshness (polls are just the fallback):
+                // refetch the affected list shortly after the event lands.
+                const t = String(n.type ?? "");
+                if (["new_conversation", "human_transfer", "intercept", "transfer",
+                     "media_escalation"].includes(t)) {
+                    setTimeout(refetchConversations, 800);
+                } else if (t === "order_update") {
+                    setTimeout(refetchOrders, 800);
+                }
+
                 // Browser push notification (only if permission already granted)
                 if (
                     typeof Notification !== "undefined" &&
@@ -320,7 +337,7 @@ export default function NeemaDashboard(): React.ReactElement {
                     });
                 }
             },
-            [showToast],
+            [showToast, refetchConversations, refetchOrders],
         ),
     );
 

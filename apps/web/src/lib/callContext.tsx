@@ -6,7 +6,7 @@
 // listener, the peer connection, and the audio elements; useCall() exposes the
 // state + actions to whatever renders the card.
 import React, {
-    createContext, useCallback, useContext, useEffect, useRef, useState, ReactNode,
+    createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, ReactNode,
 } from "react";
 import { useWs } from "@/lib/websocket";
 import { callsApi } from "@/lib/api";
@@ -323,10 +323,24 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }, [ws, cleanup, startRinging]);
 
     // Fallback path: poll the call log for a fresh "ringing" call, so the card
-    // appears even if the WS event was missed. The backend writes the ringing row
-    // the instant a call connects; we ring on it within ~2.5s regardless of WS.
+    // appears even if the WS event was missed. Phase-aware cadence: 2.5s only
+    // while RINGING (hang-up detection needs it); 12s when idle (the WS is the
+    // primary transport). Skips entirely when the tab is hidden or there is no
+    // auth token yet — the old unconditional 2.5s loop fired 24 req/min per tab
+    // including hidden tabs and the login page, and every response re-rendered
+    // the app tree.
     useEffect(() => {
-        const poll = async () => {
+        let stopped = false;
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        const cadence = () => (phaseRef.current === "ringing" ? 2500 : 12000);
+        const schedule = () => {
+            if (stopped) return;
+            timer = setTimeout(run, cadence());
+        };
+        const run = async () => {
+            if (stopped) return;
+            if (typeof document !== "undefined" && document.visibilityState === "hidden") return schedule();
+            if (typeof window !== "undefined" && !(window as any).__neema_token) return schedule();
             try {
                 const calls = await callsApi.list();
                 const now = Date.now();
@@ -335,9 +349,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
                 if (phaseRef.current === "ringing") {
                     const cur = calls.find((c) => c.call_id === activeIdRef.current);
                     if (cur && cur.status !== "ringing") { cleanup(); activeIdRef.current = null; setPhase("idle"); setCall(null); }
-                    return;
+                    return schedule();
                 }
-                if (phaseRef.current !== "idle") return;
+                if (phaseRef.current !== "idle") return schedule();
                 const ringing = calls.find((c) =>
                     c.status === "ringing" &&
                     c.started_at && (now - new Date(c.started_at).getTime()) < 90000);
@@ -346,9 +360,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
                     startRinging(ringing.call_id, ringing.wa_id || "", ringing.name);
                 }
             } catch { /* ignore */ }
+            schedule();
         };
-        const t = setInterval(poll, 2500);
-        return () => clearInterval(t);
+        schedule();
+        return () => { stopped = true; if (timer) clearTimeout(timer); };
     }, [startRinging]);
 
     useEffect(() => {
@@ -358,8 +373,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
         return () => clearInterval(t);
     }, [phase, startRecording]);
 
+    // Stable context identity: an inline object here re-rendered every
+    // useCall() consumer (incl. the customer sidebar) on ANY provider render.
+    const ctxValue = useMemo(
+        () => ({ phase, call, muted, seconds, error, note, answer, hangup, callback, toggleMute, initiateCall, outbound }),
+        [phase, call, muted, seconds, error, note, answer, hangup, callback, toggleMute, initiateCall, outbound]);
     return (
-        <Ctx.Provider value={{ phase, call, muted, seconds, error, note, answer, hangup, callback, toggleMute, initiateCall, outbound }}>
+        <Ctx.Provider value={ctxValue}>
             {children}
             <audio ref={remoteAudioRef} autoPlay className="hidden" />
         </Ctx.Provider>

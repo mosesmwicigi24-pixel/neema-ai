@@ -98,6 +98,7 @@ export function OverviewView({
         attributionApi.get().then(setAttrib).catch(() => setAttrib(null));
 
         const timer = setInterval(() => {
+            if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
             statsApi.overview().then(setApiStats).catch(() => {});
         }, 30000);
         return () => clearInterval(timer);

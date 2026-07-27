@@ -55,7 +55,11 @@ function CallTranscript({ callId }: { callId: string }): React.ReactElement {
     useEffect(() => { load(); }, [load]);
     useEffect(() => {
         if (!data || (data.status !== "pending" && data.status !== "processing")) return;
-        const t = setInterval(load, 3000);
+        // A transcription job takes ~1-2 min — 5s resolution is plenty, and a
+        // hidden tab shouldn't keep polling for it.
+        const t = setInterval(() => {
+            if (typeof document === "undefined" || document.visibilityState === "visible") load();
+        }, 5000);
         return () => clearInterval(t);
     }, [data, load]);
 
@@ -124,9 +128,11 @@ export function CallsView({ isMobile, onOpenConversation }: CallsViewProps): Rea
     const load = useCallback(() => { callsApi.list().then(setCalls).catch(() => setCalls([])); }, []);
     useEffect(() => {
         load();
+        // The WS handler below reloads on call events; this is only the
+        // missed-event fallback, so a slow cadence is enough.
         const t = setInterval(() => {
             if (typeof document === "undefined" || document.visibilityState === "visible") load();
-        }, 20000);
+        }, 60000);
         return () => clearInterval(t);
     }, [load]);
     useEffect(() => {
