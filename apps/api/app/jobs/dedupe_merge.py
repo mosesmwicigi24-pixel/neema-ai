@@ -72,14 +72,28 @@ def build_plan(rows: list[dict]) -> tuple[list[dict], list[dict]]:
 
 
 async def main(apply: bool) -> None:
+    # Standalone script: load EVERY model module first, or SQLAlchemy's
+    # string-name relationships ("Agent" on Conversation, …) fail to resolve —
+    # the app normally gets this for free from the router imports in main.py.
+    import importlib
+    import pkgutil
+    import app.models as _models
+    for _m in pkgutil.iter_modules(_models.__path__):
+        importlib.import_module(f"app.models.{_m.name}")
+
     from sqlalchemy import select
     from app.database import AsyncSessionLocal
     from app.models.user import User
-    from app.core.phone import is_plausible_phone
+    from app.models.person import Identity
     from app.services.merge import merge_persons
 
     async with AsyncSessionLocal() as db:
         users = (await db.execute(select(User))).scalars().all()
+        # WhatsApp-anchored = has a real whatsapp identity in the spine. Digit
+        # shape is NOT enough: a 15-digit Messenger PSID passes the phone
+        # plausibility check and would masquerade as an anchor.
+        wa_ids = {e for (e,) in (await db.execute(
+            select(Identity.external_id).where(Identity.channel == "whatsapp"))).all()}
         rows = [{
             "id": str(u.id),
             "wa_id": u.wa_id,
@@ -87,7 +101,7 @@ async def main(apply: bool) -> None:
             "person_id": str(u.person_id) if u.person_id else None,
             "name": u.name,
             "merged": bool((u.state or {}).get("merged_into")),
-            "is_wa": is_plausible_phone(u.wa_id),
+            "is_wa": u.wa_id in wa_ids,
             "_person_uuid": u.person_id,
             "_wa_id_raw": u.wa_id,
         } for u in users]
@@ -124,6 +138,31 @@ async def main(apply: bool) -> None:
                     primary_wa_id=pri["_wa_id_raw"],
                     secondary_wa_id=sec["_wa_id_raw"],
                 )
+                # Same user-row bookkeeping the CRM merge endpoint does: the
+                # secondary drops out of the leads list (and out of this
+                # script's next run), the primary records the union.
+                from sqlalchemy.orm.attributes import flag_modified
+                pri_u = (await db.execute(select(User).where(
+                    User.wa_id == pri["_wa_id_raw"]))).scalar_one_or_none()
+                sec_u = (await db.execute(select(User).where(
+                    User.wa_id == sec["_wa_id_raw"]))).scalar_one_or_none()
+                if sec_u is not None:
+                    s_state = dict(sec_u.state or {})
+                    s_state["merged_into"] = pri["_wa_id_raw"]
+                    sec_u.state = s_state
+                    flag_modified(sec_u, "state")
+                if pri_u is not None:
+                    p_state = dict(pri_u.state or {})
+                    merged_ids = list(p_state.get("merged_ids", []))
+                    if sec["_wa_id_raw"] not in merged_ids:
+                        merged_ids.append(sec["_wa_id_raw"])
+                    p_state["merged_ids"] = merged_ids
+                    tags = set(p_state.get("tags", [])) | set(
+                        (sec_u.state or {}).get("tags", []) if sec_u else [])
+                    if tags:
+                        p_state["tags"] = list(tags)
+                    pri_u.state = p_state
+                    flag_modified(pri_u, "state")
                 await db.commit()
                 done += 1
             except Exception as exc:
