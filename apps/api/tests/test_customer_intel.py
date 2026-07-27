@@ -182,3 +182,31 @@ def test_merge_suggestions_route_is_registered_before_the_dynamic_merge_route():
     paths = {(r.path, tuple(sorted(r.methods or []))) for r in router.routes}
     assert ("/customers/{wa_id}/merge_suggestions", ("GET",)) in paths
     assert ("/customers/{wa_id}/merge", ("POST",)) in paths
+
+
+def test_dedupe_plan_merges_only_on_overwhelming_evidence():
+    from app.jobs.dedupe_merge import build_plan
+    wa = {"id": "u1", "wa_id": "254700000001", "phone": None, "person_id": "pA",
+          "name": "Bishop Elias", "merged": False, "is_wa": True}
+    social_same = {"id": "u2", "wa_id": "2647945332506541", "phone": "+254700000001",
+                   "person_id": "pB", "name": "Elias FB", "merged": False, "is_wa": False}
+    social_linked = {"id": "u3", "wa_id": "8888888877776666", "phone": "+254700000001",
+                     "person_id": "pA", "name": "Already linked", "merged": False, "is_wa": False}
+    tombstone = {"id": "u4", "wa_id": "9999999988887777", "phone": "+254700000001",
+                 "person_id": "pC", "name": "Old dup", "merged": True, "is_wa": False}
+    merges, review = build_plan([wa, social_same, social_linked, tombstone])
+    assert len(merges) == 1
+    assert merges[0]["primary"]["id"] == "u1"            # WhatsApp anchor survives
+    assert merges[0]["secondary"]["id"] == "u2"          # linked + tombstoned skipped
+    assert review == []
+
+
+def test_dedupe_plan_sends_anchorless_groups_to_review():
+    from app.jobs.dedupe_merge import build_plan
+    a = {"id": "s1", "wa_id": "111122223333444", "phone": "+256700111222",
+         "person_id": "p1", "name": "FB One", "merged": False, "is_wa": False}
+    b = {"id": "s2", "wa_id": "555566667777888", "phone": "+256 700 111 222",
+         "person_id": "p2", "name": "IG One", "merged": False, "is_wa": False}
+    merges, review = build_plan([a, b])
+    assert merges == []
+    assert len(review) == 1 and review[0]["phone"].endswith("256700111222")
