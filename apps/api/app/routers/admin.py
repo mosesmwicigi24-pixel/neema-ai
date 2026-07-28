@@ -598,11 +598,16 @@ async def upload_media(
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/vnd.ms-excel",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "video/mp4", "video/3gpp",
+        "video/mp4", "video/3gpp", "video/quicktime", "video/hevc", "video/x-m4v",
         "audio/ogg", "audio/aac", "audio/mpeg",
     }
 
     ct = file.content_type or mimetypes.guess_type(file.filename or "")[0] or ""
+    # iPhone .mov/.hevc files often arrive as octet-stream — trust the extension.
+    if ct in ("", "application/octet-stream"):
+        _ext = os.path.splitext(file.filename or "")[1].lower() if file.filename else ""
+        ct = {".mov": "video/quicktime", ".hevc": "video/hevc",
+              ".mp4": "video/mp4", ".m4v": "video/x-m4v"}.get(_ext, ct)
     if ct not in ALLOWED_MIME:
         raise HTTPException(status_code=415, detail=f"Unsupported media type: {ct}")
 
@@ -615,12 +620,13 @@ async def upload_media(
     else:
         waba_type = "document"
 
-    # Per-type size ceilings — match WhatsApp Cloud API's hard limits (anything
-    # larger is rejected downstream anyway) and stay under the 20 MB nginx body
-    # cap. Enforced server-side so a direct API call can't bypass the UI check.
+    # Per-type ACCEPTANCE ceilings. Videos are accepted up to 150 MB — like
+    # WhatsApp itself, we take the raw phone clip and transcode it down to the
+    # Cloud API's 16 MB H.264 MP4 before sending (services/video_convert.py).
+    # The other types match WhatsApp's hard limits directly.
     MB = 1024 * 1024
-    MAX_BYTES = {"image": 5 * MB, "video": 16 * MB, "audio": 16 * MB, "document": 18 * MB}
-    MAX_LABEL = {"image": "5 MB", "video": "16 MB", "audio": "16 MB", "document": "18 MB"}
+    MAX_BYTES = {"image": 5 * MB, "video": 150 * MB, "audio": 16 * MB, "document": 18 * MB}
+    MAX_LABEL = {"image": "5 MB", "video": "150 MB", "audio": "16 MB", "document": "18 MB"}
 
     from app.routers.media import MEDIA_DIR
     media_dir = MEDIA_DIR
@@ -638,6 +644,28 @@ async def upload_media(
         )
     async with aiofiles.open(file_path, "wb") as f:
         await f.write(content)
+
+    # Videos: normalise to a WhatsApp-ready H.264 MP4 (≤16 MB). A compliant
+    # file passes through untouched; a 150 MB iPhone .mov gets re-encoded.
+    if waba_type == "video":
+        from app.services.video_convert import to_whatsapp_video
+        converted = await to_whatsapp_video(file_path)
+        if converted is None:
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
+            raise HTTPException(
+                status_code=422,
+                detail="Couldn't convert this video for WhatsApp — try a shorter "
+                       "clip or export it as MP4 (H.264).")
+        if converted != file_path:
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
+            file_path = converted
+            saved_name = os.path.basename(converted)
 
     public_base = getattr(settings, "media_public_url", "").rstrip("/")
     if not public_base:

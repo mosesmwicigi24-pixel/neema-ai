@@ -1069,21 +1069,25 @@ export function ConversationsView({
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document," +
         "application/vnd.ms-excel," +
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet," +
-        "video/mp4,video/3gpp," +
+        "video/mp4,video/3gpp,video/quicktime,video/hevc,video/x-m4v,.mov,.hevc," +
         "audio/ogg,audio/aac,audio/mpeg";
 
-    // Per-type ceilings enforced BEFORE upload (nginx also caps the request body
-    // at 20 MB). Images match WhatsApp Cloud API's hard 5 MB limit — anything
-    // larger is rejected by WhatsApp anyway, so we stop it here with a clear msg.
+    // Per-type ceilings enforced BEFORE upload. Images over the WhatsApp 5 MB
+    // cap get compressed in-browser (below); videos are accepted up to 150 MB —
+    // the server transcodes them to WhatsApp's 16 MB H.264 MP4 (like the
+    // WhatsApp app itself does on send). Audio/documents match hard limits.
     const MB = 1024 * 1024;
     const MAX_IMAGE_BYTES = 5 * MB;      // WhatsApp image limit
-    const MAX_VIDEO_BYTES = 16 * MB;     // WhatsApp video limit
+    const MAX_VIDEO_BYTES = 150 * MB;    // raw phone clip — server transcodes down
     const MAX_AUDIO_BYTES = 16 * MB;     // WhatsApp audio limit
-    const MAX_DOC_BYTES = 18 * MB;       // under the 20 MB nginx body cap
+    const MAX_DOC_BYTES = 18 * MB;
+
+    const isVideoFile = (f: File) =>
+        f.type.startsWith("video/") || /\.(mov|hevc|mp4|m4v|3gp)$/i.test(f.name);
 
     const limitFor = (file: File): { bytes: number; label: string } => {
         if (file.type.startsWith("image/")) return { bytes: MAX_IMAGE_BYTES, label: "5 MB" };
-        if (file.type.startsWith("video/")) return { bytes: MAX_VIDEO_BYTES, label: "16 MB" };
+        if (isVideoFile(file)) return { bytes: MAX_VIDEO_BYTES, label: "150 MB" };
         if (file.type.startsWith("audio/")) return { bytes: MAX_AUDIO_BYTES, label: "16 MB" };
         return { bytes: MAX_DOC_BYTES, label: "18 MB" };
     };
