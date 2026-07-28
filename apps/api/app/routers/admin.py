@@ -120,6 +120,15 @@ async def list_conversations(
         p = person_map.get(getattr(c, "person_id", None))
         return p.display_name if p else None
 
+    def _stage_for(c: Conversation):
+        """The lead-pipeline stage for the row chip (user state, person fallback)."""
+        u = user_map.get(c.wa_id)
+        st = ((u.state or {}).get("lead_stage") if u else None) or _pstate(c).get("lead_stage")
+        if not st:
+            return None
+        from app.services.lead_signals import normalise_stage
+        return normalise_stage(st)
+
     # ── Batch-load assigned agent names ──────────────────────────────────────
     agent_ids = [c.assigned_agent_id for c in conversations if c.assigned_agent_id]
     agent_map: dict[str, str] = {}
@@ -225,6 +234,7 @@ async def list_conversations(
             "flag_url":             _list_country(c)[1],
             "channel":              getattr(c, "channel", "whatsapp") or "whatsapp",
             "unread":               unread_map.get(str(c.id), 0),
+            "lead_stage":           _stage_for(c),
             "tags":                 (user_map[c.wa_id].state or {}).get("tags", []) if c.wa_id in user_map else [],
         }
         for c in conversations

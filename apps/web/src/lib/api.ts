@@ -112,6 +112,7 @@ export interface ApiConversation {
     person_id?: string | null;
     external_id?: string | null;
     intercept_mode: "ai" | "human" | "paused";
+    lead_stage?: string | null;
     assigned_agent_id: string | null;
     assigned_agent_name?: string | null;
     intercept_since: string | null;
@@ -613,6 +614,7 @@ export function mapConversation(c: ApiConversation): Conversation {
         contact_phone: c.wa_id,
         channel: (c.channel ?? "whatsapp") as Channel,
         intercept_mode: c.intercept_mode,
+        lead_stage: c.lead_stage ?? null,
         status: c.status,
         last_message_preview: c.last_message_preview ?? "",
         last_message: c.last_message_preview ?? "",

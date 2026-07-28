@@ -130,6 +130,16 @@ function Lightbox({
     );
 }
 
+// ── Lead-stage row chip palette (matches the sidebar pipeline) ───────────────
+const STAGE_CHIP: Record<string, { bg: string; fg: string; bd: string }> = {
+    contacted:   { bg: "#e0f2fe", fg: "#0369a1", bd: "#bae6fd" },
+    qualified:   { bg: "#fef3c7", fg: "#b45309", bd: "#fde68a" },
+    negotiation: { bg: "#ede9fe", fg: "#6d28d9", bd: "#ddd6fe" },
+    proposal:    { bg: "#ede9fe", fg: "#6d28d9", bd: "#ddd6fe" },
+    won:         { bg: "#dcfce7", fg: "#15803d", bd: "#bbf7d0" },
+    lost:        { bg: "#fee2e2", fg: "#b91c1c", bd: "#fecaca" },
+};
+
 // ── Album (WhatsApp-style) ───────────────────────────────────────────────────
 // Consecutive images from the same side collapse into ONE collage bubble;
 // clicking any cell opens the sequential viewer with ‹ › navigation.
@@ -496,7 +506,7 @@ export function ConversationsView({
     const [interceptFilter, setInterceptFilter] = useState<
         "all" | "human" | "ai" | "paused"
     >("all");
-    const [readFilter, setReadFilter] = useState<"all" | "unread" | "read">(
+    const [readFilter, setReadFilter] = useState<"all" | "unread" | "read" | "human">(
         "all",
     );
     const [searchQ, setSearchQ] = useState<string>("");
@@ -1245,6 +1255,7 @@ export function ConversationsView({
                 return false;
             if (readFilter === "unread" && !(c.unread > 0)) return false;
             if (readFilter === "read" && c.unread > 0) return false;
+            if (readFilter === "human" && c.intercept_mode !== "human") return false;
             if (
                 searchQ &&
                 !c.name?.toLowerCase().includes(searchQ.toLowerCase()) &&
@@ -1360,16 +1371,18 @@ export function ConversationsView({
                     </div>
                 </div>
 
-                {/* Read / Unread toggle */}
+                {/* Read / Unread / Human-pickup toggle */}
                 <div className="flex items-center gap-1 mb-2">
-                    {(["all", "unread", "read"] as const).map((f) => (
+                    {(["all", "unread", "read", "human"] as const).map((f) => (
                         <button
                             key={f}
                             onClick={() => setReadFilter(f)}
                             className={`flex-1 h-7 rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-1.5`}
                             style={{
                                 backgroundColor: readFilter === f
-                                    ? f === "unread" ? "#427425" : "#1c2917"
+                                    ? f === "unread" ? "#427425"
+                                    : f === "human" ? "#b45309"
+                                    : "#1c2917"
                                     : "#f5f6f3",
                                 color: readFilter === f ? "#fff" : "#6b7e64",
                             }}
@@ -1388,6 +1401,18 @@ export function ConversationsView({
                                 </>
                             )}
                             {f === "read" && "Read"}
+                            {f === "human" && (
+                                <>
+                                    Human
+                                    {humanCount > 0 && (
+                                        <span
+                                            className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none ${readFilter === "human" ? "bg-white/25 text-white" : "bg-[#b45309] text-white"}`}
+                                        >
+                                            {humanCount}
+                                        </span>
+                                    )}
+                                </>
+                            )}
                         </button>
                     ))}
                 </div>
@@ -1549,6 +1574,11 @@ export function ConversationsView({
                     const hasUnread = group.unread > 0;
                     const multi = group.siblings.length > 1;
                     const rowName = displayName(conv.name, conv.wa_id);
+                    // Human pickup on ANY of this person's channels shows on the
+                    // row — not only when the human-handled sibling is the open one.
+                    const humanSib = group.siblings.find((s) => s.intercept_mode === "human");
+                    const chipConv = humanSib ?? conv;
+                    const rowStage = group.siblings.map((s) => s.lead_stage).find(Boolean) ?? null;
                     return (
                         <button
                             key={group.rep.person_id ?? group.rep.id}
@@ -1668,28 +1698,41 @@ export function ConversationsView({
                                                     </span>
                                                 );
                                             })}
-                                            {conv.intercept_mode !== "ai" && (
+                                            {rowStage && rowStage !== "new" && (
+                                                <span
+                                                    className="text-[10px] font-semibold px-1.5 h-[16px] rounded border flex items-center leading-none capitalize"
+                                                    title={`Lead stage: ${rowStage}`}
+                                                    style={{
+                                                        backgroundColor: (STAGE_CHIP[rowStage] ?? STAGE_CHIP.contacted).bg,
+                                                        borderColor: (STAGE_CHIP[rowStage] ?? STAGE_CHIP.contacted).bd,
+                                                        color: (STAGE_CHIP[rowStage] ?? STAGE_CHIP.contacted).fg,
+                                                    }}
+                                                >
+                                                    {rowStage}
+                                                </span>
+                                            )}
+                                            {chipConv.intercept_mode !== "ai" && (
                                                 <div className="flex items-center gap-1">
                                                     <InterceptBadge
                                                         mode={
-                                                            conv.intercept_mode
+                                                            chipConv.intercept_mode
                                                         }
                                                     />
-                                                    {conv.intercept_mode ===
+                                                    {chipConv.intercept_mode ===
                                                         "human" &&
-                                                        conv.assigned_agent_id && (
+                                                        chipConv.assigned_agent_id && (
                                                             <span
                                                                 className={`text-[10px] font-medium truncate max-w-[64px] ${
-                                                                    conv.assigned_agent_id ===
+                                                                    chipConv.assigned_agent_id ===
                                                                     currentAgentId
                                                                         ? "text-[#427425]"
                                                                         : "text-amber-600"
                                                                 }`}
                                                             >
-                                                                {conv.assigned_agent_id ===
+                                                                {chipConv.assigned_agent_id ===
                                                                 currentAgentId
                                                                     ? "● Yours"
-                                                                    : `🔒 ${conv.assigned_agent_name?.split(" ")[0] || "Agent"}`}
+                                                                    : `🔒 ${chipConv.assigned_agent_name?.split(" ")[0] || "Agent"}`}
                                                             </span>
                                                         )}
                                                 </div>

@@ -28,6 +28,8 @@ export interface Conversation {
     avatar_url?: string | null;
     channel: Channel;
     intercept_mode: InterceptMode;
+    /** Lead-pipeline stage for the row chip (new/contacted/qualified/…). */
+    lead_stage?: string | null;
     status: ConversationStatus;
     last_message_preview: string;
     last_message: string;
