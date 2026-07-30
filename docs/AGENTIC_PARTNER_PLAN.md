@@ -41,6 +41,9 @@ harness, deployed dark, then flipped — the WHATSAPP_NATIVE playbook.
 - Settings: `hub_events_secret` (endpoint 503s while empty — inert by default).
 
 **A2. Celebrations are hers (auto-send).**
+Two payment sources, one behaviour: hub `order.paid` events AND Neema's own
+M-Pesa reconciler (a direct paybill payment matched to a person/open deal fires
+the same internal event — money that skips hub checkout still gets thanked).
 `order.paid` → instant warm confirmation + what happens next;
 `production_started` → "the workshop has begun"; `shipped` → tracking;
 `delivered` → aftercare + gentle review ask.
