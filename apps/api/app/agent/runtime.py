@@ -188,6 +188,44 @@ def route_model(user_text: str) -> str:
     return settings.tier2_model
 
 
+async def _recent_call_context(db, key: str, channel: str) -> str:
+    """The last few phone-call summaries with this customer, for the system
+    prompt — voice and chat are ONE memory ('as we discussed on the phone'
+    must be real, and what was settled on a call is never re-asked in chat).
+    Empty string when there are none (or on any failure)."""
+    from sqlalchemy import or_
+    from app.models.call import Call
+    conds = []
+    if channel == "whatsapp":
+        conds.append(Call.wa_id == key)
+    try:
+        from app.models.person import Identity
+        ident = (await db.execute(select(Identity).where(
+            Identity.channel == channel,
+            Identity.external_id == key))).scalar_one_or_none()
+        if ident is not None:
+            conds.append(Call.person_id == ident.person_id)
+    except Exception:
+        pass
+    if not conds:
+        return ""
+    rows = (await db.execute(
+        select(Call).where(or_(*conds), Call.summary.isnot(None))
+        .order_by(Call.started_at.desc()).limit(3))).scalars().all()
+    lines = []
+    for c in rows:
+        s = (c.summary or "").strip()
+        if not s:
+            continue
+        when = c.started_at.strftime("%d %b") if c.started_at else ""
+        lines.append(f"- {when}: {s[:220]}")
+    if not lines:
+        return ""
+    return ("\n\nRECENT PHONE CALLS WITH THIS CUSTOMER — what was discussed on "
+            "the phone (use it naturally; never re-ask what was already settled "
+            "there):\n" + "\n".join(lines))
+
+
 async def _history(db: AsyncSession, key: str, limit: int = 20,
                    *, channel: str = "whatsapp") -> list[dict]:
     # WhatsApp keys on wa_id (the compat shim); other channels key on
@@ -323,6 +361,15 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     # most robotic failure there is, and it usually happened because the answer
     # had scrolled out of a too-short window.
     messages = await _history(db, key, limit=40, channel=channel)
+
+    # Voice + text are one memory: recent call summaries join the context
+    # (best-effort — a calls hiccup never blocks a chat reply).
+    try:
+        _call_ctx = await _recent_call_context(db, key, channel)
+        if _call_ctx:
+            system += _call_ctx
+    except Exception:
+        pass
 
     # Current inbound turn. An image message has empty text (skipped by _history),
     # so build a multimodal turn — the agent SEES the photo (Claude vision) and
