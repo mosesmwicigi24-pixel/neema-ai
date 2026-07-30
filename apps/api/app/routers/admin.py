@@ -527,7 +527,42 @@ async def add_note(
 @router.post("/conversations/{conv_id}/intercept")
 async def intercept(conv_id: str, request: Request, db: AsyncSession = Depends(get_db),
                     agent: Agent = Depends(get_current_agent)):
-    return await intercept_conversation(db, conv_id, agent, request.app.state.redis)
+    out = await intercept_conversation(db, conv_id, agent, request.app.state.redis)
+    # Copilot C1: brief the human who just took over (background, best-effort).
+    try:
+        from app.services import copilot
+        copilot.schedule_briefing(request.app.state.redis, conv_id)
+    except Exception:
+        pass
+    return out
+
+
+@router.post("/conversations/{conv_id}/ask")
+async def ask_neema(conv_id: str, request: Request, body: dict,
+                    db: AsyncSession = Depends(get_db),
+                    agent: Agent = Depends(get_current_agent)):
+    """Ask-Neema (plan C5): the human asks about THIS customer — 'what were his
+    sizes?', 'what did he order last Easter?' — answered from the conversation,
+    calls, measurements and orders. Read-only; never customer-facing."""
+    from app.agent import runtime
+    question = (body.get("question") or "").strip()
+    if not question:
+        raise HTTPException(status_code=422, detail="question is required")
+    conv = (await db.execute(
+        select(Conversation).where(Conversation.id == conv_id))).scalar_one_or_none()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    key = conv.wa_id if conv.channel == "whatsapp" else conv.external_id
+    answer = (await runtime.run_turn(
+        db, request.app.state.redis, wa_id=key,
+        user_text=("[OPERATOR QUESTION — a human colleague asks about this "
+                   "customer. Answer THEM, briefly and factually, from the "
+                   "conversation, phone calls, sizes on file, cart and orders. "
+                   f"This is never sent to the customer.] {question[:400]}"),
+        llm=runtime.build_llm(), channel=conv.channel,
+        external_id=(None if conv.channel == "whatsapp" else conv.external_id),
+        read_only=True)).strip()
+    return {"answer": answer or "I couldn't find that in what we have on file."}
 
 
 @router.post("/conversations/{conv_id}/reply")

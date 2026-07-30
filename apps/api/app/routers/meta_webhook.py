@@ -345,6 +345,14 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
                           if media_url and media_type == "image" else None)
             if (turn_text or turn_media) and conv.intercept_mode == InterceptMode.ai:
                 replies.append((sender, turn_text, mid, page_id, turn_media))
+            elif turn_text and conv.intercept_mode == InterceptMode.human:
+                # Copilot (plan C2/C3): a human holds this thread — draft a
+                # suggestion for them and keep the scribe capturing.
+                try:
+                    from app.services import copilot
+                    copilot.schedule_human_held(redis, sender, channel, turn_text)
+                except Exception:
+                    pass
             captured += 1
 
     if captured or attributed:

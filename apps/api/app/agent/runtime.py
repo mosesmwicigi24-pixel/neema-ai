@@ -51,6 +51,11 @@ PUBLIC_COMMENT_TOOLS = [t for t in TOOLS if t["name"] in _PUBLIC_COMMENT_TOOL_NA
 # Read-only, non-sending tools for DRAFT mode: the agent may look things up (real
 # prices, the cart, order status) to compose an informed draft, but must never
 # create an order, change the cart, or send anything (no send_product_cards).
+# Copilot scribe mode (plan C3): CRM-writing tools only — saving facts is the
+# whole job; composing/sending/ordering is the human's this turn.
+_SCRIBE_TOOL_NAMES = {"capture_customer", "capture_contact", "save_measurements",
+                      "save_parish", "remember", "set_lead_source"}
+
 _READONLY_TOOL_NAMES = {"search_catalog", "get_cart", "check_order_status",
                         "church_calendar"}   # pure computation — drafts may check the season
 
@@ -315,6 +320,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                    media: dict | None = None,
                    *, channel: str = "whatsapp", external_id: str | None = None,
                    public_comment: bool = False, read_only: bool = False,
+                   scribe_only: bool = False,
                    product_sink: list | None = None) -> str:
     """Run one agent turn and return the reply text (does NOT send it).
 
@@ -490,6 +496,17 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         # Draft mode: strip to read-only tools so composing a suggestion never
         # creates an order, edits the cart, or sends a message.
         tools = [t for t in tools if t["name"] in _READONLY_TOOL_NAMES]
+    if scribe_only:
+        # Copilot scribe (plan C3): a human is talking to the customer; Neema is
+        # ONLY the record-keeper this turn — CRM-writing tools, no reply.
+        tools = [t for t in tools if t["name"] in _SCRIBE_TOOL_NAMES]
+        system += ("\n\n[SCRIBE MODE — a human colleague is handling this chat. "
+                   "You are ONLY the record-keeper this turn: from the latest "
+                   "messages, call tools to save any facts revealed (name, city, "
+                   "phone, role/title, church/ministry, measurements, durable "
+                   "preferences). Do NOT compose anything customer-facing. When "
+                   "done (or if there is nothing to save), reply with exactly: "
+                   "noted]")
 
     reply = None
     for _ in range(settings.tier2_max_iterations):

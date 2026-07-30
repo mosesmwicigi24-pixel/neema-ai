@@ -104,6 +104,10 @@ const post = <T>(path: string, body: unknown) => req<T>("POST", path, body);
 const patch = <T>(path: string, body: unknown) => req<T>("PATCH", path, body);
 const put = <T>(path: string, body: unknown) => req<T>("PUT", path, body);
 
+/** Ask-Neema: the human asks about this customer; answered from everything on file. */
+export const askNeema = (convId: string, question: string) =>
+    post<{ answer: string }>(`/admin/conversations/${convId}/ask`, { question });
+
 /** Deals + planned actions — the shared board and Neema's initiative queue. */
 export interface ApiDeal {
     id: string;

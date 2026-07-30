@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     # When ON, due planned actions AUTO-SEND (gate permitting). OFF (default):
     # the queue fills visibly but nothing fires — trust-building mode.
     agent_initiative: bool = False
+    # Copilot mode (plan C): in human-held threads Neema briefs on handoff,
+    # drafts every reply for one-tap send, keeps the CRM scribe running, and
+    # pings when a quiet thread should come back to her. Default OFF.
+    copilot_mode: bool = False
     # Approved WhatsApp UTILITY template for order-status updates OUTSIDE the
     # 24h window ({{1}}=first name, {{2}}=order number, {{3}}=status). Empty =
     # outside-window celebrations become dashboard notifications instead.

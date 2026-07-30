@@ -16,7 +16,7 @@ import {
     displayName,
 } from "@/lib/utils";
 import type { Conversation, Order } from "@/types";
-import { whatsappApi, callsApi } from "@/lib/api";
+import { whatsappApi, callsApi, askNeema } from "@/lib/api";
 import { useCall } from "@/lib/callContext";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -446,6 +446,53 @@ function ScoreBar({ score }: { score: number }) {
             <span className="text-xs font-semibold text-stone-600 w-6 text-right">
                 {score}
             </span>
+        </div>
+    );
+}
+
+/** Ask-Neema (plan C5): the junior fetches — sizes, past orders, call context —
+ *  so the human never digs. Read-only; nothing reaches the customer. */
+function AskNeemaBox({ conversationId }: { conversationId: string }) {
+    const [q, setQ] = useState("");
+    const [answer, setAnswer] = useState<string | null>(null);
+    const [busy, setBusy] = useState(false);
+
+    const ask = async () => {
+        const question = q.trim();
+        if (!question || busy) return;
+        setBusy(true);
+        setAnswer(null);
+        try {
+            const r = await askNeema(conversationId, question);
+            setAnswer(r.answer);
+        } catch {
+            setAnswer("Couldn't check right now — try again.");
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    return (
+        <div className="mb-4 rounded-xl border border-stone-200 bg-white p-2.5">
+            <div className="flex gap-1.5">
+                <input
+                    value={q}
+                    onChange={(e) => setQ(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && ask()}
+                    placeholder="Ask Neema… “what were his sizes?”"
+                    className="flex-1 text-xs rounded-lg px-2.5 py-1.5 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-[#589b31]/40"
+                />
+                <button onClick={ask} disabled={busy || !q.trim()}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-lg text-white disabled:opacity-50"
+                        style={{ backgroundColor: "#589b31" }}>
+                    {busy ? "…" : "Ask"}
+                </button>
+            </div>
+            {answer && (
+                <div className="mt-2 text-xs text-[#1c2917] bg-[#f8faf6] border border-[#e8ede4] rounded-lg px-2.5 py-2 whitespace-pre-wrap">
+                    {answer}
+                </div>
+            )}
         </div>
     );
 }
@@ -1215,6 +1262,7 @@ export function CustomerSidebar({
             >
                 {activeTab === "profile" && (
                     <>
+                        <AskNeemaBox conversationId={conversation.id} />
                         <Section title="Contact Details">
                             {profile.lead_source && (
                                 <div

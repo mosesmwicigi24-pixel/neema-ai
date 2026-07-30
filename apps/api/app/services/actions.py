@@ -208,6 +208,14 @@ async def actions_loop(redis) -> None:
                 continue
             async with AsyncSessionLocal() as db:
                 await process_due(db, redis)
+            # Copilot C4 rides the same heartbeat: quiet human-held threads
+            # get their once-a-day "take it back?" ping.
+            try:
+                from app.services.copilot import take_back_scan
+                async with AsyncSessionLocal() as db:
+                    await take_back_scan(db, redis)
+            except Exception:
+                pass
         except asyncio.CancelledError:
             return
         except Exception as exc:

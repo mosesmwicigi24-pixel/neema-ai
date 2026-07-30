@@ -407,6 +407,13 @@ async def _reply_after_debounce(redis, wa_id: str, token: int | None,
                 Conversation.wa_id == wa_id))).scalar_one_or_none()
             if conv is not None and conv.intercept_mode == InterceptMode.human:
                 _log.info("native: %s is human-handled — not replying", wa_id)
+                # Copilot: draft a suggestion for the human + keep capturing
+                # facts (plan C2/C3). Never a customer-facing send.
+                try:
+                    from app.services import copilot
+                    copilot.schedule_human_held(redis, wa_id, "whatsapp", text)
+                except Exception:
+                    pass
                 return
             # Cross-channel bridge: a wa.me deep-link ref in the text links this
             # number to the social contact + rebuilds their cart (parity).
