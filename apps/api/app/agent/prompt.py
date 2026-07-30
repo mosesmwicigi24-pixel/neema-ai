@@ -67,7 +67,7 @@ def build_system_prompt(*, customer_name: str = "", country: str = "", country_i
     business += contacts
     # Standing orders — the owner's live steering ("push copes this week").
     # Steers EMPHASIS only; pricing, payment and stock rules always win.
-    d = (directives or "").strip()[:600]
+    d = (directives or "").strip()[:1800]     # standing orders (600) + learned rules (1200)
     standing = (
         "\n\nSTANDING ORDERS FROM THE TEAM — today's steering, follow it in every "
         "reply where it applies. It guides emphasis and priorities; it NEVER "

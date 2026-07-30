@@ -43,6 +43,49 @@ async def get_directives(db, redis) -> str:
     return val
 
 
+async def get_value(db, key: str) -> str:
+    try:
+        from app.models.app_setting import AppSetting
+        row = (await db.execute(select(AppSetting).where(
+            AppSetting.id == key))).scalar_one_or_none()
+        return (row.value if row else "") or ""
+    except Exception:
+        return ""
+
+
+async def set_value(db, key: str, value: str) -> None:
+    from app.models.app_setting import AppSetting
+    row = (await db.execute(select(AppSetting).where(
+        AppSetting.id == key))).scalar_one_or_none()
+    if row is None:
+        db.add(AppSetting(id=key, value=value))
+    else:
+        row.value = value
+    await db.commit()
+
+
+LEARNED_CACHE = "app:learned_rules"
+
+
+async def get_learned_rules(db, redis) -> str:
+    """Rules the owner approved from the weekly distillation — cached like the
+    directives, injected into the prompt alongside them."""
+    if redis is not None:
+        try:
+            v = await redis.get(LEARNED_CACHE)
+            if v is not None:
+                return v.decode() if isinstance(v, bytes) else str(v)
+        except Exception:
+            pass
+    val = await get_value(db, "learned_rules")
+    if redis is not None:
+        try:
+            await redis.set(LEARNED_CACHE, val, ex=300)
+        except Exception:
+            pass
+    return val
+
+
 async def set_directives(db, redis, value: str, updated_by=None) -> str:
     from app.models.app_setting import AppSetting
     val = (value or "").strip()[:DIRECTIVES_MAX_CHARS]

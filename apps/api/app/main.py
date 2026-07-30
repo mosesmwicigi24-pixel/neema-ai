@@ -143,6 +143,30 @@ MIGRATION_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS ix_agent_actions_conversation_id ON agent_actions (conversation_id)",
     "CREATE INDEX IF NOT EXISTS ix_agent_actions_due_at ON agent_actions (due_at)",
     "CREATE INDEX IF NOT EXISTS ix_agent_actions_status ON agent_actions (status)",
+    # Learning loops (models/agent_feedback.py). Idempotent.
+    """
+    CREATE TABLE IF NOT EXISTS agent_feedback (
+        id              UUID PRIMARY KEY,
+        conversation_id UUID REFERENCES conversations(id) ON DELETE SET NULL,
+        draft           TEXT NOT NULL,
+        sent            TEXT NOT NULL,
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS ix_agent_feedback_conversation_id ON agent_feedback (conversation_id)",
+    "CREATE INDEX IF NOT EXISTS ix_agent_feedback_created_at ON agent_feedback (created_at)",
+    """
+    CREATE TABLE IF NOT EXISTS qa_findings (
+        id              UUID PRIMARY KEY,
+        conversation_id UUID REFERENCES conversations(id) ON DELETE SET NULL,
+        kind            VARCHAR(40) NOT NULL,
+        detail          TEXT,
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS ix_qa_findings_conversation_id ON qa_findings (conversation_id)",
+    "CREATE INDEX IF NOT EXISTS ix_qa_findings_kind ON qa_findings (kind)",
+    "CREATE INDEX IF NOT EXISTS ix_qa_findings_created_at ON qa_findings (created_at)",
     # Reply-to (quote) on messages (see models/message.py). Idempotent.
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_id UUID REFERENCES messages(id) ON DELETE SET NULL",
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_text TEXT",

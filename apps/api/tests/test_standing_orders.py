@@ -36,9 +36,10 @@ def test_prompt_injects_standing_orders_with_precedence_guard():
 
 
 def test_directives_are_hard_capped():
-    long = "x" * 2000
+    # 1800 = standing orders (600, capped by the service) + learned rules (1200).
+    long = "x" * 3000
     p = build_system_prompt(currency="USD", directives=long)
-    assert "x" * 600 in p and "x" * 601 not in p
+    assert "x" * 1800 in p and "x" * 1801 not in p
 
 
 def test_get_directives_cache_first_then_db_then_fills_cache():

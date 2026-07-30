@@ -423,16 +423,28 @@ async def approve_draft(
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Conversation not found")
 
+    dr = await db.execute(
+        select(Intercept)
+        .where(Intercept.conversation_id == conv_id)
+        .where(Intercept.ai_reply_held.isnot(None))
+        .order_by(Intercept.created_at.desc())
+        .limit(1)
+    )
+    intercept = dr.scalar_one_or_none()
+    original = intercept.ai_reply_held if intercept else ""
     if not text:
-        dr = await db.execute(
-            select(Intercept)
-            .where(Intercept.conversation_id == conv_id)
-            .where(Intercept.ai_reply_held.isnot(None))
-            .order_by(Intercept.created_at.desc())
-            .limit(1)
-        )
-        intercept = dr.scalar_one_or_none()
-        text = intercept.ai_reply_held if intercept else ""
+        text = original
+
+    # Learning loop (plan D1): an edited draft is a lesson — the diff between
+    # what Neema wrote and what the human actually sent feeds the weekly
+    # distillation of rule proposals.
+    if original and text and text.strip() != original.strip():
+        try:
+            from app.models.agent_feedback import AgentFeedback
+            db.add(AgentFeedback(conversation_id=conv.id,
+                                 draft=original, sent=text))
+        except Exception:
+            pass
 
     if not text:
         from fastapi import HTTPException

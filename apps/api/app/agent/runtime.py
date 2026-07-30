@@ -347,10 +347,15 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         currency = "KES" if (loc.get("country_iso") or "").upper() == "KE" else "USD"
         customer_name = (user.name if user else "") or ""
         source_post = None
-    # Standing orders: the owner's live steering, read before every turn.
+    # Standing orders + learned rules: the owner's live steering and the rules
+    # they approved from Neema's own weekly distillation.
     try:
-        from app.services.app_settings import get_directives
+        from app.services.app_settings import get_directives, get_learned_rules
         _directives = await get_directives(db, redis)
+        _learned = await get_learned_rules(db, redis)
+        if _learned:
+            _directives = (_directives + "\n\nLEARNED RULES (approved from "
+                           "experience — follow them):\n" + _learned).strip()
     except Exception:
         _directives = ""
     system = build_system_prompt(

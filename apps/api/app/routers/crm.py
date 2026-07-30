@@ -1009,6 +1009,62 @@ async def put_operator_directives(
     return {"ok": True, "directives": val}
 
 
+# ── Rule proposals (plan D4) — the weekly distillation, owner-approved ───────
+
+@router.get("/settings/proposals")
+async def list_proposals(
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    import json as _json
+    from app.services.app_settings import get_value
+    raw = await get_value(db, "rule_proposals")
+    try:
+        proposals = _json.loads(raw) if raw else []
+    except Exception:
+        proposals = []
+    return {"proposals": proposals,
+            "learned_rules": await get_value(db, "learned_rules")}
+
+
+@router.post("/settings/proposals/{idx}/{verdict}")
+async def judge_proposal(
+    idx: int,
+    verdict: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Approve moves the rule into learned_rules (injected into Neema's prompt
+    within minutes); reject just marks it. Admin-only."""
+    import json as _json
+    if verdict not in ("approve", "reject"):
+        raise HTTPException(status_code=422, detail="verdict must be approve|reject")
+    if not (getattr(agent, "is_superuser", False) or str(agent.role) in ("admin", "AgentRole.admin")):
+        raise HTTPException(status_code=403, detail="Admin only")
+    from app.services.app_settings import get_value, set_value, LEARNED_CACHE
+    raw = await get_value(db, "rule_proposals")
+    try:
+        proposals = _json.loads(raw) if raw else []
+    except Exception:
+        proposals = []
+    if not (0 <= idx < len(proposals)):
+        raise HTTPException(status_code=404, detail="No such proposal")
+    proposals[idx]["status"] = "approved" if verdict == "approve" else "rejected"
+    await set_value(db, "rule_proposals", _json.dumps(proposals))
+    if verdict == "approve":
+        rules = await get_value(db, "learned_rules")
+        rules = (rules + "\n- " + proposals[idx]["rule"]).strip()[:1200]
+        await set_value(db, "learned_rules", rules)
+        redis = getattr(request.app.state, "redis", None)
+        if redis is not None:
+            try:
+                await redis.set(LEARNED_CACHE, rules, ex=300)
+            except Exception:
+                pass
+    return {"ok": True}
+
+
 # ── Merge profiles ────────────────────────────────────────────────────────────
 
 @router.get("/customers/{wa_id}/merge_suggestions")

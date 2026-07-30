@@ -216,6 +216,30 @@ async def actions_loop(redis) -> None:
                     await take_back_scan(db, redis)
             except Exception:
                 pass
+            # Learning loops (plan D): 03:00 self-QA, 08:00 standup,
+            # Sunday 07:00 weekly distillation — daily-guarded, leader-only.
+            try:
+                from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+                from app.jobs import self_qa as _qa
+                nbo = _dt.now(_tz.utc) + _td(hours=3)
+                today = nbo.strftime("%Y%m%d")
+                if nbo.hour == 3 and await redis.set(f"selfqa:{today}", "1", nx=True, ex=86400):
+                    async with AsyncSessionLocal() as db:
+                        await _qa.run_qa(db)
+                if nbo.hour == 8 and await redis.set(f"standup:{today}", "1", nx=True, ex=86400):
+                    async with AsyncSessionLocal() as db:
+                        standup = await _qa.compose_standup(db)
+                    await redis.publish("ws:channel:agents:all", json.dumps({
+                        "event": "notification", "type": "standup",
+                        "title": "☀️ Neema's morning standup",
+                        "body": standup[:400]}))
+                if (nbo.weekday() == 6 and nbo.hour == 7 and
+                        await redis.set(f"distill:{nbo.strftime('%G%V')}", "1",
+                                        nx=True, ex=8 * 86400)):
+                    async with AsyncSessionLocal() as db:
+                        await _qa.distill_weekly(db)
+            except Exception as exc:
+                _log.info("learning-loop tick skipped: %s", exc)
         except asyncio.CancelledError:
             return
         except Exception as exc:

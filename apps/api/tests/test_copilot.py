@@ -64,7 +64,7 @@ def test_run_turn_scribe_only_offers_scribe_tools(monkeypatch):
             r = self._r[self._i]; self._i += 1; return r
 
     user = types.SimpleNamespace(name="Moses")
-    db = _FakeDB([_Res(one=user), _Res(one=None), _Res(many=[])])
+    db = _FakeDB([_Res(one=user), _Res(one=None), _Res(one=None), _Res(many=[])])
     out = asyncio.run(runtime.run_turn(db, None, "254700000001",
                                        "I'm Bishop Moses from St Mary's, chest 42",
                                        _RecLLM(), scribe_only=True))

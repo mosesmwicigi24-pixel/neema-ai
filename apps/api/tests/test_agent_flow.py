@@ -57,14 +57,14 @@ def test_full_order_turn(monkeypatch):
     ])
 
     user = types.SimpleNamespace(name="Moses")
-    # run_turn queries per turn: User (scalar), standing-orders AppSetting
-    # (scalar; none set), then Message history (scalars).
-    db1 = _FakeDB([_Res(one=user), _Res(one=None), _Res(many=[])])
+    # run_turn queries per turn: User, standing-orders AppSetting,
+    # learned-rules AppSetting (both none), then Message history.
+    db1 = _FakeDB([_Res(one=user), _Res(one=None), _Res(one=None), _Res(many=[])])
 
     async def go():
         r1 = await runtime.run_turn(db1, None, "254700000001", "I want 3 white cassocks", llm)
         assert "place the order" in r1        # first turn ends by asking to confirm
-        db2 = _FakeDB([_Res(one=user), _Res(one=None), _Res(many=[])])
+        db2 = _FakeDB([_Res(one=user), _Res(one=None), _Res(one=None), _Res(many=[])])
         r2 = await runtime.run_turn(db2, None, "254700000001", "yes, confirm", llm)
         return r1, r2
 
@@ -97,7 +97,7 @@ def test_run_turn_read_only_offers_only_readonly_tools():
                                          tool_calls=[], assistant_content=[], usage={})
 
     user = types.SimpleNamespace(name="Moses")
-    db = _FakeDB([_Res(one=user), _Res(one=None), _Res(many=[])])
+    db = _FakeDB([_Res(one=user), _Res(one=None), _Res(one=None), _Res(many=[])])
     out = asyncio.run(runtime.run_turn(db, None, "254700000001", "how much is a mitre?",
                                        _RecLLM(), read_only=True))
     assert out == "Here's a suggested reply."
