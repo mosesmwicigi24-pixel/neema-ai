@@ -29,10 +29,11 @@ def test_scribe_creates_deal_on_buying_signal(monkeypatch):
     from app.agent import cart as cartmod
 
     conv = types.SimpleNamespace(id="conv1", person_id="p1")
-    added, commits = [], []
+    added, commits, queued = [], [], []
 
     class _DB:
         def add(self, o): added.append(o)
+        async def flush(self): pass
         async def commit(self): commits.append(1)
         async def rollback(self): pass
 
@@ -40,9 +41,12 @@ def test_scribe_creates_deal_on_buying_signal(monkeypatch):
     async def fake_open(db, conversation_id=None, person_id=None): return None
     async def fake_cart(db, key, channel="whatsapp"):
         return {"items": [{"name": "Cassock", "qty": 3, "price": 12000}]}
+    async def fake_upsert(db, deal, *, due_at, kind, reason):
+        queued.append((kind, reason))
     monkeypatch.setattr(ds, "_conversation_of", fake_conv)
     monkeypatch.setattr(ds, "open_deal_for", fake_open)
     monkeypatch.setattr(cartmod, "get_cart", fake_cart)
+    monkeypatch.setattr("app.services.actions.upsert_follow_up", fake_upsert)
 
     asyncio.run(ds.scribe_update(_DB(), "254700000001", "whatsapp",
                                  "Added 3 cassocks. Let me confirm the delivery cost and get back to you."))
@@ -54,6 +58,7 @@ def test_scribe_creates_deal_on_buying_signal(monkeypatch):
     assert deal.blocking.startswith("Neema owes the customer")
     assert deal.next_action["owner"] == "ai"
     assert deal.next_action["kind"] == "follow_up"
+    assert queued and queued[0][0] == "follow_up"        # B2 queue seeded
 
 
 def test_scribe_stays_silent_on_smalltalk(monkeypatch):

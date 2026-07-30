@@ -891,6 +891,92 @@ async def update_deal(
     return {"ok": True}
 
 
+# ── Planned actions — Neema's initiative queue (plan B2) ─────────────────────
+
+@router.get("/actions")
+async def list_actions(
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+    status: str = "pending",
+):
+    """The initiative queue: what Neema plans to do and when, what awaits your
+    approval, what she's already sent. `status=pending` = planned+needs_approval."""
+    from app.models.agent_action import AgentAction
+    q = select(AgentAction).order_by(AgentAction.due_at).limit(200)
+    if status == "pending":
+        q = q.where(AgentAction.status.in_(("planned", "needs_approval")))
+    elif status != "all":
+        q = q.where(AgentAction.status == status)
+    rows = (await db.execute(q)).scalars().all()
+    return {"actions": [{
+        "id": str(a.id),
+        "deal_id": str(a.deal_id) if a.deal_id else None,
+        "conversation_id": str(a.conversation_id) if a.conversation_id else None,
+        "due_at": a.due_at.isoformat() if a.due_at else None,
+        "kind": a.kind, "reason": a.reason, "draft": a.draft,
+        "status": a.status, "created_by": a.created_by,
+    } for a in rows]}
+
+
+@router.post("/actions/{action_id}/approve")
+async def approve_action(
+    action_id: str,
+    request: Request,
+    body: dict | None = None,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """One tap: send this follow-up now (optionally with an edited draft)."""
+    import uuid as _uuid
+    from app.models.agent_action import AgentAction
+    from app.models.conversation import Conversation
+    from app.services import actions as act
+    try:
+        aid = _uuid.UUID(action_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid action id")
+    action = await db.get(AgentAction, aid)
+    if action is None:
+        raise HTTPException(status_code=404, detail="Action not found")
+    if action.status not in ("planned", "needs_approval"):
+        raise HTTPException(status_code=409, detail=f"Action is {action.status}")
+    conv = (await db.get(Conversation, action.conversation_id)
+            if action.conversation_id else None)
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation gone")
+    redis = getattr(request.app.state, "redis", None)
+    text = ((body or {}).get("draft") or action.draft or "").strip()
+    if not text:
+        text = await act._compose_follow_up(db, redis, conv, action.reason or "follow up")
+    if not text:
+        raise HTTPException(status_code=500, detail="Could not compose the message")
+    await act._send(db, redis, conv, text)
+    action.status = "sent"
+    action.draft = text
+    await db.commit()
+    return {"ok": True, "sent": text}
+
+
+@router.post("/actions/{action_id}/veto")
+async def veto_action(
+    action_id: str,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    import uuid as _uuid
+    from app.models.agent_action import AgentAction
+    try:
+        aid = _uuid.UUID(action_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid action id")
+    action = await db.get(AgentAction, aid)
+    if action is None:
+        raise HTTPException(status_code=404, detail="Action not found")
+    action.status = "vetoed"
+    await db.commit()
+    return {"ok": True}
+
+
 # ── Standing orders (docs/AGENTIC_PARTNER_PLAN.md, Phase E) ───────────────────
 
 @router.get("/settings/directives")

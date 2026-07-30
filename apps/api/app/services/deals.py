@@ -31,11 +31,52 @@ _PROMISE_RE = re.compile(
 
 PROMISE_FOLLOW_UP_HOURS = 3
 
+# The CUSTOMER's stated timeline ("I'll confirm after the church meeting") —
+# needs BOTH a commitment verb and a time hint, or we'd nag over pleasantries.
+_CUSTOMER_PROMISE_RE = re.compile(
+    r"\b(?:i(?:'ll| will)|we(?:'ll| will)|nita|tuta)\s?"
+    r"(?:confirm|get back|let you know|revert|respond|reply|check|decide|send|pay)",
+    re.IGNORECASE)
+_TIME_HINT_RE = re.compile(
+    r"\b(tomorrow|kesho|tonight|this evening|later today|"
+    r"after (?:the |our )?(?:meeting|service|church|committee)|"
+    r"next week|weekend|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+    re.IGNORECASE)
+_WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday",
+             "saturday", "sunday")
+
 
 def detect_own_promise(reply: str) -> str | None:
     """The promise sentence when Neema committed to come back with something."""
     m = _PROMISE_RE.search(reply or "")
     return m.group(0).strip() if m else None
+
+
+def detect_customer_promise(text: str) -> tuple[datetime, str] | None:
+    """(due_at_utc, the hint) when the CUSTOMER named a timeline. The follow-up
+    lands the morning after their moment — never before it."""
+    t = text or ""
+    if not (_CUSTOMER_PROMISE_RE.search(t) and (m := _TIME_HINT_RE.search(t))):
+        return None
+    hint = m.group(1).lower()
+    now_nbo = datetime.now(timezone.utc) + timedelta(hours=3)
+
+    def _at(base, hour):
+        return base.replace(hour=hour, minute=0, second=0, microsecond=0)
+
+    if hint in ("later today", "tonight", "this evening"):
+        due_nbo = _at(now_nbo, 18) if now_nbo.hour < 18 else now_nbo + timedelta(hours=3)
+    elif hint == "next week":
+        due_nbo = _at(now_nbo + timedelta(days=7), 10)
+    elif hint == "weekend":
+        days = (5 - now_nbo.weekday()) % 7 or 7        # next Saturday
+        due_nbo = _at(now_nbo + timedelta(days=days), 10)
+    elif hint in _WEEKDAYS:
+        days = (_WEEKDAYS.index(hint) - now_nbo.weekday()) % 7 or 7
+        due_nbo = _at(now_nbo + timedelta(days=days + 1), 10)   # morning AFTER their day
+    else:                                              # tomorrow / kesho / after the meeting
+        due_nbo = _at(now_nbo + timedelta(days=1), 10)
+    return due_nbo - timedelta(hours=3), hint
 
 
 def derive_stage(cart_items: int, current: str) -> str:
@@ -83,13 +124,16 @@ async def _conversation_of(db, key: str, channel: str):
         Conversation.external_id == key))).scalar_one_or_none()
 
 
-async def scribe_update(db, key: str, channel: str, reply: str) -> None:
-    """File the turn: cart → items/title/stage, promise → blocking/next_action.
-    Creates the deal on first buying signal (a cart or a promise); silent
+async def scribe_update(db, key: str, channel: str, reply: str,
+                        inbound_text: str = "") -> None:
+    """File the turn: cart → items/title/stage, promises (Neema's own AND the
+    customer's stated timeline) → blocking/next_action + a planned-action row
+    the B2 scheduler executes. Creates the deal on first buying signal; silent
     otherwise — greetings don't deserve deal rows."""
     try:
         from app.agent import cart as cartmod
         from app.models.deal import Deal
+        from app.services.actions import upsert_follow_up
 
         conv = await _conversation_of(db, key, channel)
         if conv is None:
@@ -98,13 +142,15 @@ async def scribe_update(db, key: str, channel: str, reply: str) -> None:
         cart = await cartmod.get_cart(db, key, channel=channel)
         items = list((cart or {}).get("items") or [])
         promise = detect_own_promise(reply)
+        cust = detect_customer_promise(inbound_text)
 
         deal = await open_deal_for(db, conversation_id=conv.id)
         if deal is None:
-            if not items and not promise:
+            if not items and not promise and not cust:
                 return                      # nothing worth owning yet
             deal = Deal(conversation_id=conv.id, person_id=conv.person_id)
             db.add(deal)
+            await db.flush()                # id needed for the action row
 
         if items:
             deal.items_snapshot = [
@@ -115,13 +161,20 @@ async def scribe_update(db, key: str, channel: str, reply: str) -> None:
         deal.stage = derive_stage(len(items), deal.stage or "new")
 
         if promise:
+            due = datetime.now(timezone.utc) + timedelta(hours=PROMISE_FOLLOW_UP_HOURS)
             deal.blocking = f"Neema owes the customer: {promise[:200]}"
-            deal.next_action = {
-                "kind": "follow_up", "owner": "ai",
-                "due_at": (datetime.now(timezone.utc)
-                           + timedelta(hours=PROMISE_FOLLOW_UP_HOURS)).isoformat(),
-                "note": promise[:200],
-            }
+            deal.next_action = {"kind": "follow_up", "owner": "ai",
+                                "due_at": due.isoformat(), "note": promise[:200]}
+            await upsert_follow_up(db, deal, due_at=due, kind="follow_up",
+                                   reason=f"Neema promised: {promise}")
+        elif cust:
+            due, hint = cust
+            deal.blocking = f"Waiting on the customer ({hint})"
+            deal.next_action = {"kind": "customer_promise", "owner": "ai",
+                                "due_at": due.isoformat(), "note": f"they said: {hint}"}
+            await upsert_follow_up(db, deal, due_at=due, kind="customer_promise",
+                                   reason=f"Customer said they'd respond ({hint}) — "
+                                          "warm check-in if they haven't")
         await db.commit()
     except Exception as exc:
         _log.info("deal scribe skipped for %s: %s", key, exc)

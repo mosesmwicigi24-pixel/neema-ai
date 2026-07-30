@@ -583,7 +583,7 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None)
         try:
             from app.services.deals import scribe_update
             async with AsyncSessionLocal() as db3:
-                await scribe_update(db3, wa_id, "whatsapp", reply)
+                await scribe_update(db3, wa_id, "whatsapp", reply, inbound_text=text)
         except Exception:
             pass
     except Exception:
@@ -684,7 +684,7 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
         try:
             from app.services.deals import scribe_update
             async with AsyncSessionLocal() as db3:
-                await scribe_update(db3, external_id, channel, reply)
+                await scribe_update(db3, external_id, channel, reply, inbound_text=text)
         except Exception:
             pass
         return True

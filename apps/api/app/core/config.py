@@ -65,6 +65,9 @@ class Settings(BaseSettings):
     # Shared secret the hub signs order-lifecycle events with (X-Hub-Events-
     # Signature). Empty = the whole phase is inert (endpoint 503s, no sends).
     hub_events_secret: str = ""
+    # When ON, due planned actions AUTO-SEND (gate permitting). OFF (default):
+    # the queue fills visibly but nothing fires — trust-building mode.
+    agent_initiative: bool = False
     # Approved WhatsApp UTILITY template for order-status updates OUTSIDE the
     # 24h window ({{1}}=first name, {{2}}=order number, {{3}}=status). Empty =
     # outside-window celebrations become dashboard notifications instead.

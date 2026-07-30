@@ -123,6 +123,26 @@ MIGRATION_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS ix_deals_conversation_id ON deals (conversation_id)",
     "CREATE INDEX IF NOT EXISTS ix_deals_stage ON deals (stage)",
     "CREATE INDEX IF NOT EXISTS ix_deals_status ON deals (status)",
+    # Planned actions — Neema's initiative queue (models/agent_action.py). Idempotent.
+    """
+    CREATE TABLE IF NOT EXISTS agent_actions (
+        id              UUID PRIMARY KEY,
+        deal_id         UUID REFERENCES deals(id) ON DELETE CASCADE,
+        conversation_id UUID REFERENCES conversations(id) ON DELETE SET NULL,
+        due_at          TIMESTAMPTZ NOT NULL,
+        kind            VARCHAR(30) NOT NULL DEFAULT 'follow_up',
+        reason          TEXT,
+        draft           TEXT,
+        status          VARCHAR(20) NOT NULL DEFAULT 'planned',
+        created_by      VARCHAR(10) NOT NULL DEFAULT 'ai',
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS ix_agent_actions_deal_id ON agent_actions (deal_id)",
+    "CREATE INDEX IF NOT EXISTS ix_agent_actions_conversation_id ON agent_actions (conversation_id)",
+    "CREATE INDEX IF NOT EXISTS ix_agent_actions_due_at ON agent_actions (due_at)",
+    "CREATE INDEX IF NOT EXISTS ix_agent_actions_status ON agent_actions (status)",
     # Reply-to (quote) on messages (see models/message.py). Idempotent.
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_id UUID REFERENCES messages(id) ON DELETE SET NULL",
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_text TEXT",
@@ -298,6 +318,11 @@ async def lifespan(app: FastAPI):
     from app.services import hub_events as _hub_events
     app.state._hub_events_task = _asyncio.create_task(
         _hub_events.deferred_loop(app.state.redis))
+
+    # Initiative engine: due planned actions execute each minute (leader-locked).
+    from app.services import actions as _actions
+    app.state._actions_task = _asyncio.create_task(
+        _actions.actions_loop(app.state.redis))
 
     yield
 
