@@ -191,7 +191,38 @@ async def reconcile_payment(body: PaymentDto, db: AsyncSession = Depends(get_db)
         region=body.region,
     )
     await db.commit()
+
+    # Event agency (Phase A): a matched direct M-Pesa payment gets the same
+    # instant thank-you as a hub order.paid — one guard prevents doubles when
+    # the hub also reports it. Best-effort; reconciliation already succeeded.
+    if result.get("resolved") and settings.hub_events_secret:
+        try:
+            from app.services import hub_events as _events
+            import asyncio as _aio
+            _redis = None
+            try:
+                from app.main import app as _app                 # runtime state
+                _redis = getattr(_app.state, "redis", None)
+            except Exception:
+                pass
+            event = {"id": f"mpesa:{body.mpesa_ref or body.payer_msisdn}",
+                     "type": "order.paid",
+                     "order_number": body.order_number,
+                     "customer_phone": body.payer_msisdn}
+            _aio.create_task(_run_paid_event(event, _redis))
+        except Exception:
+            pass
     return result
+
+
+async def _run_paid_event(event: dict, redis) -> None:
+    from app.database import AsyncSessionLocal
+    from app.services import hub_events as _events
+    try:
+        async with AsyncSessionLocal() as db:
+            await _events.handle_event(db, redis, event)
+    except Exception:
+        pass
 
 
 # ── AI cost controls ──────────────────────────────────────

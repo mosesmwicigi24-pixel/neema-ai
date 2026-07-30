@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import redis.asyncio as aioredis
 
 from app.core.config import settings
-from app.routers import auth, admin, n8n_bridge, websocket, health, crm, roles, media, agent, meta_webhook, public, short_link, whatsapp_webhook, web_chat, analytics
+from app.routers import auth, admin, n8n_bridge, websocket, health, crm, roles, media, agent, meta_webhook, public, short_link, whatsapp_webhook, web_chat, analytics, hub_events
 from app.database import AsyncSessionLocal
 from sqlalchemy import text
 
@@ -272,6 +272,12 @@ async def lifespan(app: FastAPI):
 
     app.state._missed_reply_task = _asyncio.create_task(_missed_reply_loop())
 
+    # Hub event agency: quiet-hours-deferred celebrations drain each morning
+    # (leader-locked; no-op while HUB_EVENTS_SECRET is unset).
+    from app.services import hub_events as _hub_events
+    app.state._hub_events_task = _asyncio.create_task(
+        _hub_events.deferred_loop(app.state.redis))
+
     yield
 
     # Shutdown
@@ -300,6 +306,7 @@ app.include_router(auth.router,       prefix="/api/auth",  tags=["Auth"])
 app.include_router(admin.router,      prefix="/api/admin", tags=["Admin"])
 app.include_router(crm.router,        prefix="/api/admin", tags=["CRM"])
 app.include_router(analytics.router,  prefix="/api/admin", tags=["Analytics"])
+app.include_router(hub_events.router, prefix="/api/hub", tags=["Hub Events"])
 app.include_router(roles.router,      prefix="/api/admin", tags=["Roles"])
 app.include_router(n8n_bridge.router, prefix="/api/n8n",   tags=["n8n Bridge"])
 app.include_router(meta_webhook.router, prefix="/api/meta", tags=["Meta Webhook"])

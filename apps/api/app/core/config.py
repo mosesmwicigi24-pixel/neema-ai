@@ -61,6 +61,16 @@ class Settings(BaseSettings):
     # endpoint 503s when empty, so it is off by default.
     analytics_api_key: str = ""
 
+    # ── Hub event agency (docs/AGENTIC_PARTNER_PLAN.md, Phase A) ─────────────
+    # Shared secret the hub signs order-lifecycle events with (X-Hub-Events-
+    # Signature). Empty = the whole phase is inert (endpoint 503s, no sends).
+    hub_events_secret: str = ""
+    # Approved WhatsApp UTILITY template for order-status updates OUTSIDE the
+    # 24h window ({{1}}=first name, {{2}}=order number, {{3}}=status). Empty =
+    # outside-window celebrations become dashboard notifications instead.
+    wa_event_template: str = ""
+    wa_event_lang: str = "en"
+
     def page_token_map(self) -> dict[str, str]:
         out: dict[str, str] = {}
         for pair in (self.meta_page_tokens or "").split(","):

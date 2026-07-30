@@ -41,6 +41,13 @@ Remove `WHATSAPP_NATIVE=1` (or set `0`), restart the API, unpause the n8n
 workflows. The forward path is untouched code — behaviour returns to exactly
 today's.
 
+### Decommission — EXECUTED 2026-07-30
+Native ran clean since the 2026-07-27 cutover. Done in the repo: the
+`Sync n8n workflows` Action retired, nginx's `/n8n/` exposure removed (reload
+nginx after deploy). On the box: stop the n8n container and remove
+`WHATSAPP_FORWARD_URL` from `.env` (commands in the ops notes below). The
+`/api/n8n/*` endpoints STAY — the hub still posts payments/orders through them.
+
 ### Decommission (after ~a week of clean native running)
 - Stop the n8n container (frees its RAM/CPU on the VPS).
 - Remove `WHATSAPP_FORWARD_URL` from the API `.env`.
