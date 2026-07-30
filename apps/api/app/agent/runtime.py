@@ -371,6 +371,17 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     except Exception:
         pass
 
+    # Per-deal operator guidance ("no discount on this one") — obeyed for THIS
+    # customer only; safety rules still win. Best-effort.
+    try:
+        from app.services.deals import guidance_for
+        _g = await guidance_for(db, key, channel)
+        if _g:
+            system += ("\n\nDEAL GUIDANCE FROM THE TEAM — for THIS customer only, "
+                       "follow it (pricing/payment/stock safety rules still win):\n" + _g)
+    except Exception:
+        pass
+
     # Current inbound turn. An image message has empty text (skipped by _history),
     # so build a multimodal turn — the agent SEES the photo (Claude vision) and
     # can match it to the catalogue. Voice notes already arrive as transcribed
@@ -568,6 +579,13 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None)
         async with AsyncSessionLocal() as db2:
             await svc.save_outbound_message(db2, redis, wa_id, reply)
         _log.info("tier2 replied to %s (%d chars)", wa_id, len(reply))
+        # The scribe files the turn (deal items/stage/promises) — best-effort.
+        try:
+            from app.services.deals import scribe_update
+            async with AsyncSessionLocal() as db3:
+                await scribe_update(db3, wa_id, "whatsapp", reply)
+        except Exception:
+            pass
     except Exception:
         _log.exception("tier2 background turn failed for %s", wa_id)
 
@@ -662,6 +680,13 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
         async with AsyncSessionLocal() as db2:
             await svc.save_outbound_channel_message(db2, redis, channel, external_id, reply)
         _log.info("tier2 replied on %s to %s (%d chars)", channel, external_id, len(reply))
+        # The scribe files the turn (deal items/stage/promises) — best-effort.
+        try:
+            from app.services.deals import scribe_update
+            async with AsyncSessionLocal() as db3:
+                await scribe_update(db3, external_id, channel, reply)
+        except Exception:
+            pass
         return True
     except Exception as exc:
         if is_outside_window(exc):

@@ -198,6 +198,15 @@ async def _celebrate(db, redis, conv, event: dict) -> dict:
         except Exception:
             pass
 
+    # A paid order closes the conversation's open deal as WON (B1 hook) —
+    # regardless of how the thank-you goes out.
+    if event.get("type") == "order.paid":
+        try:
+            from app.services.deals import mark_won_for_conversation
+            await mark_won_for_conversation(db, conv.id)
+        except Exception:
+            pass
+
     if is_quiet_hours():
         await defer(redis, event)
         return {"handled": True, "deferred": "quiet_hours"}

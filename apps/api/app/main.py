@@ -102,6 +102,27 @@ MIGRATION_STATEMENTS = [
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
     """,
+    # Deals — Neema owns outcomes (models/deal.py). Idempotent.
+    """
+    CREATE TABLE IF NOT EXISTS deals (
+        id              UUID PRIMARY KEY,
+        person_id       UUID REFERENCES persons(id) ON DELETE SET NULL,
+        conversation_id UUID REFERENCES conversations(id) ON DELETE SET NULL,
+        title           VARCHAR(300),
+        items_snapshot  JSONB NOT NULL DEFAULT '[]',
+        stage           VARCHAR(30) NOT NULL DEFAULT 'new',
+        blocking        TEXT,
+        next_action     JSONB,
+        guidance        TEXT,
+        status          VARCHAR(20) NOT NULL DEFAULT 'open',
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS ix_deals_person_id ON deals (person_id)",
+    "CREATE INDEX IF NOT EXISTS ix_deals_conversation_id ON deals (conversation_id)",
+    "CREATE INDEX IF NOT EXISTS ix_deals_stage ON deals (stage)",
+    "CREATE INDEX IF NOT EXISTS ix_deals_status ON deals (status)",
     # Reply-to (quote) on messages (see models/message.py). Idempotent.
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_id UUID REFERENCES messages(id) ON DELETE SET NULL",
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_text TEXT",

@@ -821,6 +821,76 @@ async def update_customer(
     return {"ok": True}
 
 
+# ── Deals — the shared board's API (docs/AGENTIC_PARTNER_PLAN.md, B1/B3) ─────
+
+@router.get("/deals")
+async def list_deals(
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+    status: str = "open",
+):
+    """Open deals, newest activity first — what Neema currently owns, what's
+    blocking each, and when she plans to act. The board renders this."""
+    from app.models.deal import Deal
+    q = select(Deal).order_by(Deal.updated_at.desc()).limit(200)
+    if status != "all":
+        q = q.where(Deal.status == status)
+    rows = (await db.execute(q)).scalars().all()
+    conv_ids = [d.conversation_id for d in rows if d.conversation_id]
+    convs = {}
+    if conv_ids:
+        for c in (await db.execute(select(Conversation).where(
+                Conversation.id.in_(conv_ids)))).scalars().all():
+            convs[c.id] = c
+    out = []
+    for d in rows:
+        c = convs.get(d.conversation_id)
+        out.append({
+            "id": str(d.id),
+            "conversation_id": str(d.conversation_id) if d.conversation_id else None,
+            "customer": (getattr(c, "contact_name", None) or getattr(c, "name", None)
+                         or (c.wa_id if c else None) or "Unknown"),
+            "wa_id": (c.wa_id or c.external_id) if c else None,
+            "channel": c.channel if c else None,
+            "title": d.title,
+            "items": d.items_snapshot or [],
+            "stage": d.stage,
+            "blocking": d.blocking,
+            "next_action": d.next_action,
+            "guidance": d.guidance,
+            "status": d.status,
+            "updated_at": d.updated_at.isoformat() if d.updated_at else None,
+        })
+    return {"deals": out}
+
+
+@router.patch("/deals/{deal_id}")
+async def update_deal(
+    deal_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """The operator's handle on a deal: guidance, blocking, next_action, stage,
+    status — every field Neema reads before acting."""
+    import uuid as _uuid
+    from app.models.deal import Deal
+    try:
+        did = _uuid.UUID(deal_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid deal id")
+    deal = await db.get(Deal, did)
+    if deal is None:
+        raise HTTPException(status_code=404, detail="Deal not found")
+    for field in ("guidance", "blocking", "stage", "status", "title"):
+        if field in body:
+            setattr(deal, field, body[field])
+    if "next_action" in body:
+        deal.next_action = body["next_action"] or None
+    await db.commit()
+    return {"ok": True}
+
+
 # ── Standing orders (docs/AGENTIC_PARTNER_PLAN.md, Phase E) ───────────────────
 
 @router.get("/settings/directives")
