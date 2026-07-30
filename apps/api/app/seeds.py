@@ -1,4 +1,6 @@
 import asyncio
+import os
+import secrets
 from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
@@ -11,12 +13,17 @@ from app.core.security import hash_password
 
 
 # ── Agent seeds ───────────────────────────────────────────────────────────────
+# The super-admin password is NOT hardcoded: SEED_ADMIN_PASSWORD env wins; on a
+# fresh install without it, a random one is generated and printed ONCE by the
+# seed log — change it after first login.
+
+_ADMIN_SEED_PASSWORD = os.environ.get("SEED_ADMIN_PASSWORD") or secrets.token_urlsafe(12)
 
 SEEDS = [
     {
-        "email": "nyorojnr@gmail.com",
-        "password": "MN7KNC10",
-        "name": "Admin",
+        "email": "mwicigi@icloud.com",
+        "password": _ADMIN_SEED_PASSWORD,
+        "name": "Moses Mwicigi",
         "role": "admin",
         "is_available": True,
         "is_superuser": True,
@@ -526,7 +533,10 @@ async def seed_agents(db: AsyncSession) -> None:
             is_superuser=data["is_superuser"],
         )
         db.add(agent)
-        print(f"[seed] Created agent: {data['email']}")
+        note = ""
+        if data.get("is_superuser") and not os.environ.get("SEED_ADMIN_PASSWORD"):
+            note = f" (generated password: {data['password']} — change it after first login)"
+        print(f"[seed] Created agent: {data['email']}{note}")
 
     await db.commit()
 
