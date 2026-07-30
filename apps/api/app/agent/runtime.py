@@ -312,7 +312,10 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     if is_meta:
         system += _public_comment_addendum(currency) if public_comment else _meta_addendum(currency)
 
-    messages = await _history(db, key, channel=channel)
+    # 40 messages of context (was 20): re-asking an answered question is the
+    # most robotic failure there is, and it usually happened because the answer
+    # had scrolled out of a too-short window.
+    messages = await _history(db, key, limit=40, channel=channel)
 
     # Current inbound turn. An image message has empty text (skipped by _history),
     # so build a multimodal turn — the agent SEES the photo (Claude vision) and
@@ -586,10 +589,15 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
     """Generate + send one Meta reply. Returns True only when it actually
     reached the customer (so the sweep counts real sends, not attempts)."""
     from app.database import AsyncSessionLocal
-    from app.services.meta_send import send_to_channel
+    from app.services.meta_send import send_to_channel, send_typing_on
     from app.services import n8n_bridge as svc
     reply = ""
     try:
+        # Human presence: "typing…" in their Messenger while the turn composes.
+        try:
+            await send_typing_on(external_id, page_id=page_id)
+        except Exception:
+            pass
         model = settings.tier2_model if media else route_model(text)
         async with AsyncSessionLocal() as db:
             reply = await run_turn(db, redis, wa_id=external_id, user_text=text,

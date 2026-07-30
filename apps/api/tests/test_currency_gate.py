@@ -174,7 +174,8 @@ def test_prompt_sells_with_keen_reading_not_menu_dumps():
         assert "KEEN READING" in p
         assert "wine cups" in p                      # compound name = ONE product
         assert "NEVER dump the menu" in p
-        assert "FEELING behind the words" in p       # sacred errand, calm service
+        assert "READ THE ROOM" in p                  # mood-adaptive service
+        assert "sacred errand" in p                  # devotional calm preserved
         assert "offered only AFTER their stated need" in p   # upsell discipline
 
 

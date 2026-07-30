@@ -322,6 +322,24 @@ async def page_of_contact(channel: str, external_id: str) -> str | None:
     return None
 
 
+async def send_typing_on(recipient: str, page_id: str | None = None) -> None:
+    """Show Messenger/IG "typing…" bubbles while Neema composes — the presence
+    a human at the page's inbox has. Clears when the reply sends. Best-effort:
+    never delays or breaks the actual reply."""
+    token = token_for_page(page_id)
+    if not (token and recipient):
+        return
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.post(
+                f"https://graph.facebook.com/{settings.meta_graph_version}/me/messages",
+                params={"access_token": token},
+                json={"recipient": {"id": recipient}, "sender_action": "typing_on"},
+            )
+    except Exception:
+        pass
+
+
 async def send_to_channel(channel: str, recipient: str, text: str,
                           page_id: str | None = None,
                           context_wamid: str | None = None) -> None:

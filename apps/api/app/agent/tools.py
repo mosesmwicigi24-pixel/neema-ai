@@ -398,6 +398,11 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
         }
         row["price"] = _to_display(p.get("price"), ctx, p.get("price_usd"))
         row["currency"] = ctx.currency
+        # The hub's enriched product copy (fabric, embroidery, care, contents) —
+        # this is what makes Neema's product talk SPECIFIC instead of generic.
+        details = (p.get("description") or "").strip()
+        if details:
+            row["details"] = details[:260]
         # Variants each carry their OWN price (a Thurible in S ≠ L). Surface them
         # so the agent quotes the exact size/colour the customer wants — and a
         # price range when they haven't chosen yet — instead of one flat number.

@@ -238,6 +238,32 @@ async def transcribe_voice_note(path: str | None) -> str | None:
     return await asyncio.to_thread(_transcribe_path_sync, path)
 
 
+# ── Human presence: blue ticks + "typing…" while Neema composes ──────────────
+
+
+async def _mark_read_and_typing(wamid: str | None) -> None:
+    """Mark the customer's last message read AND show the typing indicator —
+    what a human at the shop's phone looks like. One Cloud API call; the
+    indicator clears itself when the reply lands (or after ~25s). Best-effort:
+    presence must never delay or break the actual reply."""
+    if not (wamid and settings.waba_token and settings.waba_phone_number_id):
+        return
+    import httpx
+    url = (f"https://graph.facebook.com/{settings.waba_api_version}"
+           f"/{settings.waba_phone_number_id}/messages")
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.post(
+                url,
+                headers={"Authorization": f"Bearer {settings.waba_token}"},
+                json={"messaging_product": "whatsapp", "status": "read",
+                      "message_id": wamid,
+                      "typing_indicator": {"type": "text"}},
+            )
+    except Exception as exc:
+        _log.info("typing indicator failed: %s", exc)
+
+
 # ── Debounce: rapid-fire messages get ONE considered reply ───────────────────
 
 
@@ -392,6 +418,17 @@ async def _reply_after_debounce(redis, wa_id: str, token: int | None,
     except Exception as exc:
         _log.warning("native pre-reply checks failed for %s: %s", wa_id, exc)
 
+    # Human presence: blue-tick their message and show "typing…" while the
+    # reply composes (the agent turn takes seconds — silence there feels dead).
+    if redis is not None:
+        try:
+            last = await redis.get(f"wa:native:lastwamid:{wa_id}")
+            if isinstance(last, bytes):
+                last = last.decode()
+            await _mark_read_and_typing(last)
+        except Exception:
+            pass
+
     dedup = f"native:{wa_id}:{token if token is not None else text[:32]}"
     await runtime.schedule_reply(redis, wa_id, text, dedup, media=media)
 
@@ -401,6 +438,12 @@ async def _reply_after_debounce(redis, wa_id: str, token: int | None,
 
 async def _ingest_one(event: dict, redis) -> None:
     wa_id, wamid = event["wa_id"], event["wamid"]
+    # Track the latest inbound wamid — the read/typing presence call needs it.
+    if redis is not None:
+        try:
+            await redis.set(f"wa:native:lastwamid:{wa_id}", wamid, ex=86400)
+        except Exception:
+            pass
     # Idempotency: Meta retries webhooks — each wamid is processed once. The
     # permanent `seen` mark is set only AFTER the message is persisted; until
     # then a short `inflight` guard absorbs concurrent duplicate deliveries.
