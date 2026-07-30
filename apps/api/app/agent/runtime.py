@@ -303,11 +303,18 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         currency = "KES" if (loc.get("country_iso") or "").upper() == "KE" else "USD"
         customer_name = (user.name if user else "") or ""
         source_post = None
+    # Standing orders: the owner's live steering, read before every turn.
+    try:
+        from app.services.app_settings import get_directives
+        _directives = await get_directives(db, redis)
+    except Exception:
+        _directives = ""
     system = build_system_prompt(
         customer_name=customer_name,
         country=loc.get("country") or "",
         country_iso=loc.get("country_iso") or "",
         currency=currency,
+        directives=_directives,
     )
     if is_meta:
         system += _public_comment_addendum(currency) if public_comment else _meta_addendum(currency)

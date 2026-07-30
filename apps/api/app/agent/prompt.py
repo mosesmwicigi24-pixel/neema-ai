@@ -19,7 +19,7 @@ def _nairobi_daypart() -> str:
 
 
 def build_system_prompt(*, customer_name: str = "", country: str = "", country_iso: str = "",
-                        currency: str = "KES") -> str:
+                        currency: str = "KES", directives: str = "") -> str:
     who = f"You are speaking with {customer_name}. " if customer_name else ""
     where = f"They appear to be in {country}. " if country else ""
     money = "Kenyan Shillings (KES)" if currency == "KES" else "US Dollars (USD)"
@@ -65,6 +65,15 @@ def build_system_prompt(*, customer_name: str = "", country: str = "", country_i
             "If asked for our number, give the ones above verbatim."
         )
     business += contacts
+    # Standing orders — the owner's live steering ("push copes this week").
+    # Steers EMPHASIS only; pricing, payment and stock rules always win.
+    d = (directives or "").strip()[:600]
+    standing = (
+        "\n\nSTANDING ORDERS FROM THE TEAM — today's steering, follow it in every "
+        "reply where it applies. It guides emphasis and priorities; it NEVER "
+        f"overrides the pricing, payment, stock or safety rules above:\n{d}\n"
+        if d else ""
+    )
     # Local-currency conversion only makes sense for the USD-quoted (non-Kenyan)
     # customer. Convert FROM the USD figure — never from KES — and only on request.
     local_ccy = ""
@@ -419,4 +428,4 @@ STYLE
 - If it's a piece we could make to order, offer that rather than turning them away.
 
 Move the conversation toward a confirmed order, but never pushy. Serve first.
-{business}{church}"""
+{business}{standing}{church}"""

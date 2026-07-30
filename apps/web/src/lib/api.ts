@@ -102,6 +102,15 @@ async function req<T>(
 const get = <T>(path: string) => req<T>("GET", path);
 const post = <T>(path: string, body: unknown) => req<T>("POST", path, body);
 const patch = <T>(path: string, body: unknown) => req<T>("PATCH", path, body);
+const put = <T>(path: string, body: unknown) => req<T>("PUT", path, body);
+
+/** Standing orders — the owner's live steering Neema reads before every reply. */
+export const settingsApi = {
+    getDirectives: () =>
+        get<{ directives: string; max_chars: number }>("/admin/settings/directives"),
+    putDirectives: (directives: string) =>
+        put<{ ok: boolean; directives: string }>("/admin/settings/directives", { directives }),
+};
 const del = <T>(path: string) => req<T>("DELETE", path);
 
 // ── Conversations ─────────────────────────────────────────────────────────────

@@ -821,6 +821,38 @@ async def update_customer(
     return {"ok": True}
 
 
+# ── Standing orders (docs/AGENTIC_PARTNER_PLAN.md, Phase E) ───────────────────
+
+@router.get("/settings/directives")
+async def get_operator_directives(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    from app.services.app_settings import get_directives, DIRECTIVES_MAX_CHARS
+    redis = getattr(request.app.state, "redis", None)
+    return {"directives": await get_directives(db, redis),
+            "max_chars": DIRECTIVES_MAX_CHARS}
+
+
+@router.put("/settings/directives")
+async def put_operator_directives(
+    body: dict,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Standing orders Neema reads before every reply. Admin-only — this steers
+    the whole sales floor."""
+    if not (getattr(agent, "is_superuser", False) or str(agent.role) in ("admin", "AgentRole.admin")):
+        raise HTTPException(status_code=403, detail="Admin only")
+    from app.services.app_settings import set_directives
+    redis = getattr(request.app.state, "redis", None)
+    val = await set_directives(db, redis, str(body.get("directives") or ""),
+                               updated_by=agent.id)
+    return {"ok": True, "directives": val}
+
+
 # ── Merge profiles ────────────────────────────────────────────────────────────
 
 @router.get("/customers/{wa_id}/merge_suggestions")

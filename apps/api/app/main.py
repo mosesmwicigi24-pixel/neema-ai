@@ -93,6 +93,15 @@ MIGRATION_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS ix_demand_query ON demand_signals (query)",
     "CREATE INDEX IF NOT EXISTS ix_demand_kind ON demand_signals (kind)",
     "CREATE INDEX IF NOT EXISTS ix_demand_wa_id ON demand_signals (wa_id)",
+    # Operator-editable settings KV — standing orders first (models/app_setting.py).
+    """
+    CREATE TABLE IF NOT EXISTS app_settings (
+        id         VARCHAR(100) PRIMARY KEY,
+        value      TEXT NOT NULL DEFAULT '',
+        updated_by UUID,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
     # Reply-to (quote) on messages (see models/message.py). Idempotent.
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_id UUID REFERENCES messages(id) ON DELETE SET NULL",
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_text TEXT",

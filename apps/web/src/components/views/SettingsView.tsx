@@ -1,7 +1,8 @@
 // SettingsView.tsx
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Toggle } from "@/components/ui/Layout";
 import { InputField } from "@/components/ui/FormFields";
+import { settingsApi } from "@/lib/api";
 import type { SharedViewProps } from "@/types";
 
 // ── Platform SVG icons ────────────────────────────────────────────────────────
@@ -175,6 +176,59 @@ const INTEGRATIONS: Integration[] = [
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
+/** Standing orders — the FIRST live settings card: what you type here is read
+ *  by Neema before every reply, within minutes, no deploy. */
+function StandingOrdersCard({ onToast }: { onToast: SharedViewProps["onToast"] }) {
+    const [text, setText] = useState("");
+    const [maxChars, setMaxChars] = useState(600);
+    const [loaded, setLoaded] = useState(false);
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        let gone = false;
+        settingsApi.getDirectives()
+            .then((r) => { if (!gone) { setText(r.directives); setMaxChars(r.max_chars); setLoaded(true); } })
+            .catch(() => { if (!gone) setLoaded(true); });
+        return () => { gone = true; };
+    }, []);
+
+    const save = async () => {
+        setSaving(true);
+        try {
+            const r = await settingsApi.putDirectives(text);
+            setText(r.directives);
+            onToast("Standing orders saved — Neema follows them within ~5 minutes");
+        } catch {
+            onToast("Couldn't save (admin only)", "error");
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <SectionCard title="Standing Orders"
+            description="Live steering — Neema reads this before every reply. Emphasis only; pricing & payment rules always win.">
+            <textarea
+                value={text}
+                onChange={(e) => setText(e.target.value.slice(0, maxChars))}
+                disabled={!loaded}
+                rows={4}
+                placeholder={'e.g. "Push copes this week — Easter is close. Quote 3-week lead times on made-to-order. Mention the new Ladies Princess Cassock to lady customers."'}
+                className="w-full text-xs rounded-lg px-3 py-2 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-[#589b31]/40 resize-y"
+            />
+            <div className="flex items-center justify-between mt-1">
+                <span className="text-[10px] text-stone-400">{text.length}/{maxChars}</span>
+                <button onClick={save} disabled={saving || !loaded}
+                    className="h-8 px-4 rounded-lg text-xs font-semibold text-white transition-colors flex items-center gap-1.5 disabled:opacity-60"
+                    style={{ backgroundColor: "#589b31" }}>
+                    {saving && <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                    {saving ? "Saving…" : "Save standing orders"}
+                </button>
+            </div>
+        </SectionCard>
+    );
+}
+
 function SectionCard({ title, description, children }: {
     title: string; description?: string; children: React.ReactNode;
 }) {
@@ -275,6 +329,8 @@ export function SettingsView({ onToast, isMobile }: SharedViewProps): React.Reac
             <div className={`grid gap-4 ${isMobile ? "grid-cols-1" : "grid-cols-2"} mb-4`}>
 
                 {/* Business */}
+                <StandingOrdersCard onToast={onToast} />
+
                 <SectionCard title="Business" description="Core platform details">
                     <div className="grid grid-cols-2 gap-x-3">
                         <Field label="Business Name">

@@ -65,6 +65,25 @@ harness, deployed dark, then flipped — the WHATSAPP_NATIVE playbook.
 
 ---
 
+## Phase F — One Memory Across Voice and Text (cheap; slots right after A)
+
+**What:** calls and chat are separate brains today — a customer discusses
+everything on a call, then messages, and Neema has no idea the call happened.
+The transcripts/summaries already sit in the `calls` table; they just never
+reach the agent.
+
+- `run_turn` context: inject a compact `RECENT CALLS WITH THIS CUSTOMER` block
+  (last 3 call summaries for the person, dated) ahead of the history — so
+  "as we discussed on the phone" is real.
+- Handoff briefings (C1) and the deal extractor (B1) read the same block.
+- Sidebar already shows transcripts; no UI work.
+- Tests: block present when calls exist, absent otherwise; caps (3 calls,
+  ~200 chars each); person-resolution across channels.
+
+**Size:** ~half a day. **Flag:** none needed (no calls = no block).
+
+---
+
 ## Phase B — Deal State + Initiative (she owns outcomes, visibly)
 
 **B1. The Deal object (shared board's spine).**
@@ -121,6 +140,10 @@ save_measurements, save_parish, remember, deal-update}, **no reply, no sends**
 human's conversation reveals still lands on the profile.
 **C4. Take-back chip:** resolved + idle N hours (default 4) → notification
 "Take this back?" → one click releases to AI with a context recap turn.
+**C5. Ask-Neema sidebar (facts on demand):** a small query box in the customer
+sidebar — "what were his sizes?", "what did he order last Easter?" — answered
+by a read_only turn over this person's history, orders, measurements and calls.
+The human never digs; the junior fetches.
 
 - Tests: scribe tool lockdown (must never send/order); briefing generated on
   flip; draft ws contract; idle detector.
@@ -179,9 +202,10 @@ cap, shown in prompt under standing orders; rejectable anytime).
 |---|---|---|---|
 | 1 | E — Standing orders | 0.5d | — |
 | 2 | A — Event agency | 1–2d + hub PR | hub webhook |
-| 3 | B — Deals + initiative | 2–3d | A (events feed deals) |
-| 4 | C — Copilot mode | 1–2d | — |
-| 5 | D — Learning loops | 1–2d | C (draft-origin wire) |
+| 3 | F — Voice+text memory | 0.5d | — |
+| 4 | B — Deals + initiative | 2–3d | A (events feed deals) |
+| 5 | C — Copilot mode (incl. Ask-Neema) | 1.5–2.5d | F (calls in briefings) |
+| 6 | D — Learning loops | 1–2d | C (draft-origin wire) |
 
 Roughly a week and a half of focused builds, each phase live and verified
 before the next begins.
