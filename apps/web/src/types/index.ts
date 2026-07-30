@@ -236,6 +236,7 @@ export type ViewId =
     | "conversations"
     | "calls"
     | "orders"
+    | "deals"
     | "leads"
     | "reports"
     | "agents"

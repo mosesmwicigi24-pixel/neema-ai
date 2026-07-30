@@ -31,6 +31,7 @@ import { CatalogView } from "@/components/views/CatalogView";
 import { OverviewView } from "@/components/views/OverviewView";
 import { LeadsView } from "@/components/views/LeadsView";
 import { CallsView } from "@/components/views/CallsView";
+import { DealsView } from "@/components/views/DealsView";
 import { CallStage } from "@/components/CallStage";
 import { ReportsView } from "@/components/views/ReportsView";
 import { ProfileView } from "@/components/views/ProfileView";
@@ -413,6 +414,12 @@ export default function NeemaDashboard(): React.ReactElement {
             }] : []),
         ...(can(PERMS.VIEW_LEADS)
             ? [{
+                id: "deals" as ViewId,
+                icon: <Icon d="M13 10V3L4 14h7v7l9-11h-7z" />,
+                label: "Deals",
+                badge: null,
+            },
+            {
                 id: "leads" as ViewId,
                 icon: <Icon d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9" />,
                 label: "Leads",
@@ -480,6 +487,7 @@ export default function NeemaDashboard(): React.ReactElement {
             />
         ),
         calls: <CallsView onOpenConversation={openConversationFor} {...viewProps} />,
+        deals: <DealsView onOpenConversation={openConversationFor} {...viewProps} />,
         leads: <LeadsView {...viewProps} />,
         reports: (
             <ReportsView

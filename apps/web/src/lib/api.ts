@@ -104,6 +104,45 @@ const post = <T>(path: string, body: unknown) => req<T>("POST", path, body);
 const patch = <T>(path: string, body: unknown) => req<T>("PATCH", path, body);
 const put = <T>(path: string, body: unknown) => req<T>("PUT", path, body);
 
+/** Deals + planned actions — the shared board and Neema's initiative queue. */
+export interface ApiDeal {
+    id: string;
+    conversation_id: string | null;
+    customer: string;
+    wa_id: string | null;
+    channel: string | null;
+    title: string | null;
+    items: { name?: string; qty?: number; price?: number }[];
+    stage: string;
+    blocking: string | null;
+    next_action: { kind?: string; owner?: string; due_at?: string; note?: string } | null;
+    guidance: string | null;
+    status: string;
+    updated_at: string | null;
+}
+export interface ApiAction {
+    id: string;
+    deal_id: string | null;
+    conversation_id: string | null;
+    due_at: string | null;
+    kind: string;
+    reason: string | null;
+    draft: string | null;
+    status: string;
+    created_by: string;
+}
+export const dealsApi = {
+    list: (status = "open") => get<{ deals: ApiDeal[] }>(`/admin/deals?status=${status}`),
+    patch: (id: string, body: Record<string, unknown>) =>
+        patch<{ ok: boolean }>(`/admin/deals/${id}`, body),
+};
+export const actionsApi = {
+    list: (status = "pending") => get<{ actions: ApiAction[] }>(`/admin/actions?status=${status}`),
+    approve: (id: string, draft?: string) =>
+        post<{ ok: boolean }>(`/admin/actions/${id}/approve`, draft ? { draft } : {}),
+    veto: (id: string) => post<{ ok: boolean }>(`/admin/actions/${id}/veto`, {}),
+};
+
 /** Standing orders — the owner's live steering Neema reads before every reply. */
 export const settingsApi = {
     getDirectives: () =>
