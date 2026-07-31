@@ -109,7 +109,9 @@ def parse_events(payload: dict) -> list[dict]:
                             "name": names.get(wa_id), "type": mtype,
                             "text": _text_of(msg), "media": media, "ts_ms": ts_ms,
                             # Click-to-WhatsApp-ad attribution rides the message.
-                            "referral": msg.get("referral") or None})
+                            "referral": msg.get("referral") or None,
+                            # WhatsApp reply-quote: the wamid they replied to.
+                            "context_wamid": (msg.get("context") or {}).get("id")})
     return out
 
 
@@ -507,6 +509,24 @@ async def _ingest_guarded(event: dict, redis) -> None:
         mime_type=(media or {}).get("mime_type"),
         filename=(media or {}).get("filename"),
     )
+    # WhatsApp-native quote: resolve which of OUR messages they replied to, so
+    # the thread shows the quote (with thumbnail) and the agent knows exactly
+    # what "this one" means. Best-effort.
+    quoted = None
+    if event.get("context_wamid"):
+        try:
+            from app.models.message import Message as _Msg
+            from app.database import AsyncSessionLocal as _ASL
+            async with _ASL() as _qdb:
+                quoted = (await _qdb.execute(select(_Msg).where(
+                    _Msg.waba_msg_id == event["context_wamid"])
+                    .order_by(_Msg.created_at.desc()).limit(1))).scalar_one_or_none()
+        except Exception:
+            quoted = None
+    if quoted is not None:
+        q = (quoted.text or "").strip()[:120] or f"[{quoted.media_type or 'message'}]"
+        text = f'[replying to your message: "{q}"] {text}'.strip()
+
     async with AsyncSessionLocal() as db:
         # Genuinely first contact? (The n8n version of this notification fired on
         # EVERY text — its condition could never be false. This is the correct one.)
@@ -517,6 +537,19 @@ async def _ingest_guarded(event: dict, redis) -> None:
         # The SAME persistence n8n used: conversation upsert, provision_user
         # (name + country), previews, broadcast, video/document escalation.
         await svc.upsert_message(db, redis, dto)
+        if quoted is not None:
+            try:
+                from app.models.message import Message as _Msg
+                _row = (await db.execute(select(_Msg).where(
+                    _Msg.waba_msg_id == wamid)
+                    .order_by(_Msg.created_at.desc()).limit(1))).scalar_one_or_none()
+                if _row is not None and _row.reply_to_id is None:
+                    _row.reply_to_id = quoted.id
+                    _row.reply_to_text = (quoted.text or "")[:300]
+                    _row.reply_to_sender = "ai"
+                    await db.commit()
+            except Exception:
+                pass
         # Click-to-WhatsApp-ad attribution (best-effort, never blocks ingest).
         if event.get("referral"):
             try:
