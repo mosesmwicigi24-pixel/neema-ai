@@ -278,6 +278,24 @@ async def lifespan(app: FastAPI):
         )
     app.state.redis = redis
 
+    # ── Media storage ─────────────────────────────────────────────────────────
+    # The named volume at MEDIA_DIR must be writable by this (non-root) process
+    # or every upload/inbound-media save 500s.  Check once, loudly, at boot.
+    try:
+        from app.routers.media import MEDIA_DIR
+        os.makedirs(MEDIA_DIR, exist_ok=True)
+        probe = os.path.join(MEDIA_DIR, ".write_check")
+        with open(probe, "w") as f:
+            f.write("ok")
+        os.remove(probe)
+        logger.info("Media dir writable ✓ (%s)", MEDIA_DIR)
+    except Exception as exc:
+        logger.error(
+            "Media dir NOT writable — uploads and inbound media WILL fail. "
+            "Fix: docker compose exec -u root api chown -R appuser:appgroup "
+            f"{MEDIA_DIR!r}. Error: {exc}"
+        )
+
     # Run schema migrations before serving any traffic
     await run_migrations()
 

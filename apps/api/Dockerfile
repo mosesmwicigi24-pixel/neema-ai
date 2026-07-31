@@ -22,6 +22,11 @@ RUN apt-get update && apt-get install -y libpq5 ffmpeg \
 
 RUN groupadd -r appgroup && useradd -r -g appgroup appuser
 
+# Media mountpoint must exist appuser-owned BEFORE the volume is first used:
+# Docker seeds a fresh named volume from the image path's ownership, and a
+# root-owned mountpoint turns every upload into EACCES for the non-root app.
+RUN mkdir -p /var/neema/media && chown appuser:appgroup /var/neema/media
+
 # Copy installed packages from builder's default site-packages
 COPY --from=builder /usr/local/lib /usr/local/lib
 COPY --from=builder /usr/local/bin /usr/local/bin
