@@ -1310,11 +1310,18 @@ async def _send_product_cards(args: dict, ctx: ToolContext) -> dict:
         from app.services.media_convert import to_sendable_image
         sent = 0
         for c in cards:
-            if not c["url"]:
-                continue
             try:
                 # WhatsApp image messages reject .webp — convert the hub photo to jpg.
                 img = await to_sendable_image(c["image"])
+                if not img and not c["url"]:
+                    # Nothing to show and nowhere to send them: let the model
+                    # describe it in words rather than send an empty card.
+                    _log.info("send_product_cards: %s has no photo and no link",
+                              c["slug"])
+                    continue
+                if not img:
+                    _log.info("send_product_cards: %s has no photo in the "
+                              "catalogue — card goes out without one", c["slug"])
                 card_wamid = await svc._send_waba_product_card(
                     ctx.wa_id, image_url=img, title=c["name"],
                     body=c["price_text"], url=c["url"])
@@ -1341,18 +1348,22 @@ async def _send_product_cards(args: dict, ctx: ToolContext) -> dict:
         from app.services.media_convert import to_sendable_image
         elements = []
         for c in cards:
-            if not c["url"]:
-                continue
             el = {
                 "title": (c["name"] or "")[:80],
                 "subtitle": (c["price_text"] or "")[:80],
-                "default_action": {"type": "web_url", "url": c["url"]},
-                "buttons": [{"type": "web_url", "url": c["url"], "title": "View"}],
             }
+            # The View button needs a link, but a card without one still shows
+            # the photo and the price — far better than a text-only reply.
+            if c["url"]:
+                el["default_action"] = {"type": "web_url", "url": c["url"]}
+                el["buttons"] = [{"type": "web_url", "url": c["url"], "title": "View"}]
             img = await to_sendable_image(c["image"])
             if img:
                 el["image_url"] = img
             c["_img"] = img
+            if not img and not c["url"]:
+                _log.info("send_product_cards: %s has no photo and no link", c["slug"])
+                continue
             elements.append(el)
         if elements:
             try:
@@ -1373,6 +1384,29 @@ async def _send_product_cards(args: dict, ctx: ToolContext) -> dict:
                                 "names, prices or links as text."}
             except Exception as exc:
                 _log.warning("send_product_cards: meta carousel failed: %s", exc)
+                # Last resort before words: send the photos as plain attachments.
+                # A customer asking "how much is the lay reader set?" should SEE
+                # the set, even when the rich carousel can't be delivered.
+                photos = 0
+                try:
+                    from app.services.meta_send import send_meta_media, page_of_contact
+                    page_id = await page_of_contact(ctx.channel, ctx.wa_id)
+                    for c in cards:
+                        if not c.get("_img"):
+                            continue
+                        await send_meta_media(ctx.wa_id, "image", c["_img"],
+                                              page_id=page_id)
+                        await _record_shared_media(
+                            ctx, media_url=c["_img"],
+                            caption=" — ".join(x for x in (c["name"], c["price_text"]) if x))
+                        photos += 1
+                except Exception as exc2:
+                    _log.warning("send_product_cards: photo fallback failed: %s", exc2)
+                if photos:
+                    return {"ok": True, "sent_cards": photos,
+                            "note": "The product photo(s) were sent as images (the rich "
+                                    "carousel was unavailable). Add one short line with the "
+                                    "price and the link so they can tap through."}
                 # fall through to the text-link list
 
     # Non-WhatsApp channel, or nothing could be sent: hand the details back so the

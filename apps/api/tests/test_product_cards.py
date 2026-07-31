@@ -239,3 +239,80 @@ def test_send_waba_product_card_falls_back_to_image_on_reject(monkeypatch):
     assert calls[1]["image"]["caption"].startswith("*Cross*")
     assert "https://s/p" in calls[1]["image"]["caption"]
     assert wamid == "wamid.FALLBACK1"   # the wamid of whichever send SUCCEEDED
+
+
+# ── Showing the product must survive a hub blip ───────────────────────────────
+
+
+def test_hub_catalog_serves_last_good_copy_when_the_hub_is_down(monkeypatch):
+    """A hub outage must not strip Neema of photos and links: the local table
+    has no slug, and a slugless product can never become a card."""
+    import json as _json
+    from app.core import hub_client as hc
+
+    good = [{"name": "Lay Reader Complete Set", "slug": "lay-reader-set",
+             "thumbnail_url": "https://img/lr.jpg", "price": 12000}]
+
+    class _Redis:
+        store = {hc._LAST_GOOD_KEY: _json.dumps(good)}
+        async def get(self, k): return self.store.get(k)
+        async def setex(self, k, ttl, v): self.store[k] = v
+
+    async def _boom(redis):
+        raise RuntimeError("hub 503")
+    monkeypatch.setattr(hc, "_load_hub_catalog", _boom)
+
+    items = asyncio.run(hc.fetch_hub_catalog(_Redis()))
+    assert items == good
+    assert items[0]["slug"] and items[0]["thumbnail_url"]   # still cardable
+
+
+def test_hub_catalog_raises_when_there_is_no_last_good_copy(monkeypatch):
+    from app.core import hub_client as hc
+
+    class _Redis:
+        async def get(self, k): return None
+        async def setex(self, k, ttl, v): ...
+
+    async def _boom(redis):
+        raise RuntimeError("hub 503")
+    monkeypatch.setattr(hc, "_load_hub_catalog", _boom)
+
+    try:
+        asyncio.run(hc.fetch_hub_catalog(_Redis()))
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("expected the hub failure to propagate")
+
+
+def test_product_card_without_a_link_still_sends_the_photo(monkeypatch):
+    """No storefront link is no reason to fall back to bare text — the photo
+    is what builds confidence."""
+    posts = []
+
+    class _Resp:
+        is_success = True
+        status_code = 200
+        content = b"{}"
+        def json(self): return {"messages": [{"id": "wamid.X"}]}
+
+    class _Client:
+        def __init__(self, *a, **k): ...
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, url, **k):
+            posts.append(k.get("json"))
+            return _Resp()
+
+    monkeypatch.setattr(svc.httpx, "AsyncClient", _Client)
+
+    asyncio.run(svc._send_waba_product_card(
+        "254700000000", image_url="https://img/lr.jpg",
+        title="Lay Reader Complete Set", body="KES 12,000", url=None))
+
+    assert len(posts) == 1                       # went straight to image+caption
+    assert posts[0]["type"] == "image"
+    assert posts[0]["image"]["link"] == "https://img/lr.jpg"
+    assert "Lay Reader Complete Set" in posts[0]["image"]["caption"]
+    assert "None" not in posts[0]["image"]["caption"]   # no stray null link

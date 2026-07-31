@@ -324,7 +324,7 @@ async def _send_waba(wa_id: str, text: str, context_wamid: str | None = None) ->
 
 
 async def _send_waba_product_card(wa_id: str, *, image_url: str | None, title: str,
-                                  body: str, url: str, button: str = "View") -> str | None:
+                                  body: str, url: str | None, button: str = "View") -> str | None:
     """Send a WhatsApp PRODUCT CARD — the visual equivalent of the web-chat card:
     the product photo as the header, name + price in the body, and a tappable
     "View" button that opens the product page on the storefront.
@@ -343,24 +343,28 @@ async def _send_waba_product_card(wa_id: str, *, image_url: str | None, title: s
                 f"/{settings.waba_phone_number_id}/messages")
     headers = {"Authorization": f"Bearer {settings.waba_token}"}
 
-    interactive: dict = {
-        "type": "cta_url",
-        "body": {"text": f"*{title}*\n{body}"[:1024]},
-        "action": {"name": "cta_url",
-                   "parameters": {"display_text": (button or "View")[:20], "url": url}},
-    }
-    if image_url:
-        interactive["header"] = {"type": "image", "image": {"link": image_url}}
-    payload = {"messaging_product": "whatsapp", "recipient_type": "individual",
-               "to": wa_id, "type": "interactive", "interactive": interactive}
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(endpoint, headers=headers, json=payload, timeout=30.0)
-    if resp.is_success:
-        return _wamid_of(resp)
-    _l.warning("WA product card (cta_url) %s: %s — falling back to image+caption",
-               resp.status_code, resp.text[:200])
+    # A cta_url card needs a link. Without one (an unpublished item, or the
+    # local catalogue fallback) go straight to image+caption — the PHOTO is
+    # what sells; a missing link is no reason to send the customer bare text.
+    if url:
+        interactive: dict = {
+            "type": "cta_url",
+            "body": {"text": f"*{title}*\n{body}"[:1024]},
+            "action": {"name": "cta_url",
+                       "parameters": {"display_text": (button or "View")[:20], "url": url}},
+        }
+        if image_url:
+            interactive["header"] = {"type": "image", "image": {"link": image_url}}
+        payload = {"messaging_product": "whatsapp", "recipient_type": "individual",
+                   "to": wa_id, "type": "interactive", "interactive": interactive}
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(endpoint, headers=headers, json=payload, timeout=30.0)
+        if resp.is_success:
+            return _wamid_of(resp)
+        _l.warning("WA product card (cta_url) %s: %s — falling back to image+caption",
+                   resp.status_code, resp.text[:200])
 
-    caption = f"*{title}*\n{body}\n{url}"[:1024]
+    caption = "\n".join(x for x in (f"*{title}*", body, url) if x)[:1024]
     if image_url:
         fb = {"messaging_product": "whatsapp", "to": wa_id, "type": "image",
               "image": {"link": image_url, "caption": caption}}

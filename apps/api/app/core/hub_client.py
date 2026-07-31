@@ -20,6 +20,10 @@ from app.core.config import settings
 
 _log = logging.getLogger("neema.hub")
 _CACHE_KEY = "hub:catalog"
+# Last successful load, kept for a week — the fallback that keeps product cards
+# working through a hub outage (see fetch_hub_catalog).
+_LAST_GOOD_KEY = "hub:catalog:last_good"
+_LAST_GOOD_TTL = 7 * 24 * 3600
 
 
 def _price(prices_by_ccy: dict, ccy: str):
@@ -169,8 +173,12 @@ def _apply_variant_pricing(prod: dict) -> None:
 async def fetch_hub_catalog(redis) -> list[dict]:
     """All published hub products, mapped to Neema's catalogue shape (cached).
 
-    Raises on network/HTTP failure so the caller can fall back to the local
-    table — never returns a partial/empty list silently.
+    On a hub outage we serve the last known-good copy rather than raising
+    straight through to the local table. That fallback table carries no slug
+    and no photo, and `_match_product` rejects slugless items — so falling back
+    silently costs Neema every product card: she can still quote a price, but
+    can no longer SHOW the customer anything. A slightly stale catalogue with
+    photos and links sells; a fresh one without them does not.
     """
     if redis is not None:
         try:
@@ -180,6 +188,29 @@ async def fetch_hub_catalog(redis) -> list[dict]:
         except Exception:  # cache miss is non-fatal
             pass
 
+    try:
+        return await _load_hub_catalog(redis)
+    except Exception as exc:
+        stale = await _last_good(redis)
+        if stale:
+            _log.warning("hub catalogue unreachable (%s) — serving the last "
+                         "known-good copy (%d products)", exc, len(stale))
+            return stale
+        raise
+
+
+async def _last_good(redis) -> list[dict] | None:
+    """The long-lived mirror of the last successful catalogue load."""
+    if redis is None:
+        return None
+    try:
+        raw = await redis.get(_LAST_GOOD_KEY)
+        return json.loads(raw) if raw else None
+    except Exception:
+        return None
+
+
+async def _load_hub_catalog(redis) -> list[dict]:
     items: list[dict] = []
     page = 1
     base = settings.hub_api_url.rstrip("/")
@@ -218,7 +249,11 @@ async def fetch_hub_catalog(redis) -> list[dict]:
 
     if redis is not None:
         try:
-            await redis.setex(_CACHE_KEY, settings.hub_catalog_ttl, json.dumps(items))
+            blob = json.dumps(items)
+            await redis.setex(_CACHE_KEY, settings.hub_catalog_ttl, blob)
+            # The safety net: survives far longer than the working cache, so a
+            # hub outage never leaves Neema without photos and product links.
+            await redis.setex(_LAST_GOOD_KEY, _LAST_GOOD_TTL, blob)
         except Exception:
             pass
     _log.info("hub catalogue loaded: %d products", len(items))
