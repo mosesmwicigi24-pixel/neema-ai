@@ -595,6 +595,11 @@ const ROW_ACCENT = "#f59e0b";
 // than fixed — a narrow laptop keeps the old 340 instead of starving the
 // thread panel, and only roomy screens pay out the full extra inch.
 const LIST_WIDTH = "clamp(340px, 38vw, 436px)";
+// Activity-log panel: an inch wider than the old 196px, so an event line like
+// "Moses Mwicigi intercepted the conversation" stops wrapping into a column of
+// single words. Clamped for the same reason as LIST_WIDTH — it sits alongside
+// the list, the thread AND the CRM sidebar, so a narrow screen keeps the 196.
+const ACTIVITY_WIDTH = "clamp(196px, 16vw, 292px)";
 // Short channel labels for the conversation-row pill (Figma: WA / FB / IG).
 const CH_SHORT: Record<Channel, string> = {
     whatsapp: "WA",
@@ -3501,7 +3506,7 @@ export function ConversationsView({
                 return (
                     <div
                         className="flex-shrink-0 flex flex-col overflow-hidden"
-                        style={{ width: 196, backgroundColor: "#ffffff", borderLeft: "1px solid #edf0ea" }}
+                        style={{ width: ACTIVITY_WIDTH, backgroundColor: "#ffffff", borderLeft: "1px solid #edf0ea" }}
                     >
                         {/* Header with collapse button */}
                         <div className="px-3 pt-3 pb-2 flex items-center justify-between" style={{ borderBottom: "1px solid #edf0ea" }}>
