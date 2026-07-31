@@ -165,9 +165,8 @@ def test_prompt_location_answers_build_rapport_never_open_negative():
     assert "OUR NAIROBI SHOP" in ke
     assert "Sonalux Building" in ke and "Moi Avenue" in ke
     assert "rapport without gushing" in ke
-    # the within-Kenya delivery example rides only in the Kenyan prompt
-    assert "{their town}" in build_system_prompt(currency="KES")
-    assert "{their town}" not in build_system_prompt(currency="USD")
+    # Kenyan shop details never leak into the international prompt
+    assert "Sonalux Building" not in p
 
 
 def test_prompt_sells_with_keen_reading_not_menu_dumps():
