@@ -153,13 +153,18 @@ def test_prompt_location_answers_build_rapport_never_open_negative():
     """'Where are you?' gets warmth + worldwide reach + an invitation for their
     city — never 'we have no branch in…'. Naming their place earns one warm line
     of appreciation, then confident specifics (DHL, 3–7 days from Nairobi)."""
-    for currency in ("KES", "USD"):
-        p = build_system_prompt(currency=currency)
-        assert "ONE HOME, WORLDWIDE REACH" in p
-        assert "NEVER" in p and "what we don't have" in p
-        assert "grateful you chose to be served by us" in p
-        assert "3–7 days" in p and "DHL" in p
-        assert "rapport without gushing" in p            # the balance rule
+    # Location guidance is now COUNTRY-SPECIFIC: Kenyans get the physical shop
+    # plainly (they can walk in); everyone else gets one-home-worldwide-reach.
+    p = build_system_prompt(currency="USD")
+    assert "ONE HOME, WORLDWIDE REACH" in p
+    assert "NEVER" in p and "what we don't have" in p
+    assert "grateful you chose to be served by us" in p
+    assert "3–7 days" in p and "DHL" in p
+    assert "rapport without gushing" in p                # the balance rule
+    ke = build_system_prompt(currency="KES")
+    assert "OUR NAIROBI SHOP" in ke
+    assert "Sonalux Building" in ke and "Moi Avenue" in ke
+    assert "rapport without gushing" in ke
     # the within-Kenya delivery example rides only in the Kenyan prompt
     assert "{their town}" in build_system_prompt(currency="KES")
     assert "{their town}" not in build_system_prompt(currency="USD")

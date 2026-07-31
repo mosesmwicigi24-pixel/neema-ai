@@ -231,6 +231,42 @@ async def _recent_call_context(db, key: str, channel: str) -> str:
             "there):\n" + "\n".join(lines))
 
 
+async def _cross_channel_context(db, key: str, channel: str) -> str:
+    """The customer's recent messages on their OTHER linked channels — so a
+    Facebook→WhatsApp hop continues the ACTUAL conversation ('the black cassock
+    at $130 we discussed'), not a vibe. Empty when unlinked or on failure."""
+    from app.models.person import Identity
+    from app.models.conversation import Conversation
+    ident = (await db.execute(select(Identity).where(
+        Identity.channel == channel,
+        Identity.external_id == key))).scalar_one_or_none()
+    if ident is None:
+        return ""
+    convs = (await db.execute(select(Conversation).where(
+        Conversation.person_id == ident.person_id))).scalars().all()
+    lines = []
+    for c in convs:
+        if (c.channel == channel and (c.wa_id == key or c.external_id == key)):
+            continue
+        where = ((Message.wa_id == c.wa_id) if c.channel == "whatsapp" else
+                 ((Message.channel == c.channel) & (Message.external_id == c.external_id)))
+        rows = (await db.execute(
+            select(Message).where(where)
+            .where(Message.media_type.is_(None) | (Message.media_type != "note"))
+            .order_by(Message.created_at.desc()).limit(4))).scalars().all()
+        for m in reversed(rows):
+            t = (m.text or "").strip()
+            if not t:
+                continue
+            who = "Customer" if str(getattr(m.direction, "value", m.direction)) == "inbound" else "You"
+            lines.append(f"- [{c.channel}] {who}: {t[:150]}")
+    if not lines:
+        return ""
+    return ("\n\nTHEIR RECENT MESSAGES ON OTHER CHANNELS (same person, linked "
+            "identity — continue THAT conversation; never re-ask what's here):\n"
+            + "\n".join(lines[-8:]))
+
+
 async def _history(db: AsyncSession, key: str, limit: int = 20,
                    *, channel: str = "whatsapp") -> list[dict]:
     # WhatsApp keys on wa_id (the compat shim); other channels key on
@@ -379,6 +415,15 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         _call_ctx = await _recent_call_context(db, key, channel)
         if _call_ctx:
             system += _call_ctx
+    except Exception:
+        pass
+
+    # Cross-channel memory: what the SAME person said on their other linked
+    # channels — the Facebook→WhatsApp bridge continues the real conversation.
+    try:
+        _xc = await _cross_channel_context(db, key, channel)
+        if _xc:
+            system += _xc
     except Exception:
         pass
 

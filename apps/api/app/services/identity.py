@@ -257,4 +257,46 @@ async def reconcile_waref(db: AsyncSession, redis, wa_id: str, text: str) -> boo
         await db.rollback()
         return False
     await _consume()
+    # The handoff explains ITSELF: a note into the WhatsApp thread telling the
+    # team (and the record) what this ref meant — where they came from, what
+    # they were buying, and their last words on the social side. Best-effort.
+    try:
+        await _handoff_note(db, wa_id, m.group(1).upper(), data)
+    except Exception:
+        pass
     return True
+
+
+async def _handoff_note(db: AsyncSession, wa_id: str, ref: str, data: dict) -> None:
+    from sqlalchemy import select as _sel
+    from app.models.conversation import Conversation
+    from app.models.message import Message, MsgDirection, MsgSender
+    conv = (await db.execute(_sel(Conversation).where(
+        Conversation.wa_id == wa_id))).scalar_one_or_none()
+    if conv is None:
+        return
+    channel = data.get("channel") or "social"
+    ext = data.get("external_id") or ""
+    lines = [f"🔗 Handoff — arrived from {channel} via ref {ref}."]
+    if data.get("product"):
+        lines.append(f"Product they were on: {data['product']}")
+    items = data.get("items") or []
+    if items:
+        lines.append("Cart seeded: " + ", ".join(
+            f"{i.get('name') or i.get('product_name') or 'item'} ×{i.get('qty') or i.get('quantity') or 1}"
+            for i in items[:5]))
+    if ext:
+        last = (await db.execute(_sel(Message).where(
+            Message.channel == channel, Message.external_id == ext,
+            Message.direction == MsgDirection.inbound)
+            .order_by(Message.created_at.desc()).limit(2))).scalars().all()
+        for msg in reversed(last):
+            if (msg.text or "").strip():
+                lines.append(f"They said on {channel}: “{msg.text.strip()[:140]}”")
+    db.add(Message(
+        channel=conv.channel, wa_id=conv.wa_id, external_id=None,
+        person_id=conv.person_id, conversation_id=conv.id,
+        direction=MsgDirection.outbound, sender=MsgSender.agent,
+        text="\n".join(lines), media_type="note",
+    ))
+    await db.commit()

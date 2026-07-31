@@ -54,3 +54,37 @@ def test_meta_channel_resolves_via_identity():
     out2 = asyncio.run(_recent_call_context(_DB(ident=None, calls=[]),
                                             "PSID123", "messenger"))
     assert out2 == ""
+
+
+def test_cross_channel_context_labels_and_caps():
+    from app.agent.runtime import _cross_channel_context
+    from datetime import datetime as _dt
+
+    ident = types.SimpleNamespace(person_id="p1")
+    fb = types.SimpleNamespace(channel="facebook", wa_id=None, external_id="PSID1")
+    msgs = [types.SimpleNamespace(direction="inbound",
+                                  text="I need a black cassock and clergy shirt",
+                                  created_at=_dt(2026, 7, 31)),
+            types.SimpleNamespace(direction="outbound",
+                                  text="The black Cassock is 130 USD",
+                                  created_at=_dt(2026, 7, 31))]
+
+    class _Res:
+        def __init__(self, one=None, many=None):
+            self._one, self._many = one, many or []
+        def scalar_one_or_none(self): return self._one
+        def scalars(self): return types.SimpleNamespace(all=lambda: self._many)
+
+    class _DB:
+        def __init__(self): self._q = [_Res(one=ident), _Res(many=[fb]),
+                                       _Res(many=list(reversed(msgs)))]
+        async def execute(self, *a, **k): return self._q.pop(0)
+
+    out = asyncio.run(_cross_channel_context(_DB(), "243995379878", "whatsapp"))
+    assert "OTHER CHANNELS" in out
+    assert "[facebook] Customer: I need a black cassock" in out
+    assert "[facebook] You: The black Cassock is 130 USD" in out
+    # unlinked person → empty
+    class _DB2:
+        async def execute(self, *a, **k): return _Res(one=None)
+    assert asyncio.run(_cross_channel_context(_DB2(), "PSIDX", "messenger")) == ""
