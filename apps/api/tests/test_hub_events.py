@@ -136,8 +136,41 @@ def test_quiet_hours_defers_and_drains(monkeypatch):
     out = asyncio.run(he._celebrate(None, r, conv, ev))
     assert out == {"handled": True, "deferred": "quiet_hours"}
     assert r.z[he.DEFER_ZSET]
+    # REGRESSION (found live): deferring must NOT burn the paid guard, or the
+    # morning drain finds its own footprint and swallows the thank-you.
+    assert not any(k.startswith("celebrated:paid:") for k in r.store)
 
 
 def test_escalation_reasons_cover_all_disappointments():
     for t in he.ESCALATE:
         assert t in he._ESCALATE_REASON
+
+
+def test_deferred_paid_event_sends_in_the_morning(monkeypatch):
+    """The full night→morning cycle: quiet-hours defer, then the drained event
+    actually SENDS (the live bug: the guard burned at defer time)."""
+    r = _Redis()
+    conv = types.SimpleNamespace(id="c1", channel="whatsapp", wa_id="254700000001",
+                                 external_id=None, person_id="p1", contact_name="Moses")
+    ev = {"id": "e9", "type": "order.paid", "order_number": "ORD-9"}
+
+    monkeypatch.setattr(he, "is_quiet_hours", lambda now=None: True)
+    out = asyncio.run(he._celebrate(None, r, conv, ev))
+    assert out["deferred"] == "quiet_hours"
+
+    # morning
+    monkeypatch.setattr(he, "is_quiet_hours", lambda now=None: False)
+    sent = []
+    async def fake_within(db, c): return True
+    async def fake_compose(db, redis, c, brief): return "Asante! 🙏"
+    async def fake_send(to, text, context_wamid=None): sent.append(text)
+    async def fake_save(db, redis, to, text): pass
+    monkeypatch.setattr(he, "_within_window", fake_within)
+    monkeypatch.setattr(he, "_compose_announcement", fake_compose)
+    from app.services import n8n_bridge as svc
+    monkeypatch.setattr(svc, "_send_waba", fake_send)
+    monkeypatch.setattr(svc, "save_outbound_message", fake_save)
+
+    out = asyncio.run(he._celebrate(None, r, conv, ev))
+    assert out == {"handled": True, "sent": "freeform"}
+    assert sent == ["Asante! 🙏"]

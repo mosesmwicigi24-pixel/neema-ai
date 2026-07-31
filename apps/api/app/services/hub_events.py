@@ -188,6 +188,21 @@ async def _celebrate(db, redis, conv, event: dict) -> dict:
     if not brief:
         return {"handled": False, "reason": "unknown_event"}
 
+    # A paid order closes the conversation's open deal as WON (B1 hook) —
+    # regardless of how or when the thank-you goes out.
+    if event.get("type") == "order.paid":
+        try:
+            from app.services.deals import mark_won_for_conversation
+            await mark_won_for_conversation(db, conv.id)
+        except Exception:
+            pass
+
+    # Quiet hours FIRST — deferring must never burn the celebration guard, or
+    # the morning drain finds its own footprint and swallows the thank-you.
+    if is_quiet_hours():
+        await defer(redis, event)
+        return {"handled": True, "deferred": "quiet_hours"}
+
     # Paid events can arrive from BOTH the hub and the M-Pesa reconciler —
     # one thank-you per order, whoever reports first.
     if event.get("type") == "order.paid" and redis is not None:
@@ -197,19 +212,6 @@ async def _celebrate(db, redis, conv, event: dict) -> dict:
                 return {"handled": False, "reason": "already_celebrated"}
         except Exception:
             pass
-
-    # A paid order closes the conversation's open deal as WON (B1 hook) —
-    # regardless of how the thank-you goes out.
-    if event.get("type") == "order.paid":
-        try:
-            from app.services.deals import mark_won_for_conversation
-            await mark_won_for_conversation(db, conv.id)
-        except Exception:
-            pass
-
-    if is_quiet_hours():
-        await defer(redis, event)
-        return {"handled": True, "deferred": "quiet_hours"}
 
     in_window = await _within_window(db, conv)
     recipient = _recipient_of(conv)
@@ -357,9 +359,13 @@ async def drain_due(redis) -> int:
                 # bypass the seen-key (already burned on first receipt)
                 if event.get("type") in CELEBRATE:
                     conv = await _conversation_for_phone(db, event.get("customer_phone") or "")
-                    if conv is not None:
-                        await _celebrate(db, redis, conv, event)
-                        n += 1
+                    if conv is None:
+                        _log.warning("deferred event %s dropped — no conversation "
+                                     "for %s", event.get("id"), event.get("customer_phone"))
+                        continue
+                    out = await _celebrate(db, redis, conv, event)
+                    _log.info("deferred event %s → %s", event.get("id"), out)
+                    n += 1
         except Exception as exc:
             _log.warning("deferred event failed: %s", exc)
     return n
