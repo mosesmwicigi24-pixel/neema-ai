@@ -189,3 +189,24 @@ def test_login_wall_still_reaches_graph_when_ids_are_present(monkeypatch):
 
     got = asyncio.run(lp.resolve_facebook_link("https://www.facebook.com/share/p/X/"))
     assert got["source"] == "graph" and got["title"] == "Aluminium trays in stock"
+
+
+def test_a_word_glued_onto_a_share_link_is_trimmed():
+    """Live data: customers type the next word straight onto a pasted link."""
+    f = lp.find_facebook_link
+    assert f("https://www.facebook.com/share/r/1D6dUaMrsm/bleu") \
+        == "https://www.facebook.com/share/r/1D6dUaMrsm/"
+    assert f("https://www.facebook.com/share/p/1JajDZBQ55/I") \
+        == "https://www.facebook.com/share/p/1JajDZBQ55/"
+    # A share link with no p/r/v segment still normalises.
+    assert f("https://www.facebook.com/share/18SqaY1KmX/junk") \
+        == "https://www.facebook.com/share/18SqaY1KmX/"
+    # Non-share URLs keep their full path — a reel id must not be truncated.
+    assert f("https://www.facebook.com/reel/874257912350591?sfnsn=wa") \
+        == "https://www.facebook.com/reel/874257912350591?sfnsn=wa"
+
+
+def test_titles_are_html_unescaped():
+    assert lp._title_from_html("<title>78&#xa0;K vues &#xb7; Bethany House</title>") \
+        != "78&#xa0;K vues &#xb7; Bethany House"
+    assert "&amp;" not in lp._og('<meta property="og:title" content="Cups &amp; Trays">', "title")

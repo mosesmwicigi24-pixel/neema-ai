@@ -23,6 +23,7 @@ link Neema can't open must never cost the customer their reply.
 """
 from __future__ import annotations
 
+import html as _html
 import json
 import logging
 import re
@@ -45,12 +46,24 @@ _CACHE_PREFIX = "linkprev:"
 _CACHE_TTL = 7 * 24 * 3600
 
 
+# A share URL ends at its token: /share/p/<tok>/ (or /r/, /v/, or no letter).
+# Customers routinely type the next word straight onto a pasted link — the live
+# data had ".../1D6dUaMrsm/bleu" and ".../1JajDZBQ55/I" — and the glued word
+# turns a good link into a 404.
+_SHARE_URL_RE = re.compile(
+    r"^(https?://(?:www\.|m\.|web\.|mbasic\.)?facebook\.com/share/"
+    r"(?:[prv]/)?[A-Za-z0-9]+/?)", re.I)
+
+
 def find_facebook_link(text: str | None) -> str | None:
-    """The first Facebook URL in a message, trimmed of trailing punctuation."""
+    """The first Facebook URL in a message, trimmed of trailing punctuation and
+    of any word the customer ran straight into it."""
     m = FB_LINK_RE.search(text or "")
     if not m:
         return None
-    return m.group(0).rstrip(").,;!”\"'")
+    url = m.group(0).rstrip(").,;!”\"'")
+    share = _SHARE_URL_RE.match(url)
+    return share.group(1) if share else url
 
 
 def _post_id_from_url(url: str) -> str | None:
@@ -132,7 +145,7 @@ def _og(html: str, prop: str) -> str:
     m = re.search(
         rf'<meta\s+property=["\']og:{prop}["\']\s+content=["\']([^"\']*)["\']',
         html or "", re.I)
-    return (m.group(1) if m else "").strip()
+    return _html.unescape(m.group(1) if m else "").strip()
 
 
 def _title_from_html(html: str) -> str:
@@ -141,7 +154,7 @@ def _title_from_html(html: str) -> str:
     m = re.search(r"<title>([^<]{0,300})</title>", html or "", re.I)
     if not m:
         return ""
-    t = m.group(1).strip()
+    t = _html.unescape(m.group(1)).strip()
     # Strip the leading "<Page> - " so what's left is the caption itself.
     return re.sub(r"^[^-|]{1,60}\s+[-|]\s+", "", t).strip()
 
