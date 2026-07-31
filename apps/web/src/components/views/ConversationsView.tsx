@@ -1647,18 +1647,11 @@ export function ConversationsView({
                                                 : ""}
                                         </span>
                                     </div>
-                                    <div className="flex items-start justify-between gap-2">
-                                        <p
-                                            className="text-xs line-clamp-2 break-words flex-1"
-                                            style={{
-                                                color: hasUnread ? "#3d5a30" : "#8a9e80",
-                                                fontWeight: hasUnread ? 500 : 400,
-                                            }}
-                                        >
-                                            {conv.last_message ??
-                                                "No messages yet"}
-                                        </p>
-                                        <div className="flex items-center gap-1 flex-shrink-0 mt-0.5">
+                                    {/* Chips on their OWN line (never squeezing the
+                                        preview), then the preview gets the full width
+                                        and a clean 2-line clamp. */}
+                                    <div className="flex flex-col gap-0.5">
+                                        <div className="flex items-center gap-1 flex-wrap">
                                             {/* Channel chips — one per linked channel for
                                                 this person. Click loads THAT channel's
                                                 thread. The open one is filled; the rest are
@@ -1749,6 +1742,16 @@ export function ConversationsView({
                                                 </span>
                                             )}
                                         </div>
+                                        <p
+                                            className="text-xs line-clamp-2 break-words"
+                                            style={{
+                                                color: hasUnread ? "#3d5a30" : "#8a9e80",
+                                                fontWeight: hasUnread ? 500 : 400,
+                                            }}
+                                        >
+                                            {conv.last_message ??
+                                                "No messages yet"}
+                                        </p>
                                     </div>
                                 </div>
                             </div>
