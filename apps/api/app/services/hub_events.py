@@ -232,9 +232,15 @@ async def _celebrate(db, redis, conv, event: dict) -> dict:
 
     if conv.channel == "whatsapp" and settings.wa_event_template:
         name = (getattr(conv, "contact_name", None) or "").split(" ")[0] or "there"
-        params = [name, event.get("order_number") or "your order",
-                  (event.get("type") or "").split(".")[-1].replace("_", " ")]
-        await svc.send_wa_template(recipient, settings.wa_event_template, params)
+        status_word = {
+            "order.paid": "payment received — thank you! Production begins",
+            "order.production_started": "in production at our workshop",
+            "order.shipped": "shipped and on its way to you",
+            "order.delivered": "delivered — we hope it serves you beautifully",
+        }.get(event.get("type") or "", "updated")
+        params = [name, event.get("order_number") or "your order", status_word]
+        await svc.send_wa_template(recipient, settings.wa_event_template,
+                                   settings.wa_event_lang, params)
         await svc.save_outbound_message(
             db, redis, recipient, f"[template {settings.wa_event_template}] {brief}")
         return {"handled": True, "sent": "template"}

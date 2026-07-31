@@ -106,7 +106,7 @@ def test_outside_window_uses_template_or_human(monkeypatch):
     monkeypatch.setattr(he, "is_quiet_hours", lambda now=None: False)
     tsent = []
     from app.services import n8n_bridge as svc
-    async def fake_tmpl(to, name, params, lang=None): tsent.append((to, name, params))
+    async def fake_tmpl(to, name, lang, params=None): tsent.append((to, name, lang, params))
     async def fake_save(db, redis, to, text): tsent.append(("save", text))
     monkeypatch.setattr(svc, "send_wa_template", fake_tmpl, raising=False)
     monkeypatch.setattr(svc, "save_outbound_message", fake_save)
@@ -116,7 +116,12 @@ def test_outside_window_uses_template_or_human(monkeypatch):
                                     {"id": "e5", "type": "order.shipped",
                                      "order_number": "ORD-2"}))
     assert out["sent"] == "template"
-    assert tsent[0][1] == "order_update" and tsent[0][2][0] == "Moses"
+    # (to, template, lang, params) — the REAL signature; the lang slot once
+    # swallowed the params list and would have failed at the Graph.
+    assert tsent[0][1] == "order_update"
+    assert tsent[0][2] == settings.wa_event_lang
+    assert tsent[0][3][0] == "Moses"
+    assert "shipped" in tsent[0][3][2]
 
     # No template configured → dashboard notification, never a policy breach.
     monkeypatch.setattr(settings, "wa_event_template", "", raising=False)
