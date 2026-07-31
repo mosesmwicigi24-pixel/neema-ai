@@ -427,6 +427,17 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     except Exception:
         pass
 
+    # A shared Facebook link is the customer pointing at a product without
+    # words — open it and describe it, rather than asking them to type out
+    # what they already sent. Best-effort: a dead link never blocks the reply.
+    try:
+        from app.services.link_preview import shared_link_context
+        _link = await shared_link_context(user_text, redis)
+        if _link:
+            system += _link
+    except Exception:
+        pass
+
     # Per-deal operator guidance ("no discount on this one") — obeyed for THIS
     # customer only; safety rules still win. Best-effort.
     try:
