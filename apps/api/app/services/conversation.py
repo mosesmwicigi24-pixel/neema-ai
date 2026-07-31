@@ -287,6 +287,65 @@ async def _latest_inbound(db: AsyncSession, conv_id) -> Message | None:
     )).scalar_one_or_none()
 
 
+# ── Meta / WhatsApp messaging windows ────────────────────────────────────────
+# Both platforms shut free-form replies 24h after the customer's last message.
+# Messenger/Instagram then allow a HUMAN AGENT (a real person, never the AI) a
+# further 7 days under the HUMAN_AGENT tag. WhatsApp has no equivalent — outside
+# 24h only an approved template may go out.
+WINDOW_HOURS = 24
+HUMAN_AGENT_DAYS = 7
+
+
+async def messaging_window(db: AsyncSession, conv: Conversation) -> dict:
+    """What a human may send on this conversation right now.
+
+    mode:
+      "open"        — inside 24h, free-form is fine
+      "human_agent" — 24h gone, but a person may still reply for 7 days (Meta DMs)
+      "closed"      — nothing free-form will be accepted; template or wait
+      "n/a"         — comment threads / web chat: no window applies
+    """
+    from datetime import timedelta
+    channel = conv.channel or "whatsapp"
+    if channel == "facebook":                 # public comment edge — no DM window
+        return {"mode": "n/a", "channel": channel}
+
+    last = await _latest_inbound(db, conv.id)
+    last_at = getattr(last, "created_at", None)
+    if last_at is None:
+        # Never heard from them: WhatsApp needs a template, Meta needs an opt-in.
+        return {"mode": "closed", "channel": channel, "last_inbound_at": None,
+                "expires_at": None, "reason": "no inbound message yet"}
+    if last_at.tzinfo is None:
+        last_at = last_at.replace(tzinfo=timezone.utc)
+
+    now = datetime.now(timezone.utc)
+    expires = last_at + timedelta(hours=WINDOW_HOURS)
+    human_until = last_at + timedelta(days=HUMAN_AGENT_DAYS)
+    is_meta_dm = channel in ("messenger", "instagram")
+
+    if now < expires:
+        mode = "open"
+    elif is_meta_dm and now < human_until:
+        mode = "human_agent"
+    else:
+        mode = "closed"
+
+    return {
+        "mode": mode,
+        "channel": channel,
+        "last_inbound_at": last_at.isoformat(),
+        "expires_at": expires.isoformat(),
+        "human_agent_until": human_until.isoformat() if is_meta_dm else None,
+        "reason": (
+            "" if mode == "open" else
+            "24h window closed — sending as a human agent (Meta allows 7 days)"
+            if mode == "human_agent" else
+            "Outside the messaging window — an approved template is the only way in"
+        ),
+    }
+
+
 async def _deliver_agent_reply(db: AsyncSession, conv: Conversation, text: str,
                                quoted: "Message | None" = None) -> str | None:
     """Send a human reply on the conversation's channel, raising on failure.
@@ -314,8 +373,13 @@ async def _deliver_agent_reply(db: AsyncSession, conv: Conversation, text: str,
     context_wamid = None
     if channel not in META_CHANNELS and quoted is not None:
         context_wamid = getattr(quoted, "waba_msg_id", None)   # customer's wamid, if we have it
+    # Past 24h a Meta DM only goes out under the HUMAN_AGENT tag. This path is
+    # human-only by definition, so claiming it is honest — and it's the whole
+    # difference between "can't reply for 6 more days" and answering now.
+    win = await messaging_window(db, conv)
     return await send_to_channel(channel, conv.external_id or conv.wa_id, text,
-                                 context_wamid=context_wamid)
+                                 context_wamid=context_wamid,
+                                 human_agent=(win.get("mode") == "human_agent"))
 
 
 async def send_agent_reply(

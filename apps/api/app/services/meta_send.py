@@ -52,14 +52,26 @@ async def _graph_post(path: str, body: dict, what: str, page_id: str | None = No
     return resp.json() if resp.content else {}
 
 
-async def send_meta_message(recipient_id: str, text: str, page_id: str | None = None) -> None:
+async def send_meta_message(recipient_id: str, text: str, page_id: str | None = None,
+                            human_agent: bool = False) -> None:
     """Send a text reply to a Messenger PSID / Instagram IGSID via the Send API,
-    acting as the page that owns this PSID when page_id is given."""
-    await _graph_post("me/messages", {
+    acting as the page that owns this PSID when page_id is given.
+
+    `human_agent=True` sends under Meta's HUMAN_AGENT tag, which permits a reply
+    up to SEVEN days after the customer's last message — the standard RESPONSE
+    type is refused with error (#10) once the 24-hour window shuts. Only a real
+    person may use it, so it is set by the human reply path and never by the AI.
+    """
+    body: dict = {
         "recipient": {"id": recipient_id},
-        "messaging_type": "RESPONSE",
         "message": {"text": text},
-    }, "send message", page_id=page_id)
+    }
+    if human_agent:
+        body["messaging_type"] = "MESSAGE_TAG"
+        body["tag"] = "HUMAN_AGENT"
+    else:
+        body["messaging_type"] = "RESPONSE"
+    await _graph_post("me/messages", body, "send message", page_id=page_id)
 
 
 # Our media_type → Meta Send API attachment type.
@@ -342,7 +354,8 @@ async def send_typing_on(recipient: str, page_id: str | None = None) -> None:
 
 async def send_to_channel(channel: str, recipient: str, text: str,
                           page_id: str | None = None,
-                          context_wamid: str | None = None) -> str | None:
+                          context_wamid: str | None = None,
+                          human_agent: bool = False) -> str | None:
     """Dispatch an outbound text reply to the right transport for `channel`.
     `recipient` is the conversation's external_id (wa_id | PSID | IGSID).
     `context_wamid` (WhatsApp only) makes the message a native reply-quote of the
@@ -352,7 +365,8 @@ async def send_to_channel(channel: str, recipient: str, text: str,
     if channel in META_CHANNELS:
         if page_id is None:
             page_id = await page_of_contact(channel, recipient)
-        await send_meta_message(recipient, text, page_id=page_id)
+        await send_meta_message(recipient, text, page_id=page_id,
+                                human_agent=human_agent)
         return None
     # WhatsApp — the existing WABA sender expects a bare number (no '+').
     from app.services.n8n_bridge import _send_waba

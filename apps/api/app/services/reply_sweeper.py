@@ -78,6 +78,29 @@ async def _unanswered_dms(since, until, limit: int):
         return (await db.execute(q)).all()
 
 
+async def _already_escalated_since(conv_id, inbound_at) -> bool:
+    """True when this conversation was already handed to a human AFTER the
+    customer's message — so the alert has been raised and judged once."""
+    if inbound_at is None:
+        return False
+    from app.database import AsyncSessionLocal
+    from app.models.intercept import Intercept, InterceptAction
+    from sqlalchemy import func as _f
+    try:
+        async with AsyncSessionLocal() as db:
+            n = (await db.execute(
+                select(_f.count()).select_from(Intercept).where(
+                    Intercept.conversation_id == conv_id,
+                    Intercept.action.in_((InterceptAction.flag,
+                                          InterceptAction.escalated)),
+                    Intercept.created_at >= inbound_at,
+                )
+            )).scalar_one()
+        return bool(n)
+    except Exception:
+        return False          # never let the guard itself block an escalation
+
+
 async def escalate_window_closed(*, window_h: int = 23, reachable_d: int = 7,
                                  limit: int = 20) -> int:
     """Hand a human every DM whose Meta 24-hour window shut with the customer
@@ -85,8 +108,12 @@ async def escalate_window_closed(*, window_h: int = 23, reachable_d: int = 7,
     human agents a 7-day window). Past 7 days even a human is locked out, so we
     stop there rather than flag something nobody can action.
 
-    Idempotent: escalation routes the thread out of AI mode, so each is handed
-    over once, not every tick."""
+    Escalation routes the thread out of AI mode, so the sweep skips it next
+    tick. But a human who reads it and hands it BACK to Neema would be flagged
+    all over again on the next pass — the same alert re-firing every few hours
+    on a thread they have already judged. So it also refuses to flag anything
+    already flagged since that customer message: one escalation per unanswered
+    message, not one per release."""
     from app.agent.runtime import escalate_to_human
     now = datetime.now(timezone.utc)
     rows = await _unanswered_dms(now - timedelta(hours=window_h),
@@ -96,6 +123,8 @@ async def escalate_window_closed(*, window_h: int = 23, reachable_d: int = 7,
         text, media = _answerable_turn(msg.text, msg.media_type, msg.media_url)
         if text is None and media is None:
             continue                       # a bare sticker/file — nothing to answer
+        if await _already_escalated_since(conv.id, msg.created_at):
+            continue                       # a human has already seen this one
         if await escalate_to_human(
             conv.channel, msg.external_id,
             "Customer is waiting and Meta's 24-hour window has closed — Neema can't "

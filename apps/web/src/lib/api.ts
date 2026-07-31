@@ -281,6 +281,16 @@ export const conversationsApi = {
         ),
     addNote: (id: string, text: string) =>
         post<Message>(`/admin/conversations/${id}/note`, { text }),
+    /** Can a free-form reply go out right now? (Meta/WhatsApp 24h window.) */
+    window: (id: string) =>
+        get<{
+            mode: "open" | "human_agent" | "closed" | "n/a";
+            channel: string;
+            last_inbound_at?: string | null;
+            expires_at?: string | null;
+            human_agent_until?: string | null;
+            reason?: string;
+        }>(`/admin/conversations/${id}/window`),
     /** Re-fetch an expired Meta attachment from the source and re-host it. */
     recoverMedia: (messageId: string) =>
         post<{ ok: boolean; media_url: string; media_type: string | null }>(

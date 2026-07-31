@@ -431,6 +431,55 @@ function MediaFallback({
     );
 }
 
+// ── Messaging-window strip ───────────────────────────────────────────────────
+// Meta and WhatsApp both shut free-form replies 24h after the customer's last
+// message. Nothing used to say so, so a carefully typed reply was refused only
+// at the moment of sending. This states the position up front — and, on a Meta
+// DM, that a human still has seven days.
+function WindowStrip({ win }: {
+    win: { mode: string; expires_at?: string | null;
+           human_agent_until?: string | null; reason?: string };
+}) {
+    // `now` lives in state, ticking each minute: reading the clock during render
+    // is impure, and a countdown that never counts down is worse than no
+    // countdown — an agent watching the last hour needs it to move.
+    const [now, setNow] = React.useState(() => Date.now());
+    React.useEffect(() => {
+        const t = setInterval(() => setNow(Date.now()), 60_000);
+        return () => clearInterval(t);
+    }, []);
+
+    const left = (iso?: string | null) => {
+        if (!iso) return "";
+        const ms = new Date(iso).getTime() - now;
+        if (ms <= 0) return "";
+        const h = Math.floor(ms / 3600000);
+        const m = Math.floor((ms % 3600000) / 60000);
+        return h >= 24 ? `${Math.floor(h / 24)}d ${h % 24}h` : h > 0 ? `${h}h ${m}m` : `${m}m`;
+    };
+
+    const look = {
+        open:        { bg: "#f0f9e8", bd: "#d6e9c2", fg: "#427425", icon: "🟢" },
+        human_agent: { bg: "#fff7ed", bd: "#fed7aa", fg: "#b45309", icon: "🟠" },
+        closed:      { bg: "#fef2f2", bd: "#fecaca", fg: "#b91c1c", icon: "🔴" },
+    }[win.mode] ?? { bg: "#f5f6f3", bd: "#e8ebe3", fg: "#6b7e64", icon: "•" };
+
+    const text =
+        win.mode === "open"
+            ? `Reply window open — ${left(win.expires_at)} left`
+            : win.mode === "human_agent"
+              ? `24h window closed — you can still reply as a human agent for ${left(win.human_agent_until)}. Neema cannot.`
+              : "Messaging window closed — only an approved template can reach them now.";
+
+    return (
+        <div className="mb-2 px-3 py-1.5 rounded-lg flex items-center gap-2 text-[11px] font-medium"
+             style={{ backgroundColor: look.bg, border: `1px solid ${look.bd}`, color: look.fg }}>
+            <span aria-hidden>{look.icon}</span>
+            <span className="leading-snug">{text}</span>
+        </div>
+    );
+}
+
 function VideoBubble({
     src, caption, isInbound, messageId,
 }: {
@@ -672,6 +721,14 @@ export function ConversationsView({
     const [showFilters, setShowFilters] = useState<boolean>(false);
     const [threadLoading, setThreadLoading] = useState(false);
     const [sending, setSending] = useState(false);
+    // Meta/WhatsApp messaging window for the open thread — fetched per thread so
+    // the composer can say what will happen BEFORE a reply is typed.
+    const [window24, setWindow24] = useState<{
+        mode: "open" | "human_agent" | "closed" | "n/a";
+        expires_at?: string | null;
+        human_agent_until?: string | null;
+        reason?: string;
+    } | null>(null);
     const [crmOpen, setCrmOpen] = useState<boolean>(true);
     const [activityLogOpen, setActivityLogOpen] = useState<boolean>(false);
     const [clearConfirm, setClearConfirm] = useState(false);
@@ -881,6 +938,17 @@ export function ConversationsView({
         }, 20000);
         return () => clearInterval(timer);
     }, [activeConvId, loadMessages]);
+
+    // ── Messaging window for the open thread ──────────────────────────────────
+    // Refreshed on open and on every new message (an inbound reopens it).
+    useEffect(() => {
+        if (!activeConvId) { setWindow24(null); return; }
+        let cancelled = false;
+        conversationsApi.window(activeConvId)
+            .then((w) => { if (!cancelled) setWindow24(w); })
+            .catch(() => { if (!cancelled) setWindow24(null); });
+        return () => { cancelled = true; };
+    }, [activeConvId, activeMessages.length]);
 
     // ── Reset draft when switching conversations ──────────────────────────────
     useEffect(() => {
@@ -3250,6 +3318,12 @@ export function ConversationsView({
                                         </div>
                                     )}
 
+                                    {/* Messaging-window state — say it BEFORE a reply
+                                        is typed that Meta would refuse. */}
+                                    {window24 && window24.mode !== "n/a" && (
+                                        <WindowStrip win={window24} />
+                                    )}
+
                                     <div className="flex gap-2 items-end">
                                         {/* Hidden file input */}
                                         <input
@@ -3308,8 +3382,12 @@ export function ConversationsView({
                                         <button
                                             onClick={sendReply}
                                             disabled={
-                                                !replyText.trim() || sending
+                                                !replyText.trim() || sending ||
+                                                window24?.mode === "closed"
                                             }
+                                            title={window24?.mode === "closed"
+                                                ? (window24.reason || "Outside the messaging window")
+                                                : "Send"}
                                             className="h-10 w-10 rounded-xl disabled:opacity-50 flex items-center justify-center text-white transition-colors"
                                             style={{ backgroundColor: "#f59e0b" }}
                                             onMouseEnter={(e) => { if (!(!replyText.trim() || sending)) (e.currentTarget as HTMLElement).style.backgroundColor = "#d97706"; }}

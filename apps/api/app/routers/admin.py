@@ -575,6 +575,22 @@ async def reply(conv_id: str, request: Request, body: dict, db: AsyncSession = D
                                   reply_to_id=body.get("reply_to"))
 
 
+@router.get("/conversations/{conv_id}/window")
+async def messaging_window_state(
+    conv_id: str,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Whether a free-form reply can go out on this conversation right now, so
+    the composer can say so BEFORE the agent types one Meta will refuse."""
+    from app.services.conversation import messaging_window
+    conv = (await db.execute(select(Conversation).where(
+        Conversation.id == conv_id))).scalar_one_or_none()
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return await messaging_window(db, conv)
+
+
 @router.post("/conversations/{conv_id}/approve-draft")
 async def approve(conv_id: str, request: Request, db: AsyncSession = Depends(get_db),
                   agent: Agent = Depends(get_current_agent)):
