@@ -107,6 +107,9 @@ def test_process_due_respects_flag_and_gate(monkeypatch):
     async def fake_send(db, redis, c, text): sent.append(text)
     monkeypatch.setattr(act, "_compose_follow_up", fake_compose)
     monkeypatch.setattr(act, "_send", fake_send)
+    # This test is about the flag + gate; the repetition guard has its own.
+    async def not_a_repeat(db, c, t): return False
+    monkeypatch.setattr(act, "_repeats_earlier", not_a_repeat)
     action.status = "planned"
     n = asyncio.run(act.process_due(_DB(), None, now=now))
     assert n == 1 and action.status == "sent" and sent
@@ -143,3 +146,46 @@ def test_action_routes_registered():
     assert ("/actions", ("GET",)) in paths
     assert ("/actions/{action_id}/approve", ("POST",)) in paths
     assert ("/actions/{action_id}/veto", ("POST",)) in paths
+
+
+# ── Never nudge with a message they already had ───────────────────────────────
+
+
+def _fake_db_with_outbound(texts):
+    class _Result:
+        def scalars(self): return self
+        def all(self): return texts
+
+    class _DB:
+        async def execute(self, stmt): return _Result()
+    return _DB()
+
+
+def test_repeats_earlier_catches_the_echoed_stall():
+    """The exact failure seen live: the follow-up re-sent the holding line."""
+    db = _fake_db_with_outbound(["One moment — let me check on that for you."])
+    conv = types.SimpleNamespace(id="c1")
+    assert asyncio.run(act._repeats_earlier(
+        db, conv, "One moment — let me check on that for you.")) is True
+    # Same sentence with different spacing/case is still the same non-answer.
+    assert asyncio.run(act._repeats_earlier(
+        db, conv, "one moment  —  LET ME CHECK on that for you.")) is True
+    # A short stall wrapped in slightly more words is still a repeat.
+    assert asyncio.run(act._repeats_earlier(
+        db, conv, "Hi! One moment — let me check on that for you.")) is True
+
+
+def test_repeats_earlier_allows_a_genuinely_new_follow_up():
+    db = _fake_db_with_outbound(["One moment — let me check on that for you."])
+    conv = types.SimpleNamespace(id="c1")
+    real = ("Hi Ed, just checking in — our Silver Communion Tray (KES 18,000, holds "
+            "40 cups, comes with lid, holder and basin) is the closest match to "
+            "stainless steel that we stock. Happy to hold one for you.")
+    assert asyncio.run(act._repeats_earlier(db, conv, real)) is False
+
+
+def test_repeats_earlier_treats_an_empty_draft_as_unsendable():
+    db = _fake_db_with_outbound([])
+    conv = types.SimpleNamespace(id="c1")
+    assert asyncio.run(act._repeats_earlier(db, conv, "   ")) is True
+    assert asyncio.run(act._repeats_earlier(db, conv, "Something new")) is False

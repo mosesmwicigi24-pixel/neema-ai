@@ -94,6 +94,47 @@ async def _compose_follow_up(db, redis, conv, reason: str) -> str:
         read_only=True)).strip()
 
 
+def _norm(s: str) -> str:
+    return " ".join((s or "").lower().split())
+
+
+async def _repeats_earlier(db, conv, text: str, *, look_back: int = 6) -> bool:
+    """True when this follow-up is essentially something we already said.
+
+    A promise like "let me check on that for you" is exactly the phrasing the
+    composer is most likely to echo — and re-sending the stall hours later is
+    worse than silence: it tells the customer we still haven't moved. The
+    persona forbids it, but a prompt is not a guarantee, so this enforces it.
+    """
+    from app.models.message import Message, MsgDirection
+    rows = (await db.execute(
+        select(Message.text)
+        .where(Message.conversation_id == conv.id,
+               Message.direction == MsgDirection.outbound)
+        .order_by(Message.created_at.desc())
+        .limit(look_back)
+    )).scalars().all()
+
+    t = _norm(text)
+    if not t:
+        return True
+    tw = set(t.split())
+    for prev in rows:
+        p = _norm(prev)
+        if not p:
+            continue
+        if p == t:
+            return True
+        pw = set(p.split())
+        if not pw or not tw:
+            continue
+        # Containment, not Jaccard: a short stall repeated inside a slightly
+        # longer one is still the same non-answer.
+        if len(tw & pw) / min(len(tw), len(pw)) >= 0.8:
+            return True
+    return False
+
+
 async def _send(db, redis, conv, text: str) -> None:
     from app.services import n8n_bridge as svc
     recipient = conv.wa_id if conv.channel == "whatsapp" else conv.external_id
@@ -178,6 +219,18 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
             if not text:
                 action.status = "failed"
                 await db.commit()
+                continue
+            # Never nudge someone with a message they've already had. If the
+            # composer only managed to echo an earlier line, a human rewords it.
+            if await _repeats_earlier(db, conv, text):
+                action.status = "needs_approval"
+                action.draft = text
+                await db.commit()
+                _log.info("planned action %s held — draft repeats an earlier message",
+                          action.id)
+                await _notify(redis, "⏳ Follow-up needs a reword",
+                              "Neema's draft repeats what she already said: "
+                              f"{text[:80]}", conv)
                 continue
             await _send(db, redis, conv, text)
             action.status = "sent"
