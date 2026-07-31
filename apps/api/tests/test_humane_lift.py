@@ -92,3 +92,20 @@ def test_history_window_is_forty():
     from app.agent import runtime
     src = inspect.getsource(runtime.run_turn)
     assert "limit=40" in src
+
+
+def test_prompt_prices_the_photo_instead_of_asking_which_item():
+    """A photo + 'how much?' is a complete question — Pastor Pius sent a tray of
+    cups and was asked which item he meant. The persona must forbid that."""
+    from app.agent.prompt import build_system_prompt
+    # Normalised so the assertions survive re-wrapping of the prompt text.
+    p = " ".join(build_system_prompt(customer_name="Pius", currency="KES").split())
+    assert "PRICE WHAT IS IN THE PHOTO" in p
+    # Lead with the primary object's price, never a clarifying question.
+    assert "which item are you asking about" in p
+    assert "ONE primary object" in p
+    # The second item in the same photo is quoted and offered in one breath.
+    assert "Aluminium Tray is KES 7,000" in p
+    assert "50-cup pack of plastic cups is KES 500" in p
+    # Cups are catalogued per piece — never quote the unit price beside a tray.
+    assert "Cups are catalogued PER PIECE" in p
