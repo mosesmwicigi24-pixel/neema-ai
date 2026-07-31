@@ -780,6 +780,33 @@ async def reply_media(
     )
 
 
+@router.post("/messages/{message_id}/recover-media")
+async def recover_message_media(
+    message_id: str,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Fetch a lost Meta photo/video back from the source.
+
+    Meta serves inbound attachments as signed CDN links that expire, so an old
+    thread can end up showing an empty bubble where a customer's photo was.
+    This asks Meta for the attachment again and re-hosts it permanently."""
+    from app.services import meta_media
+    try:
+        msg = (await db.execute(select(Message).where(
+            Message.id == message_id))).scalar_one_or_none()
+    except Exception:
+        raise HTTPException(status_code=422, detail="Invalid message id")
+    if msg is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    url = await meta_media.recover_one(db, msg)
+    if not url:
+        raise HTTPException(
+            status_code=404,
+            detail="Meta no longer has this attachment — it can't be recovered.")
+    return {"ok": True, "media_url": url, "media_type": msg.media_type}
+
+
 @router.delete("/conversations/{conv_id}/messages")
 async def clear_chat_history(
     conv_id: str,

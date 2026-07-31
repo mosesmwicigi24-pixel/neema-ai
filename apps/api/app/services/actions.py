@@ -216,6 +216,15 @@ async def actions_loop(redis) -> None:
                     await take_back_scan(db, redis)
             except Exception:
                 pass
+            # Inbound Meta photos/videos arrive as signed CDN links that expire
+            # within days. Re-host anything still on one, so the inbox never
+            # loses sight of what a customer actually sent.
+            try:
+                from app.services.meta_media import repair_pending
+                async with AsyncSessionLocal() as db:
+                    await repair_pending(db)
+            except Exception as exc:
+                _log.info("meta media repair skipped: %s", exc)
             # Learning loops (plan D): 03:00 self-QA, 08:00 standup,
             # Sunday 07:00 weekly distillation — daily-guarded, leader-only.
             try:

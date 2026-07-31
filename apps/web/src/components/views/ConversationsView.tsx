@@ -366,33 +366,155 @@ function CommentContextCard({
 //   - Collapsible "Image analysis" toggle — GPT-4o description stored in
 //     msg.media_caption, shown exactly like the audio transcript toggle
 //   - Customer caption text (msg.text) below the image, if provided
+// ── Unrecoverable / expired media placeholder ────────────────────────────────
+// Meta serves inbound attachments as signed CDN links that expire, so an older
+// photo can silently render as an empty bubble — the operator is left asking
+// "what did they even send?". Show it plainly, and offer one click to fetch the
+// original back from Meta.
+function MediaFallback({
+    kind,
+    messageId,
+    isInbound,
+    onRecovered,
+}: {
+    kind: "image" | "video";
+    messageId?: string;
+    isInbound: boolean;
+    onRecovered: (url: string) => void;
+}) {
+    const [state, setState] = React.useState<"idle" | "loading" | "gone">("idle");
+    const label = kind === "video" ? "Video" : "Photo";
+
+    const recover = async () => {
+        if (!messageId) return;
+        setState("loading");
+        try {
+            const res = await conversationsApi.recoverMedia(messageId);
+            if (res?.media_url) onRecovered(res.media_url);
+            else setState("gone");
+        } catch {
+            setState("gone");
+        }
+    };
+
+    return (
+        <div className={[
+            "flex flex-col gap-1 rounded-xl border border-dashed px-3 py-3 w-56",
+            isInbound ? "border-black/15 bg-black/[0.03]" : "border-white/30 bg-white/10",
+        ].join(" ")}>
+            <span className="text-xs font-medium">
+                {kind === "video" ? "🎬" : "📷"} {label} sent
+            </span>
+            <span className={["text-[11px] leading-snug",
+                isInbound ? "text-black/50" : "text-white/70"].join(" ")}>
+                {state === "gone"
+                    ? "Meta no longer has this file — ask the customer to resend."
+                    : "Preview link expired."}
+            </span>
+            {messageId && state !== "gone" && (
+                <button
+                    type="button"
+                    onClick={recover}
+                    disabled={state === "loading"}
+                    className={[
+                        "mt-0.5 w-fit rounded-full px-2 py-0.5 text-[10px] font-medium",
+                        isInbound
+                            ? "bg-[#f0f9e8] text-[#427425] hover:bg-[#e2f2d3]"
+                            : "bg-white/20 text-white hover:bg-white/30",
+                        state === "loading" ? "opacity-60" : "",
+                    ].join(" ")}
+                >
+                    {state === "loading" ? "Fetching…" : "Recover from Meta"}
+                </button>
+            )}
+        </div>
+    );
+}
+
+function VideoBubble({
+    src, caption, isInbound, messageId,
+}: {
+    src: string;
+    caption: string | null;
+    isInbound: boolean;
+    messageId?: string;
+}) {
+    const [broken, setBroken] = React.useState(false);
+    const [url, setUrl] = React.useState(src);
+    React.useEffect(() => { setUrl(src); setBroken(false); }, [src]);
+
+    return (
+        <div className="space-y-1">
+            {broken ? (
+                <MediaFallback
+                    kind="video"
+                    messageId={messageId}
+                    isInbound={isInbound}
+                    onRecovered={(u) => { setUrl(u); setBroken(false); }}
+                />
+            ) : (
+                <video
+                    src={url}
+                    controls
+                    onError={() => setBroken(true)}
+                    className="max-w-full rounded-xl border border-black/10"
+                    style={{ maxHeight: 200 }}
+                />
+            )}
+            {caption && (
+                <p className="text-xs px-1 leading-relaxed whitespace-pre-wrap">
+                    {formatWa(caption)}
+                </p>
+            )}
+        </div>
+    );
+}
+
 function ImageBubble({
     src,
     analysis,
     caption,
     isInbound,
+    messageId,
 }: {
     src: string;
     analysis: string | null;
     caption: string | null;
     isInbound: boolean;
+    messageId?: string;
 }) {
     const [open, setOpen] = React.useState(false);
     const [zoom, setZoom] = React.useState(false);
+    const [broken, setBroken] = React.useState(false);
+    const [url, setUrl] = React.useState(src);
     const hasAnalysis = !!analysis;
+
+    // A new src (poll refresh, or a background re-host completing) gets a fresh
+    // chance to load — never stay stuck on a stale failure.
+    React.useEffect(() => { setUrl(src); setBroken(false); }, [src]);
 
     return (
         <div className="flex flex-col gap-1.5">
             {/* Click to view large IN-APP (lightbox) — no leaving the inbox */}
-            <button type="button" onClick={() => setZoom(true)} className="block">
-                <img
-                    src={src}
-                    alt={caption || "image"}
-                    className="max-w-full rounded-xl border border-black/10 object-cover cursor-zoom-in"
-                    style={{ maxHeight: 240 }}
+            {broken ? (
+                <MediaFallback
+                    kind="image"
+                    messageId={messageId}
+                    isInbound={isInbound}
+                    onRecovered={(u) => { setUrl(u); setBroken(false); }}
                 />
-            </button>
-            {zoom && <Lightbox src={src} kind="image" onClose={() => setZoom(false)} />}
+            ) : (
+                <button type="button" onClick={() => setZoom(true)} className="block">
+                    <img
+                        src={url}
+                        alt={caption || "image"}
+                        onError={() => setBroken(true)}
+                        className="max-w-full rounded-xl border border-black/10 object-cover cursor-zoom-in"
+                        style={{ maxHeight: 240 }}
+                    />
+                </button>
+            )}
+            {zoom && !broken && <Lightbox src={url} kind="image" onClose={() => setZoom(false)} />}
 
             {/* Analysis toggle — same pill style as audio transcript toggle */}
             {hasAnalysis && (
@@ -2474,6 +2596,21 @@ export function ConversationsView({
                                                             | null
                                                             | undefined;
                                                         if (!mt || !mu) {
+                                                            // A media message whose URL never landed would
+                                                            // otherwise show as a bare "[image]" — say what
+                                                            // was sent and offer to fetch it back.
+                                                            const kind = mt === "video" ? "video"
+                                                                : mt === "image" ? "image" : null;
+                                                            if (kind && !mu) {
+                                                                return (
+                                                                    <MediaFallback
+                                                                        kind={kind}
+                                                                        messageId={String(msg.id)}
+                                                                        isInbound={isInbound}
+                                                                        onRecovered={() => { if (activeConvId) loadMessages(activeConvId, true); }}
+                                                                    />
+                                                                );
+                                                            }
                                                             return (
                                                                 <p className="leading-relaxed whitespace-pre-wrap">
                                                                     {formatWa(msg.text)}
@@ -2529,6 +2666,7 @@ export function ConversationsView({
                                                                     analysis={imgAnalysis}
                                                                     caption={imgCaption}
                                                                     isInbound={isInbound}
+                                                                    messageId={String(msg.id)}
                                                                 />
                                                             );
                                                         }
@@ -2539,26 +2677,12 @@ export function ConversationsView({
                                                             )
                                                         ) {
                                                             return (
-                                                                <div className="space-y-1">
-                                                                    <video
-                                                                        src={mu}
-                                                                        controls
-                                                                        className="max-w-full rounded-xl border border-black/10"
-                                                                        style={{
-                                                                            maxHeight: 200,
-                                                                        }}
-                                                                    />
-                                                                    {msg.text &&
-                                                                        !msg.text.startsWith(
-                                                                            "[",
-                                                                        ) && (
-                                                                            <p className="text-xs px-1 leading-relaxed whitespace-pre-wrap">
-                                                                                {formatWa(
-                                                                                    msg.text,
-                                                                                )}
-                                                                            </p>
-                                                                        )}
-                                                                </div>
+                                                                <VideoBubble
+                                                                    src={mu}
+                                                                    caption={msg.text && !msg.text.startsWith("[") ? msg.text : null}
+                                                                    isInbound={isInbound}
+                                                                    messageId={String(msg.id)}
+                                                                />
                                                             );
                                                         }
                                                         if (

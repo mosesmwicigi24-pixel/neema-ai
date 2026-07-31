@@ -281,6 +281,10 @@ export const conversationsApi = {
         ),
     addNote: (id: string, text: string) =>
         post<Message>(`/admin/conversations/${id}/note`, { text }),
+    /** Re-fetch an expired Meta attachment from the source and re-host it. */
+    recoverMedia: (messageId: string) =>
+        post<{ ok: boolean; media_url: string; media_type: string | null }>(
+            `/admin/messages/${messageId}/recover-media`, {}),
     close: (id: string) =>
         post<{ ok: boolean }>(`/admin/conversations/${id}/release`, {}),
     clearHistory: (id: string) =>
