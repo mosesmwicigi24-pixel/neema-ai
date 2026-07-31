@@ -126,6 +126,45 @@ def test_rdid_and_fbid_never_masquerade_as_the_page_id():
         "https://www.facebook.com/x?story_fbid=5&rdid=99&fbid=77") is None
 
 
+def test_reel_share_resolves_through_the_video_node(monkeypatch):
+    """/share/r/... is the commonest share of all — it lands on /reel/<id>/,
+    whose page title is always just 'Facebook'."""
+    _fake_client("https://www.facebook.com/reel/1863405804324326/?rdid=x", "<title>Facebook</title>", monkeypatch)
+
+    async def fake_video(vid):
+        assert vid == "1863405804324326"
+        return {"title": "Welcome to Bethany House. The No.1 Shop for your Vestment needs.",
+                "permalink": "https://www.facebook.com/reel/1863405804324326/",
+                "thumb": "", "post_id": vid, "source": "graph"}
+    monkeypatch.setattr(lp, "_fetch_video_context", fake_video)
+
+    got = asyncio.run(lp.resolve_facebook_link("https://www.facebook.com/share/r/1PKQHxPJuK/"))
+    assert got["source"] == "graph" and "Vestment needs" in got["title"]
+
+
+def test_video_id_is_read_from_every_url_shape():
+    f = lp._video_id_from_url
+    assert f("https://www.facebook.com/reel/1863405804324326/?rdid=x") == "1863405804324326"
+    assert f("https://www.facebook.com/houseofbethany/videos/874257912350591/") == "874257912350591"
+    assert f("https://www.facebook.com/watch/?v=1019752660712465") == "1019752660712465"
+    assert f("https://www.facebook.com/share/r/1PKQHxPJuK/") is None   # slug, not an id
+
+
+def test_caption_slug_covers_videos_not_just_posts():
+    c = lp._caption_from_permalink
+    assert c("https://www.facebook.com/houseofbethany/videos/"
+             "welcome-to-bethany-house-the-no1-shop-for-your-vestment-needs/") \
+        .startswith("Welcome to bethany house")
+    # A numeric permalink is an id, never a caption.
+    assert c("https://www.facebook.com/houseofbethany/videos/874257912350591/") == ""
+
+
+def test_generic_titles_are_always_discarded():
+    for t in ("Facebook", "facebook", "Watch", "Log in to Facebook", "", "  ", "Video"):
+        assert lp._is_generic_title(t), t
+    assert not lp._is_generic_title("Welcome to Bethany House. We have Aluminum trays")
+
+
 def test_a_login_wall_is_never_described_as_the_post(monkeypatch):
     """Better to say nothing than to have Neema confidently describe a post she
     never saw — the login page's og:title is just 'Facebook'."""

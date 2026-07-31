@@ -76,14 +76,56 @@ def _post_id_from_url(url: str) -> str | None:
     return None
 
 
-def _is_useless_title(title: str, url: str) -> bool:
-    """A login/checkpoint wall renders og:title 'Facebook' — worse than nothing,
-    because it would have Neema confidently describe a post she never saw."""
-    t = (title or "").strip().lower()
-    if not t or t in ("facebook", "log in to facebook", "log into facebook",
-                      "facebook - log in or sign up", "error"):
-        return True
-    return "/login" in (url or "") or "/checkpoint" in (url or "")
+# A reel/video permalink: /reel/<id>/, /videos/<id>/, /watch/?v=<id>.
+_VIDEO_ID_RE = re.compile(r"/(?:reel|videos)/(\d{6,})|[?&]v=(\d{6,})")
+
+
+def _video_id_from_url(url: str) -> str | None:
+    m = _VIDEO_ID_RE.search(url or "")
+    return (m.group(1) or m.group(2)) if m else None
+
+
+def _is_generic_title(title: str) -> bool:
+    """A login/checkpoint wall renders the title 'Facebook' — worse than
+    nothing, because it would have Neema confidently describe a post she never
+    saw. Reels do this too: their page title is always just 'Facebook'."""
+    t = (title or "").strip().lower().rstrip(".")
+    return not t or t in (
+        "facebook", "log in to facebook", "log into facebook",
+        "facebook - log in or sign up", "watch", "error", "video",
+    )
+
+
+async def _fetch_video_context(video_id: str) -> dict | None:
+    """Graph read for a reel/video node.
+
+    The fields DIFFER from a post's — a video has description/permalink_url/
+    picture, and asking a post's `message` of a video makes Meta reject the
+    whole call, which is why this can't reuse fetch_post_context."""
+    from app.core.config import settings
+    if not settings.meta_page_token or not video_id:
+        return None
+    url = f"https://graph.facebook.com/{settings.meta_graph_version}/{video_id}"
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                url,
+                params={"fields": "description,title,permalink_url,picture"},
+                headers={"Authorization": f"Bearer {settings.meta_page_token}"},
+            )
+        if not resp.is_success:
+            return None
+        d = resp.json()
+    except Exception:
+        return None
+    title = (d.get("description") or d.get("title") or "").strip()
+    if not title:
+        return None
+    permalink = d.get("permalink_url") or ""
+    if permalink.startswith("/"):
+        permalink = f"https://www.facebook.com{permalink}"
+    return {"title": title[:200], "permalink": permalink,
+            "thumb": d.get("picture") or "", "post_id": video_id, "source": "graph"}
 
 
 def _og(html: str, prop: str) -> str:
@@ -105,12 +147,16 @@ def _title_from_html(html: str) -> str:
 
 
 def _caption_from_permalink(url: str) -> str:
-    """Facebook slugifies the caption into the permalink path — a decent last
-    resort when Graph is closed to us and og:title is only the page name."""
-    m = re.search(r"/posts/([a-z0-9-]{12,})/", url or "", re.I)
+    """Facebook slugifies the caption into the permalink path — the last resort
+    when Graph is closed to us and the page title is only 'Facebook'. Reels put
+    it under /videos/, ordinary posts under /posts/."""
+    m = re.search(r"/(?:posts|videos|reel)/([a-z0-9][a-z0-9-]{11,})/?", url or "", re.I)
     if not m:
         return ""
-    words = m.group(1).replace("-", " ").strip()
+    slug = m.group(1)
+    if slug.isdigit():            # a bare id is not a caption
+        return ""
+    words = slug.replace("-", " ").strip()
     return words[:1].upper() + words[1:] if words else ""
 
 
@@ -146,14 +192,25 @@ async def resolve_facebook_link(url: str, redis=None) -> dict | None:
                        "thumb": ctx.get("thumb") or "", "post_id": post_id, "source": "graph"}
 
         if out is None:
-            # Someone else's post, or an id we can't compose: use the crawler's
-            # own metadata rather than telling the customer we're blind — but
-            # never a login wall's, which would have Neema describe a post she
-            # never saw.
+            # Reels are the common share ("/share/r/…" → "/reel/<id>/") and need
+            # the video node's own fields.
+            vid = _video_id_from_url(final_url) or _video_id_from_url(_og(html, "url"))
+            if vid:
+                out = await _fetch_video_context(vid)
+
+        if out is None:
+            # Someone else's post, or an id we can't read: use the crawler's own
+            # metadata rather than telling the customer we're blind. A generic
+            # title ("Facebook") is discarded at every step — better to stay
+            # silent than to describe a post we never saw.
             permalink = _og(html, "url") or final_url
-            title = (_title_from_html(html) or _caption_from_permalink(permalink)
-                     or _og(html, "title"))
-            if title and not _is_useless_title(title, final_url):
+            title = next(
+                (c for c in (_title_from_html(html),
+                             _caption_from_permalink(permalink),
+                             _og(html, "title"))
+                 if c and not _is_generic_title(c)),
+                "")
+            if title:
                 out = {"title": title[:200], "permalink": permalink,
                        "thumb": _og(html, "image"), "post_id": post_id or "",
                        "source": "opengraph"}
