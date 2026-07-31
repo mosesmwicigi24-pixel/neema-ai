@@ -589,6 +589,12 @@ const CHANNEL_TABS: { id: "all" | Channel; label: string; short: string }[] = [
 const ALL_TAB_ACCENT = "#f59e0b";
 // Active-row accent (Figma gold).
 const ROW_ACCENT = "#f59e0b";
+
+// Desktop width of the conversation list column: an inch wider than the old
+// 340px (1 CSS inch = 96px), so a row's chips sit on one line. Clamped rather
+// than fixed — a narrow laptop keeps the old 340 instead of starving the
+// thread panel, and only roomy screens pay out the full extra inch.
+const LIST_WIDTH = "clamp(340px, 38vw, 436px)";
 // Short channel labels for the conversation-row pill (Figma: WA / FB / IG).
 const CH_SHORT: Record<Channel, string> = {
     whatsapp: "WA",
@@ -1569,8 +1575,8 @@ export function ConversationsView({
         <div
             className="flex flex-col h-full bg-white"
             style={{
-                width: isMobile ? "100%" : 340,
-                minWidth: isMobile ? "100%" : 340,
+                width: isMobile ? "100%" : LIST_WIDTH,
+                minWidth: isMobile ? "100%" : LIST_WIDTH,
                 borderRight: "1px solid #edf0ea",
             }}
         >
@@ -2062,7 +2068,7 @@ export function ConversationsView({
                                                         "human" &&
                                                         chipConv.assigned_agent_id && (
                                                             <span
-                                                                className={`text-[10px] font-medium truncate max-w-[64px] ${
+                                                                className={`text-[10px] font-medium truncate max-w-[92px] ${
                                                                     chipConv.assigned_agent_id ===
                                                                     currentAgentId
                                                                         ? "text-[#427425]"
