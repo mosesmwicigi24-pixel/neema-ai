@@ -161,7 +161,7 @@ async def transfer_conversation(
             f"One moment please! 😊"
         )
         try:
-            await send_to_channel(conv.channel or "whatsapp", conv.external_id or conv.wa_id, notification)
+            wamid = await send_to_channel(conv.channel or "whatsapp", conv.external_id or conv.wa_id, notification)
             msg = Message(
                 wa_id=conv.wa_id,
                 external_id=conv.external_id,
@@ -172,6 +172,7 @@ async def transfer_conversation(
                 sender=MsgSender.human_agent,
                 text=notification,
                 agent_id=agent.id,
+                waba_msg_id=wamid,
             )
             db.add(msg)
             conv.last_message_at = datetime.now(timezone.utc)
@@ -287,8 +288,10 @@ async def _latest_inbound(db: AsyncSession, conv_id) -> Message | None:
 
 
 async def _deliver_agent_reply(db: AsyncSession, conv: Conversation, text: str,
-                               quoted: "Message | None" = None) -> None:
+                               quoted: "Message | None" = None) -> str | None:
     """Send a human reply on the conversation's channel, raising on failure.
+    Returns the sent message's wamid (WhatsApp only) so the outbound row can
+    carry it and be reply-quotable by the customer later.
 
     A Facebook/Instagram COMMENT conversation must reply on the COMMENT edge —
     the commenter may have no open DM thread, and a Send-API DM to them 400s
@@ -307,12 +310,12 @@ async def _deliver_agent_reply(db: AsyncSession, conv: Conversation, text: str,
         # Instagram replies on a different edge (/replies) than Facebook
         # (/comments) — pass the channel or an IG comment reply 400s.
         await reply_to_comment(comment_id, text, channel=channel)   # public reply under the comment
-    else:
-        context_wamid = None
-        if channel not in META_CHANNELS and quoted is not None:
-            context_wamid = getattr(quoted, "waba_msg_id", None)   # customer's wamid, if we have it
-        await send_to_channel(channel, conv.external_id or conv.wa_id, text,
-                              context_wamid=context_wamid)
+        return None
+    context_wamid = None
+    if channel not in META_CHANNELS and quoted is not None:
+        context_wamid = getattr(quoted, "waba_msg_id", None)   # customer's wamid, if we have it
+    return await send_to_channel(channel, conv.external_id or conv.wa_id, text,
+                                 context_wamid=context_wamid)
 
 
 async def send_agent_reply(
@@ -354,7 +357,7 @@ async def send_agent_reply(
     # Deliver first; only persist the outbound if it actually went out. A send
     # failure returns a clean error (not a 500) so the inbox can surface it.
     try:
-        await _deliver_agent_reply(db, conv, text, quoted=quoted)
+        wamid = await _deliver_agent_reply(db, conv, text, quoted=quoted)
     except Exception as exc:
         import logging
         logging.getLogger("neema.inbox").warning(
@@ -375,6 +378,7 @@ async def send_agent_reply(
         sender=MsgSender.human_agent,
         text=text,
         agent_id=agent.id,
+        waba_msg_id=wamid,
         reply_to_id=(quoted.id if quoted is not None else None),
         reply_to_text=((quoted.text or "")[:200] if quoted is not None else None),
         reply_to_sender=q_sender,
@@ -450,7 +454,7 @@ async def approve_draft(
         from fastapi import HTTPException
         raise HTTPException(status_code=422, detail="No draft text found to approve")
 
-    await send_to_channel(conv.channel or "whatsapp", conv.external_id or conv.wa_id, text)
+    wamid = await send_to_channel(conv.channel or "whatsapp", conv.external_id or conv.wa_id, text)
 
     msg = Message(
         wa_id=conv.wa_id,
@@ -462,6 +466,7 @@ async def approve_draft(
         sender=MsgSender.ai,
         text=text,
         agent_id=agent.id,
+        waba_msg_id=wamid,
     )
     db.add(msg)
 

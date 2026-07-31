@@ -78,8 +78,11 @@ def test_celebrate_routes_and_paid_guard(monkeypatch):
 
     async def fake_within(db, c): return True
     async def fake_compose(db, redis, c, brief): return "Asante! Payment received 🙏"
-    async def fake_send(to, text, context_wamid=None): sent.append(("wa", to, text))
-    async def fake_save(db, redis, to, text): sent.append(("save", to, text))
+    async def fake_send(to, text, context_wamid=None):
+        sent.append(("wa", to, text))
+        return "wamid.CELEBRATE1"
+    async def fake_save(db, redis, to, text, waba_msg_id=None):
+        sent.append(("save", to, text, waba_msg_id))
     monkeypatch.setattr(he, "_within_window", fake_within)
     monkeypatch.setattr(he, "_compose_announcement", fake_compose)
     monkeypatch.setattr(he, "is_quiet_hours", lambda now=None: False)
@@ -91,6 +94,9 @@ def test_celebrate_routes_and_paid_guard(monkeypatch):
     out = asyncio.run(he._celebrate(None, r, conv, ev))
     assert out == {"handled": True, "sent": "freeform"}
     assert sent[0][0] == "wa" and "Asante" in sent[0][2]
+    # The Graph wamid must land on the saved row — that's what makes the
+    # message reply-quotable by the customer later.
+    assert sent[1][0] == "save" and sent[1][3] == "wamid.CELEBRATE1"
 
     # The SAME order paid again (hub + mpesa double-report) → guarded.
     out2 = asyncio.run(he._celebrate(None, r, conv, dict(ev, id="e4")))
@@ -106,8 +112,11 @@ def test_outside_window_uses_template_or_human(monkeypatch):
     monkeypatch.setattr(he, "is_quiet_hours", lambda now=None: False)
     tsent = []
     from app.services import n8n_bridge as svc
-    async def fake_tmpl(to, name, lang, params=None): tsent.append((to, name, lang, params))
-    async def fake_save(db, redis, to, text): tsent.append(("save", text))
+    async def fake_tmpl(to, name, lang, params=None):
+        tsent.append((to, name, lang, params))
+        return {"messages": [{"id": "wamid.TPL1"}]}
+    async def fake_save(db, redis, to, text, waba_msg_id=None):
+        tsent.append(("save", text, waba_msg_id))
     monkeypatch.setattr(svc, "send_wa_template", fake_tmpl, raising=False)
     monkeypatch.setattr(svc, "save_outbound_message", fake_save)
 
@@ -122,6 +131,8 @@ def test_outside_window_uses_template_or_human(monkeypatch):
     assert tsent[0][2] == settings.wa_event_lang
     assert tsent[0][3][0] == "Moses"
     assert "shipped" in tsent[0][3][2]
+    # Template sends carry a wamid too — stamped so the row is reply-quotable.
+    assert tsent[1][0] == "save" and tsent[1][2] == "wamid.TPL1"
 
     # No template configured → dashboard notification, never a policy breach.
     monkeypatch.setattr(settings, "wa_event_template", "", raising=False)
@@ -169,7 +180,7 @@ def test_deferred_paid_event_sends_in_the_morning(monkeypatch):
     async def fake_within(db, c): return True
     async def fake_compose(db, redis, c, brief): return "Asante! 🙏"
     async def fake_send(to, text, context_wamid=None): sent.append(text)
-    async def fake_save(db, redis, to, text): pass
+    async def fake_save(db, redis, to, text, waba_msg_id=None): pass
     monkeypatch.setattr(he, "_within_window", fake_within)
     monkeypatch.setattr(he, "_compose_announcement", fake_compose)
     from app.services import n8n_bridge as svc

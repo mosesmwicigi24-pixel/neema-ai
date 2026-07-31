@@ -37,6 +37,6 @@ async def agent_turn(body: AgentTurnDto, request: Request, db: AsyncSession = De
     reply = await runtime.run_turn(db, redis, wa_id, body.text, runtime.build_llm())
 
     # Send + persist the reply (Tier 2 owns its own outbound, like Tier 1's gate).
-    await svc._send_waba(wa_id, reply)
-    await svc.save_outbound_message(db, redis, wa_id, reply)
+    wamid = await svc._send_waba(wa_id, reply)
+    await svc.save_outbound_message(db, redis, wa_id, reply, waba_msg_id=wamid)
     return {"routed": True, "reply": reply}

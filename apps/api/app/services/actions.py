@@ -98,8 +98,8 @@ async def _send(db, redis, conv, text: str) -> None:
     from app.services import n8n_bridge as svc
     recipient = conv.wa_id if conv.channel == "whatsapp" else conv.external_id
     if conv.channel == "whatsapp":
-        await svc._send_waba(recipient, text)
-        await svc.save_outbound_message(db, redis, recipient, text)
+        wamid = await svc._send_waba(recipient, text)
+        await svc.save_outbound_message(db, redis, recipient, text, waba_msg_id=wamid)
     else:
         from app.services.meta_send import send_to_channel
         await send_to_channel(conv.channel, recipient, text)

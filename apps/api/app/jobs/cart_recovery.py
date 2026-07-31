@@ -209,9 +209,9 @@ async def _handle(redis, row: dict, *, send: bool) -> dict:
 
     try:
         if is_wa:
-            await svc._send_waba(to, reply)
+            wamid = await svc._send_waba(to, reply)
             async with AsyncSessionLocal() as db2:
-                await svc.save_outbound_message(db2, redis, to, reply)
+                await svc.save_outbound_message(db2, redis, to, reply, waba_msg_id=wamid)
         else:
             await send_to_channel(conv.channel, to, reply)
             async with AsyncSessionLocal() as db2:

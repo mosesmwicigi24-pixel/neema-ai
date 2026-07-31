@@ -200,9 +200,12 @@ async def outbound_gate(db: AsyncSession, redis, body: OutboundDto) -> dict:
         return {"action": "send"}
 
     # ── Send to WhatsApp ──────────────────────────────────────────────────────
+    # Keep the wamid Graph returns: it's what a customer's reply-quote carries
+    # back as context.message_id, so the row must remember it to be quotable.
     is_audio = body.is_audio_reply and bool(body.audio_url)
+    wamid: str | None = None
     if is_audio:
-        await _send_waba_audio(body.wa_id, body.audio_url)
+        wamid = await _send_waba_audio(body.wa_id, body.audio_url)
         # Send the full text reply alongside audio only when cart content is present.
         # cart_text being non-empty is the signal (set by the n8n workflow only when
         # full_cart / items_added is non-empty). We send ai_reply — the complete
@@ -220,7 +223,7 @@ async def outbound_gate(db: AsyncSession, redis, body: OutboundDto) -> dict:
             await asyncio.sleep(2)
             await _send_waba(body.wa_id, body.ai_reply)
     else:
-        await _send_waba(body.wa_id, body.ai_reply)
+        wamid = await _send_waba(body.wa_id, body.ai_reply)
 
     # ── Save exactly ONE outbound Message row ─────────────────────────────────
     msg = Message(
@@ -234,6 +237,7 @@ async def outbound_gate(db: AsyncSession, redis, body: OutboundDto) -> dict:
         media_type="audio" if is_audio else None,
         media_url=body.audio_url if is_audio else None,
         media_caption=body.cart_text if (is_audio and body.cart_text) else None,
+        waba_msg_id=wamid,
     )
     db.add(msg)
 
@@ -259,8 +263,19 @@ async def outbound_gate(db: AsyncSession, redis, body: OutboundDto) -> dict:
     return {"action": "send"}
 
 
-async def _send_waba_audio(wa_id: str, audio_url: str) -> None:
-    """Send a pre-generated TTS audio file to WhatsApp via a public link."""
+def _wamid_of(resp) -> str | None:
+    """The wamid Graph returned for a send (messages[0].id) — the id an inbound
+    reply-quote later carries back as context.message_id. Best-effort: None when
+    the response body isn't parseable."""
+    try:
+        return (resp.json().get("messages") or [{}])[0].get("id") or None
+    except Exception:
+        return None
+
+
+async def _send_waba_audio(wa_id: str, audio_url: str) -> str | None:
+    """Send a pre-generated TTS audio file to WhatsApp via a public link.
+    Returns the sent message's wamid."""
     url = (f"https://graph.facebook.com/{settings.waba_api_version}"
            f"/{settings.waba_phone_number_id}/messages")
     async with httpx.AsyncClient() as client:
@@ -279,10 +294,11 @@ async def _send_waba_audio(wa_id: str, audio_url: str) -> None:
             import logging
             logging.error(f"WABA audio error {resp.status_code}: {resp.text}")
             resp.raise_for_status()
+        return _wamid_of(resp)
 
 # ── WABA Sender ───────────────────────────────────────────
 
-async def _send_waba(wa_id: str, text: str, context_wamid: str | None = None) -> None:
+async def _send_waba(wa_id: str, text: str, context_wamid: str | None = None) -> str | None:
     url = (f"https://graph.facebook.com/{settings.waba_api_version}"
            f"/{settings.waba_phone_number_id}/messages")
     body: dict = {
@@ -304,10 +320,11 @@ async def _send_waba(wa_id: str, text: str, context_wamid: str | None = None) ->
             import logging
             logging.error(f"WABA error {resp.status_code}: {resp.text}")
             resp.raise_for_status()
+        return _wamid_of(resp)
 
 
 async def _send_waba_product_card(wa_id: str, *, image_url: str | None, title: str,
-                                  body: str, url: str, button: str = "View") -> None:
+                                  body: str, url: str, button: str = "View") -> str | None:
     """Send a WhatsApp PRODUCT CARD — the visual equivalent of the web-chat card:
     the product photo as the header, name + price in the body, and a tappable
     "View" button that opens the product page on the storefront.
@@ -315,7 +332,11 @@ async def _send_waba_product_card(wa_id: str, *, image_url: str | None, title: s
     Implemented as an interactive `cta_url` message. Falls back to an
     image+caption (then plain text) message if the interactive send is rejected
     — e.g. the header image isn't reachable by Meta, or the 24h window quirks —
-    so the customer always gets the photo, price and link, never nothing."""
+    so the customer always gets the photo, price and link, never nothing.
+
+    Returns the sent card's wamid (from whichever send succeeded) so the mirror
+    row can carry it — that's what lets a customer's reply-quote of the card
+    resolve back to it."""
     import logging
     _l = logging.getLogger("neema.wa")
     endpoint = (f"https://graph.facebook.com/{settings.waba_api_version}"
@@ -335,7 +356,7 @@ async def _send_waba_product_card(wa_id: str, *, image_url: str | None, title: s
     async with httpx.AsyncClient() as client:
         resp = await client.post(endpoint, headers=headers, json=payload, timeout=30.0)
     if resp.is_success:
-        return
+        return _wamid_of(resp)
     _l.warning("WA product card (cta_url) %s: %s — falling back to image+caption",
                resp.status_code, resp.text[:200])
 
@@ -351,6 +372,7 @@ async def _send_waba_product_card(wa_id: str, *, image_url: str | None, title: s
     if not r2.is_success:
         _l.error("WA product card fallback %s: %s", r2.status_code, r2.text[:200])
         r2.raise_for_status()
+    return _wamid_of(r2)
 
 
 async def send_wa_template(wa_id: str, template: str, lang: str,
@@ -1467,9 +1489,12 @@ async def latest_inbound_message(db, wa_id: str) -> dict | None:
     }
 
 
-async def save_outbound_message(db, redis, wa_id: str, text: str) -> None:
+async def save_outbound_message(db, redis, wa_id: str, text: str,
+                                waba_msg_id: str | None = None) -> None:
     """Persist an AI outbound message + broadcast it (used by the Tier 2 agent,
-    which sends its own reply rather than going through the Tier 1 outbound gate)."""
+    which sends its own reply rather than going through the Tier 1 outbound gate).
+    Pass the wamid `_send_waba` returned so a customer's reply-quote of this
+    message can resolve back to the row."""
     wa_id = _normalize_wa_id(wa_id)
     conv = (await db.execute(
         select(Conversation).where(Conversation.wa_id == wa_id)
@@ -1486,6 +1511,7 @@ async def save_outbound_message(db, redis, wa_id: str, text: str) -> None:
     db.add(Message(
         wa_id=wa_id, conversation_id=conv.id, person_id=conv.person_id, channel="whatsapp",
         direction=MsgDirection.outbound, sender=MsgSender.ai, text=text,
+        waba_msg_id=waba_msg_id,
     ))
     await db.commit()
     try:
@@ -1539,7 +1565,7 @@ async def _relay_order_confirmation(db, redis, wa_id, *, order_number, currency,
         "You can ask me \"where's my order?\" anytime for an update."
     )
 
-    await _send_waba(wa_id, text)
+    wamid = await _send_waba(wa_id, text)
 
     # Persist as an outbound message (mirrors outbound_gate's single-row save).
     conv = (await db.execute(
@@ -1562,6 +1588,7 @@ async def _relay_order_confirmation(db, redis, wa_id, *, order_number, currency,
         direction=MsgDirection.outbound,
         sender=MsgSender.ai,
         text=text,
+        waba_msg_id=wamid,
     ))
     await db.commit()
     try:

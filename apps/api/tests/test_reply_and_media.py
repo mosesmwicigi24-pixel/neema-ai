@@ -14,6 +14,8 @@ class _Resp:
     is_success = True
     status_code = 200
     text = "{}"
+    def json(self):
+        return {"messages": [{"id": "wamid.SENT1"}]}
 
 
 class _Client:
@@ -36,9 +38,12 @@ def test_send_waba_includes_reply_context(monkeypatch):
     sent: list = []
     monkeypatch.setattr(nb.httpx, "AsyncClient", lambda *a, **k: _Client(sent))
 
-    asyncio.run(nb._send_waba("254700", "hi", context_wamid="wamid.123"))
+    wamid = asyncio.run(nb._send_waba("254700", "hi", context_wamid="wamid.123"))
     assert sent[0]["context"] == {"message_id": "wamid.123"}
     assert sent[0]["text"]["body"] == "hi"
+    # The send returns OUR message's wamid — callers stamp it on the outbound
+    # row so a customer reply-quote of it can resolve later.
+    assert wamid == "wamid.SENT1"
 
     sent.clear()
     asyncio.run(nb._send_waba("254700", "hi"))
@@ -50,10 +55,12 @@ def test_send_to_channel_whatsapp_passes_context(monkeypatch):
 
     async def fake_waba(num, text, context_wamid=None):
         captured.update(num=num, text=text, ctx=context_wamid)
+        return "wamid.OUT1"
 
     monkeypatch.setattr("app.services.n8n_bridge._send_waba", fake_waba)
-    asyncio.run(ms.send_to_channel("whatsapp", "+254700", "hi", context_wamid="w.1"))
+    wamid = asyncio.run(ms.send_to_channel("whatsapp", "+254700", "hi", context_wamid="w.1"))
     assert captured["num"] == "254700" and captured["ctx"] == "w.1"
+    assert wamid == "wamid.OUT1"   # passed through so the saved row keeps it
 
 
 # ── Meta media send ───────────────────────────────────────────────────────────

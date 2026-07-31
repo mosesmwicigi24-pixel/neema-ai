@@ -221,8 +221,8 @@ async def _celebrate(db, redis, conv, event: dict) -> dict:
         if not text:
             return {"handled": False, "reason": "compose_failed"}
         if conv.channel == "whatsapp":
-            await svc._send_waba(recipient, text)
-            await svc.save_outbound_message(db, redis, recipient, text)
+            wamid = await svc._send_waba(recipient, text)
+            await svc.save_outbound_message(db, redis, recipient, text, waba_msg_id=wamid)
         else:
             from app.services.meta_send import send_to_channel
             await send_to_channel(conv.channel, recipient, text)
@@ -239,10 +239,11 @@ async def _celebrate(db, redis, conv, event: dict) -> dict:
             "order.delivered": "delivered — we hope it serves you beautifully",
         }.get(event.get("type") or "", "updated")
         params = [name, event.get("order_number") or "your order", status_word]
-        await svc.send_wa_template(recipient, settings.wa_event_template,
-                                   settings.wa_event_lang, params)
+        tpl = await svc.send_wa_template(recipient, settings.wa_event_template,
+                                         settings.wa_event_lang, params)
         await svc.save_outbound_message(
-            db, redis, recipient, f"[template {settings.wa_event_template}] {brief}")
+            db, redis, recipient, f"[template {settings.wa_event_template}] {brief}",
+            waba_msg_id=(((tpl or {}).get("messages") or [{}])[0].get("id") or None))
         return {"handled": True, "sent": "template"}
 
     await _notify_agents(

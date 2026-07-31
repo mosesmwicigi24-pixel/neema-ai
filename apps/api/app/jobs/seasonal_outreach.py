@@ -265,22 +265,23 @@ async def _handle(redis, row: dict, season: dict, *, send: bool) -> dict:
 
     try:
         if use_template:
-            await svc.send_wa_template(to, settings.wa_seasonal_template,
-                                       settings.wa_seasonal_lang,
-                                       template_params(row, season, row.get("name")))
+            tpl = await svc.send_wa_template(to, settings.wa_seasonal_template,
+                                             settings.wa_seasonal_lang,
+                                             template_params(row, season, row.get("name")))
             # Persist what went out — otherwise the inbox shows the customer
             # replying to nothing and the record diverges from reality.
             try:
                 async with AsyncSessionLocal() as db2:
                     await svc.save_outbound_message(
                         db2, redis, to,
-                        f"[template {settings.wa_seasonal_template}] " + text)
+                        f"[template {settings.wa_seasonal_template}] " + text,
+                        waba_msg_id=(((tpl or {}).get("messages") or [{}])[0].get("id") or None))
             except Exception:
                 pass
         elif is_wa:
-            await svc._send_waba(to, text)
+            wamid = await svc._send_waba(to, text)
             async with AsyncSessionLocal() as db2:
-                await svc.save_outbound_message(db2, redis, to, text)
+                await svc.save_outbound_message(db2, redis, to, text, waba_msg_id=wamid)
         else:
             await send_to_channel(ch, to, text)
             async with AsyncSessionLocal() as db2:

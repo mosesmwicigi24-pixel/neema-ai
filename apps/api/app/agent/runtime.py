@@ -642,9 +642,9 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None)
         async with AsyncSessionLocal() as db:
             reply = await run_turn(db, redis, wa_id, text,
                                    build_llm(model=model), media=media)
-        await svc._send_waba(wa_id, reply)
+        wamid = await svc._send_waba(wa_id, reply)
         async with AsyncSessionLocal() as db2:
-            await svc.save_outbound_message(db2, redis, wa_id, reply)
+            await svc.save_outbound_message(db2, redis, wa_id, reply, waba_msg_id=wamid)
         _log.info("tier2 replied to %s (%d chars)", wa_id, len(reply))
         # The scribe files the turn (deal items/stage/promises) — best-effort.
         try:

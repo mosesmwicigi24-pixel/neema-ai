@@ -69,6 +69,27 @@ def test_send_product_cards_whatsapp_sends_rich_cards(monkeypatch):
     assert sent[1]["url"].endswith("/product/ring")
 
 
+def test_card_wamid_lands_on_the_mirror_row(monkeypatch):
+    """The 'this one, but stainless steel' fix: the wamid Graph returns for a
+    product card must reach _record_shared_media, so the mirror row carries
+    waba_msg_id and a customer reply-quote of the card resolves back to it."""
+    monkeypatch.setattr(settings, "media_public_url", "https://shop.example", raising=False)
+    monkeypatch.setattr(tools, "_customer_currency", _acoro("KES"))
+    monkeypatch.setattr(svc, "catalog_items", _acoro(CATALOG))
+    monkeypatch.setattr(svc, "_send_waba_product_card", _acoro("wamid.CARD9"))
+    recorded = []
+
+    async def fake_record(ctx, *, media_url, caption, waba_msg_id=None):
+        recorded.append({"media_url": media_url, "caption": caption, "waba_msg_id": waba_msg_id})
+
+    monkeypatch.setattr(tools, "_record_shared_media", fake_record)
+    ctx = ToolContext(db=object(), redis=None, wa_id="254712345678", channel="whatsapp", currency="KES")
+    out = asyncio.run(tools._send_product_cards({"products": ["Ring"]}, ctx))
+
+    assert out["sent_cards"] == 1
+    assert recorded[0]["waba_msg_id"] == "wamid.CARD9"
+
+
 def test_send_meta_carousel_builds_generic_template(monkeypatch):
     from app.services import meta_send as ms
     calls = []
@@ -161,6 +182,8 @@ def test_send_waba_product_card_builds_cta_url(monkeypatch):
         is_success = True
         status_code = 200
         text = "{}"
+        def json(self):
+            return {"messages": [{"id": "wamid.CARD1"}]}
 
     class _Client:
         async def __aenter__(self): return self
@@ -170,7 +193,7 @@ def test_send_waba_product_card_builds_cta_url(monkeypatch):
             return _Resp()
 
     monkeypatch.setattr(svc.httpx, "AsyncClient", lambda *a, **k: _Client())
-    asyncio.run(svc._send_waba_product_card(
+    wamid = asyncio.run(svc._send_waba_product_card(
         "254700", image_url="https://i/x.jpg", title="Cross",
         body="KES 4,000", url="https://s/catalog/cross?ccy=KES"))
 
@@ -180,6 +203,9 @@ def test_send_waba_product_card_builds_cta_url(monkeypatch):
     assert p["interactive"]["header"]["image"]["link"] == "https://i/x.jpg"
     assert p["interactive"]["action"]["parameters"]["url"].endswith("cross?ccy=KES")
     assert "*Cross*" in p["interactive"]["body"]["text"]
+    # The card's wamid comes back — it's what a customer reply-quote of the
+    # card carries as context.message_id, so the mirror row must keep it.
+    assert wamid == "wamid.CARD1"
 
 
 def test_send_waba_product_card_falls_back_to_image_on_reject(monkeypatch):
@@ -194,6 +220,8 @@ def test_send_waba_product_card_falls_back_to_image_on_reject(monkeypatch):
             self.text = "err"
         def raise_for_status(self):
             pass
+        def json(self):
+            return {"messages": [{"id": "wamid.FALLBACK1"}]}
 
     class _Client:
         async def __aenter__(self): return self
@@ -203,10 +231,11 @@ def test_send_waba_product_card_falls_back_to_image_on_reject(monkeypatch):
             return _Resp(len(calls) > 1)   # cta_url rejected, image accepted
 
     monkeypatch.setattr(svc.httpx, "AsyncClient", lambda *a, **k: _Client())
-    asyncio.run(svc._send_waba_product_card(
+    wamid = asyncio.run(svc._send_waba_product_card(
         "254700", image_url="https://i/x.jpg", title="Cross", body="KES 4,000", url="https://s/p"))
 
     assert calls[0]["type"] == "interactive"
     assert calls[1]["type"] == "image"
     assert calls[1]["image"]["caption"].startswith("*Cross*")
     assert "https://s/p" in calls[1]["image"]["caption"]
+    assert wamid == "wamid.FALLBACK1"   # the wamid of whichever send SUCCEEDED

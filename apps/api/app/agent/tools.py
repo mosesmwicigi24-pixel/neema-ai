@@ -1155,10 +1155,13 @@ def _match_product(query: str, catalog: list[dict]) -> dict | None:
     return cands[0] if cands else None
 
 
-async def _record_shared_media(ctx: "ToolContext", *, media_url: str | None, caption: str) -> None:
+async def _record_shared_media(ctx: "ToolContext", *, media_url: str | None, caption: str,
+                               waba_msg_id: str | None = None) -> None:
     """Mirror an image Neema sent to the customer into the dashboard thread, so a
     human following the conversation SEES exactly what was shared (and it lands in
-    history). Best-effort — never breaks the send if this fails."""
+    history). `waba_msg_id` is the sent card's wamid — stored so a customer
+    reply-quoting the card ("this one, but in steel") resolves back to this row.
+    Best-effort — never breaks the send if this fails."""
     if not media_url:
         return
     try:
@@ -1182,6 +1185,7 @@ async def _record_shared_media(ctx: "ToolContext", *, media_url: str | None, cap
             person_id=conv.person_id, channel=conv.channel or ctx.channel,
             direction=MsgDirection.outbound, sender=MsgSender.ai,
             text=caption or None, media_type="image", media_url=media_url,
+            waba_msg_id=waba_msg_id,
         ))
         conv.last_message_at = datetime.now(timezone.utc)
         conv.last_message_preview = (caption or "📷 Photo")[:100]
@@ -1311,16 +1315,18 @@ async def _send_product_cards(args: dict, ctx: ToolContext) -> dict:
             try:
                 # WhatsApp image messages reject .webp — convert the hub photo to jpg.
                 img = await to_sendable_image(c["image"])
-                await svc._send_waba_product_card(
+                card_wamid = await svc._send_waba_product_card(
                     ctx.wa_id, image_url=img, title=c["name"],
                     body=c["price_text"], url=c["url"])
                 sent += 1
                 _log.info("product card sent to %s: %s (img=%s)", ctx.wa_id, c["slug"],
                           "yes" if img else "no")
-                # Mirror the photo into the dashboard thread so a human sees it too.
+                # Mirror the photo into the dashboard thread so a human sees it too —
+                # with the card's wamid, so a reply-quote of the card resolves to it.
                 await _record_shared_media(
                     ctx, media_url=img,
-                    caption=" — ".join(x for x in (c["name"], c["price_text"]) if x))
+                    caption=" — ".join(x for x in (c["name"], c["price_text"]) if x),
+                    waba_msg_id=card_wamid)
             except Exception as exc:
                 _log.warning("send_product_cards: card failed for %s: %s", c["slug"], exc)
         if sent:
