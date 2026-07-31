@@ -107,3 +107,46 @@ def test_context_block_only_claims_ownership_when_graph_confirmed(monkeypatch):
     assert "NEVER say you cannot open a link" in block
     # No link in the message → no block at all.
     assert asyncio.run(lp.shared_link_context("just a hello")) == ""
+
+
+# ── The login wall (found only by running this in production) ─────────────────
+# From a datacenter IP Facebook bounces the crawler to /login/?next=<escaped
+# story.php…>. The ids survive, one encoding level down.
+
+
+def test_post_id_survives_the_login_redirect():
+    login = ("https://www.facebook.com/login/?next=https%3A%2F%2Fwww.facebook.com"
+             "%2Fstory.php%3Fstory_fbid%3D1678395280959617%26id%3D100063674845161"
+             "%26rdid%3DS0PsE4dD5JAgV8Iq&rdid=S0PsE4dD5JAgV8Iq")
+    assert lp._post_id_from_url(login) == "100063674845161_1678395280959617"
+
+
+def test_rdid_and_fbid_never_masquerade_as_the_page_id():
+    assert lp._post_id_from_url(
+        "https://www.facebook.com/x?story_fbid=5&rdid=99&fbid=77") is None
+
+
+def test_a_login_wall_is_never_described_as_the_post(monkeypatch):
+    """Better to say nothing than to have Neema confidently describe a post she
+    never saw — the login page's og:title is just 'Facebook'."""
+    html = ('<title>Facebook</title>'
+            '<meta property="og:title" content="Facebook">'
+            '<meta property="og:url" content="https://www.facebook.com/login/">')
+    _fake_client("https://www.facebook.com/login/?next=https%3A%2F%2Fx", html, monkeypatch)
+    assert asyncio.run(lp.resolve_facebook_link("https://fb.me/blocked")) is None
+    assert asyncio.run(lp.shared_link_context("https://fb.me/blocked")) == ""
+
+
+def test_login_wall_still_reaches_graph_when_ids_are_present(monkeypatch):
+    """The wall blocks the HTML, not the Page token — the post id is enough."""
+    final = ("https://www.facebook.com/login/?next=https%3A%2F%2Fwww.facebook.com"
+             "%2Fstory.php%3Fstory_fbid%3D999%26id%3D111")
+    _fake_client(final, "<title>Facebook</title>", monkeypatch)
+
+    async def fake_ctx(post_id, channel="facebook"):
+        assert post_id == "111_999"
+        return {"title": "Aluminium trays in stock", "permalink": "", "thumb": ""}
+    monkeypatch.setattr("app.services.meta_send.fetch_post_context", fake_ctx)
+
+    got = asyncio.run(lp.resolve_facebook_link("https://www.facebook.com/share/p/X/"))
+    assert got["source"] == "graph" and got["title"] == "Aluminium trays in stock"

@@ -26,7 +26,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import unquote
 
 import httpx
 
@@ -54,16 +54,36 @@ def find_facebook_link(text: str | None) -> str | None:
 
 
 def _post_id_from_url(url: str) -> str | None:
-    """Graph's `<page>_<post>` id, when the resolved URL carries both halves."""
-    try:
-        q = parse_qs(urlparse(url).query)
-    except Exception:
+    """Graph's `<page>_<post>` id, when the resolved URL carries both halves.
+
+    Read from the WHOLE unescaped URL, not just its top-level query: from a
+    datacenter IP Facebook bounces the crawler to `/login/?next=<escaped
+    story.php…>`, which still carries the ids — just one level down. Unquoting
+    twice reaches them either way."""
+    if not url:
         return None
-    story = (q.get("story_fbid") or [None])[0]
-    page = (q.get("id") or [None])[0]
-    if story and page and story.isdigit() and page.isdigit():
-        return f"{page}_{story}"
+    flat = url
+    for _ in range(3):                     # nested encodings in `next=`
+        un = unquote(flat)
+        if un == flat:
+            break
+        flat = un
+    story = re.search(r"[?&]story_fbid=(\d+)", flat)
+    # `[?&]id=` so it can't match rdid= / fbid= / profile_id=.
+    page = re.search(r"[?&]id=(\d+)", flat)
+    if story and page:
+        return f"{page.group(1)}_{story.group(1)}"
     return None
+
+
+def _is_useless_title(title: str, url: str) -> bool:
+    """A login/checkpoint wall renders og:title 'Facebook' — worse than nothing,
+    because it would have Neema confidently describe a post she never saw."""
+    t = (title or "").strip().lower()
+    if not t or t in ("facebook", "log in to facebook", "log into facebook",
+                      "facebook - log in or sign up", "error"):
+        return True
+    return "/login" in (url or "") or "/checkpoint" in (url or "")
 
 
 def _og(html: str, prop: str) -> str:
@@ -127,11 +147,13 @@ async def resolve_facebook_link(url: str, redis=None) -> dict | None:
 
         if out is None:
             # Someone else's post, or an id we can't compose: use the crawler's
-            # own metadata rather than telling the customer we're blind.
+            # own metadata rather than telling the customer we're blind — but
+            # never a login wall's, which would have Neema describe a post she
+            # never saw.
             permalink = _og(html, "url") or final_url
             title = (_title_from_html(html) or _caption_from_permalink(permalink)
                      or _og(html, "title"))
-            if title:
+            if title and not _is_useless_title(title, final_url):
                 out = {"title": title[:200], "permalink": permalink,
                        "thumb": _og(html, "image"), "post_id": post_id or "",
                        "source": "opengraph"}
