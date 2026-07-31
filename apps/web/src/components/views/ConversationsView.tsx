@@ -628,7 +628,18 @@ export function ConversationsView({
     const [interceptFilter, setInterceptFilter] = useState<
         "all" | "human" | "ai" | "paused"
     >("all");
-    const [readFilter, setReadFilter] = useState<"all" | "unread" | "read" | "human">(
+    // Bulk selection in the conversation list (see "Bulk selection" below).
+    const [selectMode, setSelectMode] = useState(false);
+    const [selected, setSelected] = useState<Set<string>>(() => new Set());
+    const [bulkBusy, setBulkBusy] = useState(false);
+    const anchorRow = useRef<number | null>(null);   // shift-click range anchor
+    const longPressed = useRef(false);               // suppress the click it fired from
+    // Held in a ref, not a per-row local: the list re-renders on every poll, and
+    // a timer captured in a closure that a re-render replaced can never be
+    // cleared — the hold would fire after the finger already lifted.
+    const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    const [readFilter, setReadFilter] = useState<"all" | "unread" | "read" | "human" | "yours">(
         "all",
     );
     const [searchQ, setSearchQ] = useState<string>("");
@@ -1382,6 +1393,10 @@ export function ConversationsView({
             if (readFilter === "unread" && !(c.unread > 0)) return false;
             if (readFilter === "read" && c.unread > 0) return false;
             if (readFilter === "human" && c.intercept_mode !== "human") return false;
+            // "Yours" — held by a human AND that human is me.
+            if (readFilter === "yours" &&
+                !(c.intercept_mode === "human" && c.assigned_agent_id === currentAgentId))
+                return false;
             if (
                 searchQ &&
                 !c.name?.toLowerCase().includes(searchQ.toLowerCase()) &&
@@ -1404,7 +1419,8 @@ export function ConversationsView({
                   ? new Date(b.created_at).getTime()
                   : 0;
             return bTime - aTime;
-        }), [conversations, channelTab, tagFilter, interceptFilter, readFilter, searchQ]);
+        }), [conversations, channelTab, tagFilter, interceptFilter, readFilter, searchQ,
+             currentAgentId]);
 
     // ── Collapse siblings into one row per person ─────────────────────────────
     // Conversations sharing a person_id are the SAME customer across channels
@@ -1452,6 +1468,101 @@ export function ConversationsView({
         (c) => c.intercept_mode === "human",
     ).length, [conversations]);
 
+    const yoursCount = useMemo(() => conversations.filter(
+        (c) => c.intercept_mode === "human" && c.assigned_agent_id === currentAgentId,
+    ).length, [conversations, currentAgentId]);
+
+    // ── Bulk selection ────────────────────────────────────────────────────────
+    // Picking up ten threads is one click each; handing them back was ten more.
+    // Selection mode turns the list into a checklist so a whole shift's worth of
+    // conversations goes back to Neema in one action. A row is a PERSON, so
+    // releasing it releases every channel they're held on.
+    const rowKeyOf = useCallback(
+        (g: { rep: Conversation }) => g.rep.person_id ?? g.rep.id, []);
+
+    const heldIdsOf = useCallback(
+        (g: { siblings: Conversation[] }) =>
+            g.siblings.filter((s) => s.intercept_mode === "human").map((s) => s.id), []);
+
+    const exitSelect = useCallback(() => {
+        setSelectMode(false);
+        setSelected(new Set());
+        anchorRow.current = null;
+    }, []);
+
+    // How many conversations the Release button would actually act on — a row
+    // that is already with Neema is selectable but costs nothing.
+    const selectedHeldIds = useMemo(() => {
+        const out: string[] = [];
+        for (const g of groupedConvs) {
+            if (selected.has(rowKeyOf(g))) out.push(...heldIdsOf(g));
+        }
+        return out;
+    }, [groupedConvs, selected, rowKeyOf, heldIdsOf]);
+
+    const toggleRow = useCallback((key: string, index: number, range = false) => {
+        setSelected((prev) => {
+            const next = new Set(prev);
+            if (range && anchorRow.current !== null) {
+                // Shift-click fills the span — the difference between releasing
+                // a morning's worth of threads in one gesture or forty clicks.
+                const [from, to] = anchorRow.current <= index
+                    ? [anchorRow.current, index] : [index, anchorRow.current];
+                for (let i = from; i <= to; i++) {
+                    const g = groupedConvs[i];
+                    if (g) next.add(rowKeyOf(g));
+                }
+            } else if (next.has(key)) {
+                next.delete(key);
+            } else {
+                next.add(key);
+            }
+            return next;
+        });
+        anchorRow.current = index;
+    }, [groupedConvs, rowKeyOf]);
+
+    const releaseSelected = useCallback(async () => {
+        const ids = selectedHeldIds;
+        if (!ids.length) {
+            onToast("None of those are held by a human", "warning");
+            return;
+        }
+        setBulkBusy(true);
+        const results = await Promise.allSettled(ids.map((id) => conversationsApi.release(id)));
+        const failed = results.filter((r) => r.status === "rejected").length;
+        const ok = ids.length - failed;
+        setBulkBusy(false);
+        exitSelect();
+        refetchConversations?.();
+        if (failed) onToast(`Released ${ok} — ${failed} failed`, "error");
+        else onToast(`${ok} conversation${ok === 1 ? "" : "s"} released back to Neema`);
+    }, [selectedHeldIds, exitSelect, refetchConversations, onToast]);
+
+    // Esc leaves selection, ⌘/Ctrl+A takes everything currently filtered — so
+    // "Yours" + select-all + Release hands back a whole shift in three actions.
+    useEffect(() => {
+        if (!selectMode) return;
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === "Escape") { e.preventDefault(); exitSelect(); }
+            else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a") {
+                e.preventDefault();
+                setSelected(new Set(groupedConvs.map(rowKeyOf)));
+            }
+        };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [selectMode, exitSelect, groupedConvs, rowKeyOf]);
+
+    // Changing what the list shows clears the picks: a selection you can no
+    // longer see is one you can't check before releasing it.
+    // (selectMode is deliberately not a dependency — entering it via long-press
+    // must not wipe the row that gesture just picked.)
+    useEffect(() => {
+        setSelected(new Set());
+        anchorRow.current = null;
+    }, [readFilter, channelTab, searchQ, tagFilter]);
+
     // ── Render ────────────────────────────────────────────────────────────────
 
     const ConvList = (
@@ -1467,13 +1578,51 @@ export function ConversationsView({
             <div className="px-4 pt-4 pb-3" style={{ borderBottom: "1px solid #edf0ea" }}>
                 <div className="flex items-center justify-between mb-3">
                     <h1 className="text-sm font-semibold" style={{ color: "#1c2917", letterSpacing: "-0.01em" }}>
-                        Chats
+                        {selectMode
+                            ? `${selected.size} selected`
+                            : "Chats"}
                     </h1>
                     <div className="flex items-center gap-2">
-                        {humanCount > 0 && (
-                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: "#fff3cd", color: "#856404" }}>
-                                {humanCount} live
-                            </span>
+                        {selectMode ? (
+                            <>
+                                <button
+                                    onClick={() => setSelected(
+                                        selected.size === groupedConvs.length
+                                            ? new Set()
+                                            : new Set(groupedConvs.map(rowKeyOf)))}
+                                    className="text-[11px] font-medium px-2 py-1 rounded-lg hover:bg-[#f0f4ec]"
+                                    style={{ color: "#427425" }}
+                                >
+                                    {selected.size === groupedConvs.length && groupedConvs.length > 0
+                                        ? "Clear" : "Select all"}
+                                </button>
+                                <button
+                                    onClick={exitSelect}
+                                    className="text-[11px] font-medium px-2 py-1 rounded-lg hover:bg-[#f0f4ec]"
+                                    style={{ color: "#8a9e80" }}
+                                >
+                                    Cancel
+                                </button>
+                            </>
+                        ) : (
+                            <>
+                                {humanCount > 0 && (
+                                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: "#fff3cd", color: "#856404" }}>
+                                        {humanCount} live
+                                    </span>
+                                )}
+                                <button
+                                    onClick={() => setSelectMode(true)}
+                                    title="Select several (or press and hold a chat)"
+                                    className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:bg-[#f0f4ec]"
+                                    style={{ color: "#8a9e80" }}
+                                >
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                              d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                                    </svg>
+                                </button>
+                            </>
                         )}
                         <button
                             onClick={() => setShowFilters((f) => !f)}
@@ -1497,17 +1646,18 @@ export function ConversationsView({
                     </div>
                 </div>
 
-                {/* Read / Unread / Human-pickup toggle */}
-                <div className="flex items-center gap-1 mb-2">
-                    {(["all", "unread", "read", "human"] as const).map((f) => (
+                {/* Read / Unread / Human-pickup / Yours toggle */}
+                <div className="flex items-center flex-wrap gap-1 mb-2">
+                    {(["all", "unread", "read", "human", "yours"] as const).map((f) => (
                         <button
                             key={f}
                             onClick={() => setReadFilter(f)}
-                            className={`flex-1 h-7 rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-1.5`}
+                            className={`flex-1 min-w-[58px] h-7 px-1.5 rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-1.5`}
                             style={{
                                 backgroundColor: readFilter === f
                                     ? f === "unread" ? "#427425"
                                     : f === "human" ? "#b45309"
+                                    : f === "yours" ? "#589b31"
                                     : "#1c2917"
                                     : "#f5f6f3",
                                 color: readFilter === f ? "#fff" : "#6b7e64",
@@ -1535,6 +1685,18 @@ export function ConversationsView({
                                             className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none ${readFilter === "human" ? "bg-white/25 text-white" : "bg-[#b45309] text-white"}`}
                                         >
                                             {humanCount}
+                                        </span>
+                                    )}
+                                </>
+                            )}
+                            {f === "yours" && (
+                                <>
+                                    Yours
+                                    {yoursCount > 0 && (
+                                        <span
+                                            className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none ${readFilter === "yours" ? "bg-white/25 text-white" : "bg-[#589b31] text-white"}`}
+                                        >
+                                            {yoursCount}
                                         </span>
                                     )}
                                 </>
@@ -1690,7 +1852,7 @@ export function ConversationsView({
                         </p>
                     </div>
                 )}
-                {groupedConvs.map((group) => {
+                {groupedConvs.map((group, rowIndex) => {
                     // The row shows the person; the ACTIVE conversation is whichever
                     // sibling (channel) is open — default to the representative.
                     const activeSib =
@@ -1705,28 +1867,87 @@ export function ConversationsView({
                     const humanSib = group.siblings.find((s) => s.intercept_mode === "human");
                     const chipConv = humanSib ?? conv;
                     const rowStage = group.siblings.map((s) => s.lead_stage).find(Boolean) ?? null;
+                    const rowKey = group.rep.person_id ?? group.rep.id;
+                    const isPicked = selected.has(rowKey);
+                    const heldHere = group.siblings.some((s) => s.intercept_mode === "human");
+                    // Press and hold to start selecting — the WhatsApp gesture,
+                    // so nobody has to find the toolbar button first.
+                    const startPress = () => {
+                        longPressed.current = false;   // every press starts clean
+                        if (selectMode) return;
+                        if (pressTimer.current) clearTimeout(pressTimer.current);
+                        pressTimer.current = setTimeout(() => {
+                            longPressed.current = true;
+                            setSelectMode(true);
+                            setSelected(new Set([rowKey]));
+                            anchorRow.current = rowIndex;
+                        }, 450);
+                    };
+                    const cancelPress = () => {
+                        if (pressTimer.current) {
+                            clearTimeout(pressTimer.current);
+                            pressTimer.current = null;
+                        }
+                    };
                     return (
                         <button
-                            key={group.rep.person_id ?? group.rep.id}
-                            onClick={() => handleSelectConv(conv.id)}
+                            key={rowKey}
+                            onClick={(e) => {
+                                if (longPressed.current) { longPressed.current = false; return; }
+                                if (selectMode) toggleRow(rowKey, rowIndex, e.shiftKey);
+                                else handleSelectConv(conv.id);
+                            }}
+                            onPointerDown={startPress}
+                            onPointerUp={cancelPress}
+                            onPointerLeave={cancelPress}
+                            onPointerCancel={cancelPress}
+                            onContextMenu={(e) => {
+                                // Right-click is the desktop equivalent of the hold.
+                                if (selectMode) return;
+                                e.preventDefault();
+                                setSelectMode(true);
+                                setSelected(new Set([rowKey]));
+                                anchorRow.current = rowIndex;
+                            }}
                             className="w-full text-left px-4 py-3 transition-colors relative"
                             style={{
-                                backgroundColor: isActive ? "#fdf6e9" : "transparent",
+                                backgroundColor: isPicked ? "#eef6e5" : isActive ? "#fdf6e9" : "transparent",
                                 borderBottom: "1px solid #f2f4ef",
-                                borderLeft: `3px solid ${isActive ? ROW_ACCENT : hasUnread ? "#fcd98a" : "transparent"}`,
+                                borderLeft: `3px solid ${isPicked ? "#589b31" : isActive ? ROW_ACCENT : hasUnread ? "#fcd98a" : "transparent"}`,
                                 // Off-screen rows skip layout + paint entirely —
                                 // scrolling only ever renders the visible slice.
                                 contentVisibility: "auto",
                                 containIntrinsicSize: "auto 74px",
+                                userSelect: selectMode ? "none" : undefined,
                             } as React.CSSProperties}
                             onMouseEnter={(e) => {
-                                if (!isActive) (e.currentTarget as HTMLElement).style.backgroundColor = "#fbfaf6";
+                                if (!isActive && !isPicked) (e.currentTarget as HTMLElement).style.backgroundColor = "#fbfaf6";
                             }}
                             onMouseLeave={(e) => {
-                                if (!isActive) (e.currentTarget as HTMLElement).style.backgroundColor = "transparent";
+                                if (!isActive && !isPicked) (e.currentTarget as HTMLElement).style.backgroundColor = "transparent";
                             }}
                         >
                             <div className="flex items-start gap-3">
+                                {selectMode && (
+                                    <span
+                                        title={heldHere ? undefined : "Already with Neema — nothing to release"}
+                                        className="flex-shrink-0 mt-3 w-[18px] h-[18px] rounded-md border flex items-center justify-center transition-all"
+                                        style={{
+                                            borderColor: isPicked ? "#589b31" : "#cfdac6",
+                                            backgroundColor: isPicked ? "#589b31" : "#fff",
+                                            transform: isPicked ? "scale(1)" : "scale(0.92)",
+                                            // A row Neema already handles stays selectable but
+                                            // reads as a no-op, so the count never surprises.
+                                            opacity: heldHere ? 1 : 0.45,
+                                        }}
+                                    >
+                                        {isPicked && (
+                                            <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                            </svg>
+                                        )}
+                                    </span>
+                                )}
                                 <div className="relative flex-shrink-0">
                                     <Avatar
                                         name={rowName}
@@ -1881,6 +2102,37 @@ export function ConversationsView({
                     );
                 })}
             </div>
+
+            {/* Bulk action bar — only while selecting, so it never costs space */}
+            {selectMode && (
+                <div
+                    className="px-3 py-2.5 flex items-center gap-2"
+                    style={{ borderTop: "1px solid #edf0ea", backgroundColor: "#fbfcfa" }}
+                >
+                    <div className="flex-1 min-w-0">
+                        <p className="text-[11px] font-medium truncate" style={{ color: "#3d5a30" }}>
+                            {selected.size === 0
+                                ? "Tap chats to select"
+                                : `${selected.size} chat${selected.size === 1 ? "" : "s"} selected`}
+                        </p>
+                        {selected.size > 0 && (
+                            <p className="text-[10px]" style={{ color: "#8a9e80" }}>
+                                {selectedHeldIds.length === 0
+                                    ? "none are human-held"
+                                    : `${selectedHeldIds.length} to hand back to Neema`}
+                            </p>
+                        )}
+                    </div>
+                    <button
+                        onClick={releaseSelected}
+                        disabled={bulkBusy || selectedHeldIds.length === 0}
+                        className="text-xs font-semibold px-3 h-8 rounded-lg text-white transition-opacity disabled:opacity-40"
+                        style={{ backgroundColor: "#589b31" }}
+                    >
+                        {bulkBusy ? "Releasing…" : `Release${selectedHeldIds.length ? ` ${selectedHeldIds.length}` : ""}`}
+                    </button>
+                </div>
+            )}
         </div>
     );
 
