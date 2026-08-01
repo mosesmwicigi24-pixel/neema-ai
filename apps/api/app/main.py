@@ -236,7 +236,8 @@ async def lifespan(app: FastAPI):
     for _name in ("neema.agent", "neema.hub", "neema.wa", "neema.wa_native",
                   "neema.meta", "neema.startup", "neema.hubevents",
                   "neema.deals", "neema.actions", "neema.copilot",
-                  "neema.selfqa", "neema.settings", "neema.video"):
+                  "neema.selfqa", "neema.settings", "neema.video",
+                  "neema.selfcheck", "neema.identity"):
         _lg = logging.getLogger(_name)
         _lg.setLevel(logging.INFO)
         _lg.addHandler(_h)

@@ -126,6 +126,32 @@ async def compose_standup(db) -> str:
             f"{f.kind.replace('_', ' ')} ({(f.detail or '')[:60]}…)" for f in findings))
     else:
         lines.append("🪞 Self-review: no misses caught yesterday.")
+
+    # System health — the hourly outcome self-check's last verdict, so a dead
+    # subsystem reaches the owner by breakfast, not by archaeology.
+    try:
+        from app.services.selfcheck import health_line
+        health = await health_line(db)
+        if health:
+            lines.append(health)
+    except Exception:
+        pass
+
+    # Unmet demand — what customers asked for that we couldn't sell. The pile
+    # exists to be read: three lines a day beat a table nobody opens.
+    try:
+        from app.models.demand_signal import DemandSignal
+        week = datetime.now(timezone.utc) - timedelta(days=7)
+        top = (await db.execute(
+            select(DemandSignal.query, sa_func.count().label("n"))
+            .where(DemandSignal.created_at >= week)
+            .group_by(DemandSignal.query)
+            .order_by(sa_func.count().desc()).limit(3))).all()
+        if top:
+            lines.append("📈 Most asked-for this week (unmet): " +
+                         ", ".join(f"{q} ×{n}" for q, n in top))
+    except Exception:
+        pass
     return "\n".join(lines)
 
 

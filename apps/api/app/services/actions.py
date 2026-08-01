@@ -278,6 +278,17 @@ async def actions_loop(redis) -> None:
                     await repair_pending(db)
             except Exception as exc:
                 _log.info("meta media repair skipped: %s", exc)
+            # Outcome self-check (services/selfcheck.py): most subsystems here
+            # are best-effort, so a broken one looks identical to a quiet one.
+            # Hourly, leader-only; a failed tick is itself logged loudly.
+            try:
+                hour_key = "selfcheck:" + datetime.now(timezone.utc).strftime("%Y%m%d%H")
+                if await redis.set(hour_key, "1", nx=True, ex=3600):
+                    from app.services.selfcheck import run_checks
+                    async with AsyncSessionLocal() as db:
+                        await run_checks(db, redis)
+            except Exception as exc:
+                _log.warning("selfcheck tick failed: %s", exc)
             # Learning loops (plan D): 03:00 self-QA, 08:00 standup,
             # Sunday 07:00 weekly distillation — daily-guarded, leader-only.
             try:
