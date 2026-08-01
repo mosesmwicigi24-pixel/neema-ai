@@ -22,7 +22,7 @@ from sqlalchemy import select, func, and_
 
 from app.database import AsyncSessionLocal
 from app.models.conversation import Conversation, InterceptMode
-from app.models.message import Message, MsgDirection
+from app.models.message import Message, MsgDirection, MsgSender
 
 _log = logging.getLogger("neema.agent")
 
@@ -78,6 +78,95 @@ async def _unanswered_dms(since, until, limit: int):
         return (await db.execute(q)).all()
 
 
+# ── Cross-channel continuation ───────────────────────────────────────────────
+# The window shut on THIS channel, but the person may have another door open —
+# same identity spine, different conversation. Continuing there beats flagging
+# a human: the customer hears back in minutes, on a channel they used within
+# the last day, instead of waiting for someone to notice a flag.
+
+
+async def _compose_bridge(db, redis, dest_conv, src_channel: str,
+                          question: str) -> str:
+    """Neema's own voice on the DESTINATION thread, bridging the stranded
+    question across — read-only turn, so composing can never double-send."""
+    from app.agent import runtime
+    key = dest_conv.wa_id if dest_conv.channel == "whatsapp" else dest_conv.external_id
+    src_label = {"messenger": "Messenger", "instagram": "Instagram",
+                 "facebook": "Facebook"}.get(src_channel, src_channel)
+    text = (
+        f"[CROSS-CHANNEL CONTINUATION — not a customer message. On {src_label} "
+        f'they asked: "{(question or "").strip()[:300]}" — and that channel can '
+        "no longer be replied to. Compose the ONE warm message to send them "
+        f"HERE instead: briefly bridge (you're picking their {src_label} "
+        "question up here), then answer it or move it one step forward. Never "
+        "mention windows, policies or systems — just continue the conversation.]"
+    )
+    reply = await runtime.run_turn(
+        db, redis, wa_id=key, user_text=text, llm=runtime.build_llm(),
+        channel=dest_conv.channel,
+        external_id=(None if dest_conv.channel == "whatsapp" else dest_conv.external_id),
+        read_only=True)
+    return (reply or "").strip()
+
+
+async def _try_continue_elsewhere(redis, conv, msg):
+    """Continue a window-closed question on the same person's open channel.
+
+    Returns True (continued — don't escalate), False (no door open — escalate),
+    or "deferred" (a door exists but it's quiet hours in Nairobi; a Neema-
+    initiated send waits for morning, and the row stays queued until then)."""
+    if getattr(conv, "person_id", None) is None:
+        return False
+    async with AsyncSessionLocal() as db:
+        sibs = (await db.execute(select(Conversation).where(
+            Conversation.person_id == conv.person_id,
+            Conversation.id != conv.id,
+            # Never barge into a thread a human is working.
+            Conversation.intercept_mode == InterceptMode.ai,
+        ))).scalars().all()
+        if not sibs:
+            return False
+
+        from app.services.hub_events import is_quiet_hours
+        if is_quiet_hours(datetime.now(timezone.utc)):
+            return "deferred"
+
+        from app.services.conversation import messaging_window
+        # WhatsApp first (the most-answered channel here), then most recent.
+        sibs.sort(key=lambda s: (s.channel != "whatsapp",
+                                 -(s.last_message_at.timestamp()
+                                   if s.last_message_at else 0)))
+        for sib in sibs:
+            try:
+                win = await messaging_window(db, sib)
+            except Exception:
+                continue
+            if win.get("mode") != "open":
+                continue
+            text = await _compose_bridge(db, redis, sib, conv.channel, msg.text)
+            if not text:
+                return False
+            from app.services.actions import _send
+            await _send(db, redis, sib, text)
+            # Explain the source thread to any human reading it — and this note
+            # becomes its latest (outbound) message, so the sweep de-queues it.
+            db.add(Message(
+                channel=conv.channel, wa_id=conv.wa_id,
+                external_id=getattr(conv, "external_id", None),
+                person_id=conv.person_id, conversation_id=conv.id,
+                direction=MsgDirection.outbound, sender=MsgSender.human_agent,
+                text=(f"↪ The reply window closed here — Neema continued this "
+                      f"conversation on {sib.channel} "
+                      f"({sib.wa_id or sib.external_id})."),
+                media_type="note",
+            ))
+            await db.commit()
+            _log.info("cross-channel: %s question continued on %s (%s)",
+                      conv.channel, sib.channel, sib.wa_id or sib.external_id)
+            return True
+    return False
+
+
 async def _already_escalated_since(conv_id, inbound_at) -> bool:
     """True when this conversation was already handed to a human AFTER the
     customer's message — so the alert has been raised and judged once."""
@@ -101,11 +190,13 @@ async def _already_escalated_since(conv_id, inbound_at) -> bool:
         return False          # never let the guard itself block an escalation
 
 
-async def escalate_window_closed(*, window_h: int = 23, reachable_d: int = 7,
-                                 limit: int = 20) -> int:
-    """Hand a human every DM whose Meta 24-hour window shut with the customer
-    still unanswered — Neema physically cannot reply, but a human can (Meta gives
-    human agents a 7-day window). Past 7 days even a human is locked out, so we
+async def escalate_window_closed(redis=None, *, window_h: int = 23,
+                                 reachable_d: int = 7, limit: int = 20) -> int:
+    """A DM whose Meta 24-hour window shut with the customer still unanswered:
+    FIRST try to continue on another channel the same person has open (the
+    identity spine knows their WhatsApp) — the customer hears back in minutes.
+    Only when every door is shut, hand a human the thread (Meta gives human
+    agents a 7-day window). Past 7 days even a human is locked out, so we
     stop there rather than flag something nobody can action.
 
     Escalation routes the thread out of AI mode, so the sweep skips it next
@@ -125,6 +216,19 @@ async def escalate_window_closed(*, window_h: int = 23, reachable_d: int = 7,
             continue                       # a bare sticker/file — nothing to answer
         if await _already_escalated_since(conv.id, msg.created_at):
             continue                       # a human has already seen this one
+        # The limb: same person, different door. Best-effort — any failure
+        # falls straight through to the human escalation it replaces.
+        try:
+            moved = await _try_continue_elsewhere(redis, conv, msg)
+        except Exception as exc:
+            _log.warning("cross-channel continuation failed for %s: %s",
+                         conv.id, exc)
+            moved = False
+        if moved == "deferred":
+            continue                       # quiet hours — stays queued for morning
+        if moved:
+            n += 1
+            continue
         if await escalate_to_human(
             conv.channel, msg.external_id,
             "Customer is waiting and Meta's 24-hour window has closed — Neema can't "

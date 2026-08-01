@@ -349,9 +349,10 @@ async def lifespan(app: FastAPI):
                         sweep_missed_replies, escalate_window_closed,
                     )
                     await sweep_missed_replies(redis)
-                    # Past Meta's 24h window Neema can't reply at all — hand
-                    # those waiting customers to a human, who still can.
-                    await escalate_window_closed()
+                    # Past Meta's 24h window Neema can't reply on THAT channel —
+                    # continue on one the same person has open, else hand the
+                    # thread to a human (who gets Meta's 7-day window).
+                    await escalate_window_closed(redis)
             except Exception as exc:
                 logger.warning("missed-reply sweep tick failed: %s", exc)
             await _asyncio.sleep(interval)
