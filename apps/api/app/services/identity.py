@@ -296,7 +296,7 @@ async def _handoff_note(db: AsyncSession, wa_id: str, ref: str, data: dict) -> N
     db.add(Message(
         channel=conv.channel, wa_id=conv.wa_id, external_id=None,
         person_id=conv.person_id, conversation_id=conv.id,
-        direction=MsgDirection.outbound, sender=MsgSender.agent,
+        direction=MsgDirection.outbound, sender=MsgSender.human_agent,
         text="\n".join(lines), media_type="note",
     ))
     await db.commit()

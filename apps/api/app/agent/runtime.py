@@ -39,6 +39,7 @@ _META_TOOL_NAMES = {"search_catalog", "get_cart", "update_cart", "create_order",
                     "check_order_status", "remember", "handoff_to_human",
                     "whatsapp_checkout_link", "share_catalog", "send_product_cards",
                     "capture_contact", "pause_conversation", "save_measurements",
+                    "check_availability",
                     "church_calendar", "save_parish"}
 MESSENGER_TOOLS = [t for t in TOOLS if t["name"] in _META_TOOL_NAMES]
 

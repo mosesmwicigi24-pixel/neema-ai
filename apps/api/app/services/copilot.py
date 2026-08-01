@@ -129,7 +129,7 @@ async def _briefing(redis, conv_id) -> None:
                 channel=conv.channel, wa_id=conv.wa_id,
                 external_id=getattr(conv, "external_id", None),
                 person_id=conv.person_id, conversation_id=conv.id,
-                direction=MsgDirection.outbound, sender=MsgSender.agent,
+                direction=MsgDirection.outbound, sender=MsgSender.human_agent,
                 text=f"🤝 Handoff briefing\n\n{brief}", media_type="note",
             ))
             await db.commit()

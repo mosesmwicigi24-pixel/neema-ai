@@ -18,7 +18,7 @@ from app.models.demand_signal import DemandSignal
 
 _log = logging.getLogger("neema.demand")
 
-KINDS = ("no_match", "out_of_catalogue", "sourcing_gap")
+KINDS = ("no_match", "out_of_catalogue", "sourcing_gap", "availability_check")
 
 # Noise that would otherwise dominate the report — greetings and bare pleasantries
 # are not product demand.

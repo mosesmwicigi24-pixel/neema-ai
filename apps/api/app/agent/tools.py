@@ -216,6 +216,21 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "check_availability",
+        "description": "Ask the team to confirm whether we can supply an item you cannot "
+                       "confirm yourself (not in the catalogue, or an unusual variant). Use "
+                       "this INSTEAD of telling the customer we don't have something — we "
+                       "never say that. It alerts the team without ending your conversation, "
+                       "so you keep serving them in the same breath. Pass the item in the "
+                       "customer's own words.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"item": {"type": "string",
+                                    "description": "The item to confirm, in the customer's words"}},
+            "required": ["item"],
+        },
+    },
+    {
         "name": "whatsapp_checkout_link",
         "description": "Give a Messenger/Instagram customer a ONE-TAP WhatsApp link to finish "
                        "their order — checkout and payment happen on WhatsApp. Use this the "
@@ -970,6 +985,66 @@ async def _add_tags(args: dict, ctx: ToolContext) -> dict:
     return {"ok": True, "tags": state["tags"]}
 
 
+async def _check_availability(args: dict, ctx: ToolContext) -> dict:
+    """Ask the team to confirm an item — WITHOUT ending the conversation.
+
+    `handoff_to_human` flips the thread to human mode, which stops Neema
+    replying at all. For "do you have a metal jug?" that is far too heavy: the
+    customer is mid-purchase, and a thread parked in human mode is one nobody
+    answers. This records the demand, drops a note in the thread and pings the
+    team, while Neema stays on and keeps selling the rest of the table."""
+    item = str(args.get("item") or "").strip()
+    if not item:
+        return {"error": "name the item to confirm"}
+    if ctx.read_only:
+        return {"ok": True, "item": item}
+
+    from sqlalchemy import or_
+    from app.models.conversation import Conversation
+    from app.models.message import Message, MsgDirection, MsgSender
+    from app.services import demand
+
+    try:
+        _pid = await _person_id_of(ctx)
+    except Exception:
+        _pid = None
+    await demand.record(ctx.db, item, kind="availability_check",
+                        channel=_channel_label(ctx), wa_id=ctx.wa_id, person_id=_pid)
+
+    conv = (await ctx.db.execute(select(Conversation).where(
+        Conversation.channel == ctx.channel,
+        or_(Conversation.external_id == ctx.wa_id, Conversation.wa_id == ctx.wa_id),
+    ))).scalars().first()
+    if conv is not None:
+        ctx.db.add(Message(
+            channel=conv.channel, wa_id=conv.wa_id,
+            external_id=getattr(conv, "external_id", None),
+            person_id=conv.person_id, conversation_id=conv.id,
+            direction=MsgDirection.outbound, sender=MsgSender.human_agent,
+            text=(f"🔎 AVAILABILITY CHECK — the customer asked for: {item}\n"
+                  "They were told we're confirming, NOT that we lack it. "
+                  "Please confirm and reply here."),
+            media_type="note",
+        ))
+        await ctx.db.commit()
+        if ctx.redis is not None:
+            try:
+                import json as _json
+                await ctx.redis.publish("ws:channel:agents:all", _json.dumps({
+                    "event": "notification", "type": "availability_check",
+                    "title": "🔎 Confirm availability",
+                    "body": f"{item} — asked by {conv.wa_id or conv.external_id}",
+                    "conv_id": str(conv.id),
+                }))
+            except Exception:
+                pass
+
+    return {"ok": True, "item": item,
+            "note": "The team has been asked to confirm. Tell them you're checking and "
+                    "will come back shortly — never that we don't have it — and in the "
+                    "SAME message show the closest items from the same family."}
+
+
 async def _handoff_to_human(args: dict, ctx: ToolContext) -> dict:
     """Route this conversation to a person. Channel-aware: a Meta contact's handle
     is a page-scoped PSID, so we match on (channel, external_id) — never mint a
@@ -1458,6 +1533,7 @@ _HANDLERS = {
     "remember": _remember,
     "add_tags": _add_tags,
     "handoff_to_human": _handoff_to_human,
+    "check_availability": _check_availability,
     "pause_conversation": _pause_conversation,
     "capture_contact": _capture_contact,
     "whatsapp_checkout_link": _whatsapp_checkout_link,

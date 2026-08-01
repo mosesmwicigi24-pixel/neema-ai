@@ -64,3 +64,78 @@ def test_prompt_forbids_stock_talk():
         assert "STOCK IS NEVER A CUSTOMER TOPIC" in p
         assert "quote how many remain" in p              # no counts, ever
         assert "sourced before delivery" in p            # team flag, not customer news
+
+
+# ── Never speak the absence (owner rule, 2026-07-31) ─────────────────────────
+# Live miss: "We don't have a metal jug/flagon in stock right now, but we can
+# source or make one" — the "but" doesn't rescue it; the customer hears no.
+
+
+def test_prompt_forbids_the_hidden_but():
+    p = " ".join(build_system_prompt(customer_name="Joyce", currency="KES").split())
+    assert "NEVER SPEAK THE ABSENCE" in p
+    assert "is the SAME mistake" in p               # the "but" loophole, named
+    assert "check_availability" in p
+    # And the upsell that must ride along in the same reply.
+    assert "closest companions" in p and "communion table" in p
+    # handoff is explicitly NOT the tool for a stock question.
+    assert "never for a stock question" in p
+
+
+def test_check_availability_records_demand_without_muting_neema(monkeypatch):
+    """handoff_to_human flips the thread to human and silences her — an
+    availability question must not."""
+    from types import SimpleNamespace
+    from app.models.conversation import InterceptMode
+
+    conv = SimpleNamespace(id="c1", channel="whatsapp", wa_id="254700", person_id=None,
+                           external_id="254700", intercept_mode=InterceptMode.ai)
+    added, recorded = [], {}
+
+    class _Res:
+        def scalars(self): return self
+        def first(self): return conv
+
+    class _DB:
+        async def execute(self, *a, **k): return _Res()
+        def add(self, row): added.append(row)
+        async def commit(self): ...
+
+    async def fake_record(db, q, **kw):
+        recorded.update(query=q, kind=kw.get("kind"))
+        return True
+    monkeypatch.setattr("app.services.demand.record", fake_record)
+
+    ctx = ToolContext(db=_DB(), redis=None, wa_id="254700", currency="KES")
+    out = asyncio.run(tools._check_availability({"item": "metal jug"}, ctx))
+
+    assert out["ok"] is True
+    assert recorded["kind"] == "availability_check"
+    assert conv.intercept_mode == InterceptMode.ai      # still hers to answer
+    assert any(getattr(r, "media_type", "") == "note" for r in added)
+    assert "never that we don't have it" in out["note"]
+
+
+def test_check_availability_needs_an_item():
+    ctx = ToolContext(db=None, redis=None, wa_id="254700", currency="KES")
+    assert "error" in asyncio.run(tools._check_availability({"item": "  "}, ctx))
+
+
+def test_check_availability_is_offered_on_messenger():
+    from app.agent.runtime import MESSENGER_TOOLS
+    assert any(t["name"] == "check_availability" for t in MESSENGER_TOOLS)
+
+
+def test_every_note_writer_uses_a_real_sender():
+    """MsgSender has no `agent` member — three services used it and, being
+    best-effort, failed silently: the copilot briefing, the cross-channel
+    handoff note and the hub-event escalation note never wrote a row."""
+    import inspect
+    from app.models.message import MsgSender
+    from app.services import copilot, identity, hub_events
+    from app.agent import tools as _t
+
+    assert not hasattr(MsgSender, "agent")
+    assert MsgSender.human_agent.value == "human_agent"
+    for mod in (copilot, identity, hub_events, _t):
+        assert "MsgSender.agent," not in inspect.getsource(mod), mod.__name__

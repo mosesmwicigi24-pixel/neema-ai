@@ -146,4 +146,5 @@ def test_report_ranks_by_distinct_people_not_raw_hits():
 
 
 def test_kinds_are_the_three_we_capture():
-    assert set(demand.KINDS) == {"no_match", "out_of_catalogue", "sourcing_gap"}
+    assert set(demand.KINDS) == {"no_match", "out_of_catalogue", "sourcing_gap",
+                                 "availability_check"}
