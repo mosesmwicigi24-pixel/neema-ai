@@ -232,11 +232,15 @@ TOOLS: list[dict] = [
     },
     {
         "name": "whatsapp_checkout_link",
-        "description": "Give a Messenger/Instagram customer a ONE-TAP WhatsApp link to finish "
-                       "their order — checkout and payment happen on WhatsApp. Use this the "
-                       "moment they show buying intent ('how do I pay', 'I'll take it', a clear "
-                       "yes). Pass a SHORT product summary (a few words, never the full order "
-                       "breakdown); share the returned tiny link exactly as given.",
+        "description": "LAST RESORT ONLY — a one-tap WhatsApp link for a customer you cannot "
+                       "serve where they already are. Buying intent is NOT a reason to call "
+                       "this: 'I'll take it' / 'how do I pay' means CLOSE THE SALE HERE "
+                       "(capture_contact for their number, then create_order). Call this ONLY "
+                       "when they decline to share a phone number, they ask to move to "
+                       "WhatsApp themselves, or the order genuinely cannot be placed in this "
+                       "chat. Never use it to move a willing buyer — sending a ready customer "
+                       "away loses the sale. Pass a SHORT product summary (a few words, never "
+                       "the full order breakdown); share the returned tiny link exactly as given.",
         "input_schema": {
             "type": "object",
             "properties": {"product": {"type": "string",

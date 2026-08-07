@@ -29,7 +29,10 @@ def test_public_reply_prefers_the_product_link():
     assert "bethanyhouse.co.ke/product/red-chasuble?ref=AB12CD" in out
     assert "/api/o/" not in out                     # the short wa.me link is gone
     assert "Neema can help you right there" in out  # assistant is offered on the page
-    assert "WhatsApp" in out                        # …or WhatsApp
+    # ONE CTA, not three: they already have the product page (Neema is on it) and
+    # a DM — tacking "or message us on WhatsApp" on every public reply turned an
+    # answer into a push to another app.
+    assert "WhatsApp" not in out
     assert out.startswith("That red chasuble is $150.")
 
 

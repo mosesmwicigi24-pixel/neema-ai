@@ -132,6 +132,11 @@ def _meta_addendum(currency: str = "USD") -> str:
         "links their Messenger and WhatsApp into one customer. Frame it as "
         "staying in touch, never as sending them away. Without it we cannot place "
         "the order.\n"
+        "- That number request IS your one natural WhatsApp invitation (see THE "
+        "WHATSAPP INVITATION above) — you may add, lightly and once, that we're on "
+        "WhatsApp too if that's easier for them. Then keep selling HERE regardless "
+        "of whether they take it up. Never repeat the invitation, and never let it "
+        "replace the next step of the order.\n"
         "- Then CLOSE IT HERE: ask if they're ready to pay; on their yes call "
         "`create_order` — it registers the order and returns the order number. How "
         "they PAY follows the PAYMENT rule above for THEIR country, right in this "
@@ -146,6 +151,37 @@ def _meta_addendum(currency: str = "USD") -> str:
         "and share the link it returns EXACTLY as given — never hand-type a wa.me "
         "link or number. That is a fallback, not the plan.\n"
         "- Keep replies short, precise, and friendly; you are the same Bethany House assistant."
+    )
+
+
+# Session keys minted by the storefront chat endpoint (routers/web_chat.py:
+# "web_" + sha1). Not a phone — this is how a website visitor is recognised.
+WEB_KEY_PREFIX = "web_"
+
+
+def _web_addendum() -> str:
+    """System addendum for a visitor chatting on the bethanyhouse.co.ke storefront.
+
+    They are already standing in the shop: the products, the prices and the order
+    are all right there. Pushing them to WhatsApp from here is friction, not
+    service — so the whole sale happens on the site, and WhatsApp is offered only
+    the way THE WHATSAPP INVITATION describes: once, in passing, as an extra."""
+    return (
+        "\n\n## This conversation is on the Bethany House WEBSITE (not WhatsApp)\n"
+        "- They are already on our storefront, where they can see the products and "
+        "order. Serve them fully HERE: answer from the catalogue, guide the choice, "
+        "and take the order in this chat, exactly as you would on WhatsApp.\n"
+        "- Do NOT send them to WhatsApp to buy. Never write a wa.me link or 'message "
+        "us on WhatsApp' as the way to order — that sends a customer who is already "
+        "in the shop out of it.\n"
+        "- Ask for their phone number naturally when the items are settled (for the "
+        "order confirmation and delivery) and save it with capture_contact. That is "
+        "your ONE natural WhatsApp invitation — mention we're on WhatsApp too only "
+        "if it's genuinely easier for them, once, and then carry on selling here "
+        "whatever they choose.\n"
+        "- If they ASK for WhatsApp, or want a person, give our number warmly (see "
+        "OUR OFFICIAL CONTACTS) — that's serving them, not redirecting them.\n"
+        "- Write plain, warm sentences — no markdown headings, no asterisks."
     )
 
 
@@ -366,6 +402,9 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     skips phone/hub-bound context, uses a read-only catalogue tool set, and is
     told to route checkout to WhatsApp — one brain, one KES catalogue."""
     is_meta = channel in META_CHANNELS
+    # Website storefront visitor (web_chat mints a "web_<sha1>" session key rather
+    # than a phone). They're already on the site that sells — see _web_addendum.
+    is_web = not is_meta and str(wa_id or "").startswith(WEB_KEY_PREFIX)
     key = external_id if is_meta else wa_id
 
     # Currency display gate: Kenya → KES; everyone else → USD (= KES /
@@ -404,6 +443,8 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     )
     if is_meta:
         system += _public_comment_addendum(currency) if public_comment else _meta_addendum(currency)
+    elif is_web:
+        system += _web_addendum()
 
     # 40 messages of context (was 20): re-asking an answered question is the
     # most robotic failure there is, and it usually happened because the answer
@@ -551,6 +592,12 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         base = PUBLIC_COMMENT_TOOLS       # read-only: just enough to quote a real price
     elif is_meta:
         base = MESSENGER_TOOLS
+    elif is_web:
+        # The visitor is ALREADY on our storefront, where the whole order can be
+        # taken. Handing them a wa.me link here is pure friction — it sends a
+        # ready buyer to another app — so the WhatsApp-link tool is off the table
+        # on the website; her one natural invitation is the phone ask instead.
+        base = [t for t in TOOLS if t["name"] != "whatsapp_checkout_link"]
     else:
         base = TOOLS
     tools = base if settings.tier2_memory else [t for t in base if t["name"] != "remember"]
@@ -960,8 +1007,10 @@ def _comment_public_reply(answer: str, dm_sent: bool, link: str, name_tag: str, 
     link remains the fallback for when we couldn't identify the product AND the DM
     didn't land, so a real buyer is never stranded."""
     if answer and product_link:
-        tail = ("Order here 👉 " + product_link +
-                "\nNeema can help you right there — or message us on WhatsApp 💬")
+        # One CTA, not three. They already have the product page (where Neema is
+        # on hand) and a DM — adding "or message us on WhatsApp" made every public
+        # reply a push to another app instead of an answer.
+        tail = "Order here 👉 " + product_link + "\nNeema can help you right there 💬"
         return f"{answer}\n{tail}"
     if answer and dm_sent:
         return f"{answer}\n{_pick(_DM_NUDGE_POOL, seed)}"
