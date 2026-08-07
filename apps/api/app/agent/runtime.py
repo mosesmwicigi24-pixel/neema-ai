@@ -76,6 +76,19 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "- ANSWER THE QUESTION THEY ACTUALLY ASKED. If it isn't about price — where we "
         "are, delivery, opening hours, whether we ship to their country — answer THAT "
         "first, briefly, and only add a price if it's relevant.\n"
+        "- READ THE MOOD BEFORE YOU SELL. This is a PUBLIC square: everyone reading "
+        "judges us by how we treat one person. If the comment carries displeasure, a "
+        "correction, doubt, or a grievance — even three words like 'this is wrong' — do "
+        "NOT quote a price and do NOT pitch. Reply with one short, humble, unemotional "
+        "line that takes them seriously and offers to make it right ('Thank you for "
+        "telling us — may we look into this with you?'). Never argue, never defend, "
+        "never use a cheerful emoji on a complaint.\n"
+        "- If the comment is grief, condolence, illness or a prayer request, respond "
+        "with warmth alone — a brief blessing. Sell NOTHING. Not every comment under a "
+        "post is a customer at a till.\n"
+        "- If you genuinely cannot tell what they mean, say nothing salesy: thank them "
+        "and invite them to tell you more. A pitch aimed at a misread comment is worse "
+        "than a plain thank-you.\n"
         "- Reply in the SAME language the comment is written in (French → French, "
         "Swahili → Swahili, etc.). Never answer a French or Swahili comment in English.\n"
         "- Recognise the product from the POST IMAGE (you can see it) and find it in "
@@ -863,6 +876,36 @@ _PUBLIC_EMPATHY = (
 )
 _INTENTS = ("high", "low", "negative", "spam")
 
+# Dissatisfaction is often three words long ("this is wrong"), and a light model
+# reading a clergy-store comment biased toward "buying interest" has labelled
+# exactly that as `high` — which answered a complaint with a sales pitch in
+# public. Displeasure is the one label we cannot afford to get wrong, so it gets
+# a deterministic guard AHEAD of the model: cheap, and it also covers the paths
+# where the model errors or returns something unparseable (both default to
+# `high`). Precision over recall — these read as complaints in a shop context,
+# not as questions.
+_NEGATIVE_RE = re.compile(
+    r"(?:^|\b)("
+    r"this\s+is\s+(?:wrong|not\s+right|false|misleading)|"
+    r"(?:that|it)['’]?s\s+(?:wrong|false|a\s+lie)|"
+    r"not\s+(?:true|correct|right)|incorrect|misleading|"
+    r"wrong\s+(?:information|info|price|colour|color|item|order)|"
+    r"poor\s+(?:quality|service)|bad\s+(?:quality|service)|"
+    r"never\s+(?:replied|delivered|received|answered)|"
+    r"still\s+(?:waiting|haven'?t)|no\s+one\s+(?:replied|answered)|"
+    r"scam|fraud|cheat(?:ed|ing)?|con\s+men|thieves|"
+    r"disappoint(?:ed|ing)|refund|"
+    r"you\s+(?:people\s+)?(?:lied|are\s+lying)|shame\s+on\s+you"
+    r")(?:$|\b)",
+    re.IGNORECASE,
+)
+
+
+def looks_negative(text: str) -> bool:
+    """True when a comment plainly expresses displeasure, a correction, or a
+    grievance. Deterministic first pass for `classify_comment_intent`."""
+    return bool(_NEGATIVE_RE.search((text or "").strip()))
+
 
 async def classify_comment_intent(text: str) -> str:
     """Label a public comment so we react appropriately. Cheap light-model call.
@@ -876,13 +919,21 @@ async def classify_comment_intent(text: str) -> str:
     t = (text or "").strip()
     if not t:
         return "low"
+    # Plain displeasure never goes to the model — and never becomes a sales pitch.
+    if looks_negative(t):
+        return "negative"
     prompt = (
         "Classify this public comment on a Christian clergy/communion store's post "
         "into ONE word:\n"
         "- high: buying interest OR any genuine question — price, availability, sizes, "
         "how to order, where you are located, delivery, opening hours, 'I want this'\n"
         "- low: praise, emoji, tagging a friend, 'amen', generic positivity, no question\n"
-        "- negative: a complaint, anger, an unresolved order, or criticism\n"
+        "- negative: ANY dissatisfaction, correction, doubt or grievance — a complaint, "
+        "anger, an unresolved order, criticism of us or of the post, or a claim that "
+        "something is wrong/untrue. Short ones count: 'this is wrong', 'not true', "
+        "'poor quality', 'still waiting', 'you never replied'. If a comment could be "
+        "read as either a question OR displeasure, answer negative — a pitch sent to "
+        "an unhappy person in public is far costlier than a careful reply.\n"
         "- spam: ONLY bots, ads, promotional links, or abuse\n"
         "Comments come in many languages (French, Swahili, Sheng, Chinese, Dutch…). "
         "A comment you don't understand is NOT spam: if it asks anything, answer "
@@ -982,6 +1033,16 @@ _DM_NUDGE_POOL = [
     "Replied in your inbox — let's sort it out there 💛",
     "Sent you a DM so we can get you sorted 💬",
 ]
+# Said when we could not compose a real answer (over the per-post cap, or the
+# agent turn failed) AND we could not identify a product. It must be safe to send
+# to ANYONE — a buyer, a critic, someone grieving — so it thanks, opens a door,
+# and sells nothing at all.
+_NEUTRAL_ACK_POOL = [
+    "Thank you for reaching out{name} 🙏 Tell us a little more and we'll gladly help 💛",
+    "We appreciate you{name} 🙏 Send us a message and we'll help however we can 💛",
+    "Thank you{name} 🙏 We're here — let us know what you need and we'll assist 💛",
+    "Asante{name} 🙏 We'd be glad to help — just tell us a bit more 💛",
+]
 # The line that continues the sale INSIDE the DM the comment opens.
 _DM_CONTINUE_POOL = [
     "Reply here and I'll help you get yours — we'll sort out colour, size and delivery together. 💛",
@@ -1016,7 +1077,14 @@ def _comment_public_reply(answer: str, dm_sent: bool, link: str, name_tag: str, 
         return f"{answer}\n{_pick(_DM_NUDGE_POOL, seed)}"
     if answer:
         return f"{answer}\nOrder here 👉 {link}" if link else answer
-    return _pick(_WA_INVITE_POOL, seed).replace("{name}", name_tag)
+    # No answer — we're over the per-post cap, or the agent turn failed. We do NOT
+    # know what this person said, so we do NOT sell to them: pitching blind is how
+    # "this is wrong" was answered with "Continue on WhatsApp to get yours". A
+    # warm, content-free acknowledgement is always safe; the tap-to-order link is
+    # added only when we DID identify what they're asking about.
+    if link:
+        return _pick(_WA_INVITE_POOL, seed).replace("{name}", name_tag)
+    return _pick(_NEUTRAL_ACK_POOL, seed).replace("{name}", name_tag)
 
 
 async def _storefront_product_link(redis, channel: str, ext: str, product: dict) -> str:
