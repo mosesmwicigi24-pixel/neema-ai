@@ -207,12 +207,45 @@ TOOLS: list[dict] = [
     },
     {
         "name": "handoff_to_human",
-        "description": "Escalate to a human agent when the customer asks for one, is upset, or "
-                       "needs something you cannot do (refunds, complaints, bespoke requests).",
+        "description": "Escalate to a human agent when the customer explicitly asks for a "
+                       "person, or needs a decision only a human can make (a refund, a "
+                       "discount, a bespoke commission). For a COMPLAINT use raise_complaint "
+                       "instead — that keeps you in the conversation while the team is "
+                       "brought in, so the customer is never left waiting in silence.",
         "input_schema": {
             "type": "object",
             "properties": {"reason": {"type": "string"}},
             "required": ["reason"],
+        },
+    },
+    {
+        "name": "raise_complaint",
+        "description": "Put a complaint in front of the team as a COMPLETE CASE, after you "
+                       "have acknowledged it and looked into it. Use this for any "
+                       "dissatisfaction — a late or missing order, a wrong or damaged item, "
+                       "being charged incorrectly, nobody replying, or a customer telling us "
+                       "something is wrong. Call it ONLY after you have checked what you can "
+                       "(check_order_status, the catalogue) so the team inherits your "
+                       "findings, not just 'customer is upset'. A colleague always follows up "
+                       "and has the final word — but you STAY in the conversation and keep "
+                       "answering factual questions until they do. Never promise a refund, a "
+                       "discount, a replacement or a specific resolution: say a colleague is "
+                       "picking it up and, when you can, by when.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "issue": {"type": "string",
+                          "description": "what the customer says went wrong, in their terms"},
+                "findings": {"type": "string",
+                             "description": "what YOU checked and found (order status, dates, "
+                                            "the catalogue) — the facts the colleague needs"},
+                "wanted": {"type": "string",
+                           "description": "what the customer is asking for (refund, replacement, "
+                                          "delivery, an explanation) — say 'unclear' if unstated"},
+                "severity": {"type": "string", "enum": ["low", "normal", "high"],
+                             "description": "high = money lost, an event/date at risk, or public anger"},
+            },
+            "required": ["issue"],
         },
     },
     {
@@ -1082,6 +1115,72 @@ async def _handoff_to_human(args: dict, ctx: ToolContext) -> dict:
     return {"ok": True, "reason": args.get("reason")}
 
 
+async def _raise_complaint(args: dict, ctx: ToolContext) -> dict:
+    """File a complaint as a complete case for the team — WITHOUT muting Neema.
+
+    This is deliberately not `handoff_to_human`. That sets intercept_mode=human,
+    which stops the agent replying at all AND drops the thread out of the
+    missed-reply sweeper (it only picks up intercept_mode=ai) — so a complaint at
+    11pm got one apology and then silence until someone opened the dashboard. The
+    angriest customer received the least service.
+
+    Here the conversation stays in AI mode: the team is flagged in the Activity
+    log with Neema's findings, a colleague takes it over and has the final word,
+    and meanwhile the customer still gets factual answers instead of nothing."""
+    from sqlalchemy import or_
+    from app.models.conversation import Conversation
+    from app.models.intercept import Intercept, InterceptAction
+
+    issue = (args.get("issue") or "").strip()
+    if not issue:
+        return {"error": "issue is required — describe what the customer says went wrong"}
+    findings = (args.get("findings") or "").strip()
+    wanted = (args.get("wanted") or "").strip()
+    severity = (args.get("severity") or "normal").strip().lower()
+    if severity not in ("low", "normal", "high"):
+        severity = "normal"
+
+    lines = [f"COMPLAINT ({severity.upper()}) — a colleague must follow up and close this.",
+             f"• What the customer says: {issue}"]
+    if findings:
+        lines.append(f"• What Neema checked/found: {findings}")
+    if wanted:
+        lines.append(f"• What they're asking for: {wanted}")
+    lines.append("• Neema has NOT promised any refund, discount or replacement, and is "
+                 "still answering factual questions in the thread until you take over.")
+    note = "\n".join(lines)
+
+    conv = (await ctx.db.execute(select(Conversation).where(
+        Conversation.channel == ctx.channel,
+        or_(Conversation.external_id == ctx.wa_id, Conversation.wa_id == ctx.wa_id),
+    ))).scalars().first()
+    if conv is None:
+        _log.warning("raise_complaint: no %s conversation for %s", ctx.channel, ctx.wa_id)
+        return {"ok": False, "logged": False,
+                "next_step": "Tell the customer plainly that a colleague will follow up, "
+                             "and keep helping with anything factual you can answer."}
+
+    ctx.db.add(Intercept(conversation_id=conv.id, action=InterceptAction.flag, note=note[:2000]))
+    # Deliberately NOT conv.intercept_mode = human — see the docstring.
+    await ctx.db.commit()
+    _log.info("complaint raised on %s/%s (severity=%s)", ctx.channel, ctx.wa_id, severity)
+    return {
+        "ok": True,
+        "logged": True,
+        "severity": severity,
+        "you_may": "explain what happened, give real order status, correct wrong information, "
+                   "re-send a payment link, and say a colleague is picking it up (and by when "
+                   "if you know).",
+        "you_may_not": "promise or initiate a refund, offer a discount, commit to a remake or "
+                       "reshipment, guarantee a delivery date you cannot verify, or accept "
+                       "blame in a way that binds the business.",
+        "next_step": "Tell the customer, warmly and without excuses, what you found and that a "
+                     "colleague is now on it. Then STAY with them: keep answering factual "
+                     "questions. Do NOT sell anything in this conversation unless they "
+                     "themselves move on to buying.",
+    }
+
+
 async def _resolve_cart_items(product: str, ctx: ToolContext) -> list[dict]:
     """The product the customer agreed to, as a REAL cart line (hub product id,
     variant SKU, hub price) — never free text. Empty when it can't be matched."""
@@ -1537,6 +1636,7 @@ _HANDLERS = {
     "remember": _remember,
     "add_tags": _add_tags,
     "handoff_to_human": _handoff_to_human,
+    "raise_complaint": _raise_complaint,
     "check_availability": _check_availability,
     "pause_conversation": _pause_conversation,
     "capture_contact": _capture_contact,

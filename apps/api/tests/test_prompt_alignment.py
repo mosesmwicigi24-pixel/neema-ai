@@ -86,8 +86,8 @@ def test_mood_rules_cover_the_states_that_change_the_move():
 def test_a_complaint_stops_the_selling():
     p = _known()
     assert "STOP SELLING ENTIRELY" in p
-    assert "Never answer a complaint with" in p
-    assert "handoff_to_human" in p
+    assert "a product, a price, or an emoji" in p
+    assert "WHEN SOMETHING HAS GONE WRONG" in p
 
 
 def test_price_sensitivity_never_invents_a_discount():

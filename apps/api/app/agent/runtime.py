@@ -36,6 +36,7 @@ META_CHANNELS = ("messenger", "facebook", "instagram")
 # catalogue, one source of truth. whatsapp_checkout_link stays as the FALLBACK
 # for a buyer who won't share a number.
 _META_TOOL_NAMES = {"search_catalog", "get_cart", "update_cart", "create_order",
+                    "raise_complaint",
                     "check_order_status", "remember", "handoff_to_human",
                     "whatsapp_checkout_link", "share_catalog", "send_product_cards",
                     "capture_contact", "pause_conversation", "save_measurements",
@@ -966,17 +967,32 @@ def plan_comment_actions(intent: str) -> dict:
     return {"public": True, "style": "answer", "dm": True, "human": False}   # high
 
 
-async def _route_comment_to_human(channel: str, external_id: str) -> None:
+async def _route_comment_to_human(channel: str, external_id: str,
+                                  comment: str = "") -> None:
+    """Flag an unhappy commenter for the team — WITHOUT muting Neema.
+
+    This used to set intercept_mode=human, which stopped the agent replying at
+    all and also dropped the thread out of the missed-reply sweeper (it only
+    picks up intercept_mode=ai). So a public complaint got one apology and then
+    silence until someone opened the dashboard. The team is still brought in and
+    still has the final word — they just aren't the customer's only hope of a
+    reply in the meantime."""
     from sqlalchemy import select
     from app.database import AsyncSessionLocal
-    from app.models.conversation import Conversation, InterceptMode
+    from app.models.conversation import Conversation
+    from app.models.intercept import Intercept, InterceptAction
     async with AsyncSessionLocal() as db:
         conv = (await db.execute(select(Conversation).where(
             Conversation.channel == channel,
             Conversation.external_id == external_id))).scalar_one_or_none()
-        if conv is not None:
-            conv.intercept_mode = InterceptMode.human
-            await db.commit()
+        if conv is None:
+            return
+        note = ("COMPLAINT (public comment) — a colleague must follow up and close this."
+                + (f'\n• Their comment: "{" ".join(comment.split())[:300]}"' if comment else "")
+                + "\n• Answered publicly with an apology only — no price, no pitch."
+                + "\n• Neema stays available in the thread for factual questions.")
+        db.add(Intercept(conversation_id=conv.id, action=InterceptAction.flag, note=note))
+        await db.commit()
 
 
 async def _note_silent_decision(channel: str, ext: str, cid: str, intent: str) -> None:
@@ -1241,7 +1257,7 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
                 _log.warning("saving light reply failed for %s: %s", cid, exc)
         if plan["human"]:
             try:
-                await _route_comment_to_human(channel, ext)
+                await _route_comment_to_human(channel, ext, comment_text)
             except Exception as exc:
                 _log.warning("route-to-human failed for comment %s: %s", cid, exc)
         return
