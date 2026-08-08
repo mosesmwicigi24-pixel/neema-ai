@@ -394,6 +394,25 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "schedule_check_in",
+        "description": "Book a future check-in the customer agreed to — the moment they "
+                       "name a time ('in two weeks', 'end month') for when they'll next "
+                       "need supplies (divai, wafers, cups…) or want to continue. The "
+                       "system messages them then, automatically. Call it IN THE SAME "
+                       "TURN they name the time; then tell them plainly you'll check in "
+                       "then. A named time is a promise we keep, never a pleasantry.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "days_from_now": {"type": "integer",
+                                  "description": "When to check in, in days (e.g. 'two weeks' = 14, 'end month' = 30)."},
+                "reason": {"type": "string",
+                           "description": "What to check on, in plain words — e.g. \"they expect their divai and communion cups to run out around then; offer the next delivery\"."},
+            },
+            "required": ["days_from_now", "reason"],
+        },
+    },
+    {
         "name": "prepare_quotation",
         "description": "Prepare a formal written quotation from the current cart — for a "
                        "parish, committee or organisation that needs it in writing before "
@@ -1672,6 +1691,39 @@ async def _pause_conversation(args: dict, ctx: ToolContext) -> dict:
     return {"ok": False}
 
 
+async def _schedule_check_in(args: dict, ctx: ToolContext) -> dict:
+    """Plan a replenishment check-in on the initiative scheduler. The customer
+    named a time; this makes it a kept promise — process_due sends the message
+    (utility template when the 24h window has closed by then, as it will have)."""
+    from datetime import timedelta
+    try:
+        days = int(args.get("days_from_now") or 0)
+    except (TypeError, ValueError):
+        return {"error": "days_from_now must be a number of days"}
+    days = max(1, min(days, 90))
+    reason = (args.get("reason") or "").strip()
+    if not reason:
+        return {"error": "reason is required — what should the check-in be about?"}
+    if ctx.read_only:
+        return {"ok": True, "preview": True}
+    from app.models.agent_action import AgentAction
+    from app.models.conversation import Conversation
+    channel = _channel_label(ctx)
+    where = (Conversation.wa_id == ctx.wa_id) if ctx.channel == "whatsapp" else (
+        (Conversation.channel == ctx.channel) & (Conversation.external_id == ctx.wa_id))
+    conv = (await ctx.db.execute(select(Conversation).where(where))).scalar_one_or_none()
+    if conv is None:
+        return {"error": "no conversation found to attach the check-in to"}
+    due = datetime.now(timezone.utc) + timedelta(days=days)
+    due = due.replace(hour=7, minute=0, second=0, microsecond=0)   # 10:00 Nairobi
+    ctx.db.add(AgentAction(deal_id=None, conversation_id=conv.id, due_at=due,
+                           kind="replenishment",
+                           reason=f"Customer-agreed check-in ({channel}): {reason[:400]}"))
+    await ctx.db.commit()
+    return {"ok": True, "check_in_on": due.strftime("%d %b %Y"),
+            "note": "booked — now tell them plainly you'll check in then"}
+
+
 async def _prepare_quotation(args: dict, ctx: ToolContext) -> dict:
     """A formal written quotation from the cart — what a parish committee needs
     in hand to approve the purchase. Composed in code so the figures can't
@@ -1763,4 +1815,5 @@ _HANDLERS = {
     "save_parish": _save_parish,
     "prepare_quotation": _prepare_quotation,
     "send_measurement_guide": _send_measurement_guide,
+    "schedule_check_in": _schedule_check_in,
 }

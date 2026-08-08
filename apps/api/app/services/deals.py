@@ -35,12 +35,16 @@ PROMISE_FOLLOW_UP_HOURS = 3
 # needs BOTH a commitment verb and a time hint, or we'd nag over pleasantries.
 _CUSTOMER_PROMISE_RE = re.compile(
     r"\b(?:i(?:'ll| will)|we(?:'ll| will)|nita|tuta)\s?"
-    r"(?:confirm|get back|let you know|revert|respond|reply|check|decide|send|pay)",
+    r"(?:confirm|get back|let you know|revert|respond|reply|check|decide|send|pay"
+    r"|need|order|buy|take)",
     re.IGNORECASE)
 _TIME_HINT_RE = re.compile(
     r"\b(tomorrow|kesho|tonight|this evening|later today|"
     r"after (?:the |our )?(?:meeting|service|church|committee)|"
-    r"next week|weekend|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+    r"next week|weekend|monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
+    # Replenishment timelines ("we'll need them in two weeks", "wiki mbili")
+    r"in (?:a|one|two|three|1|2|3) weeks?|after (?:a|one|two|three|1|2|3) weeks?|"
+    r"wiki (?:moja|mbili|tatu)|in (?:a|one|1) month|next month|end (?:of )?month|month end)\b",
     re.IGNORECASE)
 _WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday",
              "saturday", "sunday")
@@ -64,8 +68,16 @@ def detect_customer_promise(text: str) -> tuple[datetime, str] | None:
     def _at(base, hour):
         return base.replace(hour=hour, minute=0, second=0, microsecond=0)
 
+    _wk = {"a": 1, "one": 1, "1": 1, "moja": 1, "two": 2, "2": 2, "mbili": 2,
+           "three": 3, "3": 3, "tatu": 3}
+    weeks = re.match(r"(?:in|after|wiki)\s+(\w+)\s*weeks?|wiki\s+(\w+)", hint)
     if hint in ("later today", "tonight", "this evening"):
         due_nbo = _at(now_nbo, 18) if now_nbo.hour < 18 else now_nbo + timedelta(hours=3)
+    elif weeks and _wk.get(weeks.group(1) or weeks.group(2)):
+        due_nbo = _at(now_nbo + timedelta(days=7 * _wk[weeks.group(1) or weeks.group(2)]), 10)
+    elif hint in ("in a month", "in one month", "in 1 month", "next month",
+                  "end month", "month end", "end of month"):
+        due_nbo = _at(now_nbo + timedelta(days=30), 10)
     elif hint == "next week":
         due_nbo = _at(now_nbo + timedelta(days=7), 10)
     elif hint == "weekend":

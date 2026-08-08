@@ -202,8 +202,8 @@ def test_fit_check_rides_the_utility_template(monkeypatch):
     monkeypatch.setattr("app.services.n8n_bridge.send_wa_template", _fake_tpl)
     monkeypatch.setattr("app.services.n8n_bridge.save_outbound_message", _fake_save)
     action = types.SimpleNamespace(reason="Order BH-2417 was delivered 6 days ago — ask...",
-                                   status="planned", draft=None)
-    ok = asyncio.run(actions._send_fit_check_template(_DB(), None, _conv(), action))
+                                   status="planned", draft=None, kind="fit_check")
+    ok = asyncio.run(actions._send_followup_template(_DB(), None, _conv(), action))
     assert ok and action.status == "sent"
     assert tpl["name"] == "order_update"
     assert tpl["params"][0] == "Pastor"            # first name into {{1}}
@@ -215,7 +215,8 @@ def test_scheduler_routes_windowless_fit_checks_to_the_template():
     import inspect
     from app.services import actions
     src = inspect.getsource(actions.process_due)
-    assert "fit_check" in src and "_send_fit_check_template" in src
+    assert "fit_check" in src and "_send_followup_template" in src
+    assert "replenishment" in src          # customer-agreed check-ins ride it too
 
 
 # ── B4: "how long will it take?" gets a real answer ──────────────────────────

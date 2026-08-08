@@ -79,31 +79,37 @@ async def needs_approval(db, deal, conv, in_window: bool) -> str | None:
     return None
 
 
-async def _send_fit_check_template(db, redis, conv, action) -> bool:
-    """Send the after-delivery fit check as the approved utility template
-    (name / order / status placeholders). True when it went out."""
+async def _send_followup_template(db, redis, conv, action) -> bool:
+    """Send a due follow-up (fit check / replenishment check-in) as the
+    approved utility template (name / order / status placeholders). True when
+    it went out."""
     import re
     from app.services import n8n_bridge as svc
     try:
         m = re.search(r"[Oo]rder\s+([A-Za-z0-9-]+)", action.reason or "")
         number = m.group(1) if m else "your recent order"
         first = ((getattr(conv, "contact_name", None) or "").split(" ") or ["there"])[0] or "there"
-        phrase = ("delivered a few days ago — how is it fitting? If anything "
-                  "needs adjusting, we're glad to help")
+        if action.kind == "replenishment":
+            number = m.group(1) if m else "your supplies"
+            phrase = ("the check-in you asked for — about time for the next "
+                      "round? Reply here and we'll plan your delivery")
+        else:
+            phrase = ("delivered a few days ago — how is it fitting? If anything "
+                      "needs adjusting, we're glad to help")
         tpl = await svc.send_wa_template(conv.wa_id, settings.wa_event_template,
                                          settings.wa_event_lang,
                                          [first, number, phrase])
         await svc.save_outbound_message(
             db, redis, conv.wa_id,
-            f"[template {settings.wa_event_template}] fit check on {number}",
+            f"[template {settings.wa_event_template}] {action.kind} on {number}",
             waba_msg_id=(((tpl or {}).get("messages") or [{}])[0].get("id") or None))
         action.status = "sent"
-        action.draft = f"[template] fit check on {number}"
+        action.draft = f"[template] {action.kind} on {number}"
         await db.commit()
-        _log.info("fit check sent via template for %s", conv.wa_id)
+        _log.info("%s sent via template for %s", action.kind, conv.wa_id)
         return True
     except Exception as exc:
-        _log.warning("fit-check template send failed for %s: %s", conv.wa_id, exc)
+        _log.warning("%s template send failed for %s: %s", action.kind, conv.wa_id, exc)
         return False
 
 
@@ -226,15 +232,17 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
 
             in_window = await _within_window(db, conv)
             gate = await needs_approval(db, deal, conv, in_window)
-            # A fit-check comes due ~6 days after delivery — the WhatsApp window
-            # is closed by then almost by definition. It is a service follow-up
-            # on their own transaction, so it may ride the approved UTILITY
-            # template instead of dying in the approvals queue.
+            # Fit-checks (~6 days after delivery) and customer-agreed
+            # replenishment check-ins ("check with me in two weeks") come due
+            # long after the WhatsApp window closed. Both are service
+            # follow-ups on the customer's own transaction/request, so they
+            # ride the approved UTILITY template instead of dying in the
+            # approvals queue.
             if (gate == "outside the 24h messaging window"
-                    and action.kind == "fit_check"
+                    and action.kind in ("fit_check", "replenishment")
                     and conv.channel == "whatsapp" and settings.wa_event_template
                     and settings.agent_initiative):
-                if await _send_fit_check_template(db, redis, conv, action):
+                if await _send_followup_template(db, redis, conv, action):
                     done += 1
                     continue
             if gate is not None:

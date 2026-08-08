@@ -42,7 +42,8 @@ _META_TOOL_NAMES = {"search_catalog", "get_cart", "update_cart", "create_order",
                     "capture_contact", "pause_conversation", "save_measurements",
                     "check_availability",
                     "church_calendar", "save_parish",
-                    "prepare_quotation", "send_measurement_guide"}
+                    "prepare_quotation", "send_measurement_guide",
+                    "schedule_check_in"}
 MESSENGER_TOOLS = [t for t in TOOLS if t["name"] in _META_TOOL_NAMES]
 
 # A PUBLIC comment reply is short and read-only — it just needs the real price, so
