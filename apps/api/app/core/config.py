@@ -147,10 +147,12 @@ class Settings(BaseSettings):
     business_info: str = ""
     # Production times Neema may quote plainly ("how long does it take?" is THE
     # most-asked made-to-order question). Free text, per-category; owner-stated
-    # (2026-08-08): shirts 24 hours, cassocks 5 days. Anything not covered here
-    # she confirms with the workshop instead of inventing. Empty = always defer.
+    # (2026-08-08): shirts 24 hours, cassocks 5 days, copes 4 days — all
+    # assuming a clear workshop queue; an order ahead can shift the date, and
+    # then a staff member confirms. Anything not covered here she confirms with
+    # the workshop instead of inventing. Empty = always defer.
     production_lead_time: str = ("clerical shirts about 24 hours; "
-                                 "cassocks about 5 days")
+                                 "cassocks about 5 days; copes about 4 days")
     # Public image URL of the how-to-measure diagram (labelled chest/length/
     # sleeve...). Empty = the send_measurement_guide tool is not registered.
     measurement_guide_url: str = ""

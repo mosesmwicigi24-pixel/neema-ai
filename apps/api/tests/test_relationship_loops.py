@@ -222,12 +222,23 @@ def test_scheduler_routes_windowless_fit_checks_to_the_template():
 
 def test_lead_time_line_appears_only_when_configured(monkeypatch):
     from app.agent.prompt import build_system_prompt
-    monkeypatch.setattr(settings, "production_lead_time", "5-10 working days")
+    monkeypatch.setattr(settings, "production_lead_time",
+                        "shirts about 24 hours; cassocks about 5 days")
     p = build_system_prompt(currency="KES")
-    assert "HOW LONG DOES IT TAKE" in p and "5-10 working days" in p
-    assert "never promise an exact date" in p
+    assert "HOW LONG DOES IT TAKE" in p and "cassocks about 5 days" in p
+    assert "Never promise an exact calendar date" in p
+    # The owner's queue caveat: an order ahead can shift the date; the team
+    # confirms and she comes back to them (check_availability closes the loop).
+    assert "an order ahead of theirs adds days" in p
+    assert "staff member will confirm" in p
     monkeypatch.setattr(settings, "production_lead_time", "")
     assert "HOW LONG DOES IT TAKE" not in build_system_prompt(currency="KES")
+
+
+def test_owner_stated_times_ship_as_the_default():
+    assert "clerical shirts about 24 hours" in settings.production_lead_time
+    assert "cassocks about 5 days" in settings.production_lead_time
+    assert "copes about 4 days" in settings.production_lead_time
 
 
 # ── B5 + B6: the guide and the quotation ─────────────────────────────────────

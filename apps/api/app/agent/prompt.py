@@ -117,12 +117,15 @@ def build_system_prompt(*, country_iso: str = "", currency: str = "KES",
     lead_time = (
         "\n- HOW LONG DOES IT TAKE — production times you may quote plainly and "
         f"confidently: {_lead}. Quote the time for THEIR item, measured from "
-        "confirmed order and measurements — never promise an exact date (that's "
-        "confirmed at order). If their item isn't covered by these times, say "
-        "you'll confirm the timeline and use `check_availability` — never invent "
-        "one. For a fixed occasion (an ordination date, an event), also "
-        "`check_availability` so the workshop confirms it can land in time. "
-        "Items we have ready ship or are collected immediately."
+        "confirmed order and measurements, as the typical time. Never promise an "
+        "exact calendar date yourself: the workshop queue can shift it (an order "
+        "ahead of theirs adds days), so exact dates are confirmed by the team at "
+        "order. When they need a firm date, or it's for a fixed occasion (an "
+        "ordination, an event), say warmly that a staff member will confirm the "
+        "date and you'll come back to them — and call `check_availability` so "
+        "the workshop is actually asked. If their item isn't covered by these "
+        "times, the same: confirm, never invent. Items we have ready ship or "
+        "are collected immediately."
         if _lead else ""
     )
     # Local-currency conversion only makes sense for the USD-quoted (non-Kenyan)
