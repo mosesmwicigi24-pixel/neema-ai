@@ -89,6 +89,15 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "line that takes them seriously and offers to make it right ('Thank you for "
         "telling us — may we look into this with you?'). Never argue, never defend, "
         "never use a cheerful emoji on a complaint.\n"
+        "- A GREETING comment ('How are you', 'Habari', 'Bonjour') is a person "
+        "OPENING a conversation — never 'kind words'. Greet them warmly back, in "
+        "their language, and connect them to the post in the same breath: 'We're "
+        "very well, asante Sylvia! 🙏 Is it the Bible in the photo you'd like?' "
+        "Never answer a greeting with a canned thanks.\n"
+        "- END WITH THE PULL: after the answer, ONE short inviting question that "
+        "draws them into the conversation (which colour? how many? which country "
+        "for delivery?) — a comment that answers AND asks is what starts the "
+        "sale; the tap-to-order line is added after your text.\n"
         "- If the comment is grief, condolence, illness or a prayer request, respond "
         "with warmth alone — a brief blessing. Sell NOTHING. Not every comment under a "
         "post is a customer at a till.\n"
@@ -157,10 +166,12 @@ def _meta_addendum(currency: str = "USD") -> str:
         "staying in touch, never as sending them away. Without it we cannot place "
         "the order.\n"
         "- That number request IS your one natural WhatsApp invitation (see THE "
-        "WHATSAPP INVITATION above) — you may add, lightly and once, that we're on "
-        "WhatsApp too if that's easier for them. Then keep selling HERE regardless "
-        "of whether they take it up. Never repeat the invitation, and never let it "
-        "replace the next step of the order.\n"
+        "WHATSAPP INVITATION above) — and once they HAVE shared a phone/WhatsApp "
+        "number, DO suggest it, politely and exactly once: 'Asante — saved for "
+        "your order. If it's ever easier, we're also on WhatsApp at this same "
+        "number — but we can finish everything right here.' Then keep selling "
+        "HERE regardless of whether they take it up. Never repeat the "
+        "invitation, and never let it replace the next step of the order.\n"
         "- Then CLOSE IT HERE: ask if they're ready to pay; on their yes call "
         "`create_order` — it registers the order and returns the order number. How "
         "they PAY follows the PAYMENT rule above for THEIR country, right in this "
@@ -988,6 +999,23 @@ _NEGATIVE_RE = re.compile(
 )
 
 
+_GREETING_COMMENT_RE = re.compile(
+    r"^(hi+|hey+|hello+|habari( yako| zenu)?|niaje|mambo|sasa|jambo|shalom|"
+    r"how are you( doing| today)?|good (morning|afternoon|evening)|"
+    r"bonjour|salut|comment (allez[- ]vous|ca va|ça va)|ca va|ça va|hola|"
+    r"como estas|greetings|blessings)[\s!?.,🙏❤️😊👋]*$",
+    re.IGNORECASE,
+)
+
+
+def looks_greeting(text: str) -> bool:
+    """A comment that is a person saying hello — a conversation OPENING, never
+    'kind words'. Routed to the model (high) so it gets a real greeting back
+    and an invitation, instead of the canned praise thank-you (the Sylvia
+    miss: 'How are you' → 'your kind words mean the world to us')."""
+    return bool(_GREETING_COMMENT_RE.match((text or "").strip()))
+
+
 def looks_negative(text: str) -> bool:
     """True when a comment plainly expresses displeasure, a correction, or a
     grievance. Deterministic first pass for `classify_comment_intent`."""
@@ -1009,12 +1037,17 @@ async def classify_comment_intent(text: str) -> str:
     # Plain displeasure never goes to the model — and never becomes a sales pitch.
     if looks_negative(t):
         return "negative"
+    # A hello is a door opening, not praise — engage, never the canned thanks.
+    if looks_greeting(t):
+        return "high"
     prompt = (
         "Classify this public comment on a Christian clergy/communion store's post "
         "into ONE word:\n"
         "- high: buying interest OR any genuine question — price, availability, sizes, "
         "how to order, where you are located, delivery, opening hours, 'I want this'\n"
-        "- low: praise, emoji, tagging a friend, 'amen', generic positivity, no question\n"
+        "- low: praise, emoji, tagging a friend, 'amen', generic positivity, no question. "
+        "A GREETING ('how are you', 'habari', 'bonjour') is NOT low — it is a person "
+        "opening a conversation: answer high\n"
         "- negative: ANY dissatisfaction, correction, doubt or grievance — a complaint, "
         "anger, an unresolved order, criticism of us or of the post, or a claim that "
         "something is wrong/untrue. Short ones count: 'this is wrong', 'not true', "
