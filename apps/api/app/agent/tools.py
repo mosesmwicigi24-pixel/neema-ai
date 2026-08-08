@@ -152,7 +152,10 @@ TOOLS: list[dict] = [
     {
         "name": "check_order_status",
         "description": "Look up the live status of the customer's most recent order "
-                       "(payment + fulfilment) to answer 'where's my order?'.",
+                       "(payment + fulfilment). Call it to answer 'where's my order?', "
+                       "to VERIFY any payment claim in the SAME turn the customer says "
+                       "they've paid — never confirm payment without it — and before "
+                       "answering any complaint about an order.",
         "input_schema": {"type": "object", "properties": {}},
     },
     {

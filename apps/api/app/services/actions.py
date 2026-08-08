@@ -7,6 +7,8 @@ needs_approval and wait for the operator's one tap.
 The sensitivity gate (conservative on purpose):
   · deal total > KES 50,000
   · the conversation is human-held
+  · the thread was flagged for the team in the last 7 days (an open
+    complaint, a failed reply, a sourcing gap — never nudge into a grievance)
   · ≥2 follow-ups already sent on this deal
   · outside the 24h messaging window (a free-form send would breach policy)
 
@@ -68,6 +70,19 @@ async def needs_approval(db, deal, conv, in_window: bool) -> str | None:
         return "outside the 24h messaging window"
     if conv is not None and conv.intercept_mode == InterceptMode.human:
         return "conversation is human-held"
+    # "Never sell into displeasure" binds the scheduler exactly as it binds a
+    # live turn: a thread flagged for the team in the last 7 days (a complaint,
+    # a failed reply, a sourcing gap) gets NO automatic refill/fit-check/nudge —
+    # the action waits in the approval queue for a human's one tap instead.
+    if conv is not None and getattr(conv, "id", None) is not None:
+        from app.models.intercept import Intercept, InterceptAction
+        flagged = (await db.execute(select(sa_func.count()).select_from(Intercept).where(
+            Intercept.conversation_id == conv.id,
+            Intercept.action.in_((InterceptAction.flag, InterceptAction.escalated)),
+            Intercept.created_at >= datetime.now(timezone.utc) - timedelta(days=7),
+        ))).scalar_one()
+        if flagged:
+            return "conversation was flagged for the team in the last 7 days"
     if deal is not None and deal_total(deal) > SENSITIVE_TOTAL_KES:
         return f"deal total above KES {SENSITIVE_TOTAL_KES:,}"
     if deal is not None:
