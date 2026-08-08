@@ -726,8 +726,13 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None)
                 await scribe_update(db3, wa_id, "whatsapp", reply, inbound_text=text)
         except Exception:
             pass
-    except Exception:
+    except Exception as exc:
         _log.exception("tier2 background turn failed for %s", wa_id)
+        # Count it so the hourly self-check can say the AI has stopped replying —
+        # and why. An out-of-credit account silenced every channel for days and
+        # the only trace was this log line.
+        from app.services.agent_health import record_turn_failure
+        await record_turn_failure(redis, wa_id, exc)
 
 
 async def schedule_reply(redis, wa_id: str, text: str, dedup_id: str | None,
@@ -840,6 +845,8 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
             await escalate_to_human(channel, external_id, note)
         else:
             _log.exception("tier2 meta turn failed for %s/%s", channel, external_id)
+            from app.services.agent_health import record_turn_failure
+            await record_turn_failure(redis, external_id, exc)
         return False
 
 
