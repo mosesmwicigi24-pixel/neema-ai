@@ -9,7 +9,7 @@ import { Btn } from "@/components/ui/Btn";
 import { Modal } from "@/components/ui/Modal";
 import { TextareaField, InputField } from "@/components/ui/FormFields";
 import { Toggle } from "@/components/ui/Layout";
-import { timeAgo, formatPhone, displayName } from "@/lib/utils";
+import { timeAgo, formatPhone, displayName, countryName } from "@/lib/utils";
 import { formatWa } from "@/lib/waText";
 import { CHANNEL_CONFIG, ALL_CHANNELS } from "@/lib/channels";
 import { conversationsApi, profileApi } from "@/lib/api";
@@ -2128,6 +2128,23 @@ export function ConversationsView({
                                                     }}
                                                 >
                                                     {rowStage}
+                                                </span>
+                                            )}
+                                            {/* Country chip — the flag on the avatar
+                                                says it small; this says it by name. */}
+                                            {(conv as any).country_iso && (
+                                                <span
+                                                    className="text-[10px] font-semibold px-1.5 h-[16px] rounded border inline-flex items-center leading-none"
+                                                    title={`Country: ${countryName((conv as any).country_iso)}`}
+                                                    style={{
+                                                        backgroundColor: "#f6f3ea",
+                                                        borderColor: "#e5dfcd",
+                                                        color: "#8a7f63",
+                                                    }}
+                                                >
+                                                    <span className="truncate max-w-[96px]">
+                                                        {countryName((conv as any).country_iso)}
+                                                    </span>
                                                 </span>
                                             )}
                                             {chipConv.intercept_mode !== "ai" && (

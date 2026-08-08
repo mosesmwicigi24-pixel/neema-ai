@@ -50,6 +50,29 @@ export const fmtDate = (iso: string): string =>
 export const cn = (...classes: (string | undefined | null | false)[]): string =>
     classes.filter(Boolean).join(" ");
 
+// "KE" → "Kenya": the browser's own region-name data (Intl.DisplayNames), so
+// there is no country table to maintain. Falls back to the bare ISO code on
+// anything the runtime can't name. Built lazily once — the conversation list
+// calls this for every row on every render.
+let _regionNames: any | null | undefined;
+export function countryName(iso?: string | null): string {
+    if (!iso) return "";
+    const code = iso.trim().toUpperCase();
+    if (!/^[A-Z]{2}$/.test(code)) return code;
+    if (_regionNames === undefined) {
+        try {
+            _regionNames = new (Intl as any).DisplayNames(["en"], { type: "region" });
+        } catch {
+            _regionNames = null;
+        }
+    }
+    try {
+        return (_regionNames && _regionNames.of(code)) || code;
+    } catch {
+        return code;
+    }
+}
+
 /**
  * Formats a raw phone string (E.164, digits-only, or partial) into a
  * human-readable international format, respecting each country's convention.
