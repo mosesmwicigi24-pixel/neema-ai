@@ -106,8 +106,12 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "than a plain thank-you.\n"
         "- Reply in the SAME language the comment is written in (French → French, "
         "Swahili → Swahili, etc.). Never answer a French or Swahili comment in English.\n"
-        "- Recognise the product from the POST IMAGE (you can see it) and find it in "
-        "the catalogue with search_catalog; if they name a different item, price that.\n"
+        "- Recognise the product from the POST IMAGE or VIDEO frame (you can see "
+        "it) and its caption — read what is ACTUALLY shown, features over finish: "
+        "a shiny stackable tray with lids is the ALUMINIUM line; the Silver line "
+        "has its stand and basin. Find the identified item with search_catalog "
+        "and quote THAT item; if the frame could be either line, give both "
+        "prices rather than guessing. If they name a different item, price that.\n"
         "- Be genuinely warm and human — a brief friendly word is welcome — but "
         "CONCISE: this is a public comment, so 1–2 short lines, plain text, no "
         "markdown or asterisks.\n"
@@ -1241,6 +1245,23 @@ def _comment_public_reply(answer: str, dm_sent: bool, link: str, name_tag: str, 
     return _pick(_NEUTRAL_ACK_POOL, seed).replace("{name}", name_tag)
 
 
+def _product_matching_answer(answer: str, seen: list) -> dict:
+    """The product the reply actually NAMED — the order link must point at the
+    same item the text quoted. The Asraya miss: the reply said 'Silver
+    Communion Tray' but the link went to seen_products[0], the Silver BREAD
+    Tray. Longest name mentioned in the answer wins; falls back to the first
+    product seen (the over-cap path has no answer text at all)."""
+    a = " ".join((answer or "").lower().split())
+    best = None
+    if a:
+        for p in seen:
+            n = " ".join((p.get("name") or "").lower().split())
+            if n and n in a and (best is None or
+                                 len(n) > len((best.get("name") or "").lower())):
+                best = p
+    return best or (seen[0] if seen else {})
+
+
 async def _storefront_product_link(redis, channel: str, ext: str, product: dict) -> str:
     """A link to the product on the Bethany House storefront, carrying a handoff
     ref: `https://bethanyhouse.co.ke/product/<slug>?ref=XXXXXX`.
@@ -1458,7 +1479,8 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     product_link = ""
     if seen_products:
         try:
-            product_link = await _storefront_product_link(redis, channel, ext, seen_products[0])
+            product_link = await _storefront_product_link(
+                redis, channel, ext, _product_matching_answer(answer, seen_products))
         except Exception as exc:
             _log.warning("product link failed for %s: %s", cid, exc)
     link = (await _order_link(redis, channel, ext)

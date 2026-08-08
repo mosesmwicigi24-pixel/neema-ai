@@ -131,3 +131,45 @@ def test_price_flinch_offers_the_humbler_line_at_the_same_count():
     assert "never choose down for them" in flat
     # And CHOSEN MEANS CHOSEN sanctions exactly this one exception.
     assert "or the price makes them flinch" in flat
+
+
+# ── the Asraya miss: name what is SHOWN, and link what you NAMED ─────────────
+# She commented "Cost please" on a VIDEO of stacked aluminium trays. The reply
+# called it the "Silver Communion Tray" ($180 — it was the $70 aluminium; all
+# trays photograph shiny) and the order link pointed at a THIRD product, the
+# silver-bread-tray, because the CTA blindly took seen_products[0].
+
+def test_metal_finish_is_not_the_product_line():
+    flat = _flat()
+    assert "METAL FINISH IS NOT THE PRODUCT LINE" in flat
+    assert '"looks silver" never identifies the Silver line' in flat
+    assert "flat stackable tray with its lid and free cups" in flat
+    assert "quote both lines in one breath instead of guessing" in flat
+
+
+def test_comment_addendum_reads_features_over_finish():
+    from app.agent.runtime import _public_comment_addendum
+    a = " ".join(_public_comment_addendum("USD").split())
+    assert "read what is ACTUALLY shown, features over finish" in a
+    assert "a shiny stackable tray with lids is the ALUMINIUM line" in a
+    assert "give both prices rather than guessing" in a
+
+
+def test_order_link_points_at_the_product_the_reply_named():
+    from app.agent.runtime import _product_matching_answer
+    seen = [{"name": "Silver Bread Tray", "slug": "silver-bread-tray"},
+            {"name": "Silver Communion Tray", "slug": "silver-communion-tray"}]
+    answer = "The Silver Communion Tray is $180 — comes with lid, stand and basin."
+    assert _product_matching_answer(answer, seen)["slug"] == "silver-communion-tray"
+    # No answer text (over-cap path) → first seen, unchanged behaviour.
+    assert _product_matching_answer("", seen)["slug"] == "silver-bread-tray"
+    # Answer names nothing we saw → first seen.
+    assert _product_matching_answer("Karibu!", seen)["slug"] == "silver-bread-tray"
+    assert _product_matching_answer("x", []) == {}
+
+
+def test_comment_flow_uses_the_matching_product():
+    import inspect
+    import app.agent.runtime as runtime
+    src = inspect.getsource(runtime)
+    assert "_product_matching_answer(answer, seen_products)" in src
