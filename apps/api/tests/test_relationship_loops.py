@@ -496,5 +496,8 @@ def test_prompt_measures_from_the_hub_and_offers_ready_made_first():
     assert "`measurements_needed`" in p
     assert "never invent a list of your own" in p
     assert "READY-MADE FIRST, CUSTOM WHEN IT DIFFERS" in p
-    assert "collect one at the shop today" in p
-    assert "never a downgrade" in p
+    flat = " ".join(p.split())
+    # Audit F2: the ready check is async — the sale continues while the team
+    # looks, and same-day collection is only promised once confirmed.
+    assert "collect at the shop or have sent the same day" in flat
+    assert "never a wait and never a downgrade" in flat

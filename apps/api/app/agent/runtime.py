@@ -72,6 +72,9 @@ def _public_comment_addendum(currency: str = "USD") -> str:
     example = "'This gown is KES 13,000.'" if currency == "KES" else "'This gown is $130.'"
     return (
         "\n\n## Replying under a Facebook/Instagram comment — warm, human, helpful\n"
+        "- No greeting ritual here: a comment reply's first line is the ANSWER, "
+        "never 'Good morning' — the FIRST CONTACT greeting rules do not apply to "
+        "public comments.\n"
         f"- Lead with the answer: the item + its real price in the first line, e.g. "
         f"{example} Quote in {money} (the `price` from search_catalog is already in "
         f"{money}) — never invent it.\n"
@@ -1141,11 +1144,13 @@ _OVER_CAP_POOL = [
 # agent turn failed) AND we could not identify a product. It must be safe to send
 # to ANYONE — a buyer, a critic, someone grieving — so it thanks, opens a door,
 # and sells nothing at all.
+# No cheerful emoji here (a 🙏 reads as humble; a 💛 reads as cheer) — this
+# line may land on a complaint, and the mood rules forbid cheer on displeasure.
 _NEUTRAL_ACK_POOL = [
-    "Thank you for reaching out{name} 🙏 Tell us a little more and we'll gladly help 💛",
-    "We appreciate you{name} 🙏 Send us a message and we'll help however we can 💛",
-    "Thank you{name} 🙏 We're here — let us know what you need and we'll assist 💛",
-    "Asante{name} 🙏 We'd be glad to help — just tell us a bit more 💛",
+    "Thank you for reaching out{name} 🙏 Tell us a little more and we'll gladly help.",
+    "We appreciate you{name} 🙏 Send us a message and we'll help however we can.",
+    "Thank you{name} 🙏 We're here — let us know what you need and we'll assist.",
+    "Asante{name} 🙏 We'd be glad to help — just tell us a bit more.",
 ]
 # The line that continues the sale INSIDE the DM the comment opens.
 _DM_CONTINUE_POOL = [

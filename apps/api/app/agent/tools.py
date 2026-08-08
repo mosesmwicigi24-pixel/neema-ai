@@ -208,10 +208,11 @@ TOOLS: list[dict] = [
     {
         "name": "handoff_to_human",
         "description": "Escalate to a human agent when the customer explicitly asks for a "
-                       "person, or needs a decision only a human can make (a refund, a "
-                       "discount, a bespoke commission). For a COMPLAINT use raise_complaint "
-                       "instead — that keeps you in the conversation while the team is "
-                       "brought in, so the customer is never left waiting in silence.",
+                       "person, or needs a human-only decision OUTSIDE any complaint (a "
+                       "discount, a bespoke commission). A REFUND request, a COMPLAINT, or "
+                       "any dissatisfaction goes through raise_complaint instead — that "
+                       "keeps you in the conversation while the team is brought in, so the "
+                       "customer is never left waiting in silence.",
         "input_schema": {
             "type": "object",
             "properties": {"reason": {"type": "string"}},
@@ -285,10 +286,11 @@ TOOLS: list[dict] = [
     {
         "name": "capture_contact",
         "description": "Save a Messenger/Instagram customer's details to their profile: name, "
-                       "phone, and city/country. We CANNOT read Messenger names automatically, so "
-                       "when someone new starts chatting, warmly ask their name (and city & "
-                       "country for delivery) and call this. If they give a phone/WhatsApp "
-                       "number, pass it too — it links their Messenger and WhatsApp into one customer.",
+                       "phone, and city/country. Their profile name is usually already in your "
+                       "context — NEVER re-ask a name you can see there; only when no name has "
+                       "appeared may you ask once, warmly (with city & country for delivery), "
+                       "then call this. If they give a phone/WhatsApp number, pass it too — it "
+                       "links their Messenger and WhatsApp into one customer.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1684,7 +1686,10 @@ async def _prepare_quotation(args: dict, ctx: ToolContext) -> dict:
     number = (f"QT-{nairobi.strftime('%y%m%d')}-"
               f"{_hashlib.sha1(ctx.wa_id.encode()).hexdigest()[:4].upper()}")
     to = (args.get("addressed_to") or "").strip()
-    lines = [f"*QUOTATION {number}*",
+    # Asterisk bold renders ONLY on WhatsApp; Messenger/Instagram/web show the
+    # literal `*`, so those channels get plain text (the meta addendum's rule).
+    star = "*" if _channel_label(ctx) == "whatsapp" else ""
+    lines = [f"{star}QUOTATION {number}{star}",
              "Bethany House — Nairobi, Kenya",
              f"Date: {nairobi.strftime('%d %b %Y')}"]
     if to:
@@ -1704,7 +1709,7 @@ async def _prepare_quotation(args: dict, ctx: ToolContext) -> dict:
     except (TypeError, ValueError):
         total_s = str(total)
     lines += ["",
-              f"*TOTAL: {ctx.currency} {total_s}*",
+              f"{star}TOTAL: {ctx.currency} {total_s}{star}",
               f"Valid until {(nairobi + _td(days=14)).strftime('%d %b %Y')}.",
               "Made to order and tailored to your measurements. Delivery is "
               "quoted separately by destination."]
