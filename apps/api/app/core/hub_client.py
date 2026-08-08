@@ -439,10 +439,16 @@ async def push_pending_order(
 
     # channel='whatsapp' groups the order under the hub's "WhatsApp Orders" (and
     # tags order_type/number as WA-), while the outlet stays the fulfilling store.
+    # The measurement note rides the ORDER-level notes as well: most producible
+    # items are 'simple' in the hub and route via items[] (the stock path),
+    # which has no per-line production_notes — the workshop must still see the
+    # customer's figures whichever path the line took.
+    _any_producible = bool(mto_lines) or any(l.get("is_producible") for l in stock_lines)
     payload = {
         "outlet_id": settings.hub_outlet_id,
         "channel": "whatsapp",
-        "notes": "WhatsApp order via Neema",
+        "notes": ("WhatsApp order via Neema"
+                  + (f". {measurement_note}" if (measurement_note and _any_producible) else "")),
     }
     if stock_lines:
         payload["items"] = [

@@ -446,6 +446,47 @@ def test_saved_figures_ride_the_production_order(monkeypatch):
                          "Confirm with the customer before production."))
     notes = captured["payload"]["production_items"][0]["production_notes"]
     assert "chest 42in" in notes and "Confirm with the customer" in notes
+    # Order-level notes carry the figures too — most producible items are
+    # 'simple' in the hub and route via items[], which has no per-line notes.
+    assert "chest 42in" in captured["payload"]["notes"]
+
+
+def test_figures_reach_the_workshop_even_via_the_stock_path(monkeypatch):
+    """A 'simple' producible cassock routes via items[] (stock path) — the
+    live hub has 15 of 23 production items shaped exactly like this. The
+    order-level notes are the only channel that reaches the workshop there."""
+    from app.core import hub_client as hc
+    captured = {}
+
+    async def _no_customer(wa_id): return None
+    monkeypatch.setattr(hc, "_find_customer_id", _no_customer)
+
+    class _Resp:
+        status_code = 200
+        is_success = True
+        def raise_for_status(self): pass
+        def json(self): return {"data": {"id": 9, "order_number": "WA-9"}}
+
+    class _Client:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, url, **k):
+            captured["payload"] = k.get("json")
+            return _Resp()
+
+    monkeypatch.setattr(hc.httpx, "AsyncClient", _Client)
+    monkeypatch.setattr(settings, "hub_outlet_id", 1)
+    catalog = [{"hub_product_id": 6, "name": "Surplice", "sku": "SP-1",
+                "slug": "surplice", "price": 4000, "price_kes": 4000,
+                "product_type": "simple", "is_producible": True,
+                "in_stock": True, "aliases": [], "variants": []}]
+    asyncio.run(hc.push_pending_order(
+        catalog, wa_id="254712345678", first_name="Moses", country_iso="KE",
+        items=[{"name": "Surplice", "qty": 1, "unit_price": 4000}],
+        measurement_note="Measurements on file: chest 40in."))
+    assert "production_items" not in captured["payload"]     # stock path, unchanged
+    assert "chest 40in" in captured["payload"]["notes"]      # figures still arrive
 
 
 def test_prompt_measures_from_the_hub_and_offers_ready_made_first():
