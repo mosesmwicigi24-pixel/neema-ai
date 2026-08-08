@@ -133,6 +133,13 @@ class Settings(BaseSettings):
     # to a lighter (still warm, varied) reply — caps AI cost + Graph rate on a
     # viral post. Buying comments beyond this still get a friendly WhatsApp nudge.
     meta_comment_agent_cap: int = 30
+    # Minutes of silence from the human side before a taken-over conversation is
+    # handed back to the AI. Intercept used to be a one-way door — a colleague
+    # replying once switched the thread to human mode and only a manual Release
+    # could undo it, so the customer got no further replies from Neema at all.
+    # Releasing never makes her speak; it only lets her answer the NEXT message.
+    # Set 0 to disable the sweep and go back to manual-release-only.
+    auto_release_minutes: int = 45
     # ── Business facts Neema answers logistics/FAQ questions from ─────────────
     # Free text (location/branches, hours, delivery, payment, contacts) injected
     # into the system prompt. Without it Neema only knows the catalogue and can't

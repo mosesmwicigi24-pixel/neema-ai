@@ -877,8 +877,9 @@ async def upsert_user(db: AsyncSession, body) -> dict:
 
 # ── Upsert Message ────────────────────────────────────────
 # Stores media_type / media_url when present.
-# Inbound media messages are automatically escalated to human mode so an
-# agent can view the attachment and respond appropriately.
+# An inbound attachment Neema cannot read (video, document, sticker) is FLAGGED
+# for an agent to view — but the conversation stays in AI mode, so she keeps
+# serving the customer instead of going silent while nobody is watching.
 # Returns a Firestore-style document array so n8n can consume the output directly.
 
 async def upsert_message(db: AsyncSession, redis, body) -> list:
@@ -991,21 +992,21 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
     )
     intercept_log = None
     if direction == MsgDirection.inbound and media_type and not is_ai_handled_media:
+        # A video / document / sticker Neema cannot read. This used to switch the
+        # conversation to human mode — which, with no auto-release at the time,
+        # silenced the AI on that customer permanently: a customer who sent a
+        # video of the item they wanted never heard from us again. Flag it for the
+        # team instead and LEAVE THE THREAD IN AI MODE, so Neema stays in the
+        # conversation and can ask them to describe or photograph the item.
         if conv.intercept_mode != InterceptMode.human:
-            conv.intercept_mode  = InterceptMode.human
-            conv.intercept_since = datetime.now(timezone.utc)
-            escalated = True
-            # Write the Intercept row with created_at = message time + 1s so it
-            # always sorts AFTER the inbound message that triggered the escalation.
             from app.models.intercept import Intercept, InterceptAction
-            reason = (
-                f"Customer sent a {media_type}"
-                + (f" — agent review required")
-            )
+            reason = (f"Customer sent a {media_type} Neema cannot open — please review. "
+                      "She is still answering in the thread and will ask them to "
+                      "describe or photograph it.")
             intercept_log = Intercept(
                 conversation_id=conv.id,
                 agent_id=None,
-                action=InterceptAction.intercept,
+                action=InterceptAction.flag,
                 note=reason,
                 created_at=datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc) + timedelta(seconds=1),
             )
@@ -1029,7 +1030,10 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
         "filename":       filename,
     })
 
-    if escalated:
+    if intercept_log is not None:
+        # The team is still notified about an attachment Neema can't open — they
+        # just aren't the customer's only hope of a reply, because the thread
+        # stays in AI mode (see the flag above).
         reason = (
             f"Customer sent a {media_type}"
             + " — agent review required"
@@ -1044,12 +1048,14 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
             "conversationId": str(conv.id),
             "mediaType":      media_type,
         })
-        # Broadcast intercept_changed with reason so the frontend pill shows it
+        # The conversation stays with the AI, so this is a FLAG for the timeline,
+        # not an intercept — broadcasting mode "human" here would make the
+        # frontend pill lie about who is handling the thread.
         await _broadcast(redis, str(conv.id), {
             "type":           "intercept_changed",
             "conversationId": str(conv.id),
-            "mode":           "human",
-            "eventKind":      "intercept",
+            "mode":           "ai",
+            "eventKind":      "flag",
             "eventReason":    reason,
         })
 

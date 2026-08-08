@@ -1049,6 +1049,17 @@ _DM_NUDGE_POOL = [
     "Replied in your inbox — let's sort it out there 💛",
     "Sent you a DM so we can get you sorted 💬",
 ]
+# Said to a buying comment when the agent could not run (over the per-post cap,
+# or the turn failed) but we DO know the product from the post. "How to order" is
+# the highest-intent comment we get and it used to receive a bare "message us on
+# WhatsApp" — on precisely the posts performing well enough to exhaust the cap.
+# These answer the question instead, with no model call.
+_OVER_CAP_POOL = [
+    "Thank you{name} 🙏 You can order it right here 👉 {link} — tap through and we'll take care of the rest 💛",
+    "Bless you{name}! 🙏 Order yours here 👉 {link} — a few taps and it's done 💛",
+    "We'd love to help{name} 🙏 Here it is 👉 {link} — order in a tap, and message us if you'd like any help 💛",
+    "Karibu{name} 🙏 You can see it and order here 👉 {link} — we'll handle delivery from there 💛",
+]
 # Said when we could not compose a real answer (over the per-post cap, or the
 # agent turn failed) AND we could not identify a product. It must be safe to send
 # to ANYONE — a buyer, a critic, someone grieving — so it thanks, opens a door,
@@ -1098,6 +1109,12 @@ def _comment_public_reply(answer: str, dm_sent: bool, link: str, name_tag: str, 
     # "this is wrong" was answered with "Continue on WhatsApp to get yours". A
     # warm, content-free acknowledgement is always safe; the tap-to-order link is
     # added only when we DID identify what they're asking about.
+    if product_link:
+        # We know WHICH product the post is about, so a buying question still gets
+        # a real answer — the product page, where they can order in a tap and
+        # Neema is on hand. No model call needed.
+        return (_pick(_OVER_CAP_POOL, seed)
+                .replace("{name}", name_tag).replace("{link}", product_link))
     if link:
         return _pick(_WA_INVITE_POOL, seed).replace("{name}", name_tag)
     return _pick(_NEUTRAL_ACK_POOL, seed).replace("{name}", name_tag)
@@ -1310,10 +1327,15 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # The comment may never name the product ("where is the shop?") — the POST
     # did. Resolve it from the post caption so the CTA still lands on the exact
     # bethanyhouse.co.ke product page with a ref.
-    if answer and not seen_products:
+    # Resolve the product even when there is NO agent answer (over the per-post
+    # cap, or the turn failed). "How do I order?" is answerable without a model —
+    # the post already tells us what they're looking at — and answering it with a
+    # bare "message us on WhatsApp" wasted the highest-intent comment we get, on
+    # exactly the posts that are working.
+    if not seen_products:
         await _resolve_post_product(redis, channel, ext, post_ctx, seen_products)
     product_link = ""
-    if answer and seen_products:
+    if seen_products:
         try:
             product_link = await _storefront_product_link(redis, channel, ext, seen_products[0])
         except Exception as exc:
