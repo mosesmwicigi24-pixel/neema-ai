@@ -113,6 +113,40 @@ async def _probe_deferred_events(db, redis) -> list[str]:
     return []
 
 
+async def _probe_after_sale(db, redis) -> list[str]:
+    """The after-sale arc (hub_events: paid / production / shipped / delivered
+    messages) deploys dark and STAYS dark until configured — and once it is on,
+    a dead hub→Neema webhook looks exactly like a quiet week. Say plainly
+    which state we're in and what unlocks the next one."""
+    if not settings.hub_events_secret:
+        return ["after-sale messages are OFF (HUB_EVENTS_SECRET unset) — customers "
+                "hear nothing at paid/production/shipped/delivered; set the secret "
+                "here and in the hub to switch the arc on"]
+    out: list[str] = []
+    from app.models.order_event import OrderEvent
+    from app.services.hub_events import LAST_EVENT_KEY
+    week = datetime.now(timezone.utc) - timedelta(days=7)
+    orders = (await db.execute(
+        select(sa_func.count()).select_from(OrderEvent)
+        .where(OrderEvent.created_at >= week))).scalar_one()
+    seen = None
+    if redis is not None:
+        try:
+            seen = await redis.get(LAST_EVENT_KEY)
+        except Exception:
+            pass
+    # Orders flowing while the hub has said nothing for 30d+ (the stamp's TTL)
+    # is a broken webhook, not a quiet week. No orders → nothing to conclude.
+    if orders >= 3 and not seen:
+        out.append(f"{orders} order(s) created in 7d but no hub event received — "
+                   "the hub→Neema webhook looks dead; check the hub side")
+    if not settings.wa_event_template:
+        out.append("WA_EVENT_TEMPLATE not set — order updates outside the 24h "
+                   "window fall to manual sending; approve a WhatsApp utility "
+                   "template and set its name to automate them")
+    return out
+
+
 async def _probe_missing_wamids(db, redis) -> list[str]:
     """Outbound WhatsApp rows should carry the wamid Meta returned; mostly-null
     means the send path is degraded and reply-quotes silently stopped resolving."""
@@ -247,6 +281,7 @@ PROBES = [
     ("media_rot", _probe_media_rot),
     ("stuck_actions", _probe_stuck_actions),
     ("deferred_events", _probe_deferred_events),
+    ("after_sale", _probe_after_sale),
     ("missing_wamids", _probe_missing_wamids),
     ("briefings", _probe_briefings),
     ("waiting_customers", _probe_waiting_customers),

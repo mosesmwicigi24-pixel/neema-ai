@@ -39,6 +39,9 @@ ESCALATE = {"order.delayed", "payment.partial", "refund.requested"}
 
 DEFER_ZSET = "hubevents:deferred"
 LEADER_KEY = "hubevents:leader"
+# Liveness stamp, set on every verified event: the after-sale self-check probe
+# reads it to tell a genuinely quiet week apart from a dead hub→Neema webhook.
+LAST_EVENT_KEY = "hubevents:last_at"
 
 # What Neema is told happened — she composes the actual message herself, in the
 # conversation's own language and register (announce mode = read-only turn).
@@ -309,6 +312,14 @@ async def handle_event(db, redis, event: dict) -> dict:
         eid = str(event.get("id") or "")
         if not eid or (etype not in CELEBRATE and etype not in ESCALATE):
             return {"handled": False, "reason": "unknown_event"}
+        if redis is not None:
+            try:
+                # Stamp before dedup — a retried duplicate still proves the
+                # hub→Neema wiring is alive.
+                await redis.set(LAST_EVENT_KEY,
+                                datetime.now(timezone.utc).isoformat(), ex=30 * 86400)
+            except Exception:
+                pass
         if redis is not None:
             try:
                 if not await redis.set(f"hubevent:seen:{eid}", "1", nx=True, ex=7 * 86400):
