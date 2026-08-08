@@ -391,7 +391,38 @@ TOOLS: list[dict] = [
             "required": ["products"],
         },
     },
+    {
+        "name": "prepare_quotation",
+        "description": "Prepare a formal written quotation from the current cart — for a "
+                       "parish, committee or organisation that needs it in writing before "
+                       "approving the purchase. Build the cart with update_cart first. "
+                       "Returns the quotation text: send it as your message exactly as "
+                       "returned (you may add ONE warm line before it) — never retype or "
+                       "alter the figures.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "addressed_to": {
+                    "type": "string",
+                    "description": "Who it is for — e.g. \"St Mary's Parish, Nakuru\" or the customer's name."},
+            },
+            "required": [],
+        },
+    },
 ]
+
+# Registered only when a guide image is configured: the tool list must be
+# byte-stable per deploy (it heads the prompt-cache prefix), and settings are
+# fixed at boot — so this is a deploy-time constant, not a per-turn branch.
+if settings.measurement_guide_url:
+    TOOLS.append({
+        "name": "send_measurement_guide",
+        "description": "Send our labelled how-to-measure diagram to this customer. Use it "
+                       "the FIRST time you ask for measurements (chest, length, sleeve…) so "
+                       "they can see exactly how to take each one — then ask for the figures "
+                       "in your own short line. Never re-send it in the same conversation.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    })
 
 
 # ── Dispatch ─────────────────────────────────────────────────────────────────
@@ -1625,6 +1656,71 @@ async def _pause_conversation(args: dict, ctx: ToolContext) -> dict:
     return {"ok": False}
 
 
+async def _prepare_quotation(args: dict, ctx: ToolContext) -> dict:
+    """A formal written quotation from the cart — what a parish committee needs
+    in hand to approve the purchase. Composed in code so the figures can't
+    drift; the model sends the text verbatim."""
+    import hashlib as _hashlib
+    from datetime import timedelta as _td
+    cart = await cartmod.get_cart(ctx.db, ctx.wa_id, ctx.channel)
+    if not (cart.get("items") or []):
+        return {"error": "cart is empty — add the items with update_cart first"}
+    items, total = await _cart_display(cart, ctx)
+    nairobi = datetime.now(timezone.utc) + _td(hours=3)
+    number = (f"QT-{nairobi.strftime('%y%m%d')}-"
+              f"{_hashlib.sha1(ctx.wa_id.encode()).hexdigest()[:4].upper()}")
+    to = (args.get("addressed_to") or "").strip()
+    lines = [f"*QUOTATION {number}*",
+             "Bethany House — Nairobi, Kenya",
+             f"Date: {nairobi.strftime('%d %b %Y')}"]
+    if to:
+        lines.append(f"Prepared for: {to}")
+    lines.append("")
+    for i in items:
+        qty = i.get("qty") or i.get("quantity") or 1
+        name = i.get("name") or "Item"
+        try:
+            unit = float(i.get("unit_price"))
+            lines.append(f"- {name} ×{qty} @ {ctx.currency} {unit:,.0f} "
+                         f"= {ctx.currency} {unit * float(qty):,.0f}")
+        except (TypeError, ValueError):
+            lines.append(f"- {name} ×{qty}")
+    try:
+        total_s = f"{float(total):,.0f}"
+    except (TypeError, ValueError):
+        total_s = str(total)
+    lines += ["",
+              f"*TOTAL: {ctx.currency} {total_s}*",
+              f"Valid until {(nairobi + _td(days=14)).strftime('%d %b %Y')}.",
+              "Made to order and tailored to your measurements. Delivery is "
+              "quoted separately by destination."]
+    return {"ok": True, "quotation": "\n".join(lines),
+            "note": "send this text as your message — at most one warm line before it"}
+
+
+async def _send_measurement_guide(args: dict, ctx: ToolContext) -> dict:
+    """Send the how-to-measure diagram. WhatsApp gets the image natively; Meta
+    channels get the link to include with the ask (their DM clients preview it)."""
+    url = (settings.measurement_guide_url or "").strip()
+    if not url:
+        return {"error": "no measurement guide is configured"}
+    if ctx.channel == "whatsapp":
+        try:
+            from app.services import n8n_bridge as _svc
+            wamid = await _svc._send_waba_image(
+                ctx.wa_id, url, caption="How to take your measurements 📏")
+            await _svc.save_outbound_message(
+                ctx.db, ctx.redis, ctx.wa_id, "[image] How-to-measure guide 📏",
+                waba_msg_id=wamid)
+            return {"ok": True, "sent": "image",
+                    "note": "the diagram is with them — now ask for the figures in one short line"}
+        except Exception as exc:
+            _log.warning("measurement guide send failed for %s: %s", ctx.wa_id, exc)
+            return {"error": "could not send the image — share the figures ask in words instead"}
+    return {"ok": True, "guide_url": url,
+            "note": "include this link with your ask so they can see how to measure"}
+
+
 _HANDLERS = {
     "search_catalog": _search_catalog,
     "get_cart": _get_cart,
@@ -1646,4 +1742,6 @@ _HANDLERS = {
     "save_measurements": _save_measurements,
     "church_calendar": _church_calendar,
     "save_parish": _save_parish,
+    "prepare_quotation": _prepare_quotation,
+    "send_measurement_guide": _send_measurement_guide,
 }

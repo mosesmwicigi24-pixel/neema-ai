@@ -200,6 +200,15 @@ async def _celebrate(db, redis, conv, event: dict) -> dict:
         except Exception:
             pass
 
+    # The tailor's call-back: six days after delivery, ask how it fits. Planned
+    # here (whatever send mode the delivery news itself takes) and executed by
+    # the initiative scheduler with its own window/quiet-hour rules.
+    if event.get("type") == "order.delivered":
+        try:
+            await _plan_fit_check(db, redis, conv, event)
+        except Exception:
+            _log.warning("fit-check planning failed for %s", event.get("order_number"))
+
     # Quiet hours FIRST — deferring must never burn the celebration guard, or
     # the morning drain finds its own footprint and swallows the thank-you.
     if is_quiet_hours():
@@ -254,6 +263,32 @@ async def _celebrate(db, redis, conv, event: dict) -> dict:
         f"{event.get('order_number') or ''}: outside the 24h window and no event "
         f"template — send the good news manually. ({brief})", conv)
     return {"handled": True, "sent": "notified_human"}
+
+
+FIT_CHECK_DAYS = 6
+
+
+async def _plan_fit_check(db, redis, conv, event: dict) -> None:
+    """Plan the after-delivery fit check — the relationship moment of a
+    made-to-measure business. One per order (redis guard); rides the existing
+    AgentAction scheduler, so approval gates and quiet hours apply there."""
+    from app.models.agent_action import AgentAction
+    number = event.get("order_number") or ""
+    if redis is not None:
+        try:
+            if not await redis.set(f"fitcheck:{number or _recipient_of(conv)}", "1",
+                                   nx=True, ex=30 * 86400):
+                return
+        except Exception:
+            pass
+    db.add(AgentAction(
+        deal_id=None, conversation_id=conv.id,
+        due_at=datetime.now(timezone.utc) + timedelta(days=FIT_CHECK_DAYS),
+        kind="fit_check",
+        reason=(f"Order {number} was delivered {FIT_CHECK_DAYS} days ago — ask "
+                "warmly whether it fits and serves well, and offer our free "
+                "adjustment if anything needs it. Care, not selling.")))
+    await db.commit()
 
 
 async def _escalate(db, redis, conv, event: dict) -> dict:

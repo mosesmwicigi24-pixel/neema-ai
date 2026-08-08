@@ -41,7 +41,8 @@ _META_TOOL_NAMES = {"search_catalog", "get_cart", "update_cart", "create_order",
                     "whatsapp_checkout_link", "share_catalog", "send_product_cards",
                     "capture_contact", "pause_conversation", "save_measurements",
                     "check_availability",
-                    "church_calendar", "save_parish"}
+                    "church_calendar", "save_parish",
+                    "prepare_quotation", "send_measurement_guide"}
 MESSENGER_TOOLS = [t for t in TOOLS if t["name"] in _META_TOOL_NAMES]
 
 # A PUBLIC comment reply is short and read-only — it just needs the real price, so
@@ -713,6 +714,65 @@ async def _is_paused(redis, channel: str, key: str) -> bool:
     return False
 
 
+_HOLD_LINE = ("Samahani for the wait — I'm having a small technical hitch on my "
+              "side. A colleague has been alerted, and we'll be right back to "
+              "you. Asante for your patience 🙏")
+
+
+async def _send_hold_line(redis, channel: str, key: str) -> None:
+    """When a turn dies, the customer must never get pure silence.
+
+    Once per thread per two hours: send a short honest hold message (it needs
+    no LLM — the send path is independent of what broke) and flag the team in
+    the Activity feed. Best-effort everywhere; this runs inside a failure
+    handler and must never raise.
+
+    Deliberately NO automatic retry of the failed turn: a turn that died
+    mid-loop may already have executed tools (a cart add, an order), and
+    re-running it would repeat them. The missed-reply sweeper re-engages the
+    thread once the underlying cause clears."""
+    try:
+        if redis is not None:
+            try:
+                if not await redis.set(f"agent:holdline:{channel}:{key}", "1",
+                                       nx=True, ex=7200):
+                    return
+            except Exception:
+                pass
+        from app.database import AsyncSessionLocal
+        from app.services import n8n_bridge as svc
+        if channel == "whatsapp":
+            wamid = await svc._send_waba(key, _HOLD_LINE)
+            async with AsyncSessionLocal() as db:
+                await svc.save_outbound_message(db, redis, key, _HOLD_LINE,
+                                                waba_msg_id=wamid)
+        else:
+            from app.services.meta_send import send_to_channel
+            await send_to_channel(channel, key, _HOLD_LINE)
+            async with AsyncSessionLocal() as db:
+                await svc.save_outbound_channel_message(db, redis, channel, key,
+                                                        _HOLD_LINE)
+        try:
+            async with AsyncSessionLocal() as db:
+                from app.models.conversation import Conversation
+                from app.models.intercept import Intercept, InterceptAction
+                where = (Conversation.wa_id == key) if channel == "whatsapp" else (
+                    (Conversation.channel == channel) & (Conversation.external_id == key))
+                conv = (await db.execute(
+                    select(Conversation).where(where))).scalar_one_or_none()
+                if conv is not None:
+                    db.add(Intercept(conversation_id=conv.id, agent_id=None,
+                                     action=InterceptAction.flag,
+                                     note="Neema's reply FAILED here — she sent a short "
+                                          "hold message; please review and answer."))
+                    await db.commit()
+        except Exception:
+            pass
+        _log.info("hold line sent to %s/%s", channel, key)
+    except Exception:
+        _log.warning("hold line failed for %s/%s", channel, key, exc_info=False)
+
+
 async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None) -> None:
     from app.database import AsyncSessionLocal
     from app.services import n8n_bridge as svc
@@ -741,6 +801,7 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None)
         # the only trace was this log line.
         from app.services.agent_health import record_turn_failure
         await record_turn_failure(redis, wa_id, exc)
+        await _send_hold_line(redis, "whatsapp", wa_id)
 
 
 async def schedule_reply(redis, wa_id: str, text: str, dedup_id: str | None,
@@ -855,6 +916,7 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
             _log.exception("tier2 meta turn failed for %s/%s", channel, external_id)
             from app.services.agent_health import record_turn_failure
             await record_turn_failure(redis, external_id, exc)
+            await _send_hold_line(redis, channel, external_id)
         return False
 
 

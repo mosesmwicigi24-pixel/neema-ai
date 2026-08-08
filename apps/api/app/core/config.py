@@ -145,6 +145,13 @@ class Settings(BaseSettings):
     # into the system prompt. Without it Neema only knows the catalogue and can't
     # answer "where are you located?". Keep it short and factual.
     business_info: str = ""
+    # Typical made-to-order production window shown to customers, e.g.
+    # "5-10 working days". THE most-asked made-to-order question; empty = Neema
+    # defers ("we'll confirm") every time someone asks how long an item takes.
+    production_lead_time: str = ""
+    # Public image URL of the how-to-measure diagram (labelled chest/length/
+    # sleeve...). Empty = the send_measurement_guide tool is not registered.
+    measurement_guide_url: str = ""
     # Currency display gate: Kenya (+254) customers are quoted KES; everyone else
     # (and all Messenger/IG, which have no phone) is quoted USD = round(KES / rate).
     usd_kes_rate: int = 100

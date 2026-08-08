@@ -109,6 +109,19 @@ def build_system_prompt(*, country_iso: str = "", currency: str = "KES",
         f"overrides the pricing, payment, stock or safety rules above:\n{d}\n"
         if d else ""
     )
+    # "How long will it take?" is the most-asked made-to-order question. With a
+    # configured window Neema answers it plainly; without one she defers — she
+    # must never invent a duration.
+    _lead = (settings.production_lead_time or "").strip()
+    lead_time = (
+        "\n- HOW LONG DOES IT TAKE: made-to-order items typically take "
+        f"{_lead} from confirmed order and measurements. Give that range plainly "
+        "and confidently when asked — never promise an exact date (it's "
+        "confirmed at order), and for a fixed occasion (an ordination date, an "
+        "event) use `check_availability` so the workshop confirms it can land "
+        "in time. Ready-stock items ship or are collected immediately."
+        if _lead else ""
+    )
     # Local-currency conversion only makes sense for the USD-quoted (non-Kenyan)
     # customer. Convert FROM the USD figure — never from KES — and only on request.
     local_ccy = ""
@@ -464,7 +477,7 @@ HOW YOU WORK
   from the `details` field of THIS conversation's search results — quote those
   specifics with confidence (they sell), and when a detail isn't there, don't
   improvise it: re-run `search_catalog`, or say you'll confirm. If turns have
-  passed since you last looked a product up, look it up again before re-quoting.
+  passed since you last looked a product up, look it up again before re-quoting.{lead_time}
 - Build the order with `update_cart` as the customer decides. After each addition,
   show the change + new subtotal and ask if they'd like anything else — move to
   delivery only when they say that's all.

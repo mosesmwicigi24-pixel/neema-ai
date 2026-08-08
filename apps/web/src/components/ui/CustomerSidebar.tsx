@@ -16,7 +16,7 @@ import {
     displayName,
 } from "@/lib/utils";
 import type { Conversation, Order } from "@/types";
-import { whatsappApi, callsApi, askNeema } from "@/lib/api";
+import { whatsappApi, callsApi, askNeema, answerViaNeema } from "@/lib/api";
 import { useCall } from "@/lib/callContext";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -491,6 +491,58 @@ function AskNeemaBox({ conversationId }: { conversationId: string }) {
             {answer && (
                 <div className="mt-2 text-xs text-[#1c2917] bg-[#f8faf6] border border-[#e8ede4] rounded-lg px-2.5 py-2 whitespace-pre-wrap">
                     {answer}
+                </div>
+            )}
+        </div>
+    );
+}
+
+/** Answer-via-Neema: type the confirmed FACTS; Neema delivers them to the
+ *  customer in her own voice and language, and the thread stays in AI mode.
+ *  This is how "let me confirm with the team" promises get kept. */
+function AnswerViaNeemaBox({ conversationId }: { conversationId: string }) {
+    const [facts, setFacts] = useState("");
+    const [status, setStatus] = useState<string | null>(null);
+    const [busy, setBusy] = useState(false);
+
+    const send = async () => {
+        const f = facts.trim();
+        if (!f || busy) return;
+        setBusy(true);
+        setStatus(null);
+        try {
+            const r = await answerViaNeema(conversationId, f);
+            setStatus(`Neema sent: “${r.sent}”`);
+            setFacts("");
+        } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : "";
+            setStatus(msg.includes("409") || msg.toLowerCase().includes("window")
+                ? "Outside the messaging window — reply yourself when they next write."
+                : "Couldn't send right now — try again.");
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    return (
+        <div className="mb-4 rounded-xl border border-stone-200 bg-white p-2.5">
+            <div className="flex gap-1.5">
+                <input
+                    value={facts}
+                    onChange={(e) => setFacts(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && send()}
+                    placeholder="Team answer… “yes, we make it — KES 3,500, ~5 days”"
+                    className="flex-1 text-xs rounded-lg px-2.5 py-1.5 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-[#589b31]/40"
+                />
+                <button onClick={send} disabled={busy || !facts.trim()}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-lg text-white disabled:opacity-50"
+                        style={{ backgroundColor: "#589b31" }}>
+                    {busy ? "…" : "Neema delivers"}
+                </button>
+            </div>
+            {status && (
+                <div className="mt-2 text-xs text-[#1c2917] bg-[#f8faf6] border border-[#e8ede4] rounded-lg px-2.5 py-2 whitespace-pre-wrap">
+                    {status}
                 </div>
             )}
         </div>
@@ -1263,6 +1315,7 @@ export function CustomerSidebar({
                 {activeTab === "profile" && (
                     <>
                         <AskNeemaBox conversationId={conversation.id} />
+                        <AnswerViaNeemaBox conversationId={conversation.id} />
                         <Section title="Contact Details">
                             {profile.lead_source && (
                                 <div

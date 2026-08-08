@@ -273,6 +273,33 @@ def _wamid_of(resp) -> str | None:
         return None
 
 
+async def _send_waba_image(wa_id: str, image_url: str, caption: str = "") -> str | None:
+    """Send an image by public link (e.g. the how-to-measure guide).
+    Returns the sent message's wamid."""
+    url = (f"https://graph.facebook.com/{settings.waba_api_version}"
+           f"/{settings.waba_phone_number_id}/messages")
+    image: dict = {"link": image_url}
+    if caption:
+        image["caption"] = caption
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            url,
+            headers={"Authorization": f"Bearer {settings.waba_token}"},
+            json={
+                "messaging_product": "whatsapp",
+                "to": wa_id,
+                "type": "image",
+                "image": image,
+            },
+            timeout=30.0,
+        )
+        if not resp.is_success:
+            import logging
+            logging.error(f"WABA image error {resp.status_code}: {resp.text}")
+            resp.raise_for_status()
+        return _wamid_of(resp)
+
+
 async def _send_waba_audio(wa_id: str, audio_url: str) -> str | None:
     """Send a pre-generated TTS audio file to WhatsApp via a public link.
     Returns the sent message's wamid."""
