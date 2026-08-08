@@ -225,6 +225,14 @@ async def _celebrate(db, redis, conv, event: dict) -> dict:
         except Exception:
             pass
 
+    # The thank-you carries their receipt — proof of payment in one tap.
+    receipt = ""
+    if event.get("type") == "order.paid":
+        receipt = await _receipt_link_for(db, redis, event)
+        if receipt:
+            brief += (f" Include their receipt link plainly in the message: "
+                      f"{receipt}")
+
     in_window = await _within_window(db, conv)
     recipient = _recipient_of(conv)
 
@@ -250,6 +258,8 @@ async def _celebrate(db, redis, conv, event: dict) -> dict:
             "order.shipped": "shipped and on its way to you",
             "order.delivered": "delivered — we hope it serves you beautifully",
         }.get(event.get("type") or "", "updated")
+        if receipt:
+            status_word += f". Receipt: {receipt}"
         params = [name, event.get("order_number") or "your order", status_word]
         tpl = await svc.send_wa_template(recipient, settings.wa_event_template,
                                          settings.wa_event_lang, params)
@@ -263,6 +273,36 @@ async def _celebrate(db, redis, conv, event: dict) -> dict:
         f"{event.get('order_number') or ''}: outside the 24h window and no event "
         f"template — send the good news manually. ({brief})", conv)
     return {"handled": True, "sent": "notified_human"}
+
+
+async def _receipt_link_for(db, redis, event: dict) -> str:
+    """A SHORT link to the customer's receipt (the hub /pay page in its paid
+    state), to ride along with the payment thank-you. Resolved from the order
+    row Neema stored at push time and shortened through the existing
+    /api/o/{ref} redirect so the chat shows a clean link, not a token monster.
+    Returns '' when anything is missing — the thank-you sends regardless."""
+    try:
+        from sqlalchemy import select
+        number = (event.get("order_number") or "").strip()
+        if not number:
+            return ""
+        from app.models.order_event import OrderEvent
+        row = (await db.execute(
+            select(OrderEvent).where(OrderEvent.hub_order_number == number)
+            .order_by(OrderEvent.created_at.desc()).limit(1))).scalar_one_or_none()
+        target = ((row.hub_payment_url or "") if row else "").strip()
+        if not target:
+            return ""
+        base = (settings.media_public_url or "").rstrip("/")
+        if redis is None or not base:
+            return target
+        import secrets
+        ref = secrets.token_hex(3).upper()
+        await redis.set(f"waref:{ref}", json.dumps({"target": target}),
+                        ex=90 * 24 * 3600)
+        return f"{base}/api/o/{ref}"
+    except Exception:
+        return ""
 
 
 FIT_CHECK_DAYS = 6
