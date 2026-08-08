@@ -628,6 +628,34 @@ async def answer_through_neema(conv_id: str, request: Request, body: dict,
     return {"ok": True, "sent": text}
 
 
+@router.post("/posts/{post_id}/product")
+async def set_post_product(post_id: str, request: Request, body: dict,
+                           db: AsyncSession = Depends(get_db),
+                           agent: Agent = Depends(get_current_agent)):
+    """The team's ten-second correction: "this post is actually X".
+
+    Resolves the given product (slug, name, or alias) against the live
+    catalogue and stores it as the post's identity — from that moment every
+    comment and DM funnelled from the post prices THAT product. The safety
+    valve behind the deterministic ladder (caption slug/alias → image
+    fingerprint): even a rare miss is a one-call fix, not a support thread."""
+    from app.agent.runtime import _remember_post_product
+    from app.services import n8n_bridge as svc
+    from app.services.post_catalog import product_from_caption
+    q = (body.get("product") or "").strip()
+    channel = (body.get("channel") or "facebook").strip()
+    if not q:
+        raise HTTPException(status_code=422, detail="product is required — a slug, name or alias")
+    catalog = await svc.catalog_items(db, request.app.state.redis)
+    hit = next((p for p in catalog if (p.get("slug") or "").lower() == q.lower()), None) \
+        or product_from_caption(q, catalog)
+    if hit is None:
+        raise HTTPException(status_code=404, detail=f"no catalogue product matches '{q}'")
+    await _remember_post_product(request.app.state.redis, channel, post_id, hit)
+    return {"ok": True, "post_id": post_id, "channel": channel,
+            "product": hit.get("name"), "slug": hit.get("slug")}
+
+
 @router.post("/conversations/{conv_id}/reply")
 async def reply(conv_id: str, request: Request, body: dict, db: AsyncSession = Depends(get_db),
                 agent: Agent = Depends(get_current_agent)):

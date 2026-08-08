@@ -106,8 +106,14 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "than a plain thank-you.\n"
         "- Reply in the SAME language the comment is written in (French → French, "
         "Swahili → Swahili, etc.). Never answer a French or Swahili comment in English.\n"
-        "- Recognise the product from the POST IMAGE (you can see it) and find it in "
-        "the catalogue with search_catalog; if they name a different item, price that.\n"
+        "- IDENTIFY THE PRODUCT in this order: (1) the post's CAPTION; (2) what "
+        "the image or video frame ACTUALLY shows — features over finish: a shiny "
+        "stackable tray with lids is the ALUMINIUM line, the Silver line has its "
+        "stand and basin; (3) OUR RECORDS of this post — when your context names "
+        "what this post sells, price THAT product, never re-guess it. Find the "
+        "identified item with search_catalog and quote THAT item. Still unsure "
+        "after all three? Give both closest options rather than guessing the "
+        "dearer one. If they name a different item, price that.\n"
         "- Be genuinely warm and human — a brief friendly word is welcome — but "
         "CONCISE: this is a public comment, so 1–2 short lines, plain text, no "
         "markdown or asterisks.\n"
@@ -596,6 +602,20 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             line += f' "{pctx["title"]}"'
         if source_post.get("comment"):
             line += f'; their comment there was: "{source_post["comment"]}"'
+        # History wisdom: a caption-less video post identified once stays
+        # identified — later replies price the SAME product, never a re-guess.
+        # On the very first contact, the deterministic ladder (caption
+        # slug/alias, image fingerprint vs our own catalogue photos) resolves
+        # and records it before the model ever has to read the frame.
+        try:
+            _known = await _post_identity(redis, channel,
+                                          {**pctx, "post_id": source_post.get("post_id") or ""})
+        except Exception:
+            _known = {}
+        if _known.get("name"):
+            line += (f". Our records identify this post's product as: "
+                     f"{_known['name']} — price THAT product; do not "
+                     "re-identify it from the image")
         line += (". Unless they say otherwise, their questions refer to the product "
                  "in that post — identify it, find it with search_catalog, and "
                  "answer about THAT item. Do not ask what they are looking for.)")
@@ -1241,6 +1261,23 @@ def _comment_public_reply(answer: str, dm_sent: bool, link: str, name_tag: str, 
     return _pick(_NEUTRAL_ACK_POOL, seed).replace("{name}", name_tag)
 
 
+def _product_matching_answer(answer: str, seen: list) -> dict:
+    """The product the reply actually NAMED — the order link must point at the
+    same item the text quoted. The Asraya miss: the reply said 'Silver
+    Communion Tray' but the link went to seen_products[0], the Silver BREAD
+    Tray. Longest name mentioned in the answer wins; falls back to the first
+    product seen (the over-cap path has no answer text at all)."""
+    a = " ".join((answer or "").lower().split())
+    best = None
+    if a:
+        for p in seen:
+            n = " ".join((p.get("name") or "").lower().split())
+            if n and n in a and (best is None or
+                                 len(n) > len((best.get("name") or "").lower())):
+                best = p
+    return best or (seen[0] if seen else {})
+
+
 async def _storefront_product_link(redis, channel: str, ext: str, product: dict) -> str:
     """A link to the product on the Bethany House storefront, carrying a handoff
     ref: `https://bethanyhouse.co.ke/product/<slug>?ref=XXXXXX`.
@@ -1281,13 +1318,75 @@ async def _storefront_product_link(redis, channel: str, ext: str, product: dict)
     return url
 
 
+def _post_product_key(channel: str, post_id: str) -> str:
+    return f"postprod:{channel}:{post_id}"
+
+
+async def _recall_post_product(redis, channel: str, post_id: str) -> dict:
+    """What our records say this post is about — identified once by an earlier
+    reply on the same post, then reused so EVERY answer under that post names
+    the SAME product. History wisdom for the caption-less video post: the
+    first confident identification becomes the post's identity, and no later
+    reply re-guesses it from a shiny frame. {} when nothing is on record."""
+    if redis is None or not post_id:
+        return {}
+    try:
+        raw = await redis.get(_post_product_key(channel, post_id))
+        return json.loads(raw) if raw else {}
+    except Exception:
+        return {}
+
+
+async def _remember_post_product(redis, channel: str, post_id: str, product: dict) -> None:
+    """Record the post's identified product (30 days, best-effort)."""
+    if redis is None or not post_id or not (product or {}).get("name"):
+        return
+    try:
+        await redis.set(_post_product_key(channel, post_id),
+                        json.dumps({"name": product.get("name"),
+                                    "slug": product.get("slug") or "",
+                                    "hub_product_id": product.get("hub_product_id")}),
+                        ex=30 * 24 * 3600)
+    except Exception:
+        pass
+
+
+async def _post_identity(redis, channel: str, pctx: dict) -> dict:
+    """The post's product identity: recalled from our records, else resolved
+    NOW by the deterministic ladder (caption slug/alias, then the image
+    fingerprint against the hub's own catalogue photos) and remembered — so
+    the post is identified once, for everyone who ever comments on it.
+    {} when even the ladder can't say (the model then reads carefully and the
+    team can set it via POST /admin/posts/{post_id}/product)."""
+    post_id = (pctx.get("post_id") or "").strip()
+    known = await _recall_post_product(redis, channel, post_id)
+    if known.get("name"):
+        return known
+    try:
+        from app.database import AsyncSessionLocal
+        from app.services import n8n_bridge as svc
+        from app.services import post_catalog
+        async with AsyncSessionLocal() as db:
+            catalog = await svc.catalog_items(db, redis)
+        hit = await post_catalog.resolve_post(redis, pctx, catalog)
+        if hit is not None:
+            await _remember_post_product(redis, channel, post_id, hit)
+            return {"name": hit.get("name"), "slug": hit.get("slug") or ""}
+    except Exception as exc:
+        _log.info("deep post resolve failed for %s/%s: %s", channel, post_id, exc)
+    return {}
+
+
 async def _resolve_post_product(redis, channel: str, ext: str,
                                 post_ctx: dict, sink: list) -> None:
     """When the comment itself didn't price a product ("where is the shop?"),
-    identify it from the POST's caption so the public CTA still lands on the
-    exact storefront product page — never the bare wa.me fallback. Appends the
+    identify it from the post's IDENTITY (our records, else the deterministic
+    ladder — caption slug/alias, image fingerprint), falling back to the
+    caption's lead words — so the public CTA still lands on the exact
+    storefront product page, never the bare wa.me fallback. Appends the
     matched hub rows into `sink` (the same seen_products list)."""
-    title = (post_ctx.get("title") or "").strip()
+    known = await _post_identity(redis, channel, post_ctx)
+    title = (known.get("name") or "").strip() or (post_ctx.get("title") or "").strip()
     if not title:
         return
     from app.database import AsyncSessionLocal
@@ -1457,10 +1556,14 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
         await _resolve_post_product(redis, channel, ext, post_ctx, seen_products)
     product_link = ""
     if seen_products:
+        matched = _product_matching_answer(answer, seen_products)
         try:
-            product_link = await _storefront_product_link(redis, channel, ext, seen_products[0])
+            product_link = await _storefront_product_link(redis, channel, ext, matched)
         except Exception as exc:
             _log.warning("product link failed for %s: %s", cid, exc)
+        # This identification becomes the POST's identity: every later comment
+        # under it prices the same product instead of re-guessing the frame.
+        await _remember_post_product(redis, channel, post_id, matched)
     link = (await _order_link(redis, channel, ext)
             if (answer and not dm_sent and not product_link) else "")
     public_text = _comment_public_reply(answer, dm_sent, link, name_tag, ext,

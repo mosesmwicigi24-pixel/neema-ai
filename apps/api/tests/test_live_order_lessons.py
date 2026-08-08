@@ -131,3 +131,93 @@ def test_price_flinch_offers_the_humbler_line_at_the_same_count():
     assert "never choose down for them" in flat
     # And CHOSEN MEANS CHOSEN sanctions exactly this one exception.
     assert "or the price makes them flinch" in flat
+
+
+# ── the Asraya miss: name what is SHOWN, and link what you NAMED ─────────────
+# She commented "Cost please" on a VIDEO of stacked aluminium trays. The reply
+# called it the "Silver Communion Tray" ($180 — it was the $70 aluminium; all
+# trays photograph shiny) and the order link pointed at a THIRD product, the
+# silver-bread-tray, because the CTA blindly took seen_products[0].
+
+def test_metal_finish_is_not_the_product_line():
+    flat = _flat()
+    assert "METAL FINISH IS NOT THE PRODUCT LINE" in flat
+    assert '"looks silver" never identifies the Silver line' in flat
+    assert "flat stackable tray with its lid and free cups" in flat
+    assert "quote both lines in one breath instead of guessing" in flat
+
+
+def test_comment_addendum_identifies_by_the_ladder():
+    from app.agent.runtime import _public_comment_addendum
+    a = " ".join(_public_comment_addendum("USD").split())
+    assert "IDENTIFY THE PRODUCT in this order" in a
+    assert "features over finish" in a
+    assert "a shiny stackable tray with lids is the ALUMINIUM line" in a
+    assert "OUR RECORDS of this post" in a
+    assert "Give both closest options rather than guessing" in a
+
+
+def test_order_link_points_at_the_product_the_reply_named():
+    from app.agent.runtime import _product_matching_answer
+    seen = [{"name": "Silver Bread Tray", "slug": "silver-bread-tray"},
+            {"name": "Silver Communion Tray", "slug": "silver-communion-tray"}]
+    answer = "The Silver Communion Tray is $180 — comes with lid, stand and basin."
+    assert _product_matching_answer(answer, seen)["slug"] == "silver-communion-tray"
+    # No answer text (over-cap path) → first seen, unchanged behaviour.
+    assert _product_matching_answer("", seen)["slug"] == "silver-bread-tray"
+    # Answer names nothing we saw → first seen.
+    assert _product_matching_answer("Karibu!", seen)["slug"] == "silver-bread-tray"
+    assert _product_matching_answer("x", []) == {}
+
+
+def test_comment_flow_uses_the_matching_product():
+    import inspect
+    import app.agent.runtime as runtime
+    src = inspect.getsource(runtime)
+    assert "_product_matching_answer(answer, seen_products)" in src
+
+
+# ── history wisdom: a post identified once stays identified ──────────────────
+
+class _PPRedis:
+    def __init__(self): self.kv = {}
+    async def set(self, k, v, nx=None, ex=None):
+        self.kv[k] = v
+        return True
+    async def get(self, k): return self.kv.get(k)
+
+
+def test_post_product_memory_round_trip():
+    from app.agent import runtime
+    r = _PPRedis()
+    asyncio.run(runtime._remember_post_product(
+        r, "facebook", "post123",
+        {"name": "Aluminium Communion Tray", "slug": "aluminium-tray",
+         "hub_product_id": 7}))
+    got = asyncio.run(runtime._recall_post_product(r, "facebook", "post123"))
+    assert got["name"] == "Aluminium Communion Tray"
+    assert got["slug"] == "aluminium-tray"
+    # Unknown post / no redis → empty, never an error.
+    assert asyncio.run(runtime._recall_post_product(r, "facebook", "other")) == {}
+    assert asyncio.run(runtime._recall_post_product(None, "facebook", "post123")) == {}
+    # A nameless product is never recorded.
+    asyncio.run(runtime._remember_post_product(r, "facebook", "p2", {"slug": "x"}))
+    assert asyncio.run(runtime._recall_post_product(r, "facebook", "p2")) == {}
+
+
+def test_post_records_feed_resolution_and_compose():
+    import inspect
+    from app.agent import runtime
+    # The over-cap resolver consults the post's identity (records, else the
+    # deterministic ladder) before guessing from the caption…
+    src = inspect.getsource(runtime._resolve_post_product)
+    assert "_post_identity" in src
+    # …the identity helper recalls, deep-resolves, and remembers…
+    src_id = inspect.getsource(runtime._post_identity)
+    assert "_recall_post_product" in src_id and "resolve_post" in src_id
+    # …the compose context tells the model to price the recorded product…
+    src2 = inspect.getsource(runtime.run_turn)
+    assert "Our records identify this post's product as" in src2
+    # …and the comment flow writes the identification back.
+    src3 = inspect.getsource(runtime)
+    assert "_remember_post_product(redis, channel, post_id, matched)" in src3
