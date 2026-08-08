@@ -305,11 +305,13 @@ TOOLS: list[dict] = [
     },
     {
         "name": "pause_conversation",
-        "description": "Pause this conversation for 2 hours. Use ONLY after ~3 consecutive "
+        "description": "Pause this conversation for 2 hours. Two uses: (1) after ~3 consecutive "
                        "customer turns that stay outside Bethany House business (legal advice, "
                        "ministry counselling, off-topic chat) despite gentle redirection — send "
-                       "one brief kind closing line, then call this. Never use it on a buying "
-                       "customer, a complaint, or an open order.",
+                       "one brief kind closing line, then call this; (2) to END a persistent "
+                       "gift/hardship appeal AFTER your one scripture blessing (see GIFT "
+                       "REQUESTS AND HARDSHIP APPEALS). Never use it on a buying customer, a "
+                       "complaint, or an open order.",
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
