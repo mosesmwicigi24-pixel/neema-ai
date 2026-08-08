@@ -1454,10 +1454,23 @@ async def _maybe_push_order_to_hub(db: AsyncSession, redis, body, event_id: str)
         await _save(hub_push_status="failed", hub_last_error=f"catalog: {exc}")
         return {"hub_push_status": "failed"}
 
+    # The figures we collected must reach the workshop WITH the order — the
+    # whole point of measuring in chat (best-effort; staff still confirm).
+    measurement_note = ""
+    try:
+        from app.agent import measurements as mm
+        sizes = mm.describe(await mm.get_measurements(db, body.wa_id, "whatsapp"))
+        if sizes:
+            measurement_note = (f"Measurements on file: {sizes}. "
+                                "Confirm with the customer before production.")
+    except Exception:
+        pass
+
     try:
         pushed = await hub_client.push_pending_order(
             catalog, wa_id=body.wa_id, first_name=first_name,
             country_iso=country_iso, items=items,
+            measurement_note=measurement_note,
         )
     except ValueError as exc:            # nothing matched a hub product
         unmatched = getattr(exc, "unmatched", [])

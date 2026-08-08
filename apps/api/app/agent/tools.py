@@ -486,6 +486,20 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
         details = (p.get("description") or "").strip()
         if details:
             row["details"] = details[:260]
+        # The workshop's own measurement spec for THIS item (production items
+        # carry it in the hub) — the source of truth for WHAT to ask when
+        # measuring. Compacted to one line; required figures lead.
+        specs = p.get("measurements") or []
+        if specs:
+            req = [s.get("name") for s in specs if s.get("required") and s.get("name")]
+            opt = [s.get("name") for s in specs if not s.get("required") and s.get("name")]
+            unit = (specs[0].get("unit") or "").strip().lower()
+            unit = "inches" if unit in ("in", "inch", "inches") else unit
+            needed = ", ".join(req) if req else ""
+            if opt:
+                needed = (needed + f" (+ optional: {', '.join(opt)})").strip()
+            if needed:
+                row["measurements_needed"] = needed + (f" — in {unit}" if unit else "")
         # Variants each carry their OWN price (a Thurible in S ≠ L). Surface them
         # so the agent quotes the exact size/colour the customer wants — and a
         # price range when they haven't chosen yet — instead of one flat number.

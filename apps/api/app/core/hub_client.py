@@ -130,6 +130,10 @@ def _map_product(p: dict) -> dict:
         # are pushed via production_items[] instead — no variant, no stock check.
         "product_type":   p.get("product_type") or "simple",
         "is_producible":  bool(p.get("is_producible")),
+        # Per-item measurement spec [{name, unit, required}] the workshop needs
+        # to PRODUCE this item — set on production items in the hub. This is the
+        # source of truth for WHAT to ask a customer being measured.
+        "measurements":   p.get("measurements") or [],
         # Filled in by fetch_hub_catalog for variable products (each with its own
         # price); empty for simple products.
         "variants":       [],
@@ -407,6 +411,7 @@ async def push_pending_order(
     first_name: str,
     country_iso: str | None,
     items: list[dict],
+    measurement_note: str = "",
 ) -> dict:
     """Create a pending order in the hub from a confirmed WhatsApp cart.
 
@@ -457,10 +462,12 @@ async def push_pending_order(
                 "quantity": l["quantity"],
                 "unit_price": l["unit_price"],
                 **({"variant_id": l["variant_id"]} if l.get("variant_id") else {}),
-                # Name carries the chosen variant (e.g. "… (L / GOLD)"); staff
-                # still confirm exact measurements with the customer.
-                "production_notes": f"WhatsApp order via Neema — {l['name']}. "
-                                    "Confirm size/measurements with the customer.",
+                # Name carries the chosen variant (e.g. "… (L / GOLD)"); the
+                # customer's figures on file ride along so the workshop starts
+                # from them — staff still confirm before cutting cloth.
+                "production_notes": (f"WhatsApp order via Neema — {l['name']}. "
+                                     + (measurement_note or
+                                        "Confirm size/measurements with the customer.")),
             }
             for l in mto_lines
         ]

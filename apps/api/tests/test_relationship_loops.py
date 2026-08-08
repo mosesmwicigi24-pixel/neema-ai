@@ -362,3 +362,98 @@ def test_standup_shows_follow_ups_due():
                  _R(row=(1.0, 10)), _R(scalar=3), _R(scalar=1)])
     out = asyncio.run(compose_standup(db))
     assert "🤝 3 follow-up(s) due in the next 24h (1 already overdue)" in out
+
+
+# ── the hub's own measurement specs drive the measuring ──────────────────────
+# Every production item in the hub carries [{name, unit, required}] — verified
+# live: clergy-cassock needs Neck/Shoulders/Sleeves/Chest/Full Length (+
+# optional Waist/Hips); a clergy-shirt needs Wrist/Arm Hole/Upper Arm too.
+# The spec now flows hub → search_catalog → the ask → the order push.
+
+_HUB_SPECS = [{"name": "Neck", "unit": "in", "required": True},
+              {"name": "Shoulders", "unit": "in", "required": True},
+              {"name": "Chest", "unit": "in", "required": True},
+              {"name": "Waist", "unit": "in", "required": False},
+              {"name": "Full Length", "unit": "in", "required": True}]
+
+
+def test_hub_mapping_carries_the_measurement_spec():
+    from app.core.hub_client import _map_product
+    p = _map_product({"id": 1, "slug": "clergy-cassock", "is_producible": True,
+                      "measurements": _HUB_SPECS,
+                      "translations": [{"language_code": "en", "name": "Clergy Cassock"}]})
+    assert p["measurements"] == _HUB_SPECS
+    assert _map_product({"id": 2, "translations": []})["measurements"] == []
+
+
+def test_search_results_say_what_to_measure(monkeypatch):
+    from app.agent import tools
+
+    async def _catalog(db, redis):
+        return [{"name": "Clergy Cassock", "sku": "CC-1", "category": "Cassocks",
+                 "price": 7000, "price_usd": 55, "slug": "clergy-cassock",
+                 "product_type": "simple", "is_producible": True,
+                 "measurements": _HUB_SPECS, "description": "Fine poly-cotton."},
+                {"name": "Anointing Oil", "sku": "AO-1", "category": "Communion",
+                 "price": 500, "price_usd": 5, "slug": "anointing-oil",
+                 "measurements": []}]
+    monkeypatch.setattr(tools.svc, "catalog_items", _catalog)
+    out = asyncio.run(tools._search_catalog({"query": ""}, _ctx()))
+    by = {r["name"]: r for r in out["results"]}
+    need = by["Clergy Cassock"]["measurements_needed"]
+    assert need == ("Neck, Shoulders, Chest, Full Length "
+                    "(+ optional: Waist) — in inches")
+    assert "measurements_needed" not in by["Anointing Oil"]
+
+
+def test_saved_figures_ride_the_production_order(monkeypatch):
+    """The point of measuring in chat: the workshop receives the figures WITH
+    the order, not a note telling them to start from zero."""
+    from app.core import hub_client as hc
+    captured = {}
+
+    async def _fake_post_json(*a, **k):  # not used — we stop before HTTP
+        raise AssertionError
+
+    async def _no_customer(wa_id): return None
+    monkeypatch.setattr(hc, "_find_customer_id", _no_customer)
+
+    class _Resp:
+        def __init__(self): self.status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return {"data": {"id": 9, "order_number": "WA-9"}}
+        @property
+        def is_success(self): return True
+
+    class _Client:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, url, **k):
+            captured["payload"] = k.get("json")
+            return _Resp()
+
+    monkeypatch.setattr(hc.httpx, "AsyncClient", _Client)
+    monkeypatch.setattr(settings, "hub_outlet_id", 1)
+    catalog = [{"hub_product_id": 5, "name": "Clergy Cassock", "sku": "CC-1",
+                "slug": "clergy-cassock", "price": 7000, "price_kes": 7000,
+                "product_type": "variable", "is_producible": True,
+                "in_stock": False, "aliases": [], "variants": []}]
+    asyncio.run(hc.push_pending_order(
+        catalog, wa_id="254712345678", first_name="Moses", country_iso="KE",
+        items=[{"name": "Clergy Cassock", "qty": 1, "unit_price": 7000}],
+        measurement_note="Measurements on file: chest 42in, full length 58in. "
+                         "Confirm with the customer before production."))
+    notes = captured["payload"]["production_items"][0]["production_notes"]
+    assert "chest 42in" in notes and "Confirm with the customer" in notes
+
+
+def test_prompt_measures_from_the_hub_and_offers_ready_made_first():
+    from app.agent.prompt import build_system_prompt
+    p = build_system_prompt(currency="KES")
+    assert "WHAT TO MEASURE comes from the catalogue" in p
+    assert "`measurements_needed`" in p
+    assert "never invent a list of your own" in p
+    assert "READY-MADE FIRST, CUSTOM WHEN IT DIFFERS" in p
+    assert "collect one at the shop today" in p
+    assert "never a downgrade" in p
