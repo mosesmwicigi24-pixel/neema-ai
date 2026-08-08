@@ -163,12 +163,30 @@ async def web_chat(body: WebChatIn, request: Request, db: AsyncSession = Depends
         return {"reply": "Thanks — one of our team will reply here shortly.",
                 "session_id": sid, "handled_by": "human"}
 
-    from app.agent.runtime import run_turn, build_llm, route_model
+    from app.agent.runtime import run_turn, build_llm, route_model, _HOLD_LINE
     try:
         reply = await run_turn(db, redis, wa_id, text, build_llm(model=route_model(text)))
     except Exception:
         _log.exception("web chat turn failed for %s", wa_id)
-        reply = "Sorry — I hit a snag on my end. Could you try that again in a moment?"
+        # Same posture as every other channel (see runtime._send_hold_line): a
+        # warm hold line as the reply AND a dashboard flag so a human actually
+        # follows up — never an apology that asks the visitor to retry into the
+        # void. The flag files at most once per 2h per visitor.
+        reply = _HOLD_LINE
+        try:
+            flag = True
+            if redis is not None:
+                flag = bool(await redis.set(f"agent:holdline:web:{wa_id}", "1",
+                                            nx=True, ex=7200))
+            if flag:
+                from app.models.intercept import Intercept, InterceptAction
+                db.add(Intercept(conversation_id=conv.id, action=InterceptAction.flag,
+                                 note="Neema's reply FAILED here (website chat) — she "
+                                      "sent a short hold message; please review and "
+                                      "answer."))
+                await db.commit()
+        except Exception:
+            _log.warning("web chat: hold flag failed for %s", wa_id)
 
     # Persist + broadcast the reply (same path the WhatsApp agent uses).
     try:
