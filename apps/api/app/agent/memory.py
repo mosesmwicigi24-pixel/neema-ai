@@ -100,7 +100,25 @@ async def _recent_orders_summary(db: AsyncSession, wa_id: str, limit: int = 3,
         number = row.hub_order_number or row.id
         total = row.hub_total if row.hub_total is not None else row.subtotal
         currency = row.hub_currency or row.currency
-        lines.append(f"{number} — {currency} {total}")
+        when = ""
+        try:
+            if row.created_at:
+                when = f" ({row.created_at.strftime('%d %b %Y')})"
+        except Exception:
+            when = ""
+        # The BASKET is the intelligence: what this customer buys TOGETHER is
+        # how Neema knows what belongs with today's order (wafers travel with
+        # divai and cups) and what will need replenishing next.
+        names = []
+        for it in (row.items or [])[:6]:
+            n = (it.get("name") or it.get("product") or "").strip()
+            if not n:
+                continue
+            q = it.get("qty") or it.get("quantity")
+            names.append(n + (f" ×{q}" if q and q not in (1, "1") else ""))
+        basket = "; ".join(names)
+        lines.append(f"{number}{when} — {currency} {total}"
+                     + (f" — {basket}" if basket else ""))
     return lines
 
 
@@ -166,5 +184,6 @@ async def build_memory_context(db: AsyncSession, redis, wa_id: str, user: User |
                      "\n(Confirm these instead of asking again — "
                      "\"same measurements as last time?\")")
     if orders:
-        parts.append("Past orders (most recent first):\n" + "\n".join(f"- {o}" for o in orders))
+        parts.append("Past orders (most recent first — note what they buy TOGETHER):\n"
+                     + "\n".join(f"- {o}" for o in orders))
     return "\n\n".join(parts)
