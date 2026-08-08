@@ -22,16 +22,28 @@ from app.core.config import settings
 
 # ── the public comment CTA ────────────────────────────────────────────────────
 
-def test_public_reply_prefers_the_product_link():
+def test_public_reply_goes_link_free_when_the_dm_landed():
+    """Links are DM-only (owner, 2026-08-08): Meta suppresses the reach of
+    link-carrying comments, so when the DM opened, the public reply is the
+    answer + an inbox nudge and the storefront link rides the DM instead."""
     out = rt._comment_public_reply(
         "That red chasuble is $150.", dm_sent=True, link="https://neema.example/api/o/ABC",
         name_tag=" Charity", seed="X", product_link="https://bethanyhouse.co.ke/product/red-chasuble?ref=AB12CD")
+    assert "http" not in out                        # NO link of any kind in public
+    assert "WhatsApp" not in out
+    assert out.startswith("That red chasuble is $150.")
+    assert out != "That red chasuble is $150."      # the inbox nudge was appended
+
+
+def test_public_link_survives_when_the_dm_did_not_open():
+    """DM failure is the one case the product link still goes public — it is
+    the buyer's only door."""
+    out = rt._comment_public_reply(
+        "That red chasuble is $150.", dm_sent=False, link="",
+        name_tag=" Charity", seed="X",
+        product_link="https://bethanyhouse.co.ke/product/red-chasuble?ref=AB12CD")
     assert "bethanyhouse.co.ke/product/red-chasuble?ref=AB12CD" in out
-    assert "/api/o/" not in out                     # the short wa.me link is gone
     assert "Neema can help you right there" in out  # assistant is offered on the page
-    # ONE CTA, not three: they already have the product page (Neema is on it) and
-    # a DM — tacking "or message us on WhatsApp" on every public reply turned an
-    # answer into a push to another app.
     assert "WhatsApp" not in out
     assert out.startswith("That red chasuble is $150.")
 
