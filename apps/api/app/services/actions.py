@@ -79,6 +79,34 @@ async def needs_approval(db, deal, conv, in_window: bool) -> str | None:
     return None
 
 
+async def _send_fit_check_template(db, redis, conv, action) -> bool:
+    """Send the after-delivery fit check as the approved utility template
+    (name / order / status placeholders). True when it went out."""
+    import re
+    from app.services import n8n_bridge as svc
+    try:
+        m = re.search(r"[Oo]rder\s+([A-Za-z0-9-]+)", action.reason or "")
+        number = m.group(1) if m else "your recent order"
+        first = ((getattr(conv, "contact_name", None) or "").split(" ") or ["there"])[0] or "there"
+        phrase = ("delivered a few days ago — how is it fitting? If anything "
+                  "needs adjusting, we're glad to help")
+        tpl = await svc.send_wa_template(conv.wa_id, settings.wa_event_template,
+                                         settings.wa_event_lang,
+                                         [first, number, phrase])
+        await svc.save_outbound_message(
+            db, redis, conv.wa_id,
+            f"[template {settings.wa_event_template}] fit check on {number}",
+            waba_msg_id=(((tpl or {}).get("messages") or [{}])[0].get("id") or None))
+        action.status = "sent"
+        action.draft = f"[template] fit check on {number}"
+        await db.commit()
+        _log.info("fit check sent via template for %s", conv.wa_id)
+        return True
+    except Exception as exc:
+        _log.warning("fit-check template send failed for %s: %s", conv.wa_id, exc)
+        return False
+
+
 async def _compose_follow_up(db, redis, conv, reason: str) -> str:
     from app.agent import runtime
     key = conv.wa_id if conv.channel == "whatsapp" else conv.external_id
@@ -198,6 +226,17 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
 
             in_window = await _within_window(db, conv)
             gate = await needs_approval(db, deal, conv, in_window)
+            # A fit-check comes due ~6 days after delivery — the WhatsApp window
+            # is closed by then almost by definition. It is a service follow-up
+            # on their own transaction, so it may ride the approved UTILITY
+            # template instead of dying in the approvals queue.
+            if (gate == "outside the 24h messaging window"
+                    and action.kind == "fit_check"
+                    and conv.channel == "whatsapp" and settings.wa_event_template
+                    and settings.agent_initiative):
+                if await _send_fit_check_template(db, redis, conv, action):
+                    done += 1
+                    continue
             if gate is not None:
                 draft = ""
                 try:

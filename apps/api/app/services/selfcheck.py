@@ -113,6 +113,40 @@ async def _probe_deferred_events(db, redis) -> list[str]:
     return []
 
 
+async def _probe_after_sale(db, redis) -> list[str]:
+    """The after-sale arc (hub_events: paid / production / shipped / delivered
+    messages) deploys dark and STAYS dark until configured — and once it is on,
+    a dead hub→Neema webhook looks exactly like a quiet week. Say plainly
+    which state we're in and what unlocks the next one."""
+    if not settings.hub_events_secret:
+        return ["after-sale messages are OFF (HUB_EVENTS_SECRET unset) — customers "
+                "hear nothing at paid/production/shipped/delivered; set the secret "
+                "here and in the hub to switch the arc on"]
+    out: list[str] = []
+    from app.models.order_event import OrderEvent
+    from app.services.hub_events import LAST_EVENT_KEY
+    week = datetime.now(timezone.utc) - timedelta(days=7)
+    orders = (await db.execute(
+        select(sa_func.count()).select_from(OrderEvent)
+        .where(OrderEvent.created_at >= week))).scalar_one()
+    seen = None
+    if redis is not None:
+        try:
+            seen = await redis.get(LAST_EVENT_KEY)
+        except Exception:
+            pass
+    # Orders flowing while the hub has said nothing for 30d+ (the stamp's TTL)
+    # is a broken webhook, not a quiet week. No orders → nothing to conclude.
+    if orders >= 3 and not seen:
+        out.append(f"{orders} order(s) created in 7d but no hub event received — "
+                   "the hub→Neema webhook looks dead; check the hub side")
+    if not settings.wa_event_template:
+        out.append("WA_EVENT_TEMPLATE not set — order updates outside the 24h "
+                   "window fall to manual sending; approve a WhatsApp utility "
+                   "template and set its name to automate them")
+    return out
+
+
 async def _probe_missing_wamids(db, redis) -> list[str]:
     """Outbound WhatsApp rows should carry the wamid Meta returned; mostly-null
     means the send path is degraded and reply-quotes silently stopped resolving."""
@@ -188,11 +222,66 @@ async def _probe_waiting_customers(db, redis) -> list[str]:
     return []
 
 
+async def _probe_agent_failures(db, redis) -> list[str]:
+    """Is Neema still able to reply at all?
+
+    The check that was missing when the AI account ran out of credit: every turn
+    raised, every customer was met with silence for days, and nothing said so.
+    An out-of-credit or rejected-key failure is reported even for a single turn —
+    it never recovers on its own — while transient kinds need a few before we
+    call it a problem."""
+    from app.services.agent_health import ACTIONABLE, describe, read_turn_failures
+    failures = await read_turn_failures(redis)
+    if not failures:
+        return []
+    kind, count = failures.get("kind") or "other", failures.get("count") or 0
+    if kind in ACTIONABLE or count >= 3:
+        return [describe(failures)]
+    return []
+
+
+async def _probe_unanswered_customers(db, redis) -> list[str]:
+    """Customers waiting on the AI — threads it OWNS where nothing went back.
+
+    Deliberately outcome-based, so it fires whatever the cause: no credit, a bad
+    deploy, a crashed task, a bug none of us predicted. `_probe_waiting_customers`
+    only looks at human-held threads, so an AI that had stopped answering was
+    invisible to it."""
+    from app.models.conversation import Conversation, InterceptMode
+    from app.models.message import Message, MsgDirection
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
+    latest = (
+        select(Message.conversation_id, sa_func.max(Message.created_at).label("m"))
+        .group_by(Message.conversation_id).subquery())
+    rows = (await db.execute(
+        select(Message.created_at)
+        .join(latest, and_(Message.conversation_id == latest.c.conversation_id,
+                           Message.created_at == latest.c.m))
+        .join(Conversation, Conversation.id == Message.conversation_id)
+        .where(Message.direction == MsgDirection.inbound,
+               Conversation.intercept_mode == InterceptMode.ai,
+               Message.created_at < cutoff)
+    )).scalars().all()
+    # A couple can be legitimate (a paused chat, a closing "asante" needing no
+    # reply). A pile-up is the AI being down.
+    if len(rows) < 3:
+        return []
+    oldest = min(rows)
+    if oldest.tzinfo is None:
+        oldest = oldest.replace(tzinfo=timezone.utc)
+    hours = int((datetime.now(timezone.utc) - oldest).total_seconds() // 3600)
+    return [f"{len(rows)} customer(s) waiting on the AI with no reply for 30m+ "
+            f"(oldest {hours}h) — check that Neema can still answer"]
+
+
 PROBES = [
+    ("agent_failures", _probe_agent_failures),
+    ("unanswered_customers", _probe_unanswered_customers),
     ("media_dir", _probe_media_dir),
     ("media_rot", _probe_media_rot),
     ("stuck_actions", _probe_stuck_actions),
     ("deferred_events", _probe_deferred_events),
+    ("after_sale", _probe_after_sale),
     ("missing_wamids", _probe_missing_wamids),
     ("briefings", _probe_briefings),
     ("waiting_customers", _probe_waiting_customers),

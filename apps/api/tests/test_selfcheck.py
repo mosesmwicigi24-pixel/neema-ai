@@ -126,3 +126,74 @@ def test_media_dir_probe_reports_the_fix(monkeypatch, tmp_path):
 
     monkeypatch.setattr("app.routers.media.MEDIA_DIR", str(tmp_path))
     assert asyncio.run(sc._probe_media_dir(None, None)) == []
+
+
+# ── after-sale arc: dark, dead, or alive — say which ─────────────────────────
+# The order paid/production/shipped/delivered messages deploy dark until
+# HUB_EVENTS_SECRET is set, and once on, a broken hub webhook produces the
+# same silence as a slow week. The probe distinguishes all three states.
+
+import types as _types
+
+
+class _CountDB:
+    def __init__(self, n): self._n = n
+    async def execute(self, *a, **k):
+        n = self._n
+        return _types.SimpleNamespace(scalar_one=lambda: n)
+
+
+class _GetRedis:
+    def __init__(self, value=None): self._v = value
+    async def get(self, k): return self._v
+    async def set(self, k, v, nx=None, ex=None): return True
+
+
+def test_after_sale_off_is_said_plainly(monkeypatch):
+    monkeypatch.setattr(settings, "hub_events_secret", "")
+    out = asyncio.run(sc._probe_after_sale(None, None))
+    assert out and "HUB_EVENTS_SECRET" in out[0]
+    assert "paid/production/shipped/delivered" in out[0]
+
+
+def test_dead_hub_webhook_is_not_mistaken_for_a_quiet_week(monkeypatch):
+    monkeypatch.setattr(settings, "hub_events_secret", "s3cret")
+    monkeypatch.setattr(settings, "wa_event_template", "order_update")
+    # Orders flowing, hub silent → the webhook is dead.
+    out = asyncio.run(sc._probe_after_sale(_CountDB(5), _GetRedis(None)))
+    assert any("webhook looks dead" in f for f in out)
+    # Hub spoke recently → healthy.
+    assert asyncio.run(sc._probe_after_sale(
+        _CountDB(5), _GetRedis("2026-08-08T09:00:00+00:00"))) == []
+    # No orders → a quiet week, not an outage.
+    assert asyncio.run(sc._probe_after_sale(_CountDB(0), _GetRedis(None))) == []
+
+
+def test_missing_event_template_is_flagged_once_arc_is_on(monkeypatch):
+    monkeypatch.setattr(settings, "hub_events_secret", "s3cret")
+    monkeypatch.setattr(settings, "wa_event_template", "")
+    out = asyncio.run(sc._probe_after_sale(_CountDB(0), _GetRedis("seen")))
+    assert any("WA_EVENT_TEMPLATE" in f for f in out)
+
+
+def test_hub_events_stamp_liveness_even_on_failure():
+    """Any verified event proves the wiring — even one whose processing dies."""
+    from app.services import hub_events as he
+
+    class _R(_GetRedis):
+        def __init__(self):
+            super().__init__()
+            self.kv = {}
+        async def set(self, k, v, nx=None, ex=None):
+            if nx and k in self.kv:
+                return None
+            self.kv[k] = v
+            return True
+
+    r = _R()
+    asyncio.run(he.handle_event(None, r, {"id": "e1", "type": "order.paid"}))
+    assert he.LAST_EVENT_KEY in r.kv
+
+
+def test_after_sale_probe_registered():
+    assert "after_sale" in [n for n, _ in sc.PROBES]

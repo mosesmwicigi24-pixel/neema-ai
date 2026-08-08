@@ -108,6 +108,12 @@ const put = <T>(path: string, body: unknown) => req<T>("PUT", path, body);
 export const askNeema = (convId: string, question: string) =>
     post<{ answer: string }>(`/admin/conversations/${convId}/ask`, { question });
 
+/** Answer-via-Neema: give her the confirmed facts ("yes, we make it — KES 3,500,
+ *  ~5 days") and she delivers them to the customer in her own voice, in the
+ *  thread's language. Closes the "let me confirm and come right back" promise. */
+export const answerViaNeema = (convId: string, facts: string) =>
+    post<{ ok: boolean; sent: string }>(`/admin/conversations/${convId}/answer`, { facts });
+
 /** Deals + planned actions — the shared board and Neema's initiative queue. */
 export interface ApiDeal {
     id: string;

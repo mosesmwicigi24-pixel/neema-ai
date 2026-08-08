@@ -133,11 +133,29 @@ class Settings(BaseSettings):
     # to a lighter (still warm, varied) reply — caps AI cost + Graph rate on a
     # viral post. Buying comments beyond this still get a friendly WhatsApp nudge.
     meta_comment_agent_cap: int = 30
+    # Minutes of silence from the human side before a taken-over conversation is
+    # handed back to the AI. Intercept used to be a one-way door — a colleague
+    # replying once switched the thread to human mode and only a manual Release
+    # could undo it, so the customer got no further replies from Neema at all.
+    # Releasing never makes her speak; it only lets her answer the NEXT message.
+    # Set 0 to disable the sweep and go back to manual-release-only.
+    auto_release_minutes: int = 45
     # ── Business facts Neema answers logistics/FAQ questions from ─────────────
     # Free text (location/branches, hours, delivery, payment, contacts) injected
     # into the system prompt. Without it Neema only knows the catalogue and can't
     # answer "where are you located?". Keep it short and factual.
     business_info: str = ""
+    # Production times Neema may quote plainly ("how long does it take?" is THE
+    # most-asked made-to-order question). Free text, per-category; owner-stated
+    # (2026-08-08): shirts 24 hours, cassocks 5 days, copes 4 days — all
+    # assuming a clear workshop queue; an order ahead can shift the date, and
+    # then a staff member confirms. Anything not covered here she confirms with
+    # the workshop instead of inventing. Empty = always defer.
+    production_lead_time: str = ("clerical shirts about 24 hours; "
+                                 "cassocks about 5 days; copes about 4 days")
+    # Public image URL of the how-to-measure diagram (labelled chest/length/
+    # sleeve...). Empty = the send_measurement_guide tool is not registered.
+    measurement_guide_url: str = ""
     # Currency display gate: Kenya (+254) customers are quoted KES; everyone else
     # (and all Messenger/IG, which have no phone) is quoted USD = round(KES / rate).
     usd_kes_rate: int = 100

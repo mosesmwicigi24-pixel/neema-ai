@@ -150,6 +150,13 @@ async def build_memory_context(db: AsyncSession, redis, wa_id: str, user: User |
         return None
 
     parts = []
+    if orders:
+        # Lead with the relationship: being remembered is the cheapest luxury
+        # we can offer, and the greeting should carry it ("karibu tena"), not
+        # bury it under facts.
+        parts.append(f"RETURNING CUSTOMER — {len(orders)} past order(s) on file. "
+                     "Greet them like the familiar friend they are (karibu tena), "
+                     "never like a stranger.")
     if parish_line:
         parts.append(parish_line)
     if facts:

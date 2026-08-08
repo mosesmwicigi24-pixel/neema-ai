@@ -80,7 +80,7 @@ def test_search_results_carry_hub_details(monkeypatch):
 
 def test_prompt_carries_mood_slots_and_grounding():
     from app.agent.prompt import build_system_prompt
-    p = build_system_prompt(customer_name="Moses", currency="KES")
+    p = build_system_prompt(currency="KES")
     assert "READ THE ROOM" in p
     assert "SLOT CHECK" in p
     assert "GROUNDED DETAILS ONLY" in p
@@ -99,7 +99,7 @@ def test_prompt_prices_the_photo_instead_of_asking_which_item():
     cups and was asked which item he meant. The persona must forbid that."""
     from app.agent.prompt import build_system_prompt
     # Normalised so the assertions survive re-wrapping of the prompt text.
-    p = " ".join(build_system_prompt(customer_name="Pius", currency="KES").split())
+    p = " ".join(build_system_prompt(currency="KES").split())
     assert "PRICE WHAT IS IN THE PHOTO" in p
     # Lead with the primary object's price, never a clarifying question.
     assert "which item are you asking about" in p

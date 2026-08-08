@@ -359,6 +359,26 @@ async def lifespan(app: FastAPI):
 
     app.state._missed_reply_task = _asyncio.create_task(_missed_reply_loop())
 
+    # ── Hand quiet human-held threads back to the AI ──────────────────────────
+    # Intercept was a one-way door: a colleague replying once switched the thread
+    # to human mode, and only a manual Release could undo it — so Neema went
+    # silent on that customer for good. This returns a thread to AI once the
+    # human side has been quiet (see services/auto_release.py). Redis-locked so
+    # only one worker sweeps per tick.
+    async def _auto_release_loop(interval: int = 300):
+        await _asyncio.sleep(90)
+        while True:
+            try:
+                if redis is None or await redis.set("agent:autorelease:tick", "1",
+                                                    nx=True, ex=interval - 30):
+                    from app.services.auto_release import sweep_auto_release
+                    await sweep_auto_release(redis)
+            except Exception as exc:
+                logger.warning("auto-release tick failed: %s", exc)
+            await _asyncio.sleep(interval)
+
+    app.state._auto_release_task = _asyncio.create_task(_auto_release_loop())
+
     # Hub event agency: quiet-hours-deferred celebrations drain each morning
     # (leader-locked; no-op while HUB_EVENTS_SECRET is unset).
     from app.services import hub_events as _hub_events

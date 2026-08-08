@@ -207,12 +207,45 @@ TOOLS: list[dict] = [
     },
     {
         "name": "handoff_to_human",
-        "description": "Escalate to a human agent when the customer asks for one, is upset, or "
-                       "needs something you cannot do (refunds, complaints, bespoke requests).",
+        "description": "Escalate to a human agent when the customer explicitly asks for a "
+                       "person, or needs a decision only a human can make (a refund, a "
+                       "discount, a bespoke commission). For a COMPLAINT use raise_complaint "
+                       "instead — that keeps you in the conversation while the team is "
+                       "brought in, so the customer is never left waiting in silence.",
         "input_schema": {
             "type": "object",
             "properties": {"reason": {"type": "string"}},
             "required": ["reason"],
+        },
+    },
+    {
+        "name": "raise_complaint",
+        "description": "Put a complaint in front of the team as a COMPLETE CASE, after you "
+                       "have acknowledged it and looked into it. Use this for any "
+                       "dissatisfaction — a late or missing order, a wrong or damaged item, "
+                       "being charged incorrectly, nobody replying, or a customer telling us "
+                       "something is wrong. Call it ONLY after you have checked what you can "
+                       "(check_order_status, the catalogue) so the team inherits your "
+                       "findings, not just 'customer is upset'. A colleague always follows up "
+                       "and has the final word — but you STAY in the conversation and keep "
+                       "answering factual questions until they do. Never promise a refund, a "
+                       "discount, a replacement or a specific resolution: say a colleague is "
+                       "picking it up and, when you can, by when.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "issue": {"type": "string",
+                          "description": "what the customer says went wrong, in their terms"},
+                "findings": {"type": "string",
+                             "description": "what YOU checked and found (order status, dates, "
+                                            "the catalogue) — the facts the colleague needs"},
+                "wanted": {"type": "string",
+                           "description": "what the customer is asking for (refund, replacement, "
+                                          "delivery, an explanation) — say 'unclear' if unstated"},
+                "severity": {"type": "string", "enum": ["low", "normal", "high"],
+                             "description": "high = money lost, an event/date at risk, or public anger"},
+            },
+            "required": ["issue"],
         },
     },
     {
@@ -232,11 +265,15 @@ TOOLS: list[dict] = [
     },
     {
         "name": "whatsapp_checkout_link",
-        "description": "Give a Messenger/Instagram customer a ONE-TAP WhatsApp link to finish "
-                       "their order — checkout and payment happen on WhatsApp. Use this the "
-                       "moment they show buying intent ('how do I pay', 'I'll take it', a clear "
-                       "yes). Pass a SHORT product summary (a few words, never the full order "
-                       "breakdown); share the returned tiny link exactly as given.",
+        "description": "LAST RESORT ONLY — a one-tap WhatsApp link for a customer you cannot "
+                       "serve where they already are. Buying intent is NOT a reason to call "
+                       "this: 'I'll take it' / 'how do I pay' means CLOSE THE SALE HERE "
+                       "(capture_contact for their number, then create_order). Call this ONLY "
+                       "when they decline to share a phone number, they ask to move to "
+                       "WhatsApp themselves, or the order genuinely cannot be placed in this "
+                       "chat. Never use it to move a willing buyer — sending a ready customer "
+                       "away loses the sale. Pass a SHORT product summary (a few words, never "
+                       "the full order breakdown); share the returned tiny link exactly as given.",
         "input_schema": {
             "type": "object",
             "properties": {"product": {"type": "string",
@@ -354,7 +391,38 @@ TOOLS: list[dict] = [
             "required": ["products"],
         },
     },
+    {
+        "name": "prepare_quotation",
+        "description": "Prepare a formal written quotation from the current cart — for a "
+                       "parish, committee or organisation that needs it in writing before "
+                       "approving the purchase. Build the cart with update_cart first. "
+                       "Returns the quotation text: send it as your message exactly as "
+                       "returned (you may add ONE warm line before it) — never retype or "
+                       "alter the figures.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "addressed_to": {
+                    "type": "string",
+                    "description": "Who it is for — e.g. \"St Mary's Parish, Nakuru\" or the customer's name."},
+            },
+            "required": [],
+        },
+    },
 ]
+
+# Registered only when a guide image is configured: the tool list must be
+# byte-stable per deploy (it heads the prompt-cache prefix), and settings are
+# fixed at boot — so this is a deploy-time constant, not a per-turn branch.
+if settings.measurement_guide_url:
+    TOOLS.append({
+        "name": "send_measurement_guide",
+        "description": "Send our labelled how-to-measure diagram to this customer. Use it "
+                       "the FIRST time you ask for measurements (chest, length, sleeve…) so "
+                       "they can see exactly how to take each one — then ask for the figures "
+                       "in your own short line. Never re-send it in the same conversation.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    })
 
 
 # ── Dispatch ─────────────────────────────────────────────────────────────────
@@ -418,6 +486,20 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
         details = (p.get("description") or "").strip()
         if details:
             row["details"] = details[:260]
+        # The workshop's own measurement spec for THIS item (production items
+        # carry it in the hub) — the source of truth for WHAT to ask when
+        # measuring. Compacted to one line; required figures lead.
+        specs = p.get("measurements") or []
+        if specs:
+            req = [s.get("name") for s in specs if s.get("required") and s.get("name")]
+            opt = [s.get("name") for s in specs if not s.get("required") and s.get("name")]
+            unit = (specs[0].get("unit") or "").strip().lower()
+            unit = "inches" if unit in ("in", "inch", "inches") else unit
+            needed = ", ".join(req) if req else ""
+            if opt:
+                needed = (needed + f" (+ optional: {', '.join(opt)})").strip()
+            if needed:
+                row["measurements_needed"] = needed + (f" — in {unit}" if unit else "")
         # Variants each carry their OWN price (a Thurible in S ≠ L). Surface them
         # so the agent quotes the exact size/colour the customer wants — and a
         # price range when they haven't chosen yet — instead of one flat number.
@@ -1078,6 +1160,72 @@ async def _handoff_to_human(args: dict, ctx: ToolContext) -> dict:
     return {"ok": True, "reason": args.get("reason")}
 
 
+async def _raise_complaint(args: dict, ctx: ToolContext) -> dict:
+    """File a complaint as a complete case for the team — WITHOUT muting Neema.
+
+    This is deliberately not `handoff_to_human`. That sets intercept_mode=human,
+    which stops the agent replying at all AND drops the thread out of the
+    missed-reply sweeper (it only picks up intercept_mode=ai) — so a complaint at
+    11pm got one apology and then silence until someone opened the dashboard. The
+    angriest customer received the least service.
+
+    Here the conversation stays in AI mode: the team is flagged in the Activity
+    log with Neema's findings, a colleague takes it over and has the final word,
+    and meanwhile the customer still gets factual answers instead of nothing."""
+    from sqlalchemy import or_
+    from app.models.conversation import Conversation
+    from app.models.intercept import Intercept, InterceptAction
+
+    issue = (args.get("issue") or "").strip()
+    if not issue:
+        return {"error": "issue is required — describe what the customer says went wrong"}
+    findings = (args.get("findings") or "").strip()
+    wanted = (args.get("wanted") or "").strip()
+    severity = (args.get("severity") or "normal").strip().lower()
+    if severity not in ("low", "normal", "high"):
+        severity = "normal"
+
+    lines = [f"COMPLAINT ({severity.upper()}) — a colleague must follow up and close this.",
+             f"• What the customer says: {issue}"]
+    if findings:
+        lines.append(f"• What Neema checked/found: {findings}")
+    if wanted:
+        lines.append(f"• What they're asking for: {wanted}")
+    lines.append("• Neema has NOT promised any refund, discount or replacement, and is "
+                 "still answering factual questions in the thread until you take over.")
+    note = "\n".join(lines)
+
+    conv = (await ctx.db.execute(select(Conversation).where(
+        Conversation.channel == ctx.channel,
+        or_(Conversation.external_id == ctx.wa_id, Conversation.wa_id == ctx.wa_id),
+    ))).scalars().first()
+    if conv is None:
+        _log.warning("raise_complaint: no %s conversation for %s", ctx.channel, ctx.wa_id)
+        return {"ok": False, "logged": False,
+                "next_step": "Tell the customer plainly that a colleague will follow up, "
+                             "and keep helping with anything factual you can answer."}
+
+    ctx.db.add(Intercept(conversation_id=conv.id, action=InterceptAction.flag, note=note[:2000]))
+    # Deliberately NOT conv.intercept_mode = human — see the docstring.
+    await ctx.db.commit()
+    _log.info("complaint raised on %s/%s (severity=%s)", ctx.channel, ctx.wa_id, severity)
+    return {
+        "ok": True,
+        "logged": True,
+        "severity": severity,
+        "you_may": "explain what happened, give real order status, correct wrong information, "
+                   "re-send a payment link, and say a colleague is picking it up (and by when "
+                   "if you know).",
+        "you_may_not": "promise or initiate a refund, offer a discount, commit to a remake or "
+                       "reshipment, guarantee a delivery date you cannot verify, or accept "
+                       "blame in a way that binds the business.",
+        "next_step": "Tell the customer, warmly and without excuses, what you found and that a "
+                     "colleague is now on it. Then STAY with them: keep answering factual "
+                     "questions. Do NOT sell anything in this conversation unless they "
+                     "themselves move on to buying.",
+    }
+
+
 async def _resolve_cart_items(product: str, ctx: ToolContext) -> list[dict]:
     """The product the customer agreed to, as a REAL cart line (hub product id,
     variant SKU, hub price) — never free text. Empty when it can't be matched."""
@@ -1522,6 +1670,71 @@ async def _pause_conversation(args: dict, ctx: ToolContext) -> dict:
     return {"ok": False}
 
 
+async def _prepare_quotation(args: dict, ctx: ToolContext) -> dict:
+    """A formal written quotation from the cart — what a parish committee needs
+    in hand to approve the purchase. Composed in code so the figures can't
+    drift; the model sends the text verbatim."""
+    import hashlib as _hashlib
+    from datetime import timedelta as _td
+    cart = await cartmod.get_cart(ctx.db, ctx.wa_id, ctx.channel)
+    if not (cart.get("items") or []):
+        return {"error": "cart is empty — add the items with update_cart first"}
+    items, total = await _cart_display(cart, ctx)
+    nairobi = datetime.now(timezone.utc) + _td(hours=3)
+    number = (f"QT-{nairobi.strftime('%y%m%d')}-"
+              f"{_hashlib.sha1(ctx.wa_id.encode()).hexdigest()[:4].upper()}")
+    to = (args.get("addressed_to") or "").strip()
+    lines = [f"*QUOTATION {number}*",
+             "Bethany House — Nairobi, Kenya",
+             f"Date: {nairobi.strftime('%d %b %Y')}"]
+    if to:
+        lines.append(f"Prepared for: {to}")
+    lines.append("")
+    for i in items:
+        qty = i.get("qty") or i.get("quantity") or 1
+        name = i.get("name") or "Item"
+        try:
+            unit = float(i.get("unit_price"))
+            lines.append(f"- {name} ×{qty} @ {ctx.currency} {unit:,.0f} "
+                         f"= {ctx.currency} {unit * float(qty):,.0f}")
+        except (TypeError, ValueError):
+            lines.append(f"- {name} ×{qty}")
+    try:
+        total_s = f"{float(total):,.0f}"
+    except (TypeError, ValueError):
+        total_s = str(total)
+    lines += ["",
+              f"*TOTAL: {ctx.currency} {total_s}*",
+              f"Valid until {(nairobi + _td(days=14)).strftime('%d %b %Y')}.",
+              "Made to order and tailored to your measurements. Delivery is "
+              "quoted separately by destination."]
+    return {"ok": True, "quotation": "\n".join(lines),
+            "note": "send this text as your message — at most one warm line before it"}
+
+
+async def _send_measurement_guide(args: dict, ctx: ToolContext) -> dict:
+    """Send the how-to-measure diagram. WhatsApp gets the image natively; Meta
+    channels get the link to include with the ask (their DM clients preview it)."""
+    url = (settings.measurement_guide_url or "").strip()
+    if not url:
+        return {"error": "no measurement guide is configured"}
+    if ctx.channel == "whatsapp":
+        try:
+            from app.services import n8n_bridge as _svc
+            wamid = await _svc._send_waba_image(
+                ctx.wa_id, url, caption="How to take your measurements 📏")
+            await _svc.save_outbound_message(
+                ctx.db, ctx.redis, ctx.wa_id, "[image] How-to-measure guide 📏",
+                waba_msg_id=wamid)
+            return {"ok": True, "sent": "image",
+                    "note": "the diagram is with them — now ask for the figures in one short line"}
+        except Exception as exc:
+            _log.warning("measurement guide send failed for %s: %s", ctx.wa_id, exc)
+            return {"error": "could not send the image — share the figures ask in words instead"}
+    return {"ok": True, "guide_url": url,
+            "note": "include this link with your ask so they can see how to measure"}
+
+
 _HANDLERS = {
     "search_catalog": _search_catalog,
     "get_cart": _get_cart,
@@ -1533,6 +1746,7 @@ _HANDLERS = {
     "remember": _remember,
     "add_tags": _add_tags,
     "handoff_to_human": _handoff_to_human,
+    "raise_complaint": _raise_complaint,
     "check_availability": _check_availability,
     "pause_conversation": _pause_conversation,
     "capture_contact": _capture_contact,
@@ -1542,4 +1756,6 @@ _HANDLERS = {
     "save_measurements": _save_measurements,
     "church_calendar": _church_calendar,
     "save_parish": _save_parish,
+    "prepare_quotation": _prepare_quotation,
+    "send_measurement_guide": _send_measurement_guide,
 }

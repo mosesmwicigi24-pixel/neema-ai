@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.llm import LLM, LLMResponse
 from app.agent.memory import build_memory_context
-from app.agent.prompt import build_system_prompt
+from app.agent.prompt import build_system_prompt, customer_context
 from app.agent.tools import TOOLS, ToolContext, run_tool
 from app.core.config import settings
 from app.core.countries import resolve_country
@@ -36,11 +36,13 @@ META_CHANNELS = ("messenger", "facebook", "instagram")
 # catalogue, one source of truth. whatsapp_checkout_link stays as the FALLBACK
 # for a buyer who won't share a number.
 _META_TOOL_NAMES = {"search_catalog", "get_cart", "update_cart", "create_order",
+                    "raise_complaint",
                     "check_order_status", "remember", "handoff_to_human",
                     "whatsapp_checkout_link", "share_catalog", "send_product_cards",
                     "capture_contact", "pause_conversation", "save_measurements",
                     "check_availability",
-                    "church_calendar", "save_parish"}
+                    "church_calendar", "save_parish",
+                    "prepare_quotation", "send_measurement_guide"}
 MESSENGER_TOOLS = [t for t in TOOLS if t["name"] in _META_TOOL_NAMES]
 
 # A PUBLIC comment reply is short and read-only — it just needs the real price, so
@@ -76,6 +78,19 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "- ANSWER THE QUESTION THEY ACTUALLY ASKED. If it isn't about price — where we "
         "are, delivery, opening hours, whether we ship to their country — answer THAT "
         "first, briefly, and only add a price if it's relevant.\n"
+        "- READ THE MOOD BEFORE YOU SELL. This is a PUBLIC square: everyone reading "
+        "judges us by how we treat one person. If the comment carries displeasure, a "
+        "correction, doubt, or a grievance — even three words like 'this is wrong' — do "
+        "NOT quote a price and do NOT pitch. Reply with one short, humble, unemotional "
+        "line that takes them seriously and offers to make it right ('Thank you for "
+        "telling us — may we look into this with you?'). Never argue, never defend, "
+        "never use a cheerful emoji on a complaint.\n"
+        "- If the comment is grief, condolence, illness or a prayer request, respond "
+        "with warmth alone — a brief blessing. Sell NOTHING. Not every comment under a "
+        "post is a customer at a till.\n"
+        "- If you genuinely cannot tell what they mean, say nothing salesy: thank them "
+        "and invite them to tell you more. A pitch aimed at a misread comment is worse "
+        "than a plain thank-you.\n"
         "- Reply in the SAME language the comment is written in (French → French, "
         "Swahili → Swahili, etc.). Never answer a French or Swahili comment in English.\n"
         "- Recognise the product from the POST IMAGE (you can see it) and find it in "
@@ -132,6 +147,11 @@ def _meta_addendum(currency: str = "USD") -> str:
         "links their Messenger and WhatsApp into one customer. Frame it as "
         "staying in touch, never as sending them away. Without it we cannot place "
         "the order.\n"
+        "- That number request IS your one natural WhatsApp invitation (see THE "
+        "WHATSAPP INVITATION above) — you may add, lightly and once, that we're on "
+        "WhatsApp too if that's easier for them. Then keep selling HERE regardless "
+        "of whether they take it up. Never repeat the invitation, and never let it "
+        "replace the next step of the order.\n"
         "- Then CLOSE IT HERE: ask if they're ready to pay; on their yes call "
         "`create_order` — it registers the order and returns the order number. How "
         "they PAY follows the PAYMENT rule above for THEIR country, right in this "
@@ -146,6 +166,37 @@ def _meta_addendum(currency: str = "USD") -> str:
         "and share the link it returns EXACTLY as given — never hand-type a wa.me "
         "link or number. That is a fallback, not the plan.\n"
         "- Keep replies short, precise, and friendly; you are the same Bethany House assistant."
+    )
+
+
+# Session keys minted by the storefront chat endpoint (routers/web_chat.py:
+# "web_" + sha1). Not a phone — this is how a website visitor is recognised.
+WEB_KEY_PREFIX = "web_"
+
+
+def _web_addendum() -> str:
+    """System addendum for a visitor chatting on the bethanyhouse.co.ke storefront.
+
+    They are already standing in the shop: the products, the prices and the order
+    are all right there. Pushing them to WhatsApp from here is friction, not
+    service — so the whole sale happens on the site, and WhatsApp is offered only
+    the way THE WHATSAPP INVITATION describes: once, in passing, as an extra."""
+    return (
+        "\n\n## This conversation is on the Bethany House WEBSITE (not WhatsApp)\n"
+        "- They are already on our storefront, where they can see the products and "
+        "order. Serve them fully HERE: answer from the catalogue, guide the choice, "
+        "and take the order in this chat, exactly as you would on WhatsApp.\n"
+        "- Do NOT send them to WhatsApp to buy. Never write a wa.me link or 'message "
+        "us on WhatsApp' as the way to order — that sends a customer who is already "
+        "in the shop out of it.\n"
+        "- Ask for their phone number naturally when the items are settled (for the "
+        "order confirmation and delivery) and save it with capture_contact. That is "
+        "your ONE natural WhatsApp invitation — mention we're on WhatsApp too only "
+        "if it's genuinely easier for them, once, and then carry on selling here "
+        "whatever they choose.\n"
+        "- If they ASK for WhatsApp, or want a person, give our number warmly (see "
+        "OUR OFFICIAL CONTACTS) — that's serving them, not redirecting them.\n"
+        "- Write plain, warm sentences — no markdown headings, no asterisks."
     )
 
 
@@ -366,6 +417,9 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     skips phone/hub-bound context, uses a read-only catalogue tool set, and is
     told to route checkout to WhatsApp — one brain, one KES catalogue."""
     is_meta = channel in META_CHANNELS
+    # Website storefront visitor (web_chat mints a "web_<sha1>" session key rather
+    # than a phone). They're already on the site that sells — see _web_addendum.
+    is_web = not is_meta and str(wa_id or "").startswith(WEB_KEY_PREFIX)
     key = external_id if is_meta else wa_id
 
     # Currency display gate: Kenya → KES; everyone else → USD (= KES /
@@ -396,14 +450,19 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     except Exception:
         _directives = ""
     system = build_system_prompt(
-        customer_name=customer_name,
-        country=loc.get("country") or "",
         country_iso=loc.get("country_iso") or "",
         currency=currency,
         directives=_directives,
     )
     if is_meta:
         system += _public_comment_addendum(currency) if public_comment else _meta_addendum(currency)
+    elif is_web:
+        system += _web_addendum()
+    # Everything about THIS customer goes in a SECOND system block ("the tail"),
+    # so the rules block above stays byte-identical fleet-wide and every turn
+    # reads it from one shared cache entry instead of writing its own copy
+    # (block 0 carries the 1h-TTL breakpoint — see llm._cached_system).
+    tail = customer_context(customer_name, loc.get("country") or "")
 
     # 40 messages of context (was 20): re-asking an answered question is the
     # most robotic failure there is, and it usually happened because the answer
@@ -415,7 +474,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     try:
         _call_ctx = await _recent_call_context(db, key, channel)
         if _call_ctx:
-            system += _call_ctx
+            tail += _call_ctx
     except Exception:
         pass
 
@@ -424,7 +483,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     try:
         _xc = await _cross_channel_context(db, key, channel)
         if _xc:
-            system += _xc
+            tail += _xc
     except Exception:
         pass
 
@@ -435,7 +494,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         from app.services.link_preview import shared_link_context
         _link = await shared_link_context(user_text, redis)
         if _link:
-            system += _link
+            tail += _link
     except Exception:
         pass
 
@@ -445,8 +504,8 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         from app.services.deals import guidance_for
         _g = await guidance_for(db, key, channel)
         if _g:
-            system += ("\n\nDEAL GUIDANCE FROM THE TEAM — for THIS customer only, "
-                       "follow it (pricing/payment/stock safety rules still win):\n" + _g)
+            tail += ("\n\nDEAL GUIDANCE FROM THE TEAM — for THIS customer only, "
+                     "follow it (pricing/payment/stock safety rules still win):\n" + _g)
     except Exception:
         pass
 
@@ -541,7 +600,8 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                       currency=currency, usd_rate=settings.usd_kes_rate,
                       seen_products=(product_sink if product_sink is not None else []),
                       read_only=read_only)
-    totals = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0}
+    totals = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0,
+              "cache_write_tokens": 0, "cache_write_1h_tokens": 0}
 
     def _accumulate(u: dict) -> None:
         for k in totals:
@@ -551,6 +611,12 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         base = PUBLIC_COMMENT_TOOLS       # read-only: just enough to quote a real price
     elif is_meta:
         base = MESSENGER_TOOLS
+    elif is_web:
+        # The visitor is ALREADY on our storefront, where the whole order can be
+        # taken. Handing them a wa.me link here is pure friction — it sends a
+        # ready buyer to another app — so the WhatsApp-link tool is off the table
+        # on the website; her one natural invitation is the phone ask instead.
+        base = [t for t in TOOLS if t["name"] != "whatsapp_checkout_link"]
     else:
         base = TOOLS
     tools = base if settings.tier2_memory else [t for t in base if t["name"] != "remember"]
@@ -570,9 +636,13 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                    "done (or if there is nothing to save), reply with exactly: "
                    "noted]")
 
+    # Two system blocks: [shared rules | this customer]. The list form is what
+    # tells the LLM client to put the fleet-shared 1h cache breakpoint on block 0.
+    sys_blocks: str | list[str] = [system, tail] if tail else [system]
+
     reply = None
     for _ in range(settings.tier2_max_iterations):
-        resp: LLMResponse = await llm.complete(system=system, messages=messages, tools=tools)
+        resp: LLMResponse = await llm.complete(system=sys_blocks, messages=messages, tools=tools)
         _accumulate(resp.usage or {})
         messages.append({"role": "assistant", "content": resp.assistant_content})
 
@@ -644,6 +714,65 @@ async def _is_paused(redis, channel: str, key: str) -> bool:
     return False
 
 
+_HOLD_LINE = ("Samahani for the wait — I'm having a small technical hitch on my "
+              "side. A colleague has been alerted, and we'll be right back to "
+              "you. Asante for your patience 🙏")
+
+
+async def _send_hold_line(redis, channel: str, key: str) -> None:
+    """When a turn dies, the customer must never get pure silence.
+
+    Once per thread per two hours: send a short honest hold message (it needs
+    no LLM — the send path is independent of what broke) and flag the team in
+    the Activity feed. Best-effort everywhere; this runs inside a failure
+    handler and must never raise.
+
+    Deliberately NO automatic retry of the failed turn: a turn that died
+    mid-loop may already have executed tools (a cart add, an order), and
+    re-running it would repeat them. The missed-reply sweeper re-engages the
+    thread once the underlying cause clears."""
+    try:
+        if redis is not None:
+            try:
+                if not await redis.set(f"agent:holdline:{channel}:{key}", "1",
+                                       nx=True, ex=7200):
+                    return
+            except Exception:
+                pass
+        from app.database import AsyncSessionLocal
+        from app.services import n8n_bridge as svc
+        if channel == "whatsapp":
+            wamid = await svc._send_waba(key, _HOLD_LINE)
+            async with AsyncSessionLocal() as db:
+                await svc.save_outbound_message(db, redis, key, _HOLD_LINE,
+                                                waba_msg_id=wamid)
+        else:
+            from app.services.meta_send import send_to_channel
+            await send_to_channel(channel, key, _HOLD_LINE)
+            async with AsyncSessionLocal() as db:
+                await svc.save_outbound_channel_message(db, redis, channel, key,
+                                                        _HOLD_LINE)
+        try:
+            async with AsyncSessionLocal() as db:
+                from app.models.conversation import Conversation
+                from app.models.intercept import Intercept, InterceptAction
+                where = (Conversation.wa_id == key) if channel == "whatsapp" else (
+                    (Conversation.channel == channel) & (Conversation.external_id == key))
+                conv = (await db.execute(
+                    select(Conversation).where(where))).scalar_one_or_none()
+                if conv is not None:
+                    db.add(Intercept(conversation_id=conv.id, agent_id=None,
+                                     action=InterceptAction.flag,
+                                     note="Neema's reply FAILED here — she sent a short "
+                                          "hold message; please review and answer."))
+                    await db.commit()
+        except Exception:
+            pass
+        _log.info("hold line sent to %s/%s", channel, key)
+    except Exception:
+        _log.warning("hold line failed for %s/%s", channel, key, exc_info=False)
+
+
 async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None) -> None:
     from app.database import AsyncSessionLocal
     from app.services import n8n_bridge as svc
@@ -665,8 +794,14 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None)
                 await scribe_update(db3, wa_id, "whatsapp", reply, inbound_text=text)
         except Exception:
             pass
-    except Exception:
+    except Exception as exc:
         _log.exception("tier2 background turn failed for %s", wa_id)
+        # Count it so the hourly self-check can say the AI has stopped replying —
+        # and why. An out-of-credit account silenced every channel for days and
+        # the only trace was this log line.
+        from app.services.agent_health import record_turn_failure
+        await record_turn_failure(redis, wa_id, exc)
+        await _send_hold_line(redis, "whatsapp", wa_id)
 
 
 async def schedule_reply(redis, wa_id: str, text: str, dedup_id: str | None,
@@ -779,6 +914,9 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
             await escalate_to_human(channel, external_id, note)
         else:
             _log.exception("tier2 meta turn failed for %s/%s", channel, external_id)
+            from app.services.agent_health import record_turn_failure
+            await record_turn_failure(redis, external_id, exc)
+            await _send_hold_line(redis, channel, external_id)
         return False
 
 
@@ -816,6 +954,36 @@ _PUBLIC_EMPATHY = (
 )
 _INTENTS = ("high", "low", "negative", "spam")
 
+# Dissatisfaction is often three words long ("this is wrong"), and a light model
+# reading a clergy-store comment biased toward "buying interest" has labelled
+# exactly that as `high` — which answered a complaint with a sales pitch in
+# public. Displeasure is the one label we cannot afford to get wrong, so it gets
+# a deterministic guard AHEAD of the model: cheap, and it also covers the paths
+# where the model errors or returns something unparseable (both default to
+# `high`). Precision over recall — these read as complaints in a shop context,
+# not as questions.
+_NEGATIVE_RE = re.compile(
+    r"(?:^|\b)("
+    r"this\s+is\s+(?:wrong|not\s+right|false|misleading)|"
+    r"(?:that|it)['’]?s\s+(?:wrong|false|a\s+lie)|"
+    r"not\s+(?:true|correct|right)|incorrect|misleading|"
+    r"wrong\s+(?:information|info|price|colour|color|item|order)|"
+    r"poor\s+(?:quality|service)|bad\s+(?:quality|service)|"
+    r"never\s+(?:replied|delivered|received|answered)|"
+    r"still\s+(?:waiting|haven'?t)|no\s+one\s+(?:replied|answered)|"
+    r"scam|fraud|cheat(?:ed|ing)?|con\s+men|thieves|"
+    r"disappoint(?:ed|ing)|refund|"
+    r"you\s+(?:people\s+)?(?:lied|are\s+lying)|shame\s+on\s+you"
+    r")(?:$|\b)",
+    re.IGNORECASE,
+)
+
+
+def looks_negative(text: str) -> bool:
+    """True when a comment plainly expresses displeasure, a correction, or a
+    grievance. Deterministic first pass for `classify_comment_intent`."""
+    return bool(_NEGATIVE_RE.search((text or "").strip()))
+
 
 async def classify_comment_intent(text: str) -> str:
     """Label a public comment so we react appropriately. Cheap light-model call.
@@ -829,13 +997,21 @@ async def classify_comment_intent(text: str) -> str:
     t = (text or "").strip()
     if not t:
         return "low"
+    # Plain displeasure never goes to the model — and never becomes a sales pitch.
+    if looks_negative(t):
+        return "negative"
     prompt = (
         "Classify this public comment on a Christian clergy/communion store's post "
         "into ONE word:\n"
         "- high: buying interest OR any genuine question — price, availability, sizes, "
         "how to order, where you are located, delivery, opening hours, 'I want this'\n"
         "- low: praise, emoji, tagging a friend, 'amen', generic positivity, no question\n"
-        "- negative: a complaint, anger, an unresolved order, or criticism\n"
+        "- negative: ANY dissatisfaction, correction, doubt or grievance — a complaint, "
+        "anger, an unresolved order, criticism of us or of the post, or a claim that "
+        "something is wrong/untrue. Short ones count: 'this is wrong', 'not true', "
+        "'poor quality', 'still waiting', 'you never replied'. If a comment could be "
+        "read as either a question OR displeasure, answer negative — a pitch sent to "
+        "an unhappy person in public is far costlier than a careful reply.\n"
         "- spam: ONLY bots, ads, promotional links, or abuse\n"
         "Comments come in many languages (French, Swahili, Sheng, Chinese, Dutch…). "
         "A comment you don't understand is NOT spam: if it asks anything, answer "
@@ -868,17 +1044,32 @@ def plan_comment_actions(intent: str) -> dict:
     return {"public": True, "style": "answer", "dm": True, "human": False}   # high
 
 
-async def _route_comment_to_human(channel: str, external_id: str) -> None:
+async def _route_comment_to_human(channel: str, external_id: str,
+                                  comment: str = "") -> None:
+    """Flag an unhappy commenter for the team — WITHOUT muting Neema.
+
+    This used to set intercept_mode=human, which stopped the agent replying at
+    all and also dropped the thread out of the missed-reply sweeper (it only
+    picks up intercept_mode=ai). So a public complaint got one apology and then
+    silence until someone opened the dashboard. The team is still brought in and
+    still has the final word — they just aren't the customer's only hope of a
+    reply in the meantime."""
     from sqlalchemy import select
     from app.database import AsyncSessionLocal
-    from app.models.conversation import Conversation, InterceptMode
+    from app.models.conversation import Conversation
+    from app.models.intercept import Intercept, InterceptAction
     async with AsyncSessionLocal() as db:
         conv = (await db.execute(select(Conversation).where(
             Conversation.channel == channel,
             Conversation.external_id == external_id))).scalar_one_or_none()
-        if conv is not None:
-            conv.intercept_mode = InterceptMode.human
-            await db.commit()
+        if conv is None:
+            return
+        note = ("COMPLAINT (public comment) — a colleague must follow up and close this."
+                + (f'\n• Their comment: "{" ".join(comment.split())[:300]}"' if comment else "")
+                + "\n• Answered publicly with an apology only — no price, no pitch."
+                + "\n• Neema stays available in the thread for factual questions.")
+        db.add(Intercept(conversation_id=conv.id, action=InterceptAction.flag, note=note))
+        await db.commit()
 
 
 async def _note_silent_decision(channel: str, ext: str, cid: str, intent: str) -> None:
@@ -935,6 +1126,27 @@ _DM_NUDGE_POOL = [
     "Replied in your inbox — let's sort it out there 💛",
     "Sent you a DM so we can get you sorted 💬",
 ]
+# Said to a buying comment when the agent could not run (over the per-post cap,
+# or the turn failed) but we DO know the product from the post. "How to order" is
+# the highest-intent comment we get and it used to receive a bare "message us on
+# WhatsApp" — on precisely the posts performing well enough to exhaust the cap.
+# These answer the question instead, with no model call.
+_OVER_CAP_POOL = [
+    "Thank you{name} 🙏 You can order it right here 👉 {link} — tap through and we'll take care of the rest 💛",
+    "Bless you{name}! 🙏 Order yours here 👉 {link} — a few taps and it's done 💛",
+    "We'd love to help{name} 🙏 Here it is 👉 {link} — order in a tap, and message us if you'd like any help 💛",
+    "Karibu{name} 🙏 You can see it and order here 👉 {link} — we'll handle delivery from there 💛",
+]
+# Said when we could not compose a real answer (over the per-post cap, or the
+# agent turn failed) AND we could not identify a product. It must be safe to send
+# to ANYONE — a buyer, a critic, someone grieving — so it thanks, opens a door,
+# and sells nothing at all.
+_NEUTRAL_ACK_POOL = [
+    "Thank you for reaching out{name} 🙏 Tell us a little more and we'll gladly help 💛",
+    "We appreciate you{name} 🙏 Send us a message and we'll help however we can 💛",
+    "Thank you{name} 🙏 We're here — let us know what you need and we'll assist 💛",
+    "Asante{name} 🙏 We'd be glad to help — just tell us a bit more 💛",
+]
 # The line that continues the sale INSIDE the DM the comment opens.
 _DM_CONTINUE_POOL = [
     "Reply here and I'll help you get yours — we'll sort out colour, size and delivery together. 💛",
@@ -960,14 +1172,29 @@ def _comment_public_reply(answer: str, dm_sent: bool, link: str, name_tag: str, 
     link remains the fallback for when we couldn't identify the product AND the DM
     didn't land, so a real buyer is never stranded."""
     if answer and product_link:
-        tail = ("Order here 👉 " + product_link +
-                "\nNeema can help you right there — or message us on WhatsApp 💬")
+        # One CTA, not three. They already have the product page (where Neema is
+        # on hand) and a DM — adding "or message us on WhatsApp" made every public
+        # reply a push to another app instead of an answer.
+        tail = "Order here 👉 " + product_link + "\nNeema can help you right there 💬"
         return f"{answer}\n{tail}"
     if answer and dm_sent:
         return f"{answer}\n{_pick(_DM_NUDGE_POOL, seed)}"
     if answer:
         return f"{answer}\nOrder here 👉 {link}" if link else answer
-    return _pick(_WA_INVITE_POOL, seed).replace("{name}", name_tag)
+    # No answer — we're over the per-post cap, or the agent turn failed. We do NOT
+    # know what this person said, so we do NOT sell to them: pitching blind is how
+    # "this is wrong" was answered with "Continue on WhatsApp to get yours". A
+    # warm, content-free acknowledgement is always safe; the tap-to-order link is
+    # added only when we DID identify what they're asking about.
+    if product_link:
+        # We know WHICH product the post is about, so a buying question still gets
+        # a real answer — the product page, where they can order in a tap and
+        # Neema is on hand. No model call needed.
+        return (_pick(_OVER_CAP_POOL, seed)
+                .replace("{name}", name_tag).replace("{link}", product_link))
+    if link:
+        return _pick(_WA_INVITE_POOL, seed).replace("{name}", name_tag)
+    return _pick(_NEUTRAL_ACK_POOL, seed).replace("{name}", name_tag)
 
 
 async def _storefront_product_link(redis, channel: str, ext: str, product: dict) -> str:
@@ -1124,7 +1351,7 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
                 _log.warning("saving light reply failed for %s: %s", cid, exc)
         if plan["human"]:
             try:
-                await _route_comment_to_human(channel, ext)
+                await _route_comment_to_human(channel, ext, comment_text)
             except Exception as exc:
                 _log.warning("route-to-human failed for comment %s: %s", cid, exc)
         return
@@ -1177,10 +1404,15 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # The comment may never name the product ("where is the shop?") — the POST
     # did. Resolve it from the post caption so the CTA still lands on the exact
     # bethanyhouse.co.ke product page with a ref.
-    if answer and not seen_products:
+    # Resolve the product even when there is NO agent answer (over the per-post
+    # cap, or the turn failed). "How do I order?" is answerable without a model —
+    # the post already tells us what they're looking at — and answering it with a
+    # bare "message us on WhatsApp" wasted the highest-intent comment we get, on
+    # exactly the posts that are working.
+    if not seen_products:
         await _resolve_post_product(redis, channel, ext, post_ctx, seen_products)
     product_link = ""
-    if answer and seen_products:
+    if seen_products:
         try:
             product_link = await _storefront_product_link(redis, channel, ext, seen_products[0])
         except Exception as exc:

@@ -51,9 +51,21 @@ def is_repeated_question(a: str, b: str) -> bool:
     return overlap >= 0.7
 
 
+_PRICE_Q_RE = re.compile(
+    r"\b(how much|price|bei(\s+gani)?|ngapi|pesa ngapi|cost)\b", re.IGNORECASE)
+_SELL_MARKER_RE = re.compile(
+    r"(KES\s*\d|USD\s*\d|would you like|how many|payment link|checkout|"
+    r"ready to (order|pay))", re.IGNORECASE)
+
+
 def find_issues(messages: list[dict]) -> list[dict]:
     """messages: [{direction, sender, text}] in order → findings."""
     out = []
+    try:
+        from app.agent.runtime import looks_negative
+    except Exception:                       # pragma: no cover — runtime unimportable
+        def looks_negative(s):
+            return False
     ai = [(i, m) for i, m in enumerate(messages)
           if m.get("direction") == "outbound" and (m.get("text") or "").strip()]
     for (i1, m1), (i2, m2) in zip(ai, ai[1:]):
@@ -61,12 +73,25 @@ def find_issues(messages: list[dict]) -> list[dict]:
             out.append({"kind": "repeated_question",
                         "detail": (m2["text"] or "")[:200]})
     for i, m in enumerate(messages):
-        if m.get("direction") == "inbound" and _BUY_INTENT_RE.search(m.get("text") or ""):
-            after = [x for x in messages[i + 1:i + 4]
-                     if x.get("direction") == "outbound"]
+        if m.get("direction") != "inbound":
+            continue
+        text = m.get("text") or ""
+        after = [x for x in messages[i + 1:i + 4]
+                 if x.get("direction") == "outbound"][:2]
+        if _BUY_INTENT_RE.search(text):
             if after and not any(_CLOSE_MARKER_RE.search(x.get("text") or "") for x in after):
-                out.append({"kind": "missed_close",
-                            "detail": (m.get("text") or "")[:200]})
+                out.append({"kind": "missed_close", "detail": text[:200]})
+        if not after:
+            continue
+        # A price question answered without a single number is a non-answer —
+        # the "repeated how much?" failure, caught the night it happens.
+        if _PRICE_Q_RE.search(text) and not any(
+                re.search(r"\d", x.get("text") or "") for x in after):
+            out.append({"kind": "price_unanswered", "detail": text[:200]})
+        # Selling into displeasure — the Florence failure, watched nightly.
+        if looks_negative(text) and any(
+                _SELL_MARKER_RE.search(x.get("text") or "") for x in after):
+            out.append({"kind": "sold_into_complaint", "detail": text[:200]})
     return out
 
 
@@ -126,6 +151,37 @@ async def compose_standup(db) -> str:
             f"{f.kind.replace('_', ' ')} ({(f.detail or '')[:60]}…)" for f in findings))
     else:
         lines.append("🪞 Self-review: no misses caught yesterday.")
+
+    # What the brain cost — measured, not guessed. Invisible spend is how the
+    # account ran dry with nobody warned; one line a day keeps it seen.
+    try:
+        from app.models.ai_usage import AiUsage
+        spend, calls = (await db.execute(
+            select(sa_func.coalesce(sa_func.sum(AiUsage.cost_usd), 0), sa_func.count())
+            .select_from(AiUsage).where(AiUsage.created_at >= since))).one()
+        if calls:
+            lines.append(f"💳 AI spend: ${float(spend):.2f} across {calls} model call(s).")
+    except Exception:
+        pass
+
+    # Promises made visible: the planned follow-ups — including answers Neema
+    # owes customers — lived only on the Deals board nobody opens daily.
+    try:
+        from app.models.agent_action import AgentAction
+        now = datetime.now(timezone.utc)
+        due = (await db.execute(select(sa_func.count()).select_from(AgentAction)
+                                .where(AgentAction.status == "planned",
+                                       AgentAction.due_at <= now + timedelta(hours=24)))
+               ).scalar_one()
+        overdue = (await db.execute(select(sa_func.count()).select_from(AgentAction)
+                                    .where(AgentAction.status == "planned",
+                                           AgentAction.due_at < now))).scalar_one()
+        if due:
+            lines.append(f"🤝 {due} follow-up(s) due in the next 24h"
+                         + (f" ({overdue} already overdue)" if overdue else "")
+                         + " — see the Deals board.")
+    except Exception:
+        pass
 
     # System health — the hourly outcome self-check's last verdict, so a dead
     # subsystem reaches the owner by breakfast, not by archaeology.

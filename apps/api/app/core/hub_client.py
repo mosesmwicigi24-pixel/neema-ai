@@ -130,6 +130,10 @@ def _map_product(p: dict) -> dict:
         # are pushed via production_items[] instead — no variant, no stock check.
         "product_type":   p.get("product_type") or "simple",
         "is_producible":  bool(p.get("is_producible")),
+        # Per-item measurement spec [{name, unit, required}] the workshop needs
+        # to PRODUCE this item — set on production items in the hub. This is the
+        # source of truth for WHAT to ask a customer being measured.
+        "measurements":   p.get("measurements") or [],
         # Filled in by fetch_hub_catalog for variable products (each with its own
         # price); empty for simple products.
         "variants":       [],
@@ -407,6 +411,7 @@ async def push_pending_order(
     first_name: str,
     country_iso: str | None,
     items: list[dict],
+    measurement_note: str = "",
 ) -> dict:
     """Create a pending order in the hub from a confirmed WhatsApp cart.
 
@@ -434,10 +439,16 @@ async def push_pending_order(
 
     # channel='whatsapp' groups the order under the hub's "WhatsApp Orders" (and
     # tags order_type/number as WA-), while the outlet stays the fulfilling store.
+    # The measurement note rides the ORDER-level notes as well: most producible
+    # items are 'simple' in the hub and route via items[] (the stock path),
+    # which has no per-line production_notes — the workshop must still see the
+    # customer's figures whichever path the line took.
+    _any_producible = bool(mto_lines) or any(l.get("is_producible") for l in stock_lines)
     payload = {
         "outlet_id": settings.hub_outlet_id,
         "channel": "whatsapp",
-        "notes": "WhatsApp order via Neema",
+        "notes": ("WhatsApp order via Neema"
+                  + (f". {measurement_note}" if (measurement_note and _any_producible) else "")),
     }
     if stock_lines:
         payload["items"] = [
@@ -457,10 +468,12 @@ async def push_pending_order(
                 "quantity": l["quantity"],
                 "unit_price": l["unit_price"],
                 **({"variant_id": l["variant_id"]} if l.get("variant_id") else {}),
-                # Name carries the chosen variant (e.g. "… (L / GOLD)"); staff
-                # still confirm exact measurements with the customer.
-                "production_notes": f"WhatsApp order via Neema — {l['name']}. "
-                                    "Confirm size/measurements with the customer.",
+                # Name carries the chosen variant (e.g. "… (L / GOLD)"); the
+                # customer's figures on file ride along so the workshop starts
+                # from them — staff still confirm before cutting cloth.
+                "production_notes": (f"WhatsApp order via Neema — {l['name']}. "
+                                     + (measurement_note or
+                                        "Confirm size/measurements with the customer.")),
             }
             for l in mto_lines
         ]

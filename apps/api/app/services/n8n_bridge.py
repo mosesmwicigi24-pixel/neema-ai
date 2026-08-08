@@ -273,6 +273,33 @@ def _wamid_of(resp) -> str | None:
         return None
 
 
+async def _send_waba_image(wa_id: str, image_url: str, caption: str = "") -> str | None:
+    """Send an image by public link (e.g. the how-to-measure guide).
+    Returns the sent message's wamid."""
+    url = (f"https://graph.facebook.com/{settings.waba_api_version}"
+           f"/{settings.waba_phone_number_id}/messages")
+    image: dict = {"link": image_url}
+    if caption:
+        image["caption"] = caption
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            url,
+            headers={"Authorization": f"Bearer {settings.waba_token}"},
+            json={
+                "messaging_product": "whatsapp",
+                "to": wa_id,
+                "type": "image",
+                "image": image,
+            },
+            timeout=30.0,
+        )
+        if not resp.is_success:
+            import logging
+            logging.error(f"WABA image error {resp.status_code}: {resp.text}")
+            resp.raise_for_status()
+        return _wamid_of(resp)
+
+
 async def _send_waba_audio(wa_id: str, audio_url: str) -> str | None:
     """Send a pre-generated TTS audio file to WhatsApp via a public link.
     Returns the sent message's wamid."""
@@ -455,8 +482,10 @@ async def log_agent_usage(db: AsyncSession, wa_id: str, model: str, totals: dict
     out = int(totals.get("output_tokens", 0) or 0)
     cread = int(totals.get("cache_read_tokens", 0) or 0)
     cwrite = int(totals.get("cache_write_tokens", 0) or 0)
+    cwrite_1h = int(totals.get("cache_write_1h_tokens", 0) or 0)
     prompt_total = inp + cread + cwrite
-    cost = estimate_cost_usd(model, prompt_total, out, cached_tokens=cread, cache_write_tokens=cwrite)
+    cost = estimate_cost_usd(model, prompt_total, out, cached_tokens=cread,
+                             cache_write_tokens=cwrite, cache_write_1h_tokens=cwrite_1h)
     db.add(AiUsage(
         wa_id=_normalize_wa_id(wa_id) if wa_id else None,
         workflow="tier2-agent", node="run_turn", model=model,
@@ -877,8 +906,9 @@ async def upsert_user(db: AsyncSession, body) -> dict:
 
 # ── Upsert Message ────────────────────────────────────────
 # Stores media_type / media_url when present.
-# Inbound media messages are automatically escalated to human mode so an
-# agent can view the attachment and respond appropriately.
+# An inbound attachment Neema cannot read (video, document, sticker) is FLAGGED
+# for an agent to view — but the conversation stays in AI mode, so she keeps
+# serving the customer instead of going silent while nobody is watching.
 # Returns a Firestore-style document array so n8n can consume the output directly.
 
 async def upsert_message(db: AsyncSession, redis, body) -> list:
@@ -991,21 +1021,21 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
     )
     intercept_log = None
     if direction == MsgDirection.inbound and media_type and not is_ai_handled_media:
+        # A video / document / sticker Neema cannot read. This used to switch the
+        # conversation to human mode — which, with no auto-release at the time,
+        # silenced the AI on that customer permanently: a customer who sent a
+        # video of the item they wanted never heard from us again. Flag it for the
+        # team instead and LEAVE THE THREAD IN AI MODE, so Neema stays in the
+        # conversation and can ask them to describe or photograph the item.
         if conv.intercept_mode != InterceptMode.human:
-            conv.intercept_mode  = InterceptMode.human
-            conv.intercept_since = datetime.now(timezone.utc)
-            escalated = True
-            # Write the Intercept row with created_at = message time + 1s so it
-            # always sorts AFTER the inbound message that triggered the escalation.
             from app.models.intercept import Intercept, InterceptAction
-            reason = (
-                f"Customer sent a {media_type}"
-                + (f" — agent review required")
-            )
+            reason = (f"Customer sent a {media_type} Neema cannot open — please review. "
+                      "She is still answering in the thread and will ask them to "
+                      "describe or photograph it.")
             intercept_log = Intercept(
                 conversation_id=conv.id,
                 agent_id=None,
-                action=InterceptAction.intercept,
+                action=InterceptAction.flag,
                 note=reason,
                 created_at=datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc) + timedelta(seconds=1),
             )
@@ -1029,7 +1059,10 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
         "filename":       filename,
     })
 
-    if escalated:
+    if intercept_log is not None:
+        # The team is still notified about an attachment Neema can't open — they
+        # just aren't the customer's only hope of a reply, because the thread
+        # stays in AI mode (see the flag above).
         reason = (
             f"Customer sent a {media_type}"
             + " — agent review required"
@@ -1044,12 +1077,14 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
             "conversationId": str(conv.id),
             "mediaType":      media_type,
         })
-        # Broadcast intercept_changed with reason so the frontend pill shows it
+        # The conversation stays with the AI, so this is a FLAG for the timeline,
+        # not an intercept — broadcasting mode "human" here would make the
+        # frontend pill lie about who is handling the thread.
         await _broadcast(redis, str(conv.id), {
             "type":           "intercept_changed",
             "conversationId": str(conv.id),
-            "mode":           "human",
-            "eventKind":      "intercept",
+            "mode":           "ai",
+            "eventKind":      "flag",
             "eventReason":    reason,
         })
 
@@ -1419,10 +1454,23 @@ async def _maybe_push_order_to_hub(db: AsyncSession, redis, body, event_id: str)
         await _save(hub_push_status="failed", hub_last_error=f"catalog: {exc}")
         return {"hub_push_status": "failed"}
 
+    # The figures we collected must reach the workshop WITH the order — the
+    # whole point of measuring in chat (best-effort; staff still confirm).
+    measurement_note = ""
+    try:
+        from app.agent import measurements as mm
+        sizes = mm.describe(await mm.get_measurements(db, body.wa_id, "whatsapp"))
+        if sizes:
+            measurement_note = (f"Measurements on file: {sizes}. "
+                                "Confirm with the customer before production.")
+    except Exception:
+        pass
+
     try:
         pushed = await hub_client.push_pending_order(
             catalog, wa_id=body.wa_id, first_name=first_name,
             country_iso=country_iso, items=items,
+            measurement_note=measurement_note,
         )
     except ValueError as exc:            # nothing matched a hub product
         unmatched = getattr(exc, "unmatched", [])

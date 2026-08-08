@@ -565,6 +565,69 @@ async def ask_neema(conv_id: str, request: Request, body: dict,
     return {"answer": answer or "I couldn't find that in what we have on file."}
 
 
+@router.post("/conversations/{conv_id}/answer")
+async def answer_through_neema(conv_id: str, request: Request, body: dict,
+                               db: AsyncSession = Depends(get_db),
+                               agent: Agent = Depends(get_current_agent)):
+    """Deliver the team's answer THROUGH Neema.
+
+    When she said "let me confirm with the team and come right back" (a
+    check_availability flag) or a complaint was raised, the confirmation used
+    to die in the Activity feed — nobody carried it back. Here the human gives
+    the FACTS ("yes, we make it — KES 3,500, about 5 days") and Neema wraps
+    them in her own voice, in the thread's language, and keeps the sale moving
+    — the thread stays in AI mode and the promise is actually kept.
+
+    Refused outside the messaging window (409) — send a template or reply as
+    yourself when they next write."""
+    from app.agent import runtime
+    from app.services.hub_events import _within_window
+    facts = (body.get("facts") or body.get("text") or "").strip()
+    if not facts:
+        raise HTTPException(status_code=422,
+                            detail="facts is required — what the team confirmed")
+    conv = (await db.execute(
+        select(Conversation).where(Conversation.id == conv_id))).scalar_one_or_none()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if not await _within_window(db, conv):
+        raise HTTPException(status_code=409,
+                            detail="outside the messaging window — send it as a "
+                                   "template, or reply yourself when they next write")
+    key = conv.wa_id if conv.channel == "whatsapp" else conv.external_id
+    text = (await runtime.run_turn(
+        db, request.app.state.redis, wa_id=key,
+        user_text=("[TEAM ANSWER — not a customer message. A colleague has "
+                   "confirmed what this customer was waiting on: "
+                   f'"{facts[:400]}". Compose the ONE short, warm message '
+                   "delivering this answer now, in the conversation's language, "
+                   "picking up exactly where the thread left off. If it confirms "
+                   "availability or a price, invite the next step of the order "
+                   "in the same breath. Never mention the checking process or "
+                   "the team's internals.]"),
+        llm=runtime.build_llm(), channel=conv.channel,
+        external_id=(None if conv.channel == "whatsapp" else conv.external_id),
+        read_only=True)).strip()
+    if not text:
+        raise HTTPException(status_code=502, detail="Neema could not compose the answer")
+    from app.services import n8n_bridge as svc
+    if conv.channel == "whatsapp":
+        wamid = await svc._send_waba(key, text)
+        await svc.save_outbound_message(db, request.app.state.redis, key, text,
+                                        waba_msg_id=wamid)
+    else:
+        from app.services.meta_send import send_to_channel
+        await send_to_channel(conv.channel, key, text)
+        await svc.save_outbound_channel_message(db, request.app.state.redis,
+                                                conv.channel, key, text)
+    # Audit trail: who answered, with what facts — an internal note, never sent.
+    db.add(Message(wa_id=conv.wa_id, conversation_id=conv.id, direction="outbound",
+                   sender="human_agent", media_type="note", agent_id=agent.id,
+                   text=f"📣 Team answer delivered via Neema: {facts[:300]}"))
+    await db.commit()
+    return {"ok": True, "sent": text}
+
+
 @router.post("/conversations/{conv_id}/reply")
 async def reply(conv_id: str, request: Request, body: dict, db: AsyncSession = Depends(get_db),
                 agent: Agent = Depends(get_current_agent)):

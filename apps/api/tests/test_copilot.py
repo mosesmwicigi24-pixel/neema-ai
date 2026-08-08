@@ -70,7 +70,10 @@ def test_run_turn_scribe_only_offers_scribe_tools(monkeypatch):
                                        _RecLLM(), scribe_only=True))
     assert out == "noted"
     assert set(seen["tools"]) <= _SCRIBE_TOOL_NAMES
-    assert "SCRIBE MODE" in seen["system"]
+    # system arrives as [shared rules block, per-customer block] since the
+    # prompt-cache split; the scribe marker rides on the rules block.
+    sys_text = seen["system"] if isinstance(seen["system"], str) else "\n".join(seen["system"])
+    assert "SCRIBE MODE" in sys_text
 
 
 def test_take_back_scan_pings_once_per_day(monkeypatch):

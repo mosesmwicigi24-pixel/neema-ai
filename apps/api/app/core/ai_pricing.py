@@ -31,6 +31,7 @@ _PRICES: dict[str, tuple[float, float, float]] = {
 
 _DEFAULT = (2.00, 0.50, 8.00)  # conservative: assume flagship pricing
 _CACHE_WRITE_MULT = 1.25       # Anthropic 5-minute cache-write premium (x input)
+_CACHE_WRITE_1H_MULT = 2.0     # 1-hour-TTL cache-write premium (x input)
 
 
 def _norm(model: str | None) -> str:
@@ -53,20 +54,27 @@ def estimate_cost_usd(
     completion_tokens: int,
     cached_tokens: int = 0,
     cache_write_tokens: int = 0,
+    cache_write_1h_tokens: int = 0,
 ) -> float:
     """Estimate USD cost of one call.
 
     `cached_tokens` and `cache_write_tokens` are disjoint subsets of
     `prompt_tokens`: cached = cache-READ (cheap), cache_write = written to cache
-    this turn (1.25x input). The remainder bills at the full input rate. OpenAI
-    callers omit cache_write (their automatic caching has no separate write cost).
+    this turn. `cache_write_1h_tokens` is the part of `cache_write_tokens`
+    written at the 1-hour TTL (2x input, vs 1.25x for the 5-minute default —
+    the shared rules prefix uses 1h so it outlives the gaps between customers).
+    The remainder bills at the full input rate. OpenAI callers omit the write
+    args (their automatic caching has no separate write cost).
     """
     inp, cached, out = _PRICES.get(_norm(model), _DEFAULT)
     fresh_input = max(prompt_tokens - cached_tokens - cache_write_tokens, 0)
+    w1h = min(max(cache_write_1h_tokens, 0), cache_write_tokens)
+    w5m = cache_write_tokens - w1h
     cost = (
         fresh_input / 1_000_000 * inp
         + cached_tokens / 1_000_000 * cached
-        + cache_write_tokens / 1_000_000 * inp * _CACHE_WRITE_MULT
+        + w5m / 1_000_000 * inp * _CACHE_WRITE_MULT
+        + w1h / 1_000_000 * inp * _CACHE_WRITE_1H_MULT
         + completion_tokens / 1_000_000 * out
     )
     return round(cost, 6)
