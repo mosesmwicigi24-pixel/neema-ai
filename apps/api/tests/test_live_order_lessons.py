@@ -90,3 +90,29 @@ def test_celebration_and_template_paths_carry_the_receipt():
     assert "_receipt_link_for" in src
     assert "Include their receipt link" in src
     assert 'status_word += f". Receipt: {receipt}"' in src
+
+
+# ── the General Nodier thread: chosen means chosen; trays stack ──────────────
+# He said "silver tray"; asked for "the stackable tray … with a reserve of 200
+# cups" — and was offered the GOLD tray as an alternative (he had to repeat
+# "we want the silver one"), with 200 cups priced separately although every
+# tray carries its 40 plastic cups free, and 200 cups of reserve means five
+# trays stacked.
+
+def test_chosen_means_chosen():
+    flat = _flat()
+    assert "CHOSEN MEANS CHOSEN" in flat
+    assert "never re-offer its siblings" in flat
+    assert ('A feature question ("does it stack?") is answered within their '
+            "chosen line") in flat
+
+
+def test_tray_trade_facts_cups_free_and_stacking():
+    flat = _flat()
+    assert "COMMUNION TRAYS" in flat
+    assert "40 plastic cups included, FREE" in flat
+    assert "each tray comes with its 40 cups free" in flat
+    assert "Charge only for EXTRA cups" in flat
+    assert "divide by 40" in flat
+    assert "5 trays stacked together" in flat
+    assert "never price the included cups separately" in flat
