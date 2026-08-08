@@ -158,3 +158,25 @@ def test_replenishment_check_in_rides_the_template(monkeypatch):
     assert ok and action.status == "sent"
     assert tpl["params"][1] == "your supplies"             # no order number → honest fallback
     assert "check-in you asked for" in tpl["params"][2]
+
+
+# ── address the parcel, don't re-ask the name (Francis, 2026-08-08) ──────────
+# His name was on his Messenger profile, yet the delivery ask was "your name,
+# phone and address" — twice. Known names are CONFIRMED at order time, never
+# re-collected: "Shall we address the parcel to your name — Francis Xavier
+# Pereira?"
+
+def test_known_names_are_confirmed_not_reasked():
+    from app.agent.prompt import build_system_prompt
+    flat = " ".join(build_system_prompt(country_iso="KE", currency="KES").split())
+    assert "ADDRESS THE PARCEL, DON'T RE-ASK THE NAME" in flat
+    assert "Shall we address the parcel to your name" in flat
+    assert "capture that name as the delivery recipient" in flat
+
+
+def test_meta_order_stage_asks_phone_and_address_only():
+    from app.agent.runtime import _meta_addendum
+    a = " ".join(_meta_addendum("USD").split())
+    assert "delivery details are the phone and address ONLY" in a
+    assert "never 'your name' when you already have it" in a
+    assert "Shall we address the parcel to your name" in a
