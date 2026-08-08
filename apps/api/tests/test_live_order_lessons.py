@@ -116,3 +116,18 @@ def test_tray_trade_facts_cups_free_and_stacking():
     assert "divide by 40" in flat
     assert "5 trays stacked together" in flat
     assert "never price the included cups separately" in flat
+
+
+def test_price_flinch_offers_the_humbler_line_at_the_same_count():
+    """Owner's note (2026-08-08): if the tray total feels like much, propose
+    the aluminium at the SAME stacked count (cups still free) without dropping
+    the silver — elegance, durability, easy maintenance stay on the table."""
+    flat = _flat()
+    assert "IF THE TRAY TOTAL MAKES THEM FLINCH" in flat
+    assert "SAME count and configuration, cups still free" in flat
+    assert "keeping the silver's crown" in flat
+    assert "more elegant, more durable and easier to maintain" in flat
+    assert "Reduce the LINE before the COUNT" in flat
+    assert "never choose down for them" in flat
+    # And CHOSEN MEANS CHOSEN sanctions exactly this one exception.
+    assert "or the price makes them flinch" in flat
