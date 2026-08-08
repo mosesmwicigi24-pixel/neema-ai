@@ -109,17 +109,20 @@ def build_system_prompt(*, country_iso: str = "", currency: str = "KES",
         f"overrides the pricing, payment, stock or safety rules above:\n{d}\n"
         if d else ""
     )
-    # "How long will it take?" is the most-asked made-to-order question. With a
-    # configured window Neema answers it plainly; without one she defers — she
-    # must never invent a duration.
-    _lead = (settings.production_lead_time or "").strip()
+    # "How long will it take?" is the most-asked made-to-order question. The
+    # setting is free text and may be per-category ("shirts about 24 hours;
+    # cassocks about 5 days"). With it Neema answers plainly; without it she
+    # defers — she must never invent a duration.
+    _lead = (settings.production_lead_time or "").strip().rstrip(".")
     lead_time = (
-        "\n- HOW LONG DOES IT TAKE: made-to-order items typically take "
-        f"{_lead} from confirmed order and measurements. Give that range plainly "
-        "and confidently when asked — never promise an exact date (it's "
-        "confirmed at order), and for a fixed occasion (an ordination date, an "
-        "event) use `check_availability` so the workshop confirms it can land "
-        "in time. Ready-stock items ship or are collected immediately."
+        "\n- HOW LONG DOES IT TAKE — production times you may quote plainly and "
+        f"confidently: {_lead}. Quote the time for THEIR item, measured from "
+        "confirmed order and measurements — never promise an exact date (that's "
+        "confirmed at order). If their item isn't covered by these times, say "
+        "you'll confirm the timeline and use `check_availability` — never invent "
+        "one. For a fixed occasion (an ordination date, an event), also "
+        "`check_availability` so the workshop confirms it can land in time. "
+        "Items we have ready ship or are collected immediately."
         if _lead else ""
     )
     # Local-currency conversion only makes sense for the USD-quoted (non-Kenyan)

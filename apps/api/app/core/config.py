@@ -145,10 +145,12 @@ class Settings(BaseSettings):
     # into the system prompt. Without it Neema only knows the catalogue and can't
     # answer "where are you located?". Keep it short and factual.
     business_info: str = ""
-    # Typical made-to-order production window shown to customers, e.g.
-    # "5-10 working days". THE most-asked made-to-order question; empty = Neema
-    # defers ("we'll confirm") every time someone asks how long an item takes.
-    production_lead_time: str = ""
+    # Production times Neema may quote plainly ("how long does it take?" is THE
+    # most-asked made-to-order question). Free text, per-category; owner-stated
+    # (2026-08-08): shirts 24 hours, cassocks 5 days. Anything not covered here
+    # she confirms with the workshop instead of inventing. Empty = always defer.
+    production_lead_time: str = ("clerical shirts about 24 hours; "
+                                 "cassocks about 5 days")
     # Public image URL of the how-to-measure diagram (labelled chest/length/
     # sleeve...). Empty = the send_measurement_guide tool is not registered.
     measurement_guide_url: str = ""
