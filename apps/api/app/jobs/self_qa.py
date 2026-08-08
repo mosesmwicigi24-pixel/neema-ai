@@ -127,6 +127,18 @@ async def compose_standup(db) -> str:
     else:
         lines.append("🪞 Self-review: no misses caught yesterday.")
 
+    # What the brain cost — measured, not guessed. Invisible spend is how the
+    # account ran dry with nobody warned; one line a day keeps it seen.
+    try:
+        from app.models.ai_usage import AiUsage
+        spend, calls = (await db.execute(
+            select(sa_func.coalesce(sa_func.sum(AiUsage.cost_usd), 0), sa_func.count())
+            .select_from(AiUsage).where(AiUsage.created_at >= since))).one()
+        if calls:
+            lines.append(f"💳 AI spend: ${float(spend):.2f} across {calls} model call(s).")
+    except Exception:
+        pass
+
     # System health — the hourly outcome self-check's last verdict, so a dead
     # subsystem reaches the owner by breakfast, not by archaeology.
     try:

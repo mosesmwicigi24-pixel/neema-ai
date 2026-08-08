@@ -72,7 +72,7 @@ def test_prompt_forbids_stock_talk():
 
 
 def test_prompt_forbids_the_hidden_but():
-    p = " ".join(build_system_prompt(customer_name="Joyce", currency="KES").split())
+    p = " ".join(build_system_prompt(currency="KES").split())
     assert "NEVER SPEAK THE ABSENCE" in p
     assert "is the SAME mistake" in p               # the "but" loophole, named
     assert "check_availability" in p

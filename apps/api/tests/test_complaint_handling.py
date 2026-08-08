@@ -115,7 +115,7 @@ def test_complaints_route_to_raise_complaint_not_handoff():
 # ── the protocol is in the prompt, in order ──────────────────────────────────
 
 def test_prompt_carries_the_repair_protocol_in_order():
-    p = build_system_prompt(country="Kenya", country_iso="KE", currency="KES")
+    p = build_system_prompt(country_iso="KE", currency="KES")
     assert "WHEN SOMETHING HAS GONE WRONG" in p
     for step in ("ACKNOWLEDGE", "FIND OUT", "TELL THEM WHAT YOU FOUND",
                  "BRING IN A COLLEAGUE", "STAY WITH THEM"):
@@ -129,7 +129,7 @@ def test_prompt_carries_the_repair_protocol_in_order():
 
 
 def test_prompt_forbids_promising_money():
-    p = build_system_prompt(country="Kenya", country_iso="KE", currency="KES")
+    p = build_system_prompt(country_iso="KE", currency="KES")
     assert "promise or start a refund" in p
     assert "offer a discount" in p
     # …but never a flat refusal to the customer

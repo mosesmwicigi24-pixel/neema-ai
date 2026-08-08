@@ -32,7 +32,7 @@ class LLMResponse:
 
 class LLM(Protocol):
     async def complete(
-        self, *, system: str, messages: list[dict], tools: list[dict]
+        self, *, system: str | list[str], messages: list[dict], tools: list[dict]
     ) -> LLMResponse: ...
 
 
@@ -71,15 +71,34 @@ def _blocks_to_response(content: list[Any]) -> LLMResponse:
                        text="".join(text_parts).strip())
 
 
-_EPHEMERAL = {"type": "ephemeral"}
+_EPHEMERAL = {"type": "ephemeral"}                  # 5-minute TTL (write bills 1.25×)
+_EPHEMERAL_1H = {"type": "ephemeral", "ttl": "1h"}  # 1-hour TTL (write bills 2×)
 
 
-def _cached_system(system: str):
-    """System as a single cached text block (render order tools→system→messages,
-    so this one breakpoint caches BOTH the tool defs and the system prompt)."""
+def _cached_system(system: str | list[str]):
+    """System blocks with their cache breakpoints.
+
+    A plain STRING (the classifier, drafts, distillation) keeps the original
+    shape: one block, one 5-minute breakpoint that caches tools + system
+    together (render order is tools→system→messages).
+
+    A LIST is the agent's split form: block 0 is the fleet-shared rules prefix
+    — byte-identical for every customer in a market bucket — cached at 1h TTL
+    so it survives the quiet gaps BETWEEN customers instead of being re-written
+    (~10k tokens at 1.25×) for nearly every conversation. 2× to write once,
+    ~0.1× for everyone to read. Later blocks are per-customer and carry no
+    marker: the per-conversation breakpoint `_cache_last_message` puts on the
+    newest message covers them, and the API requires longer-TTL breakpoints to
+    precede shorter ones anyway."""
     if not system:
         return system
-    return [{"type": "text", "text": system, "cache_control": _EPHEMERAL}]
+    if isinstance(system, str):
+        return [{"type": "text", "text": system, "cache_control": _EPHEMERAL}]
+    blocks = [{"type": "text", "text": s} for s in system if s]
+    if not blocks:
+        return ""
+    blocks[0] = {**blocks[0], "cache_control": _EPHEMERAL_1H}
+    return blocks
 
 
 def _cache_last_message(messages: list[dict]) -> list[dict]:
@@ -111,8 +130,14 @@ class AnthropicLLM:
         self._max_tokens = max_tokens
         self._cache = cache
 
-    async def complete(self, *, system: str, messages: list[dict], tools: list[dict]) -> LLMResponse:
-        sys_param = _cached_system(system) if self._cache else system
+    async def complete(self, *, system: str | list[str], messages: list[dict],
+                       tools: list[dict]) -> LLMResponse:
+        if self._cache:
+            sys_param = _cached_system(system)
+        elif isinstance(system, str):
+            sys_param = system
+        else:
+            sys_param = [{"type": "text", "text": s} for s in system if s]
         msgs = _cache_last_message(messages) if self._cache else messages
         resp = await self._client.messages.create(
             model=self._model,
@@ -124,11 +149,17 @@ class AnthropicLLM:
         r = _blocks_to_response(resp.content)
         r.stop_reason = resp.stop_reason or "end_turn"
         u = resp.usage
+        # cache_creation_input_tokens lumps 5m and 1h writes together; the
+        # nested breakdown (when the SDK provides it) says how much was written
+        # at the 1h TTL, which bills 2× rather than 1.25× — cost telemetry
+        # needs the split to stay honest.
+        cc = getattr(u, "cache_creation", None)
         r.usage = {
             "input_tokens": getattr(u, "input_tokens", 0) or 0,
             "output_tokens": getattr(u, "output_tokens", 0) or 0,
             "cache_read_tokens": getattr(u, "cache_read_input_tokens", 0) or 0,
             "cache_write_tokens": getattr(u, "cache_creation_input_tokens", 0) or 0,
+            "cache_write_1h_tokens": (getattr(cc, "ephemeral_1h_input_tokens", 0) or 0) if cc else 0,
         }
         return r
 

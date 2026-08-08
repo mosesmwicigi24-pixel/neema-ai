@@ -110,7 +110,7 @@ def test_sweep_can_be_disabled(monkeypatch):
 
 def test_prompt_tells_her_what_to_do_with_an_unreadable_attachment():
     from app.agent.prompt import build_system_prompt
-    p = build_system_prompt(country="Kenya", country_iso="KE", currency="KES")
+    p = build_system_prompt(country_iso="KE", currency="KES")
     assert "AN ATTACHMENT YOU CANNOT OPEN" in p
     assert "send a\n  PHOTO" in p or "PHOTO" in p
     assert "never say \"nobody can help\"" in p

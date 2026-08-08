@@ -455,8 +455,10 @@ async def log_agent_usage(db: AsyncSession, wa_id: str, model: str, totals: dict
     out = int(totals.get("output_tokens", 0) or 0)
     cread = int(totals.get("cache_read_tokens", 0) or 0)
     cwrite = int(totals.get("cache_write_tokens", 0) or 0)
+    cwrite_1h = int(totals.get("cache_write_1h_tokens", 0) or 0)
     prompt_total = inp + cread + cwrite
-    cost = estimate_cost_usd(model, prompt_total, out, cached_tokens=cread, cache_write_tokens=cwrite)
+    cost = estimate_cost_usd(model, prompt_total, out, cached_tokens=cread,
+                             cache_write_tokens=cwrite, cache_write_1h_tokens=cwrite_1h)
     db.add(AiUsage(
         wa_id=_normalize_wa_id(wa_id) if wa_id else None,
         workflow="tier2-agent", node="run_turn", model=model,

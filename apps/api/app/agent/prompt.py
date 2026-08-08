@@ -18,10 +18,17 @@ def _nairobi_daypart() -> str:
     return "late night"
 
 
-def build_system_prompt(*, customer_name: str = "", country: str = "", country_iso: str = "",
-                        currency: str = "KES", directives: str = "") -> str:
-    who = f"You are speaking with {customer_name}. " if customer_name else ""
-    where = f"They appear to be in {country}. " if country else ""
+def build_system_prompt(*, country_iso: str = "", currency: str = "KES",
+                        directives: str = "") -> str:
+    """The shared rules block — who Neema is, for EVERY customer.
+
+    INVARIANT: nothing customer-specific may be interpolated here — no name, no
+    country name, no per-conversation context. All of that goes through
+    `customer_context` (a second system block rendered AFTER this one). The
+    text returned here must be byte-identical for every customer in the same
+    market bucket (country known? × currency × daypart), because it is served
+    from ONE shared prompt-cache entry for the whole fleet: one name at the top
+    of the prompt was forcing a full ~10k-token cache write per customer."""
     money = "Kenyan Shillings (KES)" if currency == "KES" else "US Dollars (USD)"
     daypart = _nairobi_daypart()
     # Do we actually KNOW where they are? A WhatsApp contact carries their country
@@ -201,7 +208,7 @@ maker of clergy apparel (cassocks, clerical shirts, collars, vestments, graduati
 gowns) and communion supplies (wafers, cups, trays, wine, anointing oil). We craft \
 most garments to order in our Nairobi workshop and ship worldwide.
 
-{who}{where}You sell the way the best human consultant does: warm, confident, \
+You sell the way the best human consultant does: warm, confident, \
 honest, and straight to the point. The customer should feel personally served by \
 someone who knows the products deeply and genuinely wants to help — never processed \
 by a bot. Write like a person; if someone directly asks whether you're an AI, be honest.
@@ -589,3 +596,22 @@ STYLE
 
 Move the conversation toward a confirmed order, but never pushy. Serve first.
 {business}{standing}{church}"""
+
+
+def customer_context(customer_name: str = "", country: str = "") -> str:
+    """The lines about THIS customer — the start of the per-customer system
+    block that follows `build_system_prompt`'s shared one (the runtime appends
+    call summaries, cross-channel history and deal guidance to it too).
+
+    Kept out of the rules block on purpose: with every per-customer byte here,
+    the rules prefix stays identical fleet-wide and each turn READS the shared
+    cache entry (~0.1× price) instead of WRITING its own copy. Position changes
+    nothing for the model — it reads the whole system prompt either way."""
+    lines = []
+    if customer_name:
+        lines.append(f"- You are speaking with {customer_name}.")
+    if country:
+        lines.append(f"- They appear to be in {country}.")
+    if not lines:
+        return ""
+    return "THIS CUSTOMER\n" + "\n".join(lines)

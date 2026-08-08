@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.llm import LLM, LLMResponse
 from app.agent.memory import build_memory_context
-from app.agent.prompt import build_system_prompt
+from app.agent.prompt import build_system_prompt, customer_context
 from app.agent.tools import TOOLS, ToolContext, run_tool
 from app.core.config import settings
 from app.core.countries import resolve_country
@@ -449,8 +449,6 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     except Exception:
         _directives = ""
     system = build_system_prompt(
-        customer_name=customer_name,
-        country=loc.get("country") or "",
         country_iso=loc.get("country_iso") or "",
         currency=currency,
         directives=_directives,
@@ -459,6 +457,11 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         system += _public_comment_addendum(currency) if public_comment else _meta_addendum(currency)
     elif is_web:
         system += _web_addendum()
+    # Everything about THIS customer goes in a SECOND system block ("the tail"),
+    # so the rules block above stays byte-identical fleet-wide and every turn
+    # reads it from one shared cache entry instead of writing its own copy
+    # (block 0 carries the 1h-TTL breakpoint — see llm._cached_system).
+    tail = customer_context(customer_name, loc.get("country") or "")
 
     # 40 messages of context (was 20): re-asking an answered question is the
     # most robotic failure there is, and it usually happened because the answer
@@ -470,7 +473,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     try:
         _call_ctx = await _recent_call_context(db, key, channel)
         if _call_ctx:
-            system += _call_ctx
+            tail += _call_ctx
     except Exception:
         pass
 
@@ -479,7 +482,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     try:
         _xc = await _cross_channel_context(db, key, channel)
         if _xc:
-            system += _xc
+            tail += _xc
     except Exception:
         pass
 
@@ -490,7 +493,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         from app.services.link_preview import shared_link_context
         _link = await shared_link_context(user_text, redis)
         if _link:
-            system += _link
+            tail += _link
     except Exception:
         pass
 
@@ -500,8 +503,8 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         from app.services.deals import guidance_for
         _g = await guidance_for(db, key, channel)
         if _g:
-            system += ("\n\nDEAL GUIDANCE FROM THE TEAM — for THIS customer only, "
-                       "follow it (pricing/payment/stock safety rules still win):\n" + _g)
+            tail += ("\n\nDEAL GUIDANCE FROM THE TEAM — for THIS customer only, "
+                     "follow it (pricing/payment/stock safety rules still win):\n" + _g)
     except Exception:
         pass
 
@@ -596,7 +599,8 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                       currency=currency, usd_rate=settings.usd_kes_rate,
                       seen_products=(product_sink if product_sink is not None else []),
                       read_only=read_only)
-    totals = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0}
+    totals = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0,
+              "cache_write_tokens": 0, "cache_write_1h_tokens": 0}
 
     def _accumulate(u: dict) -> None:
         for k in totals:
@@ -631,9 +635,13 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                    "done (or if there is nothing to save), reply with exactly: "
                    "noted]")
 
+    # Two system blocks: [shared rules | this customer]. The list form is what
+    # tells the LLM client to put the fleet-shared 1h cache breakpoint on block 0.
+    sys_blocks: str | list[str] = [system, tail] if tail else [system]
+
     reply = None
     for _ in range(settings.tier2_max_iterations):
-        resp: LLMResponse = await llm.complete(system=system, messages=messages, tools=tools)
+        resp: LLMResponse = await llm.complete(system=sys_blocks, messages=messages, tools=tools)
         _accumulate(resp.usage or {})
         messages.append({"role": "assistant", "content": resp.assistant_content})
 

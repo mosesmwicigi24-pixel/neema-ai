@@ -135,7 +135,6 @@ def test_tool_returns_the_season_and_is_registered():
 
 def test_the_season_reaches_the_system_prompt():
     from app.agent.prompt import build_system_prompt
-    p = build_system_prompt(customer_name="Rev Grace", country="Kenya",
-                            country_iso="KE", currency="KES")
+    p = build_system_prompt(country_iso="KE", currency="KES")
     assert "THE CHURCH YEAR" in p
     assert "vestment colour" in p

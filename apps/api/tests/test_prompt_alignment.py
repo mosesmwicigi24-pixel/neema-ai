@@ -15,7 +15,7 @@ from app.agent.prompt import build_system_prompt
 
 
 def _known() -> str:                     # a WhatsApp customer: phone → country
-    return build_system_prompt(country="Kenya", country_iso="KE", currency="KES")
+    return build_system_prompt(country_iso="KE", currency="KES")
 
 
 def _unknown() -> str:                   # a website visitor: no phone, no country
@@ -69,8 +69,14 @@ def test_non_kenya_converts_from_usd_and_rounds_up():
 
 
 def test_country_is_only_asserted_when_known():
-    assert "They appear to be in Kenya." in _known()
-    assert "They appear to be in" not in _unknown()
+    """The 'They appear to be in …' line lives in the per-customer block now
+    (customer_context — the prompt-cache split), so the rules block itself must
+    never claim a place; the tail asserts it only when we actually have one."""
+    from app.agent.prompt import customer_context
+    assert "They appear to be in Kenya." in customer_context("", "Kenya")
+    assert "They appear to be in" not in customer_context("", "")
+    for p in (_known(), _unknown()):
+        assert "They appear to be in" not in p
 
 
 # ── mood + interest: the intelligence the sale depends on ────────────────────
