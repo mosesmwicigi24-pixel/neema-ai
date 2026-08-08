@@ -346,6 +346,12 @@ async def actions_loop(redis) -> None:
                 if nbo.hour == 3 and await redis.set(f"selfqa:{today}", "1", nx=True, ex=86400):
                     async with AsyncSessionLocal() as db:
                         await _qa.run_qa(db)
+                # 06:00: identify the page's recent posts BEFORE anyone
+                # comments — comments look up, they never guess.
+                if nbo.hour == 6 and await redis.set(f"postsweep:{today}", "1", nx=True, ex=86400):
+                    from app.services.post_catalog import sweep_page_posts
+                    async with AsyncSessionLocal() as db:
+                        await sweep_page_posts(db, redis)
                 if nbo.hour == 8 and await redis.set(f"standup:{today}", "1", nx=True, ex=86400):
                     async with AsyncSessionLocal() as db:
                         standup = await _qa.compose_standup(db)

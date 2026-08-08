@@ -604,9 +604,12 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             line += f'; their comment there was: "{source_post["comment"]}"'
         # History wisdom: a caption-less video post identified once stays
         # identified — later replies price the SAME product, never a re-guess.
+        # On the very first contact, the deterministic ladder (caption
+        # slug/alias, image fingerprint vs our own catalogue photos) resolves
+        # and records it before the model ever has to read the frame.
         try:
-            _known = await _recall_post_product(redis, channel,
-                                                source_post.get("post_id") or "")
+            _known = await _post_identity(redis, channel,
+                                          {**pctx, "post_id": source_post.get("post_id") or ""})
         except Exception:
             _known = {}
         if _known.get("name"):
@@ -1348,14 +1351,41 @@ async def _remember_post_product(redis, channel: str, post_id: str, product: dic
         pass
 
 
+async def _post_identity(redis, channel: str, pctx: dict) -> dict:
+    """The post's product identity: recalled from our records, else resolved
+    NOW by the deterministic ladder (caption slug/alias, then the image
+    fingerprint against the hub's own catalogue photos) and remembered — so
+    the post is identified once, for everyone who ever comments on it.
+    {} when even the ladder can't say (the model then reads carefully and the
+    team can set it via POST /admin/posts/{post_id}/product)."""
+    post_id = (pctx.get("post_id") or "").strip()
+    known = await _recall_post_product(redis, channel, post_id)
+    if known.get("name"):
+        return known
+    try:
+        from app.database import AsyncSessionLocal
+        from app.services import n8n_bridge as svc
+        from app.services import post_catalog
+        async with AsyncSessionLocal() as db:
+            catalog = await svc.catalog_items(db, redis)
+        hit = await post_catalog.resolve_post(redis, pctx, catalog)
+        if hit is not None:
+            await _remember_post_product(redis, channel, post_id, hit)
+            return {"name": hit.get("name"), "slug": hit.get("slug") or ""}
+    except Exception as exc:
+        _log.info("deep post resolve failed for %s/%s: %s", channel, post_id, exc)
+    return {}
+
+
 async def _resolve_post_product(redis, channel: str, ext: str,
                                 post_ctx: dict, sink: list) -> None:
     """When the comment itself didn't price a product ("where is the shop?"),
-    identify it from OUR RECORDS of the post first (an earlier reply already
-    identified it), else from the POST's caption — so the public CTA still
-    lands on the exact storefront product page, never the bare wa.me fallback.
-    Appends the matched hub rows into `sink` (the same seen_products list)."""
-    known = await _recall_post_product(redis, channel, post_ctx.get("post_id") or "")
+    identify it from the post's IDENTITY (our records, else the deterministic
+    ladder — caption slug/alias, image fingerprint), falling back to the
+    caption's lead words — so the public CTA still lands on the exact
+    storefront product page, never the bare wa.me fallback. Appends the
+    matched hub rows into `sink` (the same seen_products list)."""
+    known = await _post_identity(redis, channel, post_ctx)
     title = (known.get("name") or "").strip() or (post_ctx.get("title") or "").strip()
     if not title:
         return

@@ -208,9 +208,13 @@ def test_post_product_memory_round_trip():
 def test_post_records_feed_resolution_and_compose():
     import inspect
     from app.agent import runtime
-    # The over-cap resolver checks the records before guessing from the caption…
+    # The over-cap resolver consults the post's identity (records, else the
+    # deterministic ladder) before guessing from the caption…
     src = inspect.getsource(runtime._resolve_post_product)
-    assert "_recall_post_product" in src
+    assert "_post_identity" in src
+    # …the identity helper recalls, deep-resolves, and remembers…
+    src_id = inspect.getsource(runtime._post_identity)
+    assert "_recall_post_product" in src_id and "resolve_post" in src_id
     # …the compose context tells the model to price the recorded product…
     src2 = inspect.getsource(runtime.run_turn)
     assert "Our records identify this post's product as" in src2
