@@ -1225,24 +1225,31 @@ def _pick(pool: list, seed: str) -> str:
     return pool[i]
 
 
+def _dm_text(answer: str, product_link: str, seed: str) -> str:
+    """The DM: the answer, THE product link, and the warm continue line. Links
+    live here by design — Facebook suppresses the reach of posts and comments
+    carrying external links, so the private message is where the storefront
+    link travels."""
+    link_line = f"Order here 👉 {product_link}\n" if product_link else ""
+    return f"{answer}\n\n{link_line}{_pick(_DM_CONTINUE_POOL, seed)}"
+
+
 def _comment_public_reply(answer: str, dm_sent: bool, link: str, name_tag: str, seed: str,
                           product_link: str = "") -> str:
     """The PUBLIC comment text, given the agent's answer and whether the DM landed.
 
-    When we know WHICH product they're asking about, the comment links straight to
-    that product on the Bethany House storefront — they can buy it right there, and
-    Neema is on the page to answer anything. That link is the primary CTA; the
-    inbox nudge still follows when the DM landed, and the tap-to-order WhatsApp
-    link remains the fallback for when we couldn't identify the product AND the DM
-    didn't land, so a real buyer is never stranded."""
-    if answer and product_link:
-        # One CTA, not three. They already have the product page (where Neema is
-        # on hand) and a DM — adding "or message us on WhatsApp" made every public
-        # reply a push to another app instead of an answer.
-        tail = "Order here 👉 " + product_link + "\nNeema can help you right there 💬"
-        return f"{answer}\n{tail}"
+    LINKS ARE DM-ONLY when the DM landed: Facebook suppresses the reach of
+    link-carrying posts and comments, so the public square gets the answer and
+    an inbox nudge, while the storefront link rides the private message (see
+    _dm_text). A public link appears ONLY when the DM did not open — the
+    over-cap path and DM failures — where it is the customer's only door, so a
+    real buyer is never stranded."""
     if answer and dm_sent:
         return f"{answer}\n{_pick(_DM_NUDGE_POOL, seed)}"
+    if answer and product_link:
+        # DM didn't land — the public link is their only door.
+        tail = "Order here 👉 " + product_link + "\nNeema can help you right there 💬"
+        return f"{answer}\n{tail}"
     if answer:
         return f"{answer}\nOrder here 👉 {link}" if link else answer
     # No answer — we're over the per-post cap, or the agent turn failed. We do NOT
@@ -1528,30 +1535,11 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
         except Exception as exc:
             _log.warning("public agent reply failed for %s: %s", cid, exc)
 
-    # Open the DM first (so the public CTA can honestly point to the inbox). The DM
-    # carries the answer + a warm invitation to continue the sale right there.
-    dm_sent = False
-    if answer:
-        dm_text = f"{answer}\n\n{_pick(_DM_CONTINUE_POOL, ext)}"
-        try:
-            await send_private_reply(cid, dm_text, page_id=comment.get("page_id"),
-                                     channel=channel)
-            dm_sent = True
-        except Exception as exc:
-            _log.info("comment DM not delivered for %s: %s", cid, exc)
-
-    # Build the PUBLIC reply CTA (see _comment_public_reply). Prefer a link to the
-    # EXACT product the agent priced on the Bethany House storefront — they can buy
-    # it there and Neema is on the page to help. The tap-to-order WhatsApp link is
-    # only the fallback: no product identified AND the DM didn't land.
+    # Resolve the product FIRST — the exact storefront link belongs in the DM.
     # The comment may never name the product ("where is the shop?") — the POST
-    # did. Resolve it from the post caption so the CTA still lands on the exact
-    # bethanyhouse.co.ke product page with a ref.
-    # Resolve the product even when there is NO agent answer (over the per-post
-    # cap, or the turn failed). "How do I order?" is answerable without a model —
-    # the post already tells us what they're looking at — and answering it with a
-    # bare "message us on WhatsApp" wasted the highest-intent comment we get, on
-    # exactly the posts that are working.
+    # did (its recorded identity, its caption, its image). Resolved even when
+    # there is NO agent answer (over the per-post cap, or the turn failed):
+    # "How do I order?" is answerable without a model.
     if not seen_products:
         await _resolve_post_product(redis, channel, ext, post_ctx, seen_products)
     product_link = ""
@@ -1564,6 +1552,22 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
         # This identification becomes the POST's identity: every later comment
         # under it prices the same product instead of re-guessing the frame.
         await _remember_post_product(redis, channel, post_id, matched)
+
+    # Open the DM (so the public CTA can honestly point to the inbox). The DM
+    # carries the answer, THE product link, and a warm invitation to continue
+    # the sale right there — links live in DMs, where no algorithm scores the
+    # post: Facebook suppresses the reach of link-carrying posts and comments,
+    # so the public square stays link-free whenever the DM landed.
+    dm_sent = False
+    if answer:
+        dm_text = _dm_text(answer, product_link, ext)
+        try:
+            await send_private_reply(cid, dm_text, page_id=comment.get("page_id"),
+                                     channel=channel)
+            dm_sent = True
+        except Exception as exc:
+            _log.info("comment DM not delivered for %s: %s", cid, exc)
+
     link = (await _order_link(redis, channel, ext)
             if (answer and not dm_sent and not product_link) else "")
     public_text = _comment_public_reply(answer, dm_sent, link, name_tag, ext,

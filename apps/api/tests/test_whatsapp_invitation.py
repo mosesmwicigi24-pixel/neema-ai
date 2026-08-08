@@ -76,12 +76,21 @@ def test_web_tool_set_drops_the_wa_link():
 # ── public comments: one CTA, not a WhatsApp push on every reply ─────────────
 
 def test_public_comment_gives_one_cta():
+    # DM landed → the ONE public CTA is the inbox. Links are DM-only on Meta
+    # (the algorithm suppresses link-carrying comments), so the storefront
+    # link rides the DM and the public square stays link-free.
     out = rt._comment_public_reply(
         "That red chasuble is $150.", dm_sent=True, link="https://neema.example/api/o/ABC",
         name_tag=" Charity", seed="X",
         product_link="https://bethanyhouse.co.ke/product/red-chasuble?ref=AB12CD")
-    assert "WhatsApp" not in out                     # no push — they have the page + a DM
-    assert "red-chasuble" in out
+    assert "WhatsApp" not in out                     # no push — the DM has everything
+    assert "http" not in out                         # link-free public reply
+    # DM did not open → the product page is their only door, so it goes public
+    out2 = rt._comment_public_reply(
+        "That red chasuble is $150.", dm_sent=False, link="",
+        name_tag=" Charity", seed="X",
+        product_link="https://bethanyhouse.co.ke/product/red-chasuble?ref=AB12CD")
+    assert "red-chasuble" in out2
     # a buyer we could NOT identify a product for is still never stranded
     fallback = rt._comment_public_reply("It is $150.", dm_sent=False,
                                         link="https://neema.example/api/o/ABC",
