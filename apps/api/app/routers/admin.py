@@ -193,6 +193,32 @@ async def list_conversations(
     for row in (await db.execute(unread_q)).all():
         unread_map[str(row.conversation_id)] = row.unread
 
+    # ── Completed (paid) orders per customer — the repeat-buyer badge ─────────
+    # Counted the same dual way memory reads history: by person when the row
+    # has one (survives a Messenger↔WhatsApp merge), by wa_id otherwise. The
+    # row takes max() of the two views — they see overlapping rows, never
+    # disjoint halves, so max never double-counts. Grouped queries, never
+    # per-row. Only hub-linked orders whose money landed count.
+    from app.jobs.payment_followup import PAID_STATES
+    from app.models.order_event import OrderEvent
+    _paid = (OrderEvent.hub_order_id.isnot(None),
+             func.lower(OrderEvent.payment_status).in_(tuple(PAID_STATES)))
+    person_orders: dict = {}
+    if person_ids:
+        for pid, n in (await db.execute(
+            select(OrderEvent.person_id, func.count())
+            .where(OrderEvent.person_id.in_(person_ids), *_paid)
+            .group_by(OrderEvent.person_id))).all():
+            person_orders[pid] = n
+    wa_orders: dict[str, int] = {}
+    _real_wa = [w for w in wa_ids if w]
+    if _real_wa:
+        for wid, n in (await db.execute(
+            select(OrderEvent.wa_id, func.count())
+            .where(OrderEvent.wa_id.in_(_real_wa), *_paid)
+            .group_by(OrderEvent.wa_id))).all():
+            wa_orders[wid] = n
+
     # ── Build response, sorted by true latest-message timestamp desc ──────────
     def sort_key(c: Conversation):
         entry = preview_map.get(str(c.id))
@@ -234,6 +260,8 @@ async def list_conversations(
             "flag_url":             _list_country(c)[1],
             "channel":              getattr(c, "channel", "whatsapp") or "whatsapp",
             "unread":               unread_map.get(str(c.id), 0),
+            "orders_count":         max(person_orders.get(getattr(c, "person_id", None), 0),
+                                        wa_orders.get(c.wa_id, 0) if c.wa_id else 0),
             "lead_stage":           _stage_for(c),
             "tags":                 (user_map[c.wa_id].state or {}).get("tags", []) if c.wa_id in user_map else [],
         }

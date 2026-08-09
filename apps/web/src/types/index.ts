@@ -42,6 +42,8 @@ export interface Conversation {
     contact_phone: string;
     country?: string | null;
     country_iso?: string | null;
+    /** Completed (hub-paid) orders for the customer behind this row. */
+    orders_count?: number;
     flag_url?: string | null;
     tags?: string[];
     created_at?: string;
