@@ -31,7 +31,7 @@ class ToolContext:
     db: AsyncSession
     redis: object
     wa_id: str
-    currency: str = "KES"   # display currency for THIS customer (KES | USD)
+    currency: str = "KES"   # display currency for THIS customer (KES | USD | ZMW)
     usd_rate: int = 100     # KES per 1 USD (config.usd_kes_rate)
     channel: str = "whatsapp"  # source channel (whatsapp | messenger | instagram)
     # Catalogue rows the agent actually looked at this turn, in order — full hub
@@ -50,38 +50,49 @@ def _channel_label(ctx: "ToolContext") -> str:
     return "web" if str(ctx.wa_id or "").startswith("web_") else ctx.channel
 
 
+def _kes_rate_for(ctx: "ToolContext", ccy: str):
+    """KES per 1 unit of a display currency — the conversion fallback when the
+    hub carries no explicit price row in that currency."""
+    return {"USD": ctx.usd_rate or 100,
+            "ZMW": settings.zmw_kes_rate or 5}.get(ccy)
+
+
 def _display(kes, ctx: "ToolContext"):
     """Convert a KES amount to the customer's display currency. Catalogue/cart
     amounts are stored in KES; Kenyan customers see KES, everyone else sees
-    USD = round(KES / rate). Whole-number USD keeps quotes clean — but small
-    items (communion cups, wafers) keep cents: whole-dollar rounding floored a
-    real KES price to '$0' and the agent told a customer cups were free."""
+    KES / their currency's rate (USD ÷100, ZMW ÷5). Whole numbers keep quotes
+    clean — but small items (communion cups, wafers) keep cents: whole-dollar
+    rounding floored a real KES price to '$0' and the agent told a customer
+    cups were free."""
     if kes is None:
         return None
-    if ctx.currency == "USD":
+    rate = _kes_rate_for(ctx, ctx.currency)
+    if rate:
         try:
-            usd = float(kes) / (ctx.usd_rate or 100)
+            v = float(kes) / rate
         except (TypeError, ValueError):
             return kes
-        if usd <= 0:
+        if v <= 0:
             return 0
-        return round(usd) if usd >= 1 else max(round(usd, 2), 0.01)
+        return round(v) if v >= 1 else max(round(v, 2), 0.01)
     return kes
 
 
-def _to_display(kes, ctx: "ToolContext", price_usd=None):
-    """Display price for THIS customer, preferring the hub's own USD price.
-
-    Kenya → raw KES. Everyone else → the product's hub `price_usd` when it's a
-    valid positive number, otherwise fall back to KES / rate so a missing/zero
-    USD price never surfaces as $0. Catalogue and cart both go through this so
-    quotes and totals stay consistent."""
-    if ctx.currency != "USD":
+def _to_display(kes, ctx: "ToolContext", price_usd=None, prices=None):
+    """Display price for THIS customer, preferring the hub's OWN price in their
+    currency (the per-currency `prices` map — USD, ZMW, …), then the legacy
+    `price_usd` field for USD, then KES / rate — so a missing/zero currency row
+    never surfaces as 0. Kenya → raw KES. Catalogue and cart both go through
+    this so quotes and totals stay consistent."""
+    if ctx.currency == "KES":
         return kes
+    own = (prices or {}).get(ctx.currency)
+    if own is None and ctx.currency == "USD":
+        own = price_usd
     try:
-        v = float(price_usd)
+        v = float(own)
         if v > 0:
-            return round(v) if v >= 1 else round(v, 2)   # cents for small items, never $0
+            return round(v) if v >= 1 else round(v, 2)   # cents for small items, never 0
     except (TypeError, ValueError):
         pass
     return _display(kes, ctx)
@@ -115,8 +126,8 @@ TOOLS: list[dict] = [
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "What the customer is looking for, e.g. 'cassock', 'communion cups', 'anointing oil'"},
-                "currency": {"type": "string", "enum": ["KES", "USD"],
-                             "description": "Override the display currency: set 'KES' when the customer says they are in Kenya or asks for Kenyan shillings (our native prices); otherwise leave unset."},
+                "currency": {"type": "string", "enum": ["KES", "USD", "ZMW"],
+                             "description": "Override the display currency: set 'KES' when the customer says they are in Kenya or asks for Kenyan shillings (our native prices), 'ZMW' when they say they are in Zambia (our own Kwacha prices); otherwise leave unset."},
             },
             "required": ["query"],
         },
@@ -469,7 +480,7 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
     # — the model then re-fetches with currency="KES"/"USD" instead of being
     # trapped by the channel default (Meta defaults to USD).
     cur = (args.get("currency") or "").upper()
-    if cur in ("KES", "USD") and cur != ctx.currency:
+    if cur in ("KES", "USD", "ZMW") and cur != ctx.currency:
         from dataclasses import replace as _dc_replace
         ctx = _dc_replace(ctx, currency=cur)
     query = (args.get("query") or "").lower().strip()
@@ -505,7 +516,8 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
             # shortfall is flagged to the team at order time (_sourcing_gaps).
             "availability": "available",
         }
-        row["price"] = _to_display(p.get("price"), ctx, p.get("price_usd"))
+        row["price"] = _to_display(p.get("price"), ctx, p.get("price_usd"),
+                                   prices=p.get("prices"))
         row["currency"] = ctx.currency
         # The hub's enriched product copy (fabric, embroidery, care, contents) —
         # this is what makes Neema's product talk SPECIFIC instead of generic.
@@ -534,7 +546,8 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
             row["variants"] = [
                 {"options": v.get("attributes") or v.get("name"),
                  "sku": v.get("sku"),
-                 "price": _to_display(v.get("price_kes"), ctx, v.get("price_usd"))}
+                 "price": _to_display(v.get("price_kes"), ctx, v.get("price_usd"),
+                                      prices=v.get("prices"))}
                 for v in variants
             ]
             prices = [vr["price"] for vr in row["variants"] if isinstance(vr["price"], (int, float))]
@@ -564,27 +577,32 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
 
 
 async def _cart_display(cart: dict, ctx: ToolContext) -> tuple[list, object]:
-    """Cart items + total in the customer's display currency, preferring hub USD.
+    """Cart items + total in the customer's display currency, preferring the
+    hub's own price in that currency.
 
-    KES customers get the raw items and cart_total untouched. For USD we map each
-    line to its hub `price_usd` (falling back to KES/rate), convert per line, and
-    sum the converted lines so the shown total matches the shown unit prices. The
-    catalogue is only loaded for the USD path (and it's cached), so the common
-    Kenyan turn does no extra work."""
-    # `in_stock`/`price_usd` on a cart line are internal bookkeeping — never shown
-    # to the model (in_stock feeds the sourcing flag; price_usd feeds USD display).
-    _hidden = ("in_stock", "price_usd")
+    KES customers get the raw items and cart_total untouched. For USD/ZMW we
+    map each line to the hub's price in that currency (the line's own `prices`
+    map, then the catalogue's; KES/rate as the last fallback), convert per
+    line, and sum the converted lines so the shown total matches the shown
+    unit prices. The catalogue is only loaded for the non-KES path (and it's
+    cached), so the common Kenyan turn does no extra work."""
+    # `in_stock`/`price_usd`/`prices` on a cart line are internal bookkeeping —
+    # never shown to the model (in_stock feeds the sourcing flag; the price
+    # fields feed non-KES display).
+    _hidden = ("in_stock", "price_usd", "prices")
     items = [{k: v for k, v in i.items() if k not in _hidden} for i in cart.get("items", [])]
     raw = cart.get("items", [])
-    if ctx.currency != "USD":
+    if ctx.currency == "KES":
         return items, cartmod.cart_total(cart)
     catalog = await svc.catalog_items(ctx.db, ctx.redis)
     usd_by_id = {p.get("hub_product_id"): p.get("price_usd") for p in catalog}
+    prices_by_id = {p.get("hub_product_id"): p.get("prices") or {} for p in catalog}
     out, total = [], 0
     for i, r in zip(items, raw):
-        # Prefer the line's OWN usd (a variant's price) over the product default.
+        # Prefer the line's OWN prices (a variant's) over the product default.
         line_usd = r.get("price_usd") or usd_by_id.get(i.get("hub_product_id"))
-        unit = _to_display(i.get("unit_price"), ctx, line_usd)
+        line_prices = r.get("prices") or prices_by_id.get(i.get("hub_product_id")) or {}
+        unit = _to_display(i.get("unit_price"), ctx, line_usd, prices=line_prices)
         d = dict(i)
         d["unit_price"] = unit
         out.append(d)
@@ -645,6 +663,7 @@ async def _update_cart(args: dict, ctx: ToolContext) -> dict:
             "qty": new_qty,
             "unit_price": line["unit_price"],
             "price_usd": line.get("unit_price_usd"),   # variant's own USD (for USD display)
+            "prices": line.get("prices") or {},        # per-currency map (ZMW display)
             "in_stock": bool(cat.get("in_stock", True)),
             "made_to_order": line.get("product_type") == "variable" and bool(line.get("is_producible")),
         }
@@ -1540,7 +1559,8 @@ async def _send_product_cards(args: dict, ctx: ToolContext) -> dict:
         if not p or p.get("slug") in seen:
             continue
         seen.add(p.get("slug"))
-        price = _to_display(p.get("price"), ctx, p.get("price_usd"))
+        price = _to_display(p.get("price"), ctx, p.get("price_usd"),
+                            prices=p.get("prices"))
         cards.append({
             "name": p.get("name"),
             "price_text": _fmt_price(price, ctx.currency),

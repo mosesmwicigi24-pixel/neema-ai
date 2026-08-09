@@ -340,3 +340,30 @@ def currency_for_country(iso: str | None) -> str:
     """The customer's own currency for a country ISO — USD for anywhere we don't
     map (the safe, universally-accepted default)."""
     return _CURRENCY_BY_ISO.get((iso or "").upper(), "USD")
+
+
+# Currencies the hub actually carries price rows for TODAY. This is the market
+# gate (owner, 2026-08-09): international customers are quoted USD — EXCEPT a
+# country whose own currency has been added to the hub (Zambia → ZMW), who get
+# their own money; Kenyans always get KES. When the hub gains a currency, add
+# its code here (one line) and that country's customers switch automatically.
+HUB_PRICED_CURRENCIES = {"KES", "USD", "ZMW"}
+
+CURRENCY_NAMES = {
+    "KES": "Kenyan Shillings (KES)",
+    "USD": "US Dollars (USD)",
+    "ZMW": "Zambian Kwacha (ZMW)",
+}
+
+
+def market_currency(iso: str | None) -> str:
+    """The currency this customer's MARKET trades in: their own country's money
+    when the hub prices it (KE → KES, ZM → ZMW), USD for everyone else."""
+    ccy = currency_for_country(iso)
+    return ccy if ccy in HUB_PRICED_CURRENCIES else "USD"
+
+
+def money_name(ccy: str | None) -> str:
+    """Human name for a display currency: 'Zambian Kwacha (ZMW)'."""
+    c = (ccy or "USD").upper()
+    return CURRENCY_NAMES.get(c, c)

@@ -18,7 +18,7 @@ from app.agent.memory import build_memory_context
 from app.agent.prompt import build_system_prompt, customer_context
 from app.agent.tools import TOOLS, ToolContext, run_tool
 from app.core.config import settings
-from app.core.countries import resolve_country
+from app.core.countries import resolve_country, market_currency, money_name
 from app.models.message import Message, MsgDirection
 from app.models.user import User
 
@@ -69,8 +69,9 @@ def _public_comment_addendum(currency: str = "USD") -> str:
     it reads like a friendly shopkeeper, not a price bot. Answer the question with
     the real price, then invite them to continue in the inbox (a call-to-action is
     added after your text). The full sale is closed 1:1 in the DM that follows."""
-    money = "Kenyan Shillings (KES)" if currency == "KES" else "US Dollars (USD)"
-    example = "'This gown is KES 13,000.'" if currency == "KES" else "'This gown is $130.'"
+    money = money_name(currency)
+    example = {"KES": "'This gown is KES 13,000.'",
+               "ZMW": "'This gown is ZMW 1,300.'"}.get(currency, "'This gown is $130.'")
     return (
         "\n\n## Replying under a Facebook/Instagram comment — warm, human, helpful\n"
         "- No greeting ritual here: a comment reply's first line is the ANSWER, "
@@ -128,7 +129,7 @@ def _public_comment_addendum(currency: str = "USD") -> str:
 
 
 def _meta_addendum(currency: str = "USD") -> str:
-    money = "Kenyan Shillings (KES)" if currency == "KES" else "US Dollars (USD)"
+    money = money_name(currency)
     # Local-currency conversion only for the USD-quoted customer, and only on request.
     local = ""
     if currency == "USD":
@@ -411,8 +412,8 @@ async def _meta_market(db: AsyncSession, channel: str, key: str) -> tuple[str, d
         iso = iso_from_text(location)
         if iso:
             loc = {"country_iso": iso, "country": location}
-            if iso == "KE":
-                currency = "KES"
+            # Same market gate as WhatsApp: KE → KES, ZM → ZMW, else USD.
+            currency = market_currency(iso)
         # Source post: this identity first, then siblings on the same person
         # (a facebook comment identity funnels into a messenger DM identity),
         # then the person state (stamped by the WhatsApp handover link).
@@ -466,7 +467,9 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         # resolve to a random country/currency. No phone → no country claim.
         from app.core.phone import is_plausible_phone as _plausible
         loc = (resolve_country(wa_id) or {}) if _plausible(wa_id) else {}
-        currency = "KES" if (loc.get("country_iso") or "").upper() == "KE" else "USD"
+        # Market gate: Kenya → KES; a country whose currency the hub prices
+        # (Zambia → ZMW) → that currency; everyone else → USD.
+        currency = market_currency(loc.get("country_iso"))
         customer_name = (user.name if user else "") or ""
         source_post = None
     # Standing orders + learned rules: the owner's live steering and the rules

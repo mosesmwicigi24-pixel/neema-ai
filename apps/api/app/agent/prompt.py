@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from app.core.config import settings
+from app.core.countries import money_name
 
 
 def _nairobi_daypart() -> str:
@@ -29,7 +30,7 @@ def build_system_prompt(*, country_iso: str = "", currency: str = "KES",
     market bucket (country known? × currency × daypart), because it is served
     from ONE shared prompt-cache entry for the whole fleet: one name at the top
     of the prompt was forcing a full ~10k-token cache write per customer."""
-    money = "Kenyan Shillings (KES)" if currency == "KES" else "US Dollars (USD)"
+    money = money_name(currency)
     daypart = _nairobi_daypart()
     # Do we actually KNOW where they are? A WhatsApp contact carries their country
     # in the phone prefix; a website visitor or a Meta contact carries nothing. The
@@ -57,7 +58,8 @@ def build_system_prompt(*, country_iso: str = "", currency: str = "KES",
 - The MOMENT they name their city or country, save it (capture_contact /
   capture_customer) and price in THEIR money from then on: if it resolves to
   Kenya, call search_catalog again with currency="KES" and quote our real KES
-  prices — never a converted figure."""
+  prices — never a converted figure. Zambia the same with currency="ZMW":
+  our own Zambian Kwacha prices, never a conversion."""
         place_ask = "their city AND country — you have no phone prefix to tell you"
     # The Church year is this business's demand signal: vestments are bought by
     # season, and made-to-order must start weeks ahead. Neema should know it

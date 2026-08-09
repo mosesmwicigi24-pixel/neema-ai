@@ -315,6 +315,10 @@ def resolve_hub_line(item: dict, catalog: list[dict]) -> dict | None:
             "variant_sku": (variant or {}).get("sku"),
             "variant_id": (variant or {}).get("variant_id"),
             "unit_price_usd": (variant or {}).get("price_usd") if variant else p.get("price_usd"),
+            # Full per-currency price map (KES/USD/ZMW/…) of the matched product
+            # or variant — rides the cart line so display in ANY hub-priced
+            # currency uses the hub's own figure, never a conversion.
+            "prices": ((variant or {}).get("prices") if variant else p.get("prices")) or {},
             "matched_by": matched_by,
             "product_type": p.get("product_type") or "simple",
             "is_producible": bool(p.get("is_producible")),

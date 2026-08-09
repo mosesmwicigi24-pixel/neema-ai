@@ -159,6 +159,9 @@ class Settings(BaseSettings):
     # Currency display gate: Kenya (+254) customers are quoted KES; everyone else
     # (and all Messenger/IG, which have no phone) is quoted USD = round(KES / rate).
     usd_kes_rate: int = 100
+    # KES per 1 Zambian Kwacha (owner: "5 KES to be one Kwacha") — the fallback
+    # for ZMW display when a product somehow lacks its hub ZMW price row.
+    zmw_kes_rate: int = 5
     environment: str = "production"
     openai_api_key: str = ""
     # Website storefront → Neema web chat. The storefront server calls POST
