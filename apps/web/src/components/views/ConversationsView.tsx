@@ -1946,6 +1946,12 @@ export function ConversationsView({
                     const humanSib = group.siblings.find((s) => s.intercept_mode === "human");
                     const chipConv = humanSib ?? conv;
                     const rowStage = group.siblings.map((s) => s.lead_stage).find(Boolean) ?? null;
+                    // Completed (paid) orders for the person behind this row —
+                    // siblings of one person carry the same count, so max is it.
+                    const rowOrders = Math.max(
+                        0,
+                        ...group.siblings.map((s) => (s as any).orders_count || 0),
+                    );
                     const rowKey = group.rep.person_id ?? group.rep.id;
                     const isPicked = selected.has(rowKey);
                     const heldHere = group.siblings.some((s) => s.intercept_mode === "human");
@@ -2057,16 +2063,32 @@ export function ConversationsView({
                                         >
                                             {rowName}
                                         </span>
-                                        <span
-                                            className="text-[10px] flex-shrink-0 ml-2"
-                                            style={{
-                                                fontWeight: hasUnread ? 600 : 400,
-                                                color: hasUnread ? "#427425" : "#b5c9a8",
-                                            }}
-                                        >
-                                            {group.lastAt
-                                                ? timeAgo(group.lastAt)
-                                                : ""}
+                                        <span className="flex items-center gap-1.5 flex-shrink-0 ml-2">
+                                            {/* Repeat-buyer badge: how many orders this
+                                                customer has completed (paid) before. */}
+                                            {rowOrders > 0 && (
+                                                <span
+                                                    title={`${rowOrders} completed order${rowOrders > 1 ? "s" : ""}`}
+                                                    className="min-w-[16px] h-[16px] px-1 rounded-full text-white text-[9px] font-bold inline-flex items-center justify-center leading-none"
+                                                    style={{
+                                                        background: "linear-gradient(135deg, #f59e0b, #d97706)",
+                                                        boxShadow: "0 1px 2px rgba(217,119,6,.35)",
+                                                    }}
+                                                >
+                                                    {rowOrders > 99 ? "99+" : rowOrders}
+                                                </span>
+                                            )}
+                                            <span
+                                                className="text-[10px]"
+                                                style={{
+                                                    fontWeight: hasUnread ? 600 : 400,
+                                                    color: hasUnread ? "#427425" : "#b5c9a8",
+                                                }}
+                                            >
+                                                {group.lastAt
+                                                    ? timeAgo(group.lastAt)
+                                                    : ""}
+                                            </span>
                                         </span>
                                     </div>
                                     {/* Chips on their OWN line (never squeezing the
@@ -2137,9 +2159,11 @@ export function ConversationsView({
                                                     className="text-[10px] font-semibold px-1.5 h-[16px] rounded border inline-flex items-center leading-none"
                                                     title={`Country: ${countryName((conv as any).country_iso)}`}
                                                     style={{
-                                                        backgroundColor: "#f6f3ea",
-                                                        borderColor: "#e5dfcd",
-                                                        color: "#8a7f63",
+                                                        // Bright brand-orange so the
+                                                        // country reads at a glance.
+                                                        backgroundColor: "#ffedd5",
+                                                        borderColor: "#fdba74",
+                                                        color: "#c2410c",
                                                     }}
                                                 >
                                                     <span className="truncate max-w-[96px]">
