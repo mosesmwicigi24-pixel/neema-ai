@@ -149,6 +149,13 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "treated as a foreigner in their own shop. Only a STATED other country "
         "(Tanzania, DRC, Uganda…) overrides this — then quote for that country as "
         "usual.\n"
+        "- NEVER ASK WHERE THEY ARE to choose a currency — no 'are you in "
+        "Kenya?', no 'which country are you in?'. Asking makes the shop feel "
+        "far away. Read the cues (language, currency words, a named city), "
+        "quote confidently — USD when nothing places them — and switch "
+        "seamlessly the moment a cue lands. Location talk belongs only where "
+        "THEY ask where we are, or where you're giving shipping details — and "
+        "then it reassures: Nairobi workshop, worldwide DHL delivery.\n"
         "- IDENTIFY THE PRODUCT in this order: (1) OUR RECORDS of this post — "
         "records exist only for posts already identified (or set by the team), "
         "so when your context names what this post sells, price THAT product, "
@@ -190,7 +197,11 @@ def _meta_addendum(currency: str = "USD") -> str:
             " SWAHILI MEANS KENYA unless they say otherwise (owner rule): a "
             "customer writing in Swahili is almost always Kenyan — quote KES "
             "(search_catalog currency=\"KES\") without waiting to be asked. Only "
-            "a STATED other country (Tanzania, DRC, Uganda…) overrides this."
+            "a STATED other country (Tanzania, DRC, Uganda…) overrides this. "
+            "And NEVER ask 'are you in Kenya?' or any country question to pick "
+            "a currency — asking makes them feel far from the shop. Choose from "
+            "cues, quote confidently, switch seamlessly if a cue proves you "
+            "wrong."
         )
     return (
         "\n\n## This conversation is on Facebook Messenger / Instagram (not WhatsApp)\n"
@@ -204,8 +215,11 @@ def _meta_addendum(currency: str = "USD") -> str:
         "asterisks, no `**`, no markdown; use short lines and hyphen lists.\n"
         "- You KNOW their name from their Messenger profile (it's in your context) — "
         "greet them by it and NEVER ask for it; only if no name appears in your "
-        "context may you ask once. Early on, warmly ask just their city & country "
-        "(we ship worldwide from Nairobi).\n"
+        "context may you ask once. Do NOT open with location questions — read "
+        "where they are from CUES (language, currency, a named city or church) "
+        "and save each cue with capture_contact the moment it lands; their city "
+        "is asked once, naturally, when the order is settled and delivery comes "
+        "up.\n"
         "- At the ORDER stage the same rule holds: delivery details are the phone "
         "and address ONLY — never 'your name' when you already have it. Confirm "
         "it softly as part of confirming the order instead: 'Shall we address "
@@ -513,9 +527,15 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         user = (await db.execute(
             select(User).where(User.wa_id == wa_id))).scalar_one_or_none()
         # A web session key ("web_<sha1>") is NOT a phone — its hex digits used to
-        # resolve to a random country/currency. No phone → no country claim.
+        # resolve to a random country/currency. No phone → no country claim,
+        # EXCEPT what the storefront already resolved for us: web_chat geolocates
+        # the visitor's IP and stamps User.country_iso, so a Nairobi visitor is
+        # quoted KES without ever being asked where they are (owner rule).
         from app.core.phone import is_plausible_phone as _plausible
         loc = (resolve_country(wa_id) or {}) if _plausible(wa_id) else {}
+        if not loc.get("country_iso") and user is not None and getattr(user, "country_iso", None):
+            loc = {"country_iso": user.country_iso,
+                   "country": user.country or user.country_iso}
         currency = "KES" if (loc.get("country_iso") or "").upper() == "KE" else "USD"
         customer_name = (user.name if user else "") or ""
         source_post = None

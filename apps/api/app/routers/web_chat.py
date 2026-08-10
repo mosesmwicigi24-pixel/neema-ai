@@ -51,6 +51,11 @@ class WebChatIn(BaseModel):
     # Messenger, WhatsApp), so the website visit joins the SAME person — one
     # customer across every platform, with their cart and history intact.
     ref: str | None = None
+    # Visitor's public IP, forwarded by the storefront server (owner rule: on
+    # the website, LOCATION COMES FROM THE IP — never from asking). Resolved to
+    # a country once, cached, and stamped on the profile so a Nairobi visitor
+    # is quoted KES from the first message.
+    visitor_ip: str | None = None
 
 
 async def _adopt_person_from_ref(db: AsyncSession, redis, user: User, ref: str) -> bool:
@@ -88,6 +93,43 @@ async def _adopt_person_from_ref(db: AsyncSession, redis, user: User, ref: str) 
     except Exception as exc:
         _log.warning("web ref adopt failed for %s: %s", ref, exc)
         return False
+
+
+async def _country_from_ip(redis, ip: str | None) -> tuple[str, str] | None:
+    """Best-effort (ISO2, name) for a visitor IP — cached 30 days, 3s budget,
+    and never allowed to fail the chat turn. Private/localhost IPs resolve to
+    nothing rather than to the datacenter's country."""
+    ip = (ip or "").strip()
+    if not ip or ip in ("127.0.0.1", "::1") or ip.startswith(("10.", "192.168.", "172.")):
+        return None
+    cache_key = f"ipgeo:{ip}"
+    if redis is not None:
+        try:
+            hit = await redis.get(cache_key)
+            if hit:
+                iso, _, name = hit.partition("|")
+                return (iso, name) if iso else None
+        except Exception:
+            pass
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(f"https://ipapi.co/{ip}/json/",
+                                    headers={"User-Agent": "neema-geo/1.0"})
+            if resp.status_code != 200:
+                return None
+            d = resp.json()
+            iso = (d.get("country_code") or "").strip().upper()
+            name = (d.get("country_name") or iso).strip()
+    except Exception:
+        return None
+    if redis is not None:
+        try:
+            # Cache misses too (empty iso) so a bad IP doesn't re-query hourly.
+            await redis.setex(cache_key, 30 * 24 * 3600, f"{iso}|{name}")
+        except Exception:
+            pass
+    return (iso, name) if iso else None
 
 
 def _web_wa_id(session_id: str) -> str:
@@ -128,6 +170,14 @@ async def web_chat(body: WebChatIn, request: Request, db: AsyncSession = Depends
     # cart, one history across every platform.
     if body.ref:
         await _adopt_person_from_ref(db, redis, u, body.ref)
+
+    # Where they are, from the IP the storefront forwarded — so the first quote
+    # is already in their money and nobody is ever asked "are you in Kenya?".
+    if body.visitor_ip and not u.country_iso:
+        geo = await _country_from_ip(redis, body.visitor_ip)
+        if geo:
+            u.country_iso, u.country = geo[0], geo[1]
+            _log.info("web visitor %s geolocated to %s via IP", wa_id, geo[0])
 
     # Ensure a conversation + persist the inbound turn (so history + the inbox see it).
     conv = (await db.execute(

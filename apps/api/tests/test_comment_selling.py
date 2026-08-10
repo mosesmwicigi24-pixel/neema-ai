@@ -61,3 +61,14 @@ def test_swahili_defaults_to_kes_unless_another_country_is_stated():
 
     dm = " ".join(rt._meta_addendum("USD").split())
     assert "SWAHILI MEANS KENYA" in dm and "without waiting to be asked" in dm
+
+
+def test_currency_is_never_a_question():
+    """'…are you in Kenya? I can quote you in KES' went to a Filipino customer
+    live. Both Meta surfaces now ban the ask outright."""
+    pub = " ".join(rt._public_comment_addendum("USD").split())
+    assert "NEVER ASK WHERE THEY ARE" in pub
+    assert "are you in Kenya?" in pub            # named so the model can't rephrase it
+    dm = " ".join(rt._meta_addendum("USD").split())
+    assert "NEVER ask 'are you in Kenya?'" in dm
+    assert "switch seamlessly" in dm.lower() or "switch seamlessly" in dm
