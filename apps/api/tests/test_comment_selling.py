@@ -45,3 +45,19 @@ def test_cap_is_a_backstop_not_a_budget():
     """30 full replies per post starved boosted posts into 'DM us for the
     price' (the Allan case)."""
     assert settings.meta_comment_agent_cap >= 300
+
+
+def test_swahili_defaults_to_kes_unless_another_country_is_stated():
+    """Owner rule (2026-08-10, from the live test): 'Hii Refiller … $20' quoted
+    a Swahili speaker in dollars — a Kenyan treated as a foreigner in their own
+    shop. Swahili → KES on both public comments and Meta DMs; a stated other
+    country (Tanzania, DRC…) still wins."""
+    pub = " ".join(rt._public_comment_addendum("USD").split())
+    assert "SWAHILI MEANS KENYA" in pub
+    assert 'currency="KES"' in pub
+    assert "Tanzania" in pub                     # the override is spelled out
+    # Present even when the default is already KES (harmless no-op there).
+    assert "SWAHILI MEANS KENYA" in " ".join(rt._public_comment_addendum("KES").split())
+
+    dm = " ".join(rt._meta_addendum("USD").split())
+    assert "SWAHILI MEANS KENYA" in dm and "without waiting to be asked" in dm
