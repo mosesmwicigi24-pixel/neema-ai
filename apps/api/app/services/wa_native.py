@@ -38,6 +38,8 @@ import asyncio
 import logging
 import os
 
+from sqlalchemy import select
+
 from app.core.config import settings
 
 _log = logging.getLogger("neema.wa_native")
@@ -120,7 +122,6 @@ async def _capture_referral(db, wa_id: str, ref: dict) -> None:
     ad carries a `referral` block (source_type ad/post, source_id, source_url,
     headline). Record where this customer ACTUALLY came from — once; an
     established lead_source or stored ad is never overwritten."""
-    from sqlalchemy import select
     from sqlalchemy.orm.attributes import flag_modified
     from app.models.user import User
     from app.models.person import Person
@@ -343,7 +344,6 @@ async def _escalate_doc_request(redis, wa_id: str, text: str) -> None:
     """Flip the conversation to a human with a visible reason — the same outcome
     the n8n media-escalation branch produced via POST /api/n8n/escalate."""
     from datetime import datetime, timezone
-    from sqlalchemy import select
     from app.database import AsyncSessionLocal
     from app.models.conversation import Conversation, InterceptMode
     from app.models.intercept import Intercept, InterceptAction
@@ -402,7 +402,6 @@ async def _reply_after_debounce(redis, wa_id: str, token: int | None,
 
     # A human has this conversation → the AI stays silent (parity with /profile).
     try:
-        from sqlalchemy import select
         from app.models.conversation import Conversation, InterceptMode
         async with AsyncSessionLocal() as db:
             conv = (await db.execute(select(Conversation).where(
@@ -530,7 +529,6 @@ async def _ingest_guarded(event: dict, redis) -> None:
     async with AsyncSessionLocal() as db:
         # Genuinely first contact? (The n8n version of this notification fired on
         # EVERY text — its condition could never be false. This is the correct one.)
-        from sqlalchemy import select
         from app.models.conversation import Conversation
         is_new = (await db.execute(select(Conversation.id).where(
             Conversation.wa_id == svc._normalize_wa_id(wa_id)))).scalar_one_or_none() is None

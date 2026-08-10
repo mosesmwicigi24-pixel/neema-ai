@@ -210,9 +210,11 @@ Deliberately not doing: `ruff --fix` on the backlog. It touches ~45 unused
 imports across the app and would bury real review in noise. Fix them in
 dedicated passes.
 
-> Note: 4 of the current findings are `F821 undefined-name`
-> (`app/main.py` × 3, `app/services/wa_native.py` × 1) — those are real latent
-> `NameError`s, not style nits, and deserve their own fix.
+> The 4 `F821 undefined-name` findings this section used to flag (`app/main.py`
+> × 3, `app/services/wa_native.py` × 1) were fixed in #149 — both were real
+> crashes swallowed by `except Exception`, which is why nothing ever surfaced.
+> `tests/test_no_undefined_names.py` now keeps F821 at zero, so that rule cannot
+> silently come back through the ratchet's slack.
 
 ---
 
