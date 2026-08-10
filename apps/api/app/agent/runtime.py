@@ -1496,15 +1496,23 @@ async def _order_link(redis, channel: str, ext: str, product: str = "") -> str:
 
 
 async def _post_over_cap(redis, post_id: str) -> bool:
-    """True once we've already spent `meta_comment_agent_cap` full agent replies on
-    this post — beyond that, buying comments still get a warm reply, just a lighter
-    (no-LLM) one. Caps AI cost + Graph rate on a viral post."""
+    """True once this post has spent `meta_comment_agent_cap` full agent replies
+    TODAY — beyond that, buying comments still get a warm reply, just a lighter
+    (no-LLM) one. Caps AI cost + Graph rate on a viral post.
+
+    Per-DAY on purpose: the old counter was per-post-per-14-days, so one boosted
+    post (1,337 comments) burned its lifetime budget in hours and every buyer
+    after that got the canned "DM us" line for the rest of a fortnight. A daily
+    window keeps the runaway-cost backstop while the hot post — the one actually
+    selling — reopens every morning."""
     if not redis or not post_id:
         return False
+    from datetime import datetime, timezone
     try:
-        n = await redis.incr(f"meta:postcap:{post_id}")
+        key = f"meta:postcap:{post_id}:{datetime.now(timezone.utc):%Y%m%d}"
+        n = await redis.incr(key)
         if n == 1:
-            await redis.expire(f"meta:postcap:{post_id}", 14 * 24 * 3600)
+            await redis.expire(key, 2 * 24 * 3600)
         return n > settings.meta_comment_agent_cap
     except Exception:
         return False

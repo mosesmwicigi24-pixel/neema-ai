@@ -33,7 +33,10 @@ def test_comment_reply_uses_the_right_edge_per_platform(monkeypatch):
     assert calls[1][0] == "FB_C1/comments"     # Facebook: comment-on-a-comment
 
 
-def test_private_reply_uses_send_api_for_instagram(monkeypatch):
+def test_private_reply_uses_send_api_for_both_channels(monkeypatch):
+    """The old FB-specific /private_replies edge 400s on current Graph versions
+    (live, 2026-08-10: every comment DM failed, subcode 33) — both channels now
+    address the COMMENT as the Send API recipient."""
     calls = _capture_posts(monkeypatch)
     asyncio.run(meta_send.send_private_reply("IG_C1", "hello", channel="instagram"))
     path, payload = calls[0]
@@ -41,7 +44,9 @@ def test_private_reply_uses_send_api_for_instagram(monkeypatch):
     assert payload["recipient"] == {"comment_id": "IG_C1"}    # the COMMENT is the recipient
 
     asyncio.run(meta_send.send_private_reply("FB_C1", "hello", channel="facebook"))
-    assert calls[1][0] == "FB_C1/private_replies"             # Facebook keeps its edge
+    path2, payload2 = calls[1]
+    assert path2 == "me/messages"
+    assert payload2["recipient"] == {"comment_id": "FB_C1"}
 
 
 class _Resp:

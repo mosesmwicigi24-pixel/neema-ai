@@ -195,17 +195,15 @@ async def send_private_reply(comment_id: str, text: str, page_id: str | None = N
     per comment and time-limited by Meta; after it the conversation continues as a
     normal DM (which the agent already handles).
 
-    Facebook uses the comment's own `/private_replies` edge. Instagram instead
-    goes through the Send API, addressing the COMMENT as the recipient
-    (`recipient: {comment_id: …}`) — the FB shape 400s on an IG comment."""
-    if channel == "instagram":
-        await _graph_post("me/messages", {
-            "recipient": {"comment_id": comment_id},
-            "message": {"text": text},
-        }, "send private reply (ig)", page_id=page_id)
-        return
-    await _graph_post(f"{comment_id}/private_replies", {"message": text},
-                      "send private reply", page_id=page_id)
+    BOTH channels go through the Send API, addressing the COMMENT as the
+    recipient (`recipient: {comment_id: …}`). The old Facebook-specific
+    `/{comment_id}/private_replies` edge 400s on current Graph versions
+    ("does not support this operation", subcode 33) — verified live 2026-08-10:
+    every comment DM was failing, so the storefront link never reached anyone."""
+    await _graph_post("me/messages", {
+        "recipient": {"comment_id": comment_id},
+        "message": {"text": text},
+    }, "send private reply", page_id=page_id)
 
 
 async def fetch_profile(external_id: str, channel: str = "messenger") -> dict:

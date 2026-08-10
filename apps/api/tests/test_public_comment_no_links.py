@@ -138,8 +138,9 @@ def test_the_private_reply_keeps_its_link(monkeypatch):
     asyncio.run(meta_send.send_private_reply("CID_3", dm))
 
     path, body, _what = posted[0]
-    assert path == "CID_3/private_replies"
-    assert body["message"] == dm               # untouched, link and all
+    assert path == "me/messages"               # Send API — the edge 400s on v21
+    assert body["recipient"] == {"comment_id": "CID_3"}
+    assert body["message"] == {"text": dm}     # untouched, link and all
 
 
 def test_messenger_and_instagram_dms_keep_their_links(monkeypatch):

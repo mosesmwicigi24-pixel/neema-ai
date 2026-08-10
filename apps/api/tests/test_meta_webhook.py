@@ -246,6 +246,13 @@ def test_post_cap_falls_back_after_n_full_replies(monkeypatch):
     results = [asyncio.run(rt._post_over_cap(r, "POST1")) for _ in range(5)]
     assert results == [False, False, False, True, True]     # 3 full, then capped
     assert asyncio.run(rt._post_over_cap(r, "POST2")) is False  # a different post is independent
+    # Per-DAY window (live, 2026-08-10: a boosted post burned a 14-day budget in
+    # hours and sold nothing for a fortnight) — the key carries today, so the
+    # hot post reopens every morning.
+    assert all(":2" in k and "POST1" in k for k in r.v if "POST1" in k)
+    from datetime import datetime, timezone
+    today = f"{datetime.now(timezone.utc):%Y%m%d}"
+    assert any(k.endswith(today) for k in r.v)
 
 
 def test_whatsapp_checkout_link_is_a_tiny_short_link(monkeypatch):
