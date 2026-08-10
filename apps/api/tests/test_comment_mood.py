@@ -57,20 +57,22 @@ def test_negative_plan_never_sells():
 
 def test_no_answer_and_no_product_gives_a_neutral_line_not_a_pitch():
     """The exact path that produced the Florence reply."""
-    out = rt._comment_public_reply("", dm_sent=False, link="", name_tag=" Florence",
-                                   seed="florence", product_link="")
+    out = rt._comment_public_reply("", dm_sent=False, name_tag=" Florence",
+                                   seed="florence")
     assert "WhatsApp" not in out
     assert "get yours" not in out            # the offending line, gone
     assert "Florence" in out                 # still warm and personal
     assert out in [p.replace("{name}", " Florence") for p in rt._NEUTRAL_ACK_POOL]
 
 
-def test_no_answer_but_identified_product_may_still_offer_the_order_link():
-    """When we DID work out what they want, a buyer is never stranded."""
-    out = rt._comment_public_reply("", dm_sent=False,
-                                   link="https://neema.example/api/o/ABC",
-                                   name_tag=" Grace", seed="grace", product_link="")
-    assert "WhatsApp" in out                 # the tap-to-order invite is legitimate here
+def test_no_answer_but_identified_product_invites_the_inbox():
+    """When we DID work out what they want, a buyer is never stranded — they are
+    invited to write to us. Not sent a link: the public square is link-free."""
+    out = rt._comment_public_reply("", dm_sent=False, name_tag=" Grace", seed="grace",
+                                   product_known=True, product_name="Silver Tray")
+    assert "http" not in out
+    assert "Silver Tray" in out
+    assert "message us" in out.lower() or "dm us" in out.lower()
 
 
 def test_neutral_lines_are_safe_for_anyone():

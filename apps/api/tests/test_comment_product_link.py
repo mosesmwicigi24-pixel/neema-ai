@@ -1,6 +1,6 @@
-"""A comment reply links to the PRODUCT they asked about on the Bethany House
-storefront (not a bare wa.me short link), and the cart follows the PERSON across
-every channel.
+"""The DM that a comment opens links to the PRODUCT they asked about on the
+Bethany House storefront (not a bare wa.me short link), and the cart follows the
+PERSON across every channel. The PUBLIC comment itself never links anywhere.
 
 Two behaviours pinned here:
  1. run_turn exposes the catalogue rows the agent actually priced (product_sink),
@@ -27,36 +27,34 @@ def test_public_reply_goes_link_free_when_the_dm_landed():
     link-carrying comments, so when the DM opened, the public reply is the
     answer + an inbox nudge and the storefront link rides the DM instead."""
     out = rt._comment_public_reply(
-        "That red chasuble is $150.", dm_sent=True, link="https://neema.example/api/o/ABC",
-        name_tag=" Charity", seed="X", product_link="https://bethanyhouse.co.ke/product/red-chasuble?ref=AB12CD")
+        "That red chasuble is $150.", dm_sent=True, name_tag=" Charity", seed="X",
+        product_known=True, product_name="Red Chasuble")
     assert "http" not in out                        # NO link of any kind in public
     assert "WhatsApp" not in out
     assert out.startswith("That red chasuble is $150.")
     assert out != "That red chasuble is $150."      # the inbox nudge was appended
 
 
-def test_public_link_survives_when_the_dm_did_not_open():
-    """DM failure is the one case the product link still goes public — it is
-    the buyer's only door."""
+def test_no_public_link_even_when_the_dm_did_not_open():
+    """The 2026-08-10 tightening: a DM failure is NOT a reason to publish a
+    link. We answered the question; the next step is an invitation, not a URL."""
     out = rt._comment_public_reply(
-        "That red chasuble is $150.", dm_sent=False, link="",
-        name_tag=" Charity", seed="X",
-        product_link="https://bethanyhouse.co.ke/product/red-chasuble?ref=AB12CD")
-    assert "bethanyhouse.co.ke/product/red-chasuble?ref=AB12CD" in out
-    assert "Neema can help you right there" in out  # assistant is offered on the page
+        "That red chasuble is $150.", dm_sent=False, name_tag=" Charity", seed="X",
+        product_known=True, product_name="Red Chasuble")
+    assert "http" not in out and "bethanyhouse" not in out
+    assert "Neema can help you right there" not in out   # the old link tail, gone
     assert "WhatsApp" not in out
     assert out.startswith("That red chasuble is $150.")
+    assert any(out.endswith(line) for line in rt._COMMENT_INVITE_POOL)
 
 
-def test_wa_link_remains_the_fallback_when_no_product_identified():
-    out = rt._comment_public_reply("It is $150.", dm_sent=False,
-                                   link="https://neema.example/api/o/ABC",
-                                   name_tag="", seed="X", product_link="")
-    assert "https://neema.example/api/o/ABC" in out   # buyer never stranded
+def test_answer_without_a_product_still_never_links():
+    out = rt._comment_public_reply("It is $150.", dm_sent=False, name_tag="", seed="X")
+    assert "http" not in out
+    assert out.startswith("It is $150.")            # buyer never stranded — invited
     # DM landed and no product → the inbox nudge, unchanged behaviour
-    out2 = rt._comment_public_reply("It is $150.", dm_sent=True, link="",
-                                    name_tag="", seed="X", product_link="")
-    assert "It is $150." in out2
+    out2 = rt._comment_public_reply("It is $150.", dm_sent=True, name_tag="", seed="X")
+    assert "It is $150." in out2 and "http" not in out2
 
 
 # ── the storefront product link carries identity + the cart line ──────────────

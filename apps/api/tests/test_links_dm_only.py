@@ -1,17 +1,24 @@
-"""Links live in DMs; the public square stays link-free (owner, 2026-08-08).
+"""Links live in DMs; the public square stays link-free (owner, 2026-08-08,
+made ABSOLUTE 2026-08-10).
 
 Meta suppresses the reach of posts AND comments that carry external links —
 link posts lose roughly half their reach, and the Sept-2025 ranking change
 extended that scoring to links dropped in comments. Neema was posting the
 storefront link in every public comment reply, quietly taxing the reach of
-exactly the posts that were selling. The fix:
+exactly the posts that were selling.
+
+The 2026-08-08 fix moved the link into the DM but kept three "the buyer would
+otherwise be stranded" escape hatches, and production promptly proved they were
+not edge cases: over-cap comment replies went out reading "Karibu SelfieAnne 🙏
+You can see it and order here 👉 https://bethanyhouse.co.ke/product/refiller
+?ref=E14E0D". So the hatches are closed:
 
   * When the private reply (DM) opens, the storefront link rides THERE —
     answer, "Order here 👉 <product page>", warm continue line.
-  * The public comment then carries only the answer + an inbox nudge. No URL.
-  * The public link appears ONLY when the DM could not open (over the
-    per-post cap, or DM delivery failed) — a real buyer is never stranded,
-    and the algorithm only ever sees a link when there was no other door.
+  * The public comment carries the answer + an invitation to the inbox. No URL,
+    in ANY branch — `_comment_public_reply` is not even given one to paste.
+  * `meta_send.reply_to_comment` strips URLs at the send boundary, so a model
+    slip or a future template cannot publish one either.
 """
 import inspect
 
@@ -42,29 +49,63 @@ def test_dm_without_a_product_stays_clean():
 
 def test_public_reply_is_link_free_when_the_dm_landed():
     out = rt._comment_public_reply(
-        "The Aluminium Tray is $70.", dm_sent=True,
-        link="https://neema.example/api/o/ABC", name_tag=" Grace", seed="g",
-        product_link=_LINK)
+        "The Aluminium Tray is $70.", dm_sent=True, name_tag=" Grace", seed="g",
+        product_known=True, product_name="Aluminium Tray")
     assert "http" not in out            # no storefront link, no wa.me fallback
     assert out.startswith("The Aluminium Tray is $70.")
     assert out != "The Aluminium Tray is $70."      # inbox nudge appended
 
 
 def test_nudge_pool_itself_is_link_free():
-    for line in rt._DM_NUDGE_POOL:
+    for line in rt._DM_NUDGE_POOL + rt._COMMENT_INVITE_POOL:
         assert "http" not in line and "wa.me" not in line
 
 
-def test_public_link_returns_only_when_the_dm_did_not_open():
-    # DM failed with a known product → the page is their only door.
+def test_public_reply_is_link_free_when_the_dm_did_NOT_open():
+    """The old escape hatch, closed. A DM failure is not a licence to publish a
+    link — we answered them, so we invite them to write to us."""
     out = rt._comment_public_reply("The Aluminium Tray is $70.", dm_sent=False,
-                                   link="", name_tag="", seed="g",
-                                   product_link=_LINK)
-    assert _LINK in out
-    # Over the per-post cap (no answer at all) → the canned line still links.
-    over = rt._comment_public_reply("", dm_sent=False, link="", name_tag=" Grace",
-                                    seed="g", product_link=_LINK)
-    assert _LINK in over
+                                   name_tag="", seed="g",
+                                   product_known=True, product_name="Aluminium Tray")
+    assert "http" not in out and "bethanyhouse" not in out
+    assert out.startswith("The Aluminium Tray is $70.")
+    assert any(out.endswith(line) for line in rt._COMMENT_INVITE_POOL)
+
+    # Over the per-post cap (no answer at all) → still no link, ever.
+    over = rt._comment_public_reply("", dm_sent=False, name_tag=" Grace", seed="g",
+                                    product_known=True, product_name="Aluminium Tray")
+    assert "http" not in over and "bethanyhouse" not in over
+    assert "Aluminium Tray" in over
+
+
+def test_the_public_composer_cannot_be_handed_a_url_at_all():
+    """Structural guarantee: no parameter of `_comment_public_reply` carries a
+    URL, so no branch of it can paste one — a link has to be *invented* to leak,
+    not merely forwarded."""
+    params = set(inspect.signature(rt._comment_public_reply).parameters)
+    assert not (params & {"link", "product_link", "url", "order_link"})
+
+
+def test_no_public_comment_template_contains_a_link():
+    """Every canned line that can reach the public square, swept in one place —
+    the leak was a template, so templates are what this pins."""
+    pools = (rt._DM_NUDGE_POOL + rt._COMMENT_INVITE_POOL + rt._OVER_CAP_POOL
+             + rt._NEUTRAL_ACK_POOL + rt._THANKS_POOL)
+    for line in pools:
+        low = line.lower()
+        assert "http" not in low
+        assert "{link}" not in low
+        assert ".co.ke" not in low and ".com" not in low
+        assert "wa.me" not in low
+        assert "order here" not in low
+
+
+def test_the_send_boundary_guard_backs_all_of_this_up():
+    """Belt and braces: even if a template regressed, the wire strips it."""
+    from app.services import meta_send
+    out, removed = meta_send.sanitize_public_comment(
+        f"The tray is $70. Order here 👉 {_LINK}")
+    assert removed == [_LINK] and "http" not in out
 
 
 # ── the flow: product resolved BEFORE the DM, so the link can ride it ────────

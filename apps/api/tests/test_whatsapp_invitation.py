@@ -80,22 +80,20 @@ def test_public_comment_gives_one_cta():
     # (the algorithm suppresses link-carrying comments), so the storefront
     # link rides the DM and the public square stays link-free.
     out = rt._comment_public_reply(
-        "That red chasuble is $150.", dm_sent=True, link="https://neema.example/api/o/ABC",
-        name_tag=" Charity", seed="X",
-        product_link="https://bethanyhouse.co.ke/product/red-chasuble?ref=AB12CD")
+        "That red chasuble is $150.", dm_sent=True, name_tag=" Charity", seed="X",
+        product_known=True, product_name="Red Chasuble")
     assert "WhatsApp" not in out                     # no push — the DM has everything
     assert "http" not in out                         # link-free public reply
-    # DM did not open → the product page is their only door, so it goes public
+    # DM did not open → an invitation to the inbox, NOT the product page
     out2 = rt._comment_public_reply(
-        "That red chasuble is $150.", dm_sent=False, link="",
-        name_tag=" Charity", seed="X",
-        product_link="https://bethanyhouse.co.ke/product/red-chasuble?ref=AB12CD")
-    assert "red-chasuble" in out2
+        "That red chasuble is $150.", dm_sent=False, name_tag=" Charity", seed="X",
+        product_known=True, product_name="Red Chasuble")
+    assert "red-chasuble" not in out2 and "http" not in out2
     # a buyer we could NOT identify a product for is still never stranded
     fallback = rt._comment_public_reply("It is $150.", dm_sent=False,
-                                        link="https://neema.example/api/o/ABC",
-                                        name_tag="", seed="X", product_link="")
-    assert "https://neema.example/api/o/ABC" in fallback
+                                        name_tag="", seed="X")
+    assert "http" not in fallback
+    assert any(fallback.endswith(line) for line in rt._COMMENT_INVITE_POOL)
 
 
 # ── Messenger/Instagram: close here, invite once ─────────────────────────────
