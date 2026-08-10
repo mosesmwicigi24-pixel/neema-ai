@@ -143,17 +143,33 @@ _POINTER_RE = re.compile(r"(?:👉|➡️|➡|=>|->)")
 LINK_FREE_FALLBACK = "Thank you 🙏 Send us a message and we'll help you order 💛"
 
 
+# The country-hedge ban, enforced (owner rule): "…are you in Kenya? I can quote
+# you in KES" kept appearing even after the prompt banned it — the model mirrors
+# its OWN earlier replies in the thread history, so a bad habit outlives the
+# prompt fix. Like links, it dies at the send boundary. Matches the question
+# clause only, so "We're based in Nairobi, Kenya" is untouched.
+_COUNTRY_ASK_RE = re.compile(
+    r"(?i)[^.!?\n]*\b(?:are you (?:in|from|writing from) kenya"
+    r"|(?:which|what) country are you)\b[^.!?\n]*[.!?]?")
+
+
 def sanitize_public_comment(text: str) -> tuple[str, list[str]]:
-    """Strip every URL / e-mail out of a PUBLIC comment reply.
+    """Strip every URL / e-mail — and every country-hedge question — out of a
+    PUBLIC comment reply.
 
     Returns `(clean_text, removed)`. `removed` is empty when the text was
-    already link-free, which is the normal case — the templates and the prompt
+    already clean, which is the normal case — the templates and the prompt
     are supposed to keep it that way, and a non-empty `removed` means one of
     them regressed and should be fixed at the source."""
     raw = (text or "").strip()
-    removed = _URL_RE.findall(raw)
+    hedges = [h.strip() for h in _COUNTRY_ASK_RE.findall(raw)]
+    if hedges:
+        raw = re.sub(r"\s{2,}", " ", _COUNTRY_ASK_RE.sub("", raw)).strip(" \t-–—,;:")
+    removed = _URL_RE.findall(raw) + hedges
     if not removed:
         return raw, []
+    if not _URL_RE.search(raw):
+        return (raw or LINK_FREE_FALLBACK), removed
     lines: list[str] = []
     for line in _URL_RE.sub("", raw).splitlines():
         line = _POINTER_RE.sub("", line)

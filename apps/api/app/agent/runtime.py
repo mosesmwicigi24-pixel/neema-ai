@@ -888,6 +888,32 @@ async def _send_hold_line(redis, channel: str, key: str) -> None:
         _log.warning("hold line failed for %s/%s", channel, key, exc_info=False)
 
 
+async def _is_echo(db, channel: str, key: str, reply: str,
+                   *, window_minutes: int = 10) -> bool:
+    """True when `reply` is word-for-word what we JUST sent on this thread.
+
+    Live case (José, 02:25): a burst of rapid messages each drew the same
+    'One moment — let me check on that for you.' — three identical stalls in
+    58 seconds. An identical reply within minutes of itself never serves the
+    customer; it's already the last thing on their screen. The window is short
+    ON PURPOSE: a customer re-asking the price tomorrow deserves an answer,
+    even an identical one — only the rapid echo is robotic."""
+    t = " ".join((reply or "").lower().split())
+    if not t:
+        return True
+    from datetime import datetime, timedelta, timezone
+    from app.models.message import Message, MsgDirection
+    where = ((Message.wa_id == key) if channel == "whatsapp" else
+             ((Message.channel == channel) & (Message.external_id == key)))
+    last = (await db.execute(
+        select(Message.text).where(
+            where, Message.direction == MsgDirection.outbound,
+            Message.media_type.is_(None) | (Message.media_type != "note"),
+            Message.created_at > datetime.now(timezone.utc) - timedelta(minutes=window_minutes))
+        .order_by(Message.created_at.desc()).limit(1))).scalar_one_or_none()
+    return " ".join((last or "").lower().split()) == t
+
+
 async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None) -> None:
     from app.database import AsyncSessionLocal
     from app.services import n8n_bridge as svc
@@ -898,6 +924,9 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None)
         async with AsyncSessionLocal() as db:
             reply = await run_turn(db, redis, wa_id, text,
                                    build_llm(model=model), media=media)
+            if await _is_echo(db, "whatsapp", wa_id, reply):
+                _log.info("echo guard: identical reply within minutes suppressed for %s", wa_id)
+                return
         wamid = await svc._send_waba(wa_id, reply)
         async with AsyncSessionLocal() as db2:
             await svc.save_outbound_message(db2, redis, wa_id, reply, waba_msg_id=wamid)
@@ -1005,6 +1034,10 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
                                    llm=build_llm(model=model),
                                    channel=channel, external_id=external_id,
                                    media=media)
+            if await _is_echo(db, channel, external_id, reply):
+                _log.info("echo guard: identical reply within minutes suppressed for %s/%s",
+                          channel, external_id)
+                return True
         await send_to_channel(channel, external_id, reply, page_id=page_id)
         async with AsyncSessionLocal() as db2:
             await svc.save_outbound_channel_message(db2, redis, channel, external_id, reply)
@@ -1279,6 +1312,16 @@ _OVER_CAP_POOL = [
     "We'd love to help{name} 🙏 {product} is in — send us a message and we'll sort out size, colour and delivery 💛",
     "Karibu{name} 🙏 Yes, we have {product} — message us and we'll handle the price and delivery from there 💛",
 ]
+# Over-cap AND we know the post's product WITH its price (from the post's
+# recorded identity): the no-LLM line still SELLS — price + one pull question —
+# instead of deflecting to the inbox. The owner's law is the comment thread is
+# the shop; running out of model budget must not turn it back into a signpost.
+_OVER_CAP_SELL_POOL = [
+    "Thank you{name} 🙏 {product} is {price} — how many would you like? 💛",
+    "Karibu{name} 🙏 {product} is {price}, ready for you — how many should we prepare? 💛",
+    "Bless you{name}! 🙏 {product} is {price} — which quantity works for you? 💛",
+    "We'd love to serve you{name} 🙏 {product} is {price} — how many would you like? 💛",
+]
 # Said when we could not compose a real answer (over the per-post cap, or the
 # agent turn failed) AND we could not identify a product. It must be safe to send
 # to ANYONE — a buyer, a critic, someone grieving — so it thanks, opens a door,
@@ -1315,7 +1358,8 @@ def _dm_text(answer: str, product_link: str, seed: str) -> str:
 
 
 def _comment_public_reply(answer: str, dm_sent: bool, name_tag: str, seed: str,
-                          product_known: bool = False, product_name: str = "") -> str:
+                          product_known: bool = False, product_name: str = "",
+                          price_text: str = "") -> str:
     """The PUBLIC comment text, given the agent's answer and whether the DM landed.
 
     THIS FUNCTION CANNOT PRODUCE A LINK, by construction: it takes no URL. Meta
@@ -1343,8 +1387,13 @@ def _comment_public_reply(answer: str, dm_sent: bool, name_tag: str, seed: str,
     # only when we DID identify what they're asking about.
     if product_known:
         # We know WHICH product the post is about, so a buying question still gets
-        # a real, warm answer with no model call — the item by name, and the inbox.
+        # a real, warm answer with no model call — with its PRICE when the post's
+        # identity carries one, so even the over-cap line sells instead of
+        # signposting the inbox.
         subject = f"the {product_name.strip()}" if product_name.strip() else "it"
+        if price_text:
+            return (_pick(_OVER_CAP_SELL_POOL, seed).replace("{name}", name_tag)
+                    .replace("{product}", subject).replace("{price}", price_text))
         return (_pick(_OVER_CAP_POOL, seed)
                 .replace("{name}", name_tag).replace("{product}", subject))
     return _pick(_NEUTRAL_ACK_POOL, seed).replace("{name}", name_tag)
@@ -1683,9 +1732,13 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # A public reply no longer carries a link, so it no longer needs one to be
     # useful — knowing WHAT they're asking about is enough to answer warmly.
     product_name = (matched.get("name") or "").strip()
+    # The post identity carries hub prices — comments quote USD by default.
+    _usd, _kes = matched.get("price_usd"), matched.get("price_kes") or matched.get("price")
+    price_text = (f"${_usd:g}" if _usd else (f"KES {_kes:,.0f}" if _kes else ""))
     public_text = _comment_public_reply(answer, dm_sent, name_tag, ext,
                                         product_known=bool(product_name),
-                                        product_name=product_name)
+                                        product_name=product_name,
+                                        price_text=price_text)
 
     await _post_public(public_text)
 
