@@ -7,6 +7,13 @@ name: CI
 # Why `branches-ignore: [main]` on push: pushes to main are already covered,
 # because deploy.yml calls this workflow as a reusable workflow. Without the
 # ignore, main would run the whole suite twice in parallel for nothing.
+#
+# Every job that imports the app first provisions /var/neema/media, because
+# app/routers/media.py runs `os.makedirs("/var/neema/media")` at IMPORT time —
+# merely importing the app touches the filesystem. apps/api/Dockerfile creates
+# and chowns that exact path, so this step reproduces the container, it does not
+# work around the app. (The path is hardcoded rather than env-configurable; if
+# that is ever fixed, these steps can go.)
 
 on:
   pull_request:
@@ -48,6 +55,9 @@ jobs:
             apps/api/requirements.txt
             apps/api/requirements-dev.txt
 
+      - name: Provision the media dir
+        run: sudo mkdir -p /var/neema/media && sudo chown -R "$USER" /var/neema
+
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
 
@@ -80,6 +90,9 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: apps/api/requirements.txt
+
+      - name: Provision the media dir
+        run: sudo mkdir -p /var/neema/media && sudo chown -R "$USER" /var/neema
 
       - name: Install runtime dependencies only
         run: pip install -r requirements.txt
@@ -127,6 +140,9 @@ jobs:
           cache-dependency-path: |
             apps/api/requirements.txt
             apps/api/requirements-dev.txt
+
+      - name: Provision the media dir
+        run: sudo mkdir -p /var/neema/media && sudo chown -R "$USER" /var/neema
 
       - name: Install dependencies
         run: pip install -r requirements-dev.txt

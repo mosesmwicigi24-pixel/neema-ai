@@ -55,6 +55,16 @@ is reachable. That is intentional here — the `migrations` job runs it for real
 Nothing else in `tests/` needs a live service: every DB and Redis touchpoint is
 a hand-rolled fake.
 
+> ⚠️ **`/var/neema/media` must exist and be writable** before anything imports
+> the app. `app/routers/media.py` runs `os.makedirs("/var/neema/media")` at
+> **import time**, with the path hardcoded — so simply importing the app touches
+> the filesystem, and on a non-root user it raises `PermissionError` during test
+> *collection*. `apps/api/Dockerfile` creates and chowns that exact path, so the
+> three CI jobs that import the app do the same (`sudo mkdir -p` +
+> `chown`). The `docker run` commands below execute as root, so they don't hit
+> it; if you run the suite on your host, create the directory first. Making
+> `MEDIA_DIR` env-configurable would remove the whole footgun.
+
 > ⚠️ Always `python -m pytest`, never bare `pytest`. There is no
 > `pyproject.toml`, no `pytest.ini` and no `conftest.py` in `apps/api`, so only
 > the `-m` form puts the working directory on `sys.path`. Bare `pytest` fails to
