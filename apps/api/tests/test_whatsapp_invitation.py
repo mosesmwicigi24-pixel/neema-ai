@@ -89,11 +89,10 @@ def test_public_comment_gives_one_cta():
         "That red chasuble is $150.", dm_sent=False, name_tag=" Charity", seed="X",
         product_known=True, product_name="Red Chasuble")
     assert "red-chasuble" not in out2 and "http" not in out2
-    # a buyer we could NOT identify a product for is still never stranded
+    # an answered buyer sells on the thread — the reply stands alone
     fallback = rt._comment_public_reply("It is $150.", dm_sent=False,
                                         name_tag="", seed="X")
-    assert "http" not in fallback
-    assert any(fallback.endswith(line) for line in rt._COMMENT_INVITE_POOL)
+    assert fallback == "It is $150." and "http" not in fallback
 
 
 # ── Messenger/Instagram: close here, invite once ─────────────────────────────

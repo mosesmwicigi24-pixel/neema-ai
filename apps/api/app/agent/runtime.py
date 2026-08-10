@@ -46,10 +46,19 @@ _META_TOOL_NAMES = {"search_catalog", "get_cart", "update_cart", "create_order",
                     "schedule_check_in"}
 MESSENGER_TOOLS = [t for t in TOOLS if t["name"] in _META_TOOL_NAMES]
 
-# A PUBLIC comment reply is short and read-only — it just needs the real price, so
-# the catalogue tool (+ memory) is enough. The tap-to-order WhatsApp link is
-# appended in code, not by the model.
-_PUBLIC_COMMENT_TOOL_NAMES = {"search_catalog", "remember"}
+# The comment thread IS the shop (owner, 2026-08-10): onboard, sell and close
+# right in the comments — so the public path carries the full selling kit, minus
+# what a public square can't have: no link-bearing tools (share_catalog,
+# whatsapp_checkout_link — Meta taxes the post's reach), no DM-only sends
+# (send_product_cards — the comment already sits under the product photo), and
+# no pause. Privacy is enforced by the addendum: phones and addresses are only
+# ever VOLUNTEERED publicly, never requested.
+_PUBLIC_COMMENT_TOOL_NAMES = {"search_catalog", "get_cart", "update_cart",
+                              "create_order", "check_order_status",
+                              "capture_contact", "save_parish",
+                              "save_measurements", "remember",
+                              "check_availability", "church_calendar",
+                              "handoff_to_human"}
 PUBLIC_COMMENT_TOOLS = [t for t in TOOLS if t["name"] in _PUBLIC_COMMENT_TOOL_NAMES]
 
 # Read-only, non-sending tools for DRAFT mode: the agent may look things up (real
@@ -66,13 +75,36 @@ _READONLY_TOOL_NAMES = {"search_catalog", "get_cart", "check_order_status",
 
 def _public_comment_addendum(currency: str = "USD") -> str:
     """System addendum for a PUBLIC comment reply — warm, human, and helpful, so
-    it reads like a friendly shopkeeper, not a price bot. Answer the question with
-    the real price, then invite them to continue in the inbox (a call-to-action is
-    added after your text). The full sale is closed 1:1 in the DM that follows."""
+    it reads like a friendly shopkeeper, not a price bot. The comment thread IS
+    the shop (owner, 2026-08-10): onboard, sell and close right here — never
+    deflect a question to the inbox or WhatsApp. The private message that rides
+    along carries the storefront link and is where delivery details are taken;
+    it supports the sale, it is not where the sale is sent."""
     money = "Kenyan Shillings (KES)" if currency == "KES" else "US Dollars (USD)"
     example = "'This gown is KES 13,000.'" if currency == "KES" else "'This gown is $130.'"
     return (
         "\n\n## Replying under a Facebook/Instagram comment — warm, human, helpful\n"
+        "- THE THREAD IS THE SHOP. Sell RIGHT HERE, in the comments, like a "
+        "shopkeeper at a market stall with others listening: answer, quote, "
+        "recommend, settle colour and quantity, close. Their next comment comes "
+        "back to you with this whole thread in hand, so carry the sale forward "
+        "turn by turn. NEVER answer a question by sending them elsewhere — "
+        "'DM us for the price' or 'message us and we'll sort you out' when you "
+        "KNOW the answer is a lost sale and reads as a brush-off to everyone "
+        "watching. Deflect only what you truly cannot do here.\n"
+        "- PUBLIC PRIVACY: never ask for a phone number, address or payment "
+        "details in a public comment. Settle the ORDER here — item, colour, "
+        "quantity, their city — and when it's settled, point at the private "
+        "message that was already sent alongside: 'I've also sent you a private "
+        "message — drop your number there and we'll arrange delivery.' Say it "
+        "once, at the close, never as a substitute for answering. If THEY post "
+        "their number publicly themselves, call capture_contact with it and "
+        "carry on — never scold, never make it awkward.\n"
+        "- CAPTURE AND BUILD AS YOU GO: a stated name, city, church, role or "
+        "measurement goes to capture_contact / save_parish / save_measurements "
+        "IN THAT TURN. When they decide on an item, build it with update_cart. "
+        "When their phone is on file (they volunteered it, or it's in your "
+        "context), create_order closes the sale right from the thread.\n"
         "- No greeting ritual here: a comment reply's first line is the ANSWER, "
         "never 'Good morning' — the FIRST CONTACT greeting rules do not apply to "
         "public comments.\n"
@@ -97,11 +129,11 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "- END WITH THE PULL: after the answer, ONE short inviting question that "
         "draws them into the conversation (which colour? how many? which country "
         "for delivery?) — a comment that answers AND asks is what starts the "
-        "sale; a short invitation to message us is added after your text.\n"
+        "sale, and their answer lands right back in this thread.\n"
         "- SELL THE WAY YOU WOULD ON WHATSAPP: acknowledge what they said, name "
         "the item and its price, give one concrete benefit, then ask the one "
-        "question that moves it forward — or invite them to message us. That is "
-        "the whole shape of a comment reply.\n"
+        "question that moves it forward. That is the whole shape of a comment "
+        "reply — and the next one continues it.\n"
         "- If the comment is grief, condolence, illness or a prayer request, respond "
         "with warmth alone — a brief blessing. Sell NOTHING. Not every comment under a "
         "post is a customer at a till.\n"
@@ -121,17 +153,15 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "after all three? Give both closest options rather than guessing the "
         "dearer one. If they name a different item, price that.\n"
         "- Be genuinely warm and human — a brief friendly word is welcome — but "
-        "CONCISE: this is a public comment, so 1–2 short lines, plain text, no "
+        "CONCISE: this is a public comment, so 2–4 short lines, plain text, no "
         "markdown or asterisks.\n"
         "- Made-to-order? Say it in a few words ('made to your size').\n"
         "- NEVER WRITE A LINK. No URL, no https://, no bethanyhouse.co.ke, no bare "
         "domain, no phone number, no email, no 'order on WhatsApp'. Facebook cuts "
         "the reach of any comment carrying an outbound link, so a link here costs "
         "us the whole post's audience to gain one click. The storefront link is "
-        "sent PRIVATELY, in the message that follows; your job in public is to "
-        "answer well and invite them to write to us ('send us a message and we'll "
-        "sort you out'). If you are tempted to paste a link, invite them to the "
-        "inbox instead — the invitation is added after your text anyway.\n"
+        "sent PRIVATELY, in the message that rides alongside; your job in public "
+        "is to answer well and keep selling right here.\n"
         "- Praise / emoji only → a short, genuine, warm thanks — nothing salesy."
     )
 
@@ -662,7 +692,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             totals[k] += int(u.get(k, 0) or 0)
 
     if is_meta and public_comment:
-        base = PUBLIC_COMMENT_TOOLS       # read-only: just enough to quote a real price
+        base = PUBLIC_COMMENT_TOOLS       # the comment thread sells — full kit, link-free
     elif is_meta:
         base = MESSENGER_TOOLS
     elif is_web:
@@ -1188,8 +1218,9 @@ _THANKS_POOL = [
     "Asante{name}! 🙏 May God bless you abundantly 💛",
     "So grateful{name} 🙏 Glory to God! 💛",
 ]
-# Public-comment CTA when we've opened a DM: pull them to their inbox (where the
-# real, unrushed selling happens) — NOT to WhatsApp.
+# RETIRED from the answered path (2026-08-10: the comment thread IS the shop —
+# an answered comment stands alone). Kept only as safe warm lines; nothing
+# appends them to a selling reply anymore.
 _DM_NUDGE_POOL = [
     "I've sent you a message — let's finish there 💬",
     "Check your inbox 💬 I've messaged you the details 💛",
@@ -1264,12 +1295,16 @@ def _comment_public_reply(answer: str, dm_sent: bool, name_tag: str, seed: str,
 
     The earlier version kept a public link "for when the DM did not open, so a
     real buyer is never stranded". They are not stranded — they are invited to
-    the inbox, and the whole post keeps its reach."""
-    if answer and dm_sent:
-        return f"{answer}\n{_pick(_DM_NUDGE_POOL, seed)}"
+    the inbox, and the whole post keeps its reach.
+
+    2026-08-10 (owner): the comment thread IS the shop. When the agent answered,
+    its text already sells and ends with its own next question — appending
+    "DM us and we'll sort you out" under a selling reply reads as a brush-off
+    and sends the buyer away from the very thread that is converting them. So
+    an answered comment stands ALONE; the inbox-invite pools remain only for
+    the no-answer fallbacks, where inviting a message is all we have."""
     if answer:
-        # The DM didn't open. We still answered them; the next step is the inbox.
-        return f"{answer}\n{_pick(_COMMENT_INVITE_POOL, seed)}"
+        return answer
     # No answer — we're over the per-post cap, or the agent turn failed. We do NOT
     # know what this person said, so we do NOT sell to them: pitching blind is how
     # "this is wrong" was answered with "Continue on WhatsApp to get yours". A

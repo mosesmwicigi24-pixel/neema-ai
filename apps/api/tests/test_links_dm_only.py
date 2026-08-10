@@ -52,8 +52,7 @@ def test_public_reply_is_link_free_when_the_dm_landed():
         "The Aluminium Tray is $70.", dm_sent=True, name_tag=" Grace", seed="g",
         product_known=True, product_name="Aluminium Tray")
     assert "http" not in out            # no storefront link, no wa.me fallback
-    assert out.startswith("The Aluminium Tray is $70.")
-    assert out != "The Aluminium Tray is $70."      # inbox nudge appended
+    assert out == "The Aluminium Tray is $70."      # the answer IS the reply
 
 
 def test_nudge_pool_itself_is_link_free():
@@ -68,8 +67,7 @@ def test_public_reply_is_link_free_when_the_dm_did_NOT_open():
                                    name_tag="", seed="g",
                                    product_known=True, product_name="Aluminium Tray")
     assert "http" not in out and "bethanyhouse" not in out
-    assert out.startswith("The Aluminium Tray is $70.")
-    assert any(out.endswith(line) for line in rt._COMMENT_INVITE_POOL)
+    assert out == "The Aluminium Tray is $70."      # DM failure appends nothing
 
     # Over the per-post cap (no answer at all) → still no link, ever.
     over = rt._comment_public_reply("", dm_sent=False, name_tag=" Grace", seed="g",

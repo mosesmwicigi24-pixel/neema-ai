@@ -31,8 +31,7 @@ def test_public_reply_goes_link_free_when_the_dm_landed():
         product_known=True, product_name="Red Chasuble")
     assert "http" not in out                        # NO link of any kind in public
     assert "WhatsApp" not in out
-    assert out.startswith("That red chasuble is $150.")
-    assert out != "That red chasuble is $150."      # the inbox nudge was appended
+    assert out == "That red chasuble is $150."      # the answer IS the reply — no nudge
 
 
 def test_no_public_link_even_when_the_dm_did_not_open():
@@ -44,8 +43,7 @@ def test_no_public_link_even_when_the_dm_did_not_open():
     assert "http" not in out and "bethanyhouse" not in out
     assert "Neema can help you right there" not in out   # the old link tail, gone
     assert "WhatsApp" not in out
-    assert out.startswith("That red chasuble is $150.")
-    assert any(out.endswith(line) for line in rt._COMMENT_INVITE_POOL)
+    assert out == "That red chasuble is $150."      # a DM failure appends nothing either
 
 
 def test_answer_without_a_product_still_never_links():

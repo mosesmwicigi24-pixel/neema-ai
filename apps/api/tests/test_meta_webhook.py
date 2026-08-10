@@ -326,13 +326,15 @@ def test_messenger_addendum_closes_the_whole_order_in_thread():
     assert "Never send a Kenyan M-Pesa link to a customer outside Kenya" in p
 
 
-def test_public_comment_addendum_is_warm_and_pulls_to_inbox():
-    """The Facebook/IG comment reply reads like a warm shopkeeper and continues
-    in the DM — it must NOT push WhatsApp or write links itself."""
+def test_public_comment_addendum_sells_on_the_thread():
+    """The comment thread IS the shop (owner, 2026-08-10): the reply sells and
+    closes right there — it must NOT deflect to the inbox, and never links."""
     from app.agent.runtime import _public_comment_addendum
     p = _public_comment_addendum()
     assert "warm, human" in p.lower()
-    assert "invite them to write to us" in p
+    assert "THE THREAD IS THE SHOP" in p
+    assert "is a lost sale" in p                 # 'DM us for the price' named as the failure
+    assert "never ask for a phone number" in p.lower()   # public privacy stays
     assert "NEVER WRITE A LINK" in p
     # named concretely — "no link" alone was not enough to stop it
     assert "https://" in p and "bethanyhouse.co.ke" in p and "bare domain" in p
@@ -340,22 +342,19 @@ def test_public_comment_addendum_is_warm_and_pulls_to_inbox():
     assert "reach" in p
 
 
-def test_comment_public_reply_prefers_inbox_over_whatsapp():
-    """DM delivered → pull to inbox. DM failed → invite them to message us. No
-    answer → warm light invite. A URL in NONE of the three."""
+def test_comment_public_reply_stands_alone_and_sells():
+    """An answered comment IS the sale — no nudge appended, DM or not. A URL in
+    none of the paths, ever."""
     from app.agent import runtime as rt
     answer = "This purple cope is $150, made to your size."
 
-    # DM landed: inbox nudge, and NO WhatsApp/order link in the public comment
+    # The answer stands alone whether or not the supporting DM landed —
+    # appending "DM us" under a selling reply reads as a brush-off.
     got = rt._comment_public_reply(answer, True, " Jane", "seed1")
-    assert answer in got
-    assert "wa.me" not in got and "Order here" not in got and "neema/api/o" not in got
-    assert got != answer                                   # a nudge was appended
-
-    # DM failed: an invitation to write to us — still no link
+    assert got == answer
     got2 = rt._comment_public_reply(answer, False, " Jane", "seed1")
-    assert "http" not in got2 and "Order here" not in got2
-    assert any(got2.endswith(line) for line in rt._COMMENT_INVITE_POOL)
+    assert got2 == answer
+    assert "wa.me" not in got and "http" not in got
 
     # No answer at all → a warm light invite (no crash, non-empty)
     got3 = rt._comment_public_reply("", False, " Jane", "seed1")

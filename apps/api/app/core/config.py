@@ -132,7 +132,11 @@ class Settings(BaseSettings):
     # Max FULL agent-generated public comment replies per post before falling back
     # to a lighter (still warm, varied) reply — caps AI cost + Graph rate on a
     # viral post. Buying comments beyond this still get a friendly WhatsApp nudge.
-    meta_comment_agent_cap: int = 30
+    # Full agent replies per post before falling back to the no-LLM warm lines.
+    # 30 proved far too low once comments became the shop — a boosted post blew
+    # through it in hours and every buyer after that got "DM us for the price"
+    # (the Allan case). The cap is a runaway-cost backstop, not a budget.
+    meta_comment_agent_cap: int = 300
     # Minutes of silence from the human side before a taken-over conversation is
     # handed back to the AI. Intercept used to be a one-way door — a colleague
     # replying once switched the thread to human mode and only a manual Release
