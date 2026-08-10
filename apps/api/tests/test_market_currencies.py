@@ -9,7 +9,6 @@ before. Display prefers the hub's OWN figure in the customer's currency and
 falls back to KES ÷ rate (USD ÷100, ZMW ÷5) so a missing row never shows 0.
 """
 import inspect
-import types
 
 import app.main  # noqa: F401 — registers all SQLAlchemy models
 from app.core.countries import market_currency, money_name, resolve_country

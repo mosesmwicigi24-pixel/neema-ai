@@ -68,6 +68,7 @@ async def to_sendable_image(src_url: str | None) -> str | None:
             resp = await client.get(src_url)
         if not resp.is_success or not resp.content:
             return src_url
+        # _convert_to_jpeg creates the directory itself, right before it writes.
         await asyncio.to_thread(_convert_to_jpeg, resp.content, path)
         return public
     except Exception as exc:

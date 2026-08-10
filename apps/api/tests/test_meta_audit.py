@@ -63,10 +63,14 @@ def test_single_merged_mood_section():
 
 # ── F4: the question-count exception matches the examples ────────────────────
 
-def test_first_contact_exception_covers_colour_plus_city():
+def test_first_contact_no_longer_pairs_a_location_question():
+    """The two-question first-contact exception existed to pair colour with
+    city/country. Owner rule (2026-08-10): no location questions up front at
+    all — so the exception is gone, ONE question stands everywhere."""
     flat = _flat()
-    assert "First contact is the ONLY exception" in flat
-    assert "item or colour question with their city/country" in flat
+    assert "First contact is the ONLY exception" not in flat
+    assert "item or colour question with their city/country" not in flat
+    assert "ask EXACTLY ONE question" in flat
 
 
 # ── F7/F8: speed rules have explicit winners ─────────────────────────────────

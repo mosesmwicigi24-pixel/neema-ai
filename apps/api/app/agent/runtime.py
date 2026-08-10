@@ -46,10 +46,19 @@ _META_TOOL_NAMES = {"search_catalog", "get_cart", "update_cart", "create_order",
                     "schedule_check_in"}
 MESSENGER_TOOLS = [t for t in TOOLS if t["name"] in _META_TOOL_NAMES]
 
-# A PUBLIC comment reply is short and read-only — it just needs the real price, so
-# the catalogue tool (+ memory) is enough. The tap-to-order WhatsApp link is
-# appended in code, not by the model.
-_PUBLIC_COMMENT_TOOL_NAMES = {"search_catalog", "remember"}
+# The comment thread IS the shop (owner, 2026-08-10): onboard, sell and close
+# right in the comments — so the public path carries the full selling kit, minus
+# what a public square can't have: no link-bearing tools (share_catalog,
+# whatsapp_checkout_link — Meta taxes the post's reach), no DM-only sends
+# (send_product_cards — the comment already sits under the product photo), and
+# no pause. Privacy is enforced by the addendum: phones and addresses are only
+# ever VOLUNTEERED publicly, never requested.
+_PUBLIC_COMMENT_TOOL_NAMES = {"search_catalog", "get_cart", "update_cart",
+                              "create_order", "check_order_status",
+                              "capture_contact", "save_parish",
+                              "save_measurements", "remember",
+                              "check_availability", "church_calendar",
+                              "handoff_to_human"}
 PUBLIC_COMMENT_TOOLS = [t for t in TOOLS if t["name"] in _PUBLIC_COMMENT_TOOL_NAMES]
 
 # Read-only, non-sending tools for DRAFT mode: the agent may look things up (real
@@ -66,14 +75,37 @@ _READONLY_TOOL_NAMES = {"search_catalog", "get_cart", "check_order_status",
 
 def _public_comment_addendum(currency: str = "USD") -> str:
     """System addendum for a PUBLIC comment reply — warm, human, and helpful, so
-    it reads like a friendly shopkeeper, not a price bot. Answer the question with
-    the real price, then invite them to continue in the inbox (a call-to-action is
-    added after your text). The full sale is closed 1:1 in the DM that follows."""
+    it reads like a friendly shopkeeper, not a price bot. The comment thread IS
+    the shop (owner, 2026-08-10): onboard, sell and close right here — never
+    deflect a question to the inbox or WhatsApp. The private message that rides
+    along carries the storefront link and is where delivery details are taken;
+    it supports the sale, it is not where the sale is sent."""
     money = money_name(currency)
     example = {"KES": "'This gown is KES 13,000.'",
                "ZMW": "'This gown is ZMW 1,300.'"}.get(currency, "'This gown is $130.'")
     return (
         "\n\n## Replying under a Facebook/Instagram comment — warm, human, helpful\n"
+        "- THE THREAD IS THE SHOP. Sell RIGHT HERE, in the comments, like a "
+        "shopkeeper at a market stall with others listening: answer, quote, "
+        "recommend, settle colour and quantity, close. Their next comment comes "
+        "back to you with this whole thread in hand, so carry the sale forward "
+        "turn by turn. NEVER answer a question by sending them elsewhere — "
+        "'DM us for the price' or 'message us and we'll sort you out' when you "
+        "KNOW the answer is a lost sale and reads as a brush-off to everyone "
+        "watching. Deflect only what you truly cannot do here.\n"
+        "- PUBLIC PRIVACY: never ask for a phone number, address or payment "
+        "details in a public comment. Settle the ORDER here — item, colour, "
+        "quantity, their city — and when it's settled, point at the private "
+        "message that was already sent alongside: 'I've also sent you a private "
+        "message — drop your number there and we'll arrange delivery.' Say it "
+        "once, at the close, never as a substitute for answering. If THEY post "
+        "their number publicly themselves, call capture_contact with it and "
+        "carry on — never scold, never make it awkward.\n"
+        "- CAPTURE AND BUILD AS YOU GO: a stated name, city, church, role or "
+        "measurement goes to capture_contact / save_parish / save_measurements "
+        "IN THAT TURN. When they decide on an item, build it with update_cart. "
+        "When their phone is on file (they volunteered it, or it's in your "
+        "context), create_order closes the sale right from the thread.\n"
         "- No greeting ritual here: a comment reply's first line is the ANSWER, "
         "never 'Good morning' — the FIRST CONTACT greeting rules do not apply to "
         "public comments.\n"
@@ -98,7 +130,11 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "- END WITH THE PULL: after the answer, ONE short inviting question that "
         "draws them into the conversation (which colour? how many? which country "
         "for delivery?) — a comment that answers AND asks is what starts the "
-        "sale; the tap-to-order line is added after your text.\n"
+        "sale, and their answer lands right back in this thread.\n"
+        "- SELL THE WAY YOU WOULD ON WHATSAPP: acknowledge what they said, name "
+        "the item and its price, give one concrete benefit, then ask the one "
+        "question that moves it forward. That is the whole shape of a comment "
+        "reply — and the next one continues it.\n"
         "- If the comment is grief, condolence, illness or a prayer request, respond "
         "with warmth alone — a brief blessing. Sell NOTHING. Not every comment under a "
         "post is a customer at a till.\n"
@@ -107,6 +143,20 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "than a plain thank-you.\n"
         "- Reply in the SAME language the comment is written in (French → French, "
         "Swahili → Swahili, etc.). Never answer a French or Swahili comment in English.\n"
+        "- SWAHILI MEANS KENYA unless they say otherwise (owner rule): a comment "
+        "written in Swahili is almost always a Kenyan buyer — quote our native KES "
+        "prices (call search_catalog with currency=\"KES\"), even when your default "
+        "here is not KES. Quoting a Mswahili speaker in dollars reads like being "
+        "treated as a foreigner in their own shop. Only a STATED other country "
+        "(Tanzania, DRC, Uganda…) overrides this — then quote for that country as "
+        "usual.\n"
+        "- NEVER ASK WHERE THEY ARE to choose a currency — no 'are you in "
+        "Kenya?', no 'which country are you in?'. Asking makes the shop feel "
+        "far away. Read the cues (language, currency words, a named city), "
+        "quote confidently — USD when nothing places them — and switch "
+        "seamlessly the moment a cue lands. Location talk belongs only where "
+        "THEY ask where we are, or where you're giving shipping details — and "
+        "then it reassures: Nairobi workshop, worldwide DHL delivery.\n"
         "- IDENTIFY THE PRODUCT in this order: (1) OUR RECORDS of this post — "
         "records exist only for posts already identified (or set by the team), "
         "so when your context names what this post sells, price THAT product, "
@@ -118,12 +168,15 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "after all three? Give both closest options rather than guessing the "
         "dearer one. If they name a different item, price that.\n"
         "- Be genuinely warm and human — a brief friendly word is welcome — but "
-        "CONCISE: this is a public comment, so 1–2 short lines, plain text, no "
+        "CONCISE: this is a public comment, so 2–4 short lines, plain text, no "
         "markdown or asterisks.\n"
         "- Made-to-order? Say it in a few words ('made to your size').\n"
-        "- Do NOT write any link, phone number, or 'order on WhatsApp' — a friendly "
-        "invitation to continue in their inbox is added after your text, and the "
-        "real selling happens there.\n"
+        "- NEVER WRITE A LINK. No URL, no https://, no bethanyhouse.co.ke, no bare "
+        "domain, no phone number, no email, no 'order on WhatsApp'. Facebook cuts "
+        "the reach of any comment carrying an outbound link, so a link here costs "
+        "us the whole post's audience to gain one click. The storefront link is "
+        "sent PRIVATELY, in the message that rides alongside; your job in public "
+        "is to answer well and keep selling right here.\n"
         "- Praise / emoji only → a short, genuine, warm thanks — nothing salesy."
     )
 
@@ -142,6 +195,14 @@ def _meta_addendum(currency: str = "USD") -> str:
             "the USD amount (never from KES) at the country's current "
             "central-bank rate, rounding UP to the nearest 10; state it "
             "confidently, not as a guess."
+            " SWAHILI MEANS KENYA unless they say otherwise (owner rule): a "
+            "customer writing in Swahili is almost always Kenyan — quote KES "
+            "(search_catalog currency=\"KES\") without waiting to be asked. Only "
+            "a STATED other country (Tanzania, DRC, Uganda…) overrides this. "
+            "And NEVER ask 'are you in Kenya?' or any country question to pick "
+            "a currency — asking makes them feel far from the shop. Choose from "
+            "cues, quote confidently, switch seamlessly if a cue proves you "
+            "wrong."
         )
     return (
         "\n\n## This conversation is on Facebook Messenger / Instagram (not WhatsApp)\n"
@@ -155,8 +216,11 @@ def _meta_addendum(currency: str = "USD") -> str:
         "asterisks, no `**`, no markdown; use short lines and hyphen lists.\n"
         "- You KNOW their name from their Messenger profile (it's in your context) — "
         "greet them by it and NEVER ask for it; only if no name appears in your "
-        "context may you ask once. Early on, warmly ask just their city & country "
-        "(we ship worldwide from Nairobi).\n"
+        "context may you ask once. Do NOT open with location questions — read "
+        "where they are from CUES (language, currency, a named city or church) "
+        "and save each cue with capture_contact the moment it lands; their city "
+        "is asked once, naturally, when the order is settled and delivery comes "
+        "up.\n"
         "- At the ORDER stage the same rule holds: delivery details are the phone "
         "and address ONLY — never 'your name' when you already have it. Confirm "
         "it softly as part of confirming the order instead: 'Shall we address "
@@ -464,9 +528,15 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         user = (await db.execute(
             select(User).where(User.wa_id == wa_id))).scalar_one_or_none()
         # A web session key ("web_<sha1>") is NOT a phone — its hex digits used to
-        # resolve to a random country/currency. No phone → no country claim.
+        # resolve to a random country/currency. No phone → no country claim,
+        # EXCEPT what the storefront already resolved for us: web_chat geolocates
+        # the visitor's IP and stamps User.country_iso, so a Nairobi visitor is
+        # quoted KES without ever being asked where they are (owner rule).
         from app.core.phone import is_plausible_phone as _plausible
         loc = (resolve_country(wa_id) or {}) if _plausible(wa_id) else {}
+        if not loc.get("country_iso") and user is not None and getattr(user, "country_iso", None):
+            loc = {"country_iso": user.country_iso,
+                   "country": user.country or user.country_iso}
         # Market gate: Kenya → KES; a country whose currency the hub prices
         # (Zambia → ZMW) → that currency; everyone else → USD.
         currency = market_currency(loc.get("country_iso"))
@@ -656,7 +726,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             totals[k] += int(u.get(k, 0) or 0)
 
     if is_meta and public_comment:
-        base = PUBLIC_COMMENT_TOOLS       # read-only: just enough to quote a real price
+        base = PUBLIC_COMMENT_TOOLS       # the comment thread sells — full kit, link-free
     elif is_meta:
         base = MESSENGER_TOOLS
     elif is_web:
@@ -821,6 +891,32 @@ async def _send_hold_line(redis, channel: str, key: str) -> None:
         _log.warning("hold line failed for %s/%s", channel, key, exc_info=False)
 
 
+async def _is_echo(db, channel: str, key: str, reply: str,
+                   *, window_minutes: int = 10) -> bool:
+    """True when `reply` is word-for-word what we JUST sent on this thread.
+
+    Live case (José, 02:25): a burst of rapid messages each drew the same
+    'One moment — let me check on that for you.' — three identical stalls in
+    58 seconds. An identical reply within minutes of itself never serves the
+    customer; it's already the last thing on their screen. The window is short
+    ON PURPOSE: a customer re-asking the price tomorrow deserves an answer,
+    even an identical one — only the rapid echo is robotic."""
+    t = " ".join((reply or "").lower().split())
+    if not t:
+        return True
+    from datetime import datetime, timedelta, timezone
+    from app.models.message import Message, MsgDirection
+    where = ((Message.wa_id == key) if channel == "whatsapp" else
+             ((Message.channel == channel) & (Message.external_id == key)))
+    last = (await db.execute(
+        select(Message.text).where(
+            where, Message.direction == MsgDirection.outbound,
+            Message.media_type.is_(None) | (Message.media_type != "note"),
+            Message.created_at > datetime.now(timezone.utc) - timedelta(minutes=window_minutes))
+        .order_by(Message.created_at.desc()).limit(1))).scalar_one_or_none()
+    return " ".join((last or "").lower().split()) == t
+
+
 async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None) -> None:
     from app.database import AsyncSessionLocal
     from app.services import n8n_bridge as svc
@@ -831,6 +927,9 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None)
         async with AsyncSessionLocal() as db:
             reply = await run_turn(db, redis, wa_id, text,
                                    build_llm(model=model), media=media)
+            if await _is_echo(db, "whatsapp", wa_id, reply):
+                _log.info("echo guard: identical reply within minutes suppressed for %s", wa_id)
+                return
         wamid = await svc._send_waba(wa_id, reply)
         async with AsyncSessionLocal() as db2:
             await svc.save_outbound_message(db2, redis, wa_id, reply, waba_msg_id=wamid)
@@ -938,6 +1037,10 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
                                    llm=build_llm(model=model),
                                    channel=channel, external_id=external_id,
                                    media=media)
+            if await _is_echo(db, channel, external_id, reply):
+                _log.info("echo guard: identical reply within minutes suppressed for %s/%s",
+                          channel, external_id)
+                return True
         await send_to_channel(channel, external_id, reply, page_id=page_id)
         async with AsyncSessionLocal() as db2:
             await svc.save_outbound_channel_message(db2, redis, channel, external_id, reply)
@@ -1182,30 +1285,45 @@ _THANKS_POOL = [
     "Asante{name}! 🙏 May God bless you abundantly 💛",
     "So grateful{name} 🙏 Glory to God! 💛",
 ]
-_WA_INVITE_POOL = [
-    "Thank you{name} 🙏 Message us on WhatsApp and we'll help you order right away 💛",
-    "Bless you{name}! 🙏 Reach us on WhatsApp and we'll sort you out 💛",
-    "We'd love to help{name}! 🙏 Continue on WhatsApp to get yours 💛",
-    "Karibu{name} 🙏 Tap through to WhatsApp and we'll take it from there 💛",
-]
-# Public-comment CTA when we've opened a DM: pull them to their inbox (where the
-# real, unrushed selling happens) — NOT to WhatsApp.
+# RETIRED from the answered path (2026-08-10: the comment thread IS the shop —
+# an answered comment stands alone). Kept only as safe warm lines; nothing
+# appends them to a selling reply anymore.
 _DM_NUDGE_POOL = [
     "I've sent you a message — let's finish there 💬",
     "Check your inbox 💬 I've messaged you the details 💛",
     "Replied in your inbox — let's sort it out there 💛",
     "Sent you a DM so we can get you sorted 💬",
 ]
+# Public-comment CTA when the DM did NOT open. We answered them, so we close the
+# only way a public comment may: by asking them to write to us. This used to
+# append the storefront link ("their only door") — the door is now the inbox,
+# because a link in a comment taxes the reach of the whole post.
+_COMMENT_INVITE_POOL = [
+    "Send us a message and we'll sort you out 💛",
+    "DM us and we'll get you sorted — colour, size and delivery 💛",
+    "Message us and we'll take it from there 💛",
+    "Send us a DM and we'll help you order 💛",
+]
 # Said to a buying comment when the agent could not run (over the per-post cap,
-# or the turn failed) but we DO know the product from the post. "How to order" is
-# the highest-intent comment we get and it used to receive a bare "message us on
-# WhatsApp" — on precisely the posts performing well enough to exhaust the cap.
-# These answer the question instead, with no model call.
+# or the turn failed) but we DO know from the post WHAT they're looking at. "How
+# to order" is the highest-intent comment we get, so it gets a real, warm,
+# link-free answer with no model call: name the item, invite them to the inbox.
+# `{product}` is "the Aluminium Tray" when we identified it, else "it".
 _OVER_CAP_POOL = [
-    "Thank you{name} 🙏 You can order it right here 👉 {link} — tap through and we'll take care of the rest 💛",
-    "Bless you{name}! 🙏 Order yours here 👉 {link} — a few taps and it's done 💛",
-    "We'd love to help{name} 🙏 Here it is 👉 {link} — order in a tap, and message us if you'd like any help 💛",
-    "Karibu{name} 🙏 You can see it and order here 👉 {link} — we'll handle delivery from there 💛",
+    "Thank you{name} 🙏 Yes, {product} is available — send us a message and we'll share the price and get you sorted 💛",
+    "Bless you{name}! 🙏 We do have {product} — DM us and we'll take care of the details and delivery 💛",
+    "We'd love to help{name} 🙏 {product} is in — send us a message and we'll sort out size, colour and delivery 💛",
+    "Karibu{name} 🙏 Yes, we have {product} — message us and we'll handle the price and delivery from there 💛",
+]
+# Over-cap AND we know the post's product WITH its price (from the post's
+# recorded identity): the no-LLM line still SELLS — price + one pull question —
+# instead of deflecting to the inbox. The owner's law is the comment thread is
+# the shop; running out of model budget must not turn it back into a signpost.
+_OVER_CAP_SELL_POOL = [
+    "Thank you{name} 🙏 {product} is {price} — how many would you like? 💛",
+    "Karibu{name} 🙏 {product} is {price}, ready for you — how many should we prepare? 💛",
+    "Bless you{name}! 🙏 {product} is {price} — which quantity works for you? 💛",
+    "We'd love to serve you{name} 🙏 {product} is {price} — how many would you like? 💛",
 ]
 # Said when we could not compose a real answer (over the per-post cap, or the
 # agent turn failed) AND we could not identify a product. It must be safe to send
@@ -1242,37 +1360,45 @@ def _dm_text(answer: str, product_link: str, seed: str) -> str:
     return f"{answer}\n\n{link_line}{_pick(_DM_CONTINUE_POOL, seed)}"
 
 
-def _comment_public_reply(answer: str, dm_sent: bool, link: str, name_tag: str, seed: str,
-                          product_link: str = "") -> str:
+def _comment_public_reply(answer: str, dm_sent: bool, name_tag: str, seed: str,
+                          product_known: bool = False, product_name: str = "",
+                          price_text: str = "") -> str:
     """The PUBLIC comment text, given the agent's answer and whether the DM landed.
 
-    LINKS ARE DM-ONLY when the DM landed: Facebook suppresses the reach of
-    link-carrying posts and comments, so the public square gets the answer and
-    an inbox nudge, while the storefront link rides the private message (see
-    _dm_text). A public link appears ONLY when the DM did not open — the
-    over-cap path and DM failures — where it is the customer's only door, so a
-    real buyer is never stranded."""
-    if answer and dm_sent:
-        return f"{answer}\n{_pick(_DM_NUDGE_POOL, seed)}"
-    if answer and product_link:
-        # DM didn't land — the public link is their only door.
-        tail = "Order here 👉 " + product_link + "\nNeema can help you right there 💬"
-        return f"{answer}\n{tail}"
+    THIS FUNCTION CANNOT PRODUCE A LINK, by construction: it takes no URL. Meta
+    suppresses the reach of posts and comments carrying an external link, so the
+    public square is link-free without exception — the storefront link rides the
+    private reply instead (see `_dm_text`), and the comment does what a good
+    shopkeeper does across a counter: answer, then invite them to talk.
+
+    The earlier version kept a public link "for when the DM did not open, so a
+    real buyer is never stranded". They are not stranded — they are invited to
+    the inbox, and the whole post keeps its reach.
+
+    2026-08-10 (owner): the comment thread IS the shop. When the agent answered,
+    its text already sells and ends with its own next question — appending
+    "DM us and we'll sort you out" under a selling reply reads as a brush-off
+    and sends the buyer away from the very thread that is converting them. So
+    an answered comment stands ALONE; the inbox-invite pools remain only for
+    the no-answer fallbacks, where inviting a message is all we have."""
     if answer:
-        return f"{answer}\nOrder here 👉 {link}" if link else answer
+        return answer
     # No answer — we're over the per-post cap, or the agent turn failed. We do NOT
     # know what this person said, so we do NOT sell to them: pitching blind is how
     # "this is wrong" was answered with "Continue on WhatsApp to get yours". A
-    # warm, content-free acknowledgement is always safe; the tap-to-order link is
-    # added only when we DID identify what they're asking about.
-    if product_link:
+    # warm, content-free acknowledgement is always safe; the buying line is used
+    # only when we DID identify what they're asking about.
+    if product_known:
         # We know WHICH product the post is about, so a buying question still gets
-        # a real answer — the product page, where they can order in a tap and
-        # Neema is on hand. No model call needed.
+        # a real, warm answer with no model call — with its PRICE when the post's
+        # identity carries one, so even the over-cap line sells instead of
+        # signposting the inbox.
+        subject = f"the {product_name.strip()}" if product_name.strip() else "it"
+        if price_text:
+            return (_pick(_OVER_CAP_SELL_POOL, seed).replace("{name}", name_tag)
+                    .replace("{product}", subject).replace("{price}", price_text))
         return (_pick(_OVER_CAP_POOL, seed)
-                .replace("{name}", name_tag).replace("{link}", product_link))
-    if link:
-        return _pick(_WA_INVITE_POOL, seed).replace("{name}", name_tag)
+                .replace("{name}", name_tag).replace("{product}", subject))
     return _pick(_NEUTRAL_ACK_POOL, seed).replace("{name}", name_tag)
 
 
@@ -1417,11 +1543,17 @@ async def _resolve_post_product(redis, channel: str, ext: str,
 
 
 async def _order_link(redis, channel: str, ext: str, product: str = "") -> str:
-    """A SHORT tap-to-order link the commenter can tap to reach a pre-filled
-    WhatsApp order in one tap. Returns our own short URL
-    (`{media_public_url}/api/o/{ref}`) that 302-redirects to the real wa.me target
-    stored in redis — so the comment shows a clean link, not a 300-char wa.me?text=…
-    monster. Falls back to the raw wa.me link only if no public host is configured."""
+    """A SHORT tap-to-order link that reaches a pre-filled WhatsApp order in one tap.
+
+    NOTE: the comment funnel no longer calls this — public comment replies are
+    link-free, so its only former consumer is gone. Kept (and still unit-tested)
+    as the wa.me shortener for any surface that may legitimately send a link;
+    delete it if nothing claims it.
+
+    Returns our own short URL (`{media_public_url}/api/o/{ref}`) that 302-redirects
+    to the real wa.me target stored in redis — a clean link, not a 300-char
+    wa.me?text=… monster. Falls back to the raw wa.me link if no public host is
+    configured."""
     import secrets
     from urllib.parse import quote
     num = (settings.whatsapp_handoff_number or "").lstrip("+").strip()
@@ -1447,15 +1579,23 @@ async def _order_link(redis, channel: str, ext: str, product: str = "") -> str:
 
 
 async def _post_over_cap(redis, post_id: str) -> bool:
-    """True once we've already spent `meta_comment_agent_cap` full agent replies on
-    this post — beyond that, buying comments still get a warm reply, just a lighter
-    (no-LLM) one. Caps AI cost + Graph rate on a viral post."""
+    """True once this post has spent `meta_comment_agent_cap` full agent replies
+    TODAY — beyond that, buying comments still get a warm reply, just a lighter
+    (no-LLM) one. Caps AI cost + Graph rate on a viral post.
+
+    Per-DAY on purpose: the old counter was per-post-per-14-days, so one boosted
+    post (1,337 comments) burned its lifetime budget in hours and every buyer
+    after that got the canned "DM us" line for the rest of a fortnight. A daily
+    window keeps the runaway-cost backstop while the hot post — the one actually
+    selling — reopens every morning."""
     if not redis or not post_id:
         return False
+    from datetime import datetime, timezone
     try:
-        n = await redis.incr(f"meta:postcap:{post_id}")
+        key = f"meta:postcap:{post_id}:{datetime.now(timezone.utc):%Y%m%d}"
+        n = await redis.incr(key)
         if n == 1:
-            await redis.expire(f"meta:postcap:{post_id}", 14 * 24 * 3600)
+            await redis.expire(key, 2 * 24 * 3600)
         return n > settings.meta_comment_agent_cap
     except Exception:
         return False
@@ -1517,9 +1657,9 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # ── High intent: answer warmly in the public comment, then CONTINUE THE SALE
     # in the DM the comment opens — that Messenger thread is where we sell,
     # close, and capture the phone, unrushed. WhatsApp is NOT pushed in the
-    # comment; the public CTA pulls them to their inbox instead. We only fall
-    # back to a WhatsApp order link when the DM couldn't be delivered, so a real
-    # buyer is never left with no way to reach us.
+    # comment; the public CTA pulls them to their inbox instead. The comment
+    # NEVER carries a link, whether or not the DM opened: an external link taxes
+    # the reach of the whole post, so the invitation to write to us is the door.
     prompt_text = comment_text or "How much?"
     post_ctx = comment.get("post_context") or {}
     post_id = comment.get("post_id") or post_ctx.get("post_id") or ""
@@ -1551,6 +1691,7 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     if not seen_products:
         await _resolve_post_product(redis, channel, ext, post_ctx, seen_products)
     product_link = ""
+    matched: dict = {}
     if seen_products:
         matched = _product_matching_answer(answer, seen_products)
         try:
@@ -1565,7 +1706,7 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # carries the answer, THE product link, and a warm invitation to continue
     # the sale right there — links live in DMs, where no algorithm scores the
     # post: Facebook suppresses the reach of link-carrying posts and comments,
-    # so the public square stays link-free whenever the DM landed.
+    # so the private reply is the ONLY place the storefront link may travel.
     dm_sent = False
     if answer:
         dm_text = _dm_text(answer, product_link, ext)
@@ -1574,12 +1715,33 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
                                      channel=channel)
             dm_sent = True
         except Exception as exc:
-            _log.info("comment DM not delivered for %s: %s", cid, exc)
+            # Now that the public comment is unconditionally link-free, the
+            # private reply is the ONLY route the storefront link has. A failure
+            # here is a lost sale path, not a cosmetic miss — it used to be
+            # papered over by pasting the link publicly. WARNING, so the rate of
+            # it is visible in the logs (a steady stream means the page is
+            # missing the `pages_messaging` permission, not that buyers are rare).
+            _log.warning("comment DM not delivered for %s (%s) — the link had no "
+                         "way to reach them: %s", cid, channel, exc)
 
-    link = (await _order_link(redis, channel, ext)
-            if (answer and not dm_sent and not product_link) else "")
-    public_text = _comment_public_reply(answer, dm_sent, link, name_tag, ext,
-                                        product_link=product_link)
+    # The public reply is composed from FACTS, never from links: whether we
+    # answered, whether the DM landed, and what the post sells. No URL is even
+    # passed in — see _comment_public_reply, and the send-boundary guard in
+    # meta_send.reply_to_comment that backs it up.
+    #
+    # Note what this is gated on: the product's NAME, not a mintable link. The
+    # over-cap reply used to need `product_link`, so a catalogue row without a
+    # storefront slug fell all the way back to the content-free acknowledgement.
+    # A public reply no longer carries a link, so it no longer needs one to be
+    # useful — knowing WHAT they're asking about is enough to answer warmly.
+    product_name = (matched.get("name") or "").strip()
+    # The post identity carries hub prices — comments quote USD by default.
+    _usd, _kes = matched.get("price_usd"), matched.get("price_kes") or matched.get("price")
+    price_text = (f"${_usd:g}" if _usd else (f"KES {_kes:,.0f}" if _kes else ""))
+    public_text = _comment_public_reply(answer, dm_sent, name_tag, ext,
+                                        product_known=bool(product_name),
+                                        product_name=product_name,
+                                        price_text=price_text)
 
     await _post_public(public_text)
 

@@ -28,23 +28,31 @@ def test_known_country_keeps_the_never_ask_rule():
     p = _known()
     assert "ALREADY know their country from their phone number" in p
     assert "never ask it" in p
-    assert "which town are you in" in p            # city only
+    # The opener no longer asks a location at all (owner, 2026-08-10) — the
+    # city surfaces when delivery is being arranged, not as small talk.
+    assert "which town are you in" not in p
 
 
-def test_unknown_country_asks_instead_of_assuming():
+def test_unknown_country_reads_cues_instead_of_asking():
+    """Owner rule (2026-08-10, from the live 'are you in Kenya?' miss): a
+    location question up front makes the shop feel far away. Sell first,
+    read cues, never interrogate."""
     p = _unknown()
     assert "do NOT know where this customer is" in p
-    assert "which city and country are you in" in p
-    # the false claim must be absent, not merely contradicted
+    assert "never ASK" in p and "SELL FIRST" in p
+    assert "CUES" in p
+    assert 'NEVER ask "are you in Kenya?"' in p
+    assert "quote USD confidently" in p
+    # the old opener interrogation is gone, and the false claim stays absent
+    assert "which city and country are you in" not in p
     assert "ALREADY know their country" not in p
-    assert "never assume a country, a currency or a shipping cost" in p
 
 
 def test_unknown_country_reprices_once_they_say_kenya():
     """A Kenyan on the website must end up on real KES prices, not a conversion."""
     p = _unknown()
     assert 'currency="KES"' in p
-    assert "never a converted figure" in p
+    assert "never a conversion" in p
 
 
 def test_no_unrendered_placeholders_in_either_branch():

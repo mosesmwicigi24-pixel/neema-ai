@@ -132,7 +132,11 @@ class Settings(BaseSettings):
     # Max FULL agent-generated public comment replies per post before falling back
     # to a lighter (still warm, varied) reply — caps AI cost + Graph rate on a
     # viral post. Buying comments beyond this still get a friendly WhatsApp nudge.
-    meta_comment_agent_cap: int = 30
+    # Full agent replies per post before falling back to the no-LLM warm lines.
+    # 30 proved far too low once comments became the shop — a boosted post blew
+    # through it in hours and every buyer after that got "DM us for the price"
+    # (the Allan case). The cap is a runaway-cost backstop, not a budget.
+    meta_comment_agent_cap: int = 300
     # Minutes of silence from the human side before a taken-over conversation is
     # handed back to the AI. Intercept used to be a one-way door — a colleague
     # replying once switched the thread to human mode and only a manual Release
@@ -175,6 +179,14 @@ class Settings(BaseSettings):
     # Media file serving
     media_public_url: str = ""      # e.g. https://neema.bethanyhouse.co.ke
     media_storage_path: str = "/tmp/neema_media"
+    # On-disk media store — the ONE definition of the path. Every module that
+    # reads or writes media (routers/media.py, agent/media.py,
+    # services/meta_media.py) derives its MEDIA_DIR from this, so the literal
+    # lives here and nowhere else. The default matches production: docker-
+    # compose mounts the `neema_media` volume there and apps/api/Dockerfile
+    # pre-creates + chowns it. Override with MEDIA_DIR to run the app (or its
+    # tests) as a user who cannot write to /var.
+    media_dir: str = "/var/neema/media"
     # Bethany House hub — single source of truth for catalogue & orders
     hub_api_url: str = "https://hub.bethanyhouse.co.ke"
     hub_api_token: str = ""          # Sanctum token for pushing orders (Part B)

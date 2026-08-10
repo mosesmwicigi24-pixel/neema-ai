@@ -24,9 +24,11 @@ import logging
 import os
 from urllib.parse import urlparse
 
+from app.core.config import settings
+
 _log = logging.getLogger("neema.agent")
 
-MEDIA_DIR = "/var/neema/media"
+MEDIA_DIR = settings.media_dir   # one definition, in Settings — see media_dir
 _IMAGE_MIME = {
     ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
     ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif",

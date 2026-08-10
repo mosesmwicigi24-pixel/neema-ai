@@ -246,6 +246,13 @@ def test_post_cap_falls_back_after_n_full_replies(monkeypatch):
     results = [asyncio.run(rt._post_over_cap(r, "POST1")) for _ in range(5)]
     assert results == [False, False, False, True, True]     # 3 full, then capped
     assert asyncio.run(rt._post_over_cap(r, "POST2")) is False  # a different post is independent
+    # Per-DAY window (live, 2026-08-10: a boosted post burned a 14-day budget in
+    # hours and sold nothing for a fortnight) — the key carries today, so the
+    # hot post reopens every morning.
+    assert all(":2" in k and "POST1" in k for k in r.v if "POST1" in k)
+    from datetime import datetime, timezone
+    today = f"{datetime.now(timezone.utc):%Y%m%d}"
+    assert any(k.endswith(today) for k in r.v)
 
 
 def test_whatsapp_checkout_link_is_a_tiny_short_link(monkeypatch):
@@ -326,35 +333,39 @@ def test_messenger_addendum_closes_the_whole_order_in_thread():
     assert "Never send a Kenyan M-Pesa link to a customer outside Kenya" in p
 
 
-def test_public_comment_addendum_is_warm_and_pulls_to_inbox():
-    """The Facebook/IG comment reply reads like a warm shopkeeper and continues
-    in the DM — it must NOT push WhatsApp or write links itself."""
+def test_public_comment_addendum_sells_on_the_thread():
+    """The comment thread IS the shop (owner, 2026-08-10): the reply sells and
+    closes right there — it must NOT deflect to the inbox, and never links."""
     from app.agent.runtime import _public_comment_addendum
     p = _public_comment_addendum()
     assert "warm, human" in p.lower()
-    assert "continue in their inbox" in p and "real selling happens there" in p
-    assert "Do NOT write any link" in p
+    assert "THE THREAD IS THE SHOP" in p
+    assert "is a lost sale" in p                 # 'DM us for the price' named as the failure
+    assert "never ask for a phone number" in p.lower()   # public privacy stays
+    assert "NEVER WRITE A LINK" in p
+    # named concretely — "no link" alone was not enough to stop it
+    assert "https://" in p and "bethanyhouse.co.ke" in p and "bare domain" in p
+    # and it must say WHY, so the rule survives a future prompt edit
+    assert "reach" in p
 
 
-def test_comment_public_reply_prefers_inbox_over_whatsapp():
-    """DM delivered → pull to inbox, never a WhatsApp link. DM failed → fall back
-    to the order link so a buyer isn't stranded. No answer → warm light invite."""
+def test_comment_public_reply_stands_alone_and_sells():
+    """An answered comment IS the sale — no nudge appended, DM or not. A URL in
+    none of the paths, ever."""
     from app.agent import runtime as rt
     answer = "This purple cope is $150, made to your size."
 
-    # DM landed: inbox nudge, and NO WhatsApp/order link in the public comment
-    got = rt._comment_public_reply(answer, True, "https://neema/api/o/ABC", " Jane", "seed1")
-    assert answer in got
-    assert "wa.me" not in got and "Order here" not in got and "neema/api/o" not in got
-    assert got != answer                                   # a nudge was appended
-
-    # DM failed: fall back to the tap-to-order WhatsApp link
-    got2 = rt._comment_public_reply(answer, False, "https://neema/api/o/ABC", " Jane", "seed1")
-    assert "Order here 👉 https://neema/api/o/ABC" in got2
+    # The answer stands alone whether or not the supporting DM landed —
+    # appending "DM us" under a selling reply reads as a brush-off.
+    got = rt._comment_public_reply(answer, True, " Jane", "seed1")
+    assert got == answer
+    got2 = rt._comment_public_reply(answer, False, " Jane", "seed1")
+    assert got2 == answer
+    assert "wa.me" not in got and "http" not in got
 
     # No answer at all → a warm light invite (no crash, non-empty)
-    got3 = rt._comment_public_reply("", False, "", " Jane", "seed1")
-    assert got3.strip() and "{name}" not in got3
+    got3 = rt._comment_public_reply("", False, " Jane", "seed1")
+    assert got3.strip() and "{name}" not in got3 and "http" not in got3
 
 
 def test_capture_schedules_agent_reply_only_when_enabled(monkeypatch):

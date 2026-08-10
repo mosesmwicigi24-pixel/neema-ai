@@ -130,25 +130,37 @@ def test_media_escalation_no_longer_switches_to_human_mode():
 
 # ── 3. a buying comment gets an answer, not a pitch ──────────────────────────
 
-def test_over_cap_buying_comment_gets_the_product_link():
-    """'How to order' with no agent answer (over cap) → the product page."""
+def test_over_cap_buying_comment_names_the_item_and_opens_the_inbox():
+    """'How to order' with no agent answer (over cap) → a real, warm, LINK-FREE
+    answer: the item by name and an invitation to message us. It used to paste
+    the storefront page, which taxed the reach of the very post that was
+    working (owner rule, 2026-08-10)."""
     out = rt._comment_public_reply(
-        "", dm_sent=False, link="https://neema.example/api/o/ABC", name_tag=" Johnny",
-        seed="johnny",
-        product_link="https://bethanyhouse.co.ke/product/aluminium-tray?ref=AB12CD")
-    assert "bethanyhouse.co.ke/product/aluminium-tray?ref=AB12CD" in out
+        "", dm_sent=False, name_tag=" Johnny", seed="johnny",
+        product_known=True, product_name="Aluminium Tray")
+    assert "http" not in out and "bethanyhouse" not in out
+    assert "Aluminium Tray" in out              # they learn WHAT we're talking about
     assert "Johnny" in out
+    assert "message us" in out.lower() or "dm us" in out.lower()
     # the canned line that actually went out is gone
     assert "Message us on WhatsApp and we'll help you order right away" not in out
 
 
-def test_over_cap_lines_all_carry_the_link_and_sell_nothing_false():
+def test_over_cap_line_still_works_when_the_product_has_no_name():
+    out = rt._comment_public_reply("", dm_sent=False, name_tag="", seed="johnny",
+                                   product_known=True, product_name="")
+    assert "{product}" not in out and "{name}" not in out
+    assert "http" not in out
+
+
+def test_over_cap_lines_are_link_free_and_sell_nothing_false():
     for line in rt._OVER_CAP_POOL:
-        assert "{link}" in line and "{name}" in line
-        assert "WhatsApp" not in line          # the page IS the answer
+        assert "{product}" in line and "{name}" in line
+        assert "{link}" not in line            # the link template is gone for good
+        assert "http" not in line and "👉" not in line
+        assert "WhatsApp" not in line          # the inbox is the door
 
 
 def test_still_neutral_when_we_cannot_identify_the_product():
-    out = rt._comment_public_reply("", dm_sent=False, link="", name_tag=" Grace",
-                                   seed="grace", product_link="")
+    out = rt._comment_public_reply("", dm_sent=False, name_tag=" Grace", seed="grace")
     assert out in [p.replace("{name}", " Grace") for p in rt._NEUTRAL_ACK_POOL]

@@ -23,9 +23,10 @@ from app.models.message import Message
 
 _log = logging.getLogger("neema.meta")
 
-# Same on-disk store + public path as the WhatsApp media path (routers/media.py).
-MEDIA_DIR = "/var/neema/media"
-os.makedirs(MEDIA_DIR, exist_ok=True)
+# Same on-disk store + public path as the WhatsApp media path (routers/media.py):
+# both derive from the single Settings definition. Created at write time and at
+# startup — never at import time (see routers/media.py for why).
+MEDIA_DIR = settings.media_dir
 
 _CT_EXT = {
     "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp",
@@ -74,6 +75,7 @@ async def _store(content: bytes, content_type: str, channel: str, mid: str,
     filename = f"meta_{channel}_{safe}{ext}"
     filepath = os.path.join(MEDIA_DIR, filename)
     if not os.path.exists(filepath):            # idempotent on redelivery
+        os.makedirs(MEDIA_DIR, exist_ok=True)
         with open(filepath, "wb") as f:
             f.write(content)
     return _stable_url(filename)
