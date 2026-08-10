@@ -1,12 +1,17 @@
 name: CI
 
-# The quality gate. Runs on every branch push and every pull request, AND is
-# called by deploy.yml (workflow_call) as the gate in front of the GHCR image
-# push — so a red suite means no image is ever built for main.
+# The quality gate. Runs on every pull request (including every push to a PR
+# branch — that's the `synchronize` event), AND is called by deploy.yml
+# (workflow_call) as the gate in front of the GHCR image push — so a red suite
+# means no image is ever built for main.
 #
-# Why `branches-ignore: [main]` on push: pushes to main are already covered,
-# because deploy.yml calls this workflow as a reusable workflow. Without the
-# ignore, main would run the whole suite twice in parallel for nothing.
+# Why no bare `push:` trigger. Between `pull_request` here and deploy.yml
+# calling this workflow on main, every commit that can ship is already covered.
+# Adding `push` on top makes every PR commit fire this workflow TWICE (once per
+# event); they then either both run (double the minutes, duplicate checks) or
+# share a concurrency group and cancel each other — which leaves a cancelled,
+# red-looking check on the PR. Measured, not assumed: the first version of this
+# file had `push: branches-ignore: [main]` and did exactly that.
 #
 # Every job that imports the app first provisions /var/neema/media, because
 # app/routers/media.py runs `os.makedirs("/var/neema/media")` at IMPORT time —
@@ -17,8 +22,6 @@ name: CI
 
 on:
   pull_request:
-  push:
-    branches-ignore: [main]
   workflow_call:
   workflow_dispatch:
 

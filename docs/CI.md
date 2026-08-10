@@ -28,14 +28,22 @@ crash-loops it. `import-smoke` and `migrations` exist specifically for that.
 
 | Event | CI | Build & Push |
 | --- | --- | --- |
-| Push to any branch except `main` | ✅ standalone | — |
-| Pull request | ✅ standalone | ✅ build only, no push |
+| Open a PR, or push to a branch **with** an open PR | ✅ standalone | ✅ build only, no push |
 | Push to `main` | ✅ **as the gate inside Build & Push** | ✅ push to GHCR → deploys |
 | `workflow_dispatch` on Build & Push | ✅ unless `skip_tests` | ✅ push to GHCR → deploys |
+| Push to a branch with **no** PR | — | — |
 
-`ci.yml` deliberately does **not** trigger on pushes to `main`
-(`branches-ignore: [main]`) — `deploy.yml` already calls it there, and without
-the ignore `main` would run the whole suite twice in parallel.
+`ci.yml` has no bare `push:` trigger, and that is deliberate. Between
+`pull_request` (which fires on every push to a PR branch — the `synchronize`
+event) and `deploy.yml` calling this workflow on `main`, every commit that can
+actually ship is covered. Adding `push` on top makes every PR commit fire the
+workflow *twice*, once per event: they either both run (double the minutes and
+duplicate checks) or share a concurrency group and cancel each other, leaving a
+cancelled, red-looking check on the PR. The first version of this file did the
+latter — it's an observed problem, not a hypothetical one.
+
+The gap that leaves is a branch with no PR open yet. If you want CI before
+opening one, use *Actions → CI → Run workflow*.
 
 Runs are grouped by ref with `cancel-in-progress`, so pushing again supersedes
 the in-flight run. The concurrency key includes `github.workflow`, which inside
