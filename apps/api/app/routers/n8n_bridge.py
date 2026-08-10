@@ -267,6 +267,7 @@ async def save_tts_audio(request: Request):
     filename = filename_header if (filename_header and filename_header.endswith(".mp3")) \
         else f"tts_{uuid.uuid4().hex}.mp3"
 
+    os.makedirs(MEDIA_DIR, exist_ok=True)
     filepath = os.path.join(MEDIA_DIR, filename)
     body_bytes = await request.body()
     if not body_bytes:
@@ -324,6 +325,7 @@ async def n8n_download_media(body: dict, request: Request):
     filepath = os.path.join(MEDIA_DIR, filename)
 
     if not os.path.exists(filepath):
+        os.makedirs(MEDIA_DIR, exist_ok=True)
         async with httpx.AsyncClient(timeout=30) as client:
 
             # Step 1 — get the current download URL from Graph API using media_id

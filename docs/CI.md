@@ -56,27 +56,29 @@ All five run in parallel; the whole thing is a couple of minutes.
 
 ### `api-tests` — API tests (pytest)
 Python 3.12 (matching `apps/api/Dockerfile`), `pip install -r requirements-dev.txt`,
-then the full suite. **714 passed, 1 skipped.**
+then the full suite. **717 passed, 1 skipped.**
 
 The one skip is `tests/test_migrations.py`, which skips itself when no Postgres
 is reachable. That is intentional here — the `migrations` job runs it for real.
 Nothing else in `tests/` needs a live service: every DB and Redis touchpoint is
 a hand-rolled fake.
 
-> ⚠️ **`/var/neema/media` must exist and be writable** before anything imports
-> the app. `app/routers/media.py` runs `os.makedirs("/var/neema/media")` at
-> **import time**, with the path hardcoded — so simply importing the app touches
-> the filesystem, and on a non-root user it raises `PermissionError` during test
-> *collection*. `apps/api/Dockerfile` creates and chowns that exact path, so the
-> three CI jobs that import the app do the same (`sudo mkdir -p` +
-> `chown`). The `docker run` commands below execute as root, so they don't hit
-> it; if you run the suite on your host, create the directory first. Making
-> `MEDIA_DIR` env-configurable would remove the whole footgun.
+> ℹ️ **Importing the app touches no filesystem.** It used to:
+> `app/routers/media.py` and `app/services/meta_media.py` each ran
+> `os.makedirs("/var/neema/media")` at **import time** with the path hardcoded,
+> so on a non-root user merely importing the app raised `PermissionError` during
+> test *collection* — and three CI jobs carried a `sudo mkdir -p` workaround to
+> get past it. The path is now the `media_dir` setting (env `MEDIA_DIR`,
+> defaulting to `/var/neema/media`, which is what the Dockerfile and the
+> `neema_media` volume provide), and it is created at startup by `app/main.py`'s
+> lifespan and again at each write — never at import.
+> `tests/test_media_dir_config.py` imports the app in a subprocess and fails if
+> any directory appears, so the footgun cannot come back.
 
 > ⚠️ Always `python -m pytest`, never bare `pytest`. There is no
 > `pyproject.toml`, no `pytest.ini` and no `conftest.py` in `apps/api`, so only
 > the `-m` form puts the working directory on `sys.path`. Bare `pytest` fails to
-> import `app` in all 88 test modules.
+> import `app` in all 89 test modules.
 
 ### `import-smoke` — crash-loop guard
 `python -c "import app.main"`, installed from `requirements.txt` (**not**
@@ -134,7 +136,9 @@ docker run --rm -v "$PWD/apps/api":/w -w /w python:3.12-slim sh -c '
 ```bash
 docker run --rm -v "$PWD/apps/api":/w -w /w python:3.12-slim sh -c '
   pip install -q -r requirements.txt &&
-  DATABASE_URL=x DATABASE_URL_SYNC=x SECRET_KEY=x python -c "import app.main"'
+  DATABASE_URL=postgresql+asyncpg://x:x@127.0.0.1:5432/x \
+  DATABASE_URL_SYNC=postgresql+psycopg2://x:x@127.0.0.1:5432/x \
+  SECRET_KEY=x python -c "import app.main"'
 ```
 
 **Single alembic head** (no database needed):

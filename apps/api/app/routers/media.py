@@ -8,8 +8,13 @@ from app.core.config import settings
 
 router = APIRouter()
 
-MEDIA_DIR = "/var/neema/media"
-os.makedirs(MEDIA_DIR, exist_ok=True)
+# The on-disk store. Defined once in Settings (see media_dir) — never a literal
+# here. Creating it is deliberately NOT an import-time side effect: importing a
+# module must not touch the filesystem, or the app is unimportable for anyone
+# without write access to the path's parent (that broke CI during pytest
+# *collection*). Creation happens at startup in app/main.py's lifespan, and
+# again next to every write below so a writer never depends on that having run.
+MEDIA_DIR = settings.media_dir
 
 
 @router.post("/admin/media/download")
@@ -37,6 +42,7 @@ async def download_media(
 
     # Skip download if already saved (idempotent)
     if not os.path.exists(filepath):
+        os.makedirs(MEDIA_DIR, exist_ok=True)
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(
                 media_url,
