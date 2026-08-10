@@ -280,7 +280,8 @@ async def lifespan(app: FastAPI):
     app.state.redis = redis
 
     # ── Media storage ─────────────────────────────────────────────────────────
-    # The named volume at MEDIA_DIR must be writable by this (non-root) process
+    # This is where the media dir gets CREATED — at startup, not at import. The
+    # named volume at MEDIA_DIR must then be writable by this (non-root) process
     # or every upload/inbound-media save 500s.  Check once, loudly, at boot.
     try:
         from app.routers.media import MEDIA_DIR

@@ -172,6 +172,14 @@ class Settings(BaseSettings):
     # Media file serving
     media_public_url: str = ""      # e.g. https://neema.bethanyhouse.co.ke
     media_storage_path: str = "/tmp/neema_media"
+    # On-disk media store — the ONE definition of the path. Every module that
+    # reads or writes media (routers/media.py, agent/media.py,
+    # services/meta_media.py) derives its MEDIA_DIR from this, so the literal
+    # lives here and nowhere else. The default matches production: docker-
+    # compose mounts the `neema_media` volume there and apps/api/Dockerfile
+    # pre-creates + chowns it. Override with MEDIA_DIR to run the app (or its
+    # tests) as a user who cannot write to /var.
+    media_dir: str = "/var/neema/media"
     # Bethany House hub — single source of truth for catalogue & orders
     hub_api_url: str = "https://hub.bethanyhouse.co.ke"
     hub_api_token: str = ""          # Sanctum token for pushing orders (Part B)
