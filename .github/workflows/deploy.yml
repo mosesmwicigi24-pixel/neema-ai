@@ -41,6 +41,7 @@ jobs:
   # PR check. Skipped on a workflow_dispatch with skip_tests: true.
   ci:
     if: >-
+      github.event_name == 'pull_request' ||
       github.event_name == 'push' ||
       (github.event_name == 'workflow_dispatch' && !inputs.skip_tests)
     uses: ./.github/workflows/ci.yml
