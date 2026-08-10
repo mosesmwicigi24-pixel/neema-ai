@@ -7,6 +7,7 @@ to Meta by the conversation's channel, using the conversation's `external_id` as
 the recipient (== wa_id for WhatsApp, PSID/IGSID for Meta).
 """
 import logging
+import re
 
 import httpx
 
@@ -112,16 +113,79 @@ async def send_meta_carousel(recipient_id: str, elements: list[dict],
     }, "send carousel", page_id=page_id)
 
 
+# ── The public square is link-free (owner rule, absolute) ────────────────────
+# Meta suppresses the reach of posts AND comments that carry an external link,
+# so a PUBLIC comment reply never carries a URL: we answer, we invite them to
+# message us, and the storefront link rides the private reply / DM instead.
+#
+# This is the LAST of three gates, and the only one that cannot be talked out
+# of it: (1) the `public_comment` prompt addendum forbids links, (2) the reply
+# templates in app/agent/runtime.py no longer contain one, and (3) this. A model
+# slip, a new template, or a future caller cannot publish a link past here.
+#
+# Scheme-ful URLs, `www.` hosts, bare domains (bethanyhouse.co.ke/product/x) and
+# e-mail addresses all count — a bare domain is a link to everyone reading it.
+_TLDS = ("co\\.ke|or\\.ke|ac\\.ke|go\\.ke|com|net|org|io|app|shop|store|link"
+         "|site|online|biz|info|africa")
+_URL_RE = re.compile(
+    r"(?i)(?:"
+    r"(?:https?://|ftp://|www\.)\S+"                       # explicit URLs
+    r"|[\w.+-]+@[\w-]+(?:\.[\w-]+)+"                       # e-mail addresses
+    rf"|\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+(?:{_TLDS})\b(?:/\S*)?"
+    r")"
+)
+# "Order here 👉 <link>" without its link is not a sentence. When a URL is cut
+# out we also drop the pointer that aimed at it, then bin any line left with no
+# word in it at all.
+_POINTER_RE = re.compile(r"(?:👉|➡️|➡|=>|->)")
+# Last resort: everything in the reply was a link. Better a warm, link-free line
+# than an empty comment (which the Graph API rejects anyway).
+LINK_FREE_FALLBACK = "Thank you 🙏 Send us a message and we'll help you order 💛"
+
+
+def sanitize_public_comment(text: str) -> tuple[str, list[str]]:
+    """Strip every URL / e-mail out of a PUBLIC comment reply.
+
+    Returns `(clean_text, removed)`. `removed` is empty when the text was
+    already link-free, which is the normal case — the templates and the prompt
+    are supposed to keep it that way, and a non-empty `removed` means one of
+    them regressed and should be fixed at the source."""
+    raw = (text or "").strip()
+    removed = _URL_RE.findall(raw)
+    if not removed:
+        return raw, []
+    lines: list[str] = []
+    for line in _URL_RE.sub("", raw).splitlines():
+        line = _POINTER_RE.sub("", line)
+        line = re.sub(r"\s{2,}", " ", line).strip(" \t-–—,;:")
+        # A remnant with no letters or digits ("👉", "()") is noise, and so is a
+        # decapitated CTA like "Order here" — two words that now lead nowhere.
+        if re.search(r"[0-9A-Za-z]", line) and len(line.split()) > 2:
+            lines.append(line)
+    return ("\n".join(lines).strip() or LINK_FREE_FALLBACK), removed
+
+
 async def reply_to_comment(comment_id: str, text: str, page_id: str | None = None,
                            channel: str = "facebook") -> None:
     """Public reply posted under a Facebook/Instagram comment.
+
+    NO OUTBOUND LINKS EVER LEAVE HERE — see `sanitize_public_comment`. This is
+    the send boundary for the public square, so the rule is enforced here rather
+    than trusted to whoever composed the text. Private replies, Messenger/IG DMs
+    and WhatsApp are untouched: links belong in all of those.
 
     The endpoint DIFFERS by platform: Facebook nests a reply as a comment-on-a-
     comment (`/{comment-id}/comments`), while Instagram has a dedicated replies
     edge (`/{ig-comment-id}/replies`). Posting the Facebook shape to an IG comment
     fails, which is why IG replies must route here."""
+    safe, removed = sanitize_public_comment(text)
+    if removed:
+        _log.warning(
+            "stripped %d link(s) from a public comment reply on %s (%s): %s — "
+            "public comments must be link-free; fix the source that composed it",
+            len(removed), comment_id, channel, removed)
     edge = "replies" if channel == "instagram" else "comments"
-    await _graph_post(f"{comment_id}/{edge}", {"message": text},
+    await _graph_post(f"{comment_id}/{edge}", {"message": safe},
                       "reply to comment", page_id=page_id)
 
 

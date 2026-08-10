@@ -332,29 +332,34 @@ def test_public_comment_addendum_is_warm_and_pulls_to_inbox():
     from app.agent.runtime import _public_comment_addendum
     p = _public_comment_addendum()
     assert "warm, human" in p.lower()
-    assert "continue in their inbox" in p and "real selling happens there" in p
-    assert "Do NOT write any link" in p
+    assert "invite them to write to us" in p
+    assert "NEVER WRITE A LINK" in p
+    # named concretely — "no link" alone was not enough to stop it
+    assert "https://" in p and "bethanyhouse.co.ke" in p and "bare domain" in p
+    # and it must say WHY, so the rule survives a future prompt edit
+    assert "reach" in p
 
 
 def test_comment_public_reply_prefers_inbox_over_whatsapp():
-    """DM delivered → pull to inbox, never a WhatsApp link. DM failed → fall back
-    to the order link so a buyer isn't stranded. No answer → warm light invite."""
+    """DM delivered → pull to inbox. DM failed → invite them to message us. No
+    answer → warm light invite. A URL in NONE of the three."""
     from app.agent import runtime as rt
     answer = "This purple cope is $150, made to your size."
 
     # DM landed: inbox nudge, and NO WhatsApp/order link in the public comment
-    got = rt._comment_public_reply(answer, True, "https://neema/api/o/ABC", " Jane", "seed1")
+    got = rt._comment_public_reply(answer, True, " Jane", "seed1")
     assert answer in got
     assert "wa.me" not in got and "Order here" not in got and "neema/api/o" not in got
     assert got != answer                                   # a nudge was appended
 
-    # DM failed: fall back to the tap-to-order WhatsApp link
-    got2 = rt._comment_public_reply(answer, False, "https://neema/api/o/ABC", " Jane", "seed1")
-    assert "Order here 👉 https://neema/api/o/ABC" in got2
+    # DM failed: an invitation to write to us — still no link
+    got2 = rt._comment_public_reply(answer, False, " Jane", "seed1")
+    assert "http" not in got2 and "Order here" not in got2
+    assert any(got2.endswith(line) for line in rt._COMMENT_INVITE_POOL)
 
     # No answer at all → a warm light invite (no crash, non-empty)
-    got3 = rt._comment_public_reply("", False, "", " Jane", "seed1")
-    assert got3.strip() and "{name}" not in got3
+    got3 = rt._comment_public_reply("", False, " Jane", "seed1")
+    assert got3.strip() and "{name}" not in got3 and "http" not in got3
 
 
 def test_capture_schedules_agent_reply_only_when_enabled(monkeypatch):
