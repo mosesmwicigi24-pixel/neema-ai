@@ -264,12 +264,15 @@ alembic upgrade head
 | POST | `/api/admin/conversations/{id}/release` | Hand back to AI |
 | POST | `/api/admin/conversations/{id}/transfer` | Transfer to another agent |
 
-### Hub bridge (internal — legacy `/api/n8n` prefix)
+### Hub bridge (internal)
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/n8n/payment` | Hub relays a captured M-Pesa payment (identity reconcile) |
-| POST | `/api/n8n/order-event` | Hub pushes an order event |
-| POST | `/api/n8n/customer-history` | Hub pushes a customer-history snapshot |
+| POST | `/api/hub/payment` | Hub relays a captured M-Pesa payment (identity reconcile) |
+| POST | `/api/hub/order-event` | Hub pushes an order event |
+| POST | `/api/hub/customer-history` | Hub pushes a customer-history snapshot |
+
+Legacy aliases at `/api/n8n/*` (header `X-N8N-Secret`) stay live until the
+hub's plugin migrates — see `docs/HUB_BRIDGE_MIGRATION.md`.
 
 ### WebSocket
 ```

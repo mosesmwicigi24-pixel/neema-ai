@@ -14,11 +14,35 @@ def _paths() -> set[str]:
     return {r.path for r in app.routes if hasattr(r, "path")}
 
 
-def test_hub_bridge_survives():
+def test_hub_bridge_survives_on_both_prefixes():
+    """Canonical clean paths at /api/hub/*, legacy aliases at /api/n8n/* —
+    the aliases stay until the hub's plugin migrates (HUB_BRIDGE_MIGRATION.md)."""
     paths = _paths()
-    for keep in ("/api/n8n/payment", "/api/n8n/order-event",
-                 "/api/n8n/customer-history"):
-        assert keep in paths, f"hub-facing route {keep} must survive n8n"
+    for route in ("payment", "order-event", "customer-history"):
+        assert f"/api/hub/{route}" in paths, f"canonical /api/hub/{route} missing"
+        assert f"/api/n8n/{route}" in paths, f"legacy alias /api/n8n/{route} missing"
+
+
+def test_hub_secret_accepts_both_headers_and_fails_closed(monkeypatch):
+    import pytest
+    from fastapi import HTTPException
+    from app.core.config import settings
+    from app.routers.hub_bridge import verify_hub_secret
+    monkeypatch.setattr(settings, "n8n_api_secret", "s3cret", raising=False)
+    verify_hub_secret(x_hub_secret="s3cret", x_n8n_secret=None)     # clean header
+    verify_hub_secret(x_hub_secret=None, x_n8n_secret="s3cret")     # legacy header
+    for bad in (dict(x_hub_secret=None, x_n8n_secret=None),
+                dict(x_hub_secret="wrong", x_n8n_secret=None),
+                dict(x_hub_secret="", x_n8n_secret="")):
+        with pytest.raises(HTTPException):
+            verify_hub_secret(**bad)
+    # Unconfigured secret must reject EVERYTHING — the old check compared
+    # equal empty strings and would have waved an empty header through.
+    monkeypatch.setattr(settings, "n8n_api_secret", "", raising=False)
+    with pytest.raises(HTTPException):
+        verify_hub_secret(x_hub_secret="", x_n8n_secret=None)
+    with pytest.raises(HTTPException):
+        verify_hub_secret(x_hub_secret=None, x_n8n_secret=None)
 
 
 def test_n8n_workflow_only_routes_are_gone():
@@ -41,9 +65,13 @@ def test_tier_routing_seam_is_gone():
 
 
 def test_the_hub_secret_and_service_module_stay():
-    """N8N_API_SECRET authenticates the hub's pushes (legacy header name), and
-    services/n8n_bridge.py is the messaging service — name is historical."""
+    """N8N_API_SECRET authenticates the hub's pushes (setting keeps its env
+    name), and services/n8n_bridge.py is the messaging service — historical
+    name, real code."""
     from app.core.config import Settings
     assert "n8n_api_secret" in Settings.model_fields
     from app.services import n8n_bridge as svc
     assert hasattr(svc, "upsert_message") and hasattr(svc, "save_outbound_message")
+    # and the retired ROUTER module name is gone — the router is hub_bridge now
+    import importlib.util
+    assert importlib.util.find_spec("app.routers.n8n_bridge") is None
