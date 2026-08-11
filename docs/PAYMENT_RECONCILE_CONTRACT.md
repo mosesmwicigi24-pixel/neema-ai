@@ -8,8 +8,10 @@ person world — the only signal precise enough to auto-link across identity wor
 **neema receiver (built, live on `epic/multichannel-identity`):**
 
 ```
-POST /api/n8n/payment
-Header:  X-N8N-Secret: <n8n_api_secret>        # same secret as the other bridge calls
+POST /api/hub/payment
+Header:  X-Hub-Secret: <n8n_api_secret>        # same secret as the other bridge calls
+# Legacy alias (the hub's current config — still live): POST /api/n8n/payment
+# with X-N8N-Secret. Same body, same secret. See HUB_BRIDGE_MIGRATION.md.
 Body (JSON):
   {
     "payer_msisdn": "254712345678",   // REQUIRED. Any format — 0712…, +254…, 254… — canonicalized to E.164.

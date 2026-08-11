@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import redis.asyncio as aioredis
 
 from app.core.config import settings
-from app.routers import auth, admin, n8n_bridge, websocket, health, crm, roles, media, meta_webhook, public, short_link, whatsapp_webhook, web_chat, analytics, hub_events
+from app.routers import auth, admin, hub_bridge, websocket, health, crm, roles, media, meta_webhook, public, short_link, whatsapp_webhook, web_chat, analytics, hub_events
 from app.database import AsyncSessionLocal
 from sqlalchemy import text
 
@@ -417,7 +417,10 @@ app.include_router(crm.router,        prefix="/api/admin", tags=["CRM"])
 app.include_router(analytics.router,  prefix="/api/admin", tags=["Analytics"])
 app.include_router(hub_events.router, prefix="/api/hub", tags=["Hub Events"])
 app.include_router(roles.router,      prefix="/api/admin", tags=["Roles"])
-app.include_router(n8n_bridge.router, prefix="/api/n8n",   tags=["n8n Bridge"])
+app.include_router(hub_bridge.router, prefix="/api/hub",   tags=["Hub Bridge"])
+# Legacy mount: the hub's plugin still posts on the n8n-era prefix + header —
+# drop this line (and the X-N8N-Secret header support) once the hub migrates.
+app.include_router(hub_bridge.router, prefix="/api/n8n",   tags=["Hub Bridge (legacy prefix)"])
 app.include_router(meta_webhook.router, prefix="/api/meta", tags=["Meta Webhook"])
 app.include_router(whatsapp_webhook.router, prefix="/api/wa", tags=["WhatsApp Webhook"])
 app.include_router(short_link.router, prefix="/api",       tags=["Short Link"])

@@ -1,16 +1,19 @@
-"""The hub bridge — the surviving `/api/n8n/*` surface.
+"""The hub bridge — what the Bethany House hub posts into Neema.
 
-n8n itself was retired (container stopped 2026-07-30; the WhatsApp pipeline runs
-natively in app/services/wa_native.py, and every other channel was already
-in-process). What remains here are the endpoints the BETHANY HOUSE HUB still
-posts to: its plugin was built in the n8n era and ships the `/api/n8n` prefix
-and `X-N8N-SECRET` header, so the paths and the header name stay until the hub
-side is updated. Everything only n8n's workflows called — context/profile/
-message/user/route/outbound/usage/media/notify/escalate — was removed on
-2026-08-11 (git history has the full versions).
+Three pushes: a captured M-Pesa payment (identity reconciliation), an order
+event, and a customer-history snapshot. Canonical prefix: `/api/hub/*` with the
+`X-Hub-Secret` header. The same router is ALSO mounted at the legacy
+`/api/n8n/*` prefix accepting the legacy `X-N8N-Secret` header, because the
+hub's plugin was built in the n8n era and still posts there — the alias stays
+until the hub side migrates (see docs/HUB_BRIDGE_MIGRATION.md), after which the
+legacy mount can be dropped. Both headers carry the SAME secret value
+(`N8N_API_SECRET` in the box .env — the setting keeps its historical name to
+spare an env rename).
 
-The heavily-imported persistence/service layer keeps its historical module name
-at app/services/n8n_bridge.py — it is the messaging service, not an n8n client.
+n8n itself was retired 2026-07-30; its workflow-only endpoints were removed
+2026-08-11 (git history has them). The heavily-imported persistence/service
+layer keeps its historical module name at app/services/n8n_bridge.py — it is
+the messaging service, not an n8n client.
 """
 from fastapi import APIRouter, Depends, HTTPException, Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,31 +25,37 @@ from app.schemas.n8n import OrderEventDto, CustomerHistoryDto, PaymentDto
 router = APIRouter()
 
 
-def verify_n8n_secret(x_n8n_secret: str = Header(...)):
-    """Shared secret for the hub's pushes (legacy header name — see module doc)."""
-    if x_n8n_secret != settings.n8n_api_secret:
+def verify_hub_secret(x_hub_secret: str | None = Header(None),
+                      x_n8n_secret: str | None = Header(None)):
+    """One shared secret, two accepted header names (clean + legacy).
+
+    Fails CLOSED: an unconfigured secret rejects everything — the old check
+    compared equal empty strings, which would have waved through a request
+    carrying an empty legacy header on a box with no secret set."""
+    supplied = x_hub_secret or x_n8n_secret
+    if not settings.n8n_api_secret or supplied != settings.n8n_api_secret:
         raise HTTPException(status_code=403, detail="Forbidden")
 
 
 # ── Orders (hub → Neema) ──────────────────────────────────
-@router.post("/order-event", dependencies=[Depends(verify_n8n_secret)])
+@router.post("/order-event", dependencies=[Depends(verify_hub_secret)])
 async def upsert_order_event(body: OrderEventDto, request: Request, db: AsyncSession = Depends(get_db)):
     return await svc.upsert_order_event(db, body, request.app.state.redis)
 
 
 # ── Customer History (hub → Neema) ────────────────────────
-@router.post("/customer-history", dependencies=[Depends(verify_n8n_secret)])
+@router.post("/customer-history", dependencies=[Depends(verify_hub_secret)])
 async def upsert_customer_history(body: CustomerHistoryDto, db: AsyncSession = Depends(get_db)):
     return await svc.upsert_customer_history(db, body)
 
 
 # ── Payment → person reconciliation (the deterministic identity bridge) ──────
-@router.post("/payment", dependencies=[Depends(verify_n8n_secret)])
+@router.post("/payment", dependencies=[Depends(verify_hub_secret)])
 async def reconcile_payment(body: PaymentDto, db: AsyncSession = Depends(get_db)):
     """The hub relays a captured M-Pesa payment here (payer MSISDN + name +
     order refs). We bind the payer to a person deterministically by phone —
     the load-bearing bridge that pulls no-phone social leads into World A. See
-    app/services/reconcile.py."""
+    app/services/reconcile.py and docs/PAYMENT_RECONCILE_CONTRACT.md."""
     from app.services.reconcile import reconcile_payment as _reconcile
     result = await _reconcile(
         db,
