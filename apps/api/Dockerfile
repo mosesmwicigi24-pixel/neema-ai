@@ -14,6 +14,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 FROM python:3.12-slim AS runner
 WORKDIR /app
 
+# The commit this image was built from (deploy.yml passes it). /api/health
+# returns it so the box's running version is readable from outside.
+ARG GIT_SHA=""
+ENV GIT_SHA=$GIT_SHA
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 

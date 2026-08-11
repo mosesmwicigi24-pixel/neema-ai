@@ -261,7 +261,10 @@ def _meta_addendum(currency: str = "USD") -> str:
         "(or you genuinely cannot place the order) call whatsapp_checkout_link "
         "and share the link it returns EXACTLY as given — never hand-type a wa.me "
         "link or number. That is a fallback, not the plan.\n"
-        "- Keep replies short, precise, and friendly; you are the same Bethany House assistant."
+        "- THE BREVITY CONTRACT (STYLE) binds with full force here: Messenger and "
+        "Instagram read exactly like WhatsApp — thumb-typed, 1–3 short sentences, "
+        "shared facts said once, no how-to-order lectures. You are the same "
+        "Bethany House assistant, at the same human length."
     )
 
 
@@ -292,7 +295,9 @@ def _web_addendum() -> str:
         "whatever they choose.\n"
         "- If they ASK for WhatsApp, or want a person, give our number warmly (see "
         "OUR OFFICIAL CONTACTS) — that's serving them, not redirecting them.\n"
-        "- Write plain, warm sentences — no markdown headings, no asterisks."
+        "- Write plain, warm sentences — no markdown headings, no asterisks — and "
+        "THE BREVITY CONTRACT (STYLE) binds here too: 1–3 short sentences, shared "
+        "facts said once, no how-to-order lectures."
     )
 
 
@@ -1337,11 +1342,13 @@ _NEUTRAL_ACK_POOL = [
     "Thank you{name} 🙏 We're here — let us know what you need and we'll assist.",
     "Asante{name} 🙏 We'd be glad to help — just tell us a bit more.",
 ]
-# The line that continues the sale INSIDE the DM the comment opens.
+# The line that continues the sale INSIDE the DM the comment opens. Kept SHORT
+# on purpose: this rides under the model's answer + the order link, and a long
+# closing line is what made comment-DMs read like essays (2026-08-11).
 _DM_CONTINUE_POOL = [
-    "Reply here and I'll help you get yours — we'll sort out colour, size and delivery together. 💛",
-    "Just reply here and we'll get you sorted — colour, size and delivery, step by step. 💛",
-    "Tell me a little more here and I'll guide you all the way to your order. 💛",
+    "Reply here and I'll get yours sorted. 💛",
+    "Reply here and we'll take it from there. 💛",
+    "Tell me a little more and I'll sort you out. 💛",
 ]
 
 
