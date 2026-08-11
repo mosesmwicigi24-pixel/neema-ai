@@ -193,6 +193,24 @@ async def compose_standup(db) -> str:
     except Exception:
         pass
 
+    # Hub-bridge migration watch: authenticated pushes still arriving on the
+    # legacy /api/n8n surface. When this line stays absent for ~a week after
+    # the hub plugin switches, dropping the legacy mount is evidence-backed
+    # (docs/HUB_BRIDGE_MIGRATION.md).
+    try:
+        from app.main import app as _app
+        _redis = getattr(_app.state, "redis", None)
+        if _redis is not None:
+            _y = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y%m%d")
+            _n = int(await _redis.get(f"bridge:legacy:{_y}") or 0)
+            if _n:
+                lines.append(
+                    f"🌉 Hub bridge: {_n} push(es) yesterday still used the legacy "
+                    "/api/n8n path — the hub plugin hasn't fully migrated "
+                    "(docs/HUB_BRIDGE_MIGRATION.md).")
+    except Exception:
+        pass
+
     # Unmet demand — what customers asked for that we couldn't sell. The pile
     # exists to be read: three lines a day beat a table nobody opens.
     try:

@@ -35,9 +35,15 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST \
   https://neema.bethanyhouse.co.ke/api/hub/payment      # → 403 without the header
 ```
 
-## Afterwards (Neema side)
+## Afterwards (Neema side) — evidence-gated removal
 
-Once the hub posts only on `/api/hub/*` with `X-Hub-Secret`, delete in
+Every authenticated push that still uses the legacy surface (old prefix or old
+header) bumps a daily counter, and the **08:00 standup** reports it:
+
+> 🌉 Hub bridge: N push(es) yesterday still used the legacy /api/n8n path …
+
+Switch the plugin, then watch the standup. When that line has been absent for
+about a week, the legacy surface is provably quiet — then delete in
 `apps/api/app/main.py` the legacy mount line (marked with a comment) and the
 `x_n8n_secret` parameter in `hub_bridge.verify_hub_secret` — and, if desired,
 rename the `N8N_API_SECRET` env var to a clean name in the same change as the
