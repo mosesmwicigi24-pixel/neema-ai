@@ -1,5 +1,18 @@
 # WhatsApp goes native — retiring n8n
 
+> **STATUS: RETIREMENT COMPLETE — 2026-08-11.** n8n's container was stopped
+> 2026-07-30; on 2026-08-11 the code caught up with reality (owner's request):
+> the webhook forward path, the `WHATSAPP_NATIVE`/`WHATSAPP_FORWARD_URL` flags,
+> `/api/agent/turn`, the Tier-1/Tier-2 routing (`is_tier2`, `TIER2_ALL`,
+> `TIER2_ENABLED_WA_IDS`), all n8n-workflow-only `/api/n8n/*` endpoints, the
+> `n8n/` workflow exports, the compose service stubs and the dashboard's n8n
+> integration card were removed. **What survives**: the hub bridge —
+> `/api/n8n/payment`, `/api/n8n/order-event`, `/api/n8n/customer-history` and
+> `N8N_API_SECRET` — because the hub's plugin still posts on the legacy prefix
+> and header; and `app/services/n8n_bridge.py`, which is (and always was) the
+> messaging persistence/delivery service, keeping its historical filename.
+> The rest of this document is the migration-era record.
+
 The API now contains a complete in-process replacement for the n8n WhatsApp
 pipeline (`app/services/wa_native.py`), gated by one flag. Messenger, Instagram,
 Facebook, the web chat, calls and every sweep already ran natively; WhatsApp was

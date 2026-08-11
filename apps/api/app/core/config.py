@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     turn_credential: str = ""
     stun_url: str = "stun:stun.l.google.com:19302"
     wa_invite_lang: str = "en"
+    # Shared secret for the HUB's pushes on /api/n8n/* (payment, order-event,
+    # customer-history). n8n itself is retired — the name survives because the
+    # hub's plugin still sends the X-N8N-SECRET header on those legacy paths.
     n8n_api_secret: str = ""
     # ── Meta Messenger / Instagram webhook (multichannel ingestion) ──────────
     # meta_verify_token: the arbitrary secret you also paste into the Meta app's
@@ -91,23 +94,14 @@ class Settings(BaseSettings):
     # hub catalogue as WhatsApp; checkout routed to WhatsApp). Default OFF so the
     # webhook stays ingestion-only until you flip it on. Needs meta_page_token set.
     meta_agent_reply: bool = False
-    # Optional WhatsApp number the Messenger/IG agent invites buyers to for checkout.
-    # WhatsApp webhook front door (Option A): our API becomes the Cloud API
-    # callback and TRANSPARENTLY forwards every event to n8n (messaging keeps
-    # working exactly as before), while tapping `calls` events for voice. Set
-    # whatsapp_forward_url to n8n's current WhatsApp webhook URL. verify token
-    # falls back to meta_verify_token if unset (must match the value pasted into
-    # the Meta app's WhatsApp webhook config).
-    # NATIVE WhatsApp pipeline (app/services/wa_native.py): when ON, the front door
-    # parses + persists + replies in-process and STOPS forwarding to n8n — the
-    # complete n8n replacement. OFF (default) = today's behaviour, forward to n8n.
-    # Cutover is this one flag; rollback is flipping it back and unpausing n8n.
-    whatsapp_native: bool = False
-    # Rapid-fire messages are combined for this long and answered ONCE. 15s is the
-    # value the n8n debounce ACTUALLY executed in production (its node names said
-    # 12/30/35 — the parameter that ran was 15).
+    # WhatsApp front door: our API is the Cloud API callback; every event is
+    # processed in-process by app/services/wa_native.py (the n8n pipeline this
+    # replaced was retired 2026-07-30). The webhook verify token falls back to
+    # meta_verify_token if unset (must match the value pasted into the Meta
+    # app's WhatsApp webhook config).
+    # Rapid-fire messages are combined for this long and answered ONCE. 15s is
+    # the value the retired n8n debounce actually executed in production.
     whatsapp_debounce_seconds: int = 15
-    whatsapp_forward_url: str = ""
     whatsapp_verify_token: str = ""
     # Set only when the WhatsApp product lives in a DIFFERENT Meta app than
     # Messenger (different X-Hub-Signature-256 secret). Falls back to
@@ -196,13 +190,12 @@ class Settings(BaseSettings):
     hub_push_orders: bool = True     # push confirmed WhatsApp orders into the hub (Part B)
     hub_relay_receipt: bool = True   # WhatsApp the customer the receipt/payment link (Loop C)
     hub_order_status_ttl: int = 60   # seconds to cache a hub order's live status (Loop C)
-    # ── Tier 2 agent (tool-calling; coexists with Tier 1 behind a flag) ──────
+    # ── The agent (tool-calling; the only brain since n8n's Tier 1 retired —
+    # the tier2_ prefix is the historical name, kept to spare a box-.env rename) ──
     anthropic_api_key: str = ""
     tier2_model: str = "claude-sonnet-5"
     tier2_model_light: str = "claude-haiku-4-5"  # cheap model for trivial turns (per-turn routing)
     tier2_model_routing: bool = True  # route trivial turns to tier2_model_light; False = always tier2_model
-    tier2_enabled_wa_ids: str = ""   # comma-separated wa_ids routed to the Tier 2 agent
-    tier2_all: bool = False          # route ALL traffic to Tier 2 (full cutover)
     tier2_max_iterations: int = 8    # max tool-call loops per turn (runaway guard)
     tier2_max_tokens: int = 1024
     tier2_prompt_cache: bool = True  # cache the system+tools+conversation prefix (~90% cheaper input)
@@ -219,9 +212,6 @@ class Settings(BaseSettings):
     whisper_model: str = "base"            # base (light) | small | medium — bigger = better Swahili, slower
     whisper_compute_type: str = "int8"     # ctranslate2 compute type for faster-whisper on CPU
     groq_api_key: str = ""                 # only used when whisper_provider="groq"
-
-    def tier2_wa_ids(self) -> set[str]:
-        return {w.strip() for w in self.tier2_enabled_wa_ids.split(",") if w.strip()}
 
     @field_validator("cors_origins", mode="before")
     @classmethod

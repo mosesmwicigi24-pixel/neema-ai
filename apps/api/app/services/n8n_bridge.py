@@ -1,3 +1,12 @@
+"""The messaging persistence + delivery service.
+
+Historical name: this module was built as the API side of the n8n bridge, and
+kept the filename when n8n was retired (2026-07-30) because it was never an n8n
+client — it IS the message/conversation/user persistence layer and the WABA
+sender, imported across the app (native WhatsApp pipeline, web chat, Meta
+channels, sweeps, admin). Renaming it is pure churn; the name is the only
+n8n-era thing left in here.
+"""
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert

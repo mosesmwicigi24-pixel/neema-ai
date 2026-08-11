@@ -1,7 +1,8 @@
-"""WhatsApp Cloud API front door: transparent forward to n8n + calls tap.
+"""WhatsApp Cloud API front door: native in-process pipeline + calls tap.
 
-The messaging path must be byte-for-byte unaffected (we forward the raw body);
-inbound calls must ring the dashboard and dedupe on Meta retries.
+Every delivery is parsed/persisted/answered by wa_native (the n8n forward was
+retired 2026-07-30); inbound calls must ring the dashboard and dedupe on Meta
+retries, and a failed ingest must bounce so Meta redelivers.
 """
 import asyncio
 import hashlib
@@ -70,31 +71,6 @@ def test_incoming_call_rings_and_dedupes(monkeypatch):
     r.published.clear()
     asyncio.run(ww._handle_calls(_req(r), payload))
     assert r.published == []
-
-
-def test_forward_relays_raw_body(monkeypatch):
-    monkeypatch.setattr(settings, "whatsapp_forward_url", "https://n8n.example/wa", raising=False)
-    captured = {}
-
-    class _Resp:
-        is_success = True
-        status_code = 200
-        text = "ok"
-
-    class _Client:
-        async def __aenter__(self): return self
-        async def __aexit__(self, *a): return False
-        async def post(self, url, content=None, headers=None, timeout=None):
-            captured.update(url=url, content=content, headers=headers)
-            return _Resp()
-
-    monkeypatch.setattr(ww.httpx, "AsyncClient", lambda *a, **k: _Client())
-    raw = b'{"object":"whatsapp_business_account","entry":[]}'
-    ok = asyncio.run(ww._forward_to_n8n(raw, _sign("s", raw)))
-    assert ok is True
-    assert captured["content"] == raw                       # byte-for-byte
-    assert captured["url"] == "https://n8n.example/wa"
-    assert "X-Hub-Signature-256" in captured["headers"]     # signature preserved
 
 
 # ── Voice-calling accept flow ────────────────────────────────────────────────
@@ -223,23 +199,17 @@ def test_signature_prefers_whatsapp_app_secret(monkeypatch):
     assert not ww._valid_signature(body, _sign("meta-secret", body))
 
 
-def test_native_mode_processes_via_shared_front_door(monkeypatch):
-    """POST /api/wa/webhook in native mode must run wa_native, not the forward."""
+def test_front_door_processes_natively(monkeypatch):
+    """POST /api/wa/webhook runs wa_native in-process — the only pipeline."""
     from app.services import wa_native
     monkeypatch.setattr(settings, "meta_app_secret", "", raising=False)
     monkeypatch.setattr(settings, "whatsapp_app_secret", "", raising=False)
-    monkeypatch.setattr(settings, "whatsapp_native", True, raising=False)
-    handled, forwarded = [], []
+    handled = []
 
     async def fake_handle(payload, redis):
         handled.append(payload)
         return 1, 0
     monkeypatch.setattr(wa_native, "handle_webhook", fake_handle)
-
-    async def fake_forward(raw, sig):
-        forwarded.append(raw)
-        return True
-    monkeypatch.setattr(ww, "_forward_to_n8n", fake_forward)
 
     raw = json.dumps({"object": "whatsapp_business_account", "entry": []}).encode()
 
@@ -250,7 +220,7 @@ def test_native_mode_processes_via_shared_front_door(monkeypatch):
 
     resp = asyncio.run(ww.receive(_Req()))
     assert resp.body == b"EVENT_RECEIVED"
-    assert len(handled) == 1 and forwarded == []
+    assert len(handled) == 1
 
 
 def test_meta_route_rejects_forged_whatsapp_payload(monkeypatch):
@@ -307,7 +277,6 @@ def test_native_mode_bounces_when_ingest_failed(monkeypatch):
     from app.services import wa_native
     monkeypatch.setattr(settings, "meta_app_secret", "", raising=False)
     monkeypatch.setattr(settings, "whatsapp_app_secret", "", raising=False)
-    monkeypatch.setattr(settings, "whatsapp_native", True, raising=False)
 
     async def fake_handle(payload, redis):
         return 0, 1
@@ -329,7 +298,6 @@ def test_calls_tap_failure_does_not_block_ingestion(monkeypatch):
     from app.services import wa_native
     monkeypatch.setattr(settings, "meta_app_secret", "", raising=False)
     monkeypatch.setattr(settings, "whatsapp_app_secret", "", raising=False)
-    monkeypatch.setattr(settings, "whatsapp_native", True, raising=False)
 
     async def bad_calls(request, payload):
         raise RuntimeError("redis blip")
