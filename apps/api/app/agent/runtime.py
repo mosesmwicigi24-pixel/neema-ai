@@ -301,20 +301,16 @@ def _web_addendum() -> str:
     )
 
 
-def is_tier2(wa_id: str) -> bool:
-    return settings.tier2_all or wa_id in settings.tier2_wa_ids()
-
-
 # ── Per-turn model routing (roadmap #2) ──────────────────────────────────────
 # Route trivial customer turns (pure greetings, thanks/acknowledgements, bare
 # affirmations) to the cheap model; anything that could plausibly need a tool
 # call — products, prices, quantities, delivery, payment, orders, or any
 # question — stays on the main model. High precision on the light path: when
 # in doubt, this returns the main model, because a mis-routed sales turn is
-# worse than an extra cent spent on a greeting. Defined locally (not imported
-# from n8n_bridge) since Tier 1's _ACK_RE deliberately excludes affirmatives
-# like "yes"/"sawa" — those are load-bearing order confirmations there, but a
-# bare "sawa"/"ok" with nothing else said still needs no tool call here.
+# worse than an extra cent spent on a greeting. NOTE: unlike the persistence
+# service's ack regex, this one includes bare affirmatives ("yes"/"sawa") —
+# there they are load-bearing order confirmations; here a bare "sawa" with
+# nothing else said still needs no tool call.
 _GREETING_RE = re.compile(
     r"^(hi+|hey+|hello+|helo+|habari|niaje|mambo|sasa|yo+|good\s*(morning|afternoon|evening)|"
     r"vipi|shalom)[\s!.,]*$",

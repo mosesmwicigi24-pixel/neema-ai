@@ -341,8 +341,8 @@ def _is_doc_request(text: str | None) -> bool:
 
 
 async def _escalate_doc_request(redis, wa_id: str, text: str) -> None:
-    """Flip the conversation to a human with a visible reason — the same outcome
-    the n8n media-escalation branch produced via POST /api/n8n/escalate."""
+    """Flip the conversation to a human with a visible reason — the behaviour
+    the retired n8n media-escalation branch used to produce, now in-process."""
     from datetime import datetime, timezone
     from app.database import AsyncSessionLocal
     from app.models.conversation import Conversation, InterceptMode

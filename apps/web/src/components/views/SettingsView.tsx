@@ -32,13 +32,6 @@ const MPesaIcon = () => (
     </svg>
 );
 
-const N8NIcon = () => (
-    <svg viewBox="0 0 32 32" className="w-5 h-5" fill="none">
-        <rect width="32" height="32" rx="6" fill="#EA4B71"/>
-        <text x="4" y="22" fontSize="12" fontWeight="bold" fill="white" fontFamily="Arial">n8n</text>
-    </svg>
-);
-
 const EmailIcon = () => (
     <svg viewBox="0 0 32 32" className="w-5 h-5" fill="none" stroke="currentColor">
         <rect x="2" y="6" width="28" height="20" rx="3" strokeWidth="2"/>
@@ -62,14 +55,13 @@ const SheetsIcon = () => (
     </svg>
 );
 
-type IconKey = "whatsapp" | "messenger" | "instagram" | "mpesa" | "n8n" | "email" | "slack" | "sheets";
+type IconKey = "whatsapp" | "messenger" | "instagram" | "mpesa" | "email" | "slack" | "sheets";
 
 const PLATFORM_ICONS: Record<IconKey, { component: React.FC; bg: string; color: string }> = {
     whatsapp:  { component: WhatsAppIcon,  bg: "#25D366", color: "white" },
     messenger: { component: MessengerIcon, bg: "#0099FF", color: "white" },
     instagram: { component: InstagramIcon, bg: "linear-gradient(45deg,#f09433,#e6683c,#dc2743,#cc2366,#bc1888)", color: "white" },
     mpesa:     { component: MPesaIcon,     bg: "#00A651", color: "white" },
-    n8n:       { component: N8NIcon,       bg: "#EA4B71", color: "white" },
     email:     { component: EmailIcon,     bg: "#4d66b3", color: "white" },
     slack:     { component: SlackIcon,     bg: "#4A154B", color: "white" },
     sheets:    { component: SheetsIcon,    bg: "#0F9D58", color: "white" },
@@ -136,14 +128,6 @@ const INTEGRATIONS: Integration[] = [
             { label: "Consumer Secret", key: "consumer_secret", type: "password" },
             { label: "Paybill Number",  key: "paybill",         placeholder: "542542" },
             { label: "Account Number",  key: "account",         placeholder: "50036" },
-        ],
-    },
-    {
-        key: "n8n", name: "n8n Automation", status: "connected",
-        description: "Workflow automation engine",
-        configFields: [
-            { label: "Webhook URL", key: "n8n_url",    placeholder: "https://n8n.yourhost.com/webhook/…" },
-            { label: "API Secret",  key: "n8n_secret", type: "password", placeholder: "zXsH8…" },
         ],
     },
     {

@@ -144,42 +144,11 @@ services:
     # networks:
     # - neema_net
 
-    # ─── n8n Automation ─────────────────────────────────────
-    # n8n:
-    #     image: n8nio/n8n:latest
-    #     container_name: neema_n8n
-    #     restart: unless-stopped
-    #     env_file: .env
-    #     environment:
-    #         N8N_HOST: ${N8N_HOST}
-    #         N8N_PORT: 5678
-    #         N8N_PROTOCOL: https
-    #         WEBHOOK_URL: ${WEBHOOK_URL}
-    #         N8N_BASIC_AUTH_ACTIVE: "true"
-    #         N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER}
-    #         N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD}
-    #         # n8n uses its own schema inside the shared Postgres instance
-    #         DB_TYPE: postgresdb
-    #         DB_POSTGRESDB_HOST: postgres
-    #         DB_POSTGRESDB_PORT: 5432
-    #         DB_POSTGRESDB_DATABASE: ${POSTGRES_DB}
-    #         DB_POSTGRESDB_USER: ${POSTGRES_USER}
-    #         DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
-    #         DB_POSTGRESDB_SCHEMA: n8n
-    #     volumes:
-    #         - n8n_data:/home/node/.n8n
-    #     depends_on:
-    #         postgres:
-    #             condition: service_healthy
-    #     networks:
-    #         - neema_net
-
 # ─── Named Volumes ────────────────────────────────────────
 volumes:
     postgres_data:
     redis_data:
     pgadmin_data:
-    # n8n_data:
     neema_media:
 
 # ─── Bridge Network ───────────────────────────────────────

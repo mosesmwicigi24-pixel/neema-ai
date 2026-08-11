@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import redis.asyncio as aioredis
 
 from app.core.config import settings
-from app.routers import auth, admin, n8n_bridge, websocket, health, crm, roles, media, agent, meta_webhook, public, short_link, whatsapp_webhook, web_chat, analytics, hub_events
+from app.routers import auth, admin, n8n_bridge, websocket, health, crm, roles, media, meta_webhook, public, short_link, whatsapp_webhook, web_chat, analytics, hub_events
 from app.database import AsyncSessionLocal
 from sqlalchemy import text
 
@@ -244,15 +244,10 @@ async def lifespan(app: FastAPI):
         _lg.addHandler(_h)
         _lg.propagate = False
 
-    # One unambiguous boot line for the WhatsApp pipeline mode — cutovers are
-    # verified by reading this, not by inferring from silence.
-    if settings.whatsapp_native:
-        logging.getLogger("neema.wa").info(
-            "WhatsApp NATIVE mode ON — in-process pipeline; n8n forward disabled")
-    else:
-        logging.getLogger("neema.wa").info(
-            "WhatsApp legacy mode — forwarding to n8n (%s)",
-            settings.whatsapp_forward_url or "no forward URL set")
+    # One unambiguous boot line for the WhatsApp pipeline — native is the only
+    # mode since n8n's retirement (2026-07-30).
+    logging.getLogger("neema.wa").info(
+        "WhatsApp pipeline: native in-process (wa_native)")
 
     # ── Redis ─────────────────────────────────────────────────────────────────
     # Connect and immediately verify the node is writable (i.e. a primary, not
@@ -425,7 +420,6 @@ app.include_router(roles.router,      prefix="/api/admin", tags=["Roles"])
 app.include_router(n8n_bridge.router, prefix="/api/n8n",   tags=["n8n Bridge"])
 app.include_router(meta_webhook.router, prefix="/api/meta", tags=["Meta Webhook"])
 app.include_router(whatsapp_webhook.router, prefix="/api/wa", tags=["WhatsApp Webhook"])
-app.include_router(agent.router,      prefix="/api/agent", tags=["Tier 2 Agent"])
 app.include_router(short_link.router, prefix="/api",       tags=["Short Link"])
 app.include_router(websocket.router,  prefix="",           tags=["WebSocket"])
 app.include_router(media.router,      prefix="/api",       tags=["Media"])

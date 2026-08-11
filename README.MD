@@ -13,29 +13,27 @@ Neema AI is a full-stack platform that powers conversational sales over WhatsApp
 ## Architecture
 
 ```
-WhatsApp (WABA)
-      │
+WhatsApp / Messenger / Instagram / Web chat
+      │  (webhooks)
       ▼
-   n8n Workflow  ──────────────────────────────────────────────┐
-      │  (AI Agent, analyseGPT, context compose)         │
-      │                                                         │
-      ▼                                                         │
-  FastAPI (Python 3.12)   ◄──── Admin Dashboard (Next.js 15)  │
-      │    REST + WebSocket                                      │
-      ├── PostgreSQL 16  (conversations, orders, catalog)        │
-      ├── Redis 7         (pub-sub, session cache)               │
-      └── WhatsApp API    (outbound messages)                    │
-                                                                 │
-  n8n ◄────────────────────────────────────────────────────────┘
+  FastAPI (Python 3.12)   ◄──── Admin Dashboard (Next.js 15)
+      │    the Neema agent (Claude, tool-calling) + REST + WebSocket
+      ├── PostgreSQL 16  (conversations, orders, catalog)
+      ├── Redis 7         (pub-sub, debounce, session cache)
+      ├── WhatsApp API    (outbound messages, calls)
+      └── Bethany House hub (catalogue, orders, payments)
 ```
+
+> n8n orchestrated the WhatsApp pipeline until 2026-07-30; everything now runs
+> natively in the API (`app/services/wa_native.py`, `app/agent/`). See
+> `docs/N8N_REPLACEMENT.md` for the migration record.
 
 ### Services
 
 | Service | Stack | Purpose |
 |---------|-------|---------|
-| **n8n** | n8nio/n8n | WhatsApp trigger, AI agent orchestration, workflow automation |
-| **AI Agent** | OpenAI GPT-5 | Conversational sales, cart management, order flow |
-| **FastAPI** | Python 3.12, asyncpg | REST API, WebSocket, n8n bridge |
+| **AI Agent** | Anthropic Claude (tool-calling) | Conversational sales, cart management, order flow |
+| **FastAPI** | Python 3.12, asyncpg | Channel webhooks, agent runtime, REST API, WebSocket |
 | **Next.js** | Next.js 15, Tailwind | Admin dashboard UI |
 | **PostgreSQL** | v16 | Persistent data store |
 | **Redis** | v7 | Real-time pub-sub, session caching |
@@ -114,13 +112,10 @@ docker compose cp db/seed.sql postgres:/tmp/seed.sql
 docker compose exec postgres psql -U neema -d neema -f /tmp/seed.sql
 ```
 
-### 6. Update the n8n workflow
+### 6. Point the Meta webhooks at the API
 
-1. Open n8n and log in
-2. Import `n8n/neema-assistant-main.json`
-3. Update all HTTP Request node URLs to point to your FastAPI instance
-4. Set `N8N_API_SECRET` in n8n environment variables
-5. Activate the workflow
+WhatsApp callback: `https://your-domain.com/api/wa/webhook` — Messenger/Instagram:
+`https://your-domain.com/api/meta/webhook` (verify tokens from your `.env`).
 
 ### 7. Access the dashboard
 
@@ -148,7 +143,8 @@ REDIS_URL=redis://redis:6379/0
 
 # FastAPI
 SECRET_KEY=your_jwt_secret
-N8N_API_SECRET=your_n8n_bridge_secret
+N8N_API_SECRET=your_hub_bridge_secret   # hub → /api/n8n/* pushes (legacy header name)
+ANTHROPIC_API_KEY=your_anthropic_key
 
 # WhatsApp Business API
 WABA_TOKEN=your_meta_bearer_token
@@ -159,12 +155,6 @@ NEXTAUTH_SECRET=your_nextauth_secret
 NEXTAUTH_URL=https://your-domain.com
 NEXT_PUBLIC_API_URL=https://your-domain.com/api
 NEXT_PUBLIC_WS_URL=wss://your-domain.com
-
-# n8n
-N8N_BASIC_AUTH_USER=admin
-N8N_BASIC_AUTH_PASSWORD=your_n8n_password
-N8N_HOST=your-domain.com
-WEBHOOK_URL=https://your-domain.com/n8n/
 ```
 
 See `.env.example` for the full list with descriptions.
@@ -183,8 +173,9 @@ neema-platform/
 │   │   │   ├── core/           # Config, security, JWT
 │   │   │   ├── models/         # SQLAlchemy ORM models
 │   │   │   ├── schemas/        # Pydantic request/response schemas
-│   │   │   ├── routers/        # Route handlers (admin, auth, n8n bridge, websocket)
-│   │   │   └── services/       # Business logic (intercept, WABA, Redis)
+│   │   │   ├── routers/        # Route handlers (admin, auth, webhooks, hub bridge, websocket)
+│   │   │   ├── agent/          # The Neema agent (prompt, tools, runtime)
+│   │   │   └── services/       # Business logic (wa_native, intercept, WABA, Redis)
 │   │   └── alembic/            # Database migrations
 │   └── web/                    # Next.js 15 admin dashboard
 │       └── src/
@@ -194,8 +185,6 @@ neema-platform/
 │   └── seed.sql                # Product catalog seed data
 ├── nginx/
 │   └── nginx.conf              # Reverse proxy config
-├── n8n/
-│   └── Neema_Assistant.json    # n8n workflow export
 ├── .env.example
 ├── docker-compose.yml
 └── docker-compose.dev.yml      # Dev overrides (hot reload, exposed ports)
@@ -240,7 +229,6 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 |---------|---------|
 | Next.js Dashboard | http://localhost:3000 |
 | FastAPI | http://localhost:8000 |
-| n8n Editor | http://localhost:5678 |
 | PostgreSQL | localhost:5432 |
 | Redis | localhost:6379 |
 
@@ -276,13 +264,12 @@ alembic upgrade head
 | POST | `/api/admin/conversations/{id}/release` | Hand back to AI |
 | POST | `/api/admin/conversations/{id}/transfer` | Transfer to another agent |
 
-### n8n Bridge (internal)
+### Hub bridge (internal — legacy `/api/n8n` prefix)
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/n8n/context/{wa_id}` | Get customer context |
-| POST | `/api/n8n/upsert-user` | Upsert user & state |
-| POST | `/api/n8n/log-message` | Persist message |
-| GET | `/api/n8n/check-intercept/{wa_id}` | Check if conversation is intercepted |
+| POST | `/api/n8n/payment` | Hub relays a captured M-Pesa payment (identity reconcile) |
+| POST | `/api/n8n/order-event` | Hub pushes an order event |
+| POST | `/api/n8n/customer-history` | Hub pushes a customer-history snapshot |
 
 ### WebSocket
 ```
@@ -292,20 +279,19 @@ Receives real-time events: `new_message`, `intercept_changed`, `order_updated`.
 
 ---
 
-## n8n Workflow
+## The message lifecycle (native)
 
-The n8n workflow handles the complete inbound WhatsApp message lifecycle:
+Every inbound WhatsApp message flows through `app/services/wa_native.py`:
 
-1. **WhatsApp Trigger** — receives inbound message
-2. **Extract Sender** — normalises `wa_id`
-3. **Get Context** — fetches customer state from FastAPI
-4. **analyseGPT** — classifies intent, mood, cart signals
-5. **Neema AI Agent** — GPT-5 generates reply with cart/order actions
-6. **Check Intercept** — gates sending if a human has taken over
-7. **Generate Response** — post-processes and formats the reply
-8. **Send via WABA** — delivers the message to WhatsApp
+1. **Webhook** — `/api/wa/webhook` verifies the Meta signature
+2. **Parse + persist** — events parsed, messages saved, wamids deduped
+3. **Debounce** — rapid messages combined (default 15s) and answered once
+4. **Guards** — human-intercept, pause, and document-request escalation
+5. **Agent turn** — the Neema agent (Claude, tool-calling) composes the reply
+6. **Send via WABA** — delivered to WhatsApp, broadcast to the dashboard
 
-To migrate from the Firestore version, replace all HTTP node URLs with FastAPI endpoints and switch auth from Firebase OAuth to the `x-n8n-secret` header.
+Messenger/Instagram ride `/api/meta/webhook`; the storefront chat rides
+`/api/web/chat` — same agent, same guards.
 
 ---
 
@@ -335,8 +321,7 @@ docker compose up -d --build
 
 ## Tech Stack
 
-- **AI** — OpenAI GPT-5 (agent), GPT-5-mini (analysis & history)
-- **Automation** — n8n
+- **AI** — Anthropic Claude (tool-calling agent; light model for trivial turns)
 - **Backend** — FastAPI, SQLAlchemy (async), Alembic, Redis pub-sub
 - **Frontend** — Next.js 15, NextAuth, Tailwind CSS, Socket.IO
 - **Database** — PostgreSQL 16

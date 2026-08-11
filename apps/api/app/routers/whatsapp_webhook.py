@@ -1,22 +1,20 @@
-"""WhatsApp Cloud API webhook — the front door (Option A).
+"""WhatsApp Cloud API webhook — the front door.
 
-Our API becomes the WABA callback URL. It is a TRANSPARENT PROXY: every inbound
-event is forwarded verbatim (raw body + signature header) to n8n, so the existing
-WhatsApp messaging pipeline keeps working byte-for-byte. On top of that, it taps
-the `calls` webhook field to drive voice calling — parsing `connect`/`terminate`
-and ringing the dashboard over the existing WebSocket. No audio here; media is a
-browser↔Meta WebRTC connection set up in a later slice. Signaling only.
+Our API is the WABA callback URL. Every inbound event is processed NATIVELY
+in-process (app/services/wa_native.py: parse, persist, debounce, reply) — the
+n8n forward this door originally fronted was retired on 2026-07-30. The door
+also taps the `calls` webhook field to drive voice calling — parsing
+`connect`/`terminate` and ringing the dashboard over the existing WebSocket
+(signaling only; call audio is a browser↔Meta WebRTC connection).
 
-The forward is best-effort-but-loud: if n8n can't be reached we return non-200 so
-Meta retries (a message is never silently dropped). Calls are deduped on call id
-so a Meta retry never double-rings.
+A failed ingest returns non-200 so Meta redelivers — a message is never
+acked-and-lost. Calls are deduped on call id so a Meta retry never double-rings.
 """
 import hashlib
 import hmac
 import json
 import logging
 
-import httpx
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import PlainTextResponse
 
@@ -56,27 +54,6 @@ def _valid_signature(raw: bytes, header: str | None) -> bool:
     return hmac.compare_digest(expected, header.split("=", 1)[1])
 
 
-async def _forward_to_n8n(raw: bytes, sig: str | None) -> bool:
-    """Relay the event verbatim to n8n so messaging is unaffected. Returns True on
-    success (or when no forward URL is set — nothing to do)."""
-    url = (settings.whatsapp_forward_url or "").strip()
-    if not url:
-        return True
-    headers = {"Content-Type": "application/json"}
-    if sig:
-        headers["X-Hub-Signature-256"] = sig
-    try:
-        async with httpx.AsyncClient() as client:
-            r = await client.post(url, content=raw, headers=headers, timeout=15.0)
-        if r.is_success:
-            return True
-        _log.error("WA forward to n8n → %s: %s", r.status_code, r.text[:200])
-        return False
-    except Exception as exc:
-        _log.error("WA forward to n8n failed: %s", exc)
-        return False
-
-
 @router.post("/webhook")
 async def receive(request: Request):
     raw = await request.body()
@@ -90,62 +67,41 @@ async def receive(request: Request):
 async def process_payload(request: Request, raw: bytes, sig: str | None) -> Response:
     """Handle one signature-verified WhatsApp webhook delivery, from whichever
     route it arrived on (/api/wa/webhook, or /api/meta/webhook when the Meta app's
-    WhatsApp callback was pointed there). Native mode processes in-process;
-    legacy mode forwards to n8n verbatim."""
+    WhatsApp callback was pointed there). Everything is processed in-process
+    (app/services/wa_native.py): parse, persist, debounce, reply. `sig` was
+    already verified by the caller; it stays in the signature for those callers."""
     redis = getattr(request.app.state, "redis", None)
 
-    if settings.whatsapp_native:
-        # NATIVE MODE — the full n8n replacement (app/services/wa_native.py):
-        # parse, persist, debounce and reply in-process. No forward — forwarding
-        # too would double-process every message (two replies per customer).
-        try:
-            payload = json.loads(raw)
-        except Exception:
-            return PlainTextResponse("EVENT_RECEIVED")   # not JSON — nothing to do
-        # The taps are best-effort: a redis blip in the calls/wamid handling must
-        # never cost the customer messages riding in the same delivery.
-        try:
-            await _handle_calls(request, payload)
-        except Exception as exc:
-            _log.warning("WA calls tap failed (continuing): %s", exc)
-        try:
-            await _tap_inbound_wamids(payload, redis)
-        except Exception as exc:
-            _log.warning("WA wamid tap failed (continuing): %s", exc)
-        from app.services import wa_native
-        n, failed = await wa_native.handle_webhook(payload, redis)
-        if n or failed:
-            _log.info("WA native webhook: %d message(s) ingested, %d failed", n, failed)
-        if failed:
-            # Failed events released their dedup guard — bounce so Meta
-            # redelivers them. Never acked-and-lost.
-            return Response(status_code=502)
-        return PlainTextResponse("EVENT_RECEIVED")
-
-    # 1) TRANSPARENT FORWARD — messaging must keep flowing to n8n untouched. If it
-    #    fails, tell Meta to retry (non-200) so no message is lost.
-    forwarded = await _forward_to_n8n(raw, sig)
-
-    # 2) TAP calls + capture inbound message ids — best-effort; never let it affect
-    #    the messaging forward result.
     try:
         payload = json.loads(raw)
+    except Exception:
+        return PlainTextResponse("EVENT_RECEIVED")   # not JSON — nothing to do
+    # The taps are best-effort: a redis blip in the calls/wamid handling must
+    # never cost the customer messages riding in the same delivery.
+    try:
         await _handle_calls(request, payload)
+    except Exception as exc:
+        _log.warning("WA calls tap failed (continuing): %s", exc)
+    try:
         await _tap_inbound_wamids(payload, redis)
     except Exception as exc:
-        _log.warning("WA calls handling failed (acking anyway): %s", exc)
-
-    if not forwarded:
-        return Response(status_code=502)      # Meta retries; message not dropped
+        _log.warning("WA wamid tap failed (continuing): %s", exc)
+    from app.services import wa_native
+    n, failed = await wa_native.handle_webhook(payload, redis)
+    if n or failed:
+        _log.info("WA native webhook: %d message(s) ingested, %d failed", n, failed)
+    if failed:
+        # Failed events released their dedup guard — bounce so Meta
+        # redelivers them. Never acked-and-lost.
+        return Response(status_code=502)
     return PlainTextResponse("EVENT_RECEIVED")
 
 
 async def _tap_inbound_wamids(payload: dict, redis) -> None:
     """Stash inbound WhatsApp message ids (wamid) keyed by (wa_id, text-hash), TTL
-    1 day. The n8n /message upsert recovers them to set Message.waba_msg_id, so a
-    human reply can quote the customer's message natively (Cloud API context). The
-    n8n path doesn't carry the wamid, but the raw webhook — which we front — does.
-    Best-effort and side-effect-free on the messaging forward."""
+    1 day. The message-persistence service recovers them to set
+    Message.waba_msg_id, so a human reply can quote the customer's message
+    natively (Cloud API context). Best-effort and side-effect-free."""
     if redis is None:
         return
     import hashlib

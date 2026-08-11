@@ -213,27 +213,28 @@ def test_transcription_returns_none_when_nothing_works(monkeypatch):
     assert wn._transcribe_path_sync("/x.ogg") is None
 
 
-# ── the flag keeps production untouched ──────────────────────────────────────
+# ── native is the ONLY pipeline (n8n retired 2026-07-30, code 2026-08-11) ────
 
-def test_front_door_forwards_when_flag_off_and_goes_native_when_on():
+def test_front_door_is_native_only():
     import inspect
     from app.routers import whatsapp_webhook as ww
-    # The flag branch lives in process_payload — shared by /api/wa/webhook and
-    # the /api/meta/webhook delegation, so behaviour is identical from either.
+    # process_payload is shared by /api/wa/webhook and the /api/meta/webhook
+    # delegation, so behaviour is identical from either door.
     src = inspect.getsource(ww.process_payload)
-    assert "settings.whatsapp_native" in src
-    assert "_forward_to_n8n" in src               # off → today's behaviour
-    assert "wa_native" in src                     # on → in-process pipeline
-    # native mode must NOT also forward (double replies)
-    native_block = src.split("settings.whatsapp_native:")[1].split("# 1) TRANSPARENT")[0]
-    assert "_forward_to_n8n" not in native_block
+    assert "wa_native" in src                     # in-process pipeline
+    # the retired forward machinery must be GONE, not merely off
+    module_src = inspect.getsource(ww)
+    assert "_forward_to_n8n" not in module_src
+    assert "whatsapp_native" not in module_src    # no flag — native unconditionally
     # and the route itself must route through the shared front door
     assert "process_payload" in inspect.getsource(ww.receive)
 
 
-def test_flag_defaults_off():
+def test_retired_flags_are_gone_and_debounce_stays():
     from app.core.config import Settings
-    assert Settings.model_fields["whatsapp_native"].default is False
+    for retired in ("whatsapp_native", "whatsapp_forward_url",
+                    "tier2_all", "tier2_enabled_wa_ids"):
+        assert retired not in Settings.model_fields, retired
     assert Settings.model_fields["whatsapp_debounce_seconds"].default == 15
 
 
