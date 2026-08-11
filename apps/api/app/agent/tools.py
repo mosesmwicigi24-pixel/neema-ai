@@ -519,6 +519,19 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
         row["price"] = _to_display(p.get("price"), ctx, p.get("price_usd"),
                                    prices=p.get("prices"))
         row["currency"] = ctx.currency
+        # An unpriced hub row (e.g. "Bread container", KES 0 — no price set)
+        # must NEVER surface as 0 or "free". Strip the number and say why, so
+        # the model confirms with the team instead of quoting nothing-money.
+        try:
+            _pv = float(row["price"])
+        except (TypeError, ValueError):
+            _pv = None
+        if not _pv or _pv <= 0:
+            row["price"] = ""
+            row["price_status"] = ("no price set in the hub — NEVER quote 0 or "
+                                   "'free'; call check_availability, tell them "
+                                   "you're confirming the price, keep selling "
+                                   "the rest")
         # The hub's enriched product copy (fabric, embroidery, care, contents) —
         # this is what makes Neema's product talk SPECIFIC instead of generic.
         details = (p.get("description") or "").strip()
@@ -1282,6 +1295,12 @@ async def _resolve_cart_items(product: str, ctx: ToolContext) -> list[dict]:
     except Exception:
         return []
     if not line:
+        return []
+    # An unpriced hub product must not become a 0-shilling cart line — a cart
+    # that totals wrong is worse than one that asks. The model gets "not
+    # matched", checks availability, and the team confirms the price first.
+    if not line.get("unit_price"):
+        _log.info("cart: refused unpriced hub product %r", line.get("name"))
         return []
     return [{
         "hub_product_id": line["product_id"],

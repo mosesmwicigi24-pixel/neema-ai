@@ -139,3 +139,52 @@ def test_every_note_writer_uses_a_real_sender():
     assert MsgSender.human_agent.value == "human_agent"
     for mod in (copilot, identity, hub_events, _t):
         assert "MsgSender.agent," not in inspect.getsource(mod), mod.__name__
+
+
+# ── No price is not free (owner rule, 2026-08-11) ────────────────────────────
+# The hub carries unpriced rows ("Bread container", KES 0) and same-name
+# families (Gold/Silver Bread Tray vs the wafer-bread packs). A wrong or
+# zero quote is worse than a confirming question.
+
+
+def test_unpriced_product_is_never_quoted_as_zero(monkeypatch):
+    async def fake_catalog(db, redis):
+        return [
+            {"hub_product_id": 9, "name": "Bread container", "sku": "BC1",
+             "price": 0.0, "price_kes": None, "price_usd": None,
+             "category": "Communion", "in_stock": True},
+            {"hub_product_id": 10, "name": "Silver Bread Tray", "sku": "SBT",
+             "price": 13000, "price_usd": 130, "category": "Communion",
+             "in_stock": True},
+        ]
+    monkeypatch.setattr(tools.svc, "catalog_items", fake_catalog)
+    ctx = ToolContext(db=None, redis=None, wa_id="254700", currency="KES")
+    out = asyncio.run(_search_catalog({"query": "bread"}, ctx))
+    by = {r["name"]: r for r in out["results"]}
+
+    assert by["Bread container"]["price"] == ""            # never 0, never free
+    assert "NEVER quote 0" in by["Bread container"]["price_status"]
+    assert by["Silver Bread Tray"]["price"] == 13000       # the priced sibling intact
+    assert "price_status" not in by["Silver Bread Tray"]
+
+
+def test_unpriced_product_cannot_enter_the_cart(monkeypatch):
+    from app.core import hub_client as hc
+
+    async def fake_catalog(db, redis):
+        return [{"name": "Bread container", "sku": "BC1"}]
+    monkeypatch.setattr(tools.svc, "catalog_items", fake_catalog)
+    monkeypatch.setattr(hc, "resolve_hub_line", lambda item, cat: {
+        "product_id": 9, "name": "Bread container", "quantity": 1,
+        "unit_price": 0, "is_producible": False})
+    ctx = ToolContext(db=None, redis=None, wa_id="254700", currency="KES")
+    assert asyncio.run(tools._resolve_cart_items("bread container", ctx)) == []
+
+
+def test_prompt_teaches_the_same_name_families():
+    p = " ".join(build_system_prompt(currency="KES").split())
+    assert "SAME-NAME FAMILIES" in p
+    assert "Gold Bread" in p and "wafer BREAD packs" in p
+    assert "Round Collar Clergy" in p                      # the two-shirts trap
+    assert "NO PRICE IS NOT FREE" in p
+    assert "never from memory" in p
