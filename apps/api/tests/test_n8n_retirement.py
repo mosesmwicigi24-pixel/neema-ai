@@ -23,26 +23,105 @@ def test_hub_bridge_survives_on_both_prefixes():
         assert f"/api/n8n/{route}" in paths, f"legacy alias /api/n8n/{route} missing"
 
 
+class _FakeRedis:
+    def __init__(self):
+        self.counts, self.ttls = {}, {}
+    async def incr(self, k):
+        self.counts[k] = self.counts.get(k, 0) + 1
+        return self.counts[k]
+    async def expire(self, k, ttl):
+        self.ttls[k] = ttl
+    async def get(self, k):
+        v = self.counts.get(k)
+        return None if v is None else str(v)
+
+
+def _req(path: str, redis=None):
+    import types
+    return types.SimpleNamespace(
+        url=types.SimpleNamespace(path=path),
+        app=types.SimpleNamespace(state=types.SimpleNamespace(redis=redis)))
+
+
 def test_hub_secret_accepts_both_headers_and_fails_closed(monkeypatch):
+    import asyncio
     import pytest
     from fastapi import HTTPException
     from app.core.config import settings
     from app.routers.hub_bridge import verify_hub_secret
     monkeypatch.setattr(settings, "n8n_api_secret", "s3cret", raising=False)
-    verify_hub_secret(x_hub_secret="s3cret", x_n8n_secret=None)     # clean header
-    verify_hub_secret(x_hub_secret=None, x_n8n_secret="s3cret")     # legacy header
+    r = _req("/api/hub/payment")
+    asyncio.run(verify_hub_secret(r, x_hub_secret="s3cret", x_n8n_secret=None))
+    asyncio.run(verify_hub_secret(r, x_hub_secret=None, x_n8n_secret="s3cret"))
     for bad in (dict(x_hub_secret=None, x_n8n_secret=None),
                 dict(x_hub_secret="wrong", x_n8n_secret=None),
                 dict(x_hub_secret="", x_n8n_secret="")):
         with pytest.raises(HTTPException):
-            verify_hub_secret(**bad)
+            asyncio.run(verify_hub_secret(r, **bad))
     # Unconfigured secret must reject EVERYTHING — the old check compared
     # equal empty strings and would have waved an empty header through.
     monkeypatch.setattr(settings, "n8n_api_secret", "", raising=False)
     with pytest.raises(HTTPException):
-        verify_hub_secret(x_hub_secret="", x_n8n_secret=None)
+        asyncio.run(verify_hub_secret(r, x_hub_secret="", x_n8n_secret=None))
     with pytest.raises(HTTPException):
-        verify_hub_secret(x_hub_secret=None, x_n8n_secret=None)
+        asyncio.run(verify_hub_secret(r, x_hub_secret=None, x_n8n_secret=None))
+
+
+def test_legacy_surface_hits_are_counted_clean_ones_are_not(monkeypatch):
+    """The migration's evidence: legacy prefix OR legacy header bumps the daily
+    counter; a fully-clean push (new path + new header) does not."""
+    import asyncio
+    from app.core.config import settings
+    from app.routers.hub_bridge import verify_hub_secret
+    monkeypatch.setattr(settings, "n8n_api_secret", "s3cret", raising=False)
+    r = _FakeRedis()
+    # legacy PATH (even with the clean header) counts
+    asyncio.run(verify_hub_secret(_req("/api/n8n/payment", r),
+                                  x_hub_secret="s3cret", x_n8n_secret=None))
+    # legacy HEADER on the clean path counts
+    asyncio.run(verify_hub_secret(_req("/api/hub/payment", r),
+                                  x_hub_secret=None, x_n8n_secret="s3cret"))
+    assert sum(r.counts.values()) == 2
+    assert all(k.startswith("bridge:legacy:") for k in r.counts)
+    assert all(ttl == 14 * 24 * 3600 for ttl in r.ttls.values())
+    # fully clean push → no count
+    asyncio.run(verify_hub_secret(_req("/api/hub/payment", r),
+                                  x_hub_secret="s3cret", x_n8n_secret=None))
+    assert sum(r.counts.values()) == 2
+    # an unauthenticated hit never counts (403 first)
+    import pytest
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException):
+        asyncio.run(verify_hub_secret(_req("/api/n8n/payment", r),
+                                      x_hub_secret=None, x_n8n_secret="wrong"))
+    assert sum(r.counts.values()) == 2
+
+
+def test_standup_reports_legacy_bridge_pushes(monkeypatch):
+    """The owner learns from the 08:00 standup — not from box archaeology —
+    whether the hub plugin has fully migrated."""
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+    from app.jobs.self_qa import compose_standup
+    from app.main import app as _app
+    r = _FakeRedis()
+    y = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y%m%d")
+    r.counts[f"bridge:legacy:{y}"] = 7
+    monkeypatch.setattr(_app.state, "redis", r, raising=False)
+
+    class _Res:
+        def scalar_one(self): return 0
+        def scalars(self): return self
+        def all(self): return []
+        def one(self): return (0, 0)
+    class _DB:
+        async def execute(self, *a, **k): return _Res()
+    out = asyncio.run(compose_standup(_DB()))
+    assert "🌉 Hub bridge: 7 push(es) yesterday still used the legacy /api/n8n path" in out
+    # and silence when the counter is empty
+    r.counts.clear()
+    out = asyncio.run(compose_standup(_DB()))
+    assert "Hub bridge" not in out
 
 
 def test_n8n_workflow_only_routes_are_gone():

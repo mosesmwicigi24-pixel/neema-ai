@@ -25,8 +25,9 @@ from app.schemas.n8n import OrderEventDto, CustomerHistoryDto, PaymentDto
 router = APIRouter()
 
 
-def verify_hub_secret(x_hub_secret: str | None = Header(None),
-                      x_n8n_secret: str | None = Header(None)):
+async def verify_hub_secret(request: Request,
+                            x_hub_secret: str | None = Header(None),
+                            x_n8n_secret: str | None = Header(None)):
     """One shared secret, two accepted header names (clean + legacy).
 
     Fails CLOSED: an unconfigured secret rejects everything — the old check
@@ -35,6 +36,19 @@ def verify_hub_secret(x_hub_secret: str | None = Header(None),
     supplied = x_hub_secret or x_n8n_secret
     if not settings.n8n_api_secret or supplied != settings.n8n_api_secret:
         raise HTTPException(status_code=403, detail="Forbidden")
+    # Migration telemetry: count authenticated pushes still arriving on the
+    # LEGACY surface (old prefix or old header). The 08:00 standup reads the
+    # daily counter — a week of silence after the hub plugin switches is the
+    # evidence that makes dropping the /api/n8n mount safe. Best-effort.
+    if (not x_hub_secret) or request.url.path.startswith("/api/n8n/"):
+        try:
+            from datetime import datetime, timezone
+            redis = request.app.state.redis
+            key = f"bridge:legacy:{datetime.now(timezone.utc).strftime('%Y%m%d')}"
+            await redis.incr(key)
+            await redis.expire(key, 14 * 24 * 3600)
+        except Exception:
+            pass
 
 
 # ── Orders (hub → Neema) ──────────────────────────────────
