@@ -74,6 +74,8 @@ jobs:
           context: apps/api
           target: runner
           push: ${{ github.event_name != 'pull_request' }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
           tags: |
             ${{ env.API_IMAGE }}:latest
             ${{ env.API_IMAGE }}:${{ github.sha }}

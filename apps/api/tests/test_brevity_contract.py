@@ -104,3 +104,49 @@ def test_recommendation_is_a_pick_plus_one_reason():
     flat = _flat()
     assert "ASKED TO RECOMMEND, RECOMMEND: your pick + ONE reason" in flat
     assert "Never a paragraph weighing every option" in flat
+
+
+# ── 5: the Messenger morning (2026-08-11) — the contract binds on EVERY
+# platform. A Messenger DM opened with "Perfect! The Communion Full Set…
+# Here's how to order: 1… 2… 3… 4…" — an ~85-word numbered manual where one
+# question belonged. The lecture shape gets banned by name, and each channel
+# addendum points at the contract so no channel can claim local custom. ──────
+
+def test_ordering_process_is_walked_not_lectured():
+    flat = _flat()
+    assert "NEVER EXPLAIN HOW ORDERING WORKS" in flat
+    assert 'No "Here\'s how to order:"' in flat
+    assert "gets the first question, not the manual" in flat
+
+
+def test_meta_and_web_addenda_bind_the_contract_by_name():
+    import app.main  # noqa: F401 — registers models before runtime import
+    from app.agent.runtime import _meta_addendum, _web_addendum
+    for addendum in (_meta_addendum("USD"), _meta_addendum("KES"), _web_addendum()):
+        assert "THE BREVITY CONTRACT (STYLE)" in addendum
+        assert "no how-to-order lectures" in addendum
+    # the old weak closer is gone — "short, precise and friendly" was losing
+    assert "Keep replies short, precise" not in _meta_addendum("USD")
+
+
+def test_comment_dm_continue_lines_stay_short():
+    """The comment-DM is answer + order link + continue line stacked together —
+    a long continue line turns every DM into an essay. Keep each under 50
+    characters so the composite reads like a note, not a letter."""
+    import app.main  # noqa: F401
+    from app.agent.runtime import _DM_CONTINUE_POOL
+    assert _DM_CONTINUE_POOL, "pool must not be empty"
+    for line in _DM_CONTINUE_POOL:
+        assert len(line) <= 50, f"DM continue line too long ({len(line)}): {line!r}"
+
+
+# ── 6: deploys are verifiable — /health names the running commit ─────────────
+
+def test_health_reports_the_built_git_sha(monkeypatch):
+    """The box pulls :latest on a timer; before this field there was no way to
+    ask WHICH commit it runs, so 'did the deploy land?' was guesswork."""
+    import asyncio
+    monkeypatch.setenv("GIT_SHA", "abc1234def")
+    from app.routers.health import health
+    out = asyncio.run(health())
+    assert out == {"status": "ok", "version": "abc1234def"}
