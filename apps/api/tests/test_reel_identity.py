@@ -3,7 +3,6 @@ read the caption from the VIDEO node, see the poster frame, score the caption
 against the hub's own names and aliases — and bust the price cache the moment
 the hub edits a product."""
 import asyncio
-from types import SimpleNamespace
 
 import app.main  # noqa: F401
 from app.agent import runtime as rt
@@ -123,9 +122,16 @@ def test_catalog_updated_event_busts_the_price_cache():
     from app.services.hub_events import handle_event
 
     class _Redis:
-        def __init__(self): self.deleted = []; self.sets = []
-        async def delete(self, k): self.deleted.append(k)
-        async def set(self, k, v, ex=None, nx=None): self.sets.append(k); return True
+        def __init__(self):
+            self.deleted = []
+            self.sets = []
+
+        async def delete(self, k):
+            self.deleted.append(k)
+
+        async def set(self, k, v, ex=None, nx=None):
+            self.sets.append(k)
+            return True
 
     r = _Redis()
     out = asyncio.run(handle_event(None, r, {"type": "catalog.updated", "id": "e1"}))
