@@ -1,6 +1,7 @@
 """Cost routing without quality loss (owner, 2026-08-12): 97% of tokens ran on
 the main model, driven by comment replies. Comments default to the light model;
 money, risk, vision and nuance stay on the main one."""
+import asyncio
 import inspect
 
 import app.main  # noqa: F401
@@ -55,8 +56,6 @@ def test_history_window_is_channel_tuned():
 # ── the politeness ping-pong ends (owner, 2026-08-12) ────────────────────────
 # "thank you" → "you're welcome" → "I'll get back to you" → "I'll be waiting"
 # → "ok" → … — every round a model call, each more robotic than the last.
-import asyncio
-
 
 def test_closers_are_recognised():
     for t in ("Thanks!", "asante sana 🙏", "🙏🙏", "ok", "Amen",
