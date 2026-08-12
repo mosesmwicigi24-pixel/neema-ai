@@ -111,7 +111,8 @@ def test_tray_trade_facts_cups_free_and_stacking():
     flat = _flat()
     assert "COMMUNION TRAYS" in flat
     assert "40 plastic cups included, FREE" in flat
-    assert "each tray comes with its 40 cups free" in flat
+    # the fact now rides the list's LEAD-IN line (brevity contract, 2026-08-12)
+    assert "We have several trays, each with 40 cups included:" in flat
     assert "Charge only for EXTRA cups" in flat
     assert "divide by 40" in flat
     assert "5 trays stacked together" in flat

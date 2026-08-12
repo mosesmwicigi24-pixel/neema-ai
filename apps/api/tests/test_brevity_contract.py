@@ -49,12 +49,12 @@ def test_tray_cups_fact_is_said_once_not_each_time():
     flat = _flat()
     assert "say it each time" not in flat                 # the old mandate
     assert "Sell with that fact ONCE" in flat
-    assert "ONE shared line after the list covers them all" in flat
-    assert "never repeated per line" in flat
+    assert "it belongs in the LEAD-IN line that introduces them" in flat
+    assert "so the lines below carry only name and price" in flat
     assert "never re-attach it to later quotes, cart lines or totals" in flat
     # the trade facts themselves survive — free cups, extras charged, stacking
     assert "40 plastic cups included, FREE" in flat
-    assert "each tray comes with its 40 cups free" in flat
+    assert "We have several trays, each with 40 cups included:" in flat
     assert "Charge only for EXTRA cups" in flat
 
 
@@ -66,10 +66,29 @@ def test_shared_facts_are_said_once_everywhere():
 
 # ── 2: lists and cart updates have a lean shape ──────────────────────────────
 
-def test_lists_are_one_line_per_item():
+def test_lists_lead_with_the_shared_fact_then_name_and_price_only():
+    """Owner's dictated shape (2026-08-12): 'we have several trays that come
+    with forty cups. Aluminium tray, seventy dollars. Silver tray, one hundred
+    and eighty…' — the shared fact introduces the list, the lines carry name +
+    price and nothing else."""
     flat = _flat()
-    assert "LISTS: one line per item — name, price, at most ONE differentiator" in flat
-    assert "Whatever the lines share goes in one line after the list" in flat
+    assert "LISTS — THE LEAN SHAPE (owner's rule)" in flat
+    assert "goes in the ONE short line that introduces them" in flat
+    assert "each line is then NAME + PRICE and nothing else" in flat
+    assert "Aluminium Tray – $70" in flat            # the worked example
+    assert "When in doubt, leave it out" in flat
+    # and the trays rule agrees — lead-in, not a trailing line
+    assert "it belongs in the LEAD-IN line that introduces them" in flat
+
+
+def test_the_same_fact_reworded_is_still_the_same_fact():
+    """The Spanish thread leaked because capacity ('para 40 copas') and the
+    free cups ('40 copas incluidas') were treated as two facts — so 40
+    appeared four times in one message."""
+    flat = _flat()
+    assert "once means once in ANY wording" in flat
+    assert "never a second time dressed as a different fact" in flat
+    assert 'a capacity ("holds 40 cups") IS the included-cups fact in other words' in flat
 
 
 def test_cart_changes_show_the_change_not_the_catalogue():
