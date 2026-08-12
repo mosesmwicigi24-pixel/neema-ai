@@ -1521,6 +1521,58 @@ async def _post_identity(redis, channel: str, pctx: dict) -> dict:
     return {}
 
 
+# Caption spelling drifts the hub's names don't: US spellings and plurals must
+# still hit ("Aluminum trays" → Aluminium Tray).
+_CAPTION_NORM = {"aluminum": "aluminium", "colors": "colour", "color": "colour"}
+
+
+def _caption_tokens(text: str) -> set:
+    toks = set()
+    for t in re.findall(r"[a-z0-9']+", (text or "").lower()):
+        t = _CAPTION_NORM.get(t, t)
+        if len(t) > 2:
+            toks.add(t[:-1] if t.endswith("s") and len(t) > 3 else t)
+    return toks
+
+
+def _hub_caption_match(catalog: list, title: str) -> dict | None:
+    """The hub product a post caption is ABOUT — deterministic, no model.
+
+    Scores every product against the WHOLE caption: full-name coverage is the
+    strongest signal, a whole alias phrase counts alone ("communion cup filler"
+    names the Refiller without the word Refiller). A near-tie means the caption
+    honestly matches several siblings — return None and let the model (which
+    can SEE the frame) or the both-options rule decide, never silently pick
+    one. This is what identifies the product when a reel has a thin caption:
+    the hub's own names and aliases ARE the intelligence."""
+    text_l = (title or "").lower()
+    toks = _caption_tokens(title)
+    if not toks:
+        return None
+    scored = []
+    for prod in catalog:
+        ntoks = _caption_tokens(prod.get("name") or "")
+        if not ntoks:
+            continue
+        cov = len(ntoks & toks) / len(ntoks)
+        score = 3.0 * cov + (2.0 if cov == 1.0 else 0.0)
+        for a in (prod.get("aliases") or []):
+            if len(str(a)) > 3 and str(a).lower() in text_l:
+                score += 3.0
+                break
+        if score > 0:
+            scored.append((score, prod))
+    if not scored:
+        return None
+    scored.sort(key=lambda x: -x[0])
+    best_score, best = scored[0]
+    if best_score < 3.0:
+        return None
+    if len(scored) > 1 and (best_score - scored[1][0]) < 0.5:
+        return None                     # ambiguous siblings — don't guess
+    return best
+
+
 async def _resolve_post_product(redis, channel: str, ext: str,
                                 post_ctx: dict, sink: list) -> None:
     """When the comment itself didn't price a product ("where is the shop?"),
@@ -1536,6 +1588,19 @@ async def _resolve_post_product(redis, channel: str, ext: str,
     from app.database import AsyncSessionLocal
     from app.agent import tools as _tools
     q = " ".join(title.split()[:8])            # captions run long; lead words name the item
+    if not known.get("name"):
+        # No record yet: score the WHOLE caption against the hub's names and
+        # aliases. A confident winner narrows the search to its exact name, so
+        # the identified product (and its live hub price) is the one recorded.
+        try:
+            from app.services import n8n_bridge as _svc
+            async with AsyncSessionLocal() as _db0:
+                cat = await _svc.catalog_items(_db0, redis)
+            hit = _hub_caption_match(cat, title)
+            if hit is not None and hit.get("name"):
+                q = hit["name"]
+        except Exception:
+            pass
     try:
         async with AsyncSessionLocal() as db:
             ctx = _tools.ToolContext(db=db, redis=redis, wa_id=ext, channel=channel,

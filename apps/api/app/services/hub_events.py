@@ -385,6 +385,23 @@ async def handle_event(db, redis, event: dict) -> dict:
     try:
         etype = event.get("type") or ""
         eid = str(event.get("id") or "")
+        # A price/product edit in the hub must reach Neema NOW, not when the
+        # 10-minute catalogue cache expires (owner rule: memory changes when
+        # the price changes). The hub fires catalog.updated on product save;
+        # busting the working cache makes the very next quote re-fetch. The
+        # 7-day last-good mirror is left alone — it refreshes on that load,
+        # and during an outage a stale price beats no catalogue at all.
+        if etype in ("catalog.updated", "product.updated"):
+            if redis is not None:
+                try:
+                    await redis.delete("hub:catalog")
+                    await redis.set(LAST_EVENT_KEY,
+                                    datetime.now(timezone.utc).isoformat(),
+                                    ex=30 * 86400)
+                except Exception:
+                    pass
+            _log.info("hub %s — catalogue cache busted; next quote is fresh", etype)
+            return {"handled": True, "action": "catalog_cache_busted"}
         if not eid or (etype not in CELEBRATE and etype not in ESCALATE):
             return {"handled": False, "reason": "unknown_event"}
         if redis is not None:

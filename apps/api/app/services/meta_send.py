@@ -267,6 +267,40 @@ async def fetch_profile(external_id: str, channel: str = "messenger") -> dict:
     return {}
 
 
+async def _video_post_context(post_id: str) -> dict:
+    """Post-context shape for a Facebook VIDEO/REEL id. A reel's id is a video
+    node: the post-shaped read (message/full_picture/attachments) 400s on it,
+    so comments under reels arrived with NO caption and NO frame — the agent
+    was identifying blind. The video node's own fields carry both: description
+    (the caption) and picture (the poster frame the customer is looking at)."""
+    if not settings.meta_page_token or not post_id:
+        return {}
+    url = f"https://graph.facebook.com/{settings.meta_graph_version}/{post_id}"
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                url,
+                params={"fields": "description,title,picture,permalink_url"},
+                headers={"Authorization": f"Bearer {settings.meta_page_token}"},
+                timeout=15.0,
+            )
+        if not resp.is_success:
+            return {}
+        d = resp.json()
+    except Exception:
+        return {}
+    title = (d.get("description") or d.get("title") or "").strip()
+    thumb = d.get("picture") or ""
+    if not title and not thumb:
+        return {}
+    permalink = d.get("permalink_url") or ""
+    if permalink.startswith("/"):
+        permalink = f"https://www.facebook.com{permalink}"
+    return {"post_id": post_id, "title": (title or "Video post")[:200],
+            "permalink": permalink, "thumb": thumb,
+            "media_type": "video", "has_video": True}
+
+
 async def fetch_post_context(post_id: str, channel: str = "facebook") -> dict:
     """Best-effort: the source post a comment is replying to, so the inbox can
     show WHAT the customer is commenting on (they never say — "how much?" under a
@@ -298,7 +332,9 @@ async def fetch_post_context(post_id: str, channel: str = "facebook") -> dict:
             )
         if not resp.is_success:
             _log.info("post context fetch for %s → %s", post_id, resp.status_code)
-            return {}
+            # A reel/video id rejects the post-shaped fields wholesale — read
+            # it as the video node it is (caption + poster frame).
+            return {} if is_ig else await _video_post_context(post_id)
         d = resp.json()
     except Exception as exc:
         _log.info("post context fetch for %s failed: %s", post_id, exc)
