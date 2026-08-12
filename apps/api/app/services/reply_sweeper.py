@@ -38,6 +38,12 @@ def _answerable_turn(text: str | None, media_type: str | None, media_url: str | 
         caption = "" if t.startswith("[") else t
         return caption, {"type": "image", "url": media_url, "caption": caption}
     if t and not t.startswith("["):
+        # A polite closer ("thanks", "I'll get back to you", "God bless") is not
+        # a hanging question — rescuing it restarts the politeness ping-pong
+        # the closer gate exists to end.
+        from app.agent.runtime import is_closer
+        if is_closer(t):
+            return None, None
         return t, None
     return None, None
 

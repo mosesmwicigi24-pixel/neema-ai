@@ -316,6 +316,66 @@ _GREETING_RE = re.compile(
     r"vipi|shalom)[\s!.,]*$",
     re.IGNORECASE,
 )
+# Conversation-CLOSING pleasantries beyond a bare ack: deferrals ("I'll get
+# back to you"), farewells, blessings. Short messages only — a real sentence
+# with content is never a closer.
+_CLOSER_RE = re.compile(
+    r"(i(\s*will|'ll)\s*(get\s*back|revert|let\s*you\s*know|be\s*in\s*touch)|"
+    r"nitakujulisha|nitarudi|nitawasiliana|talk\s*(later|soon)|"
+    r"god\s*bless|be\s*blessed|blessed\s*(day|evening)|goodnight|good\s*night|"
+    r"bye+|goodbye|you'?re\s*welcome|most\s*welcome|welcome|no\s*problem|"
+    r"have\s*a\s*(good|great|blessed|lovely))", re.IGNORECASE)
+
+
+def is_closer(text: str) -> bool:
+    """A message that ENDS a conversation politely rather than advancing it —
+    a bare ack ("thanks", "🙏", "amen") or a short deferral/farewell ("I'll get
+    back to you", "God bless"). Used to stop the politeness ping-pong: thanks →
+    "you're welcome" → "I'll get back to you" → "I'll be waiting" → "ok" → …
+    Each round is a model call and reads more robotic than the last."""
+    t = (text or "").strip()
+    if not t or len(t.split()) > 8:
+        return False
+    return bool(_ACK_RE.match(t) or _CLOSER_RE.search(t))
+
+
+_CLOSER_KEY_TTL = 6 * 3600
+
+
+async def closer_gate(redis, channel: str, key: str, text: str) -> bool:
+    """True → SKIP this turn entirely (no model call, no reply).
+
+    The first closer in a stretch gets Neema's one warm line (the prompt's
+    bare-thanks rule) — and the model turn still runs, so a deferral like
+    "I'll get back to you" is scribed as the promise it is. Every FURTHER
+    closer while the flag stands gets silence: the polite end of a chat is
+    silence, not another blessing. Any substantive message clears the flag."""
+    if redis is None:
+        return False
+    rkey = f"closer:{channel}:{key}"
+    try:
+        if not is_closer(text):
+            await redis.delete(rkey)
+            return False
+        if await redis.get(rkey):
+            await redis.expire(rkey, _CLOSER_KEY_TTL)   # keep the lid on
+            _log.info("closer gate: politeness ping-pong ended for %s/%s", channel, key)
+            return True
+    except Exception:
+        return False
+    return False
+
+
+async def mark_closer_answered(redis, channel: str, key: str, inbound_text: str) -> None:
+    """After WE replied to a closer, arm the gate so the next one is silence."""
+    if redis is None or not is_closer(inbound_text):
+        return
+    try:
+        await redis.set(f"closer:{channel}:{key}", "1", ex=_CLOSER_KEY_TTL)
+    except Exception:
+        pass
+
+
 _ACK_RE = re.compile(
     r"^(thanks?|thank\s*you|asante(\s*sana)?|thx|ty|amen|ok(ay)?|sawa|poa|got\s*it|"
     r"👍+|🙏+|❤️*|😊+)[\s!.,🙏👍❤😊]*$",
@@ -340,6 +400,38 @@ def route_model(user_text: str) -> str:
     if _GREETING_RE.match(text) or _ACK_RE.match(text):
         return settings.tier2_model_light
     return settings.tier2_model
+
+
+# Signals that a public comment carries money or risk — those turns stay on the
+# main model. Everything else ("how much?", "location?", "bei gani?") is the
+# short price-and-pull shape the light model handles well.
+_COMMENT_ESCALATE_RE = re.compile(
+    r"(\d|order|buy|nunua|purchase|pay|lipa|deliver|ship|refund|wrong|scam|"
+    r"fake|complain|cancel|discount|bei ya jumla|wholesale|bulk)", re.IGNORECASE)
+
+
+def route_comment_model(user_text: str) -> str:
+    """Model for a PUBLIC comment turn — the volume driver of the whole bill.
+
+    97% of input tokens ran on the main model, and the bulk were comment
+    replies: short, formulaic, tool-grounded ("the Refiller is $20 — how
+    many?"). Those default to the LIGHT model. The main model is kept for the
+    turns where quality is money: buying intent, quantities (any digit —
+    cart math), payment words, complaints or negativity (the mood ladder
+    matters most there), and long comments (nuance). Vision turns never come
+    here — the caller pins media turns to the main model already."""
+    if not settings.tier2_model_routing:
+        return settings.tier2_model
+    text = (user_text or "").strip()
+    if not text:
+        return settings.tier2_model_light
+    if looks_negative(text):
+        return settings.tier2_model
+    if _COMMENT_ESCALATE_RE.search(text):
+        return settings.tier2_model
+    if len(text.split()) > 25:
+        return settings.tier2_model
+    return settings.tier2_model_light
 
 
 async def _recent_call_context(db, key: str, channel: str) -> str:
@@ -572,7 +664,11 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     # 40 messages of context (was 20): re-asking an answered question is the
     # most robotic failure there is, and it usually happened because the answer
     # had scrolled out of a too-short window.
-    messages = await _history(db, key, limit=40, channel=channel)
+    # Comment threads are short exchanges under one post — 14 messages of
+    # history covers them; DMs keep the full window (limit=40) because "the
+    # colour named three messages ago is still the colour" needs reach.
+    messages = await _history(db, key,
+                              limit=(14 if public_comment else 40), channel=channel)
 
     # Voice + text are one memory: recent call summaries join the context
     # (best-effort — a calls hiccup never blocks a chat reply).
@@ -934,6 +1030,7 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None)
         wamid = await svc._send_waba(wa_id, reply)
         async with AsyncSessionLocal() as db2:
             await svc.save_outbound_message(db2, redis, wa_id, reply, waba_msg_id=wamid)
+        await mark_closer_answered(redis, "whatsapp", wa_id, text)
         _log.info("tier2 replied to %s (%d chars)", wa_id, len(reply))
         # The scribe files the turn (deal items/stage/promises) — best-effort.
         try:
@@ -956,6 +1053,8 @@ async def schedule_reply(redis, wa_id: str, text: str, dedup_id: str | None,
                          media: dict | None = None) -> bool:
     """Fire the agent for this inbound once. Returns False if already handled."""
     if await _is_paused(redis, "whatsapp", wa_id):
+        return False
+    if media is None and await closer_gate(redis, "whatsapp", wa_id, text):
         return False
     if redis is not None and dedup_id:
         try:
@@ -1045,6 +1144,7 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
         await send_to_channel(channel, external_id, reply, page_id=page_id)
         async with AsyncSessionLocal() as db2:
             await svc.save_outbound_channel_message(db2, redis, channel, external_id, reply)
+        await mark_closer_answered(redis, channel, external_id, text)
         _log.info("tier2 replied on %s to %s (%d chars)", channel, external_id, len(reply))
         # The scribe files the turn (deal items/stage/promises) — best-effort.
         try:
@@ -1079,6 +1179,8 @@ async def schedule_meta_reply(redis, channel: str, external_id: str, text: str,
     both — the agent sees images natively). Deduped on the Meta message id so a
     redelivered webhook never double-replies."""
     if await _is_paused(redis, channel, external_id):
+        return False
+    if media is None and await closer_gate(redis, channel, external_id, text):
         return False
     if redis is not None and dedup_id:
         try:
@@ -1743,9 +1845,14 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     if not over_cap:
         # Full agent reply — SEES the post image, quotes the REAL price, warm + short.
         try:
+            # Cost routing: comment replies are the volume driver of the whole
+            # bill. Light model by default; the main model for vision turns and
+            # for comments carrying money or risk (see route_comment_model).
+            _cmodel = settings.tier2_model if media else route_comment_model(prompt_text)
             async with AsyncSessionLocal() as db:
                 answer = (await run_turn(
-                    db, redis, wa_id=ext, user_text=prompt_text, llm=build_llm(),
+                    db, redis, wa_id=ext, user_text=prompt_text,
+                    llm=build_llm(model=_cmodel),
                     media=media, channel=channel, external_id=ext,
                     public_comment=True, product_sink=seen_products)).strip()
         except Exception as exc:

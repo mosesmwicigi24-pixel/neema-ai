@@ -99,9 +99,11 @@ class Settings(BaseSettings):
     # replaced was retired 2026-07-30). The webhook verify token falls back to
     # meta_verify_token if unset (must match the value pasted into the Meta
     # app's WhatsApp webhook config).
-    # Rapid-fire messages are combined for this long and answered ONCE. 15s is
-    # the value the retired n8n debounce actually executed in production.
-    whatsapp_debounce_seconds: int = 15
+    # Rapid-fire messages are combined for this long and answered ONCE. The
+    # retired n8n ran 15s; raised to 30s (owner, 2026-08-12) so a burst of
+    # enquiries merges into ONE model call — half the turns on a typing
+    # customer, and one coherent answer instead of two overlapping ones.
+    whatsapp_debounce_seconds: int = 30
     whatsapp_verify_token: str = ""
     # Set only when the WhatsApp product lives in a DIFFERENT Meta app than
     # Messenger (different X-Hub-Signature-256 secret). Falls back to
