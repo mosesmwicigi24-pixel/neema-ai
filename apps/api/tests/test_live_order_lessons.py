@@ -115,7 +115,9 @@ def test_tray_trade_facts_cups_free_and_stacking():
     assert "We have several trays, each with 40 cups included:" in flat
     assert "Charge only for EXTRA cups" in flat
     assert "divide by 40" in flat
-    assert "5 trays stacked together" in flat
+    # confirmed in ONE line that does NOT restate the cups fact (say-once)
+    assert "That would be 5 trays stacked — shall I price 5?" in flat
+    assert "without restating the cups fact you have already given" in flat
     assert "never price the included cups separately" in flat
 
 

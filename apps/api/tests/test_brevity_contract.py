@@ -81,6 +81,35 @@ def test_lists_lead_with_the_shared_fact_then_name_and_price_only():
     assert "it belongs in the LEAD-IN line that introduces them" in flat
 
 
+def test_the_instructions_never_contradict_themselves_by_example(monkeypatch):
+    """The audit lesson (2026-08-12): a model imitates the prompt's EXAMPLES
+    more readily than it obeys its abstract rules, so a stale example is a live
+    contradiction. Two were found and fixed — "Johannesburg — wonderful!"
+    (a chirpy interjection the register rule bans) and a stacking confirmation
+    that restated the free-cups fact the say-once rule forbids. This guards the
+    whole class across every channel's rendering."""
+    import re
+    import app.main  # noqa: F401
+    from app.agent.runtime import (_meta_addendum, _web_addendum,
+                                   _public_comment_addendum)
+    renderings = [build_system_prompt(country_iso="KE", currency="KES"),
+                  build_system_prompt(country_iso="", currency="USD"),
+                  _meta_addendum("USD"), _web_addendum(),
+                  _public_comment_addendum("USD")]
+    for text in renderings:
+        for quoted in re.findall(r'"([^"]{15,400})"', text):
+            q = " ".join(quoted.split())
+            # A quoted EXAMPLE reply must not open with a chirpy interjection.
+            # (The ban rule itself quotes the banned words — it lists them bare,
+            # e.g. "Perfect!", so require a following sentence to count as an
+            # example rather than a citation.)
+            if len(q.split()) > 3:
+                assert not re.match(r'^(Perfect|Great|Awesome|Amazing|Cool|Okay)\b[!,]', q), \
+                    f"chirpy example teaches what the register bans: {q[:80]}"
+            # No example may exclaim over a place — that was the "wonderful!" bug.
+            assert "wonderful!" not in q.lower(), f"effusive example: {q[:80]}"
+
+
 def test_the_same_fact_reworded_is_still_the_same_fact():
     """The Spanish thread leaked because capacity ('para 40 copas') and the
     free cups ('40 copas incluidas') were treated as two facts — so 40
@@ -160,6 +189,44 @@ def test_comment_dm_continue_lines_stay_short():
 
 
 # ── 6: deploys are verifiable — /health names the running commit ─────────────
+
+def test_todays_rules_survive_onto_the_wire_for_every_channel():
+    """Read-path proof (owner asked: does the agent actually READ these?).
+
+    A rule in the file is worth nothing if it is dropped, truncated or
+    un-cached on the way to the model. This renders exactly what
+    `llm.complete` receives — the cached system BLOCKS — for each channel and
+    asserts every rule from today survives, in every market bucket."""
+    import app.main  # noqa: F401
+    from app.agent.llm import _cached_system
+    from app.agent.runtime import (_meta_addendum, _web_addendum,
+                                   _public_comment_addendum)
+    RULES = ("STYLE — THE BREVITY CONTRACT",
+             "1–3 short sentences, roughly 40 words",
+             "once means once in ANY wording",
+             "LISTS — THE LEAN SHAPE (owner's rule)",
+             "each line is then NAME + PRICE and nothing else",
+             "NEVER EXPLAIN HOW ORDERING WORKS",
+             "never an either/or tail",
+             "no hype words anywhere",
+             "CART CHANGES:",
+             "A CUSTOMER CORRECTION",
+             "ASKED TO RECOMMEND, RECOMMEND")
+    buckets = (("KE", "KES"), ("", "USD"), ("ZM", "ZMW"))
+    channels = (_meta_addendum("USD"), _web_addendum(),
+                _public_comment_addendum("USD"), "")
+    for iso, ccy in buckets:
+        base = build_system_prompt(country_iso=iso, currency=ccy)
+        for addendum in channels:
+            blocks = _cached_system([base + addendum, "THIS CUSTOMER\n- name"])
+            wire = " ".join("".join(b["text"] for b in blocks).split())
+            for rule in RULES:
+                assert " ".join(rule.split()) in wire, f"{rule!r} lost for {iso or 'web'}/{ccy}"
+            # the shared prefix must still carry the 1h cache breakpoint, and
+            # the per-customer tail must NOT (longer TTL must precede shorter)
+            assert blocks[0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
+            assert "cache_control" not in blocks[1]
+
 
 def test_health_reports_the_built_git_sha(monkeypatch):
     """The box pulls :latest on a timer; before this field there was no way to
