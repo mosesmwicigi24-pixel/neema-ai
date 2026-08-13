@@ -412,11 +412,15 @@ TOOLS: list[dict] = [
     {
         "name": "schedule_check_in",
         "description": "Book a future check-in the customer agreed to — the moment they "
-                       "name a time ('in two weeks', 'end month') for when they'll next "
-                       "need supplies (divai, wafers, cups…) or want to continue. The "
-                       "system messages them then, automatically. Call it IN THE SAME "
-                       "TURN they name the time; then tell them plainly you'll check in "
-                       "then. A named time is a promise we keep, never a pleasantry.",
+                       "name a time ('in two weeks', 'end month', 'after Sunday', "
+                       "'next month'). TWO cases, both count: (a) when they'll next "
+                       "need supplies (divai, wafers, cups…), and (b) when they've said "
+                       "they'll GET BACK TO US on a purchase they're still deciding — "
+                       "a reminder about that order, or when to have the delivery "
+                       "ready. The system messages them then, automatically. Call it IN "
+                       "THE SAME TURN they name the time; then tell them plainly you'll "
+                       "check in then. A named time is a promise we keep, never a "
+                       "pleasantry.",
         "input_schema": {
             "type": "object",
             "properties": {
