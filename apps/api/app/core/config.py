@@ -109,9 +109,14 @@ class Settings(BaseSettings):
     # Messenger (different X-Hub-Signature-256 secret). Falls back to
     # meta_app_secret when empty.
     whatsapp_app_secret: str = ""
-    whatsapp_handoff_number: str = ""
+    # Bethany House's two official lines. Defaulted (not blank) on purpose: the
+    # prompt's OUR OFFICIAL CONTACTS block only renders when at least one is
+    # set, and Neema is told to hand these to a customer who shares their own
+    # contact or needs us urgently — a blank box .env would silently leave her
+    # with nothing to give. A box env value still overrides these.
+    whatsapp_handoff_number: str = "+254727891989"
     # Second official line (calls) — quoted verbatim in prompts alongside the above.
-    whatsapp_handoff_alt: str = ""
+    whatsapp_handoff_alt: str = "+254785490805"
     # ── Facebook/Instagram comment engagement (comment → public reply + DM) ──
     # When true, a NEW comment on a Page post/reel/ad fires BOTH a short public
     # acknowledgement AND a private reply that opens a Messenger DM (where Neema

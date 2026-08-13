@@ -143,10 +143,15 @@ def test_prompt_carries_official_contacts_verbatim(monkeypatch):
     assert "WhatsApp: +254727891989" in p
     assert "Phone / calls: +254785490805" in p
     assert "NEVER type a phone number or wa.me link from memory" in p
-    # unset → no contacts block, no empty scaffolding
+    # unset → no contacts BLOCK, no empty scaffolding. (Assert on the block's
+    # own text, not the bare phrase: rules elsewhere legitimately refer to
+    # "OUR OFFICIAL CONTACTS" by name — e.g. the shared-contact rule that hands
+    # both lines to a customer who gives us theirs.)
     monkeypatch.setattr(settings, "whatsapp_handoff_number", "", raising=False)
     monkeypatch.setattr(settings, "whatsapp_handoff_alt", "", raising=False)
-    assert "OUR OFFICIAL CONTACTS" not in build_system_prompt(currency="USD")
+    blank = build_system_prompt(currency="USD")
+    assert "quote EXACTLY as written, digit for digit" not in blank
+    assert "WhatsApp: +" not in blank and "Phone / calls:" not in blank
 
 
 def test_prompt_location_answers_build_rapport_never_open_negative():
