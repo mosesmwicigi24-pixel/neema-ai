@@ -624,6 +624,9 @@ interface ConversationsViewProps extends SharedViewProps {
     // A wa_id/external_id another view (Calls) asked us to open in-app.
     openConvKey?: string | null;
     onConsumeOpenConvKey?: () => void;
+    // True once the conversations list is fresh from the server (not a cached
+    // snapshot) — gates the "no conversation yet" verdict on deep links.
+    freshLoaded?: boolean;
 }
 
 const CHANNEL_TABS: { id: "all" | Channel; label: string; short: string }[] = [
@@ -682,6 +685,7 @@ export function ConversationsView({
     refetchConversations,
     openConvKey,
     onConsumeOpenConvKey,
+    freshLoaded,
 }: ConversationsViewProps): React.ReactElement {
     const [activeConvId, setActiveConvId] = useState<string>("");
     const [mobilePanel, setMobilePanel] = useState<MobilePanel>("list");
@@ -889,10 +893,13 @@ export function ConversationsView({
         // Full open semantics (messages load, unread clears) — selecting the id
         // alone leaves the thread pane empty until the 20s poll catches up.
         if (conv) handleSelectConv(conv.id);
+        // A cached snapshot may simply not contain a brand-new conversation —
+        // don't declare "no conversation" until the fresh list has arrived.
+        else if (!freshLoaded) return;
         else onToast?.("No conversation yet — they haven't messaged. Use Invite to WhatsApp.", "warning");
         onConsumeOpenConvKey?.();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [openConvKey, conversations, onConsumeOpenConvKey, onToast]);
+    }, [openConvKey, conversations, freshLoaded, onConsumeOpenConvKey, onToast]);
 
     const openIdentityConversation = (channel: string, externalId: string) => {
         const conv = conversations.find(

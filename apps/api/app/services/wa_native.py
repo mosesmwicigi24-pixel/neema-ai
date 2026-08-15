@@ -83,7 +83,10 @@ def _text_of(msg: dict) -> str:
         return ((msg.get(t) or {}).get("caption") or "").strip()
     # Anything else (Meta's "unsupported", polls, future types): NEVER an empty
     # row — an empty bubble reads as a bug and hides that the customer said
-    # something we couldn't ingest.
+    # something we couldn't ingest. Log the raw shape so we learn what these
+    # actually are (Meta's `errors` block carries the reason, e.g. 131051).
+    _log.info("wa unhandled message type %r keys=%s errors=%s",
+              t, sorted(msg.keys()), msg.get("errors"))
     return f"⚠️ Sent a message we can't display here ({t or 'unknown'} type) — ask them to resend as text."
 
 

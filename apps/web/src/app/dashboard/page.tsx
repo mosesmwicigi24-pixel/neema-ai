@@ -25,17 +25,21 @@ import { SessionExpiredModal } from "@/components/ui/SessionExpiredModal";
 import { pushNotification } from "@/components/ui/Notifications";
 
 import { ConversationsView } from "@/components/views/ConversationsView";
-import { OrdersView } from "@/components/views/OrdersView";
-import { AgentsView } from "@/components/views/AgentsView";
-import { CatalogView } from "@/components/views/CatalogView";
-import { OverviewView } from "@/components/views/OverviewView";
-import { LeadsView } from "@/components/views/LeadsView";
-import { CallsView } from "@/components/views/CallsView";
-import { DealsView } from "@/components/views/DealsView";
 import { CallStage } from "@/components/CallStage";
-import { ReportsView } from "@/components/views/ReportsView";
-import { ProfileView } from "@/components/views/ProfileView";
-import { SettingsView } from "@/components/views/SettingsView";
+import dynamic from "next/dynamic";
+
+// Every view except the inbox is code-split: the first paint only has to
+// download and parse the shell + ConversationsView, not the whole app.
+const OrdersView   = dynamic(() => import("@/components/views/OrdersView").then((m) => m.OrdersView),     { ssr: false });
+const AgentsView   = dynamic(() => import("@/components/views/AgentsView").then((m) => m.AgentsView),     { ssr: false });
+const CatalogView  = dynamic(() => import("@/components/views/CatalogView").then((m) => m.CatalogView),   { ssr: false });
+const OverviewView = dynamic(() => import("@/components/views/OverviewView").then((m) => m.OverviewView), { ssr: false });
+const LeadsView    = dynamic(() => import("@/components/views/LeadsView").then((m) => m.LeadsView),       { ssr: false });
+const CallsView    = dynamic(() => import("@/components/views/CallsView").then((m) => m.CallsView),       { ssr: false });
+const DealsView    = dynamic(() => import("@/components/views/DealsView").then((m) => m.DealsView),       { ssr: false });
+const ReportsView  = dynamic(() => import("@/components/views/ReportsView").then((m) => m.ReportsView),   { ssr: false });
+const ProfileView  = dynamic(() => import("@/components/views/ProfileView").then((m) => m.ProfileView),   { ssr: false });
+const SettingsView = dynamic(() => import("@/components/views/SettingsView").then((m) => m.SettingsView), { ssr: false });
 
 import { getAgentPermissions, PERMS } from "@/lib/permissions";
 
@@ -247,29 +251,35 @@ export default function NeemaDashboard(): React.ReactElement {
     // The WebSocket is the primary transport (notification handler below
     // refetches on relevant events); these polls are the missed-event fallback,
     // so they run at a slow cadence.
+    // cacheKey => stale-while-revalidate: a refresh paints instantly from the
+    // last snapshot while the real fetch replaces it in the background.
     const { data: rawConversations, refetch: refetchConversations } =
         usePolling(
             () => hasToken ? conversationsApi.list() : Promise.resolve(null),
             60000,
             [hasToken],
+            "conversations",
         );
 
     const { data: rawAgents, refetch: refetchAgents } = usePolling(
         () => (hasToken ? agentsApi.list() : Promise.resolve(null)),
         180000,
         [hasToken],
+        "agents",
     );
 
     const { data: rawCatalog, refetch: refetchCatalog } = usePolling(
         () => (hasToken ? catalogApi.list() : Promise.resolve(null)),
         300000,
         [hasToken],
+        "catalog",
     );
 
     const { data: rawOrders, refetch: refetchOrders } = usePolling(
         () => (hasToken ? ordersApi.list() : Promise.resolve(null)),
         90000,
         [hasToken],
+        "orders",
     );
 
     // ── Map API data to UI types ──────────────────────────────────────────────
@@ -418,7 +428,10 @@ export default function NeemaDashboard(): React.ReactElement {
     const humanConvs    = conversations.filter((c) => c.intercept_mode === "human").length;
     const pendingOrders = orders.filter((o) => o.status === "pending").length;
 
-    if (authStatus === "loading") return <LoadingScreen />;
+    // Only block on auth when there's nothing to paint — with a snapshot the
+    // dashboard renders instantly and the session resolves in the background
+    // (an expired session still redirects to /login the moment it's known).
+    if (authStatus === "loading" && conversations.length === 0) return <LoadingScreen />;
 
     // ── Nav ───────────────────────────────────────────────────────────────────
     const baseNavItems: NavItem[] = [
@@ -510,6 +523,7 @@ export default function NeemaDashboard(): React.ReactElement {
                 refetchConversations={refetchConversations}
                 openConvKey={openConvKey}
                 onConsumeOpenConvKey={() => setOpenConvKey(null)}
+                freshLoaded={rawConversations !== null}
                 {...viewProps}
             />
         ),
