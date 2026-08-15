@@ -476,6 +476,18 @@ async def send_to_channel(channel: str, recipient: str, text: str,
     customer's message — Meta's DM Send API has no equivalent, so it's ignored there.
     Returns the sent message's wamid on WhatsApp (None on Meta channels) so the
     caller can stamp it on the outbound row and make it reply-quotable."""
+    if channel == "tiktok":
+        # Two eras, one seam. Native (Business Messaging API authorized):
+        # send like any other channel — this is what lets the async agent path,
+        # dashboard humans and the hold line reach TikTok. Pre-native (ManyChat
+        # relay only): refuse loudly — the reply travels ONLY in the ManyChat
+        # webhook response, and nothing here may WABA-send to a subscriber id.
+        from app.services import tiktok_native
+        if tiktok_native.configured():
+            return await tiktok_native.send_to_user(recipient, text)
+        raise RuntimeError(
+            "TikTok has no outbound send API — reply from ManyChat Live Chat "
+            "(or let Neema answer in the webhook response).")
     if channel in META_CHANNELS:
         if page_id is None:
             page_id = await page_of_contact(channel, recipient)

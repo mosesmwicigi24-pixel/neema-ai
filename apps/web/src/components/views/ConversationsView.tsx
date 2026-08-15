@@ -469,7 +469,8 @@ function WindowStrip({ win }: {
             ? `Reply window open — ${left(win.expires_at)} left`
             : win.mode === "human_agent"
               ? `24h window closed — you can still reply as a human agent for ${left(win.human_agent_until)}. Neema cannot.`
-              : "Messaging window closed — only an approved template can reach them now.";
+              : win.reason ||
+                "Messaging window closed — only an approved template can reach them now.";
 
     return (
         <div className="mb-2 px-3 py-1.5 rounded-lg flex items-center gap-2 text-[11px] font-medium"
@@ -655,13 +656,14 @@ const CH_SHORT: Record<Channel, string> = {
     messenger: "MSG",
     facebook: "FB",
     instagram: "IG",
+    tiktok: "TT",
     email: "Email",
     sms: "SMS",
 };
 
 // Chip order for a unified (multi-channel) customer row — WhatsApp first (it can
 // transact), then the social channels.
-const CHAN_ORDER: Channel[] = ["whatsapp", "messenger", "facebook", "instagram", "email", "sms"];
+const CHAN_ORDER: Channel[] = ["whatsapp", "messenger", "facebook", "instagram", "tiktok", "email", "sms"];
 const SparkleIcon = () => (
     <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
         <path d="M12 2l1.9 5.6L19.5 9l-5.6 1.9L12 16.5 10.1 10.9 4.5 9l5.6-1.4L12 2zm6.5 11l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9.9-2.6z" />
