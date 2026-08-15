@@ -28,6 +28,13 @@ _log = logging.getLogger("neema.agent")
 # conversations — treated like Messenger for history keying + prompt formatting.
 META_CHANNELS = ("messenger", "facebook", "instagram")
 
+# TikTok DMs arrive through ManyChat (routers/manychat.py). Meta-LIKE for the
+# agent: identity-keyed on the ManyChat subscriber id, phone-less, market from
+# captured cues — but with its own transport truth: there is NO push API; the
+# reply rides back in the webhook response, and links aren't clickable in
+# TikTok DMs (see _tiktok_addendum + meta_send.send_to_channel's guard).
+TIKTOK_CHANNEL = "tiktok"
+
 # Messenger/Instagram run the SAME order flow as WhatsApp — enquire, build the
 # cart, confirm, push the order to the hub (it lands in WhatsApp Orders), send
 # the payment details — all in-thread. The one thing a Meta contact lacks is a
@@ -265,6 +272,68 @@ def _meta_addendum(currency: str = "USD") -> str:
         "Instagram read exactly like WhatsApp — thumb-typed, 1–3 short sentences, "
         "shared facts said once, no how-to-order lectures. You are the same "
         "Bethany House assistant, at the same human length."
+    )
+
+
+def _tiktok_addendum(currency: str = "USD") -> str:
+    """System addendum for a TikTok DM (relayed by ManyChat). Same shopkeeper,
+    same KES catalogue and order flow as Messenger/IG — with TikTok's physics:
+    links don't open when tapped, every automated reply spends one of a capped
+    budget (10 per 48h window), and a quiet thread can't be re-opened from our
+    side. So: one short message per turn, and the phone number matters early."""
+    money = money_name(currency)
+    local = ""
+    if currency == "USD":
+        local = (
+            " If they ask for Kenyan Shillings or say they're in Kenya, do NOT "
+            "convert — save it with capture_contact (location, even just "
+            "'Kenya'), then call search_catalog again with currency=\"KES\" and "
+            "quote our real KES prices for the SAME items. SWAHILI MEANS KENYA "
+            "unless they say otherwise (owner rule): quote KES without waiting "
+            "to be asked; only a STATED other country overrides this. NEVER ask "
+            "'are you in Kenya?' or any country question to pick a currency — "
+            "read the cues, quote confidently, switch seamlessly if proven "
+            "wrong."
+        )
+    return (
+        "\n\n## This conversation is on TikTok (DMs relayed by ManyChat — not WhatsApp)\n"
+        f"- Answer from the catalogue via search_catalog; prices from the tool are "
+        f"already in {money} — quote them exactly, never invent a product or price. "
+        f"When an item can't be found, NEVER say we don't have it — follow NEVER "
+        f"SPEAK THE ABSENCE above.{local}\n"
+        "- Write PLAIN TEXT — no markdown, no asterisks, short lines.\n"
+        "- ONE message per turn, EXTRA short (1–3 sentences): TikTok allows only "
+        "10 automated replies per 48-hour window, so every reply must count. "
+        "Never pad, never re-greet mid-conversation.\n"
+        "- LINKS DO NOT OPEN when tapped in TikTok DMs. Share a link only when it "
+        "truly serves (a specific product page), on its OWN line, telling them to "
+        "copy it into their browser. Prefer our WhatsApp number written as plain "
+        "digits (see OUR OFFICIAL CONTACTS) over any wa.me link.\n"
+        "- Their display name (from their TikTok/ManyChat profile) may be in your "
+        "context — greet with it naturally if it reads like a real name; if it "
+        "reads like a username/handle, skip it rather than sounding robotic.\n"
+        "- HARD RULE: the MOMENT they state a name, city, country, phone, "
+        "role/title or church/ministry — even partially — call capture_contact IN "
+        "THAT SAME TURN with everything they said.\n"
+        "- CLOSE THE SALE RIGHT HERE, one warm step at a time: item → "
+        "colour/design → size → quantity → their city. Build the cart as they "
+        "decide (update_cart), then show items + total and confirm.\n"
+        "- THE PHONE IS WHAT MAKES THE ORDER REAL — and on TikTok it is also our "
+        "lifeline if this thread goes quiet (we cannot restart a TikTok chat; "
+        "they must message first). Once items are settled, warmly ask for their "
+        "WhatsApp/phone number for the order confirmation and delivery, and pass "
+        "it to capture_contact IN THAT SAME TURN. That ask is your one natural "
+        "WhatsApp invitation: mention we're on WhatsApp at the same number, "
+        "once, then keep serving HERE.\n"
+        "- On their yes, call create_order. Payment follows the PAYMENT rule for "
+        "THEIR country: a Kenyan customer gets the M-Pesa details create_order "
+        "returns (share the till/paybill as plain text, not a link); an "
+        "international customer is handed off per the PAYMENT rule. Never send a "
+        "Kenyan M-Pesa link to a customer outside Kenya.\n"
+        "- If create_order says there's no phone yet, simply ask for the number "
+        "warmly, save it, and try again.\n"
+        "- THE BREVITY CONTRACT (STYLE) binds with double force here — TikTok is "
+        "the most thumb-typed channel of all."
     )
 
 
@@ -606,15 +675,19 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     skips phone/hub-bound context, uses a read-only catalogue tool set, and is
     told to route checkout to WhatsApp — one brain, one KES catalogue."""
     is_meta = channel in META_CHANNELS
+    is_tiktok = channel == TIKTOK_CHANNEL
     # Website storefront visitor (web_chat mints a "web_<sha1>" session key rather
     # than a phone). They're already on the site that sells — see _web_addendum.
     is_web = not is_meta and str(wa_id or "").startswith(WEB_KEY_PREFIX)
-    key = external_id if is_meta else wa_id
+    key = external_id if (is_meta or is_tiktok) else wa_id
 
     # Currency display gate: Kenya → KES; everyone else → USD (= KES /
     # usd_kes_rate, done in the tools). WhatsApp knows Kenya from the +254
     # prefix; Meta channels know it from the captured location.
-    if is_meta:
+    if is_meta or is_tiktok:
+        # TikTok shares the Meta market path: no phone, so the market comes from
+        # the identity's captured location (their own words) — USD until a cue
+        # proves Kenya, then real KES prices, exactly like Messenger/IG.
         user = None
         currency, loc, customer_name, source_post = await _meta_market(db, channel, key)
     else:
@@ -653,6 +726,8 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     )
     if is_meta:
         system += _public_comment_addendum(currency) if public_comment else _meta_addendum(currency)
+    elif is_tiktok:
+        system += _tiktok_addendum(currency)
     elif is_web:
         system += _web_addendum()
     # Everything about THIS customer goes in a SECOND system block ("the tail"),
@@ -824,7 +899,9 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
 
     if is_meta and public_comment:
         base = PUBLIC_COMMENT_TOOLS       # the comment thread sells — full kit, link-free
-    elif is_meta:
+    elif is_meta or is_tiktok:
+        # TikTok is the same phone-less DM sale as Messenger/IG: full selling
+        # kit, order closed in-thread, whatsapp_checkout_link as the fallback.
         base = MESSENGER_TOOLS
     elif is_web:
         # The visitor is ALREADY on our storefront, where the whole order can be
@@ -889,8 +966,8 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
 
     # Let the AI keep the lead stage + country tag current (forward-only).
     # WhatsApp only — lead_signals is keyed on wa_id/OrderEvent, which a
-    # phone-less Meta conversation has none of.
-    if not is_meta and not read_only:
+    # phone-less Meta or TikTok conversation has none of.
+    if not is_meta and not is_tiktok and not read_only:
         from app.services.lead_signals import refresh_lead_signals
         await refresh_lead_signals(db, wa_id)
     return reply

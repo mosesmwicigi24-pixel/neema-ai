@@ -64,6 +64,15 @@ class Settings(BaseSettings):
     # endpoint 503s when empty, so it is off by default.
     analytics_api_key: str = ""
 
+    # ── ManyChat relay (TikTok DMs → routers/manychat.py) ────────────────────
+    # Shared secret ManyChat's External Request sends as X-ManyChat-Key. INERT
+    # until set — the endpoint 503s when empty.
+    manychat_webhook_key: str = ""
+    # Hard ceiling on one agent turn: ManyChat's External Request times out at
+    # ~10s, after which the flow falls into its empty-reply fallback. We answer
+    # inside this budget or return a short resend line instead.
+    manychat_reply_budget_s: float = 9.0
+
     # ── Hub event agency (docs/AGENTIC_PARTNER_PLAN.md, Phase A) ─────────────
     # Shared secret the hub signs order-lifecycle events with (X-Hub-Events-
     # Signature). Empty = the whole phase is inert (endpoint 503s, no sends).

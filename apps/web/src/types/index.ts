@@ -4,6 +4,7 @@ export type Channel =
     | "messenger"
     | "facebook"
     | "instagram"
+    | "tiktok"
     | "email"
     | "sms";
 

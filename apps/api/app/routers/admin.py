@@ -1462,7 +1462,7 @@ async def overview_stats(
                 (ch,
                  sum(1 for c in convs if getattr(c, "channel", None) == ch),
                  sum(1 for c in convs if getattr(c, "channel", None) == ch and c.status == "open"))
-                for ch in ("whatsapp", "messenger", "instagram", "email", "sms")
+                for ch in ("whatsapp", "messenger", "instagram", "tiktok", "email", "sms")
             )
             if cnt > 0
         ],

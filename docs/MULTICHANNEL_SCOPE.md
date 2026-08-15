@@ -98,6 +98,10 @@ behind a compatibility shim: keep `wa_id` working (WhatsApp identity's
   WhatsApp Cloud API — closest to what n8n already does. **TikTok has no
   comparable inbound messaging API for business DMs → explicitly out of the first
   phase** (revisit as social-listening, not conversation).
+  - *2026-08 update:* TikTok DMs are now IN — relayed by ManyChat (official
+    TikTok partner) into `routers/manychat.py` as a synchronous request→reply
+    channel. Comments remain out (TikTok's comment-to-DM API is closed in our
+    markets). See the router's docstring for TikTok's transport physics.
 - Extend the n8n workflow (or add a sibling) to receive Messenger/IG webhooks,
   normalise to the existing `MessageDto` **plus `channel` + `external_id`**, and
   POST to `/api/n8n/message`. Reply path (`/outbound`) gains per-channel send.

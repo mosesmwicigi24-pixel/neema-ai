@@ -309,6 +309,12 @@ async def messaging_window(db: AsyncSession, conv: Conversation) -> dict:
     channel = conv.channel or "whatsapp"
     if channel == "facebook":                 # public comment edge — no DM window
         return {"mode": "n/a", "channel": channel}
+    if channel == "tiktok":
+        # ManyChat owns the TikTok transport and there is NO push API at all —
+        # nothing the inbox composes can be delivered from here.
+        return {"mode": "closed", "channel": channel,
+                "reason": "TikTok has no send API — reply from ManyChat Live Chat "
+                          "(or the TikTok app); Neema answers inside the ManyChat flow."}
 
     last = await _latest_inbound(db, conv.id)
     last_at = getattr(last, "created_at", None)
