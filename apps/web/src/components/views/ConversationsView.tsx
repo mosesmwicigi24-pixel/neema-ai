@@ -3011,6 +3011,16 @@ export function ConversationsView({
                                                                     />
                                                                 );
                                                             }
+                                                            if (!rawText.trim()) {
+                                                                // A truly empty row (a message type the
+                                                                // ingester couldn't extract) must never
+                                                                // render as a blank bubble.
+                                                                return (
+                                                                    <p className="leading-relaxed italic text-stone-400">
+                                                                        Message can&apos;t be displayed (unsupported type) — ask them to resend as text.
+                                                                    </p>
+                                                                );
+                                                            }
                                                             return (
                                                                 <p className="leading-relaxed whitespace-pre-wrap">
                                                                     {formatWa(msg.text)}
