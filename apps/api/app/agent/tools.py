@@ -420,10 +420,17 @@ TOOLS: list[dict] = [
                        "ready. The system messages them then, automatically. Call it IN "
                        "THE SAME TURN they name the time; then tell them plainly you'll "
                        "check in then. A named time is a promise we keep, never a "
-                       "pleasantry.",
+                       "pleasantry. For a NAMED DAY ('Sunday', 'next Tuesday', "
+                       "'tomorrow') pass it as on_day and let the system do the "
+                       "calendar maths — never count the days yourself.",
         "input_schema": {
             "type": "object",
             "properties": {
+                "on_day": {"type": "string",
+                           "description": "The day they named: monday…sunday, "
+                                          "'tomorrow', or 'next week'. Preferred "
+                                          "over days_from_now whenever they named "
+                                          "a day rather than a number."},
                 "days_from_now": {"type": "integer",
                                   "description": "When to check in, in days (e.g. 'two weeks' = 14, 'end month' = 30)."},
                 "reason": {"type": "string",
@@ -1744,10 +1751,29 @@ async def _schedule_check_in(args: dict, ctx: ToolContext) -> dict:
     named a time; this makes it a kept promise — process_due sends the message
     (utility template when the 24h window has closed by then, as it will have)."""
     from datetime import timedelta
-    try:
-        days = int(args.get("days_from_now") or 0)
-    except (TypeError, ValueError):
-        return {"error": "days_from_now must be a number of days"}
+    on_day = (args.get("on_day") or "").strip().lower()
+    hour_utc = 7                                   # default 10:00 Nairobi
+    if on_day:
+        # Server-side calendar maths (owner rule): the named day is computed
+        # from TODAY, and a weekday check-in lands that day's EVENING (18:00
+        # Nairobi) — after the service/committee the customer was waiting on.
+        from app.services.deals import _WEEKDAYS, next_weekday_nbo
+        now_nbo = datetime.now(timezone.utc) + timedelta(hours=3)
+        if on_day in ("tomorrow", "kesho"):
+            days = 1
+        elif on_day == "next week":
+            days = 7
+        else:
+            day = on_day.removeprefix("next ").strip()
+            if day not in _WEEKDAYS:
+                return {"error": "on_day must be a weekday name, 'tomorrow' or 'next week'"}
+            days = (next_weekday_nbo(day, now_nbo) - now_nbo).days
+            hour_utc = 15                          # 18:00 Nairobi, their day
+    else:
+        try:
+            days = int(args.get("days_from_now") or 0)
+        except (TypeError, ValueError):
+            return {"error": "days_from_now must be a number of days"}
     days = max(1, min(days, 90))
     reason = (args.get("reason") or "").strip()
     if not reason:
@@ -1763,7 +1789,7 @@ async def _schedule_check_in(args: dict, ctx: ToolContext) -> dict:
     if conv is None:
         return {"error": "no conversation found to attach the check-in to"}
     due = datetime.now(timezone.utc) + timedelta(days=days)
-    due = due.replace(hour=7, minute=0, second=0, microsecond=0)   # 10:00 Nairobi
+    due = due.replace(hour=hour_utc, minute=0, second=0, microsecond=0)
     ctx.db.add(AgentAction(deal_id=None, conversation_id=conv.id, due_at=due,
                            kind="replenishment",
                            reason=f"Customer-agreed check-in ({channel}): {reason[:400]}"))
