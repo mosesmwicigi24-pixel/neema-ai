@@ -881,9 +881,12 @@ export function ConversationsView({
             (c) => c.wa_id === key || c.external_id === key || c.wa_id === openConvKey,
         );
         const conv = matches.find((c) => c.channel === "whatsapp") ?? matches[0];
-        if (conv) setActiveConvId(conv.id);
+        // Full open semantics (messages load, unread clears) — selecting the id
+        // alone leaves the thread pane empty until the 20s poll catches up.
+        if (conv) handleSelectConv(conv.id);
         else onToast?.("No conversation yet — they haven't messaged. Use Invite to WhatsApp.", "warning");
         onConsumeOpenConvKey?.();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [openConvKey, conversations, onConsumeOpenConvKey, onToast]);
 
     const openIdentityConversation = (channel: string, externalId: string) => {
@@ -892,7 +895,7 @@ export function ConversationsView({
                 c.channel === channel &&
                 (c.external_id === externalId || c.wa_id === externalId),
         );
-        if (conv) setActiveConvId(conv.id);
+        if (conv) handleSelectConv(conv.id);
         else onToast?.("No conversation on that channel yet.", "warning");
     };
 
