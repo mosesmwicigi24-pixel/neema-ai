@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import redis.asyncio as aioredis
 
 from app.core.config import settings
-from app.routers import auth, admin, hub_bridge, websocket, health, crm, roles, media, meta_webhook, public, short_link, whatsapp_webhook, web_chat, analytics, hub_events, manychat
+from app.routers import auth, admin, hub_bridge, websocket, health, crm, roles, media, meta_webhook, public, short_link, whatsapp_webhook, web_chat, analytics, hub_events, manychat, tiktok_webhook
 from app.database import AsyncSessionLocal
 from sqlalchemy import text
 
@@ -429,6 +429,7 @@ app.include_router(media.router,      prefix="/api",       tags=["Media"])
 app.include_router(public.router,     prefix="/api/public", tags=["Public Catalog"])
 app.include_router(web_chat.router,   prefix="/api/web",   tags=["Web Chat"])
 app.include_router(manychat.router,   prefix="/api/manychat", tags=["ManyChat Relay"])
+app.include_router(tiktok_webhook.router, prefix="/api/tiktok", tags=["TikTok Native"])
 
 
 @app.get("/api/health")

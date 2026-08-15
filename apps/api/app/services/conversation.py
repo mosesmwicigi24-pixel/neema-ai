@@ -310,11 +310,30 @@ async def messaging_window(db: AsyncSession, conv: Conversation) -> dict:
     if channel == "facebook":                 # public comment edge — no DM window
         return {"mode": "n/a", "channel": channel}
     if channel == "tiktok":
-        # ManyChat owns the TikTok transport and there is NO push API at all —
-        # nothing the inbox composes can be delivered from here.
-        return {"mode": "closed", "channel": channel,
-                "reason": "TikTok has no send API — reply from ManyChat Live Chat "
-                          "(or the TikTok app); Neema answers inside the ManyChat flow."}
+        from app.services import tiktok_native
+        if not await tiktok_native.native_live(db):
+            # ManyChat-relay era: no push API at all — nothing the inbox
+            # composes can be delivered from here.
+            return {"mode": "closed", "channel": channel,
+                    "reason": "TikTok has no send API — reply from ManyChat Live Chat "
+                              "(or the TikTok app); Neema answers inside the ManyChat flow."}
+        # Native era: TikTok gives 48h from the customer's last message —
+        # then only they can reopen the thread (no templates, no human-agent
+        # extension like Meta's).
+        last = await _latest_inbound(db, conv.id)
+        last_at = getattr(last, "created_at", None)
+        if last_at is None:
+            return {"mode": "closed", "channel": channel, "last_inbound_at": None,
+                    "expires_at": None, "reason": "no inbound message yet"}
+        if last_at.tzinfo is None:
+            last_at = last_at.replace(tzinfo=timezone.utc)
+        from datetime import timedelta as _td
+        expires = last_at + _td(hours=48)
+        open_now = datetime.now(timezone.utc) < expires
+        return {"mode": "open" if open_now else "closed", "channel": channel,
+                "last_inbound_at": last_at.isoformat(), "expires_at": expires.isoformat(),
+                "reason": "" if open_now else
+                          "TikTok's 48h window closed — the customer must message first."}
 
     last = await _latest_inbound(db, conv.id)
     last_at = getattr(last, "created_at", None)

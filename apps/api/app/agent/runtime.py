@@ -1204,8 +1204,11 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
     reply = ""
     try:
         # Human presence: "typing…" in their Messenger while the turn composes.
+        # Meta-only edge — TikTok (which also rides this path natively) has no
+        # typing indicator API.
         try:
-            await send_typing_on(external_id, page_id=page_id)
+            if channel in META_CHANNELS:
+                await send_typing_on(external_id, page_id=page_id)
         except Exception:
             pass
         model = settings.tier2_model if media else route_model(text)

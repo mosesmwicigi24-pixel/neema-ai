@@ -73,6 +73,17 @@ class Settings(BaseSettings):
     # inside this budget or return a short resend line instead.
     manychat_reply_budget_s: float = 9.0
 
+    # ── Native TikTok (Business Messaging API — services/tiktok_native.py) ───
+    # The developer app registered at business-api.tiktok.com. INERT until both
+    # are set; once the owner OAuths (/api/tiktok/oauth/connect) the channel
+    # goes fully native and the ManyChat relay becomes the fallback.
+    tiktok_app_id: str = ""
+    tiktok_app_secret: str = ""
+    # Must match the app portal's redirect URL character-for-character.
+    tiktok_redirect_uri: str = "https://neema.bethanyhouse.co.ke/api/tiktok/oauth/callback"
+    # Owner-only shared secret gating the /oauth/connect door (503s until set).
+    tiktok_connect_key: str = ""
+
     # ── Hub event agency (docs/AGENTIC_PARTNER_PLAN.md, Phase A) ─────────────
     # Shared secret the hub signs order-lifecycle events with (X-Hub-Events-
     # Signature). Empty = the whole phase is inert (endpoint 503s, no sends).

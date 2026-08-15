@@ -86,6 +86,14 @@ async def manychat_webhook(body: ManyChatIn, request: Request,
     if not sub_id:
         raise HTTPException(status_code=400, detail="subscriber_id is required")
 
+    # Cutover guard: once the native Business Messaging channel is authorized
+    # (routers/tiktok_webhook.py), IT owns TikTok — same DM would otherwise
+    # arrive twice under two different identity namespaces. The relay answers
+    # empty (the flow's condition sends nothing) until ManyChat is disconnected.
+    from app.services import tiktok_native
+    if await tiktok_native.native_live(db):
+        return {"reply": "", "handled_by": "native"}
+
     redis = getattr(request.app.state, "redis", None)
 
     # Identity + conversation on the (tiktok, subscriber_id) spine — the same
