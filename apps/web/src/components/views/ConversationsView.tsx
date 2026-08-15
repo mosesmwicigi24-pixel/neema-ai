@@ -873,6 +873,9 @@ export function ConversationsView({
     // Match by wa_id/external_id, preferring a WhatsApp thread for a caller.
     useEffect(() => {
         if (!openConvKey) return;
+        // A deep link (hub → Neema) can land before the inbox has loaded —
+        // don't consume the key against an empty list.
+        if (conversations.length === 0) return;
         const key = openConvKey.replace(/^\+/, "");
         const matches = conversations.filter(
             (c) => c.wa_id === key || c.external_id === key || c.wa_id === openConvKey,
