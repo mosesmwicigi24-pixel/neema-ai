@@ -82,7 +82,7 @@ def detect_customer_promise(text: str, *, now: datetime | None = None) -> tuple[
     now_nbo = now_utc + timedelta(hours=3)
     # The most specific anchor wins: a weekday named ANYWHERE in the message
     # overrides a leftmost vaguer hint ("after church on Sunday" → Sunday).
-    wd = re.search(r"\b(" + "|".join(_WEEKDAYS) + r")\b", t, re.IGNORECASE)
+    wd = re.search(r"\b(?<!last )(" + "|".join(_WEEKDAYS) + r")\b", t, re.IGNORECASE)
     if wd and hint not in _WEEKDAYS:
         hint = wd.group(1).lower()
 

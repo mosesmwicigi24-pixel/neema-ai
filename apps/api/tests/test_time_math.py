@@ -66,3 +66,22 @@ def test_next_weekday_helper_never_returns_today_or_the_past():
         target = ds.next_weekday_nbo("sunday", nbo)
         assert target.strftime("%A") == "Sunday"
         assert 1 <= (target.date() - nbo.date()).days <= 7
+
+
+def test_a_past_weekday_reference_never_becomes_the_anchor():
+    """'like I did last Sunday' is memory, not a promise date."""
+    got = ds.detect_customer_promise(
+        "I'll pay you next week like I did last Sunday", now=WED)
+    assert got is not None
+    _, hint = got
+    assert hint == "next week"                # not hijacked by "last Sunday"
+
+
+def test_midnight_nairobi_does_not_shift_the_day():
+    """01:00 Nairobi is 22:00 UTC the previous day — Nairobi-calendar days
+    added to a UTC clock land one day early. Pin the deals path (the tool
+    shares the same NBO-first arithmetic)."""
+    late = datetime(2026, 8, 11, 22, 0, tzinfo=timezone.utc)   # 01:00 NBO Wed 12th
+    due, _ = _due_nbo("I'll confirm on Sunday", late)
+    assert due.strftime("%A") == "Sunday"
+    assert due.date().isoformat() == "2026-08-16"              # Sunday the 16th, not the 15th

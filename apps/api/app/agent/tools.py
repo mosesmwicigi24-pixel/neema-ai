@@ -1788,8 +1788,11 @@ async def _schedule_check_in(args: dict, ctx: ToolContext) -> dict:
     conv = (await ctx.db.execute(select(Conversation).where(where))).scalar_one_or_none()
     if conv is None:
         return {"error": "no conversation found to attach the check-in to"}
-    due = datetime.now(timezone.utc) + timedelta(days=days)
-    due = due.replace(hour=hour_utc, minute=0, second=0, microsecond=0)
+    # Count days on the NAIROBI calendar, then convert once — adding Nairobi
+    # days to a UTC clock is one day early for anyone writing 00:00–03:00 NBO.
+    _nbo_now = datetime.now(timezone.utc) + timedelta(hours=3)
+    due = (_nbo_now + timedelta(days=days)).replace(
+        hour=hour_utc + 3, minute=0, second=0, microsecond=0) - timedelta(hours=3)
     ctx.db.add(AgentAction(deal_id=None, conversation_id=conv.id, due_at=due,
                            kind="replenishment",
                            reason=f"Customer-agreed check-in ({channel}): {reason[:400]}"))
