@@ -22,7 +22,14 @@ these shapes were mirrored from.
 
 Env (VPS `.env`): `TIKTOK_APP_ID`, `TIKTOK_APP_SECRET`, `TIKTOK_CONNECT_KEY`
 (owner door for the connect flow), `TIKTOK_REDIRECT_URI`
-(default `https://neema.bethanyhouse.co.ke/api/tiktok/oauth/callback`).
+(default `https://neema.bethanyhouse.co.ke/api/tiktok/oauth/callback/`), and
+`TIKTOK_AUTHORIZE_URL` — the account-holder authorization URL TikTok mints on
+My Apps once the redirect URL is activated.
+
+**TikTok's redirect-URL rules** (registration is rejected otherwise): absolute,
+`https://`, **ends with `/`**, no port, no query string, no anchor, 10–512
+chars. Carry per-connect data in `state`, never in the URL. The grant comes
+back as **`auth_code`** (not `code`) and expires in **10 minutes**, single use.
 
 ## The owner's part (nobody else can do this — it's your TikTok login)
 
@@ -41,8 +48,12 @@ Env (VPS `.env`): `TIKTOK_APP_ID`, `TIKTOK_APP_SECRET`, `TIKTOK_CONNECT_KEY`
 ## Cutover (after approval — config flip, ~10 minutes)
 
 1. Set the two env values; container restart picks them up.
-2. Open `https://neema.bethanyhouse.co.ke/api/tiktok/oauth/connect?key=<TIKTOK_CONNECT_KEY>`
+2. In the portal, activate the account-holder redirect URL; TikTok generates the
+   **authorization URL** next to it — paste that into `TIKTOK_AUTHORIZE_URL`.
+   Then open `https://neema.bethanyhouse.co.ke/api/tiktok/oauth/connect?key=<TIKTOK_CONNECT_KEY>`
    in a browser where the **business TikTok account** is logged in → Authorize.
+   (That connect link is our equivalent of ManyChat's one-click Connect button —
+   same OAuth screen, our app instead of theirs.)
    The callback stores tokens, self-registers the webhook, and shows
    "✅ TikTok connected as @…". (If self-registration fails, set the callback
    URL `https://neema.bethanyhouse.co.ke/api/tiktok/webhook/events` in the app

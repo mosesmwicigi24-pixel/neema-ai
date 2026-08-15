@@ -87,6 +87,18 @@ async def native_live(db: AsyncSession) -> bool:
 # ── OAuth (one-time owner connect + silent refresh) ──────────────────────────
 
 def authorize_url(state: str) -> str:
+    """Where to send the owner to connect their TikTok account.
+
+    Preferred: the authorization URL TikTok mints for the app once its account-
+    holder redirect URL is activated (settings.tiktok_authorize_url) — it already
+    carries app_id and the granted scopes, so all we add is our CSRF state. This
+    is the one-click "Connect" experience; ManyChat's button is the same thing
+    against their own approved app. Fallback (unset): build the standard
+    v2/auth/authorize URL ourselves."""
+    portal = (settings.tiktok_authorize_url or "").strip()
+    if portal:
+        sep = "&" if "?" in portal else "?"
+        return f"{portal}{sep}{urlencode({'state': state})}"
     return AUTHORIZE_URL + "?" + urlencode({
         "client_key": settings.tiktok_app_id,
         "response_type": "code",

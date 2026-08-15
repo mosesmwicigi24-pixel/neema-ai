@@ -79,8 +79,16 @@ class Settings(BaseSettings):
     # goes fully native and the ManyChat relay becomes the fallback.
     tiktok_app_id: str = ""
     tiktok_app_secret: str = ""
-    # Must match the app portal's redirect URL character-for-character.
-    tiktok_redirect_uri: str = "https://neema.bethanyhouse.co.ke/api/tiktok/oauth/callback"
+    # Must match the app portal's redirect URL character-for-character. TikTok
+    # REQUIRES a trailing slash, https, no port, no query, no anchor — a URL
+    # without the trailing "/" is rejected at registration.
+    tiktok_redirect_uri: str = "https://neema.bethanyhouse.co.ke/api/tiktok/oauth/callback/"
+    # The "TikTok account holder authorization URL" TikTok GENERATES for the app
+    # once the redirect URL is activated (portal → My Apps). This is the whole
+    # connect experience — the same link ManyChat's "Connect" button opens for
+    # their approved app. We append &state=… and send the owner there. Empty →
+    # fall back to constructing the v2/auth/authorize URL ourselves.
+    tiktok_authorize_url: str = ""
     # Owner-only shared secret gating the /oauth/connect door (503s until set).
     tiktok_connect_key: str = ""
 

@@ -281,6 +281,66 @@ def test_manychat_relay_steps_aside_when_native_live(monkeypatch):
 
 # ── oauth callback state gate ────────────────────────────────────────────────
 
+def test_redirect_uri_obeys_tiktok_url_rules():
+    """TikTok rejects a registered redirect URL that lacks the trailing slash,
+    uses http, carries a port/query/anchor, or is under 10 chars."""
+    uri = settings.tiktok_redirect_uri
+    assert uri.startswith("https://") and uri.endswith("/")
+    assert "?" not in uri and "#" not in uri
+    assert 10 <= len(uri) <= 512
+    # The webhook callback is derived from it — the slash must not break that.
+    assert settings.tiktok_redirect_uri.rsplit("/oauth/", 1)[0] + "/webhook/events" == \
+        "https://neema.bethanyhouse.co.ke/api/tiktok/webhook/events"
+
+
+def test_authorize_url_prefers_portal_url(monkeypatch):
+    """TikTok mints the account-holder authorization URL for the app; we only
+    add CSRF state. That link IS the one-click connect."""
+    monkeypatch.setattr(settings, "tiktok_authorize_url",
+                        "https://business-api.tiktok.com/portal/auth?app_id=123&redirect_uri=x",
+                        raising=False)
+    url = tn.authorize_url("st8")
+    assert url.startswith("https://business-api.tiktok.com/portal/auth?app_id=123")
+    assert url.endswith("&state=st8")
+
+    monkeypatch.setattr(settings, "tiktok_authorize_url", "", raising=False)
+    monkeypatch.setattr(settings, "tiktok_app_id", "appkey", raising=False)
+    fallback = tn.authorize_url("st9")
+    assert fallback.startswith("https://www.tiktok.com/v2/auth/authorize?")
+    assert "client_key=appkey" in fallback and "state=st9" in fallback
+
+
+def test_oauth_callback_accepts_auth_code_param(monkeypatch):
+    """TikTok returns the grant as `auth_code`, not the OAuth-standard `code`."""
+    class _Redis:
+        async def getdel(self, k):
+            return "1"
+
+    seen = {}
+
+    async def fake_exchange(db, grant):
+        seen["grant"] = grant
+        return {"business_id": "biz_1"}
+
+    async def fake_profile(db):
+        return {"username": "bethanyhouse"}
+
+    async def fake_register():
+        seen["webhook"] = True
+
+    monkeypatch.setattr(settings, "tiktok_app_id", "app", raising=False)
+    monkeypatch.setattr(settings, "tiktok_app_secret", "sec", raising=False)
+    monkeypatch.setattr(tn, "exchange_code", fake_exchange)
+    monkeypatch.setattr(tn, "business_profile", fake_profile)
+    monkeypatch.setattr(tn, "register_webhook", fake_register)
+
+    req = types.SimpleNamespace(app=types.SimpleNamespace(
+        state=types.SimpleNamespace(redis=_Redis())))
+    out = asyncio.run(tw.oauth_callback(req, auth_code="AC-123", state="s", db=_FakeDB()))
+    assert seen["grant"] == "AC-123"
+    assert "bethanyhouse" in out.body.decode()
+
+
 def test_oauth_callback_rejects_bad_state(monkeypatch):
     class _Redis:
         async def getdel(self, k):

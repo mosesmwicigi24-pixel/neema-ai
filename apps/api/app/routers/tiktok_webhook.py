@@ -213,9 +213,13 @@ async def oauth_connect(request: Request):
     return RedirectResponse(tiktok_native.authorize_url(state))
 
 
+# TikTok requires the registered redirect URL to END WITH "/" (no query, no
+# port, no anchor), and it returns the grant as `auth_code`, not `code`. Both
+# path forms are served so a copy/paste without the slash still lands.
+@router.get("/oauth/callback/")
 @router.get("/oauth/callback")
-async def oauth_callback(request: Request, code: str = "", state: str = "",
-                         db: AsyncSession = Depends(get_db)):
+async def oauth_callback(request: Request, code: str = "", auth_code: str = "",
+                         state: str = "", db: AsyncSession = Depends(get_db)):
     from app.services import tiktok_native
     if not tiktok_native.configured():
         raise HTTPException(status_code=503, detail="TikTok app not configured.")
@@ -228,9 +232,12 @@ async def oauth_callback(request: Request, code: str = "", state: str = "",
             ok = False
     if not ok:
         raise HTTPException(status_code=403, detail="State mismatch — restart the connect flow.")
-    if not code:
-        raise HTTPException(status_code=400, detail="TikTok sent no code.")
-    blob = await tiktok_native.exchange_code(db, code)
+    grant = (auth_code or code or "").strip()
+    if not grant:
+        raise HTTPException(status_code=400, detail="TikTok sent no auth_code.")
+    # An account-holder auth_code lives 10 minutes and burns on first use — a
+    # failure here means restarting the connect flow, not retrying this URL.
+    blob = await tiktok_native.exchange_code(db, grant)
     username = ""
     try:
         username = (await tiktok_native.business_profile(db)).get("username") or ""
