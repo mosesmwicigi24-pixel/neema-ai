@@ -159,7 +159,21 @@ export const settingsApi = {
         get<{ directives: string; max_chars: number }>("/admin/settings/directives"),
     putDirectives: (directives: string) =>
         put<{ ok: boolean; directives: string }>("/admin/settings/directives", { directives }),
+    /** Operator-added pipeline stage labels (render between Proposal and Won). */
+    getPipelineStages: () =>
+        get<{ stages: string[] }>("/admin/settings/pipeline-stages"),
+    putPipelineStages: (stages: string[]) =>
+        put<{ ok: boolean; stages: string[] }>("/admin/settings/pipeline-stages", { stages }),
 };
+
+/** One row of the customer's journey (Activity Log panel). */
+export interface ApiActivityEvent {
+    id: string;
+    kind: string;
+    label: string;
+    detail?: string | null;
+    at: string | null;
+}
 const del = <T>(path: string) => req<T>("DELETE", path);
 
 // ── Conversations ─────────────────────────────────────────────────────────────
@@ -253,6 +267,10 @@ export const conversationsApi = {
         return get<ApiConversation[]>(`/admin/conversations${q}`);
     },
     get: (id: string) => get<ApiConversation>(`/admin/conversations/${id}`),
+
+    /** The person-scoped journey ledger the Activity Log panel renders. */
+    activity: (id: string) =>
+        get<{ events: ApiActivityEvent[] }>(`/admin/conversations/${id}/activity`),
 
     /** Fetch the merged message + system-event timeline for a conversation. */
     messages: async (id: string): Promise<Message[]> => {
