@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import String, Text, BigInteger, ForeignKey, Enum as PgEnum, DateTime
+from sqlalchemy import String, Text, BigInteger, ForeignKey, Enum as PgEnum, DateTime, Index
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models import Base
@@ -23,6 +23,18 @@ def _external_id_from_wa_id(context):
 
 class Message(Base):
     __tablename__ = "messages"
+
+    # Postgres does NOT index a foreign key automatically, and this is the
+    # dashboard's hottest access path: every inbox load groups the latest
+    # message / last outbound / unread count by conversation_id, and opening a
+    # chat reads one thread ordered by created_at. Without this every one of
+    # those was a sequential scan of the WHOLE messages table, so the UI got
+    # linearly slower as the business talked to more customers (2026-08-13).
+    # Composite (not just conversation_id): the second column serves the
+    # ORDER BY / MAX(created_at) from the index itself, no sort step.
+    __table_args__ = (
+        Index("ix_messages_conversation_id_created_at", "conversation_id", "created_at"),
+    )
 
     id              : Mapped[uuid.UUID]        = mapped_column(primary_key=True, default=uuid.uuid4)
     name            : Mapped[str | None]       = mapped_column(String(100), nullable=True)
