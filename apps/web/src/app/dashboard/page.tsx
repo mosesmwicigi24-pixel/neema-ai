@@ -1,5 +1,6 @@
 "use client";
 import React, { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import dynamic from "next/dynamic";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 
@@ -24,18 +25,59 @@ import { MobileHeader, MobileBottomNav } from "@/components/ui/MobileNav";
 import { SessionExpiredModal } from "@/components/ui/SessionExpiredModal";
 import { pushNotification } from "@/components/ui/Notifications";
 
-import { ConversationsView } from "@/components/views/ConversationsView";
-import { OrdersView } from "@/components/views/OrdersView";
-import { AgentsView } from "@/components/views/AgentsView";
-import { CatalogView } from "@/components/views/CatalogView";
-import { OverviewView } from "@/components/views/OverviewView";
-import { LeadsView } from "@/components/views/LeadsView";
-import { CallsView } from "@/components/views/CallsView";
-import { DealsView } from "@/components/views/DealsView";
 import { CallStage } from "@/components/CallStage";
-import { ReportsView } from "@/components/views/ReportsView";
-import { ProfileView } from "@/components/views/ProfileView";
-import { SettingsView } from "@/components/views/SettingsView";
+
+// ── Code splitting: ship the inbox, stream the rest ───────────────────────────
+// The dashboard used to be ONE 303 KB chunk holding all eleven views, so an
+// agent waited for Orders, Reports, Settings and Catalog to download, parse and
+// execute before the inbox could paint — every load, on a Nairobi phone.
+// The inbox is the landing view, so it stays a static import (no lazy flash on
+// the screen everyone opens first). The other ten load on demand, and are then
+// warmed during the browser's idle time (see the prefetch effect below) so
+// switching tabs stays instant. Nothing is removed; it simply arrives in the
+// order it is needed.
+import { ConversationsView } from "@/components/views/ConversationsView";
+
+const ViewFallback = () => (
+    // Matches the app's surface so a switch never flashes white. aria-busy keeps
+    // screen readers honest about the momentary load.
+    <div
+        aria-busy="true"
+        className="flex h-full w-full items-center justify-center bg-background"
+    >
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground/25 border-t-muted-foreground/70" />
+    </div>
+);
+
+const lazyView = <P,>(load: () => Promise<React.ComponentType<P>>) =>
+    dynamic(load, { loading: ViewFallback, ssr: false });
+
+const OrdersView   = lazyView(() => import("@/components/views/OrdersView").then(m => m.OrdersView));
+const AgentsView   = lazyView(() => import("@/components/views/AgentsView").then(m => m.AgentsView));
+const CatalogView  = lazyView(() => import("@/components/views/CatalogView").then(m => m.CatalogView));
+const OverviewView = lazyView(() => import("@/components/views/OverviewView").then(m => m.OverviewView));
+const LeadsView    = lazyView(() => import("@/components/views/LeadsView").then(m => m.LeadsView));
+const CallsView    = lazyView(() => import("@/components/views/CallsView").then(m => m.CallsView));
+const DealsView    = lazyView(() => import("@/components/views/DealsView").then(m => m.DealsView));
+const ReportsView  = lazyView(() => import("@/components/views/ReportsView").then(m => m.ReportsView));
+const ProfileView  = lazyView(() => import("@/components/views/ProfileView").then(m => m.ProfileView));
+const SettingsView = lazyView(() => import("@/components/views/SettingsView").then(m => m.SettingsView));
+
+// Warmed after the inbox is interactive, cheapest-first, one at a time. By the
+// time an agent reaches for Orders or Reports the chunk is already in cache, so
+// the split costs them nothing.
+const PREFETCH_VIEWS = [
+    () => import("@/components/views/OrdersView"),
+    () => import("@/components/views/CallsView"),
+    () => import("@/components/views/DealsView"),
+    () => import("@/components/views/LeadsView"),
+    () => import("@/components/views/OverviewView"),
+    () => import("@/components/views/ReportsView"),
+    () => import("@/components/views/CatalogView"),
+    () => import("@/components/views/AgentsView"),
+    () => import("@/components/views/ProfileView"),
+    () => import("@/components/views/SettingsView"),
+];
 
 import { getAgentPermissions, PERMS } from "@/lib/permissions";
 
@@ -207,6 +249,39 @@ export default function NeemaDashboard(): React.ReactElement {
             }
         }
     }, [nextAuthSession, accessToken]);
+
+    // ── Warm the split-out view chunks while the browser is idle ──────────────
+    // Code splitting must not turn into a wait the first time someone opens
+    // Orders. These fetch one at a time in requestIdleCallback slices, so they
+    // never compete with the inbox's own paint, its data, or a live message
+    // arriving — and by the time a tab is clicked the chunk is already cached.
+    useEffect(() => {
+        if (!hasToken) return;               // not signed in — nothing to warm
+        let cancelled = false;
+        let handle: number | undefined;
+        const ric: typeof requestIdleCallback =
+            typeof requestIdleCallback === "function"
+                ? requestIdleCallback
+                : ((cb: IdleRequestCallback) =>
+                      window.setTimeout(() => cb({ didTimeout: false, timeRemaining: () => 50 } as IdleDeadline), 300)) as typeof requestIdleCallback;
+
+        let i = 0;
+        const warmNext = () => {
+            if (cancelled || i >= PREFETCH_VIEWS.length) return;
+            const load = PREFETCH_VIEWS[i++];
+            // A failed prefetch is harmless: the real import retries on click.
+            load().catch(() => {}).finally(() => {
+                if (!cancelled) handle = ric(warmNext);
+            });
+        };
+        handle = ric(warmNext);
+        return () => {
+            cancelled = true;
+            if (handle !== undefined && typeof cancelIdleCallback === "function") {
+                cancelIdleCallback(handle);
+            }
+        };
+    }, [hasToken]);
 
     // ── Live data polling — gated on hasToken ─────────────────────────────────
     // The WebSocket is the primary transport (notification handler below
