@@ -21,6 +21,13 @@ from app.core.security import decode_token
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 router = APIRouter()
+
+# Most recent messages returned when a chat is opened. The inbox renders every
+# message into the DOM (no virtualisation), and the thread query was unbounded,
+# so one long-running customer could freeze the tab. 500 is far above a normal
+# sales conversation — an agent never notices the ceiling, but the pathological
+# case can no longer hang the page.
+THREAD_LIMIT = 500
 bearer = HTTPBearer()
 
 
@@ -219,6 +226,12 @@ async def list_conversations(
             .group_by(OrderEvent.wa_id))).all():
             wa_orders[wid] = n
 
+    # Resolve each row's country ONCE. This used to be called twice per row
+    # (country_iso and flag_url), and on a row with no stored country it parses
+    # the phone number each time — double the work for every conversation, on
+    # every poll.
+    country_map = {str(c.id): _list_country(c) for c in conversations}
+
     # ── Build response, sorted by true latest-message timestamp desc ──────────
     def sort_key(c: Conversation):
         entry = preview_map.get(str(c.id))
@@ -256,8 +269,8 @@ async def list_conversations(
             "updated_at":           c.updated_at.isoformat() if c.updated_at else None,
             "name":                 _name_for(c),
             "avatar_url":           avatar_map.get(getattr(c, "person_id", None)),
-            "country_iso":          _list_country(c)[0],
-            "flag_url":             _list_country(c)[1],
+            "country_iso":          country_map[str(c.id)][0],
+            "flag_url":             country_map[str(c.id)][1],
             "channel":              getattr(c, "channel", "whatsapp") or "whatsapp",
             "unread":               unread_map.get(str(c.id), 0),
             "orders_count":         max(person_orders.get(getattr(c, "person_id", None), 0),
@@ -282,14 +295,21 @@ async def get_thread(
     Every item in the returned list has a `type` field:
       - "message"      → normal chat bubble
       - "system_event" → inline timeline divider with event_kind + event_reason
+
+    Bounded to the most recent THREAD_LIMIT messages. The inbox renders every
+    message it is given into the DOM (no virtualisation), so an unbounded
+    thread meant a long-running customer could freeze the tab on click — the
+    browser building thousands of nodes in one synchronous pass. The cap is far
+    above a normal sales conversation, so nothing an agent works with is lost.
     """
-    # ── 1. Fetch messages ─────────────────────────────────────────────────────
+    # ── 1. Fetch messages (newest THREAD_LIMIT, returned oldest-first) ────────
     msg_result = await db.execute(
         select(Message)
         .where(Message.conversation_id == conv_id)
-        .order_by(Message.created_at.asc())
+        .order_by(Message.created_at.desc())
+        .limit(THREAD_LIMIT)
     )
-    msgs = msg_result.scalars().all()
+    msgs = list(reversed(msg_result.scalars().all()))
 
     # Batch-load agent names referenced by messages to avoid N+1
     msg_agent_ids = [m.agent_id for m in msgs if m.agent_id]
