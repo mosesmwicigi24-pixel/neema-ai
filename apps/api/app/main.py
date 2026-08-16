@@ -1,3 +1,4 @@
+import logging
 import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -409,6 +410,37 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ── Response timing: stop guessing which call is slow ────────────────────────
+# "The dashboard is slow" was unanswerable from outside: the box's OTHER sites
+# were healthy, /api/health was fast, and the endpoints that actually matter
+# (conversations, threads, orders) need a login to measure. So the API now
+# times itself and says so, two ways:
+#
+#   · Server-Timing: app;dur=<ms>  — every response. Any browser's Network tab
+#     shows it per request, which separates SERVER time from network and render
+#     time. Without this a slow phone and a slow query look identical.
+#   · a WARNING log for anything over SLOW_REQUEST_MS, so a regression is
+#     visible in `docker compose logs api` without anyone watching devtools.
+#
+# Cost is one perf_counter pair per request — nothing measurable.
+SLOW_REQUEST_MS = 750
+_slow_log = logging.getLogger("neema.slow")
+
+
+@app.middleware("http")
+async def _timing(request, call_next):
+    import time as _t
+    started = _t.perf_counter()
+    response = await call_next(request)
+    ms = (_t.perf_counter() - started) * 1000
+    response.headers["Server-Timing"] = f"app;dur={ms:.1f}"
+    if ms >= SLOW_REQUEST_MS:
+        # Query string omitted deliberately — it can carry customer handles.
+        _slow_log.warning("slow %s %s — %.0f ms", request.method,
+                          request.url.path, ms)
+    return response
 
 app.include_router(health.router,     prefix="/api",       tags=["Health"])
 app.include_router(auth.router,       prefix="/api/auth",  tags=["Auth"])
