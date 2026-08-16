@@ -5,6 +5,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Btn } from "@/components/ui/Btn";
 import { fmtCurrency, timeAgo, formatPhone, displayName } from "@/lib/utils";
+import { settingsApi } from "@/lib/api";
 import type { SharedViewProps } from "@/types";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -16,7 +17,8 @@ type LeadStage =
     | "proposal"
     | "negotiation"
     | "won"
-    | "lost";
+    | "lost"
+    | (string & {});  // operator-added stages (Settings-backed)
 
 interface Lead {
     id: string;
@@ -54,6 +56,20 @@ const STAGES: {
     { id: "lost",        label: "Lost",        color: "text-red-600",     bg: "bg-red-50",      border: "border-red-200",    dot: "bg-red-400"     },
 ];
 
+// Canonical columns plus the operator-added stages (Settings-backed; they sit
+// between Negotiating and Won). Rebuilt when LeadsView fetches the customs and
+// re-rendered by its state tick — module-level so LeadCard sees it too.
+let ALL_STAGES = STAGES;
+function rebuildAllStages(customs: string[]) {
+    const defs = customs.map((c) => ({
+        id: c as LeadStage, label: c,
+        color: "text-yellow-700", bg: "bg-yellow-50",
+        border: "border-yellow-200", dot: "bg-yellow-500",
+    }));
+    const won = STAGES.findIndex((s) => s.id === "won");
+    ALL_STAGES = [...STAGES.slice(0, won), ...defs, ...STAGES.slice(won)];
+}
+
 // Flat SVG channel icons matching Settings/CustomerSidebar
 const CH_SVG: Record<string, { bg: string; path: string }> = {
     whatsapp:  { bg:"#25D366", path:'<path fill="white" d="M12 2C6.48 2 2 6.48 2 12c0 1.82.48 3.54 1.32 5.04L2 22l5.08-1.3A9.94 9.94 0 0012 22c5.52 0 10-4.48 10-10S17.52 2 12 2zm0 18c-1.56 0-3.02-.44-4.26-1.2l-.3-.18-3.14.72.7-3.06-.2-.32A7.96 7.96 0 014 12c0-4.42 3.58-8 8-8s8 3.58 8 8-3.58 8-8 8zm4.24-5.78c-.24-.12-1.42-.7-1.64-.78-.22-.08-.38-.12-.54.12-.16.24-.62.78-.76.94-.14.16-.28.18-.52.06-.24-.12-1.02-.38-1.94-1.18a7.2 7.2 0 01-1.34-1.64c-.14-.24 0-.36.1-.5.1-.1.24-.28.36-.42.12-.16.16-.26.24-.44.08-.16.04-.3 0-.42-.06-.14-.54-1.32-.74-1.8-.2-.48-.4-.42-.54-.44h-.46c-.16 0-.42.06-.64.3-.22.24-.84.82-.84 2s.86 2.32.98 2.48c.12.16 1.7 2.6 4.12 3.64.58.26 1.02.4 1.38.52.58.18 1.1.16 1.52.1.46-.08 1.42-.58 1.62-1.14.2-.56.2-1.04.14-1.14-.08-.1-.22-.16-.46-.28z"/>'},
@@ -89,7 +105,7 @@ function LeadCard({
     onStageChange: (id: string, stage: LeadStage) => void;
     onSelect: (lead: Lead) => void;
 }) {
-    const stageIdx = STAGES.findIndex((s) => s.id === lead.lead_stage);
+    const stageIdx = ALL_STAGES.findIndex((s) => s.id === lead.lead_stage);
 
     return (
         <div
@@ -146,18 +162,18 @@ function LeadCard({
             <div className="hidden group-hover:flex gap-1 mt-2 pt-2" style={{borderTop:"1px solid #e6f3d8"}}>
                 {stageIdx > 0 && (
                     <button
-                        onClick={(e) => { e.stopPropagation(); onStageChange(lead.id, STAGES[stageIdx - 1].id); }}
+                        onClick={(e) => { e.stopPropagation(); onStageChange(lead.id, ALL_STAGES[stageIdx - 1].id); }}
                         className="flex-1 text-[9px] rounded py-1 transition-colors" style={{backgroundColor:"#f0f9ec",border:"1px solid #b5da8b",color:"#699a32"}}
                     >
-                        ← {STAGES[stageIdx - 1].label}
+                        ← {ALL_STAGES[stageIdx - 1].label}
                     </button>
                 )}
-                {stageIdx < STAGES.length - 1 && STAGES[stageIdx + 1].id !== "lost" && (
+                {stageIdx !== -1 && stageIdx < ALL_STAGES.length - 1 && ALL_STAGES[stageIdx + 1].id !== "lost" && (
                     <button
-                        onClick={(e) => { e.stopPropagation(); onStageChange(lead.id, STAGES[stageIdx + 1].id); }}
+                        onClick={(e) => { e.stopPropagation(); onStageChange(lead.id, ALL_STAGES[stageIdx + 1].id); }}
                         className="flex-1 text-[9px] rounded py-1 transition-colors" style={{backgroundColor:"#e6f3d8",border:"1px solid #b5da8b",color:"#427425"}}
                     >
-                        {STAGES[stageIdx + 1].label} →
+                        {ALL_STAGES[stageIdx + 1].label} →
                     </button>
                 )}
             </div>
@@ -201,7 +217,7 @@ function LeadModal({ lead, onClose, onSave }: {
                             Lead Stage
                         </label>
                         <div className="flex flex-wrap gap-1.5">
-                            {STAGES.map((s) => (
+                            {ALL_STAGES.map((s) => (
                                 <button
                                     key={s.id}
                                     onClick={() => setStage(s.id)}
@@ -288,6 +304,13 @@ interface LeadsViewProps extends SharedViewProps {
 export function LeadsView({ onToast, isMobile }: LeadsViewProps): React.ReactElement {
     const [leads, setLeads]           = useState<Lead[]>([]);
     const [loading, setLoading]       = useState(true);
+    // Tick to re-render once the operator's custom stages arrive.
+    const [, setStagesTick]           = useState(0);
+    useEffect(() => {
+        settingsApi.getPipelineStages()
+            .then((r) => { rebuildAllStages(r.stages); setStagesTick((t) => t + 1); })
+            .catch(() => {});
+    }, []);
     const [selected, setSelected]     = useState<Lead | null>(null);
     const [filterStage, setFilterStage] = useState<"all" | LeadStage>("all");
     const [search, setSearch]         = useState("");
@@ -392,7 +415,7 @@ export function LeadsView({ onToast, isMobile }: LeadsViewProps): React.ReactEle
                 >
                     All ({leads.length})
                 </button>
-                {STAGES.map((s) => {
+                {ALL_STAGES.map((s) => {
                     const count = leads.filter((l) => l.lead_stage === s.id).length;
                     return (
                         <button
@@ -418,8 +441,8 @@ export function LeadsView({ onToast, isMobile }: LeadsViewProps): React.ReactEle
                 </div>
             ) : (
                 <div className="flex-1 overflow-x-auto">
-                    <div className="flex h-full gap-3 p-4" style={{ minWidth: STAGES.length * 220 + "px" }}>
-                        {STAGES.map((stage) => {
+                    <div className="flex h-full gap-3 p-4" style={{ minWidth: ALL_STAGES.length * 220 + "px" }}>
+                        {ALL_STAGES.map((stage) => {
                             const stageLeads = filteredLeads.filter((l) => l.lead_stage === stage.id);
                             const stageValue = stageLeads.reduce((s, l) => s + l.total_spent, 0);
                             return (

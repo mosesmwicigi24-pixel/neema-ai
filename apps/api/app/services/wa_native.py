@@ -71,9 +71,23 @@ def _text_of(msg: dict) -> str:
         names = [((c.get("name") or {}).get("formatted_name") or "")
                  for c in (msg.get("contacts") or [])]
         return "👤 Shared contact: " + ", ".join(n for n in names if n)
-    # media types carry their text as a caption
-    media = msg.get(t) or {}
-    return (media.get("caption") or "").strip()
+    if t == "reaction":
+        emoji = ((msg.get("reaction") or {}).get("emoji") or "").strip()
+        return f"{emoji} (reacted to your message)".strip()
+    if t == "order":
+        items = (msg.get("order") or {}).get("product_items") or []
+        n = sum(int(i.get("quantity") or 1) for i in items)
+        return f"🛒 Sent a cart from the catalog: {n} item{'s' if n != 1 else ''}"
+    if t in ("image", "audio", "video", "document", "sticker"):
+        # media types carry their text as a caption
+        return ((msg.get(t) or {}).get("caption") or "").strip()
+    # Anything else (Meta's "unsupported", polls, future types): NEVER an empty
+    # row — an empty bubble reads as a bug and hides that the customer said
+    # something we couldn't ingest. Log the raw shape so we learn what these
+    # actually are (Meta's `errors` block carries the reason, e.g. 131051).
+    _log.info("wa unhandled message type %r keys=%s errors=%s",
+              t, sorted(msg.keys()), msg.get("errors"))
+    return f"⚠️ Sent a message we can't display here ({t or 'unknown'} type) — ask them to resend as text."
 
 
 def parse_events(payload: dict) -> list[dict]:
@@ -564,6 +578,11 @@ async def _ingest_guarded(event: dict, redis) -> None:
                 "wa_id": wa_id}))
         except Exception:
             pass
+
+    # A reaction is presence, not a question — show it in the thread but never
+    # wake the agent for it (a 👍 must not earn the customer a sales reply).
+    if event.get("type") == "reaction":
+        return
 
     # What the agent should respond to for THIS message.
     turn_media = None

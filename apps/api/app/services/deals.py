@@ -56,14 +56,35 @@ def detect_own_promise(reply: str) -> str | None:
     return m.group(0).strip() if m else None
 
 
-def detect_customer_promise(text: str) -> tuple[datetime, str] | None:
-    """(due_at_utc, the hint) when the CUSTOMER named a timeline. The follow-up
-    lands the morning after their moment — never before it."""
+def next_weekday_nbo(day_name: str, now_nbo: datetime) -> datetime:
+    """The NEXT occurrence of a named weekday, computed from the day of speech
+    (owner rule): "Sunday" said ON a Sunday means next week's Sunday, said on a
+    Friday means in two days. Never a past day, never today."""
+    days = (_WEEKDAYS.index(day_name.lower()) - now_nbo.weekday()) % 7 or 7
+    return now_nbo + timedelta(days=days)
+
+
+def detect_customer_promise(text: str, *, now: datetime | None = None) -> tuple[datetime, str] | None:
+    """(due_at_utc, the hint) when the CUSTOMER named a timeline.
+
+    Time maths (owner rule, 2026-08-13): a NAMED DAY is anchored to the day
+    they said it, and the check-in lands ON that day — in the EVENING (18:00
+    Nairobi), after the church service / committee / group they were waiting
+    on — matching what Neema tells them ("I'll check in with you on Sunday").
+    A weekday beats a vaguer hint in the same sentence: "I'll confirm after
+    church on Sunday" schedules for Sunday, not tomorrow. Un-dayed hints keep
+    the morning-after shape — never before their moment."""
     t = text or ""
     if not (_CUSTOMER_PROMISE_RE.search(t) and (m := _TIME_HINT_RE.search(t))):
         return None
     hint = m.group(1).lower()
-    now_nbo = datetime.now(timezone.utc) + timedelta(hours=3)
+    now_utc = now or datetime.now(timezone.utc)
+    now_nbo = now_utc + timedelta(hours=3)
+    # The most specific anchor wins: a weekday named ANYWHERE in the message
+    # overrides a leftmost vaguer hint ("after church on Sunday" → Sunday).
+    wd = re.search(r"\b(?<!last )(" + "|".join(_WEEKDAYS) + r")\b", t, re.IGNORECASE)
+    if wd and hint not in _WEEKDAYS:
+        hint = wd.group(1).lower()
 
     def _at(base, hour):
         return base.replace(hour=hour, minute=0, second=0, microsecond=0)
@@ -84,8 +105,9 @@ def detect_customer_promise(text: str) -> tuple[datetime, str] | None:
         days = (5 - now_nbo.weekday()) % 7 or 7        # next Saturday
         due_nbo = _at(now_nbo + timedelta(days=days), 10)
     elif hint in _WEEKDAYS:
-        days = (_WEEKDAYS.index(hint) - now_nbo.weekday()) % 7 or 7
-        due_nbo = _at(now_nbo + timedelta(days=days + 1), 10)   # morning AFTER their day
+        # ON their named day, evening — after the service/meeting they cited,
+        # and the same day Neema promises in her reply.
+        due_nbo = _at(next_weekday_nbo(hint, now_nbo), 18)
     else:                                              # tomorrow / kesho / after the meeting
         due_nbo = _at(now_nbo + timedelta(days=1), 10)
     return due_nbo - timedelta(hours=3), hint

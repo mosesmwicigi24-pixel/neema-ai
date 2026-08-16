@@ -16,13 +16,15 @@ import {
     displayName,
 } from "@/lib/utils";
 import type { Conversation, Order } from "@/types";
-import { whatsappApi, callsApi, askNeema, answerViaNeema } from "@/lib/api";
+import { whatsappApi, callsApi, askNeema, answerViaNeema, settingsApi } from "@/lib/api";
 import { useCall } from "@/lib/callContext";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Canonical stages plus operator-added labels (Settings → pipeline stages).
+// The `(string & {})` arm admits customs while keeping literal autocomplete.
 export type LeadStage =
     | "new"
     | "contacted"
@@ -30,7 +32,8 @@ export type LeadStage =
     | "proposal"
     | "negotiation"
     | "won"
-    | "lost";
+    | "lost"
+    | (string & {});
 
 export interface CustomerChannel {
     channel: "whatsapp" | "messenger" | "instagram" | "email" | "sms";
@@ -153,7 +156,7 @@ interface Props {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const STAGE_META: Record<
-    LeadStage,
+    string,
     {
         label: string;
         color: string;
@@ -293,7 +296,7 @@ const PIPE_LOST_TEXT = "#e08a8a"; // Lost label
 
 // Clean labels for the stepper (STAGE_META.won is "Won ✓" — drop the glyph
 // here since the node circle already shows a checkmark).
-const PIPE_LABEL: Record<LeadStage, string> = {
+const PIPE_LABEL: Record<string, string> = {
     new: "New",
     contacted: "Contacted",
     qualified: "Qualified",
@@ -302,17 +305,23 @@ const PIPE_LABEL: Record<LeadStage, string> = {
     won: "Won",
     lost: "Lost",
 };
+const stageLabel = (s: LeadStage): string =>
+    PIPE_LABEL[s] ?? (s.charAt(0).toUpperCase() + s.slice(1));
+
+// Operator-added stages sit between Proposal and Won on every pipeline.
+// Module-level cache so each sidebar open doesn't refetch.
+let customStagesCache: string[] | null = null;
 
 type StepState = "active" | "done" | "future";
-function stepState(stage: LeadStage, active: LeadStage): StepState {
+function stepState(stage: LeadStage, active: LeadStage, forward: LeadStage[]): StepState {
     if (stage === active) return "active";
     if (stage === "lost") return "future"; // Lost is only ever active when current
     if (active === "lost") {
         // Customer is lost: everything up to Proposal is done, Won is skipped.
         return stage === "won" ? "future" : "done";
     }
-    const a = PIPELINE_FORWARD.indexOf(active);
-    const s = PIPELINE_FORWARD.indexOf(stage);
+    const a = forward.indexOf(active);
+    const s = forward.indexOf(stage);
     return s > -1 && a > -1 && s < a ? "done" : "future";
 }
 
@@ -695,6 +704,32 @@ export function CustomerSidebar({
     // Made-to-order enquiry pending on this conversation (measurement form).
     const [enquiry, setEnquiry] = useState<ProductionEnquiry | null>(null);
     const [pushing, setPushing] = useState(false);
+    // Operator-added pipeline stages (global, Settings-backed).
+    const [customStages, setCustomStages] = useState<string[]>(customStagesCache ?? []);
+    const [stageEditorOpen, setStageEditorOpen] = useState(false);
+    const [newStage, setNewStage] = useState("");
+    useEffect(() => {
+        if (customStagesCache !== null) return;
+        settingsApi.getPipelineStages()
+            .then((r) => { customStagesCache = r.stages; setCustomStages(r.stages); })
+            .catch(() => { customStagesCache = []; });
+    }, []);
+    const saveCustomStages = async (stages: string[]) => {
+        try {
+            const r = await settingsApi.putPipelineStages(stages);
+            customStagesCache = r.stages;
+            setCustomStages(r.stages);
+        } catch (e: any) {
+            onToast?.(String(e?.message || "").includes("403")
+                ? "Only an admin can change pipeline stages."
+                : "Couldn't save pipeline stages.", "error");
+        }
+    };
+    // Customs render between Proposal and Won, and count toward forward progress.
+    const pipelineStages: LeadStage[] =
+        ["new", "contacted", "qualified", "proposal", ...customStages, "won", "lost"];
+    const pipelineForward: LeadStage[] =
+        ["new", "contacted", "qualified", "proposal", "negotiation", ...customStages, "won"];
 
     // Customer key: wa_id for WhatsApp, else the channel-native handle (PSID /
     // IGSID). WhatsApp's wa_id IS its external_id, so this is wa_id there too.
@@ -1431,10 +1466,11 @@ export function CustomerSidebar({
                                 </div>
                             )}
                             <div className="flex items-center relative pb-5 px-0.5">
-                                {PIPELINE_STAGES.flatMap((stage, i) => {
+                                {pipelineStages.flatMap((stage, i) => {
                                     const state = stepState(
                                         stage,
                                         profile.lead_stage,
+                                        pipelineForward,
                                     );
                                     const isLost = stage === "lost";
                                     const reached =
@@ -1519,7 +1555,7 @@ export function CustomerSidebar({
                                             onClick={() =>
                                                 patch({ lead_stage: stage })
                                             }
-                                            title={PIPE_LABEL[stage]}
+                                            title={stageLabel(stage)}
                                             className="relative flex-shrink-0"
                                         >
                                             <span
@@ -1565,13 +1601,72 @@ export function CustomerSidebar({
                                                 }`}
                                                 style={{ color: labelColor }}
                                             >
-                                                {PIPE_LABEL[stage]}
+                                                {stageLabel(stage)}
                                             </span>
                                         </button>,
                                     );
                                     return els;
                                 })}
                             </div>
+                            {/* Operator-added stage labels — global, admin-saved */}
+                            {stageEditorOpen ? (
+                                <div className="mt-1.5 space-y-1.5">
+                                    {customStages.length > 0 && (
+                                        <div className="flex flex-wrap gap-1">
+                                            {customStages.map((s) => (
+                                                <span key={s}
+                                                    className="inline-flex items-center gap-1 text-[10px] rounded px-1.5 py-0.5 border"
+                                                    style={{ backgroundColor: "#fdf8ec", borderColor: "#e3cf9b", color: "#8a6d1f" }}>
+                                                    {s}
+                                                    <button
+                                                        onClick={() => saveCustomStages(customStages.filter((x) => x !== s))}
+                                                        className="text-stone-400 hover:text-red-500 ml-0.5">
+                                                        ×
+                                                    </button>
+                                                </span>
+                                            ))}
+                                        </div>
+                                    )}
+                                    <div className="flex gap-1">
+                                        <input
+                                            value={newStage}
+                                            onChange={(e) => setNewStage(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === "Enter" && newStage.trim()) {
+                                                    saveCustomStages([...customStages, newStage.trim()]);
+                                                    setNewStage("");
+                                                }
+                                            }}
+                                            maxLength={18}
+                                            placeholder="Stage label (e.g. Sampling)…"
+                                            className="flex-1 text-[10px] rounded border border-stone-200 px-1.5 py-1 outline-none focus:border-amber-400"
+                                        />
+                                        <button
+                                            onClick={() => {
+                                                if (newStage.trim()) {
+                                                    saveCustomStages([...customStages, newStage.trim()]);
+                                                    setNewStage("");
+                                                }
+                                            }}
+                                            className="text-[10px] rounded px-2 py-1 font-semibold"
+                                            style={{ backgroundColor: "#a97c14", color: "#fff" }}>
+                                            Add
+                                        </button>
+                                        <button
+                                            onClick={() => setStageEditorOpen(false)}
+                                            className="text-[10px] rounded px-1.5 py-1 text-stone-400 hover:text-stone-600">
+                                            Done
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <button
+                                    onClick={() => setStageEditorOpen(true)}
+                                    className="mt-1 text-[10px] font-semibold hover:underline"
+                                    style={{ color: "#c89b3c" }}>
+                                    + Add stage
+                                </button>
+                            )}
                         </Section>
 
                         <Section title="Tags">

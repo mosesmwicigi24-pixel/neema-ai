@@ -39,6 +39,9 @@ function DirIcon({ dir, color }: { dir: "in" | "out" | "back"; color: string }) 
 
 interface CallsViewProps extends SharedViewProps {
     onOpenConversation?: (key: string) => void;
+    /** Deep-link (e.g. from the hub's order page): focus this customer's calls. */
+    focusWaId?: string | null;
+    onConsumeFocus?: () => void;
 }
 
 // The expandable transcript + AI summary panel under a call row. Lazily fetches
@@ -121,7 +124,7 @@ function CallTranscript({ callId }: { callId: string }): React.ReactElement {
     );
 }
 
-export function CallsView({ isMobile, onOpenConversation, onToast }: CallsViewProps): React.ReactElement {
+export function CallsView({ isMobile, onOpenConversation, onToast, focusWaId, onConsumeFocus }: CallsViewProps): React.ReactElement {
     const ws = useWs();
     const [calls, setCalls] = useState<ApiCall[] | null>(null);
     const [openId, setOpenId] = useState<string | null>(null);
@@ -148,6 +151,20 @@ export function CallsView({ isMobile, onOpenConversation, onToast }: CallsViewPr
         ws.on("event", on);
         return () => ws.off("event", on);
     }, [ws, load]);
+
+    // Deep-link focus: once the log has loaded, open the caller panel for the
+    // customer the link named. Waits for `calls` so a cold navigation from the
+    // hub doesn't consume the key against an empty list.
+    useEffect(() => {
+        if (!focusWaId || calls === null) return;
+        const key = focusWaId.replace(/^\+/, "");
+        const match = [...calls]
+            .sort((a, b) => (b.started_at ?? "").localeCompare(a.started_at ?? ""))
+            .find((c) => c.wa_id === key);
+        if (match) setSelected(match);
+        else onToast?.("No calls with this customer yet — showing the full call log.", "warning");
+        onConsumeFocus?.();
+    }, [focusWaId, calls, onConsumeFocus, onToast]);
 
     const missed = (calls ?? []).filter((c) => c.status === "missed").length;
     const shownCalls = missedOnly ? (calls ?? []).filter((c) => c.status === "missed") : calls;

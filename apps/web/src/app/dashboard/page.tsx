@@ -144,6 +144,9 @@ export default function NeemaDashboard(): React.ReactElement {
     // WhatsApp popup). Holds a wa_id / external_id; ConversationsView consumes it.
     const [openConvKey, setOpenConvKey] = useState<string | null>(null);
     const openConversationFor = (key: string) => { setOpenConvKey(key); setView("conversations"); };
+    // Cross-view request to focus the Calls console on one customer's history
+    // (deep-linked from the hub's order page). Holds a wa_id; CallsView consumes it.
+    const [callsFocusKey, setCallsFocusKey] = useState<string | null>(null);
     const [messages, setMessages] = useState<MessagesMap>({});
     const [toast, setToast] = useState<ToastState | null>(null);
     // ── Sidebar expanded by default (Figma) — collapsible to an icon rail ──────
@@ -151,6 +154,38 @@ export default function NeemaDashboard(): React.ReactElement {
     const [sessionExpired, setSessionExpired] = useState(false);
     const [localConversations, setLocalConversations] = useState<Conversation[]>([]);
     const isMobile = useIsMobile();
+
+    // ── Deep links (?open=<wa_id> opens the chat; ?view=calls&caller=<wa_id>
+    // focuses the call console) — how the hub's order page jumps straight to a
+    // customer inside Neema. Stashed on mount so a login round-trip doesn't
+    // lose them (the /login redirect drops the query string), consumed once
+    // authenticated, then stripped so a refresh doesn't replay them. ──────────
+    useEffect(() => {
+        const qs = window.location.search;
+        if (qs.length > 1) sessionStorage.setItem("neema:deeplink", qs);
+    }, []);
+    useEffect(() => {
+        if (authStatus !== "authenticated") return;
+        const raw = window.location.search.length > 1
+            ? window.location.search
+            : sessionStorage.getItem("neema:deeplink") ?? "";
+        sessionStorage.removeItem("neema:deeplink");
+        if (!raw) return;
+        const params = new URLSearchParams(raw);
+        const open = params.get("open");
+        const viewParam = params.get("view") as ViewId | null;
+        const caller = params.get("caller");
+        const views: ViewId[] = ["conversations", "calls", "orders", "deals", "leads",
+            "reports", "agents", "catalog", "overview", "profile", "settings"];
+        if (open) {
+            openConversationFor(open);
+        } else if (viewParam && views.includes(viewParam)) {
+            setView(viewParam);
+            if (viewParam === "calls" && caller) setCallsFocusKey(caller);
+        }
+        window.history.replaceState(null, "", window.location.pathname);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [authStatus]);
 
     // ── Notification state ────────────────────────────────────────────────────
     const [notifications, setNotifications] = useState<AgentNotification[]>([]);
@@ -287,29 +322,35 @@ export default function NeemaDashboard(): React.ReactElement {
     // The WebSocket is the primary transport (notification handler below
     // refetches on relevant events); these polls are the missed-event fallback,
     // so they run at a slow cadence.
+    // cacheKey => stale-while-revalidate: a refresh paints instantly from the
+    // last snapshot while the real fetch replaces it in the background.
     const { data: rawConversations, refetch: refetchConversations } =
         usePolling(
             () => hasToken ? conversationsApi.list() : Promise.resolve(null),
             60000,
             [hasToken],
+            "conversations",
         );
 
     const { data: rawAgents, refetch: refetchAgents } = usePolling(
         () => (hasToken ? agentsApi.list() : Promise.resolve(null)),
         180000,
         [hasToken],
+        "agents",
     );
 
     const { data: rawCatalog, refetch: refetchCatalog } = usePolling(
         () => (hasToken ? catalogApi.list() : Promise.resolve(null)),
         300000,
         [hasToken],
+        "catalog",
     );
 
     const { data: rawOrders, refetch: refetchOrders } = usePolling(
         () => (hasToken ? ordersApi.list() : Promise.resolve(null)),
         90000,
         [hasToken],
+        "orders",
     );
 
     // ── Map API data to UI types ──────────────────────────────────────────────
@@ -458,7 +499,10 @@ export default function NeemaDashboard(): React.ReactElement {
     const humanConvs    = conversations.filter((c) => c.intercept_mode === "human").length;
     const pendingOrders = orders.filter((o) => o.status === "pending").length;
 
-    if (authStatus === "loading") return <LoadingScreen />;
+    // Only block on auth when there's nothing to paint — with a snapshot the
+    // dashboard renders instantly and the session resolves in the background
+    // (an expired session still redirects to /login the moment it's known).
+    if (authStatus === "loading" && conversations.length === 0) return <LoadingScreen />;
 
     // ── Nav ───────────────────────────────────────────────────────────────────
     const baseNavItems: NavItem[] = [
@@ -550,6 +594,7 @@ export default function NeemaDashboard(): React.ReactElement {
                 refetchConversations={refetchConversations}
                 openConvKey={openConvKey}
                 onConsumeOpenConvKey={() => setOpenConvKey(null)}
+                freshLoaded={rawConversations !== null}
                 {...viewProps}
             />
         ),
@@ -561,7 +606,14 @@ export default function NeemaDashboard(): React.ReactElement {
                 {...viewProps}
             />
         ),
-        calls: <CallsView onOpenConversation={openConversationFor} {...viewProps} />,
+        calls: (
+            <CallsView
+                onOpenConversation={openConversationFor}
+                focusWaId={callsFocusKey}
+                onConsumeFocus={() => setCallsFocusKey(null)}
+                {...viewProps}
+            />
+        ),
         deals: <DealsView onOpenConversation={openConversationFor} {...viewProps} />,
         leads: <LeadsView {...viewProps} />,
         reports: (

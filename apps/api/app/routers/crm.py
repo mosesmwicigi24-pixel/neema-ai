@@ -977,6 +977,60 @@ async def veto_action(
     return {"ok": True}
 
 
+# ── Custom pipeline stages ────────────────────────────────────────────────────
+# Operator-added stage labels that render between Proposal and Won in every
+# pipeline view. The canonical stages stay fixed (the AI classifier and lead
+# signals reason about them); customs are manual-only waypoints.
+
+PIPELINE_CANONICAL = {"new", "contacted", "qualified", "proposal",
+                      "negotiation", "won", "lost"}
+PIPELINE_CUSTOM_MAX = 4
+PIPELINE_LABEL_MAX = 18
+
+
+@router.get("/settings/pipeline-stages")
+async def get_pipeline_stages(
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    import json as _json
+    from app.services.app_settings import get_value
+    raw = await get_value(db, "pipeline_custom_stages")
+    try:
+        stages = _json.loads(raw) if raw else []
+    except Exception:
+        stages = []
+    return {"stages": [s for s in stages if isinstance(s, str) and s.strip()]}
+
+
+@router.put("/settings/pipeline-stages")
+async def put_pipeline_stages(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Replace the custom stage list. Admin-only — it reshapes every pipeline."""
+    import json as _json
+    if not (getattr(agent, "is_superuser", False) or str(agent.role) in ("admin", "AgentRole.admin")):
+        raise HTTPException(status_code=403, detail="Admin only")
+    from app.services.app_settings import set_value
+    raw_stages = body.get("stages")
+    if not isinstance(raw_stages, list):
+        raise HTTPException(status_code=422, detail="stages must be a list")
+    cleaned: list[str] = []
+    for s in raw_stages:
+        label = str(s or "").strip()[:PIPELINE_LABEL_MAX]
+        slug = label.lower()
+        if not label or slug in PIPELINE_CANONICAL or slug in [c.lower() for c in cleaned]:
+            continue
+        cleaned.append(label)
+    if len(cleaned) > PIPELINE_CUSTOM_MAX:
+        raise HTTPException(status_code=422,
+                            detail=f"At most {PIPELINE_CUSTOM_MAX} custom stages")
+    await set_value(db, "pipeline_custom_stages", _json.dumps(cleaned))
+    return {"ok": True, "stages": cleaned}
+
+
 # ── Standing orders (docs/AGENTIC_PARTNER_PLAN.md, Phase E) ───────────────────
 
 @router.get("/settings/directives")

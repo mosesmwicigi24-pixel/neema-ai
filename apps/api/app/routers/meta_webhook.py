@@ -251,6 +251,10 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
             # matches the resolved media_type (so "[fallback]" becomes "[image]").
             if media_type and (not text or text.startswith("[")):
                 text = f"[{media_type}]"
+            # Never persist an empty row — an empty bubble reads as a bug and
+            # hides that the customer said something we couldn't ingest.
+            if not text and not media_type:
+                text = "⚠️ Sent a message we can't display here — ask them to resend as text."
 
             # Enrich name + photo from Meta's User Profile API, once per contact
             # (redis-gated) so a phone-less DM becomes a named, pictured lead. Best

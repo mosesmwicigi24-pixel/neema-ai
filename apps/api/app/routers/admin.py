@@ -457,6 +457,152 @@ async def get_thread(
     return thread
 
 
+@router.get("/conversations/{conv_id}/activity")
+async def get_conversation_activity(
+    conv_id: str,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """The customer's journey, person-scoped — everything the system did and
+    observed for this human across channels: pickups/escalations, the check-ins
+    Neema planned and sent, deals and detected promises, orders, and calls.
+    The in-thread system_event dividers show a slice of this; this endpoint is
+    the full ledger the Activity Log panel renders."""
+    from app.models.agent_action import AgentAction
+    from app.models.deal import Deal
+    from app.models.order_event import OrderEvent
+
+    conv = (await db.execute(
+        select(Conversation).where(Conversation.id == conv_id))).scalar_one_or_none()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    person_id = getattr(conv, "person_id", None)
+    wa_id = conv.wa_id
+
+    # Sibling conversations of the same person — their intercepts and actions
+    # belong to this journey too (the cross-channel "one human" principle).
+    conv_ids = [conv.id]
+    if person_id:
+        sib = await db.execute(select(Conversation.id).where(
+            Conversation.person_id == person_id))
+        conv_ids = list({*conv_ids, *[r[0] for r in sib.all()]})
+
+    events: list[dict] = []
+
+    # ── Pickups / escalations / releases ──────────────────────────────────────
+    ACTION_LABEL = {
+        InterceptAction.escalated: "Escalated — needs human",
+        InterceptAction.flag:      "Flagged: needs attention",
+        InterceptAction.intercept: "Picked up by agent",
+        InterceptAction.release:   "Released to AI",
+        InterceptAction.transfer:  "Transferred",
+    }
+    icpts = (await db.execute(
+        select(Intercept).where(Intercept.conversation_id.in_(conv_ids))
+        .order_by(Intercept.created_at.desc()).limit(40))).scalars().all()
+    agent_ids = [e.agent_id for e in icpts if e.agent_id]
+    name_map: dict[str, str] = {}
+    if agent_ids:
+        a_res = await db.execute(select(Agent).where(Agent.id.in_(agent_ids)))
+        name_map = {str(a.id): a.name for a in a_res.scalars().all()}
+    for e in icpts:
+        who = name_map.get(str(e.agent_id)) if e.agent_id else None
+        label = ACTION_LABEL.get(e.action, str(e.action))
+        if e.action == InterceptAction.intercept and who:
+            label = f"Picked up by {who}"
+        elif e.action == InterceptAction.release and who:
+            label = f"Released to AI by {who}"
+        events.append({
+            "id": f"icpt-{e.id}", "kind": e.action.value, "label": label,
+            "detail": e.note, "at": e.created_at.isoformat() if e.created_at else None,
+        })
+
+    # ── Check-ins Neema planned / sent (the initiative engine) ────────────────
+    acts = (await db.execute(
+        select(AgentAction).where(AgentAction.conversation_id.in_(conv_ids))
+        .order_by(AgentAction.created_at.desc()).limit(40))).scalars().all()
+    ACT_LABEL = {"planned": "Check-in planned", "sent": "Check-in sent",
+                 "vetoed": "Check-in vetoed", "needs_approval": "Check-in awaiting approval",
+                 "failed": "Check-in failed"}
+    for a in acts:
+        due = a.due_at.strftime("%a %d %b, %H:%M") if a.due_at else None
+        events.append({
+            "id": f"act-{a.id}",
+            "kind": f"checkin_{a.status}",
+            "label": ACT_LABEL.get(a.status, f"Check-in {a.status}")
+                     + (f" — {a.kind.replace('_', ' ')}" if a.kind and a.kind != "follow_up" else ""),
+            "detail": (a.reason or "") + (f" (due {due} UTC)" if due and a.status == "planned" else ""),
+            "at": (a.updated_at or a.created_at).isoformat() if (a.updated_at or a.created_at) else None,
+        })
+
+    # ── Deals ─────────────────────────────────────────────────────────────────
+    deal_q = select(Deal).where(Deal.conversation_id.in_(conv_ids))
+    if person_id:
+        deal_q = select(Deal).where(
+            (Deal.conversation_id.in_(conv_ids)) | (Deal.person_id == person_id))
+    deals = (await db.execute(deal_q.order_by(Deal.created_at.desc()).limit(20))
+             ).scalars().all()
+    for d in deals:
+        nxt = d.next_action or {}
+        events.append({
+            "id": f"deal-{d.id}", "kind": "deal",
+            "label": f"Deal {d.status}" + (f" — {d.title}" if d.title else ""),
+            "detail": (f"stage {d.stage}" if d.stage else None),
+            "at": d.created_at.isoformat() if d.created_at else None,
+        })
+        if isinstance(nxt, dict) and nxt.get("note"):
+            kind_label = ("Customer promised" if nxt.get("kind") == "customer_promise"
+                          else "Neema owes a reply")
+            events.append({
+                "id": f"deal-next-{d.id}", "kind": "promise",
+                "label": kind_label,
+                "detail": nxt.get("note"),
+                "at": (d.updated_at or d.created_at).isoformat()
+                      if (d.updated_at or d.created_at) else None,
+            })
+
+    # ── Orders ────────────────────────────────────────────────────────────────
+    if person_id or wa_id:
+        o_q = select(OrderEvent)
+        o_q = o_q.where((OrderEvent.person_id == person_id) if person_id
+                        else (OrderEvent.wa_id == wa_id))
+        orders = (await db.execute(o_q.order_by(OrderEvent.created_at.desc())
+                                   .limit(20))).scalars().all()
+        for o in orders:
+            n_items = len(o.items or [])
+            events.append({
+                "id": f"ord-{o.id}", "kind": "order",
+                "label": f"Order {o.status}"
+                         + (f" · {o.payment_status}" if o.payment_status else ""),
+                "detail": f"{n_items} item{'s' if n_items != 1 else ''} — "
+                          f"{o.currency} {float(o.subtotal or 0):,.0f}",
+                "at": o.created_at.isoformat() if o.created_at else None,
+            })
+
+    # ── Calls ─────────────────────────────────────────────────────────────────
+    if person_id or wa_id:
+        c_q = select(Call)
+        c_q = c_q.where((Call.person_id == person_id) if person_id
+                        else (Call.wa_id == wa_id))
+        calls = (await db.execute(c_q.order_by(Call.started_at.desc())
+                                  .limit(20))).scalars().all()
+        for c in calls:
+            dur = None
+            if c.answered_at and c.ended_at:
+                secs = int((c.ended_at - c.answered_at).total_seconds())
+                dur = f"{secs // 60}:{secs % 60:02d}"
+            events.append({
+                "id": f"call-{c.id}", "kind": "call",
+                "label": f"Call {c.status}" + (f" · {dur}" if dur else ""),
+                "detail": name_map.get(str(c.agent_id)) if c.agent_id else None,
+                "at": c.started_at.isoformat() if c.started_at else None,
+            })
+
+    events.sort(key=lambda x: x["at"] or "", reverse=True)
+    return {"events": events[:80]}
+
+
 @router.get("/conversations/{conv_id}/latest-draft")
 async def get_latest_draft(
     conv_id: str,
@@ -1336,7 +1482,7 @@ async def overview_stats(
                 (ch,
                  sum(1 for c in convs if getattr(c, "channel", None) == ch),
                  sum(1 for c in convs if getattr(c, "channel", None) == ch and c.status == "open"))
-                for ch in ("whatsapp", "messenger", "instagram", "email", "sms")
+                for ch in ("whatsapp", "messenger", "instagram", "tiktok", "email", "sms")
             )
             if cnt > 0
         ],

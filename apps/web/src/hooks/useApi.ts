@@ -13,11 +13,40 @@ export interface UseApiResult<T> {
     refetch: () => void;
 }
 
+// Stale-while-revalidate snapshot store: the last good payload per cacheKey,
+// so a refresh paints the dashboard instantly from local data while the real
+// fetch happens in the background. Arrays are trimmed so a huge inbox can't
+// blow the localStorage quota.
+const SNAP_PREFIX = "neema:snap:";
+const SNAP_MAX_ROWS = 600;
+
+function readSnapshot<T>(cacheKey?: string): T | null {
+    if (!cacheKey || typeof window === "undefined") return null;
+    try {
+        const raw = localStorage.getItem(SNAP_PREFIX + cacheKey);
+        return raw ? (JSON.parse(raw) as T) : null;
+    } catch {
+        return null;
+    }
+}
+
+function writeSnapshot(cacheKey: string, value: unknown): void {
+    try {
+        const v = Array.isArray(value) && value.length > SNAP_MAX_ROWS
+            ? value.slice(0, SNAP_MAX_ROWS)
+            : value;
+        localStorage.setItem(SNAP_PREFIX + cacheKey, JSON.stringify(v));
+    } catch {
+        /* quota / private mode — snapshotting is best-effort */
+    }
+}
+
 export function useApi<T>(
     fetcher: () => Promise<T>,
     deps: unknown[] = [],
+    cacheKey?: string,
 ): UseApiResult<T> {
-    const [data, setData] = useState<T | null>(null);
+    const [data, setData] = useState<T | null>(() => readSnapshot<T>(cacheKey));
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const mountedRef = useRef(true);
@@ -33,11 +62,15 @@ export function useApi<T>(
         try {
             const result = await fetcher();
             if (mountedRef.current) {
+                // A null result means "not ready yet" (e.g. no auth token) —
+                // never let it clobber a hydrated snapshot.
+                if (result === null) return;
                 let fp: string | null = null;
                 try { fp = JSON.stringify(result); } catch { /* non-serializable */ }
                 if (fp === null || fp !== fingerprintRef.current) {
                     fingerprintRef.current = fp;
                     setData(result);
+                    if (cacheKey) writeSnapshot(cacheKey, result);
                 }
                 hasDataRef.current = true;
                 setError(null);
@@ -66,8 +99,9 @@ export function usePolling<T>(
     fetcher: () => Promise<T>,
     intervalMs = 8000,
     deps: unknown[] = [],
+    cacheKey?: string,
 ): UseApiResult<T> {
-    const result = useApi<T>(fetcher, deps);
+    const result = useApi<T>(fetcher, deps, cacheKey);
 
     useEffect(() => {
         // Polls are the WebSocket's *fallback*, not the primary transport — so

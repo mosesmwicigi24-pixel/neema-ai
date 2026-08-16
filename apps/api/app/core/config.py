@@ -64,6 +64,34 @@ class Settings(BaseSettings):
     # endpoint 503s when empty, so it is off by default.
     analytics_api_key: str = ""
 
+    # ── ManyChat relay (TikTok DMs → routers/manychat.py) ────────────────────
+    # Shared secret ManyChat's External Request sends as X-ManyChat-Key. INERT
+    # until set — the endpoint 503s when empty.
+    manychat_webhook_key: str = ""
+    # Hard ceiling on one agent turn: ManyChat's External Request times out at
+    # ~10s, after which the flow falls into its empty-reply fallback. We answer
+    # inside this budget or return a short resend line instead.
+    manychat_reply_budget_s: float = 9.0
+
+    # ── Native TikTok (Business Messaging API — services/tiktok_native.py) ───
+    # The developer app registered at business-api.tiktok.com. INERT until both
+    # are set; once the owner OAuths (/api/tiktok/oauth/connect) the channel
+    # goes fully native and the ManyChat relay becomes the fallback.
+    tiktok_app_id: str = ""
+    tiktok_app_secret: str = ""
+    # Must match the app portal's redirect URL character-for-character. TikTok
+    # REQUIRES a trailing slash, https, no port, no query, no anchor — a URL
+    # without the trailing "/" is rejected at registration.
+    tiktok_redirect_uri: str = "https://neema.bethanyhouse.co.ke/api/tiktok/oauth/callback/"
+    # The "TikTok account holder authorization URL" TikTok GENERATES for the app
+    # once the redirect URL is activated (portal → My Apps). This is the whole
+    # connect experience — the same link ManyChat's "Connect" button opens for
+    # their approved app. We append &state=… and send the owner there. Empty →
+    # fall back to constructing the v2/auth/authorize URL ourselves.
+    tiktok_authorize_url: str = ""
+    # Owner-only shared secret gating the /oauth/connect door (503s until set).
+    tiktok_connect_key: str = ""
+
     # ── Hub event agency (docs/AGENTIC_PARTNER_PLAN.md, Phase A) ─────────────
     # Shared secret the hub signs order-lifecycle events with (X-Hub-Events-
     # Signature). Empty = the whole phase is inert (endpoint 503s, no sends).

@@ -12,7 +12,7 @@ import { Toggle } from "@/components/ui/Layout";
 import { timeAgo, formatPhone, displayName, countryName } from "@/lib/utils";
 import { formatWa } from "@/lib/waText";
 import { CHANNEL_CONFIG, ALL_CHANNELS } from "@/lib/channels";
-import { conversationsApi, profileApi } from "@/lib/api";
+import { conversationsApi, profileApi, type ApiActivityEvent } from "@/lib/api";
 import { useConversationEvents, buildSystemEventFromWs } from "@/lib/websocket";
 import { CustomerSidebar } from "@/components/ui/CustomerSidebar";
 import type {
@@ -469,7 +469,8 @@ function WindowStrip({ win }: {
             ? `Reply window open — ${left(win.expires_at)} left`
             : win.mode === "human_agent"
               ? `24h window closed — you can still reply as a human agent for ${left(win.human_agent_until)}. Neema cannot.`
-              : "Messaging window closed — only an approved template can reach them now.";
+              : win.reason ||
+                "Messaging window closed — only an approved template can reach them now.";
 
     return (
         <div className="mb-2 px-3 py-1.5 rounded-lg flex items-center gap-2 text-[11px] font-medium"
@@ -623,6 +624,9 @@ interface ConversationsViewProps extends SharedViewProps {
     // A wa_id/external_id another view (Calls) asked us to open in-app.
     openConvKey?: string | null;
     onConsumeOpenConvKey?: () => void;
+    // True once the conversations list is fresh from the server (not a cached
+    // snapshot) — gates the "no conversation yet" verdict on deep links.
+    freshLoaded?: boolean;
 }
 
 const CHANNEL_TABS: { id: "all" | Channel; label: string; short: string }[] = [
@@ -655,13 +659,14 @@ const CH_SHORT: Record<Channel, string> = {
     messenger: "MSG",
     facebook: "FB",
     instagram: "IG",
+    tiktok: "TT",
     email: "Email",
     sms: "SMS",
 };
 
 // Chip order for a unified (multi-channel) customer row — WhatsApp first (it can
 // transact), then the social channels.
-const CHAN_ORDER: Channel[] = ["whatsapp", "messenger", "facebook", "instagram", "email", "sms"];
+const CHAN_ORDER: Channel[] = ["whatsapp", "messenger", "facebook", "instagram", "tiktok", "email", "sms"];
 const SparkleIcon = () => (
     <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
         <path d="M12 2l1.9 5.6L19.5 9l-5.6 1.9L12 16.5 10.1 10.9 4.5 9l5.6-1.4L12 2zm6.5 11l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9.9-2.6z" />
@@ -680,6 +685,7 @@ export function ConversationsView({
     refetchConversations,
     openConvKey,
     onConsumeOpenConvKey,
+    freshLoaded,
 }: ConversationsViewProps): React.ReactElement {
     const [activeConvId, setActiveConvId] = useState<string>("");
     const [mobilePanel, setMobilePanel] = useState<MobilePanel>("list");
@@ -731,6 +737,9 @@ export function ConversationsView({
     } | null>(null);
     const [crmOpen, setCrmOpen] = useState<boolean>(true);
     const [activityLogOpen, setActivityLogOpen] = useState<boolean>(false);
+    // The person-scoped journey ledger (pickups, check-ins, deals, orders,
+    // calls) — fetched per thread, refreshed while the panel is open.
+    const [activityEvents, setActivityEvents] = useState<ApiActivityEvent[]>([]);
     const [clearConfirm, setClearConfirm] = useState(false);
     const [clearing, setClearing] = useState(false);
     const [mobileCrmOpen, setMobileCrmOpen] = useState(false);
@@ -873,15 +882,24 @@ export function ConversationsView({
     // Match by wa_id/external_id, preferring a WhatsApp thread for a caller.
     useEffect(() => {
         if (!openConvKey) return;
+        // A deep link (hub → Neema) can land before the inbox has loaded —
+        // don't consume the key against an empty list.
+        if (conversations.length === 0) return;
         const key = openConvKey.replace(/^\+/, "");
         const matches = conversations.filter(
             (c) => c.wa_id === key || c.external_id === key || c.wa_id === openConvKey,
         );
         const conv = matches.find((c) => c.channel === "whatsapp") ?? matches[0];
-        if (conv) setActiveConvId(conv.id);
+        // Full open semantics (messages load, unread clears) — selecting the id
+        // alone leaves the thread pane empty until the 20s poll catches up.
+        if (conv) handleSelectConv(conv.id);
+        // A cached snapshot may simply not contain a brand-new conversation —
+        // don't declare "no conversation" until the fresh list has arrived.
+        else if (!freshLoaded) return;
         else onToast?.("No conversation yet — they haven't messaged. Use Invite to WhatsApp.", "warning");
         onConsumeOpenConvKey?.();
-    }, [openConvKey, conversations, onConsumeOpenConvKey, onToast]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [openConvKey, conversations, freshLoaded, onConsumeOpenConvKey, onToast]);
 
     const openIdentityConversation = (channel: string, externalId: string) => {
         const conv = conversations.find(
@@ -889,7 +907,7 @@ export function ConversationsView({
                 c.channel === channel &&
                 (c.external_id === externalId || c.wa_id === externalId),
         );
-        if (conv) setActiveConvId(conv.id);
+        if (conv) handleSelectConv(conv.id);
         else onToast?.("No conversation on that channel yet.", "warning");
     };
 
@@ -938,6 +956,25 @@ export function ConversationsView({
         }, 20000);
         return () => clearInterval(timer);
     }, [activeConvId, loadMessages]);
+
+    // ── Journey ledger for the Activity Log panel ─────────────────────────────
+    useEffect(() => {
+        if (!activeConvId) { setActivityEvents([]); return; }
+        let stale = false;
+        const load = () =>
+            conversationsApi.activity(activeConvId)
+                .then((r) => { if (!stale) setActivityEvents(r.events); })
+                .catch(() => { if (!stale) setActivityEvents([]); });
+        load();
+        // Slow refresh while the panel is open — new check-ins/orders surface
+        // without a reopen; WS message traffic doesn't cover these.
+        const timer = activityLogOpen
+            ? setInterval(() => {
+                  if (document.visibilityState !== "hidden") load();
+              }, 60000)
+            : null;
+        return () => { stale = true; if (timer) clearInterval(timer); };
+    }, [activeConvId, activityLogOpen]);
 
     // ── Messaging window for the open thread ──────────────────────────────────
     // Refreshed on open and on every new message (an inbound reopens it).
@@ -2983,6 +3020,16 @@ export function ConversationsView({
                                                                     />
                                                                 );
                                                             }
+                                                            if (!rawText.trim()) {
+                                                                // A truly empty row (a message type the
+                                                                // ingester couldn't extract) must never
+                                                                // render as a blank bubble.
+                                                                return (
+                                                                    <p className="leading-relaxed italic text-stone-400">
+                                                                        Message can&apos;t be displayed (unsupported type) — ask them to resend as text.
+                                                                    </p>
+                                                                );
+                                                            }
                                                             return (
                                                                 <p className="leading-relaxed whitespace-pre-wrap">
                                                                     {formatWa(msg.text)}
@@ -3566,17 +3613,21 @@ export function ConversationsView({
             </div>
             {/* Activity Log — collapsible, desktop only */}
             {activeConv && !isMobile && (() => {
-                const systemEvents = activeMessages.filter(
-                    (m) => m.type === "system_event",
-                );
-
                 const dotColor: Record<string, string> = {
-                    escalated:     "bg-amber-100 border-amber-300",
-                    flag:          "bg-red-100 border-red-300",
-                    intercept:     "bg-purple-100 border-purple-300",
-                    release:       "bg-blue-100 border-blue-300",
-                    transfer:      "bg-indigo-100 border-indigo-300",
-                    approve_draft: "bg-green-100 border-green-300",
+                    escalated:        "bg-amber-100 border-amber-300",
+                    flag:             "bg-red-100 border-red-300",
+                    intercept:        "bg-purple-100 border-purple-300",
+                    release:          "bg-blue-100 border-blue-300",
+                    transfer:         "bg-indigo-100 border-indigo-300",
+                    approve_draft:    "bg-green-100 border-green-300",
+                    checkin_planned:  "bg-sky-100 border-sky-300",
+                    checkin_sent:     "bg-sky-200 border-sky-400",
+                    checkin_vetoed:   "bg-stone-100 border-stone-300",
+                    checkin_failed:   "bg-red-100 border-red-300",
+                    deal:             "bg-emerald-100 border-emerald-300",
+                    promise:          "bg-amber-100 border-amber-300",
+                    order:            "bg-green-100 border-green-400",
+                    call:             "bg-teal-100 border-teal-300",
                 };
 
                 if (!activityLogOpen) {
@@ -3613,9 +3664,9 @@ export function ConversationsView({
                             >
                                 Activity
                             </span>
-                            {systemEvents.length > 0 && (
+                            {activityEvents.length > 0 && (
                                 <span className="w-4 h-4 rounded-full bg-amber-100 border border-amber-300 text-[8px] font-bold text-amber-700 flex items-center justify-center">
-                                    {systemEvents.length}
+                                    {activityEvents.length > 20 ? "20+" : activityEvents.length}
                                 </span>
                             )}
                         </button>
@@ -3656,35 +3707,37 @@ export function ConversationsView({
                             </button>
                         </div>
 
-                        {systemEvents.length === 0 ? (
+                        {activityEvents.length === 0 ? (
                             <div className="flex-1 flex items-center justify-center px-3">
                                 <p className="text-[11px] text-stone-300 text-center leading-relaxed">
-                                    No events yet
+                                    No activity yet — pickups, check-ins, deals,
+                                    orders and calls will appear here as the
+                                    journey unfolds.
                                 </p>
                             </div>
                         ) : (
                             <div className="flex-1 overflow-y-auto px-3 py-3 space-y-0">
-                                {systemEvents.map((evt, i) => (
+                                {activityEvents.map((evt, i) => (
                                     <div key={evt.id} className="flex gap-2 pb-3 relative">
                                         {/* Connector line */}
-                                        {i < systemEvents.length - 1 && (
+                                        {i < activityEvents.length - 1 && (
                                             <div className="absolute left-[6px] top-4 bottom-0 w-px bg-stone-100" />
                                         )}
                                         {/* Dot */}
                                         <div
-                                            className={`w-3.5 h-3.5 rounded-full border flex-shrink-0 mt-0.5 ${dotColor[evt.event_kind ?? ""] ?? "bg-stone-100 border-stone-300"}`}
+                                            className={`w-3.5 h-3.5 rounded-full border flex-shrink-0 mt-0.5 ${dotColor[evt.kind] ?? "bg-stone-100 border-stone-300"}`}
                                         />
                                         <div className="min-w-0">
                                             <p className="text-[11px] font-medium text-[#1c2917] leading-snug">
-                                                {evt.text}
+                                                {evt.label}
                                             </p>
-                                            {evt.agent_name && (
-                                                <p className="text-[10px] text-[#b5c9a8] mt-0.5 truncate">
-                                                    {evt.agent_name}
+                                            {evt.detail && (
+                                                <p className="text-[10px] text-[#8fa383] mt-0.5 leading-snug break-words">
+                                                    {evt.detail}
                                                 </p>
                                             )}
                                             <p className="text-[10px] text-stone-400 mt-0.5">
-                                                {timeAgo(evt.created_at)}
+                                                {timeAgo(evt.at)}
                                             </p>
                                         </div>
                                     </div>
