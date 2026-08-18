@@ -479,6 +479,24 @@ _COMMENT_ESCALATE_RE = re.compile(
     r"fake|complain|cancel|discount|bei ya jumla|wholesale|bulk)", re.IGNORECASE)
 
 
+# A comment that asks ONLY the price, in a language the no-model reply pools
+# speak (English/Swahili). Strict on purpose: any digit means quantities (cart
+# math -> model), any extra clause means nuance (model), and other languages
+# keep the model so the mirror-their-language rule holds.
+_BARE_PRICE_ASK_RE = re.compile(
+    r"^[\s\W]*(how\s+much(\s+is\s+(it|this|that))?|price(\s+please)?|"
+    r"bei(\s+gani)?|(pesa\s+)?ngapi|cost(\s+please)?|price\s*\?*)[\s\W]*$",
+    re.IGNORECASE)
+
+
+def is_bare_price_ask(text: str) -> bool:
+    """True only for the naked price question the no-model pool answers well."""
+    t = (text or "").strip()
+    if not t or len(t.split()) > 5 or re.search(r"\d", t):
+        return False
+    return bool(_BARE_PRICE_ASK_RE.match(t))
+
+
 def route_comment_model(user_text: str) -> str:
     """Model for a PUBLIC comment turn — the volume driver of the whole bill.
 
@@ -933,7 +951,13 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     sys_blocks: str | list[str] = [system, tail] if tail else [system]
 
     reply = None
-    for _ in range(settings.tier2_max_iterations):
+    # A public comment reply is one search + one short answer; the full
+    # 8-iteration budget belongs to real sales conversations (cart, order,
+    # measurements). Half the ceiling caps the worst-case cost of the
+    # highest-volume path without touching its normal shape.
+    _max_iter = (min(settings.tier2_max_iterations, 4) if public_comment
+                 else settings.tier2_max_iterations)
+    for _ in range(_max_iter):
         resp: LLMResponse = await llm.complete(system=sys_blocks, messages=messages, tools=tools)
         _accumulate(resp.usage or {})
         messages.append({"role": "assistant", "content": resp.assistant_content})
@@ -957,10 +981,17 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         # Ran out of iterations — return the last text if any, else a safe fallback.
         reply = resp.text or "Let me get a colleague to help you with this."
 
-    # Measure spend so cost is visible, not guessed at (best-effort).
+    # Measure spend so cost is visible, not guessed at (best-effort). Two
+    # honesty rules learned when the bill was audited (2026-08-18): log the
+    # model that ACTUALLY served the turn — settings.tier2_model recorded every
+    # Haiku-routed turn as Sonnet, so the per-model split was fiction — and tag
+    # the row with WHERE the money went (comment vs channel), because "the
+    # volume driver of the whole bill" was a guess nobody could query.
     try:
         from app.services import n8n_bridge as svc
-        await svc.log_agent_usage(db, key, settings.tier2_model, totals)
+        _served = getattr(llm, "_model", None) or settings.tier2_model
+        _node = f"{channel}:comment" if public_comment else channel
+        await svc.log_agent_usage(db, key, _served, totals, node=_node)
     except Exception:
         _log.warning("usage logging failed for %s", key, exc_info=False)
 
@@ -1927,11 +1958,24 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     media = ({"type": "image", "url": thumb}
              if thumb and not _known_product.get("name") else None)
 
-    over_cap = await _post_over_cap(redis, post_id)
+    # THE FREE PATH (owner's affordability push, 2026-08-18). The single most
+    # common comment is a naked "How much?"/"Bei gani?" — and on a post our
+    # records have already identified, everything a model call would produce is
+    # already known: the product, its live hub price, and the storefront link.
+    # The over-cap machinery below composes exactly that reply with NO model
+    # call (_OVER_CAP_SELL_POOL: warm line + real price + one question), and the
+    # DM still carries the product link. So an identified post answers its
+    # price-asks for $0; the model is saved for comments that actually need
+    # reading. English/Swahili only — other languages keep the model so replies
+    # stay in the commenter's tongue.
+    # Checked BEFORE the cap counter: a free reply must not spend the post's
+    # daily model budget (the counter increments on every call).
+    free_ask = bool(_known_product.get("name")) and is_bare_price_ask(prompt_text)
+    skip_model = free_ask or await _post_over_cap(redis, post_id)
 
     answer = ""
     seen_products: list = []          # the catalogue rows the agent actually priced
-    if not over_cap:
+    if not skip_model:
         # Full agent reply — SEES the post image, quotes the REAL price, warm + short.
         try:
             # Cost routing: comment replies are the volume driver of the whole
@@ -2018,7 +2062,8 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     except Exception as exc:
         _log.warning("saving public reply to thread failed for %s: %s", cid, exc)
 
-    _log.info("comment %s engaged: agent=%s over_cap=%s dm=%s", cid, not over_cap, over_cap, dm_sent)
+    _log.info("comment %s engaged: agent=%s free_ask=%s dm=%s",
+              cid, not skip_model, free_ask, dm_sent)
 
 
 def schedule_comment_engage(redis, channel: str, comment: dict, own_pages: set) -> None:
