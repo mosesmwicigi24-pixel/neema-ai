@@ -29,7 +29,12 @@ _PRICES: dict[str, tuple[float, float, float]] = {
     "gpt-4o-mini-tts": (0.60, 0.0, 12.00),
 }
 
-_DEFAULT = (2.00, 0.50, 8.00)  # conservative: assume flagship pricing
+# Unknown model → assume Sonnet-class pricing. Deliberately HIGH: the daily
+# spend breaker (services/ai_budget) trusts this table, and a renamed or new
+# model that quietly billed at cheaper assumed rates would blind it exactly
+# when spend patterns change. Over-reporting trips the breaker early — annoying;
+# under-reporting lets a surprise through — the thing it exists to prevent.
+_DEFAULT = (3.00, 0.30, 15.00)
 _CACHE_WRITE_MULT = 1.25       # Anthropic 5-minute cache-write premium (x input)
 _CACHE_WRITE_1H_MULT = 2.0     # 1-hour-TTL cache-write premium (x input)
 
