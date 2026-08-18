@@ -414,6 +414,8 @@ async def send_agent_reply(
     text: str,
     redis=None,
     reply_to_id: str | None = None,
+    original_text: str | None = None,
+    original_lang: str | None = None,
 ) -> dict:
     result = await db.execute(select(Conversation).where(Conversation.id == conv_id))
     conv = result.scalar_one_or_none()
@@ -477,6 +479,11 @@ async def send_agent_reply(
         reply_to_id=(quoted.id if quoted is not None else None),
         reply_to_text=((quoted.text or "")[:200] if quoted is not None else None),
         reply_to_sender=q_sender,
+        # Reply-box translate toggle: `text` above is what the customer got
+        # (their language); this keeps the human's English original so the
+        # thread's gray reading-glass line renders under the sent bubble.
+        translated_text=((original_text or "").strip() or None),
+        translated_from=((original_lang or "").strip()[:24] or None),
     )
     db.add(msg)
 
@@ -497,6 +504,8 @@ async def send_agent_reply(
             "sender": "human_agent",
             "text": text,
             "replyTo": reply_to,
+            "translation": ((original_text or "").strip() or None),
+            "translatedFrom": ((original_lang or "").strip() or None),
         })
 
     return {

@@ -710,6 +710,12 @@ export function ConversationsView({
     );
     const [searchQ, setSearchQ] = useState<string>("");
     const [replyText, setReplyText] = useState<string>("");
+    // Reply-box translate toggle (per conversation): the human types English,
+    // the customer receives their own language. undefined = smart default
+    // (ON whenever the thread has a detected foreign language).
+    const [txMode, setTxMode] = useState<Record<string, boolean>>({});
+    const [txPreview, setTxPreview] = useState<{ src: string; text: string; lang: string | null } | null>(null);
+    const [txBusy, setTxBusy] = useState(false);
     // The message the agent is replying to. Same-channel → a native threaded reply
     // (reply_to id, shown as a quoted strip on the bubble; WhatsApp delivers it as a
     // native reply too). A quote grabbed from ANOTHER channel keeps the old
@@ -1038,6 +1044,9 @@ export function ConversationsView({
                 media_caption: event.mediaCaption ?? undefined,
                 mime_type: event.mimeType ?? undefined,
                 filename: event.filename ?? undefined,
+                // Sent-in-their-language replies carry the human's English
+                translation: event.translation ?? undefined,
+                translated_from: event.translatedFrom ?? undefined,
             };
             setMessages((m) => {
                 const existing = m[activeConvId] ?? [];
@@ -1060,6 +1069,28 @@ export function ConversationsView({
                         return m;
                 }
                 return { ...m, [activeConvId]: [...existing, msg] };
+            });
+        }
+        if (
+            event.type === "translations" &&
+            event.conversationId === activeConvId &&
+            Array.isArray(event.items)
+        ) {
+            // The background translator finished for this thread — attach the
+            // gray English lines to their bubbles in place.
+            setMessages((m) => {
+                const existing = m[activeConvId] ?? [];
+                const byId = new Map<string, any>(
+                    event.items.map((t: any) => [String(t.id), t] as [string, any]),
+                );
+                let changed = false;
+                const next = existing.map((x) => {
+                    const t = byId.get(String(x.id));
+                    if (!t || x.translation) return x;
+                    changed = true;
+                    return { ...x, translation: t.text ?? null, translated_from: t.lang ?? null };
+                });
+                return changed ? { ...m, [activeConvId]: next } : m;
             });
         }
         if (
@@ -1158,6 +1189,41 @@ export function ConversationsView({
         }
     };
 
+    // The customer's detected language for the open thread — read for free
+    // from the translations already cached on inbound rows.
+    const threadLang = useMemo(() => {
+        const list = activeConvId ? (messages[activeConvId] ?? []) : [];
+        for (let i = list.length - 1; i >= 0; i--) {
+            const m = list[i];
+            if (m.direction === "inbound" && m.translated_from) return m.translated_from;
+        }
+        return null;
+    }, [messages, activeConvId]);
+    const txOn = activeConvId ? (txMode[activeConvId] ?? !!threadLang) : false;
+
+    // Samsung-keyboard-style live preview: pause typing → see what will be
+    // sent in the customer's language. Debounced; the send path reuses the
+    // preview when it still matches, so nothing is translated twice.
+    useEffect(() => {
+        if (!txOn || !activeConvId) { setTxPreview(null); return; }
+        const t = replyText.trim();
+        if (t.length < 2) { setTxPreview(null); return; }
+        const h = setTimeout(async () => {
+            try {
+                setTxBusy(true);
+                const res = await conversationsApi.translateReply(activeConvId, t);
+                if (res.text && res.text.trim() && res.text.trim() !== t)
+                    setTxPreview({ src: t, text: res.text, lang: res.lang ?? null });
+                else setTxPreview(null);
+            } catch {
+                setTxPreview(null);          // fail open — English still sends
+            } finally {
+                setTxBusy(false);
+            }
+        }, 700);
+        return () => clearTimeout(h);
+    }, [replyText, txOn, activeConvId]);
+
     const sendReply = async () => {
         if (!replyText.trim() || !activeConvId) return;
         setSending(true);
@@ -1170,12 +1236,32 @@ export function ConversationsView({
             ? `↩ Re (${CHANNEL_CONFIG[quoted.channel as Channel]?.label ?? quoted.channel}): "${quoted.text.slice(0, 180)}"\n\n`
             : "";
         const text = q + replyText;
+        // Toggle ON → what the customer receives is their language; the
+        // English original rides along and renders as the gray line under the
+        // sent bubble. Any failure falls open to sending the English as-is.
+        let sendText = text;
+        let extras: { original_text?: string; original_lang?: string } | undefined;
+        if (txOn) {
+            try {
+                const src = text.trim();
+                const tx = txPreview && txPreview.src === src
+                    ? txPreview
+                    : await conversationsApi.translateReply(activeConvId, src);
+                if (tx?.text && tx.text.trim() && tx.text.trim() !== src) {
+                    sendText = tx.text;
+                    extras = { original_text: src,
+                               original_lang: tx.lang ?? undefined };
+                }
+            } catch { /* fail open */ }
+        }
         try {
             const optimisticMsg: Message = {
                 id: `optimistic-${Date.now()}`,
                 direction: "outbound",
                 sender: "human_agent",
-                text,
+                text: sendText,
+                translation: extras?.original_text ?? undefined,
+                translated_from: extras?.original_lang ?? undefined,
                 created_at: new Date().toISOString(),
                 reply_to: replyToId && quoted
                     ? { id: replyToId, text: quoted.text, sender: quoted.sender ?? null,
@@ -1188,7 +1274,8 @@ export function ConversationsView({
             }));
             setReplyText("");
             setQuoted(null);
-            await conversationsApi.sendReply(activeConvId, text, replyToId);
+            setTxPreview(null);
+            await conversationsApi.sendReply(activeConvId, sendText, replyToId, extras);
             const msgs = await conversationsApi.messages(activeConvId);
             setMessages((m) => ({ ...m, [activeConvId]: msgs }));
             refetchConversations?.();
@@ -3183,6 +3270,28 @@ export function ConversationsView({
                                                             </a>
                                                         );
                                                     })()}
+                                                    {/* Reading glass: English under a foreign message —
+                                                        the customer's Bulgarian AND Neema's mirrored reply
+                                                        alike — so the human can follow the whole sale. */}
+                                                    {(msg as any).translation && (
+                                                        <div
+                                                            className={`mt-1.5 pt-1 text-[11px] leading-relaxed italic whitespace-pre-wrap border-t border-dashed ${
+                                                                isInbound
+                                                                    ? "text-stone-500 border-stone-200"
+                                                                    : msg.sender === "ai"
+                                                                      ? "text-white/70 border-white/25"
+                                                                      : "text-[#0a2e05]/70 border-[#0a2e05]/25"
+                                                            }`}
+                                                        >
+                                                            <span className="not-italic mr-1 select-none opacity-80">🌐</span>
+                                                            {(msg as any).translation}
+                                                            {(msg as any).translated_from && (
+                                                                <span className="ml-1.5 text-[9px] uppercase tracking-wide opacity-60 not-italic">
+                                                                    {(msg as any).translated_from}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    )}
                                                     <div
                                                         className={`text-[10px] mt-1 flex items-center gap-2 ${isInbound ? "" : "opacity-60 justify-end"}`}
                                                         style={{ color: isInbound ? "#b5c9a8" : undefined }}
@@ -3412,6 +3521,42 @@ export function ConversationsView({
                                         <WindowStrip win={window24} />
                                     )}
 
+                                    {/* Translate-to-their-language toggle (Samsung-keyboard style):
+                                        ON by default when the thread reads foreign; type English,
+                                        preview what they'll receive, send in their tongue. */}
+                                    {(threadLang || txOn) && (
+                                        <div className="mb-2 flex items-center gap-2 flex-wrap">
+                                            <button
+                                                onClick={() => activeConvId &&
+                                                    setTxMode((sMap) => ({ ...sMap, [activeConvId]: !txOn }))}
+                                                className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-colors ${
+                                                    txOn
+                                                        ? "bg-[#e6f3d8] text-[#427425] border-[#427425]/30"
+                                                        : "bg-stone-100 text-stone-500 border-stone-200"
+                                                }`}
+                                                title={txOn
+                                                    ? "Your English will be sent in the customer's language — click to send English as typed"
+                                                    : "Click to translate your reply into the customer's language"}
+                                            >
+                                                🌐 {txOn
+                                                    ? `Sending in ${txPreview?.lang ?? threadLang ?? "their language"}`
+                                                    : "Translate: off"}
+                                            </button>
+                                            {txOn && txBusy && (
+                                                <span className="text-[10px] text-stone-400 animate-pulse">translating…</span>
+                                            )}
+                                        </div>
+                                    )}
+                                    {txOn && txPreview && replyText.trim().length > 1 && (
+                                        <div className="mb-2 px-3 py-2 rounded-xl bg-stone-50 border border-stone-200">
+                                            <div className="text-[9px] uppercase tracking-wide text-stone-400 font-semibold mb-0.5">
+                                                They will receive{txPreview.lang ? ` — ${txPreview.lang}` : ""}
+                                            </div>
+                                            <div className="text-xs text-stone-600 italic whitespace-pre-wrap">
+                                                {txPreview.text}
+                                            </div>
+                                        </div>
+                                    )}
                                     <div className="flex gap-2 items-end">
                                         {/* Hidden file input */}
                                         <input
