@@ -232,7 +232,10 @@ def test_health_reports_the_built_git_sha(monkeypatch):
     """The box pulls :latest on a timer; before this field there was no way to
     ask WHICH commit it runs, so 'did the deploy land?' was guesswork."""
     import asyncio
+    import types
     monkeypatch.setenv("GIT_SHA", "abc1234def")
     from app.routers.health import health
-    out = asyncio.run(health())
-    assert out == {"status": "ok", "version": "abc1234def"}
+    req = types.SimpleNamespace(app=types.SimpleNamespace(state=types.SimpleNamespace(redis=None)))
+    out = asyncio.run(health(req))
+    assert out["status"] == "ok"
+    assert out["version"] == "abc1234def"
