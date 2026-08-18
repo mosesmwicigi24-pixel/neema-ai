@@ -160,7 +160,36 @@ async def compose_standup(db) -> str:
             select(sa_func.coalesce(sa_func.sum(AiUsage.cost_usd), 0), sa_func.count())
             .select_from(AiUsage).where(AiUsage.created_at >= since))).one()
         if calls:
-            lines.append(f"💳 AI spend: ${float(spend):.2f} across {calls} model call(s).")
+            line = f"💳 AI spend: ${float(spend):.2f} across {calls} model call(s)."
+            # The breakdown is a NICETY on top of the number that matters, so it
+            # gets its own guard: a shape the detail queries dislike must never
+            # cost the owner the spend line itself.
+            # WHERE the money went, and whether the cache is earning its keep.
+            # Spend alone said nothing actionable: the same total means one
+            # thing if the ~16k-token rules+tools prefix is being READ from
+            # cache (0.1x) and quite another if it is paid for fresh (1x) on
+            # every call. The per-model split shows whether the light-model
+            # routing is actually catching the high-volume comment replies.
+            try:
+                by_model = (await db.execute(
+                    select(AiUsage.model, sa_func.sum(AiUsage.cost_usd))
+                    .where(AiUsage.created_at >= since)
+                    .group_by(AiUsage.model)
+                    .order_by(sa_func.sum(AiUsage.cost_usd).desc()).limit(3))).all()
+                if by_model:
+                    line += " " + ", ".join(
+                        f"{(m or 'unknown').split('-')[1] if m and '-' in m else (m or 'unknown')}"
+                        f" ${float(c or 0):.2f}" for m, c in by_model)
+                cached, fresh = (await db.execute(
+                    select(sa_func.coalesce(sa_func.sum(AiUsage.cached_tokens), 0),
+                           sa_func.coalesce(sa_func.sum(AiUsage.prompt_tokens), 0))
+                    .where(AiUsage.created_at >= since))).one()
+                if fresh:
+                    hit = 100.0 * float(cached or 0) / float(fresh)
+                    line += f" · prompt cache hit {hit:.0f}%"
+            except Exception:
+                pass
+            lines.append(line)
     except Exception:
         pass
 

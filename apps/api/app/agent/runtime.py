@@ -1916,7 +1916,16 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     thumb = (post_ctx.get("thumb") or "").strip()
     # Let the agent SEE the product in the post image and match it to the catalogue
     # (they rarely name the item — "how much?" under a photo is meaningless alone).
-    media = {"type": "image", "url": thumb} if thumb else None
+    # BUT only while we are actually unsure. Once a post is identified, our own
+    # comment rule tells the model to price THAT product and "never re-guess it
+    # from the frame" — so shipping the picture anyway buys nothing and costs a
+    # great deal on the highest-volume path in the system: full-price vision
+    # tokens (a thumbnail is ~1.6k, and an image in `messages` never rides the
+    # cached prefix) AND a forced upgrade to the main model, because the caller
+    # pins every media turn there. A pure redis recall decides it.
+    _known_product = await _recall_post_product(redis, channel, post_id)
+    media = ({"type": "image", "url": thumb}
+             if thumb and not _known_product.get("name") else None)
 
     over_cap = await _post_over_cap(redis, post_id)
 
