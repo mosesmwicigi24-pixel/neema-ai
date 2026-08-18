@@ -91,14 +91,20 @@ async def resolve_or_create_person(
     # otherwise the commenter and the DM sender become two customers (the
     # Meshack split: name, location, and source post scattered over two people).
     adopt = None
-    siblings = (_META_SIBLINGS if channel in _META_SIBLINGS
-                else _PHONE_SIBLINGS if channel in _PHONE_SIBLINGS
-                else None)
-    if siblings:
+    if channel in _META_SIBLINGS:
+        sibling_pool = [c for c in _META_SIBLINGS if c != channel]
+    elif channel == "sms":
+        # One direction only: an SMS adopts its WhatsApp sibling's person, but
+        # the high-volume WhatsApp path never pays an adopt query for the rare
+        # sms case (an sms-first contact who later WhatsApps can be merged).
+        sibling_pool = ["whatsapp"]
+    else:
+        sibling_pool = None
+    if sibling_pool:
         adopt = (await db.execute(
             select(Identity).where(
                 Identity.external_id == external_id,
-                Identity.channel.in_([c for c in siblings if c != channel]),
+                Identity.channel.in_(sibling_pool),
             ).limit(1)
         )).scalars().first()
 
