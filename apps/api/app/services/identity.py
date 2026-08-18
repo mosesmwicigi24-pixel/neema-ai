@@ -26,6 +26,9 @@ _log = logging.getLogger("neema.identity")
 
 WHATSAPP = "whatsapp"
 _META_SIBLINGS = ("messenger", "instagram", "facebook")
+# Channels keyed on the bare phone number: an SMS from 2547… and the WhatsApp
+# chat with 2547… are the same human — adopt, don't mint a second person.
+_PHONE_SIBLINGS = ("whatsapp", "sms")
 
 
 async def _select_identity(db: AsyncSession, channel: str, external_id: str) -> Identity | None:
@@ -88,11 +91,14 @@ async def resolve_or_create_person(
     # otherwise the commenter and the DM sender become two customers (the
     # Meshack split: name, location, and source post scattered over two people).
     adopt = None
-    if channel in _META_SIBLINGS:
+    siblings = (_META_SIBLINGS if channel in _META_SIBLINGS
+                else _PHONE_SIBLINGS if channel in _PHONE_SIBLINGS
+                else None)
+    if siblings:
         adopt = (await db.execute(
             select(Identity).where(
                 Identity.external_id == external_id,
-                Identity.channel.in_([c for c in _META_SIBLINGS if c != channel]),
+                Identity.channel.in_([c for c in siblings if c != channel]),
             ).limit(1)
         )).scalars().first()
 

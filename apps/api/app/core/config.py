@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     # hub's plugin still sends the X-N8N-SECRET header on those legacy paths.
     n8n_api_secret: str = ""
     # ── Meta Messenger / Instagram webhook (multichannel ingestion) ──────────
+    # sms_inbound_token: bearer token the phone-side SMS forwarder sends to
+    # POST /api/sms/inbound (routers/sms.py). Empty = the bridge is disabled.
+    sms_inbound_token: str = ""
+
     # meta_verify_token: the arbitrary secret you also paste into the Meta app's
     #   webhook "Verify token" field — echoed back during the GET handshake.
     # meta_app_secret: the Meta App Secret, used to verify the X-Hub-Signature-256

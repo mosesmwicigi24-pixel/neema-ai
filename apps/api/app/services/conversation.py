@@ -421,6 +421,12 @@ async def send_agent_reply(
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Conversation not found")
 
+    if conv.channel == "sms":
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400,
+                            detail="SMS is receive-only — Neema cannot send SMS. "
+                                   "Reach this customer on WhatsApp or by phone.")
+
     # Resolve the quoted message (for native WhatsApp reply-context + thread render).
     quoted = None
     if reply_to_id:
@@ -610,6 +616,10 @@ async def send_agent_media(
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     channel = conv.channel or "whatsapp"
+    if channel == "sms":
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400,
+                            detail="SMS is receive-only — Neema cannot send SMS.")
     if channel in META_CHANNELS:
         # Messenger / Instagram / Facebook DM — send via the Meta Send API
         # (attachment by URL), acting as the page that owns this contact.
