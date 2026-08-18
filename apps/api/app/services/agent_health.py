@@ -29,8 +29,10 @@ _LAST_KEY = "agent:fail:last"
 _TTL = 3600                      # a rolling hour — matches the self-check cadence
 
 # Failure kinds a person must DO something about. These never clear by
-# themselves: retrying a turn against an unpaid account just fails again.
-ACTIONABLE = ("credit", "auth", "model")
+# themselves within the hour: retrying a turn against an unpaid account just
+# fails again, and a budget stop holds until midnight UTC unless someone
+# raises the ceiling.
+ACTIONABLE = ("credit", "auth", "model", "budget")
 
 
 def classify(exc_or_text) -> str:
@@ -38,8 +40,13 @@ def classify(exc_or_text) -> str:
 
     credit → the account is out of money (this outage) · auth → the key is wrong,
     revoked or missing · model → the configured model id isn't valid for this
-    account · rate → throttled, usually self-clearing · other → anything else."""
+    account · budget → Neema's own daily spend ceiling tripped (ai_budget) ·
+    rate → throttled, usually self-clearing · other → anything else."""
     s = str(exc_or_text or "").lower()
+    # Ours before the provider's: the breaker's message says "spend ceiling",
+    # and it must never be mistaken for a real billing failure.
+    if "spend ceiling" in s or "ai_daily_stop" in s:
+        return "budget"
     if ("credit balance" in s or "insufficient" in s or "billing" in s
             or "quota" in s or "payment" in s):
         return "credit"
@@ -93,6 +100,8 @@ _HUMAN = {
     "credit": "the AI account is OUT OF CREDIT — top it up, replies are dead until you do",
     "auth": "the AI API key is rejected — check ANTHROPIC_API_KEY",
     "model": "the configured AI model was rejected — check TIER2_MODEL",
+    "budget": ("Neema hit her own daily AI spend ceiling — replies hold until "
+               "midnight UTC; raise AI_DAILY_STOP_USD if today's spend is expected"),
     "rate": "the AI is rate-limiting us — replies are delayed or dropped",
     "other": "agent turns are failing",
 }
