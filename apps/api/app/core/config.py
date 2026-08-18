@@ -246,6 +246,12 @@ class Settings(BaseSettings):
     # normal day on purpose — a breaker, not a target. 0 disables a rung.
     ai_daily_budget_usd: float = 40.0
     ai_daily_stop_usd: float = 60.0
+    # Team-facing translations (services/translate): a gray English line under
+    # foreign-language messages in the dashboard thread — the customer's AND
+    # Neema's mirrored-language replies — plus the reply box's translate-to-
+    # their-language toggle. Lazy, batched on the light model, cached on the
+    # message row forever, budget-aware, never customer-visible.
+    translate_for_team: bool = True
     tier2_memory: bool = True        # cross-conversation customer memory (facts + past orders)
     tier2_vision: bool = True         # let the agent SEE product photos natively (Claude vision)
     # ── Call recording + transcription (self-hosted Whisper = zero marginal cost) ──

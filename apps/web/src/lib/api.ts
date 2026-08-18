@@ -288,8 +288,15 @@ export const conversationsApi = {
         post<ApiConversation>(`/admin/conversations/${id}/transfer`, {
             agent_id: agentId,
         }),
-    sendReply: (id: string, text: string, replyTo?: string) =>
-        post<Message>(`/admin/conversations/${id}/reply`, { text, reply_to: replyTo }),
+    sendReply: (id: string, text: string, replyTo?: string,
+               extras?: { original_text?: string; original_lang?: string }) =>
+        post<Message>(`/admin/conversations/${id}/reply`, {
+            text, reply_to: replyTo, ...(extras ?? {}),
+        }),
+    // Reply-box translate toggle: English in, the customer's language out.
+    translateReply: (id: string, text: string) =>
+        post<{ text: string; lang: string | null }>(
+            `/admin/conversations/${id}/translate-reply`, { text }),
     approveDraft: (id: string, text?: string) =>
         post<{ ok: boolean }>(`/admin/conversations/${id}/approve-draft`, {
             text: text ?? null,

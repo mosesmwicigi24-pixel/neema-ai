@@ -16,6 +16,7 @@ from app.services.conversation import (
     intercept_conversation, release_conversation,
     transfer_conversation, send_agent_reply, approve_draft, send_agent_media,
 )
+from app.services import translate as translate_svc
 import jwt
 from app.core.security import decode_token
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -285,6 +286,7 @@ async def list_conversations(
 @router.get("/conversations/{conv_id}/messages")
 async def get_thread(
     conv_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
 ):
@@ -363,6 +365,12 @@ async def get_thread(
             "direction":     m.direction,
             "sender":        m.sender,
             "text":          m.text,
+            # The team's reading glass: an English rendering of a foreign
+            # message (either direction), shown gray under the bubble. None
+            # when the original is already readable. services/translate fills
+            # these lazily; see the schedule call at the end of this handler.
+            "translation":     translate_svc.translation_for(m),
+            "translated_from": getattr(m, "translated_from", None),
             "isNote":        m.media_type == "note",
             "agent_name":    agent_name_map.get(str(m.agent_id)) if m.agent_id else None,
             "created_at":    m.created_at.isoformat() if m.created_at else None,
@@ -453,6 +461,17 @@ async def get_thread(
 
     # ── 5. Sort merged timeline by created_at ascending ───────────────────────
     thread.sort(key=lambda x: x["created_at"] or "")
+
+    # ── 6. Lazily fill the missing gray English lines ─────────────────────────
+    # Background so the open stays instant; results arrive over the same ws
+    # channel new messages ride and are cached on the rows forever after.
+    try:
+        _cand = [str(m.id) for m in msgs if translate_svc.is_candidate(m)]
+        if _cand:
+            translate_svc.schedule_thread_translation(
+                request.app.state.redis, conv_id, _cand)
+    except Exception:
+        pass
 
     return thread
 
@@ -856,8 +875,30 @@ async def reply(conv_id: str, request: Request, body: dict, db: AsyncSession = D
     text = body.get("text", "")
     if not text:
         raise HTTPException(status_code=422, detail="text is required")
+    # Reply-box translate toggle: `text` is what the CUSTOMER receives (their
+    # language); original_text is the English the human actually typed, stored
+    # on the row so the thread shows the gray English line under the sent
+    # bubble — the reading glass working in reverse.
     return await send_agent_reply(db, conv_id, agent, text, request.app.state.redis,
-                                  reply_to_id=body.get("reply_to"))
+                                  reply_to_id=body.get("reply_to"),
+                                  original_text=body.get("original_text"),
+                                  original_lang=body.get("original_lang"))
+
+
+@router.post("/conversations/{conv_id}/translate-reply")
+async def translate_reply(conv_id: str, request: Request, body: dict,
+                          db: AsyncSession = Depends(get_db),
+                          agent: Agent = Depends(get_current_agent)):
+    """The reply box's outbound direction: the human types English, the
+    customer reads their own language (the 'Samsung keyboard' toggle). Target
+    language comes from the thread's cached detections — free — or the newest
+    foreign inbound as a sample. Fails open to the original text: the
+    translator must never block a reply."""
+    text = (body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="text is required")
+    return await translate_svc.translate_reply(db, request.app.state.redis,
+                                               conv_id, text)
 
 
 @router.get("/conversations/{conv_id}/window")

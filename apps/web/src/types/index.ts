@@ -71,6 +71,10 @@ export interface Message {
     text: string;
     created_at: string;
     isNote?: boolean;
+    // Team-facing reading glass: English rendering of a foreign-language
+    // message (either direction), shown gray under the bubble. Dashboard-only.
+    translation?: string | null;
+    translated_from?: string | null;
     agent_name?: string;
     // Populated when type === "system_event"
     event_kind?: SystemEventKind;

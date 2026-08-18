@@ -70,6 +70,15 @@ class Message(Base):
     reply_to_id     : Mapped[uuid.UUID | None] = mapped_column(ForeignKey("messages.id", ondelete="SET NULL"), nullable=True)
     reply_to_text   : Mapped[str | None]       = mapped_column(Text, nullable=True)
     reply_to_sender : Mapped[str | None]       = mapped_column(String(20), nullable=True)
+    # Team-facing English rendering of a foreign-language message (either
+    # direction — customers write Bulgarian/French/…, and Neema mirrors their
+    # language back). Filled lazily by services/translate.py when a human opens
+    # the thread, then cached here forever. Dashboard-only: the agent's own
+    # history builder and every send path read `text`, never this. When the
+    # original is already readable (English/Swahili) this stores a copy of
+    # `text` as the "nothing to do" marker, so it is never re-checked.
+    translated_text : Mapped[str | None]       = mapped_column(Text, nullable=True)
+    translated_from : Mapped[str | None]       = mapped_column(String(24), nullable=True)
     created_at      : Mapped[datetime]         = mapped_column(DateTime(timezone=True), default=datetime.utcnow, index=True)
 
     conversation = relationship("Conversation", back_populates="messages")
