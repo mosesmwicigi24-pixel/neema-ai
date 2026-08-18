@@ -37,6 +37,38 @@ _REMOTE_MIME = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 _MAX_BYTES = 4_500_000  # keep under Anthropic's per-image limit; skip oversized
 
 
+# Vision is billed by AREA (~ width x height / 750 after Anthropic's own 1568px
+# server-side cap), and customers send phone photos at full resolution: a
+# 4000x3000 original bills ~2,459 tokens even after the server downscale, while
+# the same photo at 1092px on the long edge — Anthropic's documented sweet spot
+# — bills ~1,192. Nothing a sales agent reads (which garment, which colour,
+# which tray) needs more than 1092px, so every image is shrunk before it is
+# base64'd: roughly HALF the vision tokens on every media turn, plus a much
+# smaller request body over the wire. Best-effort by construction — a resize
+# failure must never cost the customer their turn, so any error returns the
+# original bytes untouched.
+_MAX_EDGE = 1092
+
+
+def _shrink(raw: bytes, mime: str) -> tuple[bytes, str]:
+    """(bytes, mime) with the long edge capped at _MAX_EDGE — original on any
+    failure or when the image is already small enough."""
+    try:
+        import io
+        from PIL import Image
+        img = Image.open(io.BytesIO(raw))
+        if max(img.size) <= _MAX_EDGE:
+            return raw, mime
+        img.thumbnail((_MAX_EDGE, _MAX_EDGE))
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")          # drops alpha; JPEG needs it gone
+        out = io.BytesIO()
+        img.save(out, format="JPEG", quality=82)
+        return out.getvalue(), "image/jpeg"
+    except Exception:
+        return raw, mime
+
+
 def _local_path(media_url: str | None) -> str | None:
     if not media_url:
         return None
@@ -58,7 +90,8 @@ def _fetch_remote(url: str) -> dict | None:
             return None
         if not resp.content or len(resp.content) > _MAX_BYTES:
             return None
-        data = base64.standard_b64encode(resp.content).decode("ascii")
+        raw, mime = _shrink(resp.content, mime)
+        data = base64.standard_b64encode(raw).decode("ascii")
     except Exception as exc:
         _log.warning("remote media fetch failed for %s: %s", url[:120], exc)
         return None
@@ -79,10 +112,12 @@ def load_image_block(media_url: str | None) -> dict | None:
             if size <= 0 or size > _MAX_BYTES:
                 return None
             with open(path, "rb") as f:
-                data = base64.standard_b64encode(f.read()).decode("ascii")
+                raw = f.read()
         except OSError as exc:
             _log.warning("could not read media %s: %s", path, exc)
             return None
+        raw, mime = _shrink(raw, mime)
+        data = base64.standard_b64encode(raw).decode("ascii")
         return {"type": "image", "source": {"type": "base64", "media_type": mime, "data": data}}
     if media_url and media_url.startswith(("http://", "https://")):
         return _fetch_remote(media_url)

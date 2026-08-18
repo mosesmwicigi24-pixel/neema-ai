@@ -480,10 +480,13 @@ _ACK_RE = _re.compile(
 )
 
 
-async def log_agent_usage(db: AsyncSession, wa_id: str, model: str, totals: dict) -> dict:
+async def log_agent_usage(db: AsyncSession, wa_id: str, model: str, totals: dict,
+                          node: str = "run_turn") -> dict:
     """Persist aggregated Tier 2 agent token usage for one customer turn, so
     spend + cache effectiveness are measurable. `totals` carries the summed
-    input/output/cache-read/cache-write tokens across the turn's tool loop."""
+    input/output/cache-read/cache-write tokens across the turn's tool loop.
+    `node` says WHERE the spend happened ("whatsapp", "facebook:comment", …) so
+    the bill can be split by purpose, not just by model."""
     from app.models.ai_usage import AiUsage
     from app.core.ai_pricing import estimate_cost_usd
 
@@ -497,7 +500,7 @@ async def log_agent_usage(db: AsyncSession, wa_id: str, model: str, totals: dict
                              cache_write_tokens=cwrite, cache_write_1h_tokens=cwrite_1h)
     db.add(AiUsage(
         wa_id=_normalize_wa_id(wa_id) if wa_id else None,
-        workflow="tier2-agent", node="run_turn", model=model,
+        workflow="tier2-agent", node=(node or "run_turn")[:80], model=model,
         prompt_tokens=prompt_total, completion_tokens=out,
         cached_tokens=cread, cost_usd=cost,
     ))

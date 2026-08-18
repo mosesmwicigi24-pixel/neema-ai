@@ -161,15 +161,18 @@ async def compose_standup(db) -> str:
             .select_from(AiUsage).where(AiUsage.created_at >= since))).one()
         if calls:
             line = f"💳 AI spend: ${float(spend):.2f} across {calls} model call(s)."
-            # The breakdown is a NICETY on top of the number that matters, so it
-            # gets its own guard: a shape the detail queries dislike must never
-            # cost the owner the spend line itself.
+            # The breakdown is a NICETY on top of the number that matters, so
+            # it gets its own guard: a shape the detail queries dislike must
+            # never cost the owner the spend line itself.
+            #
             # WHERE the money went, and whether the cache is earning its keep.
             # Spend alone said nothing actionable: the same total means one
             # thing if the ~16k-token rules+tools prefix is being READ from
             # cache (0.1x) and quite another if it is paid for fresh (1x) on
             # every call. The per-model split shows whether the light-model
-            # routing is actually catching the high-volume comment replies.
+            # routing is catching the high-volume comment replies, and the
+            # per-node split shows comments vs conversations now that every
+            # row's node carries the channel (":comment" for public replies).
             try:
                 by_model = (await db.execute(
                     select(AiUsage.model, sa_func.sum(AiUsage.cost_usd))
@@ -180,6 +183,14 @@ async def compose_standup(db) -> str:
                     line += " " + ", ".join(
                         f"{(m or 'unknown').split('-')[1] if m and '-' in m else (m or 'unknown')}"
                         f" ${float(c or 0):.2f}" for m, c in by_model)
+                by_node = (await db.execute(
+                    select(AiUsage.node, sa_func.sum(AiUsage.cost_usd))
+                    .where(AiUsage.created_at >= since)
+                    .group_by(AiUsage.node)
+                    .order_by(sa_func.sum(AiUsage.cost_usd).desc()).limit(2))).all()
+                if by_node and any(n for n, _ in by_node):
+                    line += " · " + ", ".join(
+                        f"{(n or '?')} ${float(c or 0):.2f}" for n, c in by_node)
                 cached, fresh = (await db.execute(
                     select(sa_func.coalesce(sa_func.sum(AiUsage.cached_tokens), 0),
                            sa_func.coalesce(sa_func.sum(AiUsage.prompt_tokens), 0))

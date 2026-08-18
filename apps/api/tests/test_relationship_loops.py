@@ -367,6 +367,7 @@ def test_standup_shows_follow_ups_due():
     db = _SeqDB([_R(scalar=7), _R(scalar=2), _R(scalar=0), _R(many=[]),
                  _R(row=(1.0, 10)),
                  _R(many=[("claude-sonnet-5", 0.9), ("claude-haiku-4-5", 0.1)]),
+                 _R(many=[("facebook:comment", 0.7), ("whatsapp", 0.3)]),
                  _R(row=(8000, 10000)),
                  _R(scalar=3), _R(scalar=1)])
     out = asyncio.run(compose_standup(db))
