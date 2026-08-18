@@ -256,8 +256,17 @@ async def sweep_missed_replies(redis, *, min_age_s: int = 90, max_age_h: int = 2
     window). Beyond that, a send is rejected with error (#10) — so there's no
     point generating a reply we can't deliver. 23h leaves a margin under the
     boundary. Older backlog can only be reached by a human within the 7-day
-    HUMAN_AGENT-tag window, or once the customer messages again."""
-    from app.agent.runtime import _run_and_send_meta, _is_paused
+    HUMAN_AGENT-tag window, or once the customer messages again.
+
+    Attempts are BOUNDED per stuck message (cost-surprise probe, 2026-08-18):
+    when the model turn succeeds but delivery keeps failing for a reason that
+    is not the 24h window (dead page token, blocked sender, Graph policy), the
+    thread's latest message stays inbound — so before this bound, the sweep
+    regenerated a fully-billed reply every ~5 minutes for up to 23 hours
+    (~276 model turns) for ONE undeliverable thread. Three strikes, then the
+    thread goes to a human with the reason, which also removes it from the
+    sweep's query for good."""
+    from app.agent.runtime import _run_and_send_meta, _is_paused, escalate_to_human
 
     now = datetime.now(timezone.utc)
     young = now - timedelta(seconds=min_age_s)      # give the normal path its chance
@@ -310,6 +319,25 @@ async def sweep_missed_replies(redis, *, min_age_s: int = 90, max_age_h: int = 2
             if still != MsgDirection.inbound:
                 continue
             page_id = await _page_id_for(db2, channel, ext)
+        # Three strikes per stuck message, counted on the message id so a NEW
+        # inbound naturally earns fresh attempts. No redis → no counter → the
+        # 300s lock still paces attempts (fail-open, like every guard here).
+        tries = 1
+        if redis is not None:
+            try:
+                tries = int(await redis.incr(f"agent:missed:tries:{msg.id}"))
+                if tries == 1:
+                    await redis.expire(f"agent:missed:tries:{msg.id}", 2 * 86400)
+            except Exception:
+                tries = 1
+        if tries > 3:
+            await escalate_to_human(
+                channel, ext,
+                "Neema composed a reply 3 times but delivery keeps failing on "
+                f"{channel} — please answer from here and check the page connection.")
+            _log.warning("missed-reply gave up after 3 attempts for %s/%s — "
+                         "handed to a human", channel, ext)
+            continue
         try:
             if await _run_and_send_meta(redis, channel, ext, text or "",
                                         page_id=page_id, media=media):

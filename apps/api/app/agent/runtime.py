@@ -699,6 +699,19 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     is_web = not is_meta and str(wa_id or "").startswith(WEB_KEY_PREFIX)
     key = external_id if (is_meta or is_tiktok) else wa_id
 
+    # ── The daily spend ceiling — checked before ANY token is bought.
+    # Past the soft budget (economy), a main-model turn quietly becomes a
+    # light-model turn: every customer still gets answered, at a third of the
+    # price. Past the hard stop, the turn refuses here and the caller's
+    # existing failure handling takes over — hold line, team flag, "budget" on
+    # /api/health — the exact path an out-of-credit day already proved out,
+    # but self-imposed and self-clearing at midnight UTC. Fails open: no
+    # redis, no verdict, no blocking (services/ai_budget).
+    from app.services import ai_budget
+    if await ai_budget.guard_turn(redis) == "economy" \
+            and getattr(llm, "_model", None) == settings.tier2_model:
+        llm = build_llm(model=settings.tier2_model_light)
+
     # Currency display gate: Kenya → KES; everyone else → USD (= KES /
     # usd_kes_rate, done in the tools). WhatsApp knows Kenya from the +254
     # prefix; Meta channels know it from the captured location.
@@ -987,9 +1000,19 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     # Haiku-routed turn as Sonnet, so the per-model split was fiction — and tag
     # the row with WHERE the money went (comment vs channel), because "the
     # volume driver of the whole bill" was a guess nobody could query.
+    _served = getattr(llm, "_model", None) or settings.tier2_model
+    # Feed the daily breaker FIRST, from the same numbers, independently of the
+    # DB — a down database must never blind the spend meter (ai_budget owns
+    # its own best-effort guards, so this line can't cost the reply either).
+    from app.core.ai_pricing import estimate_cost_usd
+    await ai_budget.add_spend(redis, estimate_cost_usd(
+        _served,
+        totals["input_tokens"] + totals["cache_read_tokens"] + totals["cache_write_tokens"],
+        totals["output_tokens"], cached_tokens=totals["cache_read_tokens"],
+        cache_write_tokens=totals["cache_write_tokens"],
+        cache_write_1h_tokens=totals["cache_write_1h_tokens"]))
     try:
         from app.services import n8n_bridge as svc
-        _served = getattr(llm, "_model", None) or settings.tier2_model
         _node = f"{channel}:comment" if public_comment else channel
         await svc.log_agent_usage(db, key, _served, totals, node=_node)
     except Exception:
@@ -1367,7 +1390,7 @@ def looks_negative(text: str) -> bool:
     return bool(_NEGATIVE_RE.search((text or "").strip()))
 
 
-async def classify_comment_intent(text: str) -> str:
+async def classify_comment_intent(text: str, redis=None) -> str:
     """Label a public comment so we react appropriately. Cheap light-model call.
     Errs toward 'high' (engage) on uncertainty — better to help than go silent —
     but returns 'low' for an empty comment (emoji/sticker with no text).
@@ -1385,6 +1408,16 @@ async def classify_comment_intent(text: str) -> str:
     # A hello is a door opening, not praise — engage, never the canned thanks.
     if looks_greeting(t):
         return "high"
+    # Past the daily spend stop, even this light call waits for midnight: fall
+    # to the same default the except-arm uses. "high" then flows into run_turn
+    # (which refuses for free) and lands on the canned sell pools — so under a
+    # budget stop the comment funnel keeps answering at exactly $0.
+    try:
+        from app.services import ai_budget
+        if redis is not None and await ai_budget.mode(redis) == "stop":
+            return "high"
+    except Exception:
+        pass
     prompt = (
         "Classify this public comment on a Christian clergy/communion store's post "
         "into ONE word:\n"
@@ -1893,7 +1926,7 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     first = (comment.get("from_name") or "").strip().split(" ")[0]
     name_tag = f" {first}" if first else ""
 
-    intent = await classify_comment_intent(comment_text)
+    intent = await classify_comment_intent(comment_text, redis=redis)
     plan = plan_comment_actions(intent)
     _log.info("comment %s intent=%s plan=%s", cid, intent, plan)
     if not (plan["public"] or plan["dm"] or plan["human"]):

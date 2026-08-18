@@ -245,6 +245,32 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
                 await db.commit()
                 continue
 
+            # Bounded attempts (cost-surprise probe, 2026-08-18): an action
+            # whose compose is BILLED but whose send then raises used to stay
+            # `planned` — recomposed every 60s tick, the dearest possible loop
+            # in the system (a full model turn a minute, forever). Three
+            # attempts, then it parks in needs_approval where a human sends,
+            # rewords or discards it. Fail-open: no redis, no counter — the
+            # tick cadence still paces it.
+            tries = 0
+            if redis is not None:
+                try:
+                    tries = int(await redis.incr(f"actions:tries:{action.id}"))
+                    if tries == 1:
+                        await redis.expire(f"actions:tries:{action.id}", 7 * 86400)
+                except Exception:
+                    tries = 0
+            if tries > 3:
+                action.status = "needs_approval"
+                action.reason = ((action.reason or "")
+                                 + " [auto-send failed 3× — needs a human]")
+                await db.commit()
+                _log.warning("planned action %s parked after 3 failed attempts",
+                             action.id)
+                await _notify(redis, "⏳ Follow-up parked after 3 failed tries",
+                              (action.reason or "")[:120], conv)
+                continue
+
             in_window = await _within_window(db, conv)
             gate = await needs_approval(db, deal, conv, in_window)
             # Fit-checks (~6 days after delivery) and customer-agreed

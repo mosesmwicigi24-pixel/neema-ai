@@ -238,6 +238,14 @@ class Settings(BaseSettings):
     tier2_max_iterations: int = 8    # max tool-call loops per turn (runaway guard)
     tier2_max_tokens: int = 1024
     tier2_prompt_cache: bool = True  # cache the system+tools+conversation prefix (~90% cheaper input)
+    # ── Daily AI spend ceiling (services/ai_budget) — the cost-surprise breaker.
+    # Metered per UTC day. Past the soft budget, main-model turns downgrade to
+    # tier2_model_light; past the hard stop, agent turns refuse before buying a
+    # token (customers get the hold line, the team gets flags, /api/health says
+    # "budget") and it self-clears at midnight UTC. Both are set well ABOVE a
+    # normal day on purpose — a breaker, not a target. 0 disables a rung.
+    ai_daily_budget_usd: float = 40.0
+    ai_daily_stop_usd: float = 60.0
     tier2_memory: bool = True        # cross-conversation customer memory (facts + past orders)
     tier2_vision: bool = True         # let the agent SEE product photos natively (Claude vision)
     # ── Call recording + transcription (self-hosted Whisper = zero marginal cost) ──
