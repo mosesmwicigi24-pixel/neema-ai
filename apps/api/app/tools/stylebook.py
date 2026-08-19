@@ -34,6 +34,13 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
+# Message.conversation is a relationship declared by NAME — the mapper only
+# resolves it once the whole registry is imported. Querying with the bare
+# model import compiles nothing and dies on 'Conversation' (the tool's first
+# live run, 2026-08-19). Importing the app registers every model, so anyone
+# who imports this module can run its queries.
+import app.main  # noqa: F401,E402 — registers models/relationships
+
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 _log = logging.getLogger("neema.stylebook")
 
