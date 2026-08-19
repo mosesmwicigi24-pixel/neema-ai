@@ -74,12 +74,25 @@ async function req<T>(
     body?: unknown,
 ): Promise<T> {
     const headers = await authHeaders();
-    const res = await fetch(`${BASE}${path}`, {
-        method,
-        headers,
-        credentials: "include",
-        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-    });
+    // A request that never settles is a spinner that never dies: a dropped
+    // connection (net::ERR_CONNECTION_RESET mid-transfer) left the thread pane
+    // "loading forever" (owner, 2026-08-19). 30s is generous for every admin
+    // call; media uploads have their own longer-lived paths below.
+    let res: Response;
+    try {
+        res = await fetch(`${BASE}${path}`, {
+            method,
+            headers,
+            credentials: "include",
+            signal: AbortSignal.timeout(30_000),
+            ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+        });
+    } catch (e: any) {
+        if (e?.name === "TimeoutError" || e?.name === "AbortError") {
+            throw new Error(`${method} ${path} → timed out after 30s`);
+        }
+        throw e;
+    }
 
     // ── 401 → fire session-expired event instead of throwing generically ──────
     if (res.status === 401) {
