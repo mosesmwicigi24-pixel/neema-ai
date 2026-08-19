@@ -613,6 +613,23 @@ function ImageBubble({
 
 type MobilePanel = "list" | "thread";
 
+// Thread pagination (owner's rule, 2026-08-19): open with the newest PAGE
+// messages, fetch the next PAGE only when the reader scrolls past them — the
+// app stays light instead of painting a long customer's history in one go.
+const THREAD_PAGE = 50;
+
+// Union two thread slices by id, newest state winning, ordered by time — so a
+// poll refresh (newest page) never throws away older pages already loaded,
+// and an older page slots in without duplicating anything.
+function mergeThread(existing: Message[], incoming: Message[]): Message[] {
+    const byId = new Map<string, Message>();
+    for (const m of existing) byId.set(String(m.id), m);
+    for (const m of incoming)
+        byId.set(String(m.id), { ...(byId.get(String(m.id)) ?? {}), ...m });
+    return [...byId.values()].sort((a, b) =>
+        (a.created_at || "").localeCompare(b.created_at || ""));
+}
+
 // ── Keyboard lift (mobile) ────────────────────────────────────────────────────
 // iOS Safari never resizes the layout for the on-screen keyboard — it just
 // overlays it — so a composer at the bottom of our fixed-height (100dvh) pane
@@ -846,13 +863,31 @@ export function ConversationsView({
     const prevMessageCount = useRef<number>(0);
 
     // ── Load messages for a conversation (always fetches fresh) ───────────────
+    const [threadHasMore, setThreadHasMore] = useState<Record<string, boolean>>({});
+    const [loadingOlder, setLoadingOlder] = useState(false);
+    const threadScrollRef = useRef<HTMLDivElement>(null);
+    // While an older page is being prepended, the new-message autoscroll must
+    // hold still — yanking the reader to the bottom mid-scroll is the exact
+    // heaviness this pagination removes.
+    const holdAutoScroll = useRef(false);
+
     const loadMessages = useCallback(
         async (convId: string, silent = false) => {
             if (!convId) return;
             if (!silent) setThreadLoading(true);
             try {
-                const msgs = await conversationsApi.messages(convId);
-                setMessages((m) => ({ ...m, [convId]: msgs }));
+                const msgs = await conversationsApi.messages(convId, { limit: THREAD_PAGE });
+                setMessages((m) => ({
+                    ...m,
+                    // A fresh open replaces; a silent refresh (poll, after-send)
+                    // merges so already-loaded older pages survive.
+                    [convId]: silent ? mergeThread(m[convId] ?? [], msgs) : msgs,
+                }));
+                if (!silent)
+                    setThreadHasMore((sMap) => ({
+                        ...sMap,
+                        [convId]: msgs.filter((x) => x.type !== "system_event").length >= THREAD_PAGE,
+                    }));
             } catch {
                 if (!silent) onToast("Failed to load messages", "error");
             } finally {
@@ -861,6 +896,47 @@ export function ConversationsView({
         },
         [setMessages, onToast],
     );
+
+    // Scrolling up past the loaded page fetches the previous THREAD_PAGE and
+    // prepends it, keeping the reader's scroll position pinned to the message
+    // they were looking at.
+    const loadOlder = useCallback(async () => {
+        const convId = activeConvId;
+        if (!convId || loadingOlder || !threadHasMore[convId]) return;
+        const list = messages[convId] ?? [];
+        const oldest = list.find(
+            (m) => m.type !== "system_event" && !String(m.id).startsWith("optimistic-"),
+        );
+        if (!oldest?.created_at) return;
+        setLoadingOlder(true);
+        holdAutoScroll.current = true;
+        const el = threadScrollRef.current;
+        const prevH = el?.scrollHeight ?? 0;
+        const prevTop = el?.scrollTop ?? 0;
+        try {
+            const older = await conversationsApi.messages(convId, {
+                before: oldest.created_at, limit: THREAD_PAGE,
+            });
+            setThreadHasMore((sMap) => ({
+                ...sMap,
+                [convId]: older.filter((x) => x.type !== "system_event").length >= THREAD_PAGE,
+            }));
+            if (older.length) {
+                setMessages((m) => ({ ...m, [convId]: mergeThread(m[convId] ?? [], older) }));
+                requestAnimationFrame(() => {
+                    const el2 = threadScrollRef.current;
+                    if (el2) el2.scrollTop = el2.scrollHeight - prevH + prevTop;
+                    holdAutoScroll.current = false;
+                });
+            } else {
+                holdAutoScroll.current = false;
+            }
+        } catch {
+            holdAutoScroll.current = false;   // quiet — scrolling again retries
+        } finally {
+            setLoadingOlder(false);
+        }
+    }, [activeConvId, loadingOlder, threadHasMore, messages, setMessages]);
 
     // ── Auto-select & load the first conversation on initial data load ────────
     useEffect(() => {
@@ -976,7 +1052,7 @@ export function ConversationsView({
     // ── Scroll to bottom only when new messages arrive ────────────────────────
     useEffect(() => {
         const count = activeMessages.length;
-        if (count > prevMessageCount.current) {
+        if (count > prevMessageCount.current && !holdAutoScroll.current) {
             messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
         }
         prevMessageCount.current = count;
@@ -2697,10 +2773,26 @@ export function ConversationsView({
 
                         {/* Messages */}
                         <div
+                            ref={threadScrollRef}
+                            onScroll={(e) => {
+                                if (e.currentTarget.scrollTop < 80) loadOlder();
+                            }}
                             className="flex-1 overflow-y-auto px-4 sm:px-5 py-4 space-y-3"
                             style={{ backgroundColor: "#f5f7f2",
                                      paddingBottom: kbLift ? kbLift + 12 : undefined }}
                         >
+                            {activeConvId && threadHasMore[activeConvId] && (
+                                <div className="flex justify-center py-1">
+                                    {loadingOlder ? (
+                                        <div className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin"
+                                             style={{ borderColor: "#c5d5bc", borderTopColor: "transparent" }} />
+                                    ) : (
+                                        <span className="text-[10px] text-stone-400 select-none">
+                                            ↑ scroll for older messages
+                                        </span>
+                                    )}
+                                </div>
+                            )}
                             {threadLoading && (
                                 <div className="flex justify-center py-8">
                                     <div className="w-5 h-5 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: "#589b31", borderTopColor: "transparent" }} />
