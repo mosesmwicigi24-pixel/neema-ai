@@ -134,7 +134,8 @@ def test_rapid_reclicks_produce_one_briefing_not_five(monkeypatch):
     class _Sess:
         async def __aenter__(self):
             return types.SimpleNamespace(
-                get=_get, add=added.append, commit=_commit, execute=_exec)
+                get=_get, add=added.append, commit=_commit, execute=_exec,
+                delete=_delete)
 
         async def __aexit__(self, *a):
             return False
@@ -146,8 +147,12 @@ def test_rapid_reclicks_produce_one_briefing_not_five(monkeypatch):
         pass
 
     async def _exec(*a, **k):
-        return types.SimpleNamespace(scalar_one_or_none=lambda: None,
-                                     scalars=lambda: types.SimpleNamespace(all=lambda: []))
+        return types.SimpleNamespace(
+            scalar_one_or_none=lambda: None, scalar=lambda: 0,
+            scalars=lambda: types.SimpleNamespace(all=lambda: [], first=lambda: None))
+
+    async def _delete(_row):
+        pass
     monkeypatch.setattr(database, "AsyncSessionLocal", _Sess)
 
     turns = []
@@ -253,3 +258,124 @@ def test_the_hourly_selfcheck_probes_every_page_token(monkeypatch):
         async def get(self, *a, **k): return _OK()
     monkeypatch.setattr(httpx, "AsyncClient", _ClientOK)
     assert asyncio.run(selfcheck._probe_meta_tokens(None, _Redis())) == []
+
+
+# ── a dying token is announced BEFORE it dies (owner's rotation, 2026-08-19) ─
+# The replacement page token installed at 10:20 UTC carried
+# `expires_at: 1787140800` — 12:00 UTC the same day. Every other check was
+# green: valid, right page, right scopes. It would have stopped every send at
+# lunchtime with no warning whatsoever. Graph knows the expiry; now so do we.
+
+def _graph(handlers):
+    """An httpx.AsyncClient stub that answers by URL."""
+    class _R:
+        def __init__(self, body, code=200):
+            self.text, self.status_code = body, code
+
+        def json(self):
+            import json as _j
+            return _j.loads(self.text)
+
+    class _C:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+
+        async def get(self, url, **kw):
+            for frag, (body, code) in handlers.items():
+                if frag in url:
+                    return _R(body, code)
+            raise AssertionError(f"unexpected Graph call: {url}")
+    return _C
+
+
+_PAGE_OK = '{"id":"1556733441275467","name":"Bethany House","category":"Religious Organization"}'
+
+
+def _run_probe(monkeypatch, handlers):
+    import httpx
+    import app.services.selfcheck as selfcheck
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "meta_page_token", "tok", raising=False)
+    monkeypatch.setattr(settings, "meta_app_secret", "s3cr3t", raising=False)
+    monkeypatch.setattr(httpx, "AsyncClient", _graph(handlers))
+    return asyncio.run(selfcheck._probe_meta_tokens(None, _Redis()))
+
+
+def test_a_token_expiring_today_is_flagged_hours_ahead(monkeypatch):
+    import time
+    soon = int(time.time()) + 5400                      # 90 minutes from now
+    findings = _run_probe(monkeypatch, {
+        "/me": (_PAGE_OK, 200),
+        "debug_token": ('{"data":{"type":"PAGE","expires_at":%d,"is_valid":true}}' % soon, 200),
+    })
+    assert findings and "EXPIRES in 1h" in findings[0]
+    assert "META_TOKEN_ROTATION" in findings[0]
+
+
+def test_a_never_expiring_token_says_nothing(monkeypatch):
+    assert _run_probe(monkeypatch, {
+        "/me": (_PAGE_OK, 200),
+        "debug_token": ('{"data":{"type":"PAGE","expires_at":0,"is_valid":true}}', 200),
+    }) == []
+
+
+def test_a_token_with_weeks_left_says_nothing(monkeypatch):
+    import time
+    later = int(time.time()) + 40 * 86400
+    assert _run_probe(monkeypatch, {
+        "/me": (_PAGE_OK, 200),
+        "debug_token": ('{"data":{"type":"PAGE","expires_at":%d}}' % later, 200),
+    }) == []
+
+
+def test_a_graph_blip_on_the_expiry_call_never_cries_wolf(monkeypatch):
+    assert _run_probe(monkeypatch, {
+        "/me": (_PAGE_OK, 200),
+        "debug_token": ("<html>502 Bad Gateway</html>", 502),
+    }) == []
+
+
+# ── an unset app secret is an OPEN webhook, not a quiet default ──────────────
+# The box had no META_APP_SECRET line at all. Both webhook front doors skip
+# X-Hub-Signature-256 verification when the secret is empty (a dev
+# convenience), so every inbound payload was taken on trust for months —
+# invisibly, because inbound "always worked".
+
+def test_an_unset_app_secret_is_reported_as_an_open_webhook(monkeypatch):
+    import app.services.selfcheck as selfcheck
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "meta_app_secret", "", raising=False)
+    monkeypatch.setattr(settings, "whatsapp_app_secret", "", raising=False)
+    findings = asyncio.run(selfcheck._probe_webhook_signature(None, _Redis()))
+    assert len(findings) == 2
+    assert "META_APP_SECRET is UNSET" in findings[0] and "UNSIGNED" in findings[0]
+    assert "WhatsApp" in findings[1]
+
+
+def test_a_configured_secret_is_silent(monkeypatch):
+    import app.services.selfcheck as selfcheck
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "meta_app_secret", "s3cr3t", raising=False)
+    monkeypatch.setattr(settings, "whatsapp_app_secret", "", raising=False)
+    assert asyncio.run(selfcheck._probe_webhook_signature(None, _Redis())) == []
+
+
+def test_the_probe_is_actually_registered(monkeypatch):
+    import app.services.selfcheck as selfcheck
+    names = [n for n, _ in selfcheck.PROBES]
+    assert "webhook_signature" in names and "meta_tokens" in names
+
+
+# ── the rotation is one command, not an archaeology dig ──────────────────────
+
+def test_the_install_script_verifies_before_it_writes():
+    import os
+    p = os.path.join(os.path.dirname(__file__), "..", "..", "..",
+                     "scripts", "meta-token-install.sh")
+    s = open(p, encoding="utf-8").read()
+    assert "read -rsp" in s                       # tokens never echo, never hit history
+    assert "is NOT a page token" in s             # the page-kind trap
+    assert "META_PAGE_TOKENS=" in s               # the map overrides the fallback
+    assert "--force-recreate api" in s            # restart does not re-read .env
+    assert "Number of the page to use" in s       # pick by number, not by id
