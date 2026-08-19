@@ -92,8 +92,21 @@ def _clean(text: str) -> str:
     return " ".join((text or "").split())
 
 
+# Replies that move the customer to ANOTHER channel instead of answering.
+# The standing rules forbid deflection ("'DM us for the price' when you KNOW
+# the answer is a lost sale") — so a deflecting reply, however real, must
+# never become a teaching example. Found in the first live report
+# (2026-08-19): "can I pay in Ethiopian currency?" was answered with
+# "i will be calling you using our other whatsapp number".
+_DEFLECTIONS = ("will be calling you", "will call you", "we will call",
+                "dm us", "inbox us", "check your inbox", "check your dm",
+                "message us on", "text us on", "whatsapp us on",
+                "reach us on", "call us on", "call our")
+
+
 def usable_answer(text: str | None) -> bool:
-    """Is this human reply worth learning from? Small, textual, self-contained.
+    """Is this human reply worth learning from? Small, textual, self-contained
+    — and it must actually ANSWER, not deflect.
 
     Links are excluded (an exemplar must read whole without following one),
     as are media placeholders and anything so long the team themselves would
@@ -101,8 +114,11 @@ def usable_answer(text: str | None) -> bool:
     t = _clean(text or "")
     if not t or t.startswith("[") or t.startswith("🤝"):
         return False
-    if "http" in t.lower() or "www." in t.lower():
+    low = t.lower()
+    if "http" in low or "www." in low:
         return False
+    if any(d in low for d in _DEFLECTIONS):
+        return False                       # deflection is anti-teaching
     if not re.search(r"[A-Za-zÀ-ɏ]", t):
         return False                       # digits or emoji alone teach nothing
     # A media send whose caption is just the filename ("FB_IMG_17843…jpg") is
