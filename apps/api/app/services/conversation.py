@@ -469,8 +469,19 @@ async def _deliver_agent_reply(db: AsyncSession, conv: Conversation, text: str,
     as the native reply context so the customer sees the quote."""
     channel = conv.channel or "whatsapp"
     latest_in = await _latest_inbound(db, conv.id)
-    is_comment = channel == "facebook" or bool(getattr(latest_in, "comment_context", None))
+    has_ctx = bool(getattr(latest_in, "comment_context", None))
     comment_id = latest_in.waba_msg_id if latest_in else None
+    win = await messaging_window(db, conv)
+    dm_possible = win.get("mode") in ("open", "human_agent")
+    # DM FIRST (the Mukami fix, 2026-08-19): a MESSENGER/IG thread that was
+    # opened by a comment funnel carries comment_context on its mirrored
+    # inbound — the old `has_ctx → comment edge` rule sent the human's typed
+    # reply to the PUBLIC comment on the post instead of into the DM they were
+    # typing in, and the thread showed nothing. When a DM window is open, the
+    # DM is the door. The comment edge remains for the `facebook` channel
+    # (which IS the comment thread) and for commenters with no DM open at all
+    # (a Send-API DM to them 400s — the original 500 this guard fixed).
+    is_comment = (channel == "facebook") or (has_ctx and not dm_possible)
     if is_comment and comment_id:
         from app.services.meta_send import reply_to_comment
         # Instagram replies on a different edge (/replies) than Facebook
@@ -483,7 +494,6 @@ async def _deliver_agent_reply(db: AsyncSession, conv: Conversation, text: str,
     # Past 24h a Meta DM only goes out under the HUMAN_AGENT tag. This path is
     # human-only by definition, so claiming it is honest — and it's the whole
     # difference between "can't reply for 6 more days" and answering now.
-    win = await messaging_window(db, conv)
     return await send_to_channel(channel, conv.external_id or conv.wa_id, text,
                                  context_wamid=context_wamid,
                                  human_agent=(win.get("mode") == "human_agent"))
