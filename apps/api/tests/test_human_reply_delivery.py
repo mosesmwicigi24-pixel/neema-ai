@@ -109,6 +109,13 @@ class _Redis:
         self.kv[k] = v
         return True
 
+    async def incr(self, k):
+        self.kv[k] = int(self.kv.get(k, 0)) + 1
+        return self.kv[k]
+
+    async def expire(self, k, s):
+        return True
+
     def __getattr__(self, name):
         async def _noop(*a, **kw):
             return None
@@ -164,3 +171,72 @@ def test_an_idempotent_intercept_reclick_never_schedules_a_briefing():
     src = inspect.getsource(admin.intercept)
     assert 'if not out.get("already")' in src
     assert "schedule_briefing" in src
+
+
+# ── the failing CREDENTIAL is named (owner's toast, 2026-08-19) ──────────────
+# The live toast finally showed the truth: 'Meta send message failed (401):
+# Error validating access token: The session has been invalidated because the
+# user changed their password'. classify() saw '401' and called it "auth" —
+# whose remedy says 'check ANTHROPIC_API_KEY'. A morning was lost to the wrong
+# key. Channel credentials are now classified before AI credentials.
+
+def test_a_dead_page_token_is_named_meta_never_ai_auth():
+    from app.services.agent_health import ACTIONABLE, classify, describe
+    exc = RuntimeError(
+        'Meta send message failed (401): {"error":{"message":"Error validating '
+        'access token: The session has been invalidated because the user '
+        'changed their password"}}')
+    assert classify(exc) == "meta"
+    assert "meta" in ACTIONABLE
+    line = describe({"kind": "meta", "count": 5, "error": str(exc)})
+    assert "PAGE TOKEN" in line and "META_PAGE_TOKEN" in line
+    assert "ANTHROPIC" not in line
+
+
+def test_waba_send_failures_are_named_whatsapp():
+    from app.services.agent_health import classify
+    assert classify("WhatsApp template send failed (401): bad token") == "whatsapp"
+    # and the AI key's own failures still classify as before
+    assert classify("authentication_error: invalid x-api-key") == "auth"
+    assert classify("Your credit balance is too low") == "credit"
+
+
+def test_a_failed_human_send_reaches_the_health_signal():
+    import inspect
+    src = inspect.getsource(convsvc.send_agent_reply)
+    assert "record_turn_failure" in src
+
+
+def test_the_hourly_selfcheck_probes_every_page_token(monkeypatch):
+    """A dead token is flagged by the watchdog within the hour — before a
+    customer send has to fail first. Network blips never cry wolf."""
+    import app.services.selfcheck as selfcheck
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "meta_page_token", "tok_dead", raising=False)
+
+    class _Resp:
+        status_code = 401
+        text = '{"error":{"type":"OAuthException","message":"Error validating access token"}}'
+
+    class _Client:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get(self, *a, **k): return _Resp()
+
+    import httpx
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    r = _Redis()
+    findings = asyncio.run(selfcheck._probe_meta_tokens(None, r))
+    assert findings and "REJECTED by Graph (401)" in findings[0]
+    assert "META_TOKEN_ROTATION" in findings[0]
+    # and the health signal now carries kind=meta from the probe itself
+    assert "agent:fail:count" in r.kv
+
+    class _OK(_Resp):
+        status_code = 200
+        text = '{"id":"123"}'
+    class _ClientOK(_Client):
+        async def get(self, *a, **k): return _OK()
+    monkeypatch.setattr(httpx, "AsyncClient", _ClientOK)
+    assert asyncio.run(selfcheck._probe_meta_tokens(None, _Redis())) == []
