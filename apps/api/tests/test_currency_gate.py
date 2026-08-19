@@ -123,6 +123,13 @@ def test_prompt_payment_and_fulfilment_are_country_specific():
 
     assert "Western Union" in intl and "Mukuru" in intl  # discover the route
     assert "Do NOT present the KES payment link" in intl
+    # payment-before-delivery must be explicit abroad too (the Joseph Elias fix):
+    # instalments are a way to pay BEFORE delivery, never 'no fee before delivery'
+    assert "PAYMENT IS COMPLETED BEFORE DELIVERY" in intl
+    assert "pay BEFORE delivery over time, NOT to receive first" in intl
+    for p in (ke, intl):                                 # global anti-stall + photo-price guards
+        assert "NEVER STALL on something you already know" in p
+        assert "quote THAT item's price plainly" in p
     assert 'never ask "delivery or pickup?"' in intl     # courier talk instead
     assert "DHL" in intl and "KES 350" not in intl       # no Kenyan fee language abroad
 
