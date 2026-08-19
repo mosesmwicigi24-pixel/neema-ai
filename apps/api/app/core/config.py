@@ -52,6 +52,12 @@ class Settings(BaseSettings):
     # The webhook is INERT until meta_verify_token is set.
     meta_verify_token: str = ""
     meta_app_secret: str = ""
+    # Meta gates the HUMAN_AGENT message tag (replies 24h–7d after the
+    # customer's last message) behind App Review. Until the app is granted it,
+    # every tagged send fails with "(#100) Cannot tag messages with
+    # 'HUMAN_AGENT' without prior approval" (live toast, 2026-08-19) — so the
+    # window must not be promised. Flip to true the day Meta approves.
+    meta_human_agent_approved: bool = False
     # Page access token used to SEND Messenger/Instagram replies via the Graph
     # Send API (/me/messages). Instagram DMs use the same token once the IG
     # account is linked to the Page. Unset → outbound Messenger/IG is disabled.

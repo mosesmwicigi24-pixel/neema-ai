@@ -431,13 +431,21 @@ async def messaging_window(db: AsyncSession, conv: Conversation) -> dict:
     human_until = last_at + timedelta(days=HUMAN_AGENT_DAYS)
     is_meta_dm = channel in ("messenger", "instagram")
 
+    # The 7-day human-agent lane exists only once Meta has APPROVED the app
+    # for the HUMAN_AGENT tag (App Review). Promising it before then produced
+    # a banner that said "you can still reply" over a send that always failed
+    # with (#100) — the UI must tell the truth the flag knows.
+    from app.core.config import settings
+    approval = settings.meta_human_agent_approved
     if now < expires:
         mode = "open"
-    elif is_meta_dm and now < human_until:
+    elif is_meta_dm and now < human_until and approval:
         mode = "human_agent"
     else:
         mode = "closed"
 
+    pending = (mode == "closed" and is_meta_dm and now < human_until
+               and not approval)
     return {
         "mode": mode,
         "channel": channel,
@@ -448,6 +456,10 @@ async def messaging_window(db: AsyncSession, conv: Conversation) -> dict:
             "" if mode == "open" else
             "24h window closed — sending as a human agent (Meta allows 7 days)"
             if mode == "human_agent" else
+            ("24h window closed — Meta hasn't yet approved this app for the "
+             "Human Agent allowance (App Review). Until approval, only the "
+             "customer's next message reopens the thread.")
+            if pending else
             "Outside the messaging window — an approved template is the only way in"
         ),
     }
