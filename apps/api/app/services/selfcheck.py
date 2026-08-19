@@ -296,8 +296,20 @@ async def _probe_meta_tokens(db, redis) -> list[str]:
             import httpx
             async with httpx.AsyncClient(timeout=8.0) as client:
                 r = await client.get("https://graph.facebook.com/v19.0/me",
-                                     params={"access_token": tok})
+                                     params={"access_token": tok,
+                                             "fields": "id,name,category"})
             if r.status_code == 200:
+                # Valid is not enough — it must be a PAGE token. A System User
+                # token answers /me happily but has no messages edge, so every
+                # send 400s ("Object with ID 'me' does not exist") while this
+                # probe stays green — exactly today's second outage. Only a
+                # Page carries `category`.
+                if '"category"' not in (r.text or ""):
+                    out.append(
+                        f"Meta token ({label}) is VALID but NOT a Page token — "
+                        "sends fail with 'Object with ID me does not exist'. "
+                        "Exchange it: GET /me/accounts with this token and use "
+                        "the page's own access_token. See docs/META_TOKEN_ROTATION.md")
                 continue
             body = (r.text or "")[:160]
             if r.status_code in (400, 401, 403) and (
