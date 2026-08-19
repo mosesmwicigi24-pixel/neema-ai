@@ -80,21 +80,32 @@ _MEDIA_TYPE_TO_META = {"image": "image", "video": "video", "audio": "audio", "do
 
 
 async def send_meta_media(recipient_id: str, media_type: str, media_url: str,
-                          caption: str | None = None, page_id: str | None = None) -> None:
+                          caption: str | None = None, page_id: str | None = None,
+                          human_agent: bool = False) -> None:
     """Send an image / video / audio / file to a Messenger PSID or Instagram IGSID
     via the Send API (attachment by URL). Meta attachments carry no caption, so a
     caption follows as a short text message — the same way Messenger shows an image
     with a caption. (Instagram DMs accept images; other types may be rejected by
-    Meta and surface as a send error, which the caller handles.)"""
+    Meta and surface as a send error, which the caller handles.)
+
+    `human_agent=True` claims Meta's HUMAN_AGENT tag, same as text: without it,
+    a photo sent by a person in the 24h–7d window is refused with (#10) while
+    their words go through — half a reply. Human-only, never set by the AI."""
     meta_type = _MEDIA_TYPE_TO_META.get(media_type, "file")
-    await _graph_post("me/messages", {
+    body: dict = {
         "recipient": {"id": recipient_id},
-        "messaging_type": "RESPONSE",
         "message": {"attachment": {"type": meta_type,
                                    "payload": {"url": media_url, "is_reusable": True}}},
-    }, "send media", page_id=page_id)
+    }
+    if human_agent:
+        body["messaging_type"] = "MESSAGE_TAG"
+        body["tag"] = "HUMAN_AGENT"
+    else:
+        body["messaging_type"] = "RESPONSE"
+    await _graph_post("me/messages", body, "send media", page_id=page_id)
     if caption:
-        await send_meta_message(recipient_id, caption, page_id=page_id)
+        await send_meta_message(recipient_id, caption, page_id=page_id,
+                                human_agent=human_agent)
 
 
 async def send_meta_carousel(recipient_id: str, elements: list[dict],
