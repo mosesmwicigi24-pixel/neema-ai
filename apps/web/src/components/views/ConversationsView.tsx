@@ -613,6 +613,36 @@ function ImageBubble({
 
 type MobilePanel = "list" | "thread";
 
+// ── Keyboard lift (mobile) ────────────────────────────────────────────────────
+// iOS Safari never resizes the layout for the on-screen keyboard — it just
+// overlays it — so a composer at the bottom of our fixed-height (100dvh) pane
+// disappears under it and the agent types blind. The visualViewport API knows
+// the truth: the gap between the layout viewport and the visual one IS the
+// keyboard. We translate the composer up by that gap. Android Chrome resizes
+// the layout itself (viewport `interactiveWidget: "resizes-content"`), so the
+// gap there stays ~0 and this hook is a no-op — no double lift.
+function useKeyboardLift(enabled: boolean): number {
+    const [lift, setLift] = useState(0);
+    useEffect(() => {
+        if (!enabled || typeof window === "undefined") { setLift(0); return; }
+        const vv = window.visualViewport;
+        if (!vv) return;
+        const update = () => {
+            const gap = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+            // Ignore URL-bar show/hide jitter — a keyboard is never that short.
+            setLift(gap > 60 ? Math.round(gap) : 0);
+        };
+        update();
+        vv.addEventListener("resize", update);
+        vv.addEventListener("scroll", update);
+        return () => {
+            vv.removeEventListener("resize", update);
+            vv.removeEventListener("scroll", update);
+        };
+    }, [enabled]);
+    return lift;
+}
+
 interface ConversationsViewProps extends SharedViewProps {
     conversations: Conversation[];
     setConversations: React.Dispatch<React.SetStateAction<Conversation[]>>;
@@ -806,6 +836,13 @@ export function ConversationsView({
     const [uploadingMedia, setUploadingMedia] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    // How far the on-screen keyboard covers the pane right now (mobile only).
+    const kbLift = useKeyboardLift(isMobile);
+    useEffect(() => {
+        // When the keyboard rises, keep the conversation's tail in view above
+        // the lifted composer instead of leaving it buried.
+        if (kbLift) messagesEndRef.current?.scrollIntoView({ block: "end" });
+    }, [kbLift]);
     const prevMessageCount = useRef<number>(0);
 
     // ── Load messages for a conversation (always fetches fresh) ───────────────
@@ -2618,8 +2655,9 @@ export function ConversationsView({
 
                         {/* Messages */}
                         <div
-                            className="flex-1 overflow-y-auto px-5 py-4 space-y-3"
-                            style={{ backgroundColor: "#f5f7f2" }}
+                            className="flex-1 overflow-y-auto px-4 sm:px-5 py-4 space-y-3"
+                            style={{ backgroundColor: "#f5f7f2",
+                                     paddingBottom: kbLift ? kbLift + 12 : undefined }}
                         >
                             {threadLoading && (
                                 <div className="flex justify-center py-8">
@@ -3326,7 +3364,23 @@ export function ConversationsView({
                         {activeConv.intercept_mode === "human" &&
                             (activeConv.assigned_agent_id === currentAgentId ||
                                 isAdminOrSuper) && (
-                                <div className="px-4 py-3 bg-white" style={{ borderTop: "1px solid #edf0ea" }}>
+                                <div
+                                    className="px-3 sm:px-4 pt-2.5 bg-white/95 backdrop-blur-sm relative z-30"
+                                    style={{
+                                        borderTop: "1px solid #edf0ea",
+                                        // Riding above the keyboard earns a real
+                                        // shadow; at rest it sits flush.
+                                        boxShadow: kbLift
+                                            ? "0 -8px 24px rgba(0,0,0,0.10)"
+                                            : "0 -1px 0 rgba(0,0,0,0.02)",
+                                        paddingBottom: kbLift
+                                            ? 10
+                                            : "max(env(safe-area-inset-bottom), 12px)",
+                                        transform: kbLift ? `translateY(-${kbLift}px)` : undefined,
+                                        transition: "transform 160ms ease-out, box-shadow 160ms ease-out",
+                                        willChange: "transform",
+                                    }}
+                                >
                                     {/* ── AI Draft pill — shown when a draft exists but panel is collapsed */}
                                     {draftVisible && !draftExpanded && (
                                         <button
@@ -3573,7 +3627,7 @@ export function ConversationsView({
                                                 fileInputRef.current?.click()
                                             }
                                             title="Attach images or files (up to 5 MB each for images)"
-                                            className="h-10 w-10 rounded-xl bg-[#f1f3f5] hover:bg-[#e5e8eb] flex items-center justify-center text-[#64748b] transition-colors flex-shrink-0"
+                                            className="h-11 w-11 sm:h-10 sm:w-10 rounded-2xl bg-[#f1f3f5] hover:bg-[#e5e8eb] active:scale-95 flex items-center justify-center text-[#64748b] transition-all flex-shrink-0"
                                         >
                                             <svg
                                                 className="w-4 h-4"
@@ -3591,24 +3645,34 @@ export function ConversationsView({
                                         </button>
                                         <textarea
                                             value={replyText}
-                                            onChange={(e) =>
-                                                setReplyText(e.target.value)
-                                            }
+                                            onChange={(e) => {
+                                                setReplyText(e.target.value);
+                                                // Grow with the message, up to ~5 lines,
+                                                // then scroll inside — like WhatsApp.
+                                                const t = e.currentTarget;
+                                                t.style.height = "auto";
+                                                t.style.height = Math.min(t.scrollHeight, 132) + "px";
+                                            }}
                                             onKeyDown={(e) => {
                                                 if (
                                                     e.key === "Enter" &&
                                                     !e.shiftKey
                                                 ) {
                                                     e.preventDefault();
+                                                    (e.currentTarget as HTMLTextAreaElement).style.height = "auto";
                                                     sendReply();
                                                 }
                                             }}
-                                            placeholder="Type a reply… (Enter to send)"
-                                            rows={2}
-                                            className="flex-1 resize-none px-3 py-2 text-sm rounded-xl focus:outline-none focus:ring-2 focus:ring-[#f59e0b] focus:border-transparent"
+                                            placeholder="Type a reply…"
+                                            rows={1}
+                                            // text-[16px] on mobile is load-bearing: any
+                                            // input under 16px makes iOS Safari zoom the
+                                            // whole page on focus, which is the single
+                                            // ugliest thing that happened when typing here.
+                                            className="flex-1 resize-none px-4 py-2.5 text-[16px] sm:text-sm leading-snug rounded-2xl min-h-[44px] max-h-[132px] focus:outline-none focus:ring-2 focus:ring-[#f59e0b]/70 focus:border-transparent placeholder:text-stone-400"
                                             style={{
-                                                backgroundColor: "#f8fafc",
-                                                border: "1px solid #e2e8f0",
+                                                backgroundColor: "#f6f7f5",
+                                                border: "1px solid #e5e8e2",
                                                 color: "#1c2917",
                                             }}
                                         />
@@ -3621,7 +3685,7 @@ export function ConversationsView({
                                             title={window24?.mode === "closed"
                                                 ? (window24.reason || "Outside the messaging window")
                                                 : "Send"}
-                                            className="h-10 w-10 rounded-xl disabled:opacity-50 flex items-center justify-center text-white transition-colors"
+                                            className="h-11 w-11 sm:h-10 sm:w-10 rounded-2xl disabled:opacity-50 active:scale-95 flex items-center justify-center text-white transition-all shadow-sm"
                                             style={{ backgroundColor: "#f59e0b" }}
                                             onMouseEnter={(e) => { if (!(!replyText.trim() || sending)) (e.currentTarget as HTMLElement).style.backgroundColor = "#d97706"; }}
                                             onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#f59e0b"; }}

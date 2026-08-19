@@ -1,6 +1,17 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Providers from "@/components/providers";
 import "./globals.css";
+
+// The mobile composer contract: on browsers that support it (Android Chrome),
+// the layout itself shrinks when the keyboard opens, so the reply box lands
+// above the keyboard natively; on iOS Safari (which ignores interactiveWidget)
+// the visualViewport lift in ConversationsView translates it up instead.
+export const viewport: Viewport = {
+    width: "device-width",
+    initialScale: 1,
+    viewportFit: "cover",
+    interactiveWidget: "resizes-content",
+};
 
 export const metadata: Metadata = {
     title: {
