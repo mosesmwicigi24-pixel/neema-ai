@@ -34,6 +34,10 @@ _log = logging.getLogger("neema.selfcheck")
 
 FINDINGS_KEY = "selfcheck_findings"     # app_settings row: {"at": iso, "findings": [...]}
 
+# How much notice a dying page token gets. Three days is enough to be seen on a
+# working day and acted on calmly; the 2026-08-19 token had 100 minutes.
+_TOKEN_EXPIRY_WARN_SEC = 72 * 3600
+
 
 # ── Probes ───────────────────────────────────────────────────────────────────
 # Each returns a list of human-readable finding strings (empty = healthy) and
@@ -274,6 +278,41 @@ async def _probe_unanswered_customers(db, redis) -> list[str]:
             f"(oldest {hours}h) — check that Neema can still answer"]
 
 
+async def _token_expiry_finding(label: str, tok: str) -> list[str]:
+    """Warn while a page token still has hours to live, not after it dies.
+
+    Graph will happily tell you when a token expires (`/debug_token`), and a
+    token minted from a short-lived login carries `expires_at` a few hours out
+    — the exact shape of the 2026-08-19 replacement token, which was installed
+    at 10:20 UTC and would have died at 12:00 with no warning at all. Only a
+    token derived from an EXTENDED user token reports `expires_at: 0` (never).
+
+    The token debugs itself (`input_token` = `access_token`), so this needs no
+    app secret — which matters, because the box had none.
+    """
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            r = await client.get("https://graph.facebook.com/v19.0/debug_token",
+                                 params={"input_token": tok, "access_token": tok})
+        data = (r.json() or {}).get("data") or {}
+        exp = data.get("expires_at")
+        if not isinstance(exp, int) or exp <= 0:
+            return []                     # 0 = never expires; absent = unknown
+        left = exp - int(datetime.now(timezone.utc).timestamp())
+        if left > _TOKEN_EXPIRY_WARN_SEC:
+            return []
+        when = datetime.fromtimestamp(exp, timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        hours = max(0, left) // 3600
+        return [f"Meta page token ({label}) EXPIRES in {hours}h ({when}) — "
+                "Messenger/Instagram sends stop then. This one was minted from a "
+                "short-lived login; a permanent token comes from EXTENDING the "
+                "user token first, then GET /me/accounts. "
+                "See docs/META_TOKEN_ROTATION.md"]
+    except Exception:
+        return []                         # a blip must never cry wolf
+
+
 async def _probe_meta_tokens(db, redis) -> list[str]:
     """Ask Graph directly whether each configured page token still works —
     BEFORE a customer send fails on it. A user-session-derived token dies the
@@ -310,6 +349,8 @@ async def _probe_meta_tokens(db, redis) -> list[str]:
                         "sends fail with 'Object with ID me does not exist'. "
                         "Exchange it: GET /me/accounts with this token and use "
                         "the page's own access_token. See docs/META_TOKEN_ROTATION.md")
+                    continue
+                out += await _token_expiry_finding(label, tok)
                 continue
             body = (r.text or "")[:160]
             if r.status_code in (400, 401, 403) and (
@@ -329,9 +370,37 @@ async def _probe_meta_tokens(db, redis) -> list[str]:
     return out
 
 
+async def _probe_webhook_signature(db, redis) -> list[str]:
+    """An unset app secret does not fail loudly — it turns verification OFF.
+
+    Both webhook front doors verify Meta's `X-Hub-Signature-256` only when a
+    secret is configured, and return True when it is not (a dev convenience:
+    routers/meta_webhook.py, routers/whatsapp_webhook.py). On 2026-08-19 the
+    box turned out to have no META_APP_SECRET at all — inbound had "always
+    worked", so nothing ever hinted that every payload was being taken on
+    trust. Anyone who learned the callback URL could have posted a fake
+    customer message; Neema would have run a paid turn and answered it as
+    real. Silence is not the same as safety, so the gap gets a voice.
+    """
+    out: list[str] = []
+    if not settings.meta_app_secret:
+        out.append(
+            "META_APP_SECRET is UNSET — the Messenger/Instagram webhook accepts "
+            "UNSIGNED payloads: anyone with the callback URL can inject fake "
+            "customer messages, each costing a paid AI turn and answered as if "
+            "real. Copy the App Secret from the Meta app (Settings → Basic), set "
+            "META_APP_SECRET on the box, recreate the api container.")
+    if not (settings.whatsapp_app_secret or settings.meta_app_secret):
+        out.append(
+            "No WhatsApp webhook secret (WHATSAPP_APP_SECRET / META_APP_SECRET "
+            "both unset) — the WhatsApp front door accepts UNSIGNED payloads too.")
+    return out
+
+
 PROBES = [
     ("agent_failures", _probe_agent_failures),
     ("meta_tokens", _probe_meta_tokens),
+    ("webhook_signature", _probe_webhook_signature),
     ("unanswered_customers", _probe_unanswered_customers),
     ("media_dir", _probe_media_dir),
     ("media_rot", _probe_media_rot),
