@@ -233,9 +233,22 @@ def test_the_hourly_selfcheck_probes_every_page_token(monkeypatch):
     # and the health signal now carries kind=meta from the probe itself
     assert "agent:fail:count" in r.kv
 
+    # a VALID token that is not a PAGE token (a System User's own token
+    # answers /me but has no messages edge — every send 400s while a naive
+    # probe stays green; today's second outage) must be flagged too
+    class _SysUser(_Resp):
+        status_code = 200
+        text = '{"id":"122","name":"neema-bot"}'
+    class _ClientSys(_Client):
+        async def get(self, *a, **k): return _SysUser()
+    monkeypatch.setattr(httpx, "AsyncClient", _ClientSys)
+    findings = asyncio.run(selfcheck._probe_meta_tokens(None, _Redis()))
+    assert findings and "NOT a Page token" in findings[0]
+    assert "me/accounts" in findings[0]
+
     class _OK(_Resp):
         status_code = 200
-        text = '{"id":"123"}'
+        text = '{"id":"123","name":"Bethany House","category":"Religious Organization"}'
     class _ClientOK(_Client):
         async def get(self, *a, **k): return _OK()
     monkeypatch.setattr(httpx, "AsyncClient", _ClientOK)
