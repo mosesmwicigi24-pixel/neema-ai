@@ -134,7 +134,8 @@ def test_rapid_reclicks_produce_one_briefing_not_five(monkeypatch):
     class _Sess:
         async def __aenter__(self):
             return types.SimpleNamespace(
-                get=_get, add=added.append, commit=_commit, execute=_exec)
+                get=_get, add=added.append, commit=_commit, execute=_exec,
+                delete=_delete)
 
         async def __aexit__(self, *a):
             return False
@@ -146,8 +147,12 @@ def test_rapid_reclicks_produce_one_briefing_not_five(monkeypatch):
         pass
 
     async def _exec(*a, **k):
-        return types.SimpleNamespace(scalar_one_or_none=lambda: None,
-                                     scalars=lambda: types.SimpleNamespace(all=lambda: []))
+        return types.SimpleNamespace(
+            scalar_one_or_none=lambda: None, scalar=lambda: 0,
+            scalars=lambda: types.SimpleNamespace(all=lambda: [], first=lambda: None))
+
+    async def _delete(_row):
+        pass
     monkeypatch.setattr(database, "AsyncSessionLocal", _Sess)
 
     turns = []

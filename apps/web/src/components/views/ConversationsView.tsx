@@ -227,6 +227,7 @@ function CommentContextCard({
     ctx,
     isInbound,
     channel,
+    heading,
 }: {
     ctx: {
         post_id?: string;
@@ -240,6 +241,8 @@ function CommentContextCard({
     // The post lives on the channel that owns the comment — Instagram media and
     // Facebook posts are read differently, so playback needs to say which.
     channel?: string;
+    // Shown once above a run of comments on the same post, Facebook-style.
+    heading?: string;
 }) {
     const title = (ctx.title || "").trim() || "a post";
     const permalink = ctx.permalink || "";
@@ -287,7 +290,7 @@ function CommentContextCard({
                     isInbound ? "text-[#699a32]" : "text-white/70",
                 ].join(" ")}
             >
-                Commented on your post
+                {heading || "Commented on your post"}
             </div>
             <div
                 className={[
@@ -2830,6 +2833,31 @@ export function ConversationsView({
                                 // Repeat media requests after the first escalation are suppressed.
                                 let escalationShown = false;
 
+                                // ── A comment thread reads like Facebook: the POST
+                                // once, that customer's comments as a thread under it.
+                                // Every inbound comment used to carry its own copy of
+                                // the post card, so four comments on one reel pushed
+                                // the same poster down the thread four times and the
+                                // conversation itself off screen (owner, 2026-08-19).
+                                // The card now appears where the post CHANGES; the run
+                                // beneath it belongs to that post.
+                                const postHeadFor = new Map<string, any>();
+                                {
+                                    let lastPostKey = "";
+                                    for (const m of sortedMessages) {
+                                        const c = (m as any).comment_context;
+                                        // Our own public replies (reply_to) sit inside
+                                        // the run — they must not break or restart it.
+                                        if (!c || c.reply_to) continue;
+                                        const key = String(c.post_id || c.permalink || c.title || "");
+                                        if (!key) continue;
+                                        if (key !== lastPostKey) {
+                                            postHeadFor.set(String(m.id), c);
+                                            lastPostKey = key;
+                                        }
+                                    }
+                                }
+
                                 return sortedMessages.map((msg, idx) => {
                                     const isInbound =
                                         msg.direction === "inbound";
@@ -3118,6 +3146,18 @@ export function ConversationsView({
                                                     <div className="flex-1 h-px bg-[#427425]/30" />
                                                 </div>
                                             )}
+                                            {postHeadFor.has(String(msg.id)) && (
+                                                <div className="flex justify-start mt-3 mb-1">
+                                                    <div className="w-full max-w-[75%]">
+                                                        <CommentContextCard
+                                                            ctx={postHeadFor.get(String(msg.id))}
+                                                            isInbound={true}
+                                                            channel={activeConv?.channel}
+                                                            heading="Your post — their comments below"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            )}
                                             <div
                                                 className={`flex ${isInbound ? "justify-start" : "justify-end"}`}
                                                 {...makeSwipeHandlers(msg)}
@@ -3246,13 +3286,6 @@ export function ConversationsView({
                                                             );
                                                             return (
                                                                 <div className="flex flex-col gap-1.5">
-                                                                    {cctx && (cctx.title || cctx.post_id) && (
-                                                                        <CommentContextCard
-                                                                            ctx={cctx}
-                                                                            isInbound={isInbound}
-                                                                            channel={activeConv?.channel}
-                                                                        />
-                                                                    )}
                                                                     {body && (
                                                                         <p className="leading-relaxed whitespace-pre-wrap">
                                                                             {formatWa(body)}

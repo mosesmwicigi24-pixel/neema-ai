@@ -18,7 +18,7 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func as sa_func, select
 
 from app.core.config import settings
 
@@ -101,6 +101,11 @@ def schedule_briefing(redis, conv_id) -> None:
     _spawn(_briefing(redis, conv_id))
 
 
+# Every handoff briefing carries this heading. It is also how the thread
+# finds the previous one to supersede — a thread keeps exactly one.
+BRIEF_HEADING = "🤝 Handoff briefing"
+
+
 async def _briefing(redis, conv_id) -> None:
     from app.database import AsyncSessionLocal
     from app.agent import runtime
@@ -120,6 +125,32 @@ async def _briefing(redis, conv_id) -> None:
             conv = await db.get(Conversation, conv_id)
             if conv is None:
                 return
+
+            # ── One briefing per thread, and only when there is something new
+            # to brief ON. A thread that is picked up, auto-released after 45
+            # idle minutes and picked up again used to stack a fresh note every
+            # cycle: John Nyaga's thread carried three near-identical briefings
+            # (2026-08-19), each a full model turn, each pushing the actual
+            # conversation further off screen. If the customer has said nothing
+            # since the last briefing, that briefing is still true — keep it and
+            # spend nothing.
+            prev = (await db.execute(
+                select(Message)
+                .where(Message.conversation_id == conv.id,
+                       Message.media_type == "note",
+                       Message.text.like(f"{BRIEF_HEADING}%"))
+                .order_by(Message.created_at.desc()).limit(1)
+            )).scalars().first()
+            if prev is not None and prev.created_at is not None:
+                fresh = (await db.execute(
+                    select(sa_func.count()).select_from(Message)
+                    .where(Message.conversation_id == conv.id,
+                           Message.direction == MsgDirection.inbound,
+                           Message.created_at > prev.created_at)
+                )).scalar() or 0
+                if not fresh:
+                    return
+
             key = conv.wa_id if conv.channel == "whatsapp" else conv.external_id
             brief = (await runtime.run_turn(
                 db, redis, wa_id=key,
@@ -134,12 +165,21 @@ async def _briefing(redis, conv_id) -> None:
                 read_only=True)).strip()
             if not brief:
                 return
+            # The new note SUPERSEDES the old ones: a briefing is a snapshot of
+            # where the sale stands, and a stale snapshot beside a fresh one is
+            # worse than none — the reader has to work out which is current.
+            for stale in (await db.execute(
+                select(Message).where(Message.conversation_id == conv.id,
+                                      Message.media_type == "note",
+                                      Message.text.like(f"{BRIEF_HEADING}%"))
+            )).scalars().all():
+                await db.delete(stale)
             db.add(Message(
                 channel=conv.channel, wa_id=conv.wa_id,
                 external_id=getattr(conv, "external_id", None),
                 person_id=conv.person_id, conversation_id=conv.id,
                 direction=MsgDirection.outbound, sender=MsgSender.human_agent,
-                text=f"🤝 Handoff briefing\n\n{brief}", media_type="note",
+                text=f"{BRIEF_HEADING}\n\n{brief}", media_type="note",
             ))
             await db.commit()
     except Exception as exc:
