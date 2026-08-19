@@ -816,6 +816,19 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     except Exception:
         pass
 
+    # What "this product" means: the products past turns actually surfaced for
+    # THIS contact (photo-only asks included — their text history shows
+    # nothing). Makes a returning "is it available now?" resolvable without
+    # asking the customer to start over. Best-effort (see product_interest).
+    try:
+        from app.services import product_interest
+        _pi = product_interest.context_block(
+            await product_interest.recall(redis, channel, key))
+        if _pi:
+            tail += _pi
+    except Exception:
+        pass
+
     # Current inbound turn. An image message has empty text (skipped by _history),
     # so build a multimodal turn — the agent SEES the photo (Claude vision) and
     # can match it to the catalogue. Voice notes already arrive as transcribed
@@ -1000,6 +1013,16 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     # Haiku-routed turn as Sonnet, so the per-model split was fiction — and tag
     # the row with WHERE the money went (comment vs channel), because "the
     # volume driver of the whole bill" was a guess nobody could query.
+    # Make this turn's surfaced products durable — the memory the next
+    # "is this product available now?" resolves against. Real turns only:
+    # a read-only draft or a scribe pass must never pollute the record.
+    if not read_only and not scribe_only and ctx.seen_products:
+        try:
+            from app.services import product_interest
+            await product_interest.remember(redis, channel, key, ctx.seen_products)
+        except Exception:
+            pass
+
     _served = getattr(llm, "_model", None) or settings.tier2_model
     # Feed the daily breaker FIRST, from the same numbers, independently of the
     # DB — a down database must never blind the spend meter (ai_budget owns
