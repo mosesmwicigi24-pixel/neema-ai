@@ -253,7 +253,15 @@ async def _probe_unanswered_customers(db, redis) -> list[str]:
     invisible to it."""
     from app.models.conversation import Conversation, InterceptMode
     from app.models.message import Message, MsgDirection
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(minutes=30)
+    # Only the RECENT window (48h) is evidence about whether Neema is answering
+    # TODAY. The historical tail — hundreds of threads whose Meta reply window
+    # expired months ago and that nobody can lawfully answer — used to be counted
+    # too, which pinned this finding at "823 waiting (oldest 3180h)" forever:
+    # permanent alarm, zero signal. An outage shows up as a pile-up of FRESH
+    # unanswered inbound, so that is all we look at.
+    horizon = now - timedelta(hours=48)
     latest = (
         select(Message.conversation_id, sa_func.max(Message.created_at).label("m"))
         .group_by(Message.conversation_id).subquery())
@@ -264,7 +272,8 @@ async def _probe_unanswered_customers(db, redis) -> list[str]:
         .join(Conversation, Conversation.id == Message.conversation_id)
         .where(Message.direction == MsgDirection.inbound,
                Conversation.intercept_mode == InterceptMode.ai,
-               Message.created_at < cutoff)
+               Message.created_at < cutoff,
+               Message.created_at > horizon)
     )).scalars().all()
     # A couple can be legitimate (a paused chat, a closing "asante" needing no
     # reply). A pile-up is the AI being down.
@@ -273,9 +282,9 @@ async def _probe_unanswered_customers(db, redis) -> list[str]:
     oldest = min(rows)
     if oldest.tzinfo is None:
         oldest = oldest.replace(tzinfo=timezone.utc)
-    hours = int((datetime.now(timezone.utc) - oldest).total_seconds() // 3600)
+    hours = int((now - oldest).total_seconds() // 3600)
     return [f"{len(rows)} customer(s) waiting on the AI with no reply for 30m+ "
-            f"(oldest {hours}h) — check that Neema can still answer"]
+            f"in the last 48h (oldest {hours}h) — check that Neema can still answer"]
 
 
 async def _token_expiry_finding(label: str, tok: str) -> list[str]:

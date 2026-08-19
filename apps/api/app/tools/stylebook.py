@@ -105,6 +105,11 @@ def usable_answer(text: str | None) -> bool:
         return False
     if not re.search(r"[A-Za-zÀ-ɏ]", t):
         return False                       # digits or emoji alone teach nothing
+    # A media send whose caption is just the filename ("FB_IMG_17843…jpg") is
+    # not language — one leaked into the house voice and taught Neema that a
+    # filename is an acceptable reply to "do you have pictures?".
+    if re.search(r"\.(jpe?g|png|gif|webp|mp4|3gp|pdf|docx?|xlsx?)\b", t.lower()):
+        return False
     n = _words(t)
     return 1 <= n <= 60
 

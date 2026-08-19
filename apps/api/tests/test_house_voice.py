@@ -30,6 +30,10 @@ def test_notes_media_links_and_letters_are_not():
     assert not usable_answer("🤝 Handoff briefing\n\n- the sale stands…")
     assert not usable_answer("[image]")
     assert not usable_answer("see https://bethanyhouse.co.ke/catalog")
+    # a media send whose text is just the filename is not language — one leaked
+    # into the live house voice and taught "FB_IMG_….jpg" as a reply
+    assert not usable_answer("FB_IMG_1784359688861.jpg")
+    assert not usable_answer("catalogue.pdf")
     assert not usable_answer("")
     assert not usable_answer("word " * 61)          # a letter, not a reply
 
