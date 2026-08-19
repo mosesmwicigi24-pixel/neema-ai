@@ -659,7 +659,13 @@ async def approve_draft(
         from fastapi import HTTPException
         raise HTTPException(status_code=422, detail="No draft text found to approve")
 
-    wamid = await send_to_channel(conv.channel or "whatsapp", conv.external_id or conv.wa_id, text)
+    # A human read this draft and chose to send it — that makes it a human
+    # agent's reply, entitled to Meta's 7-day HUMAN_AGENT window just like a
+    # typed one. Before this, approving a held draft on a thread older than a
+    # day failed with (#10) while the very same words, typed by hand, went out.
+    win = await messaging_window(db, conv)
+    wamid = await send_to_channel(conv.channel or "whatsapp", conv.external_id or conv.wa_id, text,
+                                  human_agent=(win.get("mode") == "human_agent"))
 
     msg = Message(
         wa_id=conv.wa_id,
@@ -736,7 +742,13 @@ async def send_agent_media(
         from app.services.meta_send import send_meta_media, page_of_contact
         recipient = conv.external_id or conv.wa_id
         page_id = await page_of_contact(channel, recipient)
-        await send_meta_media(recipient, media_type, media_url, caption, page_id=page_id)
+        # Past 24h the attachment needs the HUMAN_AGENT tag exactly like text —
+        # this is a person sending, so claiming it is honest (the banner already
+        # promises "you can still reply as a human agent"; the photo must keep
+        # that promise too).
+        win = await messaging_window(db, conv)
+        await send_meta_media(recipient, media_type, media_url, caption, page_id=page_id,
+                              human_agent=(win.get("mode") == "human_agent"))
     else:
         wa_id = conv.wa_id.lstrip("+")
         await _send_waba_media(wa_id, media_type, media_url, caption, filename)

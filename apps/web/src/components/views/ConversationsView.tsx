@@ -3838,7 +3838,9 @@ export function ConversationsView({
                                                     sendReply();
                                                 }
                                             }}
-                                            placeholder="Type a reply…"
+                                            placeholder={window24?.mode === "human_agent"
+                                                ? "Type a reply — goes out under your name (human agent)…"
+                                                : "Type a reply…"}
                                             rows={1}
                                             // text-[16px] on mobile is load-bearing: any
                                             // input under 16px makes iOS Safari zoom the
