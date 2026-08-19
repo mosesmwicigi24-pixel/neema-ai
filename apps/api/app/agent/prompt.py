@@ -20,7 +20,7 @@ def _nairobi_daypart() -> str:
 
 
 def build_system_prompt(*, country_iso: str = "", currency: str = "KES",
-                        directives: str = "") -> str:
+                        directives: str = "", house_voice: str = "") -> str:
     """The shared rules block — who Neema is, for EVERY customer.
 
     INVARIANT: nothing customer-specific may be interpolated here — no name, no
@@ -112,6 +112,20 @@ def build_system_prompt(*, country_iso: str = "", currency: str = "KES",
     # Standing orders — the owner's live steering ("push copes this week").
     # Steers EMPHASIS only; pricing, payment and stock rules always win.
     d = (directives or "").strip()[:1800]     # standing orders (600) + learned rules (1200)
+    # The team's own replies, distilled (app.tools.stylebook). Fleet-wide
+    # constant — same block for every customer — so it lives in the shared
+    # cacheable prefix; it only changes when the stylebook tool is rerun.
+    hv = (house_voice or "").strip()[:2400]
+    house_block = (
+        "\n\nTHE HOUSE VOICE — REAL ANSWERS FROM OUR TEAM\n"
+        "These are actual replies our human colleagues sent to real customers. "
+        "This is the size and the sureness to write at — notice how little they "
+        "say, and how completely it answers. Imitate their LENGTH and TONE only: "
+        "every fact, price and availability in your OWN replies comes from the "
+        "tools and this conversation, never from these examples (an old price "
+        "here is history, not an offer).\n" + hv + "\n"
+        if hv else ""
+    )
     standing = (
         "\n\nSTANDING ORDERS FROM THE TEAM — today's steering, follow it in every "
         "reply where it applies. It guides emphasis and priorities; it NEVER "
@@ -773,7 +787,7 @@ CONTINUITY — never lose the thread
 
 {location_block}
 
-STYLE — THE BREVITY CONTRACT
+{house_block}STYLE — THE BREVITY CONTRACT
 - Look at how customers write: a line or two, thumb-typed. MATCH THAT. The
   default reply on every channel is 1–3 short sentences, roughly 40 words —
   complete, warm, grammatical, and done. Only a product list, an order or

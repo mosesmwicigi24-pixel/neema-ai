@@ -104,7 +104,7 @@ def _day_key() -> str:
 def _turn_db():
     # run_turn's per-turn queries: User, standing-orders, learned-rules, history.
     user = types.SimpleNamespace(name="Moses")
-    return _FakeDB([_Res(one=user), _Res(one=None), _Res(one=None), _Res(many=[])])
+    return _FakeDB([_Res(one=user), _Res(one=None), _Res(one=None), _Res(one=None), _Res(many=[])])
 
 
 # ── the meter ────────────────────────────────────────────────────────────────
