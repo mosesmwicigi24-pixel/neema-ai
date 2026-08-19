@@ -267,3 +267,18 @@ def test_answer_the_question_they_actually_asked_is_a_named_rule():
     flat = " ".join(p.split())              # the rule wraps across lines
     assert '"How can I order it?" is an ORDERING question' in flat
     assert "not a price recital" in flat
+
+
+def test_deflecting_replies_never_become_teaching_examples():
+    """First live report (2026-08-19): 'can I pay in Ethiopian currency?' was
+    answered with 'i will be calling you using our other whatsapp number' —
+    and the curator chose it as an exemplar. The standing rules forbid
+    deflection; the textbook must never teach it."""
+    assert not usable_answer(
+        "Hello, i will be calling you using our other whatsapp number to "
+        "finalize with your order")
+    assert not usable_answer("Kindly DM us for the price list")
+    assert not usable_answer("Please check your inbox, we texted you")
+    # …while real in-channel answers keep teaching
+    assert usable_answer("We are located in Nairobi CBD, Sonalux House 7th floor Room 18.")
+    assert usable_answer("this aluminium tray goes for 70$")
