@@ -794,9 +794,13 @@ async def intercept(conv_id: str, request: Request, db: AsyncSession = Depends(g
                     agent: Agent = Depends(get_current_agent)):
     out = await intercept_conversation(db, conv_id, agent, request.app.state.redis)
     # Copilot C1: brief the human who just took over (background, best-effort).
+    # Only on a REAL takeover — an idempotent re-click (out.already) must not
+    # write another briefing note (five stacked up in one thread, 2026-08-19,
+    # each a full model turn).
     try:
-        from app.services import copilot
-        copilot.schedule_briefing(request.app.state.redis, conv_id)
+        if not out.get("already"):
+            from app.services import copilot
+            copilot.schedule_briefing(request.app.state.redis, conv_id)
     except Exception:
         pass
     return out

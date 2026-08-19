@@ -107,6 +107,15 @@ async def _briefing(redis, conv_id) -> None:
     from app.models.conversation import Conversation
     from app.models.message import Message, MsgDirection, MsgSender
     try:
+        # One briefing per takeover, whoever schedules it: rapid re-clicks and
+        # racing tabs collapse into a single note (and a single model turn).
+        if redis is not None:
+            try:
+                if not await redis.set(f"copilot:briefed:{conv_id}", "1",
+                                       nx=True, ex=900):
+                    return
+            except Exception:
+                pass
         async with AsyncSessionLocal() as db:
             conv = await db.get(Conversation, conv_id)
             if conv is None:

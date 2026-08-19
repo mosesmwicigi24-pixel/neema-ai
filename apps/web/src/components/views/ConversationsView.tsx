@@ -1425,11 +1425,19 @@ export function ConversationsView({
             setReplyText("");
             setQuoted(null);
             setTxPreview(null);
-            await conversationsApi.sendReply(activeConvId, sendText, replyToId, extras);
-            const msgs = await conversationsApi.messages(activeConvId);
-            setMessages((m) => ({ ...m, [activeConvId]: msgs }));
+            const res: any = await conversationsApi.sendReply(
+                activeConvId, sendText, replyToId, extras);
+            // The server answers 200 with {ok:false, error} when DELIVERY
+            // failed (Graph refused, window closed, page token) — swallowing
+            // that made a failed send vanish silently: no bubble, no toast,
+            // no clue (the Mukami case, 2026-08-19). Surface it as a failure.
+            if (res && res.ok === false) {
+                throw new Error(res.error || "Couldn't send the reply");
+            }
+            const msgs = await conversationsApi.messages(activeConvId, { limit: THREAD_PAGE });
+            setMessages((m) => ({ ...m, [activeConvId]: mergeThread(m[activeConvId] ?? [], msgs) }));
             refetchConversations?.();
-        } catch {
+        } catch (err: any) {
             setMessages((m) => ({
                 ...m,
                 [activeConvId]: (m[activeConvId] ?? []).filter(
@@ -1437,7 +1445,7 @@ export function ConversationsView({
                 ),
             }));
             setReplyText(text);
-            onToast("Failed to send message", "error");
+            onToast(err?.message?.slice(0, 160) || "Failed to send message", "error");
         } finally {
             setSending(false);
         }
