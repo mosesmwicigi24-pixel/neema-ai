@@ -241,3 +241,29 @@ def test_the_tools_queries_compile_outside_the_app_process():
         cwd=api_dir, env={**os.environ, "PYTHONPATH": api_dir})
     assert out.returncode == 0, f"query would not compile:\n{out.stderr[-2000:]}"
     assert "compiled" in out.stdout
+
+
+# ── the owner's own coaching, written into the standing rules ─────────────────
+# 2026-08-19, the Malakhi Benya comment thread: he asked "How can I order it"
+# and Neema answered "$40 — which colours would you like?" — brief, accurate,
+# and deaf to the question. The owner wrote the reply he WOULD have sent and
+# asked for the memory update; that reply is now the canonical first-contact
+# example, and answer-what-they-asked is a named rule.
+
+def test_the_owners_first_contact_welcome_is_the_standard():
+    from app.agent.prompt import build_system_prompt
+    p = build_system_prompt(currency="USD")
+    assert "FIRST CONTACT — THE WELCOME" in p
+    assert "Welcome to Bethany House, Malakhi" in p
+    assert "excited to have you" in p                 # (spelling corrected)
+    assert "ship to you via DHL" in p
+    assert "FIRST touch only" in p and "never a re-welcome" in p
+
+
+def test_answer_the_question_they_actually_asked_is_a_named_rule():
+    from app.agent.prompt import build_system_prompt
+    p = build_system_prompt(currency="USD")
+    assert "ANSWER THE QUESTION THEY ACTUALLY ASKED" in p
+    flat = " ".join(p.split())              # the rule wraps across lines
+    assert '"How can I order it?" is an ORDERING question' in flat
+    assert "not a price recital" in flat
