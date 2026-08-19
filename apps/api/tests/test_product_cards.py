@@ -316,3 +316,127 @@ def test_product_card_without_a_link_still_sends_the_photo(monkeypatch):
     assert posts[0]["image"]["link"] == "https://img/lr.jpg"
     assert "Lay Reader Complete Set" in posts[0]["image"]["caption"]
     assert "None" not in posts[0]["image"]["caption"]   # no stray null link
+
+
+# ── the album rule (owner, 2026-08-18): a product with several hub photos ─────
+# shares them as a BUNCH. History: chat only ever sent the primary photo — the
+# galleries the owner uploaded (43 of 93 products carry more than one image,
+# one carries 14) were never consumed; the "bunches" customers used to get were
+# humans sending photos by hand before image requests stopped escalating
+# (43e36dc, 2026-07-23). These pin the native album behaviour.
+
+GALLERY_CATALOG = [
+    {"name": "Aluminium 4 Stacked Communion Set", "sku": "AL-4S", "slug": "aluminium-4-stacked",
+     "price": 9000, "price_usd": 70, "thumbnail_url": "https://img/al_thumb.jpg",
+     "image_url": "https://img/al_1.jpg",
+     "images": [{"url": "https://img/al_1.jpg", "thumb": "https://img/al_thumb.jpg"},
+                {"url": "https://img/al_2.jpg"}, {"url": "https://img/al_3.jpg"},
+                {"url": "https://img/al_4.jpg"}]},
+    {"name": "Ring", "sku": "RING-1", "slug": "ring", "price": 1500, "price_usd": 15,
+     "thumbnail_url": "https://img/ring.jpg",
+     "images": [{"url": "https://img/ring.jpg"}, {"url": "https://img/ring_2.jpg"}]},
+]
+
+
+def _gallery_ctx(channel="whatsapp", wa_id="254712345678"):
+    return ToolContext(db=object(), redis=None, wa_id=wa_id, channel=channel, currency="KES")
+
+
+def _wire_whatsapp(monkeypatch):
+    monkeypatch.setattr(settings, "media_public_url", "https://shop.example", raising=False)
+    monkeypatch.setattr(tools, "_customer_currency", _acoro("KES"))
+    monkeypatch.setattr(svc, "catalog_items", _acoro(GALLERY_CATALOG))
+    monkeypatch.setattr(svc, "_send_waba_product_card", _acoro("wamid.CARD"))
+    mirrored = []
+
+    async def _rec(ctx, media_url, caption="", waba_msg_id=None):
+        mirrored.append({"url": media_url, "caption": caption})
+    monkeypatch.setattr(tools, "_record_shared_media", _rec)
+    albums = []
+
+    async def _img(wa_id, image_url, caption=""):
+        albums.append(image_url)
+        return f"wamid.IMG{len(albums)}"
+    monkeypatch.setattr(svc, "_send_waba_image", _img)
+    return albums, mirrored
+
+
+def test_single_product_card_is_followed_by_its_gallery_as_an_album(monkeypatch):
+    albums, mirrored = _wire_whatsapp(monkeypatch)
+    out = asyncio.run(tools._send_product_cards(
+        {"products": ["Aluminium 4 Stacked Communion Set"]}, _gallery_ctx()))
+    assert out["sent_cards"] == 1
+    assert out["album_photos"] == 3
+    # gallery[0] is the primary the card already shows — never re-sent
+    assert albums == ["https://img/al_2.jpg", "https://img/al_3.jpg", "https://img/al_4.jpg"]
+    # every album photo is mirrored to the dashboard thread with its place
+    caps = [m["caption"] for m in mirrored]
+    assert any("photo 2/4" in c for c in caps) and any("photo 4/4" in c for c in caps)
+    assert "gallery" in out["note"] and "album" in out["note"]
+
+
+def test_multi_product_comparison_never_floods_with_galleries(monkeypatch):
+    albums, _ = _wire_whatsapp(monkeypatch)
+    out = asyncio.run(tools._send_product_cards(
+        {"products": ["Aluminium 4 Stacked Communion Set", "Ring"]}, _gallery_ctx()))
+    assert out["sent_cards"] == 2
+    assert out.get("album_photos", 0) == 0
+    assert albums == []
+
+
+def test_a_single_photo_product_sends_just_its_card(monkeypatch):
+    albums, _ = _wire_whatsapp(monkeypatch)
+    monkeypatch.setattr(svc, "catalog_items", _acoro(CATALOG))   # no galleries at all
+    out = asyncio.run(tools._send_product_cards({"products": ["Ring"]}, _gallery_ctx()))
+    assert out["sent_cards"] == 1 and out.get("album_photos", 0) == 0
+    assert albums == []
+
+
+def test_messenger_carousel_is_followed_by_the_gallery_too(monkeypatch):
+    monkeypatch.setattr(settings, "media_public_url", "https://shop.example", raising=False)
+    monkeypatch.setattr(tools, "_customer_currency", _acoro("USD"))
+    monkeypatch.setattr(svc, "catalog_items", _acoro(GALLERY_CATALOG))
+    mirrored = []
+
+    async def _rec(ctx, media_url, caption="", waba_msg_id=None):
+        mirrored.append(media_url)
+    monkeypatch.setattr(tools, "_record_shared_media", _rec)
+
+    import app.services.meta_send as meta_send
+    sent_media, carousels = [], []
+
+    async def _carousel(rid, elements, page_id=None):
+        carousels.append(elements)
+
+    async def _media(rid, mtype, url, page_id=None):
+        sent_media.append((mtype, url))
+
+    async def _page(channel, rid):
+        return "page1"
+    monkeypatch.setattr(meta_send, "send_meta_carousel", _carousel)
+    monkeypatch.setattr(meta_send, "send_meta_media", _media)
+    monkeypatch.setattr(meta_send, "page_of_contact", _page)
+
+    out = asyncio.run(tools._send_product_cards(
+        {"products": ["Aluminium 4 Stacked Communion Set"]},
+        _gallery_ctx(channel="messenger", wa_id="psid42")))
+    assert out["sent_cards"] == 1 and out["album_photos"] == 3
+    assert len(carousels) == 1
+    assert [u for _, u in sent_media] == ["https://img/al_2.jpg", "https://img/al_3.jpg",
+                                          "https://img/al_4.jpg"]
+
+
+def test_a_broken_album_photo_never_blocks_the_rest(monkeypatch):
+    albums, _ = _wire_whatsapp(monkeypatch)
+
+    async def _img_flaky(wa_id, image_url, caption=""):
+        if image_url.endswith("al_3.jpg"):
+            raise RuntimeError("cdn hiccup")
+        albums.append(image_url)
+        return "wamid.IMG"
+    monkeypatch.setattr(svc, "_send_waba_image", _img_flaky)
+    out = asyncio.run(tools._send_product_cards(
+        {"products": ["Aluminium 4 Stacked Communion Set"]}, _gallery_ctx()))
+    assert out["sent_cards"] == 1
+    assert out["album_photos"] == 2                     # the other two still landed
+    assert albums == ["https://img/al_2.jpg", "https://img/al_4.jpg"]

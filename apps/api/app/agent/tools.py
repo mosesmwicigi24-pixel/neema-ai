@@ -398,8 +398,12 @@ TOOLS: list[dict] = [
                        "instead of typing product names/prices/links as text whenever you show "
                        "catalogue items, alternatives, or what's in their cart. Call "
                        "search_catalog first, then pass the EXACT product names (or SKUs) to "
-                       "display. After the cards are sent, add only a short line (e.g. ask which "
-                       "one, or their size) — never re-list the names, prices or links in text.",
+                       "display. When you show ONE product and our catalogue holds several "
+                       "photos of it, its full gallery is sent automatically as an album right "
+                       "after the card — so for 'send me pictures of X' just call this with X "
+                       "alone; never say more photos aren't possible. After the cards are sent, "
+                       "add only a short line (e.g. ask which one, or their size) — never "
+                       "re-list the names, prices or links in text.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1597,11 +1601,34 @@ async def _send_product_cards(args: dict, ctx: ToolContext) -> dict:
             "image": p.get("thumbnail_url") or p.get("image_url"),
             "url": _product_url(p.get("slug")),   # Bethany House storefront product page
             "slug": p.get("slug"),
+            # The FULL hub gallery (owner's rule, 2026-08-18: "products with
+            # several images should share images as a bunch") — ordered,
+            # primary first. Only consumed when a single product is shown.
+            "gallery": [im.get("url") for im in (p.get("images") or [])
+                        if im.get("url")],
         })
 
     if not cards:
         return {"error": "none of those products were found in the catalogue",
                 "hint": "call search_catalog first, then pass the exact product names it returns"}
+
+    # The album rule: when exactly ONE product is being shown and the hub
+    # carries several photos of it, the card is followed by the REST of its
+    # gallery as consecutive images — chat apps group those into an album, so
+    # the customer sees the garment from every angle the owner photographed.
+    # Never for multi-product comparisons (six galleries at once is a flood),
+    # and capped at 5 extra photos. The owner set these galleries up in the
+    # hub precisely to be shown (43 of 93 products carry more than one photo).
+    _extras: list[str] = []
+    if len(cards) == 1 and len(cards[0]["gallery"]) > 1:
+        # gallery[0] IS the primary the card already shows (the card uses its
+        # thumb variant), so the album starts at the second photo.
+        _seen_urls = {cards[0]["image"], cards[0]["gallery"][0]}
+        for u in cards[0]["gallery"][1:]:
+            if u and u not in _seen_urls:
+                _seen_urls.add(u)
+                _extras.append(u)
+        _extras = _extras[:5]
 
     # Rich WhatsApp cards — only for a real WhatsApp phone (never a Meta PSID or a
     # web session key), and only when we have a storefront URL to link to.
@@ -1635,11 +1662,40 @@ async def _send_product_cards(args: dict, ctx: ToolContext) -> dict:
                     waba_msg_id=card_wamid)
             except Exception as exc:
                 _log.warning("send_product_cards: card failed for %s: %s", c["slug"], exc)
+        album = 0
+        if sent and _extras:
+            # The bunch: consecutive images from the same sender — WhatsApp
+            # renders them grouped as an album under the card. Best-effort per
+            # photo; a broken image never blocks the rest.
+            total = len(_extras) + 1
+            for i, u in enumerate(_extras, start=2):
+                try:
+                    img = await to_sendable_image(u)
+                    if not img:
+                        continue
+                    wamid = await svc._send_waba_image(ctx.wa_id, img)
+                    album += 1
+                    await _record_shared_media(
+                        ctx, media_url=img,
+                        caption=f"{cards[0]['name']} — photo {i}/{total}",
+                        waba_msg_id=wamid)
+                except Exception as exc:
+                    _log.warning("send_product_cards: album photo failed for %s: %s",
+                                 cards[0]["slug"], exc)
+            if album:
+                _log.info("product album sent to %s: %s (+%d photos)",
+                          ctx.wa_id, cards[0]["slug"], album)
         if sent:
-            return {"ok": True, "sent_cards": sent,
-                    "note": "Cards with photo, price and a View button were delivered to the "
-                            "customer. Reply with only a short line (ask which one, or their "
-                            "size/quantity) — do NOT repeat the names, prices or links as text."}
+            note = ("Cards with photo, price and a View button were delivered to the "
+                    "customer. Reply with only a short line (ask which one, or their "
+                    "size/quantity) — do NOT repeat the names, prices or links as text.")
+            if album:
+                note = (f"The card AND {album} more photo(s) of it (the full gallery, "
+                        "as an album) were delivered. Reply with only a short line — "
+                        "never say you can't send more photos, and do NOT repeat the "
+                        "name, price or link as text.")
+            return {"ok": True, "sent_cards": sent, "album_photos": album,
+                    "note": note}
 
     # Rich cards on Messenger / Instagram — a NATIVE generic-template carousel
     # (photo + name + price + View button, swipeable), the web-chat card look.
@@ -1677,10 +1733,33 @@ async def _send_product_cards(args: dict, ctx: ToolContext) -> dict:
                         await _record_shared_media(
                             ctx, media_url=c["_img"],
                             caption=" — ".join(x for x in (c["name"], c["price_text"]) if x))
+                # Single product with a hub gallery → the rest of its photos
+                # follow the carousel as an album (same rule as WhatsApp).
+                album = 0
+                total = len(_extras) + 1
+                for i, u in enumerate(_extras, start=2):
+                    try:
+                        img = await to_sendable_image(u)
+                        if not img:
+                            continue
+                        from app.services.meta_send import send_meta_media
+                        await send_meta_media(ctx.wa_id, "image", img, page_id=page_id)
+                        album += 1
+                        await _record_shared_media(
+                            ctx, media_url=img,
+                            caption=f"{cards[0]['name']} — photo {i}/{total}")
+                    except Exception as exc:
+                        _log.warning("send_product_cards: meta album photo failed "
+                                     "for %s: %s", cards[0]["slug"], exc)
+                note = ("A swipeable carousel of product cards (photo, price, View "
+                        "button) was sent. Add only a short line — do NOT re-list the "
+                        "names, prices or links as text.")
+                if album:
+                    note = (f"The card AND {album} more photo(s) of it (the full "
+                            "gallery, as an album) were sent. Add only a short line — "
+                            "never say you can't send more photos.")
                 return {"ok": True, "sent_cards": len(elements),
-                        "note": "A swipeable carousel of product cards (photo, price, View "
-                                "button) was sent. Add only a short line — do NOT re-list the "
-                                "names, prices or links as text."}
+                        "album_photos": album, "note": note}
             except Exception as exc:
                 _log.warning("send_product_cards: meta carousel failed: %s", exc)
                 # Last resort before words: send the photos as plain attachments.
