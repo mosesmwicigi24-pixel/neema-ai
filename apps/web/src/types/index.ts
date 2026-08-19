@@ -58,6 +58,7 @@ export type SystemEventKind =
     | "release"         // Agent released back to AI
     | "transfer"        // Conversation transferred to another agent
     | "approve_draft"   // Agent approved an AI-generated draft
+    | "pause"           // Replies held until someone resumes
     | "flag";           // Generic "Needs Attention" flag
 
 // ── Thread item — either a chat message or an inline system event ─────────────

@@ -172,8 +172,10 @@ async def outbound_gate(db: AsyncSession, redis, body: OutboundDto) -> dict:
     if conv.channel is None:
         conv.channel = "whatsapp"
 
-    # ── Human intercept: hold the reply ──────────────────────────────────────
-    if conv.intercept_mode == InterceptMode.human:
+    # ── Human intercept OR pause: hold the reply ─────────────────────────────
+    # (paused used to slip through here — the Meta webhook and the sweeper
+    # already held for it, but WhatsApp kept replying. One gate, all modes.)
+    if conv.intercept_mode != InterceptMode.ai:
         intercept = Intercept(
             conversation_id=conv.id,
             agent_id=conv.assigned_agent_id,

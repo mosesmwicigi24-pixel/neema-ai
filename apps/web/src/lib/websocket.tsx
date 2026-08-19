@@ -184,6 +184,9 @@ export function buildSystemEventFromWs(wsEvent: any): Message | null {
         transfer:      wsEvent.eventNote
                            ? `Transferred — ${wsEvent.eventNote}`
                            : "Transferred",
+        pause:         wsEvent.eventAgentName
+                           ? `Paused by ${wsEvent.eventAgentName} — replies held`
+                           : "Paused — replies held",
         approve_draft: "AI draft approved",
     };
 

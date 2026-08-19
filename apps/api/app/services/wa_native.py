@@ -420,8 +420,9 @@ async def _reply_after_debounce(redis, wa_id: str, token: int | None,
         async with AsyncSessionLocal() as db:
             conv = (await db.execute(select(Conversation).where(
                 Conversation.wa_id == wa_id))).scalar_one_or_none()
-            if conv is not None and conv.intercept_mode == InterceptMode.human:
-                _log.info("native: %s is human-handled — not replying", wa_id)
+            if conv is not None and conv.intercept_mode != InterceptMode.ai:
+                _log.info("native: %s is %s — not replying", wa_id,
+                          conv.intercept_mode.value)
                 # Copilot: draft a suggestion for the human + keep capturing
                 # facts (plan C2/C3). Never a customer-facing send.
                 try:

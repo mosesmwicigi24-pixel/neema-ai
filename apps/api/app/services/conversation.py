@@ -37,6 +37,18 @@ async def intercept_conversation(
             detail=f"Already handled by {owner_name}. They must release or transfer it first.",
         )
 
+    # Idempotent for the OWNER: re-clicking Intercept (a double-tap, a retry
+    # after a slow network) must not write a duplicate "picked up" timeline
+    # row or ping every agent again. One click, one claim, one notification.
+    if (conv.intercept_mode == InterceptMode.human
+            and conv.assigned_agent_id == agent.id):
+        return {
+            "id": str(conv.id),
+            "intercept_mode": "human",
+            "assigned_agent_id": str(agent.id),
+            "already": True,
+        }
+
     conv.intercept_mode    = InterceptMode.human
     conv.assigned_agent_id = agent.id
     conv.intercept_since   = datetime.now(timezone.utc)
@@ -76,6 +88,69 @@ async def intercept_conversation(
     return {"ok": True, "mode": "human", "assigned_to": str(agent.id)}
 
 
+async def pause_conversation(
+    db: AsyncSession,
+    conv_id: str,
+    agent: Agent,
+    redis=None,
+) -> dict:
+    """Hold ALL replies on this conversation — Neema stays silent until someone
+    resumes (Resume = release back to AI). Idempotent: a double-tap journals
+    one pause, notifies once. The dashboard's Pause button used to call
+    release() — handing the thread back to the AI, the opposite of pausing —
+    because this endpoint simply didn't exist (2026-08-19)."""
+    result = await db.execute(select(Conversation).where(Conversation.id == conv_id))
+    conv = result.scalar_one_or_none()
+    if not conv:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # Same ownership lock as intercept: another agent's live conversation
+    # can't be paused out from under them by a non-admin.
+    if (
+        conv.intercept_mode == InterceptMode.human
+        and conv.assigned_agent_id is not None
+        and conv.assigned_agent_id != agent.id
+        and not agent.is_superuser
+        and agent.role != "admin"
+    ):
+        owner = await db.get(Agent, conv.assigned_agent_id)
+        owner_name = owner.name if owner else "another agent"
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=409,
+            detail=f"Handled by {owner_name} — they must pause or release it.",
+        )
+
+    if conv.intercept_mode == InterceptMode.paused:
+        return {"id": str(conv.id), "intercept_mode": "paused", "already": True}
+
+    conv.intercept_mode = InterceptMode.paused
+    db.add(Intercept(
+        conversation_id=conv.id,
+        agent_id=agent.id,
+        action=InterceptAction.pause,
+        note=agent.name,
+    ))
+    await db.commit()
+
+    if redis:
+        try:
+            await redis.delete(f"context:{conv.wa_id}")
+        except Exception:
+            pass
+        await _broadcast(redis, str(conv.id), {
+            "type":           "intercept_changed",
+            "conversationId": str(conv.id),
+            "mode":           "paused",
+            "eventKind":      "pause",
+            "eventAgentName": agent.name,
+        })
+    return {"id": str(conv.id), "intercept_mode": "paused",
+            "assigned_agent_id": (str(conv.assigned_agent_id)
+                                  if conv.assigned_agent_id else None)}
+
+
 async def release_conversation(
     db: AsyncSession,
     conv_id: str,
@@ -87,6 +162,13 @@ async def release_conversation(
     if not conv:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # Idempotent: a double-tapped Release (or a retry) on a conversation
+    # already back with the AI must not journal a second "Released to AI"
+    # row or notify the team twice. One click, one release.
+    if conv.intercept_mode == InterceptMode.ai:
+        return {"id": str(conv.id), "intercept_mode": "ai",
+                "assigned_agent_id": None, "already": True}
 
     conv.intercept_mode    = InterceptMode.ai
     conv.assigned_agent_id = None

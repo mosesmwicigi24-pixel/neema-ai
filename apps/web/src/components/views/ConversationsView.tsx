@@ -1189,7 +1189,17 @@ export function ConversationsView({
 
     // ── Actions ───────────────────────────────────────────────────────────────
 
+    // Exactly-once click semantics for the conversation controls: while one
+    // action is in flight every control is disabled and the pressed button
+    // shows a spinner — a double-tap on a slow connection must never fire the
+    // API twice (each duplicate used to journal a second timeline row and
+    // re-notify the whole team; the server is idempotent now too, belt AND
+    // braces).
+    const [convBusy, setConvBusy] = useState<"" | "intercept" | "release" | "pause">("");
+
     const intercept = async (convId: string) => {
+        if (convBusy) return;
+        setConvBusy("intercept");
         try {
             await conversationsApi.intercept(convId);
             refetchConversations?.();
@@ -1200,21 +1210,46 @@ export function ConversationsView({
             } else {
                 onToast("Failed to claim conversation", "error");
             }
+        } finally {
+            setConvBusy("");
         }
     };
 
     const release = async (convId: string) => {
+        if (convBusy) return;
+        setConvBusy("release");
         try {
             await conversationsApi.release(convId);
             refetchConversations?.();
             onToast("Conversation released back to AI");
         } catch {
             onToast("Failed to release", "error");
+        } finally {
+            setConvBusy("");
+        }
+    };
+
+    const pauseConv = async (convId: string) => {
+        if (convBusy) return;
+        setConvBusy("pause");
+        try {
+            await conversationsApi.pause(convId);
+            refetchConversations?.();
+            onToast("Paused — Neema holds all replies until you resume");
+        } catch (err: any) {
+            if (err?.message?.includes("409")) {
+                onToast("Handled by another agent — they must pause it", "error");
+            } else {
+                onToast("Failed to pause", "error");
+            }
+        } finally {
+            setConvBusy("");
         }
     };
 
     const transfer = async (agentId: string) => {
-        if (!activeConvId) return;
+        if (!activeConvId || convBusy) return;
+        setConvBusy("release");
         try {
             await conversationsApi.transfer(activeConvId, agentId);
             setTransferModal(false);
@@ -1223,6 +1258,8 @@ export function ConversationsView({
             onToast(`Transferred to ${agent?.name ?? "agent"}`);
         } catch {
             onToast("Failed to transfer", "error");
+        } finally {
+            setConvBusy("");
         }
     };
 
@@ -2512,12 +2549,13 @@ export function ConversationsView({
                                     canHandleConversations && (
                                         <Btn
                                             small
+                                            disabled={!!convBusy}
                                             onClick={() =>
                                                 intercept(activeConv.id)
                                             }
                                             variant="primary"
                                         >
-                                            ⚡ Intercept
+                                            {convBusy === "intercept" ? <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : "⚡"} Intercept
                                         </Btn>
                                     )}
                                 {/* ── Pick up ──
@@ -2528,12 +2566,13 @@ export function ConversationsView({
                                     canHandleConversations && (
                                         <Btn
                                             small
+                                            disabled={!!convBusy}
                                             onClick={() =>
                                                 intercept(activeConv.id)
                                             }
                                             variant="primary"
                                         >
-                                            🙋 Pick up
+                                            {convBusy === "intercept" ? <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : "🙋"} Pick up
                                         </Btn>
                                     )}
 
@@ -2544,12 +2583,13 @@ export function ConversationsView({
                                         <Btn
                                             key="release"
                                             small
+                                            disabled={!!convBusy}
                                             onClick={() =>
                                                 release(activeConv.id)
                                             }
                                             variant="secondary"
                                         >
-                                            ↩ Release
+                                            {convBusy === "release" ? <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : "↩"} Release
                                         </Btn>
                                     )}
 
@@ -2576,12 +2616,13 @@ export function ConversationsView({
                                         <Btn
                                             key="pause"
                                             small
+                                            disabled={!!convBusy}
                                             onClick={() =>
-                                                release(activeConv.id)
+                                                pauseConv(activeConv.id)
                                             }
                                             variant="secondary"
                                         >
-                                            ⏸ Pause
+                                            {convBusy === "pause" ? <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : "⏸"} Pause
                                         </Btn>
                                     )}
 
@@ -2591,12 +2632,13 @@ export function ConversationsView({
                                         <Btn
                                             key="resume"
                                             small
+                                            disabled={!!convBusy}
                                             onClick={() =>
                                                 release(activeConv.id)
                                             }
                                             variant="primary"
                                         >
-                                            ▶ Resume
+                                            {convBusy === "release" ? <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : "▶"} Resume
                                         </Btn>
                                     )}
 
@@ -3829,6 +3871,7 @@ export function ConversationsView({
                     release:          "bg-blue-100 border-blue-300",
                     transfer:         "bg-indigo-100 border-indigo-300",
                     approve_draft:    "bg-green-100 border-green-300",
+                    pause:            "bg-stone-200 border-stone-400",
                     checkin_planned:  "bg-sky-100 border-sky-300",
                     checkin_sent:     "bg-sky-200 border-sky-400",
                     checkin_vetoed:   "bg-stone-100 border-stone-300",
