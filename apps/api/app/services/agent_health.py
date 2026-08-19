@@ -32,7 +32,7 @@ _TTL = 3600                      # a rolling hour — matches the self-check cad
 # themselves within the hour: retrying a turn against an unpaid account just
 # fails again, and a budget stop holds until midnight UTC unless someone
 # raises the ceiling.
-ACTIONABLE = ("credit", "auth", "model", "budget")
+ACTIONABLE = ("credit", "auth", "model", "budget", "meta", "whatsapp")
 
 
 def classify(exc_or_text) -> str:
@@ -47,6 +47,18 @@ def classify(exc_or_text) -> str:
     # and it must never be mistaken for a real billing failure.
     if "spend ceiling" in s or "ai_daily_stop" in s:
         return "budget"
+    # CHANNEL credentials before AI credentials (2026-08-19): a Meta Graph 401
+    # ("Error validating access token — the session has been invalidated
+    # because the user changed their password") contains "401" and was being
+    # classified "auth" — whose remedy line says "check ANTHROPIC_API_KEY".
+    # A whole morning was spent chasing the wrong key. The failing credential
+    # must be NAMED.
+    if (("meta " in s and "failed (" in s)
+            or "error validating access token" in s
+            or "oauthexception" in s):
+        return "meta"
+    if "whatsapp" in s and "failed (" in s:
+        return "whatsapp"
     if ("credit balance" in s or "insufficient" in s or "billing" in s
             or "quota" in s or "payment" in s):
         return "credit"
@@ -102,6 +114,14 @@ _HUMAN = {
     "model": "the configured AI model was rejected — check TIER2_MODEL",
     "budget": ("Neema hit her own daily AI spend ceiling — replies hold until "
                "midnight UTC; raise AI_DAILY_STOP_USD if today's spend is expected"),
+    "meta": ("the Facebook/Instagram PAGE TOKEN is rejected — Messenger/IG sends "
+             "are failing. Regenerate the Page Access Token (use a System User "
+             "token so password changes can't kill it), update META_PAGE_TOKEN / "
+             "META_PAGE_TOKENS on the box, restart the api — see "
+             "docs/META_TOKEN_ROTATION.md"),
+    "whatsapp": ("the WhatsApp (WABA) token is rejected — WhatsApp sends are "
+                 "failing; regenerate it in Meta Business settings and update "
+                 "the box env"),
     "rate": "the AI is rate-limiting us — replies are delayed or dropped",
     "other": "agent turns are failing",
 }

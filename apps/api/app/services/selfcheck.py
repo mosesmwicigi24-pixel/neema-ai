@@ -274,8 +274,52 @@ async def _probe_unanswered_customers(db, redis) -> list[str]:
             f"(oldest {hours}h) — check that Neema can still answer"]
 
 
+async def _probe_meta_tokens(db, redis) -> list[str]:
+    """Ask Graph directly whether each configured page token still works —
+    BEFORE a customer send fails on it. A user-session-derived token dies the
+    moment the page admin changes their Facebook password (today's outage);
+    this probe turns that silent death into a named, once-notified finding
+    within the hour. Network blips never cry wolf — only a definite Graph
+    auth rejection counts."""
+    toks: dict[str, str] = {}
+    if settings.meta_page_token:
+        toks["default"] = settings.meta_page_token
+    try:
+        for pid, t in (settings.page_token_map or {}).items():
+            if t and t not in toks.values():
+                toks[str(pid)] = t
+    except Exception:
+        pass
+    out: list[str] = []
+    for label, tok in list(toks.items())[:5]:
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                r = await client.get("https://graph.facebook.com/v19.0/me",
+                                     params={"access_token": tok})
+            if r.status_code == 200:
+                continue
+            body = (r.text or "")[:160]
+            if r.status_code in (400, 401, 403) and (
+                    "oauth" in body.lower() or "access token" in body.lower()):
+                out.append(
+                    f"Meta page token ({label}) is REJECTED by Graph "
+                    f"({r.status_code}) — Messenger/Instagram sends are failing. "
+                    "Regenerate the Page Access Token (use a System User token), "
+                    "update META_PAGE_TOKEN(S), restart the api. "
+                    "See docs/META_TOKEN_ROTATION.md")
+                from app.services.agent_health import record_turn_failure
+                await record_turn_failure(
+                    redis, f"meta-token:{label}",
+                    RuntimeError(f"Meta token probe failed ({r.status_code}): {body}"))
+        except Exception:
+            continue
+    return out
+
+
 PROBES = [
     ("agent_failures", _probe_agent_failures),
+    ("meta_tokens", _probe_meta_tokens),
     ("unanswered_customers", _probe_unanswered_customers),
     ("media_dir", _probe_media_dir),
     ("media_rot", _probe_media_rot),

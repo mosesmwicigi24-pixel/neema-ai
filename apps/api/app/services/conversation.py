@@ -552,6 +552,15 @@ async def send_agent_reply(
         logging.getLogger("neema.inbox").warning(
             "agent reply delivery failed for conv %s (%s): %s",
             conv.id, conv.channel, exc)
+        # A HUMAN's failed send is a delivery failure too — it must reach
+        # /api/health and the hourly self-check with its real kind (a dead
+        # page token looked like a once-an-hour blip because only AI-turn
+        # sends were counted, 2026-08-19).
+        try:
+            from app.services.agent_health import record_turn_failure
+            await record_turn_failure(redis, conv.wa_id or conv.external_id or "?", exc)
+        except Exception:
+            pass
         return {"ok": False, "error": f"Couldn't send the reply: {str(exc)[:200]}"}
 
     q_sender = None
