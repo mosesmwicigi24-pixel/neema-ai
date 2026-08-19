@@ -86,6 +86,28 @@ async def get_learned_rules(db, redis) -> str:
     return val
 
 
+HOUSE_VOICE_CACHE = "app:house_voice"
+
+
+async def get_house_voice(db, redis) -> str:
+    """The distilled voice of the team's own replies (app.tools.stylebook) —
+    cached like the directives, injected beside the brevity contract."""
+    if redis is not None:
+        try:
+            v = await redis.get(HOUSE_VOICE_CACHE)
+            if v is not None:
+                return v.decode() if isinstance(v, bytes) else str(v)
+        except Exception:
+            pass
+    val = await get_value(db, "house_voice")
+    if redis is not None:
+        try:
+            await redis.set(HOUSE_VOICE_CACHE, val, ex=300)
+        except Exception:
+            pass
+    return val
+
+
 async def set_directives(db, redis, value: str, updated_by=None) -> str:
     from app.models.app_setting import AppSetting
     val = (value or "").strip()[:DIRECTIVES_MAX_CHARS]

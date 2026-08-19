@@ -750,10 +750,18 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                            "experience — follow them):\n" + _learned).strip()
     except Exception:
         _directives = ""
+    # The house voice: the team's own replies, distilled. Best-effort — Neema
+    # answers in her default voice if the block can't be read.
+    try:
+        from app.services.app_settings import get_house_voice
+        _house = await get_house_voice(db, redis)
+    except Exception:
+        _house = ""
     system = build_system_prompt(
         country_iso=loc.get("country_iso") or "",
         currency=currency,
         directives=_directives,
+        house_voice=_house,
     )
     if is_meta:
         system += _public_comment_addendum(currency) if public_comment else _meta_addendum(currency)

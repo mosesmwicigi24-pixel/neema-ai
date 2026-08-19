@@ -99,7 +99,7 @@ def test_run_turn_sends_shared_rules_and_customer_tail_separately():
     # A name the rules text can't contain by coincidence (the prompt's own
     # examples legitimately say "Pastor Moses").
     user = types.SimpleNamespace(name="Zablon Wanjiru")
-    db = _FakeDB([_Res(one=user), _Res(one=None), _Res(one=None), _Res(many=[])])
+    db = _FakeDB([_Res(one=user), _Res(one=None), _Res(one=None), _Res(one=None), _Res(many=[])])
     out = asyncio.run(runtime.run_turn(db, None, "254700000001",
                                        "Habari, niaje", _RecLLM()))
     assert out == "Karibu!"
