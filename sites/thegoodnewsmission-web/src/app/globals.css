@@ -1,0 +1,47 @@
+@import "tailwindcss";
+
+/*
+ * Brand palette lifted from the current nuruplace.org stylesheet:
+ *   #060eff / #1c24ff  primary blue
+ *   #2428a6            deep blue
+ *   #dc2b0f            accent red
+ */
+@theme {
+  --color-brand-50: #eef0ff;
+  --color-brand-100: #dfe2ff;
+  --color-brand-200: #c4c9ff;
+  --color-brand-300: #9ea6ff;
+  --color-brand-400: #6f79ff;
+  --color-brand-500: #1c24ff;
+  --color-brand-600: #060eff;
+  --color-brand-700: #2428a6;
+  --color-brand-800: #1b1e7d;
+  --color-brand-900: #141654;
+
+  --color-ink-700: #2b3243;
+  --color-ink-800: #161c2d;
+  --color-ink-900: #0b1020;
+
+  --color-accent-500: #dc2b0f;
+  --color-accent-600: #b8220c;
+
+  --font-sans: var(--font-montserrat), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-merienda), Georgia, serif;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: #ffffff;
+  color: var(--color-ink-700);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Visible focus ring for keyboard users across the whole site. */
+:focus-visible {
+  outline: 2px solid var(--color-brand-600);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
