@@ -63,8 +63,13 @@ def _world():
     call = types.SimpleNamespace(
         id=uuid.uuid4(), status="missed", answered_at=None, ended_at=None,
         started_at=_ts(13), agent_id=None)
-    # Query order: conv → sibling ids → intercepts → actions → deals → orders → calls
-    db = _SeqDB([conv, [(conv_id,)], [icpt], [act], [deal], [order], [call]])
+    # The agent's own step (2026-08-19): every tool call is part of the journey.
+    step = types.SimpleNamespace(
+        id=uuid.uuid4(), summary="Searched the catalogue",
+        detail="“tray” → 2 result(s)", created_at=_ts(14))
+    # Query order: conv → sibling ids → intercepts → actions → deals → orders
+    # → agent steps → calls
+    db = _SeqDB([conv, [(conv_id,)], [icpt], [act], [deal], [order], [step], [call]])
     return conv_id, db
 
 
@@ -72,7 +77,11 @@ def test_activity_aggregates_every_journey_source():
     conv_id, db = _world()
     out = asyncio.run(get_conversation_activity(str(conv_id), db=db, agent=object()))
     kinds = {e["kind"] for e in out["events"]}
-    assert {"escalated", "checkin_planned", "deal", "promise", "order", "call"} <= kinds
+    assert {"escalated", "checkin_planned", "deal", "promise", "order", "call",
+            "tool"} <= kinds
+    step = next(e for e in out["events"] if e["kind"] == "tool")
+    assert step["label"] == "Searched the catalogue"
+    assert "2 result(s)" in step["detail"]
 
 
 def test_activity_is_newest_first_and_labels_read_like_english():

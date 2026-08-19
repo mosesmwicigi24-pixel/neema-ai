@@ -3837,6 +3837,7 @@ export function ConversationsView({
                     promise:          "bg-amber-100 border-amber-300",
                     order:            "bg-green-100 border-green-400",
                     call:             "bg-teal-100 border-teal-300",
+                    tool:             "bg-lime-50 border-lime-300",
                 };
 
                 if (!activityLogOpen) {
