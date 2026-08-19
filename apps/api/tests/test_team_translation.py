@@ -305,3 +305,105 @@ def test_the_thread_serializer_would_show_the_sent_reply_in_reverse():
     m = _msg("Благодарим ви — подносът е $70.",
              translated="Thank you — the tray is $70.")
     assert tx.translation_for(m) == "Thank you — the tray is $70."
+
+
+# ── the poisoned-marker bug (DAIDAI's French thread, 2026-08-19) ─────────────
+# The probe on the box read: "already translated: 8 | waiting: 0" — yet the
+# dashboard showed nothing. The light model had answered a French batch with
+# empty strings ("already readable"), and the worker stored the readable
+# MARKER (translated_text = the original) on every row: displayed as nothing,
+# and — because is_candidate saw translated_text set — never offered to the
+# model again. Frozen untranslated forever. Three fixes pinned here: the
+# worker refuses to write a marker onto text the heuristics call foreign, a
+# stonewalled batch cools down instead of burning a call per open, and
+# already-poisoned rows heal by becoming candidates again.
+
+def _row(text, stored=None, lang=None, media_type=None):
+    import types as _t
+    return _t.SimpleNamespace(id="m1", text=text, translated_text=stored,
+                              translated_from=lang, media_type=media_type)
+
+
+def test_a_poisoned_marker_on_foreign_text_is_a_candidate_again():
+    from app.services.translate import is_candidate
+    poisoned = _row("Puis-je avoir les prix en Francs CFA",
+                    stored="Puis-je avoir les prix en Francs CFA")
+    assert is_candidate(poisoned), "the frozen French row must be retried"
+    # …but a marker on a bare NAME is legitimate and must stay done — healing
+    # it would burn a model call on every thread-open forever.
+    assert not is_candidate(_row("Bruno Nion", stored="Bruno Nion"))
+
+
+def test_a_legitimate_marker_and_a_real_translation_stay_done():
+    from app.services.translate import is_candidate
+    # marker on genuinely readable text — correct, stays done
+    assert not is_candidate(_row("Thank you, God bless", stored="Thank you, God bless"))
+    # a real translation — done forever
+    assert not is_candidate(_row("Puis-je avoir les prix",
+                                 stored="May I have the prices", lang="French"))
+
+
+def test_the_worker_never_writes_a_marker_onto_foreign_text(monkeypatch):
+    import asyncio as _a
+    import json as _j
+    import types as _t
+    import app.services.translate as tr
+
+    # Both rows are real candidates: the French sentence and a bare name
+    # (an English row would never reach the worker — it is not a candidate).
+    french = _row("Puis-je avoir les prix en Francs CFA")
+    name = _row("Bruno Nion")
+
+    class _Res:
+        def scalars(self):
+            return _t.SimpleNamespace(all=lambda: [french, name])
+
+    class _DB:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def execute(self, *a, **k): return _Res()
+        async def commit(self): pass
+
+    import app.database as database
+    monkeypatch.setattr(database, "AsyncSessionLocal", lambda: _DB())
+
+    class _LLM:
+        async def complete(self, **kw):
+            # the model stonewalls: empty "en" for BOTH rows
+            return _t.SimpleNamespace(
+                text=_j.dumps([{"i": 0, "lang": "French", "en": ""},
+                               {"i": 1, "lang": "", "en": ""}]),
+                usage={})
+    import app.agent.runtime as runtime
+    monkeypatch.setattr(runtime, "build_llm", lambda model=None: _LLM())
+
+    class _R:
+        def __init__(self): self.kv = {}
+        async def get(self, k):
+            return self.kv.get(k)
+
+        async def set(self, k, v, nx=False, ex=None):
+            if nx and k in self.kv:
+                return None
+            self.kv[k] = v
+            return True
+
+        async def delete(self, k):
+            self.kv.pop(k, None)
+
+        async def publish(self, *a):
+            pass
+
+    r = _R()
+    n = _a.run(tr._translate_thread(r, "c1", ["m1", "m2"]))
+    assert n == 0
+    assert french.translated_text is None, "the French row was poisoned again"
+    assert name.translated_text == name.text, "the honest name-marker still lands"
+    # refused-without-progress batches cool down instead of burning per open
+    assert any(k.startswith("translate:cool:") for k in r.kv)
+
+
+def test_the_instruction_forbids_the_empty_string_escape_for_foreign_text():
+    from app.services.translate import _SYSTEM
+    assert "ONLY when the message is English or Swahili" in _SYSTEM
+    assert "never echo the original" in _SYSTEM

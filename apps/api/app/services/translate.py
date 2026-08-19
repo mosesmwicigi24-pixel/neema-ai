@@ -122,13 +122,41 @@ def needs_translation(text: str | None) -> bool:
     return hits / len(words) < 0.34
 
 
+def _marker_suspect(text: str | None) -> bool:
+    """Could a "readable as-is" verdict on this text be WRONG?
+
+    Every candidate already failed the word-lists, so ambiguity is normal —
+    a bare name ("Bruno Nion") legitimately draws the readable marker. But a
+    non-Latin script, or a sentence of four-plus words in which the lists
+    recognise nothing, is not a name: a readable-verdict there is the model
+    stonewalling (the French thread of 2026-08-19), and trusting it froze
+    eight rows untranslated forever."""
+    t = (text or "").strip()
+    if not t:
+        return False
+    if _has_non_latin_letters(t):
+        return True
+    return needs_translation(t) and len(_WORD_RE.findall(t)) >= 4
+
+
 def is_candidate(m) -> bool:
     """Message-level filter shared by the thread endpoint and the worker."""
-    if getattr(m, "translated_text", None):
-        return False                       # done (or marked readable) already
+    stored = getattr(m, "translated_text", None)
+    text = getattr(m, "text", None)
+    if stored:
+        # A REAL translation (differs from the original) is done forever. The
+        # readable-marker (stored == original) is trusted except where the
+        # verdict itself is suspect — a whole foreign sentence declared
+        # readable is the 2026-08-19 poison (a French thread frozen
+        # untranslated for good) — those are offered again. A marker on a
+        # bare name stays done: churn there would burn a call per open.
+        if (stored or "").strip() != (text or "").strip():
+            return False
+        if not _marker_suspect(text):
+            return False
     if getattr(m, "media_type", None) == "note":
         return False                       # operator-private, already English
-    return needs_translation(getattr(m, "text", None))
+    return needs_translation(text)
 
 
 def translation_for(m) -> str | None:
@@ -182,10 +210,12 @@ _SYSTEM = (
     "with ONLY a JSON array, one object per input: {\"i\": <same index>, "
     "\"lang\": <English name of the source language>, \"en\": <faithful "
     "English translation>}. Rules: translate meaning faithfully — never "
-    "summarise, never add, keep emojis and line breaks. If a message is "
-    "already English or Swahili (or is just a name, emoji or number with "
-    "nothing to translate), return an empty string for \"en\". No prose, no "
-    "code fences — the JSON array only."
+    "summarise, never add, keep emojis and line breaks. Return an empty "
+    "string for \"en\" ONLY when the message is English or Swahili, or is "
+    "just a name, emoji or number with nothing to translate. EVERY other "
+    "language — French, Portuguese, Spanish, Bulgarian, Indonesian, anything "
+    "— MUST be translated; never echo the original text as the translation. "
+    "No prose, no code fences — the JSON array only."
 )
 
 
@@ -230,6 +260,7 @@ async def _translate_thread(redis, conv_id: str, ids: list[str]) -> int:
                 tools=[])
             items = _parse_items(resp.text)
 
+            refused = 0
             done: list[dict] = []
             for it in items:
                 try:
@@ -241,8 +272,17 @@ async def _translate_thread(redis, conv_id: str, ids: list[str]) -> int:
                 m = rows[idx]
                 en = (it.get("en") or "").strip()
                 if not en or en == (m.text or "").strip():
-                    # Readable as-is: store the original as the marker so this
-                    # message is never offered to the model again.
+                    # The model says "readable as-is". A bare name earns that;
+                    # a foreign SENTENCE does not — and a verdict that names a
+                    # foreign language while refusing to translate contradicts
+                    # itself. Storing the marker on those froze rows
+                    # untranslated forever (the French thread, 2026-08-19);
+                    # leave them empty instead so a later pass retries.
+                    said_lang = (str(it.get("lang") or "").strip().lower())
+                    contradiction = said_lang not in ("", "english", "swahili")
+                    if contradiction or _marker_suspect(m.text):
+                        refused += 1
+                        continue
                     m.translated_text = m.text
                     m.translated_from = None
                 else:
@@ -253,6 +293,15 @@ async def _translate_thread(redis, conv_id: str, ids: list[str]) -> int:
                                  "lang": m.translated_from})
             if items:
                 await db.commit()
+            if refused and not done and redis is not None:
+                # The model refused a whole batch it should have translated —
+                # cool down instead of burning a call on every thread-open.
+                try:
+                    await redis.set(f"translate:cool:{conv_id}", "1", ex=_COOLDOWN_TTL)
+                except Exception:
+                    pass
+                _log.warning("translate: model refused %d foreign message(s) in %s",
+                             refused, conv_id)
 
             # Meter the spend honestly (node "translate") and feed the breaker.
             try:
