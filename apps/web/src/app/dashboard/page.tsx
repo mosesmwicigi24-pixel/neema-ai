@@ -260,6 +260,7 @@ export default function NeemaDashboard(): React.ReactElement {
 
     // ── Listen for session-expired events dispatched by api.ts ───────────────
     useEffect(() => {
+        let bail: ReturnType<typeof setTimeout> | undefined;
         const handler = () => {
             if (!sessionExpiredRef.current) {
                 sessionExpiredRef.current = true;
@@ -267,10 +268,23 @@ export default function NeemaDashboard(): React.ReactElement {
                     ? (window as any).__neema_token
                     : undefined;
                 setSessionExpired(true);
+                // The modal is the nice path — but if it never mounts (a
+                // hydration crash took the tree down: the zombie dashboard of
+                // 2026-08-19, spinners over 401s) or re-auth stalls, the user
+                // must still LAND somewhere they can sign in. Two minutes is
+                // enough to type a password; then the login page it is.
+                bail = setTimeout(() => {
+                    if (sessionExpiredRef.current) {
+                        window.location.href = "/login";
+                    }
+                }, 120_000);
             }
         };
         window.addEventListener("neema:session-expired", handler);
-        return () => window.removeEventListener("neema:session-expired", handler);
+        return () => {
+            window.removeEventListener("neema:session-expired", handler);
+            if (bail) clearTimeout(bail);
+        };
     }, []);
 
     // ── Detect NextAuth-level refresh failures ────────────────────────────────

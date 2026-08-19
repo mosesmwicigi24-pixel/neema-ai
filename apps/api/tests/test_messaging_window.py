@@ -35,11 +35,37 @@ def test_inside_24h_is_open(monkeypatch):
     assert w["mode"] == "open"
 
 
-def test_messenger_past_24h_is_human_agent_not_closed(monkeypatch):
-    """The whole point: a person can still answer Armando on day 2."""
+def test_messenger_past_24h_is_human_agent_once_meta_approves(monkeypatch):
+    """The whole point: a person can still answer Armando on day 2 — once the
+    app holds Meta's Human Agent approval (App Review)."""
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "meta_human_agent_approved", True, raising=False)
     w = _window("messenger", timedelta(hours=30), monkeypatch)
     assert w["mode"] == "human_agent"
     assert "human agent" in w["reason"].lower()
+
+
+def test_without_approval_the_banner_stops_promising(monkeypatch):
+    """Live toast, 2026-08-19: "(#100) Cannot tag messages with 'HUMAN_AGENT'
+    without prior approval" — while the banner above the composer read "you
+    can still reply as a human agent". Until the flag says Meta approved, the
+    window is honestly CLOSED, and the reason says exactly why."""
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "meta_human_agent_approved", False, raising=False)
+    w = _window("messenger", timedelta(hours=30), monkeypatch)
+    assert w["mode"] == "closed"
+    assert "approv" in w["reason"].lower() and "App Review" in w["reason"]
+    # the countdown survives for the day approval lands
+    assert w["human_agent_until"]
+
+
+def test_the_health_line_names_app_review_not_the_token():
+    from app.services.agent_health import describe
+    line = describe({"kind": "meta", "count": 3, "error":
+                     "Meta send message failed (400): (#100) Cannot tag messages "
+                     "with 'HUMAN_AGENT' without prior approval."})
+    assert "App Review" in line and "Human Agent" in line
+    assert "page token itself is fine" in line
 
 
 def test_messenger_past_seven_days_is_closed(monkeypatch):

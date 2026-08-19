@@ -782,6 +782,10 @@ export function ConversationsView({
     const [noteText, setNoteText] = useState<string>("");
     const [showFilters, setShowFilters] = useState<boolean>(false);
     const [threadLoading, setThreadLoading] = useState(false);
+    // A failed thread load must say so — "No messages yet" over a fetch that
+    // errored reads as an empty conversation, and a spinner with no timeout
+    // read as "loading forever" (owner, 2026-08-19).
+    const [threadError, setThreadError] = useState(false);
     const [sending, setSending] = useState(false);
     // Meta/WhatsApp messaging window for the open thread — fetched per thread so
     // the composer can say what will happen BEFORE a reply is typed.
@@ -877,7 +881,7 @@ export function ConversationsView({
     const loadMessages = useCallback(
         async (convId: string, silent = false) => {
             if (!convId) return;
-            if (!silent) setThreadLoading(true);
+            if (!silent) { setThreadLoading(true); setThreadError(false); }
             try {
                 const msgs = await conversationsApi.messages(convId, { limit: THREAD_PAGE });
                 setMessages((m) => ({
@@ -892,7 +896,7 @@ export function ConversationsView({
                         [convId]: msgs.filter((x) => x.type !== "system_event").length >= THREAD_PAGE,
                     }));
             } catch {
-                if (!silent) onToast("Failed to load messages", "error");
+                if (!silent) { setThreadError(true); onToast("Failed to load messages", "error"); }
             } finally {
                 if (!silent) setThreadLoading(false);
             }
@@ -2809,7 +2813,21 @@ export function ConversationsView({
                                     <div className="w-5 h-5 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: "#589b31", borderTopColor: "transparent" }} />
                                 </div>
                             )}
-                            {!threadLoading && activeMessages.length === 0 && (
+                            {!threadLoading && threadError && activeMessages.length === 0 && (
+                                <div className="text-center py-12">
+                                    <p className="text-sm mb-2" style={{ color: "#b45309" }}>
+                                        Couldn&apos;t load this conversation.
+                                    </p>
+                                    <button
+                                        onClick={() => { if (activeConvId) loadMessages(activeConvId); }}
+                                        className="px-4 py-1.5 rounded-full text-xs font-semibold text-white active:scale-95"
+                                        style={{ backgroundColor: "#f59e0b" }}
+                                    >
+                                        Try again
+                                    </button>
+                                </div>
+                            )}
+                            {!threadLoading && !threadError && activeMessages.length === 0 && (
                                 <div className="text-center py-12" style={{ color: "#c5d5bc" }}>
                                     <p className="text-sm">No messages yet</p>
                                 </div>

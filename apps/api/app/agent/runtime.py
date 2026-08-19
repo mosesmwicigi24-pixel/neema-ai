@@ -1260,11 +1260,19 @@ def is_outside_window(exc_or_text) -> bool:
     return any(m in s for m in _WINDOW_MARKERS)
 
 
-async def escalate_to_human(channel: str, ext: str, note: str) -> bool:
+async def escalate_to_human(channel: str, ext: str, note: str,
+                            draft: str | None = None, redis=None) -> bool:
     """Hand this conversation to a person: route it out of AI mode and leave the
     reason in the Activity log, so the team sees it needs them. Used when Meta's
     24-hour window has closed — Neema physically cannot reply, but a human still
     can (Meta allows human agents a 7-day window). Best-effort; never raises.
+
+    `draft` is the ONE-TAP flow (owner, 2026-08-19): the reply Neema composed
+    but could not send is stored as the thread's held draft, so the dashboard's
+    existing draft card shows it the moment the thread opens (and live, over
+    the `ai_draft_ready` ws event) — a person reads it and taps Approve, and it
+    goes out under Meta's human-agent window. The human'S tap is what makes
+    claiming that window honest; nothing here sends anything by itself.
 
     Idempotent by construction: once the thread is in human mode the sweep no
     longer selects it, so it's flagged once, not every tick."""
@@ -1282,9 +1290,27 @@ async def escalate_to_human(channel: str, ext: str, note: str) -> bool:
                 return False
             conv.intercept_mode = InterceptMode.human
             db.add(Intercept(conversation_id=conv.id,
-                             action=InterceptAction.flag, note=note[:500]))
+                             action=InterceptAction.flag, note=note[:500],
+                             ai_reply_held=(draft or None)))
             await db.commit()
-            return True
+            conv_id = str(conv.id)
+        if draft and redis is not None:
+            try:
+                payload = json.dumps({
+                    "type": "ai_draft_ready",
+                    "conversationId": conv_id,
+                    "waId": ext,
+                    "draft": draft,
+                })
+                await redis.publish(f"ws:channel:{conv_id}", payload)
+                await redis.publish("ws:channel:agents:all", json.dumps({
+                    "event": "notification", "type": "draft_ready",
+                    "title": "✍️ Draft ready — one tap to send",
+                    "body": note[:200], "conv_id": conv_id, "wa_id": ext,
+                }))
+            except Exception:
+                pass
+        return True
     except Exception:
         _log.warning("human escalation failed for %s/%s", channel, ext, exc_info=True)
         return False
@@ -1333,14 +1359,17 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
         return True
     except Exception as exc:
         if is_outside_window(exc):
-            # Meta's 24h window shut before we could answer. Ask a human to take
-            # it — and hand them Neema's drafted reply so they can just send it.
-            draft = " ".join((reply or "").split())[:220]
-            note = ("Outside Meta's 24-hour window — Neema can't reply. Please respond "
-                    "from here (human agents get a 7-day window)."
-                    + (f' Neema had drafted: "{draft}"' if draft else ""))
-            _log.info("meta 24h window closed for %s/%s — routing to a human", channel, external_id)
-            await escalate_to_human(channel, external_id, note)
+            # Meta's 24h window shut before we could answer. The reply Neema
+            # already composed becomes the thread's held draft — the dashboard
+            # shows it with an Approve button, and one tap sends it under the
+            # human-agent window (7 days). A person's tap, a person's send.
+            note = ("Outside Meta's 24-hour window — Neema drafted a reply; "
+                    "review it and tap Approve to send it as a human agent "
+                    "(Meta allows 7 days).")
+            _log.info("meta 24h window closed for %s/%s — draft held for one-tap send",
+                      channel, external_id)
+            await escalate_to_human(channel, external_id, note,
+                                    draft=(reply or None), redis=redis)
         else:
             _log.exception("tier2 meta turn failed for %s/%s", channel, external_id)
             from app.services.agent_health import record_turn_failure

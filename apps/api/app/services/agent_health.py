@@ -131,7 +131,17 @@ def describe(failures: dict) -> str:
     """One operator-facing line for a batch of failures."""
     kind = failures.get("kind") or "other"
     n = failures.get("count") or 0
-    line = f"{n} agent repl{'y' if n == 1 else 'ies'} FAILED in the last hour — {_HUMAN.get(kind, _HUMAN['other'])}"
+    remedy = _HUMAN.get(kind, _HUMAN["other"])
+    # A Meta refusal of the HUMAN_AGENT tag is an APP REVIEW problem, not a
+    # token problem — pointing at META_PAGE_TOKEN here would repeat the
+    # wrong-credential morning in a new costume (2026-08-19: "(#100) Cannot
+    # tag messages with 'HUMAN_AGENT' without prior approval").
+    if kind == "meta" and "human_agent" in (failures.get("error") or "").lower():
+        remedy = ("Meta refused the HUMAN_AGENT tag — the app lacks Human Agent "
+                  "approval. Request it: developers.facebook.com → the app → "
+                  "App Review → Permissions and Features → Human Agent. The "
+                  "page token itself is fine.")
+    line = f"{n} agent repl{'y' if n == 1 else 'ies'} FAILED in the last hour — {remedy}"
     err = (failures.get("error") or "").strip()
     if err:
         line += f' (last error: "{" ".join(err.split())[:160]}")'
