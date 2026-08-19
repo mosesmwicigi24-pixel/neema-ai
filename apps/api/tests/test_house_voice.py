@@ -213,3 +213,31 @@ def test_the_settings_read_is_cached_like_the_directives(monkeypatch):
     assert asyncio.run(aps.get_house_voice(db, r)) == "- the block"
     assert asyncio.run(aps.get_house_voice(db, r)) == "- the block"
     assert db.reads == 1, "the second read should come from cache"
+
+
+def test_the_tools_queries_compile_outside_the_app_process():
+    """The first live run died compiling its very first query: Message's
+    relationship to 'Conversation' resolves only once the model registry is
+    imported, and the in-process tests (which import app.main globally) could
+    never see it missing. A fresh interpreter that imports ONLY the stylebook
+    module must be able to compile a select over Message — no database needed:
+    mapper configuration happens at compile time, which is exactly where the
+    box fell over."""
+    import os
+    import subprocess
+    import sys
+    api_dir = os.path.join(os.path.dirname(__file__), "..")
+    code = (
+        "import app.tools.stylebook\n"
+        "from sqlalchemy import select\n"
+        "from sqlalchemy.dialects import postgresql\n"
+        "from app.models.message import Message\n"
+        "select(Message).compile(dialect=postgresql.dialect())\n"
+        "print('compiled')\n"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True, text=True, timeout=120,
+        cwd=api_dir, env={**os.environ, "PYTHONPATH": api_dir})
+    assert out.returncode == 0, f"query would not compile:\n{out.stderr[-2000:]}"
+    assert "compiled" in out.stdout
