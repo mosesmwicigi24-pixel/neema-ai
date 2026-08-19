@@ -236,7 +236,16 @@ async def _celebrate(db, redis, conv, event: dict) -> dict:
     in_window = await _within_window(db, conv)
     recipient = _recipient_of(conv)
 
-    if in_window:
+    # Meta allows POST_PURCHASE_UPDATE outside the 24h window for exactly this:
+    # automated updates about an order the customer already placed (payment
+    # received, in production, shipped, delivered). Messenger only — Instagram
+    # supports no tag but HUMAN_AGENT, which automation must never claim. So a
+    # Messenger customer hears "your order shipped" the day it ships, not only
+    # if they happened to write to us yesterday (owner, 2026-08-19).
+    post_purchase = (conv.channel == "messenger"
+                     and (event.get("type") or "").startswith("order."))
+
+    if in_window or post_purchase:
         text = await _compose_announcement(db, redis, conv, brief)
         if not text:
             return {"handled": False, "reason": "compose_failed"}
@@ -245,10 +254,12 @@ async def _celebrate(db, redis, conv, event: dict) -> dict:
             await svc.save_outbound_message(db, redis, recipient, text, waba_msg_id=wamid)
         else:
             from app.services.meta_send import send_to_channel
-            await send_to_channel(conv.channel, recipient, text)
+            await send_to_channel(conv.channel, recipient, text,
+                                  tag=(None if in_window else "POST_PURCHASE_UPDATE"))
             await svc.save_outbound_channel_message(db, redis, conv.channel, recipient, text)
-        _log.info("hub event %s → celebrated in-window to %s", event.get("type"), recipient)
-        return {"handled": True, "sent": "freeform"}
+        _log.info("hub event %s → celebrated %s to %s", event.get("type"),
+                  "in-window" if in_window else "via POST_PURCHASE_UPDATE", recipient)
+        return {"handled": True, "sent": "freeform" if in_window else "post_purchase_tag"}
 
     if conv.channel == "whatsapp" and settings.wa_event_template:
         name = (getattr(conv, "contact_name", None) or "").split(" ")[0] or "there"
