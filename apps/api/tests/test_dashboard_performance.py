@@ -43,7 +43,10 @@ def test_opening_a_chat_is_bounded():
     from app.routers import admin
     assert admin.THREAD_LIMIT == 500
     src = inspect.getsource(admin.get_thread)
-    assert ".limit(THREAD_LIMIT)" in src
+    # The bound evolved (2026-08-19): the query limit is the requested PAGE
+    # (default 50), clamped so THREAD_LIMIT stays the unbreakable ceiling.
+    assert ".limit(page)" in src
+    assert "min(int(limit or 50), THREAD_LIMIT)" in src
     # newest N, then flipped so the UI still reads oldest-first
     assert "Message.created_at.desc()" in src
     assert "list(reversed(" in src
@@ -57,3 +60,53 @@ def test_the_inbox_resolves_each_country_once():
     src = inspect.getsource(admin.list_conversations)
     assert "country_map = {str(c.id): _list_country(c) for c in conversations}" in src
     assert src.count("_list_country(c)") == 1     # built once, read from the map
+
+
+# ── Thread pagination (owner, 2026-08-19): "load latest 50 … until one scrolls
+# past 50, you load the next 50 — keep the app light, not painting all the
+# threads at one go." The 500-cap stopped the tab-freeze; paging in 50s makes
+# the OPEN itself light, on every thread, every time.
+
+def test_thread_serves_pages_of_fifty_newest_first():
+    import inspect
+    from app.routers import admin
+    src = inspect.getsource(admin.get_thread)
+    assert "limit: int = 50" in src                  # the owner's page size
+    assert "before" in src and "_parse_before" in src
+    assert "min(int(limit or 50), THREAD_LIMIT)" in src   # cap survives as ceiling
+
+
+def test_older_pages_carry_messages_only():
+    """Page one delivers the full event timeline; an older page must add
+    messages alone, or every scroll-up would duplicate the event pills."""
+    import inspect
+    from app.routers import admin
+    src = inspect.getsource(admin.get_thread)
+    seg = src.split("if before_dt is not None:", 2)[-1]
+    assert "_shape_messages_into" in seg.split("return thread", 1)[0]
+
+
+def test_a_bad_cursor_degrades_to_first_page_never_a_500():
+    from app.routers.admin import _parse_before
+    assert _parse_before(None) is None
+    assert _parse_before("") is None
+    assert _parse_before("not-a-date") is None
+    assert _parse_before("2026-08-19T07:00:00Z") is not None
+    assert _parse_before("2026-08-19T07:00:00+00:00") is not None
+
+
+def test_the_inbox_fetches_and_merges_pages_not_repaints():
+    """Frontend contract, pinned at source (no component harness): opens ask
+    for THREAD_PAGE, scrolling up asks `before` the oldest loaded message,
+    silent refreshes MERGE so loaded pages survive the 20s poll, and the
+    prepend pins the reader's scroll position."""
+    import os
+    view = os.path.join(os.path.dirname(__file__), "..", "..", "web", "src",
+                        "components", "views", "ConversationsView.tsx")
+    s = open(view, encoding="utf-8").read()
+    assert "const THREAD_PAGE = 50" in s
+    assert "function mergeThread(" in s
+    assert "before: oldest.created_at" in s
+    assert "silent ? mergeThread(" in s
+    assert "el2.scrollHeight - prevH + prevTop" in s
+    assert "holdAutoScroll" in s

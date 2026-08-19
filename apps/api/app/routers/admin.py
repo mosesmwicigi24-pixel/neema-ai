@@ -29,6 +29,51 @@ router = APIRouter()
 # sales conversation — an agent never notices the ceiling, but the pathological
 # case can no longer hang the page.
 THREAD_LIMIT = 500
+
+
+def _parse_before(before: str | None):
+    """ISO timestamp → aware datetime, or None on anything unparseable — a bad
+    cursor must degrade to 'first page', never to a 500."""
+    if not before:
+        return None
+    try:
+        from datetime import datetime
+        return datetime.fromisoformat(str(before).replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _shape_messages_into(thread: list, msgs, agent_name_map: dict) -> None:
+    """One message row → one thread item (shared by page one and older pages).
+    Quoted messages resolve within the same fetched page — an older page's
+    quote of a still-older message falls back to its cached text, no join."""
+    _by_id = {str(m.id): m for m in msgs}
+    for m in msgs:
+        _q = _by_id.get(str(m.reply_to_id)) if getattr(m, "reply_to_id", None) else None
+        thread.append({
+            "id":            str(m.id),
+            "type":          "message",
+            "direction":     m.direction,
+            "sender":        m.sender,
+            "text":          m.text,
+            "translation":     translate_svc.translation_for(m),
+            "translated_from": getattr(m, "translated_from", None),
+            "isNote":        m.media_type == "note",
+            "agent_name":    agent_name_map.get(str(m.agent_id)) if m.agent_id else None,
+            "created_at":    m.created_at.isoformat() if m.created_at else None,
+            "media_type":    m.media_type if m.media_type != "note" else None,
+            "media_id":      m.media_id,
+            "media_url":     m.media_url,
+            "media_caption": m.media_caption,
+            "mime_type":     m.mime_type,
+            "filename":      m.filename,
+            "comment_context": m.comment_context,
+            "reply_to": ({"id": str(m.reply_to_id), "text": m.reply_to_text,
+                          "sender": m.reply_to_sender,
+                          "media_type": (_q.media_type if _q and _q.media_type != "note" else None),
+                          "media_url": (_q.media_url if _q and _q.media_type != "note" else None)}
+                         if getattr(m, "reply_to_id", None) else None),
+        })
 bearer = HTTPBearer()
 
 
@@ -287,6 +332,8 @@ async def list_conversations(
 async def get_thread(
     conv_id: str,
     request: Request,
+    before: str | None = None,
+    limit: int = 50,
     db: AsyncSession = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
 ):
@@ -304,12 +351,18 @@ async def get_thread(
     browser building thousands of nodes in one synchronous pass. The cap is far
     above a normal sales conversation, so nothing an agent works with is lost.
     """
-    # ── 1. Fetch messages (newest THREAD_LIMIT, returned oldest-first) ────────
+    # ── 1. Fetch ONE PAGE of messages (newest `limit`, returned oldest-first).
+    # Owner's rule (2026-08-19): open with the latest 50 and fetch the next 50
+    # only when the reader scrolls past them — the app stays light instead of
+    # painting a long customer's whole history into the DOM in one pass.
+    # `before` (ISO timestamp) pages older; THREAD_LIMIT stays the hard cap.
+    page = max(1, min(int(limit or 50), THREAD_LIMIT))
+    before_dt = _parse_before(before)
+    q = select(Message).where(Message.conversation_id == conv_id)
+    if before_dt is not None:
+        q = q.where(Message.created_at < before_dt)
     msg_result = await db.execute(
-        select(Message)
-        .where(Message.conversation_id == conv_id)
-        .order_by(Message.created_at.desc())
-        .limit(THREAD_LIMIT)
+        q.order_by(Message.created_at.desc()).limit(page)
     )
     msgs = list(reversed(msg_result.scalars().all()))
 
@@ -321,9 +374,24 @@ async def get_thread(
         for a in a_res.scalars().all():
             agent_name_map[str(a.id)] = a.name
 
-    # ── 2. Fetch intercept events (activity log rows) ─────────────────────────
+    # ── 2. Fetch intercept events (activity log rows) — FIRST page only.
+    # An older page (`before` set) adds messages alone: the full event timeline
+    # already arrived with page one, and re-sending it would duplicate pills.
     # We surface escalated, flag, intercept, release, and transfer actions.
     # approve_draft is skipped — it's implicit from the AI message that follows.
+    if before_dt is not None:
+        thread: list[dict] = []
+        _shape_messages_into(thread, msgs, agent_name_map)
+        thread.sort(key=lambda x: x["created_at"] or "")
+        try:
+            _cand = [str(m.id) for m in msgs if translate_svc.is_candidate(m)]
+            if _cand:
+                translate_svc.schedule_thread_translation(
+                    request.app.state.redis, conv_id, _cand)
+        except Exception:
+            pass
+        return thread
+
     SURFACED_ACTIONS = {
         InterceptAction.escalated,
         InterceptAction.flag,
@@ -353,44 +421,7 @@ async def get_thread(
 
     # ── 3. Shape messages into thread items ───────────────────────────────────
     thread: list[dict] = []
-
-    # Quoted messages live in the same thread — resolve their media locally so a
-    # reply-to-an-image quote can render the actual thumbnail (like WhatsApp),
-    # not an "[image]" placeholder. No extra query.
-    _by_id = {str(m.id): m for m in msgs}
-    for m in msgs:
-        _q = _by_id.get(str(m.reply_to_id)) if getattr(m, "reply_to_id", None) else None
-        thread.append({
-            "id":            str(m.id),
-            "type":          "message",
-            "direction":     m.direction,
-            "sender":        m.sender,
-            "text":          m.text,
-            # The team's reading glass: an English rendering of a foreign
-            # message (either direction), shown gray under the bubble. None
-            # when the original is already readable. services/translate fills
-            # these lazily; see the schedule call at the end of this handler.
-            "translation":     translate_svc.translation_for(m),
-            "translated_from": getattr(m, "translated_from", None),
-            "isNote":        m.media_type == "note",
-            "agent_name":    agent_name_map.get(str(m.agent_id)) if m.agent_id else None,
-            "created_at":    m.created_at.isoformat() if m.created_at else None,
-            # ── Media ────────────────────────────────────────────────────────
-            "media_type":    m.media_type if m.media_type != "note" else None,
-            "media_id":      m.media_id,
-            "media_url":     m.media_url,
-            "media_caption": m.media_caption,
-            "mime_type":     m.mime_type,
-            "filename":      m.filename,
-            # Source-post context for FB/IG comment messages (what it replies to)
-            "comment_context": m.comment_context,
-            # Reply-to (quote): the message this one replies to, for the thread strip.
-            "reply_to": ({"id": str(m.reply_to_id), "text": m.reply_to_text,
-                          "sender": m.reply_to_sender,
-                          "media_type": (_q.media_type if _q and _q.media_type != "note" else None),
-                          "media_url": (_q.media_url if _q and _q.media_type != "note" else None)}
-                         if getattr(m, "reply_to_id", None) else None),
-        })
+    _shape_messages_into(thread, msgs, agent_name_map)
 
     # ── 4. Shape intercept events into system_event thread items ──────────────
     # Human-readable labels for each action shown in the timeline pill

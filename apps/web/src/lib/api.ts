@@ -272,10 +272,19 @@ export const conversationsApi = {
     activity: (id: string) =>
         get<{ events: ApiActivityEvent[] }>(`/admin/conversations/${id}/activity`),
 
-    /** Fetch the merged message + system-event timeline for a conversation. */
-    messages: async (id: string): Promise<Message[]> => {
+    /** Fetch ONE PAGE of the merged message + system-event timeline.
+     *  Default: the newest 50 (plus the full event timeline). Pass `before`
+     *  (the oldest loaded message's created_at) to page older messages in
+     *  50s as the reader scrolls up — the thread never paints all at once. */
+    messages: async (
+        id: string,
+        opts?: { before?: string; limit?: number },
+    ): Promise<Message[]> => {
+        const qs = new URLSearchParams();
+        if (opts?.before) qs.set("before", opts.before);
+        if (opts?.limit) qs.set("limit", String(opts.limit));
         const raw = await get<ApiThreadItem[]>(
-            `/admin/conversations/${id}/messages`,
+            `/admin/conversations/${id}/messages${qs.size ? `?${qs}` : ""}`,
         );
         return raw.map(mapThreadItem);
     },
