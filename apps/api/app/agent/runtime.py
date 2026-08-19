@@ -997,6 +997,18 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             out = await run_tool(call.name, call.input, ctx)
             _log.info("agent tool %s(%s) -> %s", call.name, json.dumps(call.input)[:120],
                       json.dumps(out)[:160])
+            # The Activity Log's per-turn trail: every tool call becomes a row
+            # a human can read (owner's rule, 2026-08-19 — "every activity in
+            # the interaction"). Real turns only — a read-only draft or scribe
+            # pass previews, it doesn't act. Best-effort by construction.
+            if not read_only and not scribe_only:
+                try:
+                    from app.services import activity_trail
+                    await activity_trail.record(db, channel=channel, contact=key,
+                                                tool=call.name, args=call.input,
+                                                out=out)
+                except Exception:
+                    pass
             results.append({
                 "type": "tool_result",
                 "tool_use_id": call.id,

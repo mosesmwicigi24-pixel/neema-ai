@@ -599,6 +599,24 @@ async def get_conversation_activity(
                 "at": o.created_at.isoformat() if o.created_at else None,
             })
 
+    # ── The agent's own steps — every tool call of every turn ─────────────────
+    # (owner's rule, 2026-08-19: the log must capture every activity of the
+    # interaction, not just the system's milestones around it.)
+    try:
+        from app.models.agent_activity import AgentActivity
+        acts_rows = (await db.execute(
+            select(AgentActivity).where(AgentActivity.conversation_id.in_(conv_ids))
+            .order_by(AgentActivity.created_at.desc()).limit(60))).scalars().all()
+        for t in acts_rows:
+            events.append({
+                "id": f"tool-{t.id}", "kind": "tool",
+                "label": t.summary,
+                "detail": t.detail,
+                "at": t.created_at.isoformat() if t.created_at else None,
+            })
+    except Exception:
+        pass          # a missing table (pre-migration box) must not break the ledger
+
     # ── Calls ─────────────────────────────────────────────────────────────────
     if person_id or wa_id:
         c_q = select(Call)
