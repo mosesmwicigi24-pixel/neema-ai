@@ -330,6 +330,7 @@ async def get_thread(
         InterceptAction.intercept,
         InterceptAction.release,
         InterceptAction.transfer,
+        InterceptAction.pause,
     }
 
     evt_result = await db.execute(
@@ -399,6 +400,7 @@ async def get_thread(
         InterceptAction.intercept: "Picked up by agent",
         InterceptAction.release:   "Released to AI",
         InterceptAction.transfer:  "Transferred",
+        InterceptAction.pause:     "Paused — replies held",
     }
 
     # Build a quick lookup: messages that arrived before each event timestamp
@@ -516,6 +518,7 @@ async def get_conversation_activity(
         InterceptAction.intercept: "Picked up by agent",
         InterceptAction.release:   "Released to AI",
         InterceptAction.transfer:  "Transferred",
+        InterceptAction.pause:     "Paused — replies held",
     }
     icpts = (await db.execute(
         select(Intercept).where(Intercept.conversation_id.in_(conv_ids))
@@ -949,6 +952,15 @@ async def approve(conv_id: str, request: Request, db: AsyncSession = Depends(get
 async def release(conv_id: str, request: Request, db: AsyncSession = Depends(get_db),
                   agent: Agent = Depends(get_current_agent)):
     return await release_conversation(db, conv_id, agent, request.app.state.redis)
+
+
+@router.post("/conversations/{conv_id}/pause")
+async def pause(conv_id: str, request: Request, db: AsyncSession = Depends(get_db),
+                agent: Agent = Depends(get_current_agent)):
+    """Hold ALL replies until someone resumes. The Pause button used to call
+    /release — the opposite of pausing — because this endpoint didn't exist."""
+    from app.services.conversation import pause_conversation
+    return await pause_conversation(db, conv_id, agent, request.app.state.redis)
 
 
 @router.post("/conversations/{conv_id}/close")

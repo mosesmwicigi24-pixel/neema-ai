@@ -284,6 +284,8 @@ export const conversationsApi = {
         post<ApiConversation>(`/admin/conversations/${id}/intercept`, {}),
     release: (id: string) =>
         post<ApiConversation>(`/admin/conversations/${id}/release`, {}),
+    pause: (id: string) =>
+        post<ApiConversation>(`/admin/conversations/${id}/pause`, {}),
     transfer: (id: string, agentId: string) =>
         post<ApiConversation>(`/admin/conversations/${id}/transfer`, {
             agent_id: agentId,

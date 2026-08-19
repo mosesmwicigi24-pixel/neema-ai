@@ -19,6 +19,11 @@ class InterceptAction(str, enum.Enum):
     # Written when the conversation is flagged "Needs Attention" (e.g. after an
     # escalation that has not yet been picked up, or an explicit flag action).
     flag          = "flag"
+    # Written when a person PAUSES the conversation: Neema holds all replies
+    # until someone resumes (Resume releases back to AI and journals as
+    # `release`). Before this value existed the dashboard's Pause button was
+    # wired to release() — the exact opposite of pausing (2026-08-19).
+    pause         = "pause"
 
 
 class Intercept(Base):
