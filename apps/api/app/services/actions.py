@@ -132,10 +132,14 @@ async def _compose_follow_up(db, redis, conv, reason: str) -> str:
     from app.agent import runtime
     key = conv.wa_id if conv.channel == "whatsapp" else conv.external_id
     text = ("[SCHEDULED FOLLOW-UP — not a customer message. Time to keep the "
-            f"commitment: {reason}. Compose the ONE short, warm message to send "
-            "them now. If the commitment was to confirm something you still "
-            "can't confirm, be honest and say you're still on it. Never repeat "
-            "a message already sent; never pressure.]")
+            f"commitment: {reason}. FIRST re-read the conversation above: if a "
+            "human colleague (lines marked [TEAM — a human colleague sent "
+            "this]) has already answered part or all of it, their answer "
+            "STANDS — repeat its substance as the update and only chase what "
+            "genuinely remains open. Compose the ONE short, warm message to "
+            "send them now. If the commitment was to confirm something nobody "
+            "has confirmed yet, be honest and say you're still on it. Never "
+            "repeat a message already sent; never pressure.]")
     return (await runtime.run_turn(
         db, redis, wa_id=key, user_text=text, llm=runtime.build_llm(),
         channel=conv.channel,
