@@ -19,7 +19,7 @@ from app.agent.prompt import build_system_prompt, customer_context
 from app.agent.tools import TOOLS, ToolContext, run_tool
 from app.core.config import settings
 from app.core.countries import resolve_country, market_currency, money_name
-from app.models.message import Message, MsgDirection
+from app.models.message import Message, MsgDirection, MsgSender
 from app.models.user import User
 
 _log = logging.getLogger("neema.agent")
@@ -615,6 +615,17 @@ async def _history(db: AsyncSession, key: str, limit: int = 20,
         if not text:
             continue
         role = "user" if m.direction == MsgDirection.inbound else "assistant"
+        # A HUMAN colleague's reply must be recognisable as such (owner,
+        # 2026-08-19): Moses answered Mestowt's shipping question by hand —
+        # Ethiopian Airlines, 1–2 days — and ten hours later the scheduled
+        # check-in was still "following up" as if nothing had been said,
+        # because his words read as just another of Neema's own turns. The
+        # marker makes a colleague's answer stand out as settled team fact;
+        # the prompt forbids echoing the marker itself.
+        if (role == "assistant"
+                and getattr(m, "sender", None) == MsgSender.human_agent
+                and m.media_type != "note"):
+            text = f"[TEAM — a human colleague sent this]: {text}"
         # Collapse consecutive same-role turns so the transcript alternates cleanly.
         if msgs and msgs[-1]["role"] == role:
             msgs[-1]["content"] += "\n" + text
