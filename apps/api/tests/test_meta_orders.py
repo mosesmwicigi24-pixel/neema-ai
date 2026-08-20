@@ -12,6 +12,8 @@ from types import SimpleNamespace
 
 from app.agent import cart as cartmod
 from app.agent.tools import _order_identity, _create_order, ToolContext
+
+import app.core.hub_client as hub_client_mod
 from app.models.person import Person
 
 PSID = "26414904614761138"
@@ -196,8 +198,6 @@ def test_meta_cart_lives_on_the_person_not_a_missing_user_row():
 # its platform — ToolContext.channel — and the order must carry it, because
 # nobody can reconstruct it later from a WA- order number alone.
 
-import app.core.hub_client as hub_client_mod
-
 
 def test_push_pending_order_forwards_a_valid_source(monkeypatch):
     captured = {}
@@ -222,7 +222,7 @@ def test_push_pending_order_forwards_a_valid_source(monkeypatch):
 
     monkeypatch.setattr(hub_client_mod.httpx, "AsyncClient", _Client)
     monkeypatch.setattr(hub_client_mod, "resolve_hub_line",
-                        lambda it, cat: {"product_id": 5, "quantity": 1})
+                        lambda it, cat: {"product_id": 5, "quantity": 1, "unit_price": 100.0})
     monkeypatch.setattr(hub_client_mod, "_is_made_to_order", lambda line: False)
 
     asyncio.run(hub_client_mod.push_pending_order(
@@ -259,7 +259,7 @@ def test_push_pending_order_drops_an_unknown_source(monkeypatch):
 
     monkeypatch.setattr(hub_client_mod.httpx, "AsyncClient", _Client)
     monkeypatch.setattr(hub_client_mod, "resolve_hub_line",
-                        lambda it, cat: {"product_id": 5, "quantity": 1})
+                        lambda it, cat: {"product_id": 5, "quantity": 1, "unit_price": 100.0})
     monkeypatch.setattr(hub_client_mod, "_is_made_to_order", lambda line: False)
 
     asyncio.run(hub_client_mod.push_pending_order(
