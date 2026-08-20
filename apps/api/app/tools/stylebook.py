@@ -259,42 +259,61 @@ def render_block(exemplars: list[dict], human_wc: list[int],
     return out
 
 
+async def refresh(db, redis) -> str:
+    """Re-learn the house voice from the current replies and store the block.
+    Returns the stored block ('' when there was nothing to learn). Used by the
+    CLI run below AND by the weekly heartbeat — the team's style drifts, new
+    people join, coaching lands; the textbook must follow without anyone
+    remembering a script."""
+    from app.services.app_settings import HOUSE_VOICE_CACHE, set_value
+
+    pairs, human_wc, ai_wc = await collect_pairs(db)
+    chosen = choose_exemplars(pairs)
+    block = render_block(chosen, human_wc, ai_wc)
+
+    _log.info("human replies read : %d (window %dd)", len(human_wc), WINDOW_DAYS)
+    _log.info("usable Q→A pairs   : %d", len(pairs))
+    kinds: dict[str, int] = {}
+    for p in pairs:
+        kinds[p["kind"]] = kinds.get(p["kind"], 0) + 1
+    for k in sorted(kinds, key=kinds.get, reverse=True):
+        _log.info("  %-13s %d", k, kinds[k])
+    if not block:
+        _log.info("nothing to learn yet — no usable human replies found; "
+                  "the prompt keeps its current voice")
+        return ""
+    _log.info("---- the block Neema will read ----\n%s\n----", block)
+
+    await set_value(db, HOUSE_VOICE_KEY, block)
+    _log.info("stored %d chars → app_settings.%s (%d exemplars)",
+              len(block), HOUSE_VOICE_KEY, len(chosen))
+    if redis is not None:
+        try:
+            await redis.delete(HOUSE_VOICE_CACHE)
+            _log.info("cache dropped — live on the next customer turn")
+        except Exception:
+            _log.info("cache not reachable — live within 5 minutes (TTL)")
+    return block
+
+
 async def main() -> None:
     import redis.asyncio as aioredis
 
     from app.core.config import settings
     from app.database import AsyncSessionLocal
-    from app.services.app_settings import HOUSE_VOICE_CACHE, set_value
 
-    async with AsyncSessionLocal() as db:
-        pairs, human_wc, ai_wc = await collect_pairs(db)
-        chosen = choose_exemplars(pairs)
-        block = render_block(chosen, human_wc, ai_wc)
-
-        _log.info("human replies read : %d (window %dd)", len(human_wc), WINDOW_DAYS)
-        _log.info("usable Q→A pairs   : %d", len(pairs))
-        kinds: dict[str, int] = {}
-        for p in pairs:
-            kinds[p["kind"]] = kinds.get(p["kind"], 0) + 1
-        for k in sorted(kinds, key=kinds.get, reverse=True):
-            _log.info("  %-13s %d", k, kinds[k])
-        if not block:
-            _log.info("nothing to learn yet — no usable human replies found; "
-                      "the prompt keeps its current voice")
-            return
-        _log.info("---- the block Neema will read ----\n%s\n----", block)
-
-        await set_value(db, HOUSE_VOICE_KEY, block)
-        _log.info("stored %d chars → app_settings.%s (%d exemplars)",
-                  len(block), HOUSE_VOICE_KEY, len(chosen))
-
+    r = None
     try:
         r = aioredis.from_url(settings.redis_url, decode_responses=True)
-        await r.delete(HOUSE_VOICE_CACHE)
-        await r.aclose()
-        _log.info("cache dropped — live on the next customer turn")
     except Exception:
-        _log.info("cache not reachable — live within 5 minutes (TTL)")
+        pass
+    async with AsyncSessionLocal() as db:
+        await refresh(db, r)
+    if r is not None:
+        try:
+            await r.aclose()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
