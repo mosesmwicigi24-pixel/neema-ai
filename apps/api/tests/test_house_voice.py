@@ -286,3 +286,57 @@ def test_deflecting_replies_never_become_teaching_examples():
     # …while real in-channel answers keep teaching
     assert usable_answer("We are located in Nairobi CBD, Sonalux House 7th floor Room 18.")
     assert usable_answer("this aluminium tray goes for 70$")
+
+
+# ── the machine tells (owner: "do as a normal human does", 2026-08-20) ───────
+
+def test_the_machine_tells_are_named_and_banned():
+    from app.agent.prompt import build_system_prompt
+    p = build_system_prompt(currency="USD")
+    assert "TEXT LIKE A PERSON" in p
+    for tell in ("PARAGRAPH STACKS", "DECISION MENUS", "OPTION PARENTHESES",
+                 "SERVICE FILLER", "ECHO ANSWERS", "DASH CHAINS"):
+        assert tell in p, f"missing tell: {tell}"
+    assert "n'hésitez pas" in p                    # the live French filler
+    assert "never as their" in p                   # blessings woven in, not stacked
+
+
+# ── the textbook follows the team by itself ──────────────────────────────────
+
+def test_refresh_is_shared_by_cli_and_heartbeat(monkeypatch):
+    """The weekly heartbeat and `python -m app.tools.stylebook` must be the
+    same code path — one learner, two triggers."""
+    import inspect
+    assert hasattr(stylebook, "refresh")
+    src = inspect.getsource(stylebook.main)
+    assert "await refresh(db, r)" in src
+
+    from app.services import actions
+    loop_src = inspect.getsource(actions.actions_loop)
+    assert "stylebook" in loop_src and "_style_refresh(db, redis)" in loop_src
+    assert "nbo.weekday() == 6" in loop_src        # Sunday, Nairobi clock
+
+
+def test_refresh_stores_and_drops_the_cache(monkeypatch):
+    calls = {}
+
+    async def _collect(db):
+        return ([_pair("How much?", "The tray is $70", "price")], [4, 4, 4, 4], [20])
+    monkeypatch.setattr(stylebook, "collect_pairs", _collect)
+
+    async def _set_value(db, key, value):
+        calls["stored"] = (key, value)
+    import app.services.app_settings as aps
+    monkeypatch.setattr(aps, "set_value", _set_value)
+
+    class _R:
+        def __init__(self):
+            self.deleted = []
+
+        async def delete(self, k):
+            self.deleted.append(k)
+
+    r = _R()
+    block = asyncio.run(stylebook.refresh(None, r))
+    assert calls["stored"][0] == "house_voice" and "The tray is $70" in block
+    assert aps.HOUSE_VOICE_CACHE in r.deleted

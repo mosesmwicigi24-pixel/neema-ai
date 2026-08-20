@@ -393,6 +393,14 @@ async def actions_loop(redis) -> None:
                         await _qa.run_qa(db)
                 # 06:00: identify the page's recent posts BEFORE anyone
                 # comments — comments look up, they never guess.
+                # Sunday 05:00: the stylebook re-learns the house voice from
+                # the week's human replies — the textbook follows the team
+                # without anyone remembering a script (zero model cost).
+                if (nbo.weekday() == 6 and nbo.hour == 5
+                        and await redis.set(f"stylebook:{today}", "1", nx=True, ex=86400)):
+                    from app.tools.stylebook import refresh as _style_refresh
+                    async with AsyncSessionLocal() as db:
+                        await _style_refresh(db, redis)
                 if nbo.hour == 6 and await redis.set(f"postsweep:{today}", "1", nx=True, ex=86400):
                     from app.services.post_catalog import sweep_page_posts
                     async with AsyncSessionLocal() as db:
