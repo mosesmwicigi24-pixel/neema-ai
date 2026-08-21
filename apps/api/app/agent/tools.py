@@ -774,6 +774,19 @@ async def _order_identity(ctx: ToolContext):
             User.person_id == ident.person_id))).scalar_one_or_none()
         if u is not None and u.phone:
             phone = u.phone.lstrip("+")
+            # The phone reached us but never became an Identifier — persist the
+            # claim now, so the hub's plain-phone deep link (and every future
+            # cross-channel match) can find this person without an order ref.
+            # UNIQUE(type, value) makes a lost race harmless; check-first keeps
+            # the common path quiet.
+            existing = (await ctx.db.execute(select(Identifier).where(
+                Identifier.type == "phone",
+                Identifier.value.in_([phone, f"+{phone}"]),
+            ))).scalars().first()
+            if existing is None:
+                ctx.db.add(Identifier(person_id=ident.person_id, type="phone",
+                                      value=f"+{phone}", source="order"))
+                await ctx.db.commit()
         if u is not None and u.name and name == "Customer":
             name = u.name.split()[0]
     return phone, name, ident.person_id

@@ -180,6 +180,23 @@ async def resolve_conversation(
         if conv:
             return {"conversation_id": conv.id}
 
+    # 5. the phone as an IDENTIFIER — the designed home for captured phones
+    # (capture_contact stores '+<digits>' with source=messenger_capture). This
+    # is what makes the PLAIN phone link find a Meta customer with no order
+    # ref: identifier -> person -> PSID identities -> thread. Stored values
+    # carry a leading '+'; links send bare digits — match both spellings.
+    if digits:
+        from app.models.person import Identifier
+        pid = (await db.execute(
+            select(Identifier.person_id).where(
+                Identifier.type == "phone",
+                Identifier.value.in_([digits, f"+{digits}"]),
+            ).limit(1)
+        )).scalar_one_or_none()
+        conv = await person_conversation(pid)
+        if conv:
+            return {"conversation_id": conv.id}
+
     return {"conversation_id": None}
 
 

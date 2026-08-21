@@ -91,3 +91,22 @@ def test_a_person_with_threads_on_two_channels_prefers_whatsapp():
         key="254700000001", ref="POS-1", db=db, agent=None))
 
     assert out == {"conversation_id": "conv-wa"}, "WhatsApp thread wins the tie"
+
+
+def test_a_captured_phone_resolves_through_identifiers_with_no_order_ref():
+    # capture_contact stores '+<digits>' as an Identifier; the link sends bare
+    # digits and no order number. identifier -> person -> PSID -> thread.
+    person_id = uuid.uuid4()
+    conv = _conv("conv-psid", channel="messenger")
+    db = _DB([
+        [],                     # 1: no thread keyed by the digits
+        [],                     # 2: no order carries them either
+        None,                   # 3: no Identity is the phone
+        person_id,              # 4: but an Identifier claims it
+        ["27950420514615789"],  # 5: the person's channel identities
+        [conv],                 # 6: the PSID-keyed thread
+    ])
+
+    out = asyncio.run(resolve_conversation(key="+23672582495", ref="", db=db, agent=None))
+
+    assert out == {"conversation_id": "conv-psid"}
