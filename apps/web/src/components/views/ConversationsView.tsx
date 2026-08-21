@@ -1011,9 +1011,13 @@ export function ConversationsView({
         // A deep link (hub → Neema) can land before the inbox has loaded —
         // don't consume the key against an empty list.
         if (conversations.length === 0) return;
-        const key = openConvKey.replace(/^\+/, "");
+        // "digits|REF" — the hub sends the phone plus the order number, because
+        // a Meta customer's thread is keyed by PSID and their phone may exist
+        // nowhere in identities. The order number is the strongest key.
+        const [rawKey, refPart] = openConvKey.split("|");
+        const key = rawKey.replace(/^\+/, "");
         const matches = conversations.filter(
-            (c) => c.wa_id === key || c.external_id === key || c.wa_id === openConvKey,
+            (c) => c.wa_id === key || c.external_id === key || c.wa_id === rawKey,
         );
         const conv = matches.find((c) => c.channel === "whatsapp") ?? matches[0];
         // Full open semantics (messages load, unread clears) — selecting the id
@@ -1022,7 +1026,17 @@ export function ConversationsView({
         // A cached snapshot may simply not contain a brand-new conversation —
         // don't declare "no conversation" until the fresh list has arrived.
         else if (!freshLoaded) return;
-        else onToast?.("No conversation yet — they haven't messaged. Use Invite to WhatsApp.", "warning");
+        else {
+            // Not directly keyed — ask the server to walk order -> person ->
+            // identities (the Meta case: order carries a phone, thread a PSID).
+            conversationsApi
+                .resolve(key, refPart || undefined)
+                .then(({ conversation_id }) => {
+                    if (conversation_id) handleSelectConv(conversation_id);
+                    else onToast?.("No conversation yet — they haven't messaged. Use Invite to WhatsApp.", "warning");
+                })
+                .catch(() => onToast?.("Could not look up that chat.", "error"));
+        }
         onConsumeOpenConvKey?.();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [openConvKey, conversations, freshLoaded, onConsumeOpenConvKey, onToast]);

@@ -272,6 +272,10 @@ function mapThreadItem(raw: ApiThreadItem): Message {
 }
 
 export const conversationsApi = {
+    /** Resolve a hub deep link (phone and/or order number) to a conversation id. */
+    resolve: (key: string, ref?: string) =>
+        get<{ conversation_id: string | null }>(
+            `/admin/conversations/resolve?key=${encodeURIComponent(key)}${ref ? `&ref=${encodeURIComponent(ref)}` : ""}`),
     list: (params?: { mode?: string; status?: string }) => {
         const q = params
             ? "?" +

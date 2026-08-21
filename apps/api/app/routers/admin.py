@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, func, delete
+from sqlalchemy import select, update, func, delete, or_
 from app.database import get_db
 from app.models.conversation import Conversation, InterceptMode
 from app.models.message import Message
@@ -96,6 +96,92 @@ async def get_current_agent(
 
 
 # ── Conversations ─────────────────────────────────────────
+
+@router.get("/conversations/resolve")
+async def resolve_conversation(
+    key: str = "",
+    ref: str = "",
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Resolve a hub deep link to ONE conversation.
+
+    The hub links to a chat by the customer's PHONE — the only key it has.
+    That matches WhatsApp threads directly, but a Meta customer's thread is
+    keyed by PSID and their phone may exist nowhere in identities (it was
+    captured during ordering and lives on the order record). So resolution
+    walks the strongest chain available:
+
+      1. conversations.wa_id / external_id == the digits         (WhatsApp)
+      2. ref (hub order number) -> order_events.person_id -> that person's
+         identities -> their conversations                        (Meta orders)
+      3. order_events.wa_id == digits -> person -> conversations  (phone-keyed
+         order but PSID-keyed thread)
+      4. identities.external_id == digits -> person -> conversations
+
+    Preference within a person's threads: WhatsApp first, then most recent.
+    Returns {"conversation_id": <id>|null} — the caller toasts on null.
+    """
+    from app.models.order_event import OrderEvent
+    from app.models.person import Identity
+
+    digits = "".join(ch for ch in (key or "") if ch.isdigit())
+
+    async def by_external(ids: list[str]):
+        if not ids:
+            return None
+        q = (select(Conversation)
+             .where(or_(Conversation.wa_id.in_(ids), Conversation.external_id.in_(ids))))
+        convs = (await db.execute(q)).scalars().all()
+        if not convs:
+            return None
+        convs.sort(key=lambda c: (c.channel != "whatsapp",
+                                  -(c.last_message_at.timestamp() if c.last_message_at else 0)))
+        return convs[0]
+
+    # 1. direct thread key
+    if digits:
+        conv = await by_external([digits])
+        if conv:
+            return {"conversation_id": conv.id}
+
+    async def person_conversation(person_id):
+        if not person_id:
+            return None
+        idents = (await db.execute(
+            select(Identity.external_id).where(Identity.person_id == person_id)
+        )).scalars().all()
+        return await by_external(list({*idents}))
+
+    # 2 + 3. the order knows the person even when identities don't know the phone
+    clauses = []
+    if ref:
+        clauses.append(OrderEvent.hub_order_number == ref)
+    if digits:
+        clauses.append(OrderEvent.wa_id == digits)
+    if clauses:
+        events = (await db.execute(
+            select(OrderEvent.person_id, OrderEvent.wa_id)
+            .where(or_(*clauses))
+            .order_by(OrderEvent.created_at.desc())
+            .limit(5)
+        )).all()
+        for person_id, ev_wa in events:
+            conv = await person_conversation(person_id) or await by_external([ev_wa] if ev_wa else [])
+            if conv:
+                return {"conversation_id": conv.id}
+
+    # 4. the phone as a known identity
+    if digits:
+        pid = (await db.execute(
+            select(Identity.person_id).where(Identity.external_id == digits).limit(1)
+        )).scalar_one_or_none()
+        conv = await person_conversation(pid)
+        if conv:
+            return {"conversation_id": conv.id}
+
+    return {"conversation_id": None}
+
 
 @router.get("/conversations")
 async def list_conversations(
