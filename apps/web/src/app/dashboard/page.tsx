@@ -173,12 +173,13 @@ export default function NeemaDashboard(): React.ReactElement {
         if (!raw) return;
         const params = new URLSearchParams(raw);
         const open = params.get("open");
+        const openRef = params.get("ref");
         const viewParam = params.get("view") as ViewId | null;
         const caller = params.get("caller");
         const views: ViewId[] = ["conversations", "calls", "orders", "deals", "leads",
             "reports", "agents", "catalog", "overview", "profile", "settings"];
         if (open) {
-            openConversationFor(open);
+            openConversationFor(openRef ? `${open}|${openRef}` : open);
         } else if (viewParam && views.includes(viewParam)) {
             setView(viewParam);
             if (viewParam === "calls" && caller) setCallsFocusKey(caller);
