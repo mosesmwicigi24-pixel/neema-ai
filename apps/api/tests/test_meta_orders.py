@@ -187,3 +187,54 @@ def test_meta_cart_lives_on_the_person_not_a_missing_user_row():
     db2 = _DB([ident], person=person)
     got = asyncio.run(cartmod.get_cart(db2, PSID, "messenger"))
     assert got["items"][0]["name"] == "Thurible"        # and survives the next turn
+
+
+# ── ordering writes the phone back as an Identifier ──────────────────────────
+#
+# When the phone reaches an order only via the users fallback (capture never
+# made an Identifier), the order flow persists the claim — so the hub's
+# plain-phone deep link and future cross-channel matching can find the person
+# without an order ref.
+
+class _WDB(_DB):
+    def __init__(self, results, person=None):
+        super().__init__(results, person)
+        self.added = []
+
+    def add(self, obj):
+        self.added.append(obj)
+
+
+def test_meta_order_persists_a_fallback_phone_as_an_identifier():
+    person = _person("Stella Chimène Yebess")
+    ident = SimpleNamespace(channel="messenger", external_id=PSID, person_id=person.id)
+    user = SimpleNamespace(phone="+23672582495", name="Stella", person_id=person.id)
+
+    #        identity, no phone-identifier, users fallback, no existing claim
+    db = _WDB([ident,   None,               user,           None], person=person)
+    ctx = ToolContext(db=db, redis=None, wa_id=PSID, currency="KES", channel="messenger")
+
+    phone, name, pid = asyncio.run(_order_identity(ctx))
+
+    assert phone == "23672582495"
+    assert len(db.added) == 1
+    claim = db.added[0]
+    assert claim.type == "phone"
+    assert claim.value == "+23672582495"
+    assert claim.source == "order"
+    assert claim.person_id == person.id
+
+
+def test_meta_order_does_not_duplicate_an_existing_identifier():
+    person = _person()
+    ident = SimpleNamespace(channel="messenger", external_id=PSID, person_id=person.id)
+    user = SimpleNamespace(phone="+254700111222", name="M", person_id=person.id)
+    existing = SimpleNamespace(type="phone", value="+254700111222")
+
+    db = _WDB([ident, None, user, existing], person=person)
+    ctx = ToolContext(db=db, redis=None, wa_id=PSID, currency="KES", channel="messenger")
+
+    phone, _, _ = asyncio.run(_order_identity(ctx))
+
+    assert phone == "254700111222"
+    assert db.added == [], "UNIQUE(type, value) — a second claim is never written"
