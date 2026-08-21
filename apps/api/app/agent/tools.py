@@ -800,6 +800,10 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
         pushed = await hub_client.push_pending_order(
             catalog, wa_id=order_wa_id, first_name=first_name,
             country_iso=country_iso, items=cart["items"],
+            # The conversation knows which app it lives in; the order should
+            # too. hub_client drops values the hub does not accept, so a
+            # web-chat session simply goes untagged rather than failing.
+            source_channel=ctx.channel,
         )
     except ValueError as exc:
         return {"error": "none of the cart items could be matched to the hub",

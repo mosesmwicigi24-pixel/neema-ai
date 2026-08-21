@@ -12,6 +12,8 @@ from types import SimpleNamespace
 
 from app.agent import cart as cartmod
 from app.agent.tools import _order_identity, _create_order, ToolContext
+
+import app.core.hub_client as hub_client_mod
 from app.models.person import Person
 
 PSID = "26414904614761138"
@@ -187,3 +189,82 @@ def test_meta_cart_lives_on_the_person_not_a_missing_user_row():
     db2 = _DB([ident], person=person)
     got = asyncio.run(cartmod.get_cart(db2, PSID, "messenger"))
     assert got["items"][0]["name"] == "Thurible"        # and survives the next turn
+
+
+# ── source_channel: the order knows which app sold it ────────────────────────
+#
+# The hub buckets every chat sale under Chat Orders; source_channel is the
+# per-row badge (WhatsApp vs Messenger vs Instagram). The conversation knows
+# its platform — ToolContext.channel — and the order must carry it, because
+# nobody can reconstruct it later from a WA- order number alone.
+
+
+def test_push_pending_order_forwards_a_valid_source(monkeypatch):
+    captured = {}
+
+    class _Resp:
+        status_code = 200
+        def json(self):
+            return {"order": {"id": 1, "order_number": "WA-1", "total_amount": 10,
+                              "currency_code": "KES"}, "lines": [], "production_lines": []}
+        def raise_for_status(self):
+            return None
+
+    class _Client:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, url, json=None, headers=None):
+            captured["payload"] = json
+            return _Resp()
+        async def get(self, *a, **k):
+            return _Resp()
+
+    monkeypatch.setattr(hub_client_mod.httpx, "AsyncClient", _Client)
+    monkeypatch.setattr(hub_client_mod, "resolve_hub_line",
+                        lambda it, cat: {"product_id": 5, "quantity": 1, "unit_price": 100.0})
+    monkeypatch.setattr(hub_client_mod, "_is_made_to_order", lambda line: False)
+
+    asyncio.run(hub_client_mod.push_pending_order(
+        [], wa_id="254700000001", first_name="M", country_iso="KE",
+        items=[{"name": "stole"}], source_channel="messenger",
+    ))
+
+    assert captured["payload"]["source_channel"] == "messenger"
+    assert captured["payload"]["channel"] == "whatsapp", "the queue stays chat"
+
+
+def test_push_pending_order_drops_an_unknown_source(monkeypatch):
+    """A web-chat session ('web') must be omitted, not sent — the hub validates
+    the value set and an unknown source would 422 the whole order."""
+    captured = {}
+
+    class _Resp:
+        status_code = 200
+        def json(self):
+            return {"order": {"id": 1, "order_number": "WA-1", "total_amount": 10,
+                              "currency_code": "KES"}, "lines": [], "production_lines": []}
+        def raise_for_status(self):
+            return None
+
+    class _Client:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, url, json=None, headers=None):
+            captured["payload"] = json
+            return _Resp()
+        async def get(self, *a, **k):
+            return _Resp()
+
+    monkeypatch.setattr(hub_client_mod.httpx, "AsyncClient", _Client)
+    monkeypatch.setattr(hub_client_mod, "resolve_hub_line",
+                        lambda it, cat: {"product_id": 5, "quantity": 1, "unit_price": 100.0})
+    monkeypatch.setattr(hub_client_mod, "_is_made_to_order", lambda line: False)
+
+    asyncio.run(hub_client_mod.push_pending_order(
+        [], wa_id="web_abc", first_name="M", country_iso=None,
+        items=[{"name": "stole"}], source_channel="web",
+    ))
+
+    assert "source_channel" not in captured["payload"]

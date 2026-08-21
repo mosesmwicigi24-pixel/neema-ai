@@ -416,6 +416,7 @@ async def push_pending_order(
     country_iso: str | None,
     items: list[dict],
     measurement_note: str = "",
+    source_channel: str | None = None,
 ) -> dict:
     """Create a pending order in the hub from a confirmed WhatsApp cart.
 
@@ -451,6 +452,13 @@ async def push_pending_order(
     payload = {
         "outlet_id": settings.hub_outlet_id,
         "channel": "whatsapp",
+        # Which app the conversation happened in. The hub buckets ALL of these
+        # under Chat Orders (channel='whatsapp' is the queue); the source is
+        # the per-row badge that says WhatsApp vs Messenger vs Instagram.
+        # Only the values the hub validates are ever sent — anything else
+        # (e.g. a web-chat session) is omitted rather than 422-ing the order.
+        **({"source_channel": source_channel}
+           if source_channel in ("whatsapp", "messenger", "instagram") else {}),
         "notes": ("WhatsApp order via Neema"
                   + (f". {measurement_note}" if (measurement_note and _any_producible) else "")),
     }
