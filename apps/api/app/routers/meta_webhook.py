@@ -21,8 +21,8 @@ import hashlib
 import hmac
 import logging
 
-from fastapi import APIRouter, Request, Response, Depends
-from fastapi.responses import PlainTextResponse
+from fastapi import APIRouter, Form, Request, Response, Depends
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -537,3 +537,61 @@ async def _capture_comment_events(db: AsyncSession, channel: str, payload: dict,
             except Exception as exc:
                 _log.warning("comment engage failed to schedule for %s: %s",
                              c.get("comment_id"), exc)
+
+
+# ── Data deletion callback (Meta Platform Terms 3(d)(i)) ─────────────────────
+# A user asks Meta to delete their data; Meta signs a request and POSTs it here.
+# We purge that person's Meta trace immediately and hand back a status URL plus
+# a confirmation code, which is the contract Meta expects. Without this callback
+# Meta falls back to emailing a human — which is how we found out we lacked one.
+
+@router.post("/data-deletion")
+async def data_deletion(signed_request: str = Form(...),
+                        db: AsyncSession = Depends(get_db)):
+    """Verify, purge, receipt. Returns {url, confirmation_code}."""
+    from app.services import meta_deletion as md
+    try:
+        payload = md.parse_signed_request(signed_request)
+    except md.InvalidSignedRequest as exc:
+        _log.warning("data deletion request rejected: %s", exc)
+        return Response(status_code=400)
+    user_id = str(payload.get("user_id") or "").strip()
+    if not user_id:
+        _log.warning("data deletion request carried no user_id")
+        return Response(status_code=400)
+
+    code = md.new_confirmation_code()
+    try:
+        counts = await md.purge_meta_user(db, user_id, dry_run=False)
+        await md.write_receipt(db, code, user_id, counts)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        _log.exception("data deletion purge failed for %s", md.subject_hash(user_id))
+        # Meta retries on a 5xx — better a retry than a false confirmation that
+        # the data is gone.
+        return Response(status_code=500)
+    _log.info("data deletion completed %s (%s)", code, md.subject_hash(user_id))
+    return {"url": md.status_url(code), "confirmation_code": code}
+
+
+@router.get("/data-deletion/status")
+async def data_deletion_status(code: str = "", db: AsyncSession = Depends(get_db)):
+    """The page Meta links the customer to. Says what happened, names nobody."""
+    from app.services import meta_deletion as md
+    receipt = await md.read_receipt(db, code)
+    if receipt is None:
+        return HTMLResponse(status_code=404, content=(
+            "<h3>Deletion request not found</h3><p>We have no record of this "
+            "confirmation code. Please contact Bethany House if you believe "
+            "this is an error.</p>"))
+    removed = receipt.get("removed") or {}
+    return HTMLResponse(
+        "<h3>Your data has been deleted</h3>"
+        f"<p>Request <code>{code}</code> was completed on "
+        f"{(receipt.get('completed_at') or '')[:19].replace('T', ' ')} UTC.</p>"
+        f"<p>Removed: {removed.get('messages', 0)} messages, "
+        f"{removed.get('conversations', 0)} conversation(s), "
+        f"{removed.get('identities', 0)} profile record(s).</p>"
+        "<p>Orders and payment records required for tax and accounting are kept "
+        "without any link to your identity.</p>")
