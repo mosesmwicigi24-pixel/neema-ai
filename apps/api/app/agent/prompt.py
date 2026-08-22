@@ -24,7 +24,8 @@ def _nairobi_daypart() -> str:
 # so the agent must not name Mukuru to them — Western Union/MoneyGram reach
 # everywhere and stay the universal suggestion. Mirrors the hub's
 # payment_methods gate (bethany-house PublicPaymentController).
-MUKURU_SEND_ISO = {"ZA", "GB", "ZW", "ZM", "MW", "BW", "LS", "UG", "RW", "KE"}
+# Kenya deliberately absent (owner, 2026-08-22): Kenyans pay by M-Pesa.
+MUKURU_SEND_ISO = {"ZA", "GB", "ZW", "ZM", "MW", "BW", "LS", "UG", "RW"}
 
 
 def build_system_prompt(*, country_iso: str = "", currency: str = "KES",
