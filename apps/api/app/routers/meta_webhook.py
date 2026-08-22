@@ -22,7 +22,7 @@ import hmac
 import logging
 
 from fastapi import APIRouter, Form, Request, Response, Depends
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -544,6 +544,24 @@ async def _capture_comment_events(db: AsyncSession, channel: str, payload: dict,
 # We purge that person's Meta trace immediately and hand back a status URL plus
 # a confirmation code, which is the contract Meta expects. Without this callback
 # Meta falls back to emailing a human — which is how we found out we lacked one.
+
+# Meta offers two ways to satisfy its deletion requirement: an instructions URL
+# (a page a human reads) or a callback URL (a signed POST we act on). We serve
+# the callback below — and answer a GET on the SAME path with a redirect to the
+# canonical policy page on the storefront, so the URL is browser-valid whichever
+# field it is pasted into, without a second copy of the policy text to drift.
+DELETION_POLICY_PATH = "/policies/data-deletion"
+
+
+def deletion_policy_url() -> str:
+    return (settings.storefront_url or "https://bethanyhouse.co.ke").rstrip("/") + DELETION_POLICY_PATH
+
+
+@router.get("/data-deletion")
+async def data_deletion_instructions():
+    """Public: send a human to the published deletion policy."""
+    return RedirectResponse(deletion_policy_url(), status_code=307)
+
 
 @router.post("/data-deletion")
 async def data_deletion(signed_request: str = Form(...),

@@ -209,3 +209,22 @@ def test_status_page_reports_and_names_nobody(monkeypatch):
     monkeypatch.setattr(md, "read_receipt", none_read)
     missing = asyncio.run(mw.data_deletion_status(code="nope", db=_PurgeDB()))
     assert missing.status_code == 404
+
+
+# ── instructions redirect ────────────────────────────────────────────────────
+
+def test_get_redirects_to_the_published_policy(monkeypatch):
+    """Meta validates an instructions URL by fetching it, and a POST-only route
+    fails that check. A GET on the same path sends humans to the real policy —
+    one source of truth, on the app's own domain."""
+    monkeypatch.setattr(settings, "storefront_url", "https://bethanyhouse.co.ke",
+                        raising=False)
+    resp = asyncio.run(mw.data_deletion_instructions())
+    assert resp.status_code == 307
+    assert resp.headers["location"] == "https://bethanyhouse.co.ke/policies/data-deletion"
+
+
+def test_policy_url_survives_a_trailing_slash(monkeypatch):
+    monkeypatch.setattr(settings, "storefront_url", "https://bethanyhouse.co.ke/",
+                        raising=False)
+    assert mw.deletion_policy_url() == "https://bethanyhouse.co.ke/policies/data-deletion"
