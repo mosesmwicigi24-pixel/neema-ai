@@ -270,3 +270,25 @@ def test_crm_country_falls_back_to_phone_prefix():
     u3 = SimpleNamespace(country_iso=None, country=None, flag_url=None,
                          location="Ekeremor, Bayelsa State, Nigeria")
     assert _country_fields(u3, {}, None)["country_iso"] == "NG"
+
+
+def test_mukuru_is_only_offered_in_its_send_markets():
+    """Mukuru takes senders in specific markets (ZA, UK, ZW, ZM, MW, BW, LS,
+    UG, RW, KE). Elsewhere the agent must not name it — a customer in Addis
+    or Dallas cannot walk into a Mukuru agent, and naming it stalls the sale.
+    Unknown country keeps the full menu: unknown is not "does not work"."""
+    za = build_system_prompt(currency="USD", country_iso="ZA")
+    assert "Mukuru" in za
+
+    uk = build_system_prompt(currency="USD", country_iso="GB")
+    assert "Mukuru" in uk
+
+    et = build_system_prompt(currency="USD", country_iso="ET")
+    assert "Mukuru" not in et
+    assert "Western Union or MoneyGram" in et            # the universal rails remain
+
+    us = build_system_prompt(currency="USD", country_iso="US")
+    assert "Mukuru" not in us
+
+    unknown = build_system_prompt(currency="USD")
+    assert "Mukuru" in unknown

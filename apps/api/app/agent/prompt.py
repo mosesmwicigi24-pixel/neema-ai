@@ -19,6 +19,15 @@ def _nairobi_daypart() -> str:
     return "late night"
 
 
+# Mukuru's documented SEND markets (mukuru.com site selector + UK site,
+# checked 2026-08-22). A customer elsewhere cannot walk into a Mukuru agent,
+# so the agent must not name Mukuru to them — Western Union/MoneyGram reach
+# everywhere and stay the universal suggestion. Mirrors the hub's
+# payment_methods gate (bethany-house PublicPaymentController).
+# Kenya deliberately absent (owner, 2026-08-22): Kenyans pay by M-Pesa.
+MUKURU_SEND_ISO = {"ZA", "GB", "ZW", "ZM", "MW", "BW", "LS", "UG", "RW"}
+
+
 def build_system_prompt(*, country_iso: str = "", currency: str = "KES",
                         directives: str = "", house_voice: str = "") -> str:
     """The shared rules block — who Neema is, for EVERY customer.
@@ -202,13 +211,20 @@ def build_system_prompt(*, country_iso: str = "", currency: str = "KES",
 - Payment comes before delivery — kindly and firmly; pickup is the alternative
   for anyone who prefers to pay in person."""
     else:
+        # Name Mukuru only where a sender can actually use it; unknown country
+        # keeps the full menu (unknown is not "does not work").
+        rails_example = (
+            "Western Union, MoneyGram or Mukuru"
+            if (not country_iso or country_iso.upper() in MUKURU_SEND_ISO)
+            else "Western Union or MoneyGram"
+        )
         payment_rule = (
             "- Payment is a soft TWO-STEP close: once the order and shipping are\n"
             "  settled, ask gently whether they're ready to proceed with payment. Only\n"
             "  on their yes: call `create_order` to register it and give them their\n"
             "  order number. Do NOT present the KES payment link as their way to pay —\n"
             "  international payment routes differ by country. Ask which transfer\n"
-            "  method suits them (e.g. Western Union or Mukuru work well into Kenya),\n"
+            "  method suits them (e.g. " + rails_example + " work well into Kenya),\n"
             "  then call `handoff_to_human` so a colleague confirms the route and\n"
             "  amount with them. Afterwards share our contact lines (OUR OFFICIAL\n"
             "  CONTACTS) for quick communication.\n"
