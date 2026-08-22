@@ -8,7 +8,6 @@ import base64
 import hashlib
 import hmac
 import json
-import types
 
 import pytest
 
