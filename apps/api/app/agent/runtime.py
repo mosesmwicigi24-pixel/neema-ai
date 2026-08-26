@@ -96,7 +96,15 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "shopkeeper at a market stall with others listening: answer, quote, "
         "recommend, settle colour and quantity, close. Their next comment comes "
         "back to you with this whole thread in hand, so carry the sale forward "
-        "turn by turn. NEVER answer a question by sending them elsewhere — "
+        "turn by turn.\n"
+        "- STAY ON THE POST'S PRODUCT. A follow-up comment — 'my order', 'yes', "
+        "'I'm interested', 'how much' — continues the SAME product as the post "
+        "and your own earlier replies in this thread. NEVER switch to a product "
+        "nobody named: answering a Silver-tray thread with a Gold Bread Tray is "
+        "a wrong answer even at the right price. Finish and colour are part of "
+        "identity — silver is not gold. Only if THEY name a different product do "
+        "you price that one, and the post's product stays what it was.\n"
+        "- NEVER answer a question by sending them elsewhere — "
         "'DM us for the price' or 'message us and we'll sort you out' when you "
         "KNOW the answer is a lost sale and reads as a brush-off to everyone "
         "watching. Deflect only what you truly cannot do here.\n"
@@ -1824,6 +1832,33 @@ async def _remember_post_product(redis, channel: str, post_id: str, product: dic
         pass
 
 
+def _post_identity_compatible(known: dict, caption: str | None, matched: dict) -> bool:
+    """May `matched` become (or refresh) this post's RECORDED product identity?
+
+    The record outlives every conversation, so a wrong write poisons every
+    future commenter (live: a Silver-tray post answered as 'Gold Bread Tray'
+    would have anchored the whole thread to the wrong product). Three rules:
+      - an existing identity is never overwritten by a DIFFERENT product (the
+        model pricing a sibling one customer asked about must not rewrite what
+        the POST is);
+      - with a caption, the product must be supported by it (≥ half its name
+        tokens appear there);
+      - a caption-less post (thin reels) trusts the identification — recording
+        the model's read is the whole point there."""
+    name = (matched or {}).get("name") or ""
+    if not name:
+        return False
+    if known and known.get("name"):
+        return _caption_tokens(known["name"]) == _caption_tokens(name)   # refresh only
+    cap = (caption or "").strip()
+    if not cap:
+        return True
+    ntoks = _caption_tokens(name)
+    if not ntoks:
+        return False
+    return len(ntoks & _caption_tokens(cap)) / len(ntoks) >= 0.5
+
+
 async def _post_identity(redis, channel: str, pctx: dict) -> dict:
     """The post's product identity: recalled from our records, else resolved
     NOW by the deterministic ladder (caption slug/alias, then the image
@@ -1856,12 +1891,23 @@ _CAPTION_NORM = {"aluminum": "aluminium", "colors": "colour", "color": "colour"}
 
 
 def _caption_tokens(text: str) -> set:
-    toks = set()
+    return set(_caption_token_seq(text))
+
+
+def _caption_token_seq(text: str) -> list:
+    """Normalized tokens in ORDER (same stemming as _caption_tokens) — so a
+    product name can be checked as a contiguous phrase, not just a bag of words."""
+    out = []
     for t in re.findall(r"[a-z0-9']+", (text or "").lower()):
         t = _CAPTION_NORM.get(t, t)
         if len(t) > 2:
-            toks.add(t[:-1] if t.endswith("s") and len(t) > 3 else t)
-    return toks
+            out.append(t[:-1] if t.endswith("s") and len(t) > 3 else t)
+    return out
+
+
+def _contains_phrase(hay: list, needle: list) -> bool:
+    n = len(needle)
+    return n > 0 and any(hay[i:i + n] == needle for i in range(len(hay) - n + 1))
 
 
 def _hub_caption_match(catalog: list, title: str) -> dict | None:
@@ -1876,15 +1922,25 @@ def _hub_caption_match(catalog: list, title: str) -> dict | None:
     the hub's own names and aliases ARE the intelligence."""
     text_l = (title or "").lower()
     toks = _caption_tokens(title)
+    cap_seq = _caption_token_seq(title)
     if not toks:
         return None
     scored = []
     for prod in catalog:
-        ntoks = _caption_tokens(prod.get("name") or "")
+        name_seq = _caption_token_seq(prod.get("name") or "")
+        ntoks = set(name_seq)
         if not ntoks:
             continue
         cov = len(ntoks & toks) / len(ntoks)
         score = 3.0 * cov + (2.0 if cov == 1.0 else 0.0)
+        # The caption literally SAYING the product name, in order, is decisive:
+        # "We have Silver Communion Trays… holds 40 cups" gives full bag-of-words
+        # coverage to BOTH the Tray and the Cups — the tie made the ladder refuse
+        # to pick, and a model free-styled "Gold Bread Tray" under a Silver-tray
+        # post (live, Arman thread). A contiguous phrase breaks such ties the way
+        # a human reads the caption.
+        if _contains_phrase(cap_seq, name_seq):
+            score += 4.0
         for a in (prod.get("aliases") or []):
             if len(str(a)) > 3 and str(a).lower() in text_l:
                 score += 3.0
@@ -2124,7 +2180,13 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
             _log.warning("product link failed for %s: %s", cid, exc)
         # This identification becomes the POST's identity: every later comment
         # under it prices the same product instead of re-guessing the frame.
-        await _remember_post_product(redis, channel, post_id, matched)
+        # GUARDED: a model guess that contradicts the caption — or differs from
+        # an identity already on record — must never poison that record.
+        if _post_identity_compatible(_known_product, post_ctx.get("title"), matched):
+            await _remember_post_product(redis, channel, post_id, matched)
+        else:
+            _log.info("post %s: not recording %r as identity (known=%r, caption disagrees)",
+                      post_id, (matched or {}).get("name"), _known_product.get("name"))
 
     # Open the DM (so the public CTA can honestly point to the inbox). The DM
     # carries the answer, THE product link, and a warm invitation to continue
