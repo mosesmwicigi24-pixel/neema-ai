@@ -61,3 +61,17 @@ def test_comment_addendum_pins_thread_product_continuity():
     assert "STAY ON THE POST'S PRODUCT" in p
     assert "silver is not gold" in p
     assert "Gold Bread Tray" in p          # the live failure, named as the counter-example
+
+
+def test_hub_descriptions_arrive_as_plain_text():
+    """'<p>The Bishop staff</p>' leaked raw into both catalogs AND the agent's
+    context — hub rich text is stripped to plain text at the mapping."""
+    from app.core.hub_client import _strip_html, _map_product
+    assert _strip_html("<p>The Bishop staff. The shepherd staff</p>") == \
+        "The Bishop staff. The shepherd staff"
+    assert _strip_html("<ul><li>CINCTURE &amp; belt</li></ul>") == "CINCTURE & belt"
+    assert _strip_html(None) == "" and _strip_html("plain") == "plain"
+    prod = _map_product({"id": 1, "translations": [
+        {"language_code": "en", "name": "Crozier",
+         "short_description": "<p>The Bishop staff</p>"}], "prices": []})
+    assert prod["description"] == "The Bishop staff"

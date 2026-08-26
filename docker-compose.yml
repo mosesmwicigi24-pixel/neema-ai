@@ -30,11 +30,16 @@ services:
         image: redis:7-alpine
         container_name: neema_redis
         restart: unless-stopped
+        # noeviction is deliberate: this redis holds STATE, not just cache —
+        # cross-channel carts (waref:*), pause flags, dedup keys, post product
+        # identities. allkeys-lru would silently evict a paying customer's cart
+        # under memory pressure; with noeviction a full redis fails writes
+        # LOUDLY instead (at 256MB we run ~3MB — headroom is enormous).
         command: >
             redis-server
             --appendonly yes
             --maxmemory 256mb
-            --maxmemory-policy allkeys-lru
+            --maxmemory-policy noeviction
         volumes:
             - redis_data:/data
         networks:

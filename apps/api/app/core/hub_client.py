@@ -11,8 +11,10 @@ is unreachable, so a conversation never loses its price list mid-sale.
 """
 from __future__ import annotations
 
+import html as _html
 import json
 import logging
+import re as _re
 
 import httpx
 
@@ -24,6 +26,15 @@ _CACHE_KEY = "hub:catalog"
 # working through a hub outage (see fetch_hub_catalog).
 _LAST_GOOD_KEY = "hub:catalog:last_good"
 _LAST_GOOD_TTL = 7 * 24 * 3600
+
+
+def _strip_html(text: str | None) -> str:
+    """Hub descriptions arrive as rich text ("<p>The Bishop staff</p>") — the
+    tags leaked raw into the admin catalog, the customer storefront AND the
+    agent's context. Plain text everywhere: tags out, entities decoded,
+    whitespace collapsed."""
+    t = _re.sub(r"<[^>]+>", " ", text or "")
+    return " ".join(_html.unescape(t).split())
 
 
 def _price(prices_by_ccy: dict, ccy: str):
@@ -116,7 +127,7 @@ def _map_product(p: dict) -> dict:
         "price_usd":      usd,
         "prices":         prices,
         "unit":           "",
-        "description":    en.get("short_description") or en.get("description") or "",
+        "description":    _strip_html(en.get("short_description") or en.get("description")),
         "aliases":        p.get("aliases") or [],
         "in_stock":       bool(p.get("in_stock", True)),
         "available_qty":  p.get("available_qty"),
