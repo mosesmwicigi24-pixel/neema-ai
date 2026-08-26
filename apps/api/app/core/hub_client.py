@@ -296,6 +296,15 @@ def _norm(s) -> str:
     return " ".join(str(s or "").lower().split())
 
 
+def _attr_norm(s) -> str:
+    """Normalize for attribute matching: lowercase, measurement marks unified
+    (19", 19-inch, 19 inches → '19 inch'), punctuation to spaces."""
+    t = str(s or "").lower().replace('"', " inch ").replace("”", " inch ")
+    t = _re.sub(r"\binche?s?\b", " inch ", t)
+    t = _re.sub(r"[^a-z0-9]+", " ", t)
+    return " ".join(t.split())
+
+
 def resolve_hub_line(item: dict, catalog: list[dict]) -> dict | None:
     """Match one confirmed cart line to a hub product.
 
@@ -352,6 +361,39 @@ def resolve_hub_line(item: dict, catalog: list[dict]) -> dict | None:
     if name and name in by_var_name:
         p, v = by_var_name[name]
         return _line(p, "variant_name", v)
+
+    # Attribute-aware variant match: "straight collar 19 inches" names the
+    # PRODUCT plus a variant's ATTRIBUTE value ("19 Inches") — but the variant
+    # SKU is opaque (9C0393V3R-19) and the variant name repeats the product, so
+    # neither map above hits. The live Simon thread fell through here and priced
+    # the DEFAULT 8-inch variant (KES 400) for a 19-inch collar (KES 1,200);
+    # a colleague had to correct it by hand. Product-name tokens plus a
+    # variant's full attribute values in the customer's words = that variant,
+    # at ITS price. Most attribute coverage wins; a tie between variants refuses
+    # (better the base price than a coin-flip between sizes).
+    if name:
+        text_toks = set(_attr_norm(name).split())
+        best = None
+        best_cov = 0
+        tie = False
+        for p in catalog:
+            if not p.get("hub_product_id"):
+                continue
+            ptoks = set(_attr_norm(p.get("name") or "").split())
+            if not ptoks or not ptoks <= text_toks:
+                continue
+            for v in (p.get("variants") or []):
+                avals = " ".join(str(x) for x in (v.get("attributes") or {}).values())
+                atoks = set(_attr_norm(avals).split()) - ptoks
+                if not atoks or not atoks <= text_toks:
+                    continue
+                if len(atoks) > best_cov:
+                    best, best_cov, tie = (p, v), len(atoks), False
+                elif len(atoks) == best_cov and best is not None and v is not best[1]:
+                    tie = True
+        if best is not None and not tie:
+            return _line(best[0], "variant_attrs", best[1])
+
     if name and name in by_name and by_name[name].get("hub_product_id"):
         return _line(by_name[name], "name")
     for p in catalog:                       # alias exact

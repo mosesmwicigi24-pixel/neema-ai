@@ -109,3 +109,51 @@ def test_push_order_sends_variant_id_and_price(monkeypatch):
     assert out["order_number"] == "WA-1"
     line = captured["items"][0]
     assert line["variant_id"] == 102 and line["unit_price"] == 15000.0 and line["quantity"] == 2
+
+
+# ── The Simon thread (live, 2026-08-26): "1 straight collar 19 inches" priced
+# the DEFAULT 8-inch variant (KES 400) instead of the 19-inch (KES 1,200) —
+# opaque variant SKUs (9C0393V3R-19) and a variant name that just repeats the
+# product meant nothing matched, and a colleague had to correct it by hand.
+
+_COLLAR = {
+    "hub_product_id": 23, "name": "Straight Collar", "sku": "CAC-001-01",
+    "price": 400, "product_type": "variable", "is_producible": False,
+    "variants": [
+        {"variant_id": 81, "sku": "9C0393V3R-8", "name": "Straight Collar",
+         "attributes": {"Size": "8 Inches"}, "price_kes": 400.0,
+         "prices": {"KES": 400.0}, "is_default": True},
+        {"variant_id": 87, "sku": "9C0393V3R-19", "name": "Straight Collar",
+         "attributes": {"Size": "19 inches"}, "price_kes": 1200.0,
+         "prices": {"KES": 1200.0}},
+    ],
+}
+
+
+def test_attribute_words_resolve_the_exact_variant():
+    import app.core.hub_client as hc
+    line = hc.resolve_hub_line({"name": "1 straight collar 19 inches", "sku": "", "qty": 1},
+                               [_COLLAR])
+    assert line["unit_price"] == 1200.0            # the 19-inch price, not the default
+    assert line["variant_id"] == 87
+    assert line["matched_by"] == "variant_attrs"
+    # measurement spellings all land on the same variant
+    for phrasing in ('straight collar 19"', "straight collar 19 inch", "straight collar, 19-inches"):
+        got = hc.resolve_hub_line({"name": phrasing, "sku": "", "qty": 1}, [_COLLAR])
+        assert got["variant_id"] == 87, phrasing
+
+
+def test_no_attribute_words_still_gets_the_base_product():
+    import app.core.hub_client as hc
+    line = hc.resolve_hub_line({"name": "straight collar", "sku": "", "qty": 1}, [_COLLAR])
+    assert line["product_id"] == 23 and line.get("variant_id") is None
+    assert line["unit_price"] == 400               # base/default price, honestly
+
+
+def test_prompt_makes_the_colleagues_answer_supreme():
+    from app.agent.prompt import build_system_prompt
+    p = build_system_prompt(currency="KES")
+    assert "A COLLEAGUE'S ANSWER OVERRIDES YOURS" in p
+    assert "THEY are right and YOUR earlier line was the error" in p
+    assert "fix the cart with update_cart" in p
+    assert "my colleague was pricing a different item" in p     # the live failure, banned by name
