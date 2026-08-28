@@ -292,3 +292,12 @@ def test_mukuru_is_only_offered_in_its_send_markets():
 
     unknown = build_system_prompt(currency="USD")
     assert "Mukuru" in unknown
+
+
+def test_the_order_link_rule_is_in_the_prompt():
+    """The agent must never call a product or tap-to-order link "your order
+    link" — that is what a real customer was handed before this rule."""
+    p = build_system_prompt(currency="KES")
+    assert "YOUR ORDER LINK" in p
+    assert "order_url" in p
+    assert "never improvise a link" in p.lower() or "never improvise" in p.lower()

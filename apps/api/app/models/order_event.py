@@ -39,3 +39,22 @@ class OrderEvent(Base):
     hub_total          : Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     hub_last_error     : Mapped[str | None] = mapped_column(Text, nullable=True)
     hub_pushed_at      : Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # ── The customer's DURABLE order link ──────────────────────────────────
+    # hub_payment_url above is a 72-hour pay session; every one Neema ever sent
+    # is expired. hub_public_url is the hub's /order/{public_token}: the receipt
+    # when paid, the checkout when not, and it does not expire. short_ref backs
+    # our own /api/r/{ref} shortener so the chat shows a clean link.
+    hub_public_url     : Mapped[str | None] = mapped_column(Text, nullable=True)
+    hub_public_token   : Mapped[str | None] = mapped_column(String(64), nullable=True)
+    short_ref          : Mapped[str | None] = mapped_column(String(12), nullable=True, index=True)
+
+    # ── Mirrored hub state ─────────────────────────────────────────────────
+    # What the HUB says about this order. Kept apart from `status` above, which
+    # is the operator's own triage flag set by hand in the Orders modal —
+    # clobbering it would throw away human work. The Orders screen reads hub
+    # truth when the order is linked and the local flag otherwise.
+    hub_status             : Mapped[str | None] = mapped_column(String(24), nullable=True)
+    hub_payment_status     : Mapped[str | None] = mapped_column(String(24), nullable=True)
+    hub_fulfillment_status : Mapped[str | None] = mapped_column(String(24), nullable=True)
+    hub_status_at          : Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

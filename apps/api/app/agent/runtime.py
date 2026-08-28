@@ -981,7 +981,12 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         # on the website; her one natural invitation is the phone ask instead.
         base = [t for t in TOOLS if t["name"] != "whatsapp_checkout_link"]
     else:
-        base = TOOLS
+        # On WhatsApp itself the customer is ALREADY in the thread, so a wa.me
+        # invitation is a link back to where they are standing — and it is the
+        # shape of link that got handed to a buyer as "your order link", landing
+        # her in an empty chat. Their order link is create_order's order_url.
+        base = [t for t in TOOLS if t["name"] != "whatsapp_checkout_link"] \
+            if channel == "whatsapp" else TOOLS
     tools = base if settings.tier2_memory else [t for t in base if t["name"] != "remember"]
     if read_only:
         # Draft mode: strip to read-only tools so composing a suggestion never
