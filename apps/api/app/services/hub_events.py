@@ -36,6 +36,10 @@ _log = logging.getLogger("neema.hubevents")
 
 CELEBRATE = {"order.paid", "order.production_started", "order.shipped", "order.delivered"}
 ESCALATE = {"order.delayed", "payment.partial", "refund.requested"}
+# Mirror the state, send the customer nothing. Confirmation is an internal
+# milestone — the buyer already got the thank-you when they paid, and a second
+# ping saying "confirmed" reads as a duplicate.
+QUIET = {"order.confirmed", "order.cancelled"}
 
 DEFER_ZSET = "hubevents:deferred"
 LEADER_KEY = "hubevents:leader"
@@ -286,6 +290,55 @@ async def _celebrate(db, redis, conv, event: dict) -> dict:
     return {"handled": True, "sent": "notified_human"}
 
 
+async def _mirror_order_state(db, event: dict) -> bool:
+    """Write what the HUB says about this order onto our own row.
+
+    Runs for EVERY order event, before any conversation lookup. That ordering
+    is the whole point: 23 of 27 order.paid events in a month returned
+    {'handled': False, 'reason': 'no_conversation'} with HTTP 200 — the hub
+    saw success, the customer got no message, and the STATUS was thrown away
+    with it. A missing conversation should cost a message, never the state.
+
+    Deliberately does NOT touch OrderEvent.status: that is the operator's own
+    triage flag, set by hand in the Orders modal, and clobbering it would
+    destroy human work. Hub truth lives in its own columns.
+    """
+    from sqlalchemy import or_, update
+    from app.models.order_event import OrderEvent
+
+    number = (event.get("order_number") or "").strip()
+    hub_id = event.get("hub_order_id")
+    if not number and not hub_id:
+        return False
+
+    values = {"hub_status_at": datetime.now(timezone.utc)}
+    for key, col in (("status", "hub_status"),
+                     ("payment_status", "hub_payment_status"),
+                     ("fulfillment_status", "hub_fulfillment_status")):
+        if event.get(key):
+            values[col] = event[key]
+    if event.get("public_url"):
+        values["hub_public_url"] = event["public_url"]
+    if len(values) == 1:            # nothing but the timestamp — nothing to mirror
+        return False
+
+    conds = []
+    if hub_id:
+        conds.append(OrderEvent.hub_order_id == hub_id)
+    if number:
+        conds.append(OrderEvent.hub_order_number == number)
+
+    try:
+        res = await db.execute(
+            update(OrderEvent).where(or_(*conds)).values(**values)
+        )
+        await db.commit()
+        return bool(res.rowcount)
+    except Exception:
+        _log.warning("could not mirror hub state for %s", number or hub_id, exc_info=True)
+        return False
+
+
 async def _receipt_link_for(db, redis, event: dict) -> str:
     """A SHORT link to the customer's receipt (the hub /pay page in its paid
     state), to ride along with the payment thank-you. Resolved from the order
@@ -413,8 +466,15 @@ async def handle_event(db, redis, event: dict) -> dict:
                     pass
             _log.info("hub %s — catalogue cache busted; next quote is fresh", etype)
             return {"handled": True, "action": "catalog_cache_busted"}
+        # Mirror FIRST — before the event-type gate and before the conversation
+        # lookup, both of which used to discard the status along with the event.
+        mirrored = await _mirror_order_state(db, event)
+
+        if etype in QUIET:
+            return {"handled": True, "action": "state_mirrored", "mirrored": mirrored}
         if not eid or (etype not in CELEBRATE and etype not in ESCALATE):
-            return {"handled": False, "reason": "unknown_event"}
+            return {"handled": bool(mirrored), "reason": "unknown_event",
+                    "mirrored": mirrored}
         if redis is not None:
             try:
                 # Stamp before dedup — a retried duplicate still proves the
@@ -435,7 +495,10 @@ async def handle_event(db, redis, event: dict) -> dict:
                                  f"{etype} for {event.get('order_number') or '?'} "
                                  f"({event.get('customer_phone') or 'no phone'}) — "
                                  "no matching customer thread.")
-            return {"handled": False, "reason": "no_conversation"}
+            # The state is already mirrored above; only the customer message
+            # is lost, and a human has been told.
+            return {"handled": False, "reason": "no_conversation",
+                    "mirrored": mirrored}
         if etype in CELEBRATE:
             return await _celebrate(db, redis, conv, event)
         return await _escalate(db, redis, conv, event)
