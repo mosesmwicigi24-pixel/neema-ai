@@ -558,6 +558,12 @@ async def push_pending_order(
         "order_number": data.get("order_number"),
         "total_amount": data.get("total_amount"),
         "currency_code": data.get("currency_code"),
+        # The customer's DURABLE order link. Unlike the 72-hour pay token this
+        # never expires, so the link we hand a buyer still works next month.
+        # Absent when the hub predates the public-token change — callers must
+        # tolerate None (see _create_order).
+        "public_url": data.get("public_url"),
+        "public_token": data.get("public_token"),
         "lines": stock_lines,
         "production_lines": mto_lines,
         "unmatched": unmatched,

@@ -116,6 +116,15 @@ def build_system_prompt(*, country_iso: str = "", currency: str = "KES",
             "\n- NEVER type a phone number or wa.me link from memory. When sharing "
             "a WhatsApp order link, use the exact link a tool returned, unchanged. "
             "If asked for our number, give the ones above verbatim."
+            "\n- \"YOUR ORDER LINK\" MEANS ONE THING: the `order_url` that "
+            "`create_order` returned for THAT customer's order. It opens their "
+            "order — items, amount and the payment options that work in their "
+            "country. A product link, a shop link or a tap-to-order link is NOT "
+            "an order link: calling one that is left a real customer tapping "
+            "into an empty chat with no order in sight. If you have no "
+            "`order_url`, say the order is being set up and hand off — never "
+            "improvise a link, and never present a reference code as an order "
+            "number unless a tool gave you that order number."
         )
     business += contacts
     # Standing orders — the owner's live steering ("push copes this week").

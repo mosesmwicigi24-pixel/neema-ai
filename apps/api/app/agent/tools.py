@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import hub_client
 from app.core.config import settings
+from app.routers.order_link import assign_short_ref
 from app.core.countries import resolve_country
 from app.models.order_event import OrderEvent
 from app.models.user import User
@@ -819,11 +820,19 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
                 "unmatched": getattr(exc, "unmatched", [])}
 
     hub_order_id = pushed.get("order_id")
+
+    # The DURABLE customer link — the hub's /order/{public_token}: their receipt
+    # when paid, their checkout when not, and it never expires. We used to send
+    # the 72-hour pay session instead, which is why all 88 links Neema had ever
+    # sent were dead. The pay link is still fetched as a fallback for a hub that
+    # predates public_token, and never as the thing we hand the customer.
+    public_url = pushed.get("public_url")
     payment_url = None
-    try:
-        payment_url = await hub_client.fetch_payment_link(hub_order_id)
-    except Exception as exc:
-        _log.warning("payment link fetch failed for order %s: %s", hub_order_id, exc)
+    if not public_url:
+        try:
+            payment_url = await hub_client.fetch_payment_link(hub_order_id)
+        except Exception as exc:
+            _log.warning("payment link fetch failed for order %s: %s", hub_order_id, exc)
 
     # A hub shortfall never reaches the customer — it becomes a SOURCING flag in
     # the Activity log so the team buys/produces it before delivery or pickup.
@@ -851,7 +860,7 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
     # openOrder). Keyed on the PHONE (so a Messenger buyer's order is found again
     # on WhatsApp — one customer), tagged with the channel that actually sold it.
     event_id = f"{order_wa_id}_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
-    ctx.db.add(OrderEvent(
+    order_row = OrderEvent(
         id=event_id, wa_id=order_wa_id, event_type="confirmed",
         person_id=order_person_id,
         items=cart["items"], subtotal=cartmod.cart_total(cart),
@@ -860,8 +869,23 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
         hub_order_id=hub_order_id, hub_order_number=pushed.get("order_number"),
         hub_currency=pushed.get("currency_code"), hub_total=pushed.get("total_amount"),
         hub_payment_url=payment_url, hub_push_status="pushed",
+        hub_public_url=public_url, hub_public_token=pushed.get("public_token"),
         hub_pushed_at=datetime.now(timezone.utc),
-    ))
+    )
+    ctx.db.add(order_row)
+
+    # A short, readable ref for the link we give the customer. Postgres-backed,
+    # so it survives redis loss and never expires into a bare wa.me chat.
+    order_url = None
+    if public_url or payment_url:
+        try:
+            ref = await assign_short_ref(ctx.db, order_row)
+            base = (settings.media_public_url or "").rstrip("/")
+            order_url = f"{base}/api/r/{ref}" if base else (public_url or payment_url)
+        except Exception:
+            _log.warning("short ref failed for order %s", hub_order_id, exc_info=True)
+            order_url = public_url or payment_url
+
     await ctx.db.commit()
     await cartmod.clear_cart(ctx.db, ctx.wa_id, ctx.channel)
 
@@ -870,7 +894,10 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
         "order_number": pushed.get("order_number"),
         "total": pushed.get("total_amount"),
         "currency": pushed.get("currency_code"),
-        "payment_url": payment_url,
+        # ONE link for the customer: it shows the order, the amount, and every
+        # payment option that works in their country. Never a product page.
+        "order_url": order_url,
+        "payment_url": order_url,   # legacy key — same durable destination
         "made_to_order_items": [l["name"] for l in pushed.get("production_lines", [])],
         "unmatched": pushed.get("unmatched") or [],
     }
