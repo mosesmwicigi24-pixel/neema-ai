@@ -469,6 +469,7 @@ async def push_pending_order(
     country_iso: str | None,
     items: list[dict],
     measurement_note: str = "",
+    source_channel: str | None = None,
 ) -> dict:
     """Create a pending order in the hub from a confirmed WhatsApp cart.
 
@@ -501,10 +502,25 @@ async def push_pending_order(
     # which has no per-line production_notes — the workshop must still see the
     # customer's figures whichever path the line took.
     _any_producible = bool(mto_lines) or any(l.get("is_producible") for l in stock_lines)
+    # `channel` stays 'whatsapp': it is the hub's SALES BUCKET (chat), and every
+    # conversational order belongs there whichever app carried it.
+    # `source_channel` is the app the customer actually used — the hub has always
+    # accepted whatsapp|messenger|instagram and Neema never sent it, so a
+    # Messenger buyer arrived labelled WhatsApp and every contact button on the
+    # order offered the wrong app.
+    _src = (source_channel or "").strip().lower()
+    # Facebook and Messenger are one inbox to a customer; the hub's vocabulary
+    # for it is 'messenger'. Anything else we cannot name (tiktok, web) falls
+    # back to whatsapp, which is the hub's default for a chat order.
+    _src = {"facebook": "messenger"}.get(_src, _src)
+    if _src not in {"whatsapp", "messenger", "instagram"}:
+        _src = "whatsapp"
+    _app = {"whatsapp": "WhatsApp", "messenger": "Messenger", "instagram": "Instagram"}[_src]
     payload = {
         "outlet_id": settings.hub_outlet_id,
         "channel": "whatsapp",
-        "notes": ("WhatsApp order via Neema"
+        "source_channel": _src,
+        "notes": (f"{_app} order via Neema"
                   + (f". {measurement_note}" if (measurement_note and _any_producible) else "")),
     }
     if stock_lines:

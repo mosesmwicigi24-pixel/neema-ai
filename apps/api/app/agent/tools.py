@@ -814,6 +814,10 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
         pushed = await hub_client.push_pending_order(
             catalog, wa_id=order_wa_id, first_name=first_name,
             country_iso=country_iso, items=cart["items"],
+            # The app this customer actually used. Without it every chat order
+            # reached the hub labelled WhatsApp, so a Messenger buyer's order
+            # offered a WhatsApp button that could not reach them.
+            source_channel=ctx.channel,
         )
     except ValueError as exc:
         return {"error": "none of the cart items could be matched to the hub",
