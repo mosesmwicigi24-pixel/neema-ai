@@ -63,7 +63,12 @@ def test_briefs_are_specific():
 def test_unknown_and_duplicate_events_are_dropped():
     r = _Redis()
     out = asyncio.run(he.handle_event(None, r, {"id": "e1", "type": "weird.event"}))
-    assert out == {"handled": False, "reason": "unknown_event"}
+    # Subset, not exact equality: the payload also reports whether the state
+    # mirror ran, and an unrecognised event with no order identifier mirrors
+    # nothing. Pinning the exact dict made a diagnostic key a breaking change.
+    assert out["handled"] is False
+    assert out["reason"] == "unknown_event"
+    assert out.get("mirrored") is False
     # burn e2, then redeliver
     asyncio.run(r.set("hubevent:seen:e2", "1"))
     out = asyncio.run(he.handle_event(None, r, {"id": "e2", "type": "order.paid"}))
