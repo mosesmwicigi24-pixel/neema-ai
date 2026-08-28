@@ -532,6 +532,21 @@ export interface ApiOrder {
     updated_at: string;
     contact_name?: string;
     contact_phone?: string;
+
+    // ── Hub linkage ────────────────────────────────────────────────────────
+    // All of these were ALREADY on the wire (the endpoint returns bare ORM
+    // rows); the client simply never declared them, so every row showed
+    // `#{id.slice(-6)}` — six digits of a creation timestamp — instead of the
+    // real order number, and linked nowhere.
+    hub_order_id?: number | null;
+    hub_order_number?: string | null;
+    hub_push_status?: string | null;
+    hub_last_error?: string | null;
+    hub_public_token?: string | null;
+    hub_public_url?: string | null;
+    /** What the HUB says. Distinct from `status`, which is our own triage flag. */
+    hub_status?: string | null;
+    hub_payment_status?: string | null;
 }
 
 export interface OrderItem {
@@ -826,7 +841,17 @@ export function mapOrder(o: ApiOrder): Order {
         })),
         total: o.subtotal,
         subtotal: o.subtotal,
+        // "open" is a cart snapshot that was never an order. Calling it
+        // "pending" is why the screen reads 277 pending of 284 — most of those
+        // were never worked, and the label hid it.
         status: (o.status === "open" ? "pending" : o.status) as OrderStatus,
+        hub_order_id: o.hub_order_id ?? null,
+        hub_order_number: o.hub_order_number ?? null,
+        hub_push_status: o.hub_push_status ?? null,
+        hub_last_error: o.hub_last_error ?? null,
+        hub_public_token: o.hub_public_token ?? null,
+        hub_status: o.hub_status ?? null,
+        hub_payment_status: o.hub_payment_status ?? null,
         payment: "mpesa" as PaymentMethod,
         currency: o.currency,
         created_at: o.created_at,

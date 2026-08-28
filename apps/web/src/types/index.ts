@@ -140,6 +140,16 @@ export interface Order {
     notes?: string;
     created_at: string;
     channel?: string;
+
+    // Hub linkage. `status` above is OUR triage flag; hub_status is what the
+    // hub says — the two are kept apart on purpose.
+    hub_order_id?: number | null;
+    hub_order_number?: string | null;
+    hub_push_status?: string | null;
+    hub_last_error?: string | null;
+    hub_public_token?: string | null;
+    hub_status?: string | null;
+    hub_payment_status?: string | null;
 }
 
 export interface Agent {

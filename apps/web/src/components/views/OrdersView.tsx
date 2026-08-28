@@ -66,6 +66,41 @@ function ChannelPill({ channel }: { channel?: string }) {
     );
 }
 
+/** Where the hub lives, for "Open in hub" links. */
+const HUB_URL = process.env.NEXT_PUBLIC_HUB_URL ?? "https://hub.bethanyhouse.co.ke";
+
+/**
+ * The link into the hub for one order.
+ *
+ * Goes to /handoff/orders/{id}, carrying the order's own public token in the
+ * URL FRAGMENT. A fragment never reaches a server, a log or a Referer header —
+ * so a colleague with a hub login lands on the admin page, and one without
+ * lands on the customer's view of that same order instead of a login wall.
+ *
+ * Null when the order was never pushed: a link to a hub order that does not
+ * exist is worse than no link.
+ */
+function hubOrderHref(order: Order): string | null {
+    if (!order.hub_order_id) return null;
+    const base = `${HUB_URL.replace(/\/$/, "")}/handoff/orders/${order.hub_order_id}`;
+    return order.hub_public_token ? `${base}#v=${order.hub_public_token}` : base;
+}
+
+/** The hub's own word for this order's state — "Completed" when it is done. */
+function hubMeta(order: Order) {
+    const s = (order.hub_status ?? "").toLowerCase();
+    if (!order.hub_order_id || !s) return null;
+    if (s === "confirmed" || s === "processing")
+        return { label: "Confirmed", bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200" };
+    if (s === "shipped")
+        return { label: "Shipped", bg: "bg-sky-50", text: "text-sky-700", border: "border-sky-200" };
+    if (s === "delivered" || s === "completed")
+        return { label: "Completed", bg: "bg-green-50", text: "text-green-700", border: "border-green-200" };
+    if (s === "cancelled" || s === "voided")
+        return { label: "Cancelled", bg: "bg-red-50", text: "text-red-700", border: "border-red-200" };
+    return null;
+}
+
 const STATUS_ACTIONS: Record<OrderStatus, { next: OrderStatus[] }> = {
     pending: { next: ["confirmed", "cancelled"] },
     confirmed: { next: ["delivered", "cancelled"] },
@@ -345,9 +380,14 @@ export function OrdersView({
                 ) : (
                     <div className="divide-y divide-[#f0f9ec]">
                         {paginated.map((order) => {
-                            const meta =
+                            // The HUB is the authority once an order is pushed
+                            // there. `order.status` is our own triage flag, and
+                            // showing it for a linked order is how a confirmed
+                            // sale kept reading "Pending" in this list.
+                            const meta = hubMeta(order) ??
                                 STATUS_META[order.status] ??
                                 STATUS_META.pending;
+                            const hubHref = hubOrderHref(order);
                             const isUpdating = updating === order.id;
                             const itemSummary = (order.items ?? [])
                                 .slice(0, 2)
@@ -407,11 +447,38 @@ export function OrdersView({
                                                     color: "#427425",
                                                 }}
                                             >
-                                                #
-                                                {(order.id || "")
-                                                    .slice(-6)
-                                                    .toUpperCase()}
+                                                {/* The REAL hub order number.
+                                                    This used to print six digits
+                                                    of the creation timestamp,
+                                                    which is not an order number
+                                                    and not unique. */}
+                                                {order.hub_order_number
+                                                    ? order.hub_order_number
+                                                    : "not in hub"}
                                             </span>
+                                            {hubHref && (
+                                                // An anchor, not an onClick:
+                                                // middle-click and copy-link
+                                                // must work like any link.
+                                                <a
+                                                    href={hubHref}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    onClick={(e) => e.stopPropagation()}
+                                                    className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded font-semibold border border-[#cfe3bd] text-[#427425] hover:bg-[#e6f3d8]"
+                                                    title="Open this order in the hub"
+                                                >
+                                                    Open in hub ↗
+                                                </a>
+                                            )}
+                                            {order.hub_push_status === "failed" && (
+                                                <span
+                                                    className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded font-semibold border border-red-200 bg-red-50 text-red-700"
+                                                    title={order.hub_last_error ?? "The push to the hub failed"}
+                                                >
+                                                    push failed
+                                                </span>
+                                            )}
                                             <span
                                                 className="text-xs font-mono"
                                                 style={{ color: "#699a32" }}

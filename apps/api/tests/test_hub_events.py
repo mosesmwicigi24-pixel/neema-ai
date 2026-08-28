@@ -63,7 +63,12 @@ def test_briefs_are_specific():
 def test_unknown_and_duplicate_events_are_dropped():
     r = _Redis()
     out = asyncio.run(he.handle_event(None, r, {"id": "e1", "type": "weird.event"}))
-    assert out == {"handled": False, "reason": "unknown_event"}
+    # Subset, not exact equality: the payload also reports whether the state
+    # mirror ran, and an unrecognised event with no order identifier mirrors
+    # nothing. Pinning the exact dict made a diagnostic key a breaking change.
+    assert out["handled"] is False
+    assert out["reason"] == "unknown_event"
+    assert out.get("mirrored") is False
     # burn e2, then redeliver
     asyncio.run(r.set("hubevent:seen:e2", "1"))
     out = asyncio.run(he.handle_event(None, r, {"id": "e2", "type": "order.paid"}))
@@ -190,3 +195,63 @@ def test_deferred_paid_event_sends_in_the_morning(monkeypatch):
     out = asyncio.run(he._celebrate(None, r, conv, ev))
     assert out == {"handled": True, "sent": "freeform"}
     assert sent == ["Asante! 🙏"]
+
+
+# ── State mirroring (the 85%-loss fix) ───────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_mirror_writes_hub_truth_without_touching_our_triage_flag():
+    """OrderEvent.status is an operator's hand-set flag; hub state is separate.
+    Clobbering it would throw away human work."""
+    from app.services import hub_events
+
+    captured = {}
+
+    class _DB:
+        async def execute(self, stmt):
+            captured["stmt"] = stmt
+            class R:
+                rowcount = 1
+            return R()
+        async def commit(self):
+            captured["committed"] = True
+
+    ok = await hub_events._mirror_order_state(_DB(), {
+        "order_number": "WA-260812-EAVMJ",
+        "hub_order_id": 642,
+        "status": "confirmed",
+        "payment_status": "pending",
+        "public_url": "https://hub.bethanyhouse.co.ke/order/" + "a" * 48,
+    })
+
+    assert ok is True
+    assert captured.get("committed")
+    compiled = str(captured["stmt"]).lower()
+    assert "hub_status" in compiled
+    # The operator's own column must not appear in the SET clause.
+    set_clause = compiled.split("where")[0]
+    assert " status=" not in set_clause.replace("hub_status=", "")
+
+
+@pytest.mark.asyncio
+async def test_mirror_is_a_noop_without_an_identifier():
+    from app.services import hub_events
+
+    class _DB:
+        async def execute(self, stmt):
+            raise AssertionError("must not touch the database")
+        async def commit(self):
+            raise AssertionError("must not commit")
+
+    assert await hub_events._mirror_order_state(_DB(), {"status": "confirmed"}) is False
+
+
+def test_confirmed_mirrors_quietly():
+    """order.confirmed must update state and send the customer NOTHING — they
+    already got the thank-you when they paid."""
+    from app.services import hub_events
+
+    assert "order.confirmed" in hub_events.QUIET
+    assert "order.confirmed" not in hub_events.CELEBRATE
+    assert "order.confirmed" not in hub_events.ESCALATE
