@@ -15,13 +15,13 @@ flag set by hand in the Orders modal — overwriting it would destroy human work
 The screen shows hub truth when the order is linked, and the local flag
 otherwise.
 
-Revision ID: a1b2c3d4e5f6
+Revision ID: d7f4b9c2e1a8
 Revises: f0a1b2c3d4e5
 """
 from alembic import op
 import sqlalchemy as sa
 
-revision = "a1b2c3d4e5f6"
+revision = "d7f4b9c2e1a8"
 down_revision = "f0a1b2c3d4e5"
 branch_labels = None
 depends_on = None
