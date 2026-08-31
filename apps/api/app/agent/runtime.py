@@ -1621,6 +1621,62 @@ async def _note_silent_decision(channel: str, ext: str, cid: str, intent: str) -
 # Varied warm lines so a viral post's replies don't read identically. Picked
 # deterministically by the commenter id — same person, stable line; different
 # people, different lines.
+_QUESTION_HINTS = ("?", "how much", "how many", "price", "cost", "bei", "gani",
+                   "combien", "quanto", "where", "wapi", "do you", "can i", "is it")
+
+
+def _looks_like_a_question(text: str) -> bool:
+    t = (text or "").strip().lower()
+    return any(h in t for h in _QUESTION_HINTS)
+
+
+def _mentions_catalogue_item(text: str) -> bool:
+    """Does the comment actually NAME something we sell?
+
+    Deliberately word-based and generous — the point is only to tell "how much
+    is the Tallit?" (answerable: they named it) from "how much?" (not
+    answerable during a broadcast, because the camera has shown twenty things).
+    A miss costs a friendly "which one?" rather than a wrong price, which is the
+    trade we want.
+    """
+    t = (text or "").lower()
+    if not t:
+        return False
+    return any(w in t for w in _CATALOGUE_WORDS)
+
+
+# The vocabulary of the shop. Not the catalogue itself: this runs on every live
+# comment and must not hit the DB, and a broadcast's questions use everyday
+# words ("shawl", "cassock") rather than exact product names.
+_CATALOGUE_WORDS = (
+    "tallit", "talliet", "tallits", "shawl", "prayer shawl",
+    "cassock", "cossack", "gown", "robe", "vestment", "chasuble", "cope", "mitre", "mitres",
+    "stole", "surplice", "alb", "clergy", "collar", "cincture", "belt", "shirt",
+    "communion", "chalice", "paten", "cup", "cups", "wafer", "bread", "host",
+    "tray", "burner", "incense", "thurible", "candle", "cross", "crozier", "staff",
+    "bible", "book", "stories", "banner", "cloth", "kitambaa", "skull cap", "zucchetto",
+    "bag", "shoe", "shoes", "ring", "pectoral", "bell", "offering", "basket",
+)
+
+# When a live viewer asks a price without naming the item. The camera has shown
+# many things — guessing is how a vestment stream quoted a children's book.
+_LIVE_WHICH_POOL = [
+    "Great question{name} 🙏 Which item are you asking about? Tell me and I'll give you the price right away 💛",
+    "Happy to help{name}! 🙏 Which one caught your eye? Name it and I'll share the price 💛",
+    "Of course{name} 🙏 Which piece do you mean? Let me know and I'll quote it for you 💛",
+]
+
+# A live viewer saying "watching from Liberia" is arriving, not shopping. The
+# owner's words: "When I go live, I expect you to welcome people in." These are
+# warm, varied, and sell NOTHING — the broadcast itself is the pitch.
+_LIVE_WELCOME_POOL = [
+    "Welcome{name} 🙏 So glad you could join us live — make yourself at home! 💛",
+    "Karibu sana{name} 🙏 Lovely to have you with us today 💛",
+    "Bless you for joining{name} 🙏 Enjoy the show — ask us anything as we go! 💛",
+    "Welcome in{name}! 🙏 Great to see you here with us 💛",
+    "So good to have you{name} 🙏 Watch along and say hello anytime 💛",
+]
+
 _THANKS_POOL = [
     "Amen{name} 🙏 Thank you so much — God bless you! 💛",
     "Bless you{name} 🙏 We're so glad this speaks to you! 💛",
@@ -2072,7 +2128,25 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
 
     intent = await classify_comment_intent(comment_text, redis=redis)
     plan = plan_comment_actions(intent)
-    _log.info("comment %s intent=%s plan=%s", cid, intent, plan)
+
+    # ── LIVE BROADCAST ───────────────────────────────────────────────────────
+    # During a live stream the room is full of people ARRIVING. classify_comment
+    # sends a greeting to `high` on purpose — under a product photo a hello is a
+    # door opening — but on a live video that turned "Watching from Liberia 🇱🇷"
+    # into a price quote. Worse, the product is guessed from a video FRAME and
+    # then recorded as the post's identity, so one bad guess priced every later
+    # comment on the broadcast: a stream about vestments answered every question
+    # with the price of a children's book.
+    #
+    # So while live: greet the greeters, and never guess a product.
+    is_live = bool((comment.get("post_context") or {}).get("is_live"))
+    if is_live and intent in {"high", "low"} and not _mentions_catalogue_item(comment_text):
+        # Nothing nameable in the comment. Either they are saying hello (welcome
+        # them) or asking a price without saying of what (ask — never guess).
+        style = "which" if intent == "high" and _looks_like_a_question(comment_text) else "welcome"
+        plan = {"public": True, "style": style, "dm": False, "human": False}
+
+    _log.info("comment %s intent=%s live=%s plan=%s", cid, intent, is_live, plan)
     if not (plan["public"] or plan["dm"] or plan["human"]):
         # Spam → stay silent publicly, but leave an internal note so the team can
         # SEE that Neema decided not to reply (and step in if it misjudged).
@@ -2093,9 +2167,14 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # ── Negative: an empathetic line + route the conversation to a human.
     if not plan["dm"]:
         if plan["public"]:
-            text = (_pick(_THANKS_POOL, ext).replace("{name}", name_tag)
-                    if plan["style"] == "light"
-                    else _PUBLIC_EMPATHY.replace("{name}", name_tag))
+            if plan["style"] == "welcome":
+                text = _pick(_LIVE_WELCOME_POOL, ext).replace("{name}", name_tag)
+            elif plan["style"] == "which":
+                text = _pick(_LIVE_WHICH_POOL, ext).replace("{name}", name_tag)
+            elif plan["style"] == "light":
+                text = _pick(_THANKS_POOL, ext).replace("{name}", name_tag)
+            else:
+                text = _PUBLIC_EMPATHY.replace("{name}", name_tag)
             await _post_public(text)
             # Persist it threaded under the comment — the inbox must show every
             # outgoing reply, not just the high-intent ones.
@@ -2132,8 +2211,11 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # cached prefix) AND a forced upgrade to the main model, because the caller
     # pins every media turn there. A pure redis recall decides it.
     _known_product = await _recall_post_product(redis, channel, post_id)
+    # NEVER read the frame of a live broadcast for a product. A live frame is a
+    # person talking in a shop full of stock — the match is a coin toss, and the
+    # result gets recorded as the post's identity for every later comment.
     media = ({"type": "image", "url": thumb}
-             if thumb and not _known_product.get("name") else None)
+             if thumb and not is_live and not _known_product.get("name") else None)
 
     # THE FREE PATH (owner's affordability push, 2026-08-18). The single most
     # common comment is a naked "How much?"/"Bei gani?" — and on a post our
@@ -2187,7 +2269,11 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
         # under it prices the same product instead of re-guessing the frame.
         # GUARDED: a model guess that contradicts the caption — or differs from
         # an identity already on record — must never poison that record.
-        if _post_identity_compatible(_known_product, post_ctx.get("title"), matched):
+        if is_live:
+            # A broadcast shows many products over an hour; it HAS no single
+            # identity, and pinning one makes every later comment wrong.
+            _log.info("post %s is live — not recording a product identity", post_id)
+        elif _post_identity_compatible(_known_product, post_ctx.get("title"), matched):
             await _remember_post_product(redis, channel, post_id, matched)
         else:
             _log.info("post %s: not recording %r as identity (known=%r, caption disagrees)",
