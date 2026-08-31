@@ -144,7 +144,7 @@ async def manychat_webhook(body: ManyChatIn, request: Request,
             await _save_reply(db, redis, sub_id, reply)
         return {"reply": reply, "handled_by": "human"}
 
-    from app.agent.runtime import (run_turn, build_llm, route_model, _HOLD_LINE,
+    from app.agent.runtime import (run_turn, build_llm, route_model, _hold_line,
                                    closer_gate, mark_closer_answered)
     # Politeness ping-pong ends in silence, not another blessing — on TikTok
     # that silence is also a saved reply from the 10-per-48h budget.
@@ -177,7 +177,7 @@ async def manychat_webhook(body: ManyChatIn, request: Request,
             await db.rollback()
         except Exception:
             pass
-        reply = _HOLD_LINE
+        reply = _hold_line(CHANNEL)
         try:
             flag = True
             if redis is not None:

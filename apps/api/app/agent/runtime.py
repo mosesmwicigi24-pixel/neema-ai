@@ -1127,9 +1127,44 @@ async def _is_paused(redis, channel: str, key: str) -> bool:
     return False
 
 
-_HOLD_LINE = ("Samahani for the wait — I'm having a small technical hitch on my "
-              "side. A colleague has been alerted, and we'll be right back to "
-              "you. Asante for your patience 🙏")
+def _hold_line(channel: str = "whatsapp") -> str:
+    """What a customer gets when the turn could not be answered.
+
+    It used to be an apology: a "small technical hitch on my side", a colleague
+    alerted, back to you shortly. Two things were wrong with it. It tells a
+    customer about OUR problem, which is not theirs to carry — and when the
+    tokens are out nobody is coming back to them soon, so the promise is empty.
+
+    So say the true, useful thing instead: welcome them, and give them the ways
+    to reach us. It is what the shop says to every arrival, and it works
+    whether the outage lasts a minute or the rest of the evening.
+
+    Needs no LLM, no catalogue, no DB — this runs precisely when those are what
+    broke, so it is built from config alone. It names NO product and NO price:
+    an unpriced guess here would be worse than the silence it replaces.
+    """
+    wa = (settings.whatsapp_handoff_number or "").strip()
+    alt = (settings.whatsapp_handoff_alt or "").strip()
+    parts = ["Hello and welcome to Bethany House 🙏 We are so glad to have you here."]
+    if channel == "whatsapp":
+        # They are already in the WhatsApp thread — quoting the number back at
+        # them is noise. The alternative line is the one they cannot see.
+        reach = ("For samples, further inquiries, or to place your order, send "
+                 "us a message right here and we will take good care of you.")
+        if alt:
+            reach += f" You can also call us on {alt}."
+        parts.append(reach)
+    elif wa:
+        parts.append("For samples, further inquiries, or to place your order, "
+                     f"please reach out to us via WhatsApp at {wa}.")
+    elif alt:
+        parts.append("For samples, further inquiries, or to place your order, "
+                     f"please call us on {alt}.")
+    else:
+        parts.append("For samples, further inquiries, or to place your order, "
+                     "leave us a message here and we will get right back to you.")
+    parts.append("Asante for choosing Bethany House 💛")
+    return "\n\n".join(parts)
 
 
 async def _send_hold_line(redis, channel: str, key: str) -> None:
@@ -1154,17 +1189,18 @@ async def _send_hold_line(redis, channel: str, key: str) -> None:
                 pass
         from app.database import AsyncSessionLocal
         from app.services import n8n_bridge as svc
+        text = _hold_line(channel)
         if channel == "whatsapp":
-            wamid = await svc._send_waba(key, _HOLD_LINE)
+            wamid = await svc._send_waba(key, text)
             async with AsyncSessionLocal() as db:
-                await svc.save_outbound_message(db, redis, key, _HOLD_LINE,
+                await svc.save_outbound_message(db, redis, key, text,
                                                 waba_msg_id=wamid)
         else:
             from app.services.meta_send import send_to_channel
-            await send_to_channel(channel, key, _HOLD_LINE)
+            await send_to_channel(channel, key, text)
             async with AsyncSessionLocal() as db:
                 await svc.save_outbound_channel_message(db, redis, channel, key,
-                                                        _HOLD_LINE)
+                                                        text)
         try:
             async with AsyncSessionLocal() as db:
                 from app.models.conversation import Conversation
@@ -1176,8 +1212,9 @@ async def _send_hold_line(redis, channel: str, key: str) -> None:
                 if conv is not None:
                     db.add(Intercept(conversation_id=conv.id, agent_id=None,
                                      action=InterceptAction.flag,
-                                     note="Neema's reply FAILED here — she sent a short "
-                                          "hold message; please review and answer."))
+                                     note="Neema's reply FAILED here — the customer got the "
+                                          "welcome-and-contacts line, not an answer. "
+                                          "Please review and reply."))
                     await db.commit()
         except Exception:
             pass

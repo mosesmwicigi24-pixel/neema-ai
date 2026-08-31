@@ -152,7 +152,10 @@ def test_hold_line_sends_once_and_flags(monkeypatch):
     asyncio.run(runtime._send_hold_line(r, "whatsapp", "254712345678"))
     asyncio.run(runtime._send_hold_line(r, "whatsapp", "254712345678"))  # guarded
     assert len(sends) == 1
-    assert "Samahani" in sends[0] and "colleague" in sends[0]
+    # A welcome and our contacts — never an apology about our own outage.
+    assert "welcome to Bethany House" in sends[0]
+    assert "colleague" not in sends[0].lower()
+    assert "technical" not in sends[0].lower()
 
 
 def test_hold_line_never_raises(monkeypatch):
