@@ -61,3 +61,32 @@ def test_the_which_item_pool_never_quotes_a_price():
 ])
 def test_arrivals_name_no_product(text):
     assert not rt._mentions_catalogue_item(text)
+
+
+@pytest.mark.parametrize("text", [
+    "Watching from across the border 🇰🇪",          # "across" is not a cross
+    "I'm hosting a wedding next month, how much?",  # "hosting" is not a Host
+    "Just booked my flight, how much?",             # "booked" is not a book
+    "Saw this on facebook, how much?",              # "facebook" is not a book
+    "Bring the price please",                       # "Bring" names no ring
+    "During the service, how much?",                # "During" names no ring
+    "Nice album! how much?",                        # "album" is not an alb
+    "Stolen goods? how much",                       # "Stolen" is not a stole
+])
+def test_a_word_hiding_inside_another_word_names_no_product(text):
+    """Held as substrings, the shop's vocabulary matched all eight of these.
+
+    The first is the very shape of the comment that opened this bug — a viewer
+    saying where they are watching from. Finding `cross` inside `across` put
+    them back on the answering path when they had earned the welcome mat.
+    """
+    assert not rt._mentions_catalogue_item(text)
+
+
+@pytest.mark.parametrize("text", [
+    "how much for the cassocks?", "Do you have shawls?", "prices for tallits",
+    "are the mitres in stock", "how much are the robes",
+])
+def test_a_plural_still_names_its_product(text):
+    # Whole words must not cost us the plural the shop is actually asked for.
+    assert rt._mentions_catalogue_item(text)

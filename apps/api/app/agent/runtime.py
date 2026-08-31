@@ -1633,16 +1633,19 @@ def _looks_like_a_question(text: str) -> bool:
 def _mentions_catalogue_item(text: str) -> bool:
     """Does the comment actually NAME something we sell?
 
-    Deliberately word-based and generous — the point is only to tell "how much
-    is the Tallit?" (answerable: they named it) from "how much?" (not
-    answerable during a broadcast, because the camera has shown twenty things).
-    A miss costs a friendly "which one?" rather than a wrong price, which is the
-    trade we want.
+    The point is only to tell "how much is the Tallit?" (answerable: they named
+    it) from "how much?" (not answerable during a broadcast, because the camera
+    has shown twenty things).
+
+    Matched on WHOLE words — plus a plural "s" — never as a substring. Held as
+    a substring, "across" was a cross, "hosting" was a Host, "facebook" was a
+    book and "Bring the price" named a ring; the first of those is the very
+    shape of comment that opened this bug ("Watching from Liberia").
+
+    The bias is deliberate: a miss costs a friendly "which one?", while a false
+    match costs an arriving viewer a sales reply where a welcome belonged.
     """
-    t = (text or "").lower()
-    if not t:
-        return False
-    return any(w in t for w in _CATALOGUE_WORDS)
+    return bool(_CATALOGUE_RE.search(text or ""))
 
 
 # The vocabulary of the shop. Not the catalogue itself: this runs on every live
@@ -1656,6 +1659,12 @@ _CATALOGUE_WORDS = (
     "tray", "burner", "incense", "thurible", "candle", "cross", "crozier", "staff",
     "bible", "book", "stories", "banner", "cloth", "kitambaa", "skull cap", "zucchetto",
     "bag", "shoe", "shoes", "ring", "pectoral", "bell", "offering", "basket",
+)
+
+# Whole words, optional plural, compiled once — this runs on every live comment.
+_CATALOGUE_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(w) for w in _CATALOGUE_WORDS) + r")s?\b",
+    re.IGNORECASE,
 )
 
 # When a live viewer asks a price without naming the item. The camera has shown
