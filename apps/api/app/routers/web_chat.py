@@ -213,7 +213,7 @@ async def web_chat(body: WebChatIn, request: Request, db: AsyncSession = Depends
         return {"reply": "Thanks — one of our team will reply here shortly.",
                 "session_id": sid, "handled_by": "human"}
 
-    from app.agent.runtime import run_turn, build_llm, route_model, _HOLD_LINE
+    from app.agent.runtime import run_turn, build_llm, route_model, _hold_line
     try:
         reply = await run_turn(db, redis, wa_id, text, build_llm(model=route_model(text)))
     except Exception:
@@ -222,7 +222,7 @@ async def web_chat(body: WebChatIn, request: Request, db: AsyncSession = Depends
         # warm hold line as the reply AND a dashboard flag so a human actually
         # follows up — never an apology that asks the visitor to retry into the
         # void. The flag files at most once per 2h per visitor.
-        reply = _HOLD_LINE
+        reply = _hold_line("web")
         try:
             flag = True
             if redis is not None:

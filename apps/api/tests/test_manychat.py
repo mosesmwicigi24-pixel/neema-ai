@@ -200,7 +200,7 @@ def test_agent_failure_returns_hold_line_and_flags(monkeypatch):
         mc.ManyChatIn(subscriber_id="55", message="hi there"), _req(), db))
 
     assert out["handled_by"] == "ai"
-    assert out["reply"] == runtime._HOLD_LINE
+    assert out["reply"] == runtime._hold_line(mc.CHANNEL)
     from app.models.intercept import Intercept
     assert any(isinstance(o, Intercept) for o in db.added)   # team flagged
 

@@ -126,6 +126,6 @@ def test_web_chat_failure_uses_the_hold_line_and_flags():
     from app.routers import web_chat
     src = inspect.getsource(web_chat)
     assert "hit a snag" not in src                      # the retry-apology is gone
-    assert "_HOLD_LINE" in src
+    assert "_hold_line(" in src
     assert "InterceptAction.flag" in src
     assert "agent:holdline:web:" in src                 # flags at most once per 2h
