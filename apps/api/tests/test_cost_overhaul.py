@@ -100,11 +100,20 @@ def test_free_path_skips_the_model_and_spares_the_cap():
 def test_identified_posts_stop_buying_the_picture():
     """The earlier leak, pinned: the thumbnail rides only while the post is
     unidentified — once our records name the product, the comment rule says
-    never re-guess from the frame, so the image would be paid for and ignored."""
+    never re-guess from the frame, so the image would be paid for and ignored.
+
+    The guard has since gained a second condition (never read the frame of a
+    LIVE broadcast — a live frame is a person in a shop full of stock, and the
+    random match got recorded as the post's identity). Assert the CONDITIONS
+    rather than the literal line, so a further guard does not read as a
+    regression while still catching the leak this test exists for."""
     import inspect
     from app.agent import runtime
     src = inspect.getsource(runtime._run_comment_engage)
-    assert 'if thumb and not _known_product.get("name") else None' in src
+    media_line = next(line for line in src.splitlines() if "if thumb and not" in line)
+    assert '_known_product.get("name")' in media_line, "identified posts must not buy the picture"
+    assert "is_live" in media_line, "a live broadcast must not buy the picture either"
+    assert "else None" in media_line
 
 
 # ── 4. comment turns are capped at half the loop budget ──────────────────────

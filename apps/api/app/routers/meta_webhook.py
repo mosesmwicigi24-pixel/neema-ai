@@ -500,6 +500,18 @@ async def _capture_comment_events(db: AsyncSession, channel: str, payload: dict,
             # we pull the source-post context and carry it on the message + into the
             # AI reply. Cached per post_id; best-effort (empty context → no card).
             ctx = await _post_context(c["post_id"], redis=redis, channel=comment_channel)
+            # Is this comment arriving DURING a live broadcast? A live viewer is
+            # greeting the room, and the "post" shows many products over an hour
+            # rather than one — so the engage path must not price a product
+            # guessed from a video frame, nor record one as the post's identity.
+            try:
+                from app.services.meta_send import live_video_ids, post_is_live
+                if comment_channel == "facebook":
+                    ctx = dict(ctx or {})
+                    ctx["is_live"] = post_is_live(c["post_id"], await live_video_ids(redis))
+            except Exception:
+                _log.warning("live check failed for %s — treating as a normal post",
+                             c.get("post_id"), exc_info=True)
             c["post_context"] = ctx           # rides into the engage → AI reply path
 
             ident = await resolve_or_create_person(

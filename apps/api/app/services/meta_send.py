@@ -6,6 +6,7 @@ seam every reply path calls: it routes to WhatsApp (the existing WABA sender) or
 to Meta by the conversation's channel, using the conversation's `external_id` as
 the recipient (== wa_id for WhatsApp, PSID/IGSID for Meta).
 """
+import json
 import logging
 import re
 
@@ -320,6 +321,74 @@ async def _video_post_context(post_id: str) -> dict:
     return {"post_id": post_id, "title": (title or "Video post")[:200],
             "permalink": permalink, "thumb": thumb,
             "media_type": "video", "has_video": True}
+
+
+async def live_video_ids(redis=None) -> set[str]:
+    """The Page's videos that are broadcasting RIGHT NOW.
+
+    A comment during a live stream is a different animal from a comment under a
+    product photo: the viewer is greeting the room ("Watching from Liberia"),
+    and the "post" shows a dozen products over an hour rather than one. Treating
+    the two the same is how a broadcast about vestments answered every question
+    with the price of a children's book.
+
+    Graph will not serve live_status on the video node with a Page token (400),
+    but the Page's own live_videos edge carries `status` — so ask the edge and
+    keep the answer briefly. Cheap, cached 60s: a broadcast lasts an hour and
+    comments arrive in bursts.
+
+    Returns an empty set on any failure — unknown means "treat it as a normal
+    post", which is the behaviour we had before.
+    """
+    if not settings.meta_page_token or not settings.meta_page_id:
+        return set()
+
+    key = "meta:live_video_ids"
+    if redis is not None:
+        try:
+            cached = await redis.get(key)
+            if cached is not None:
+                return set(json.loads(cached))
+        except Exception:
+            pass
+
+    ids: set[str] = set()
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"https://graph.facebook.com/{settings.meta_graph_version}/"
+                f"{settings.meta_page_id}/live_videos",
+                params={"fields": "id,status", "limit": "5"},
+                headers={"Authorization": f"Bearer {settings.meta_page_token}"},
+                timeout=10.0,
+            )
+        if resp.is_success:
+            for v in (resp.json().get("data") or []):
+                if (v.get("status") or "").upper() == "LIVE" and v.get("id"):
+                    ids.add(str(v["id"]))
+    except Exception as exc:
+        _log.info("live video lookup failed: %s", exc)
+        return set()
+
+    if redis is not None:
+        try:
+            await redis.set(key, json.dumps(sorted(ids)), ex=60)
+        except Exception:
+            pass
+    return ids
+
+
+def post_is_live(post_id: str, live_ids: set[str]) -> bool:
+    """True when this comment's post IS one of the running broadcasts.
+
+    A feed comment on a live video carries `{page_id}_{video_id}` while the
+    live_videos edge returns the bare video id, so match on containment rather
+    than equality.
+    """
+    pid = (post_id or "").strip()
+    if not pid or not live_ids:
+        return False
+    return any(vid and (vid == pid or vid in pid) for vid in live_ids)
 
 
 async def fetch_post_context(post_id: str, channel: str = "facebook") -> dict:
