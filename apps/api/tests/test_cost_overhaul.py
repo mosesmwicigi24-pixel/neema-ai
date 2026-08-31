@@ -110,7 +110,7 @@ def test_identified_posts_stop_buying_the_picture():
     import inspect
     from app.agent import runtime
     src = inspect.getsource(runtime._run_comment_engage)
-    media_line = next(l for l in src.splitlines() if "if thumb and not" in l)
+    media_line = next(line for line in src.splitlines() if "if thumb and not" in line)
     assert '_known_product.get("name")' in media_line, "identified posts must not buy the picture"
     assert "is_live" in media_line, "a live broadcast must not buy the picture either"
     assert "else None" in media_line
