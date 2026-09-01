@@ -29,6 +29,10 @@ Shape of the solution (built cost-first, a day after the spend probe):
   · BUDGET-AWARE — skips entirely at the daily stop, meters its (tiny) spend
     under node "translate", and cools down on failure instead of retrying on
     every open.
+  · SWITCHABLE BY A PERSON — Settings carries an on/off control that takes
+    effect on the next thread-open, in BOTH directions, with no deploy.
+    `TRANSLATE_FOR_TEAM` in the environment is only the default; the stored
+    switch wins once anyone touches it (services/app_settings).
 
 Dashboard-only by construction: the agent's history builder and every send
 path read `Message.text`; nothing here is ever shown to a customer.
@@ -168,6 +172,31 @@ def translation_for(m) -> str | None:
     return t
 
 
+async def switch_is_on(redis) -> bool:
+    """Is the reading glass switched on?
+
+    Redis answers the normal case. On a cold cache we open a SHORT PRIVATE
+    session rather than borrow the caller's: this runs inside a customer
+    reply, and a settings read must never consume, dirty, or fail a session
+    that belongs to someone else's work. Anything at all going wrong falls
+    back to the environment default — a settings hiccup cannot be allowed to
+    silently disable a feature the owner is paying for, or enable one they
+    turned off.
+    """
+    from app.services.app_settings import (translate_enabled_cached,
+                                           get_translate_enabled,
+                                           _default_translate_enabled)
+    cached = await translate_enabled_cached(redis)
+    if cached is not None:
+        return cached
+    try:
+        from app.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as db:
+            return await get_translate_enabled(db, redis)
+    except Exception:
+        return _default_translate_enabled()
+
+
 # ── the background worker ────────────────────────────────────────────────────
 
 _tasks: set = set()
@@ -175,8 +204,15 @@ _tasks: set = set()
 
 def schedule_thread_translation(redis, conv_id, message_ids: list[str]) -> bool:
     """Fire-and-forget fill for one opened thread. Returns True when a task
-    was actually started."""
-    if not settings.translate_for_team or not message_ids:
+    was actually started.
+
+    The on/off switch is NOT consulted here. It lives in the database now (a
+    person can flip it from Settings without a deploy), and reading it needs a
+    session this synchronous call site has no business opening. The worker
+    checks it first thing instead — one authoritative check, and a disabled
+    feature costs an async task that returns immediately.
+    """
+    if not message_ids:
         return False
     task = asyncio.create_task(_translate_thread(redis, str(conv_id),
                                                  [str(i) for i in message_ids]))
@@ -227,6 +263,10 @@ async def _translate_thread(redis, conv_id: str, ids: list[str]) -> int:
     from app.models.message import Message
 
     try:
+        # THE SWITCH. Checked before the lock, before the budget, before any
+        # token is bought — off means off, from the next thread-open onward.
+        if not await switch_is_on(redis):
+            return 0
         if redis is not None:
             try:
                 if await redis.get(f"translate:cool:{conv_id}"):
@@ -402,9 +442,11 @@ async def translate_reply(db, redis, conv_id, text: str) -> dict:
     the translator that exists to help it."""
     original = (text or "").strip()
     out = {"text": original, "lang": None}
-    if not original or not settings.translate_for_team:
+    if not original:
         return out
     try:
+        if not await switch_is_on(redis):
+            return out
         from app.services import ai_budget
         if await ai_budget.mode(redis) == "stop":
             return out

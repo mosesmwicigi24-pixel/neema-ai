@@ -177,7 +177,21 @@ export const settingsApi = {
         get<{ stages: string[] }>("/admin/settings/pipeline-stages"),
     putPipelineStages: (stages: string[]) =>
         put<{ ok: boolean; stages: string[] }>("/admin/settings/pipeline-stages", { stages }),
+    /** The team's reading glass: the switch, plus what it actually cost. */
+    getTranslation: () =>
+        get<ApiTranslationSetting>("/admin/settings/translation"),
+    putTranslation: (enabled: boolean) =>
+        put<{ ok: boolean; enabled: boolean }>("/admin/settings/translation", { enabled }),
 };
+
+export interface ApiTranslationSetting {
+    enabled: boolean;
+    /** What TRANSLATE_FOR_TEAM says in the environment — the value before anyone touched the switch. */
+    default: boolean;
+    /** Real spend from ai_usage (node="translate") over the last 30 days, not an estimate. */
+    spend_30d_usd: number;
+    calls_30d: number;
+}
 
 /** One row of the customer's journey (Activity Log panel). */
 export interface ApiActivityEvent {
