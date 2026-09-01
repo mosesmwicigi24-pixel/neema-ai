@@ -575,6 +575,14 @@ async def send_agent_reply(
             pass
         return {"ok": False, "error": f"Couldn't send the reply: {str(exc)[:200]}"}
 
+    # It went out — the mirror of the failure above. A human's send proves a
+    # rejected page/WABA token is alive again just as well as an AI turn does.
+    try:
+        from app.services.agent_health import record_turn_success
+        await record_turn_success(redis)
+    except Exception:
+        pass
+
     q_sender = None
     if quoted is not None:
         q_sender = quoted.sender.value if hasattr(quoted.sender, "value") else str(quoted.sender)
