@@ -126,3 +126,81 @@ async def set_directives(db, redis, value: str, updated_by=None) -> str:
         except Exception:
             pass
     return val
+
+
+# ── Team translation (services/translate.py) ─────────────────────────────────
+# The reading glass costs money on every foreign message, so a person must be
+# able to stop it — and start it again — without an env edit and a restart.
+# `TRANSLATE_FOR_TEAM` in the environment is the DEFAULT; this row overrides it
+# for good once anyone touches the switch.
+
+TRANSLATE_KEY = "translate_for_team"
+TRANSLATE_CACHE = "app:translate_enabled"
+
+
+def _default_translate_enabled() -> bool:
+    from app.core.config import settings
+    return bool(getattr(settings, "translate_for_team", True))
+
+
+async def translate_enabled_cached(redis) -> bool | None:
+    """The switch from redis alone — None when the cache can't answer.
+
+    Split out because both callers sit on hot paths (every reply, every thread
+    open) and neither should reach for a database on the normal case."""
+    if redis is None:
+        return None
+    try:
+        v = await redis.get(TRANSLATE_CACHE)
+    except Exception:
+        return None
+    if v is None:
+        return None
+    s = v.decode() if isinstance(v, bytes) else str(v)
+    return s == "on" if s in ("on", "off") else None
+
+
+async def get_translate_enabled(db, redis) -> bool:
+    """Is the team's reading glass on right now?
+
+    Cache-first, DB fallback, and on ANY failure the environment default —
+    a settings hiccup must never silently disable a feature the owner paid to
+    have on, nor silently enable one they turned off.
+    """
+    cached = await translate_enabled_cached(redis)
+    if cached is not None:
+        return cached
+    try:
+        val = (await get_value(db, TRANSLATE_KEY) or "").strip().lower()
+    except Exception:
+        return _default_translate_enabled()
+    enabled = _default_translate_enabled() if val not in ("on", "off") else val == "on"
+    if redis is not None:
+        try:
+            await redis.set(TRANSLATE_CACHE, "on" if enabled else "off", ex=300)
+        except Exception:
+            pass
+    return enabled
+
+
+async def set_translate_enabled(db, redis, enabled: bool, updated_by=None) -> bool:
+    """Flip the switch. The cache is written in the same breath as the row, so
+    the next thread-open honours it immediately rather than up to 5 minutes
+    later — an operator who turns this off during a spend scare means NOW."""
+    from app.models.app_setting import AppSetting
+    val = "on" if enabled else "off"
+    row = (await db.execute(select(AppSetting).where(
+        AppSetting.id == TRANSLATE_KEY))).scalar_one_or_none()
+    if row is None:
+        db.add(AppSetting(id=TRANSLATE_KEY, value=val, updated_by=updated_by))
+    else:
+        row.value = val
+        row.updated_by = updated_by
+    await db.commit()
+    if redis is not None:
+        try:
+            await redis.set(TRANSLATE_CACHE, val, ex=300)
+        except Exception:
+            pass
+    _log.info("team translation turned %s", "ON" if enabled else "OFF")
+    return enabled

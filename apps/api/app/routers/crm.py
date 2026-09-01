@@ -1063,6 +1063,65 @@ async def put_operator_directives(
     return {"ok": True, "directives": val}
 
 
+# ── Team translation switch (services/translate.py) ──────────────────────────
+
+@router.get("/settings/translation")
+async def get_translation_setting(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """The reading glass's switch, and what it has actually cost.
+
+    The spend is read from the same `ai_usage` rows the translator writes on
+    every call (node="translate"), so the number beside the switch is the real
+    bill rather than an estimate — which is the only honest way to answer
+    "should I leave this on?".
+    """
+    from datetime import datetime, timedelta, timezone
+    from app.models.ai_usage import AiUsage
+    from app.services.app_settings import (get_translate_enabled,
+                                           _default_translate_enabled)
+
+    redis = getattr(request.app.state, "redis", None)
+    enabled = await get_translate_enabled(db, redis)
+
+    spend = 0.0
+    calls = 0
+    try:
+        since = datetime.now(timezone.utc) - timedelta(days=30)
+        row = (await db.execute(
+            select(func.coalesce(func.sum(AiUsage.cost_usd), 0), func.count())
+            .where(AiUsage.node == "translate", AiUsage.created_at >= since))).one()
+        spend, calls = float(row[0] or 0), int(row[1] or 0)
+    except Exception:
+        pass                                # a metrics hiccup must not hide the switch
+    return {"enabled": enabled,
+            "default": _default_translate_enabled(),
+            "spend_30d_usd": round(spend, 4),
+            "calls_30d": calls}
+
+
+@router.put("/settings/translation")
+async def put_translation_setting(
+    body: dict,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Turn the team's translation on or off. Admin-only: it spends money and
+    it changes what every operator sees under every foreign message."""
+    if not (getattr(agent, "is_superuser", False) or str(agent.role) in ("admin", "AgentRole.admin")):
+        raise HTTPException(status_code=403, detail="Admin only")
+    if "enabled" not in body or not isinstance(body.get("enabled"), bool):
+        raise HTTPException(status_code=422, detail="enabled must be true or false")
+    from app.services.app_settings import set_translate_enabled
+    redis = getattr(request.app.state, "redis", None)
+    enabled = await set_translate_enabled(db, redis, bool(body["enabled"]),
+                                          updated_by=agent.id)
+    return {"ok": True, "enabled": enabled}
+
+
 # ── Rule proposals (plan D4) — the weekly distillation, owner-approved ───────
 
 @router.get("/settings/proposals")

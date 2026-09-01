@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from "react";
 import { Toggle } from "@/components/ui/Layout";
 import { InputField } from "@/components/ui/FormFields";
-import { settingsApi } from "@/lib/api";
+import { settingsApi, type ApiTranslationSetting } from "@/lib/api";
 import type { SharedViewProps } from "@/types";
 
 // ── Platform SVG icons ────────────────────────────────────────────────────────
@@ -213,6 +213,70 @@ function StandingOrdersCard({ onToast }: { onToast: SharedViewProps["onToast"] }
     );
 }
 
+/** The team's reading glass. Off by a click when the bill matters, on again by
+ *  another — no deploy, no env edit. The 30-day spend sits beside the switch
+ *  because "should this stay on?" is a money question, and guessing at it is
+ *  how a small feature becomes a scary one. */
+function TranslationCard({ onToast }: { onToast: SharedViewProps["onToast"] }) {
+    const [state, setState] = useState<ApiTranslationSetting | null>(null);
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        let gone = false;
+        settingsApi.getTranslation()
+            .then((r) => { if (!gone) setState(r); })
+            .catch(() => { /* leave the card in its loading state */ });
+        return () => { gone = true; };
+    }, []);
+
+    const toggle = async () => {
+        if (!state || saving) return;
+        const next = !state.enabled;
+        setState({ ...state, enabled: next });          // optimistic: the switch must feel instant
+        setSaving(true);
+        try {
+            await settingsApi.putTranslation(next);
+            onToast(next
+                ? "Translation on — foreign messages get an English line from the next thread you open"
+                : "Translation off — no new translations will be bought. Ones already saved stay visible.");
+        } catch {
+            setState({ ...state, enabled: !next });     // put it back; nothing was saved
+            onToast("Couldn't change that (admin only)", "error");
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const money = (v: number) =>
+        v > 0 && v < 0.01 ? "under $0.01" : `$${v.toFixed(2)}`;
+
+    return (
+        <SectionCard title="Translation for the team"
+            description="Shows an English line under any message that is not English or Swahili — in both directions, so you can follow a whole conversation. Customers never see it.">
+            <div className="flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                    <p className="text-xs font-semibold text-stone-700">
+                        {state === null ? "Loading…" : state.enabled ? "On" : "Off"}
+                    </p>
+                    <p className="text-[10px] text-stone-400 mt-0.5 leading-relaxed">
+                        {state === null
+                            ? "\u00a0"
+                            : state.calls_30d > 0
+                                ? `${money(state.spend_30d_usd)} over the last 30 days · ${state.calls_30d} call${state.calls_30d === 1 ? "" : "s"}`
+                                : "Nothing spent in the last 30 days"}
+                    </p>
+                </div>
+                <Toggle checked={!!state?.enabled} onChange={toggle} />
+            </div>
+            {state !== null && !state.enabled && (
+                <p className="text-[10px] text-stone-400 mt-3 leading-relaxed">
+                    Translations already saved stay visible — turning this off only stops new ones being bought.
+                </p>
+            )}
+        </SectionCard>
+    );
+}
+
 function SectionCard({ title, description, children }: {
     title: string; description?: string; children: React.ReactNode;
 }) {
@@ -314,6 +378,7 @@ export function SettingsView({ onToast, isMobile }: SharedViewProps): React.Reac
 
                 {/* Business */}
                 <StandingOrdersCard onToast={onToast} />
+                <TranslationCard onToast={onToast} />
 
                 <SectionCard title="Business" description="Core platform details">
                     <div className="grid grid-cols-2 gap-x-3">
