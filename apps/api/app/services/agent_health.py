@@ -91,6 +91,39 @@ async def record_turn_failure(redis, wa_id: str, exc) -> None:
         pass                       # never let monitoring cost a reply
 
 
+async def record_turn_success(redis) -> bool:
+    """A turn just completed. Clear an ACTIONABLE failure state — only that.
+
+    The count is a rolling hour and nothing used to clear it early, so the
+    dashboard kept telling the team "replies are failing, a human is needed"
+    for up to an hour after a person had already fixed it — the credit outage
+    of 2026-09-01 read `needs_a_human` long after the account was topped up.
+    A completed turn is proof the blocker is gone: you cannot finish one
+    against an unpaid account, a rejected key or a dead page token.
+
+    `rate` and `other` never clear this way. Those are intermittent by nature —
+    some turns fail while others succeed — and wiping the count on the next
+    success would hide exactly the partial outage the count exists to show.
+
+    Best-effort, like everything here: monitoring must never cost a reply.
+    """
+    if redis is None:
+        return False
+    try:
+        raw = await redis.get(_LAST_KEY)
+        if not raw:
+            return False                   # nothing recorded, or already aged out
+        kind = ((json.loads(raw) or {}).get("kind") or "other")
+        if kind not in ACTIONABLE:
+            return False
+        await redis.delete(_COUNT_KEY)
+        await redis.delete(_LAST_KEY)
+    except Exception:
+        return False
+    _log.info("agent recovered — a turn completed, clearing the %s failure state", kind)
+    return True
+
+
 async def read_turn_failures(redis) -> dict:
     """{count, kind, error, at} for the last hour — {} when nothing has failed."""
     if redis is None:

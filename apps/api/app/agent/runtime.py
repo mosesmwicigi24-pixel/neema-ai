@@ -1267,6 +1267,9 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None)
             await svc.save_outbound_message(db2, redis, wa_id, reply, waba_msg_id=wamid)
         await mark_closer_answered(redis, "whatsapp", wa_id, text)
         _log.info("tier2 replied to %s (%d chars)", wa_id, len(reply))
+        # She answered — so whatever a person was told to go and fix is fixed.
+        from app.services.agent_health import record_turn_success
+        await record_turn_success(redis)
         # The scribe files the turn (deal items/stage/promises) — best-effort.
         try:
             from app.services.deals import scribe_update
@@ -1410,6 +1413,8 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
             await svc.save_outbound_channel_message(db2, redis, channel, external_id, reply)
         await mark_closer_answered(redis, channel, external_id, text)
         _log.info("tier2 replied on %s to %s (%d chars)", channel, external_id, len(reply))
+        from app.services.agent_health import record_turn_success
+        await record_turn_success(redis)
         # The scribe files the turn (deal items/stage/promises) — best-effort.
         try:
             from app.services.deals import scribe_update
