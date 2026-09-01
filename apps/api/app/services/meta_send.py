@@ -338,7 +338,8 @@ async def live_video_ids(redis=None) -> set[str]:
     comments arrive in bursts.
 
     Returns an empty set on any failure — unknown means "treat it as a normal
-    post", which is the behaviour we had before.
+    post", which is the behaviour we had before. A FAILED lookup is never
+    cached: only an answer Graph actually gave us is worth keeping for a minute.
     """
     if not settings.meta_page_token or not settings.meta_page_id:
         return set()
@@ -362,10 +363,17 @@ async def live_video_ids(redis=None) -> set[str]:
                 headers={"Authorization": f"Bearer {settings.meta_page_token}"},
                 timeout=10.0,
             )
-        if resp.is_success:
-            for v in (resp.json().get("data") or []):
-                if (v.get("status") or "").upper() == "LIVE" and v.get("id"):
-                    ids.add(str(v["id"]))
+        if not resp.is_success:
+            # An expired page token answers 401, which is NOT "nothing is live".
+            # Caching it as such would hold the wrong answer over the next
+            # minute of a broadcast — exactly when the guard has to work. Fail
+            # open, but do not remember failing open.
+            _log.warning("live video lookup failed: HTTP %s — not caching",
+                         resp.status_code)
+            return set()
+        for v in (resp.json().get("data") or []):
+            if (v.get("status") or "").upper() == "LIVE" and v.get("id"):
+                ids.add(str(v["id"]))
     except Exception as exc:
         _log.info("live video lookup failed: %s", exc)
         return set()
@@ -382,13 +390,15 @@ def post_is_live(post_id: str, live_ids: set[str]) -> bool:
     """True when this comment's post IS one of the running broadcasts.
 
     A feed comment on a live video carries `{page_id}_{video_id}` while the
-    live_videos edge returns the bare video id, so match on containment rather
-    than equality.
+    live_videos edge returns the bare video id — so the rule is exactly that
+    shape, anchored: the whole id, or the id after the underscore. It used to
+    ask whether the video id appeared ANYWHERE in the post id, which also says
+    yes when the digits happen to fall inside a page id or a longer run.
     """
     pid = (post_id or "").strip()
     if not pid or not live_ids:
         return False
-    return any(vid and (vid == pid or vid in pid) for vid in live_ids)
+    return any(vid and (pid == vid or pid.endswith(f"_{vid}")) for vid in live_ids)
 
 
 async def fetch_post_context(post_id: str, channel: str = "facebook") -> dict:
