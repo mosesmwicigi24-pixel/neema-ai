@@ -164,7 +164,10 @@ def order_note(c: dict | None) -> str:
     """What the team reading the hub order needs to know.
 
     Order lines go to the hub at list price and a person applies the offer, so
-    this line is the whole safety net between "quoted 117" and "charged 130".
+    this line is the whole safety net between "quoted 45" and "charged 50".
+    Only ever attached to an order whose conversation was actually GRANTED the
+    offer (see was_granted) — a customer who happily paid list price must not
+    be discounted by a note nobody meant.
     """
     if not is_running(c):
         return ""
@@ -196,6 +199,42 @@ def describe(c: dict | None) -> str:
         what = "selected items"
     return (f"{c['name']} — {c['percent']}% off {what}, "
             f"until {_human_date(c['ends_on'])}")
+
+
+# ── who has actually been given it ───────────────────────────────────────────
+# The offer is a CLOSING LEVER, not an announcement: most customers buy at the
+# list price and never ask. So the discount is granted per conversation, by
+# Neema, at the moment it buys her something — and only a conversation that was
+# granted it carries the note telling the team to apply it. Without this the
+# team would discount every order, including the ones the customer never asked
+# to have discounted, which is the exact margin the holding-back protects.
+
+_GRANT_TTL = 45 * 24 * 3600        # outlives any campaign; the order comes later
+
+
+def _grant_key(channel: str, key: str) -> str:
+    return f"offer:granted:{channel or 'whatsapp'}:{key}"
+
+
+async def mark_granted(redis, channel: str, key: str, name: str) -> bool:
+    """Record that this customer was actually offered the discount."""
+    if redis is None or not key:
+        return False
+    try:
+        await redis.set(_grant_key(channel, key), name or "1", ex=_GRANT_TTL)
+        return True
+    except Exception:
+        return False
+
+
+async def was_granted(redis, channel: str, key: str) -> bool:
+    """Was it? Only then does the order carry it."""
+    if redis is None or not key:
+        return False
+    try:
+        return bool(await redis.get(_grant_key(channel, key)))
+    except Exception:
+        return False
 
 
 # ── storage (app_settings row, redis-cached like the other live settings) ────

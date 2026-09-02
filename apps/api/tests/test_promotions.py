@@ -213,3 +213,93 @@ def test_a_declared_campaign_comes_back():
 def test_declaring_nonsense_is_refused_loudly():
     with pytest.raises(ValueError):
         asyncio.run(promo.set_campaign(_DB(), _Redis(), {"name": "X", "percent": 999}))
+
+
+# ── the discount is a closing tool, not an announcement ──────────────────────
+# The owner's steer: "think as a business man … not to always throw the
+# discount in the beginning. Sales is closing more sales, but if a discount
+# helps close the sale, throw it in." The shape he drew:
+#
+#   Customer: Do you have anointing oil?
+#   Neema:    Yes we do — Eliad Oil at USD 50.        ← full price, no offer
+#   Customer: Can you give a discount?
+#   Neema:    Let me see — Harvest Offer, 10% off …   ← now it is played
+#
+# Most customers never reach line three. Leading with the offer hands 10% to
+# every one of them.
+
+def test_the_catalogue_quotes_the_full_price_even_when_an_offer_covers_it():
+    import inspect
+    from app.agent import tools
+    src = inspect.getsource(tools._search_catalog)
+    # The held card is attached, but the quoted price is untouched.
+    assert "offer_available" in src
+    assert 'row["price"] = _off' not in src and 'row["price"] = _now' not in src
+
+
+def test_the_held_card_tells_her_not_to_lead_with_it():
+    import inspect
+    from app.agent import tools
+    src = inspect.getsource(tools._search_catalog)
+    assert "DO NOT mention this yet" in src
+    assert "apply_offer" in src
+
+
+def test_playing_it_is_a_deliberate_act_with_its_own_tool():
+    from app.agent.tools import TOOLS, _HANDLERS
+    assert "apply_offer" in _HANDLERS
+    schema = next(t for t in TOOLS if t["name"] == "apply_offer")
+    d = schema["description"]
+    assert "close the sale" in d
+    assert "NEVER call it on a first quote" in d
+
+
+def test_the_prompt_teaches_hold_then_close():
+    from app.agent.prompt import build_system_prompt
+    p = build_system_prompt(offer="Harvest Offer — 10% off our oils, until 30 September 2026")
+    assert "QUOTE THE FULL PRICE FIRST" in p
+    assert "closing tool, not an announcement" in p
+    assert "ASK FOR THE ORDER in the same message" in p
+    # …and it must not be preached when no campaign is running.
+    assert "THE OFFER YOU ARE HOLDING" not in build_system_prompt(offer="")
+
+
+def test_an_order_carries_the_offer_only_when_it_was_actually_given():
+    import inspect
+    from app.agent import tools
+    src = inspect.getsource(tools._create_order)
+    assert "was_granted" in src, "every order would otherwise be discounted"
+
+
+class _GrantRedis:
+    def __init__(self):
+        self.store = {}
+    async def get(self, k):
+        return self.store.get(k)
+    async def set(self, k, v, **kw):
+        self.store[k] = v
+        return True
+
+
+def test_a_customer_who_never_asked_is_not_recorded_as_discounted():
+    r = _GrantRedis()
+    assert asyncio.run(promo.was_granted(r, "whatsapp", "254700000000")) is False
+
+
+def test_granting_is_per_conversation_not_global():
+    r = _GrantRedis()
+    asyncio.run(promo.mark_granted(r, "whatsapp", "254700000000", "Harvest Offer"))
+    assert asyncio.run(promo.was_granted(r, "whatsapp", "254700000000")) is True
+    # The customer next door still pays the full price.
+    assert asyncio.run(promo.was_granted(r, "whatsapp", "254711111111")) is False
+    # And the same person on another channel is a different thread.
+    assert asyncio.run(promo.was_granted(r, "instagram", "254700000000")) is False
+
+
+def test_granting_survives_a_dead_redis_without_raising():
+    class _Boom:
+        async def get(self, k): raise RuntimeError("down")
+        async def set(self, k, v, **kw): raise RuntimeError("down")
+    assert asyncio.run(promo.mark_granted(_Boom(), "whatsapp", "x", "H")) is False
+    assert asyncio.run(promo.was_granted(_Boom(), "whatsapp", "x")) is False
+    assert asyncio.run(promo.was_granted(None, "whatsapp", "x")) is False

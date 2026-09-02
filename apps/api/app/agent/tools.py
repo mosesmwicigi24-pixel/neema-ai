@@ -134,6 +134,25 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "apply_offer",
+        "description": "Play the running discount for THIS customer, and get the exact "
+                       "figures to quote. Call it ONLY at the moment the discount can "
+                       "close the sale — they asked for a discount, they said it's too "
+                       "expensive, they went quiet after a price, or you are landing a "
+                       "big or repeat order. NEVER call it on a first quote, and never "
+                       "just because an offer exists: most customers buy at the list "
+                       "price and never ask. Returns the offer's name, percentage, the "
+                       "list price and the offer price for the item, and records that "
+                       "this customer was given it so the team applies it to the order.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "product": {"type": "string",
+                            "description": "The item you are discounting, e.g. 'Eliad Oil'. Leave out to get the offer's terms alone."},
+            },
+        },
+    },
+    {
         "name": "get_cart",
         "description": "Return the customer's current cart (items, quantities, line and total price).",
         "input_schema": {"type": "object", "properties": {}},
@@ -553,24 +572,30 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
                                    "'free'; call check_availability, tell them "
                                    "you're confirming the price, keep selling "
                                    "the rest")
-        # THE OFFER, if this item is in one. Computed from the price the
-        # customer is actually being shown, so it is right in KES, USD and ZMW
-        # alike and never double-rounded. `was` and `now` are both given so the
-        # saving is stated outright rather than implied.
+        # THE OFFER — held, not spent. `price` stays the LIST price, because
+        # most customers buy at it and never ask; leading with a discount gives
+        # away margin on every one of them. This block is the card Neema holds
+        # until it buys her something (see `apply_offer`), with the arithmetic
+        # already done so that when she plays it the number is right.
         if campaign and promo.applies_to(campaign, p) and isinstance(row.get("price"), (int, float)):
-            _now = promo.offer_price(campaign, row["price"])
-            if _now is not None:
-                row["offer"] = {
+            _off = promo.offer_price(campaign, row["price"])
+            if _off is not None:
+                row["offer_available"] = {
                     "name": campaign["name"],
                     "percent": campaign["percent"],
-                    "was": row["price"],
-                    "now": _now,
+                    "list_price": row["price"],
+                    "offer_price": _off,
                     "ends_on": campaign["ends_on"],
-                    "say": (f"{campaign['name']}: {campaign['percent']}% off — "
-                            f"{_fmt_price(row['price'], ctx.currency)}, now "
-                            f"{_fmt_price(_now, ctx.currency)}"),
+                    "hold": ("DO NOT mention this yet. Quote `price`. Play it "
+                             "only when it can close the sale — they ask for a "
+                             "discount, they balk at the price, or they have "
+                             "gone quiet after a quote — and then call "
+                             "`apply_offer` first."),
+                    "say_when_played": (
+                        f"{campaign['name']}: {campaign['percent']}% off — "
+                        f"{_fmt_price(row['price'], ctx.currency)}, now "
+                        f"{_fmt_price(_off, ctx.currency)}"),
                 }
-                row["price"] = _now      # quote the offer price; `offer.was` keeps the original
 
         # The hub's enriched product copy (fabric, embroidery, care, contents) —
         # this is what makes Neema's product talk SPECIFIC instead of generic.
@@ -603,15 +628,15 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
                                       prices=v.get("prices"))}
                 for v in variants
             ]
-            # A size L cassock is in the offer exactly as much as the size S —
-            # discounting the headline price but not the variants is how the
-            # customer who picks a size loses the offer.
-            if row.get("offer"):
+            # A size L cassock is in the offer exactly as much as the size S.
+            # Each variant carries its own held figure; `price` stays list here
+            # too, for the same reason it does above.
+            if row.get("offer_available"):
                 for vr in row["variants"]:
-                    _vn = promo.offer_price(campaign, vr["price"]) \
+                    _vo = promo.offer_price(campaign, vr["price"]) \
                         if isinstance(vr.get("price"), (int, float)) else None
-                    if _vn is not None:
-                        vr["was"], vr["price"] = vr["price"], _vn
+                    if _vo is not None:
+                        vr["offer_price"] = _vo
             prices = [vr["price"] for vr in row["variants"] if isinstance(vr["price"], (int, float))]
             if prices and min(prices) != max(prices):
                 row["price_range"] = {"from": min(prices), "to": max(prices)}
@@ -844,7 +869,12 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
     catalog = await svc.catalog_items(ctx.db, ctx.redis)
     try:
         from app.services import promotions as _promo
-        _promo_note = _promo.order_note(await _promo.campaign_now(ctx.redis))
+        # ONLY if this conversation was actually granted the offer. A customer
+        # who paid list price without ever asking must not be discounted by a
+        # note nobody meant — that margin is the whole point of holding it back.
+        _promo_note = (
+            _promo.order_note(await _promo.campaign_now(ctx.redis))
+            if await _promo.was_granted(ctx.redis, ctx.channel, ctx.wa_id) else "")
     except Exception:
         _promo_note = ""          # no offer recorded beats no order created
 
@@ -2033,8 +2063,71 @@ async def _send_measurement_guide(args: dict, ctx: ToolContext) -> dict:
             "note": "include this link with your ask so they can see how to measure"}
 
 
+async def _apply_offer(args: dict, ctx: ToolContext) -> dict:
+    """Give this customer the running offer, and hand back exact figures.
+
+    Two jobs, and the second is the one that protects the margin: it RECORDS
+    the grant, so only a conversation that was actually offered the discount
+    carries it into the order. A customer who paid list price without asking is
+    never quietly discounted by the team.
+
+    The arithmetic is done here rather than by the model — the whole point of
+    the tool is that the number Neema says is the number code computed.
+    """
+    from app.services import promotions as promo
+    campaign = await promo.campaign_now(ctx.redis)
+    if not campaign:
+        return {"offer": None,
+                "say": "There is no offer running — do not invent one. Hold the "
+                       "price warmly, sell the value, and hand off if they press."}
+
+    out = {
+        "offer": {"name": campaign["name"], "percent": campaign["percent"],
+                  "ends_on": campaign["ends_on"]},
+        "granted": await promo.mark_granted(ctx.redis, ctx.channel, ctx.wa_id,
+                                            campaign["name"]),
+    }
+
+    wanted = (args.get("product") or "").strip().lower()
+    if wanted:
+        catalog = await svc.catalog_items(ctx.db, ctx.redis)
+        toks = [t for t in wanted.split() if t]
+        for p in catalog:
+            hay = " ".join([p.get("name", ""), " ".join(p.get("aliases") or [])]).lower()
+            if not all(t in hay for t in toks):
+                continue
+            if not promo.applies_to(campaign, p):
+                out["not_covered"] = (
+                    f"{p.get('name')} is NOT in this offer. Say so plainly and "
+                    "kindly — quote its normal price; never stretch the offer to "
+                    "cover it.")
+                break
+            listed = _to_display(p.get("price"), ctx, p.get("price_usd"),
+                                 prices=p.get("prices"))
+            off = promo.offer_price(campaign, listed) if isinstance(listed, (int, float)) else None
+            if off is not None:
+                out["product"] = p.get("name")
+                out["list_price"] = listed
+                out["offer_price"] = off
+                out["currency"] = ctx.currency
+                out["say"] = (
+                    f"{campaign['name']}: {campaign['percent']}% off — "
+                    f"{p.get('name')} is {_fmt_price(listed, ctx.currency)}, "
+                    f"now {_fmt_price(off, ctx.currency)}")
+            break
+
+    # The line that stops a discount being spent for nothing.
+    out["then"] = ("State it in one breath and ASK FOR THE ORDER in the same "
+                   "message — a discount that doesn't get a yes is just lost "
+                   "margin. Give it once; never deepen it, never invent a "
+                   "second offer, and never offer it again to someone who "
+                   "already has it.")
+    return out
+
+
 _HANDLERS = {
     "search_catalog": _search_catalog,
+    "apply_offer": _apply_offer,
     "get_cart": _get_cart,
     "update_cart": _update_cart,
     "create_order": _create_order,
