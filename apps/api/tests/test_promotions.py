@@ -371,7 +371,10 @@ def test_the_order_note_no_longer_depends_on_a_running_campaign():
     import inspect
     from app.agent import tools
     src = inspect.getsource(tools._create_order)
-    assert "granted_promise" in src and "promise_note" in src
+    # The promise itself now travels to push_pending_order, which puts the
+    # percentage on the covered lines and writes the note describing what it
+    # did — so the order carries the discount as MONEY, not as a sentence.
+    assert "granted_promise" in src and "promise=" in src
     assert "campaign_now" not in src, "an ended campaign must not revoke a quoted price"
 
 

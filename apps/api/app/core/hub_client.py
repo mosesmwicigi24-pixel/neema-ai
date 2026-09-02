@@ -532,12 +532,12 @@ async def push_pending_order(
 
     _applied = _pending = 0
     if _pct > 0:
-        for l in stock_lines:
-            if _promo.promise_covers(promise, l):
-                l["discount_type"] = "percent"
-                l["discount_value"] = _pct
+        for line in stock_lines:
+            if _promo.promise_covers(promise, line):
+                line["discount_type"] = "percent"
+                line["discount_value"] = _pct
                 _applied += 1
-        _pending = sum(1 for l in mto_lines if _promo.promise_covers(promise, l))
+        _pending = sum(1 for m in mto_lines if _promo.promise_covers(promise, m))
 
     if promise:
         campaign_note = _promo.applied_note(promise, _applied, _pending)
