@@ -1100,7 +1100,8 @@ Move the conversation toward a confirmed order, but never pushy. Serve first.
 {business}{standing}{offer_block}{church}"""
 
 
-def customer_context(customer_name: str = "", country: str = "") -> str:
+def customer_context(customer_name: str = "", country: str = "",
+                     standing_offer: str = "") -> str:
     """The lines about THIS customer — the start of the per-customer system
     block that follows `build_system_prompt`'s shared one (the runtime appends
     call summaries, cross-channel history and deal guidance to it too).
@@ -1110,6 +1111,11 @@ def customer_context(customer_name: str = "", country: str = "") -> str:
     cache entry (~0.1× price) instead of WRITING its own copy. Position changes
     nothing for the model — it reads the whole system prompt either way."""
     lines = []
+    # A price already quoted to THIS person. It belongs here, not in the shared
+    # rules block: it is about them, and it must survive the campaign that
+    # produced it (services/promotions.promise_line).
+    if standing_offer:
+        lines.append(standing_offer)
     if customer_name:
         lines.append(f"- You are speaking with {customer_name}.")
     if country:
