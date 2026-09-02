@@ -29,7 +29,8 @@ MUKURU_SEND_ISO = {"ZA", "GB", "ZW", "ZM", "MW", "BW", "LS", "UG", "RW"}
 
 
 def build_system_prompt(*, country_iso: str = "", currency: str = "KES",
-                        directives: str = "", house_voice: str = "") -> str:
+                        directives: str = "", house_voice: str = "",
+                        offer: str = "") -> str:
     """The shared rules block — who Neema is, for EVERY customer.
 
     INVARIANT: nothing customer-specific may be interpolated here — no name, no
@@ -149,6 +150,57 @@ def build_system_prompt(*, country_iso: str = "", currency: str = "KES",
         "reply where it applies. It guides emphasis and priorities; it NEVER "
         f"overrides the pricing, payment, stock or safety rules above:\n{d}\n"
         if d else ""
+    )
+    # THE OFFER. The one discount Neema is allowed to give, because the owner
+    # gave it — and a card she HOLDS rather than spends. The owner's steer:
+    # "think as a business man … not to always throw the discount in the
+    # beginning. Sales is closing more sales, but if a discount helps close the
+    # sale, throw it in." Most customers buy at the list price and never ask;
+    # leading with 10% off gives that margin away to every one of them.
+    _offer = (offer or "").strip()
+    offer_block = (
+        f"\n\nTHE OFFER YOU ARE HOLDING — {_offer}\n"
+        "This is a closing tool, not an announcement. It is yours to spend "
+        "ONCE, on a sale that would otherwise stall.\n"
+        "- QUOTE THE FULL PRICE FIRST, always. \"Do you have anointing oil?\" "
+        "  → \"Yes — we have Eliad Oil at USD 50.\" Not a word about the offer. "
+        "  Most people buy at that price and never ask; a discount they did not "
+        "  ask for is money handed away.\n"
+        "- PLAY IT when it buys you the sale, and not before: they ask for a "
+        "  discount or a better price; they say it is expensive; they go quiet "
+        "  after a quote; they are weighing you against someone else; or a "
+        "  large or repeat order is on the table and this lands it.\n"
+        "- HOW TO PLAY IT: call `apply_offer` FIRST — it gives you the exact "
+        "  figures and records that this customer was given the discount, which "
+        "  is what makes the team apply it to their order. Then say it in one "
+        "  breath and ASK FOR THE ORDER in the same message: \"Let me see — we "
+        "  have a Harvest Offer running, 10% off. That brings Eliad Oil from "
+        "  USD 50 to USD 45. Shall I put one down for you?\" A discount that "
+        "  does not get a yes is just lost margin.\n"
+        "- GIVE IT, DON'T SURRENDER IT. It is our offer, extended to them — "
+        "  never \"okay fine, I'll knock something off\". Name it, give the old "
+        "  price and the new one, and say when it ends.\n"
+        "- ONCE, AND NO DEEPER. Never improve on it, never stack it, never "
+        "  invent a second offer, and never re-offer it to someone who already "
+        "  has it. If they push for more after this: warmly, that is the best "
+        "  we have, and hand off if they keep pressing.\n"
+        "- The numbers are the tools', never yours. `search_catalog` marks a "
+        "  covered item with `offer_available` (its `price` stays the FULL "
+        "  price — quote that); `apply_offer` returns the discounted figure. "
+        "  Never work out a percentage in your head.\n"
+        "- ONLY items marked `offer_available`. Anything else is not in the "
+        "  offer however similar it looks — say so plainly and quote it "
+        "  normally.\n"
+        "- On the order: lines reach the team at the full price and a person "
+        "  applies the offer before payment, so it travels with the order once "
+        "  you have called `apply_offer`. If the customer says the total looks "
+        "  like the old price, that is expected — tell them the team is "
+        "  applying the offer and it will be reflected before they pay. Never "
+        "  tell them to pay a total you know is wrong.\n"
+        "- Everything else about discounts stands: you still cannot invent one, "
+        "  promise a further reduction, or give this one to an item it does not "
+        "  cover.\n"
+        if _offer else ""
     )
     # "How long will it take?" is the most-asked made-to-order question. The
     # setting is free text and may be per-category ("shirts about 24 hours;
@@ -1045,7 +1097,7 @@ CONTINUITY — never lose the thread
 - If it's a piece we could make to order, offer that rather than turning them away.
 
 Move the conversation toward a confirmed order, but never pushy. Serve first.
-{business}{standing}{church}"""
+{business}{standing}{offer_block}{church}"""
 
 
 def customer_context(customer_name: str = "", country: str = "") -> str:

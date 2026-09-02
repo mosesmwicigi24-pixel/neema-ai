@@ -470,6 +470,7 @@ async def push_pending_order(
     items: list[dict],
     measurement_note: str = "",
     source_channel: str | None = None,
+    campaign_note: str = "",
 ) -> dict:
     """Create a pending order in the hub from a confirmed WhatsApp cart.
 
@@ -520,7 +521,11 @@ async def push_pending_order(
         "outlet_id": settings.hub_outlet_id,
         "channel": "whatsapp",
         "source_channel": _src,
-        "notes": (f"{_app} order via Neema"
+        # The campaign note leads: lines are pushed at LIST price and a person
+        # applies the offer, so this is the only thing standing between "Neema
+        # quoted 117" and "the customer was charged 130".
+        "notes": ((f"{campaign_note} " if campaign_note else "")
+                  + f"{_app} order via Neema"
                   + (f". {measurement_note}" if (measurement_note and _any_producible) else "")),
     }
     if stock_lines:

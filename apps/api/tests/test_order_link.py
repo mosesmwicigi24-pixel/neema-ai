@@ -12,7 +12,7 @@ must NOT resolve to a WhatsApp chat.
 """
 import pytest
 
-from app.routers.order_link import new_short_ref
+from app.routers.order_link import _ALPHABET, new_short_ref
 
 
 def test_short_ref_is_readable_over_the_phone():
@@ -20,7 +20,13 @@ def test_short_ref_is_readable_over_the_phone():
     for _ in range(200):
         ref = new_short_ref()
         assert len(ref) == 6
-        assert ref.isupper()
+        # Every character comes from the readable alphabet. NOT `ref.isupper()`:
+        # an all-digit ref like "428729" reads aloud perfectly but has no cased
+        # character, so isupper() is False. With 8 digits in a 32-character
+        # alphabet that is (8/32)**6 per ref — ~4.8% across 200 draws, so this
+        # test failed roughly one CI run in twenty for no real reason.
+        assert set(ref) <= set(_ALPHABET)
+        assert not any(c.islower() for c in ref)
         # I/O/0/1 are the pairs people mishear and mistype.
         assert not (set(ref) & set("IO01"))
 

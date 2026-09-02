@@ -182,7 +182,32 @@ export const settingsApi = {
         get<ApiTranslationSetting>("/admin/settings/translation"),
     putTranslation: (enabled: boolean) =>
         put<{ ok: boolean; enabled: boolean }>("/admin/settings/translation", { enabled }),
+    /** The offer Neema states outright while it runs. */
+    getOffer: () => get<ApiOfferSetting>("/admin/settings/offer"),
+    putOffer: (campaign: ApiCampaign | null) =>
+        put<{ ok: boolean; campaign: ApiCampaign | null; running: boolean; says: string }>(
+            "/admin/settings/offer", { campaign }),
 };
+
+export interface ApiCampaign {
+    name: string;
+    percent: number;
+    scope: "all" | "category" | "products";
+    categories: string[];
+    skus: string[];
+    starts_on: string | null;
+    /** Inclusive last day, YYYY-MM-DD. */
+    ends_on: string;
+}
+
+export interface ApiOfferSetting {
+    campaign: ApiCampaign | null;
+    /** Declared AND live today — a campaign past its end date is stored but not running. */
+    running: boolean;
+    /** The sentence Neema is told to say. */
+    says: string;
+    max_percent: number;
+}
 
 export interface ApiTranslationSetting {
     enabled: boolean;

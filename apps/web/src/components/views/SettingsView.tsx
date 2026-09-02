@@ -2,7 +2,8 @@
 import React, { useEffect, useState } from "react";
 import { Toggle } from "@/components/ui/Layout";
 import { InputField } from "@/components/ui/FormFields";
-import { settingsApi, type ApiTranslationSetting } from "@/lib/api";
+import { settingsApi, type ApiTranslationSetting,
+         type ApiCampaign, type ApiOfferSetting } from "@/lib/api";
 import type { SharedViewProps } from "@/types";
 
 // ── Platform SVG icons ────────────────────────────────────────────────────────
@@ -277,6 +278,133 @@ function TranslationCard({ onToast }: { onToast: SharedViewProps["onToast"] }) {
     );
 }
 
+/** The offer Neema states outright. Named, sized, scoped and dated — the four
+ *  things a customer needs, and the four a vague "we have a discount" leaves
+ *  out. Order lines still reach the hub at list price and a person applies the
+ *  offer, so the card says so rather than letting anyone assume otherwise. */
+function OfferCard({ onToast }: { onToast: SharedViewProps["onToast"] }) {
+    const [state, setState] = useState<ApiOfferSetting | null>(null);
+    const [draft, setDraft] = useState<ApiCampaign | null>(null);
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        let gone = false;
+        settingsApi.getOffer()
+            .then((r) => { if (!gone) { setState(r); setDraft(r.campaign); } })
+            .catch(() => { /* leave it loading rather than show a wrong state */ });
+        return () => { gone = true; };
+    }, []);
+
+    const blank = (): ApiCampaign => {
+        const end = new Date();
+        end.setMonth(end.getMonth() + 1);          // "for 1 month" is the common case
+        return { name: "", percent: 10, scope: "all", categories: [], skus: [],
+                 starts_on: null, ends_on: end.toISOString().slice(0, 10) };
+    };
+
+    const save = async (c: ApiCampaign | null) => {
+        setSaving(true);
+        try {
+            const r = await settingsApi.putOffer(c);
+            setState((s) => s ? { ...s, campaign: r.campaign, running: r.running, says: r.says } : s);
+            setDraft(r.campaign);
+            onToast(r.campaign
+                ? `Offer live — Neema will say: ${r.says}`
+                : "Offer ended — Neema stops mentioning it from her next reply");
+        } catch {
+            onToast("Couldn't save that offer (admin only, and it needs a name, a percentage and an end date)", "error");
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const set = (patch: Partial<ApiCampaign>) =>
+        setDraft((d) => ({ ...(d ?? blank()), ...patch }));
+
+    const list = (v: string) => v.split(",").map((x) => x.trim()).filter(Boolean);
+
+    return (
+        <SectionCard title="Offer running now"
+            description="A discount you have given. Neema states it outright — the offer's name, the old price, the new one, and when it ends — and stops the day it expires.">
+            {state === null ? (
+                <p className="text-xs text-stone-400">Loading…</p>
+            ) : (
+                <>
+                    {state.says && (
+                        <p className="text-xs text-[#16270c] bg-[#f3f9ec] border border-[#cee6b2] rounded-lg px-3 py-2 mb-3">
+                            Neema says: <span className="font-semibold">{state.says}</span>
+                        </p>
+                    )}
+                    {state.campaign && !state.running && (
+                        <p className="text-[10px] text-amber-700 mb-3">
+                            This offer has passed its end date — it is saved, but Neema is not mentioning it.
+                        </p>
+                    )}
+
+                    <Field label="Offer name" hint="What the customer hears it called.">
+                        <SmallInput value={draft?.name ?? ""} placeholder="Harvest Offer"
+                            onChange={(v: string) => set({ name: v })} />
+                    </Field>
+
+                    <div className="grid grid-cols-2 gap-3">
+                        <Field label="Discount %" hint={`1–${state.max_percent}`}>
+                            <SmallInput type="number" value={String(draft?.percent ?? 10)}
+                                onChange={(v: string) => set({ percent: Number(v) || 0 })} />
+                        </Field>
+                        <Field label="Last day" hint="Inclusive — it runs through this date.">
+                            <SmallInput type="date" value={draft?.ends_on ?? ""}
+                                onChange={(v: string) => set({ ends_on: v })} />
+                        </Field>
+                    </div>
+
+                    <Field label="Applies to">
+                        <select value={draft?.scope ?? "all"}
+                            onChange={(e) => set({ scope: e.target.value as ApiCampaign["scope"] })}
+                            className="w-full text-xs rounded-lg px-3 py-2 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-[#589b31]/40">
+                            <option value="all">Everything in the catalogue</option>
+                            <option value="category">Certain categories</option>
+                            <option value="products">Certain products</option>
+                        </select>
+                    </Field>
+
+                    {draft?.scope === "category" && (
+                        <Field label="Categories" hint="Comma-separated, as they appear in the hub. e.g. gowns, cassocks">
+                            <SmallInput value={(draft?.categories ?? []).join(", ")}
+                                onChange={(v: string) => set({ categories: list(v) })} />
+                        </Field>
+                    )}
+                    {draft?.scope === "products" && (
+                        <Field label="Product SKUs" hint="Comma-separated. Only these items get the offer.">
+                            <SmallInput value={(draft?.skus ?? []).join(", ")}
+                                onChange={(v: string) => set({ skus: list(v) })} />
+                        </Field>
+                    )}
+
+                    <p className="text-[10px] text-stone-400 mb-3 leading-relaxed">
+                        Orders still reach the hub at the list price with the offer noted on them —
+                        a person applies it before payment.
+                    </p>
+
+                    <div className="flex items-center gap-2">
+                        <button onClick={() => save(draft)} disabled={saving}
+                            className="h-8 px-4 rounded-lg text-xs font-semibold text-white transition-colors flex items-center gap-1.5 disabled:opacity-60"
+                            style={{ backgroundColor: "#589b31" }}>
+                            {saving && <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                            {saving ? "Saving…" : state.campaign ? "Update offer" : "Start offer"}
+                        </button>
+                        {state.campaign && (
+                            <button onClick={() => save(null)} disabled={saving}
+                                className="h-8 px-4 rounded-lg text-xs font-semibold text-stone-600 border border-stone-200 disabled:opacity-60">
+                                End it now
+                            </button>
+                        )}
+                    </div>
+                </>
+            )}
+        </SectionCard>
+    );
+}
+
 function SectionCard({ title, description, children }: {
     title: string; description?: string; children: React.ReactNode;
 }) {
@@ -379,6 +507,7 @@ export function SettingsView({ onToast, isMobile }: SharedViewProps): React.Reac
                 {/* Business */}
                 <StandingOrdersCard onToast={onToast} />
                 <TranslationCard onToast={onToast} />
+                <OfferCard onToast={onToast} />
 
                 <SectionCard title="Business" description="Core platform details">
                     <div className="grid grid-cols-2 gap-x-3">
