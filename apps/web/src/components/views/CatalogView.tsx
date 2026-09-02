@@ -4,8 +4,9 @@
 // maintained in the hub, shared across POS, the website and this WhatsApp agent,
 // so what an operator sees here is exactly what the agent quotes. Nothing is
 // edited from Neema; the hub is the single source of truth.
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { fmtCurrency } from "@/lib/utils";
+import { catalogApi, type ApiPriceAudit } from "@/lib/api";
 import type { CatalogItem, SharedViewProps } from "@/types";
 
 const catEmoji: Record<string, string> = {
@@ -74,6 +75,67 @@ interface CatalogViewProps extends SharedViewProps {
 
 // ── CatalogView (read-only operator view) ─────────────────────────────────────
 
+/** The hub's prices, checked against themselves. A USD row that is not
+ *  KES ÷ rate, or a pack good priced per single piece, is a wrong quote waiting
+ *  to happen — Neema repeats what the hub holds. Nothing here is editable:
+ *  the fix is in the hub, and this says which rows. */
+function PriceAuditBanner() {
+    const [audit, setAudit] = useState<ApiPriceAudit | null>(null);
+    const [open, setOpen] = useState(false);
+    useEffect(() => {
+        let gone = false;
+        catalogApi.audit().then((r) => { if (!gone) setAudit(r); }).catch(() => { /* stay hidden */ });
+        return () => { gone = true; };
+    }, []);
+    if (!audit) return null;
+    const gaps = audit.currency_gaps, pp = audit.per_piece;
+    if (gaps.length === 0 && pp.length === 0) return null;
+    const usd = (v: number) => (v < 1 ? `$${v.toFixed(2)}` : `$${Math.round(v).toLocaleString()}`);
+    return (
+        <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4">
+            <button onClick={() => setOpen((o) => !o)} className="w-full text-left">
+                <p className="text-sm font-semibold text-amber-900">
+                    {gaps.length > 0 && `${gaps.length} product${gaps.length === 1 ? "" : "s"} whose USD price in the hub disagrees with KES ÷ ${audit.rate}`}
+                    {gaps.length > 0 && pp.length > 0 && " · "}
+                    {pp.length > 0 && `${pp.length} pack good${pp.length === 1 ? "" : "s"} priced per single piece`}
+                </p>
+                <p className="text-xs text-amber-800 mt-0.5">
+                    Neema quotes exactly what the hub holds — these are wrong quotes waiting to happen. Fix the rows in the hub. {open ? "Hide" : "Show"} the list.
+                </p>
+            </button>
+            {open && (
+                <div className="mt-3 space-y-3">
+                    {gaps.length > 0 && (
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-xs">
+                                <thead className="text-amber-900/70">
+                                    <tr><th className="text-left py-1">Product</th><th className="text-right">KES</th><th className="text-right">USD in hub</th><th className="text-right">KES ÷ {audit.rate}</th></tr>
+                                </thead>
+                                <tbody>
+                                    {gaps.map((g) => (
+                                        <tr key={g.name} className="border-t border-amber-200">
+                                            <td className="py-1 pr-2 text-amber-950">{g.name}<span className="text-amber-700/70"> · {g.category}</span></td>
+                                            <td className="text-right tabular-nums">{g.kes.toLocaleString()}</td>
+                                            <td className={`text-right tabular-nums font-semibold ${g.usd > g.usd_expected ? "text-red-700" : "text-blue-700"}`}>{usd(g.usd)}</td>
+                                            <td className="text-right tabular-nums">{usd(g.usd_expected)}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                    {pp.length > 0 && (
+                        <p className="text-xs text-amber-900">
+                            <span className="font-semibold">Priced per piece, no pack size in the name:</span>{" "}
+                            {pp.map((x) => `${x.name} (KES ${x.kes ?? "?"})`).join(", ")}. Neema says "each" and asks how many — she will not invent a pack price. Give these rows a pack quantity and a pack price in the hub.
+                        </p>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
 export function CatalogView({
     catalog,
     isMobile,
@@ -103,6 +165,7 @@ export function CatalogView({
         <div
             className={`flex-1 overflow-y-auto bg-[#f3f9ec] ${isMobile ? "p-4 pb-24" : "p-6"}`}
         >
+            <PriceAuditBanner />
             {/* Header */}
             <div className="flex items-center justify-between mb-4">
                 <div>
