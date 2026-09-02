@@ -2100,14 +2100,22 @@ async def _apply_offer(args: dict, ctx: ToolContext) -> dict:
     out = {
         "offer": {"name": campaign["name"], "percent": campaign["percent"],
                   "ends_on": campaign["ends_on"]},
-        # Records the TERMS, not just the fact — so an order placed after the
-        # campaign ends still carries what this customer was actually told.
-        "granted": await promo.mark_granted(ctx.redis, ctx.channel, ctx.wa_id,
-                                            campaign),
     }
 
+    # A promise is recorded ONLY once we have actually quoted the offer to this
+    # customer. The grant used to be written here, before the eligibility check
+    # below had run — so asking about a product the campaign EXCLUDES recorded a
+    # 45-day promise anyway, and Neema said "not covered" in the same breath.
+    # The next order they placed, of anything at all, then carried a note
+    # telling the team a discount was owed. A blanket discount, earned by
+    # asking about the one thing it did not cover.
+    #
+    # Asking with no product named is a general "what's on?" — stating the
+    # campaign IS the quote, so that still grants. Anything else has to earn it.
     wanted = (args.get("product") or "").strip().lower()
+    quoted = not wanted
     if wanted:
+        quoted = False
         catalog = await svc.catalog_items(ctx.db, ctx.redis)
         toks = [t for t in wanted.split() if t]
         for p in catalog:
@@ -2132,7 +2140,16 @@ async def _apply_offer(args: dict, ctx: ToolContext) -> dict:
                     f"{campaign['name']}: {campaign['percent']}% off — "
                     f"{p.get('name')} is {_fmt_price(listed, ctx.currency)}, "
                     f"now {_fmt_price(off, ctx.currency)}")
+                quoted = True
             break
+
+    # Now, and only now: record the TERMS this customer was actually told — so
+    # an order placed after the campaign ends still carries what was said, and
+    # a conversation that was never quoted a price carries nothing.
+    out["granted"] = (
+        await promo.mark_granted(ctx.redis, ctx.channel, ctx.wa_id, campaign)
+        if quoted else False
+    )
 
     # The line that stops a discount being spent for nothing.
     out["then"] = ("State it in one breath and ASK FOR THE ORDER in the same "
