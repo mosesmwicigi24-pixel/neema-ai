@@ -501,6 +501,11 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
         ctx = _dc_replace(ctx, currency=cur)
     query = (args.get("query") or "").lower().strip()
     catalog = await svc.catalog_items(ctx.db, ctx.redis)
+    # An offer the owner declared (services/promotions). Fetched once per
+    # search, and priced by CODE below — a model doing 10% off 130 in its head
+    # is how a customer gets quoted 118.
+    from app.services import promotions as promo
+    campaign = await promo.campaign_now(ctx.redis)
     toks = [t for t in query.split() if t]
 
     def _hay(p: dict) -> str:
@@ -548,6 +553,25 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
                                    "'free'; call check_availability, tell them "
                                    "you're confirming the price, keep selling "
                                    "the rest")
+        # THE OFFER, if this item is in one. Computed from the price the
+        # customer is actually being shown, so it is right in KES, USD and ZMW
+        # alike and never double-rounded. `was` and `now` are both given so the
+        # saving is stated outright rather than implied.
+        if campaign and promo.applies_to(campaign, p) and isinstance(row.get("price"), (int, float)):
+            _now = promo.offer_price(campaign, row["price"])
+            if _now is not None:
+                row["offer"] = {
+                    "name": campaign["name"],
+                    "percent": campaign["percent"],
+                    "was": row["price"],
+                    "now": _now,
+                    "ends_on": campaign["ends_on"],
+                    "say": (f"{campaign['name']}: {campaign['percent']}% off — "
+                            f"{_fmt_price(row['price'], ctx.currency)}, now "
+                            f"{_fmt_price(_now, ctx.currency)}"),
+                }
+                row["price"] = _now      # quote the offer price; `offer.was` keeps the original
+
         # The hub's enriched product copy (fabric, embroidery, care, contents) —
         # this is what makes Neema's product talk SPECIFIC instead of generic.
         details = (p.get("description") or "").strip()
@@ -579,6 +603,15 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
                                       prices=v.get("prices"))}
                 for v in variants
             ]
+            # A size L cassock is in the offer exactly as much as the size S —
+            # discounting the headline price but not the variants is how the
+            # customer who picks a size loses the offer.
+            if row.get("offer"):
+                for vr in row["variants"]:
+                    _vn = promo.offer_price(campaign, vr["price"]) \
+                        if isinstance(vr.get("price"), (int, float)) else None
+                    if _vn is not None:
+                        vr["was"], vr["price"] = vr["price"], _vn
             prices = [vr["price"] for vr in row["variants"] if isinstance(vr["price"], (int, float))]
             if prices and min(prices) != max(prices):
                 row["price_range"] = {"from": min(prices), "to": max(prices)}
@@ -809,6 +842,11 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
 
     country_iso = (resolve_country(order_wa_id) or {}).get("country_iso")
     catalog = await svc.catalog_items(ctx.db, ctx.redis)
+    try:
+        from app.services import promotions as _promo
+        _promo_note = _promo.order_note(await _promo.campaign_now(ctx.redis))
+    except Exception:
+        _promo_note = ""          # no offer recorded beats no order created
 
     try:
         pushed = await hub_client.push_pending_order(
@@ -818,6 +856,9 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
             # reached the hub labelled WhatsApp, so a Messenger buyer's order
             # offered a WhatsApp button that could not reach them.
             source_channel=ctx.channel,
+            # Neema quoted the offer price; the hub gets list price. This note
+            # is what tells the person applying it that a discount is owed.
+            campaign_note=_promo_note,
         )
     except ValueError as exc:
         return {"error": "none of the cart items could be matched to the hub",

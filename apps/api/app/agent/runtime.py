@@ -776,11 +776,20 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         _house = await get_house_voice(db, redis)
     except Exception:
         _house = ""
+    # The offer the owner declared, if one is running today. Best-effort: no
+    # campaign, an expired one, or a settings hiccup all mean "no offer", and
+    # silence never gives away margin.
+    try:
+        from app.services import promotions as _promo
+        _offer = _promo.describe(await _promo.campaign_now(redis))
+    except Exception:
+        _offer = ""
     system = build_system_prompt(
         country_iso=loc.get("country_iso") or "",
         currency=currency,
         directives=_directives,
         house_voice=_house,
+        offer=_offer,
     )
     if is_meta:
         system += _public_comment_addendum(currency) if public_comment else _meta_addendum(currency)

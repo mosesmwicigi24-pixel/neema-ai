@@ -1122,6 +1122,50 @@ async def put_translation_setting(
     return {"ok": True, "enabled": enabled}
 
 
+# ── The offer running now (services/promotions) ──────────────────────────────
+
+@router.get("/settings/offer")
+async def get_offer(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """The declared offer, whether it is live today, and how Neema states it."""
+    from app.services import promotions as promo
+    from app.services.app_settings import get_value
+
+    redis = getattr(request.app.state, "redis", None)
+    stored = promo.parse(await get_value(db, promo.CAMPAIGN_KEY))
+    live = await promo.active_campaign(db, redis)
+    return {"campaign": stored,
+            "running": bool(live),
+            "says": promo.describe(live),
+            "max_percent": promo.MAX_PERCENT}
+
+
+@router.put("/settings/offer")
+async def put_offer(
+    body: dict,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Declare the offer, or end it by sending `{"campaign": null}`.
+
+    Admin-only: this gives away margin on every quote until its end date.
+    """
+    if not (getattr(agent, "is_superuser", False) or str(agent.role) in ("admin", "AgentRole.admin")):
+        raise HTTPException(status_code=403, detail="Admin only")
+    from app.services import promotions as promo
+    redis = getattr(request.app.state, "redis", None)
+    try:
+        c = await promo.set_campaign(db, redis, body.get("campaign"), updated_by=agent.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"ok": True, "campaign": c, "running": promo.is_running(c),
+            "says": promo.describe(c)}
+
+
 # ── Rule proposals (plan D4) — the weekly distillation, owner-approved ───────
 
 @router.get("/settings/proposals")
