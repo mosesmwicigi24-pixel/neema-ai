@@ -268,7 +268,8 @@ def test_an_order_carries_the_offer_only_when_it_was_actually_given():
     import inspect
     from app.agent import tools
     src = inspect.getsource(tools._create_order)
-    assert "was_granted" in src, "every order would otherwise be discounted"
+    # The note is built from THIS customer's promise; no promise, no note.
+    assert "granted_promise" in src, "every order would otherwise be discounted"
 
 
 class _GrantRedis:
@@ -303,3 +304,72 @@ def test_granting_survives_a_dead_redis_without_raising():
     assert asyncio.run(promo.mark_granted(_Boom(), "whatsapp", "x", "H")) is False
     assert asyncio.run(promo.was_granted(_Boom(), "whatsapp", "x")) is False
     assert asyncio.run(promo.was_granted(None, "whatsapp", "x")) is False
+
+
+# ── a price already quoted is a promise ──────────────────────────────────────
+# The offer was switched off the day after Neema quoted someone the offer
+# price. Before this, their order silently reverted to the full price: the
+# note was built from the campaign, and the campaign was gone. You do not take
+# back a price you have given — and the customer would never learn why.
+
+def _promised(redis, channel="whatsapp", key="254700000000"):
+    c = _c(percent=10)
+    asyncio.run(promo.mark_granted(redis, channel, key, c))
+    return asyncio.run(promo.granted_promise(redis, channel, key))
+
+
+def test_the_terms_are_recorded_not_just_the_fact():
+    p = _promised(_GrantRedis())
+    assert p["name"] == "Harvest Offer" and p["percent"] == 10 and p["at"]
+
+
+def test_the_order_honours_it_after_the_campaign_ends():
+    # No campaign running at all — the note comes from the promise regardless.
+    note = promo.promise_note(_promised(_GrantRedis()))
+    assert "Harvest Offer" in note and "10% off" in note
+    assert "was QUOTED" in note and "APPLY before taking payment" in note
+    assert "even if the offer has since ended" in note
+
+
+def test_a_customer_who_was_never_promised_anything_gets_no_note():
+    assert promo.promise_note(None) == ""
+    assert promo.promise_note({}) == ""
+    assert promo.promise_note(asyncio.run(
+        promo.granted_promise(_GrantRedis(), "whatsapp", "254799999999"))) == ""
+
+
+def test_neema_is_told_the_price_stands_so_she_does_not_quote_higher():
+    line = promo.promise_line(_promised(_GrantRedis()))
+    assert "THAT PRICE STANDS" in line
+    assert "even if the offer has since ended" in line
+    # …and she must not treat it as a fresh card to play again.
+    assert "do not offer it a second time" in line
+    assert promo.promise_line(None) == ""
+
+
+def test_the_promise_reaches_the_per_customer_block_only():
+    from app.agent.prompt import build_system_prompt, customer_context
+    line = promo.promise_line(_promised(_GrantRedis()))
+    assert line in customer_context("Pastor Moses", "Kenya", line)
+    # The shared rules block is byte-identical fleet-wide — a per-customer
+    # promise in there would break the cached prefix for everyone.
+    assert line not in build_system_prompt(offer="Harvest Offer — 10% off")
+
+
+def test_an_older_bare_name_grant_still_counts_as_a_promise():
+    # Grants written before the terms were stored held just the campaign name.
+    r = _GrantRedis()
+    r.store[promo._grant_key("whatsapp", "254700000000")] = "Harvest Offer"
+    p = asyncio.run(promo.granted_promise(r, "whatsapp", "254700000000"))
+    assert p["name"] == "Harvest Offer" and p["percent"] is None
+    note = promo.promise_note(p)
+    assert "the offer price was QUOTED" in note      # no percentage to quote back
+    assert "Honour it" in note
+
+
+def test_the_order_note_no_longer_depends_on_a_running_campaign():
+    import inspect
+    from app.agent import tools
+    src = inspect.getsource(tools._create_order)
+    assert "granted_promise" in src and "promise_note" in src
+    assert "campaign_now" not in src, "an ended campaign must not revoke a quoted price"

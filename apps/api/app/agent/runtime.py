@@ -801,7 +801,15 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     # so the rules block above stays byte-identical fleet-wide and every turn
     # reads it from one shared cache entry instead of writing its own copy
     # (block 0 carries the 1h-TTL breakpoint — see llm._cached_system).
-    tail = customer_context(customer_name, loc.get("country") or "")
+    # A price we already gave this customer stands, whatever the campaign is
+    # doing now — otherwise she quotes them MORE today than yesterday.
+    try:
+        from app.services import promotions as _promo2
+        _promise = _promo2.promise_line(
+            await _promo2.granted_promise(redis, channel, key))
+    except Exception:
+        _promise = ""
+    tail = customer_context(customer_name, loc.get("country") or "", _promise)
 
     # 40 messages of context (was 20): re-asking an answered question is the
     # most robotic failure there is, and it usually happened because the answer

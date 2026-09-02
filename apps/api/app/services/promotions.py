@@ -216,25 +216,88 @@ def _grant_key(channel: str, key: str) -> str:
     return f"offer:granted:{channel or 'whatsapp'}:{key}"
 
 
-async def mark_granted(redis, channel: str, key: str, name: str) -> bool:
-    """Record that this customer was actually offered the discount."""
+async def mark_granted(redis, channel: str, key: str, campaign) -> bool:
+    """Record the TERMS this customer was promised — not merely that they were.
+
+    A price you have quoted is a promise, and a promise does not expire because
+    the campaign behind it did. Storing the name, the percentage and the day it
+    was given means an order placed after the offer ends still carries what was
+    actually said to them.
+    """
     if redis is None or not key:
         return False
+    c = campaign if isinstance(campaign, dict) else {"name": str(campaign or "")}
+    promise = {"name": c.get("name") or "", "percent": c.get("percent"),
+               "at": _today().isoformat()}
     try:
-        await redis.set(_grant_key(channel, key), name or "1", ex=_GRANT_TTL)
+        await redis.set(_grant_key(channel, key), json.dumps(promise), ex=_GRANT_TTL)
         return True
     except Exception:
         return False
 
 
-async def was_granted(redis, channel: str, key: str) -> bool:
-    """Was it? Only then does the order carry it."""
+async def granted_promise(redis, channel: str, key: str) -> dict | None:
+    """What this customer was promised, if anything.
+
+    Tolerates the older format, which stored the campaign name as bare text:
+    those still count as a promise, just without a percentage to quote back.
+    """
     if redis is None or not key:
-        return False
+        return None
     try:
-        return bool(await redis.get(_grant_key(channel, key)))
+        raw = await redis.get(_grant_key(channel, key))
     except Exception:
-        return False
+        return None
+    if not raw:
+        return None
+    s = raw.decode() if isinstance(raw, bytes) else str(raw)
+    try:
+        p = json.loads(s)
+        if isinstance(p, dict) and p.get("name"):
+            return p
+    except Exception:
+        pass
+    return {"name": s, "percent": None, "at": None} if s and s != "1" else None
+
+
+async def was_granted(redis, channel: str, key: str) -> bool:
+    """Was it? Kept as the plain question; the terms are in granted_promise."""
+    return bool(await granted_promise(redis, channel, key))
+
+
+def promise_note(promise: dict | None) -> str:
+    """The order note for a promise ALREADY MADE.
+
+    Deliberately independent of whether the campaign still runs: withdrawing a
+    price you already gave someone is how a discount turns into a complaint,
+    and they never find out from us that the offer ended the day before.
+    """
+    if not promise or not promise.get("name"):
+        return ""
+    pct = promise.get("percent")
+    size = f"{pct}% off" if pct else "the offer price"
+    when = f" on {promise['at']}" if promise.get("at") else ""
+    return (f"{promise['name']}: {size} was QUOTED to this customer{when}. "
+            f"Honour it — APPLY before taking payment, even if the offer has "
+            f"since ended.")
+
+
+def promise_line(promise: dict | None) -> str:
+    """What Neema must be told, so she does not contradict her own quote.
+
+    Without this she reads the catalogue's full price, sees no running offer,
+    and quotes a higher number than she gave this same person yesterday.
+    """
+    if not promise or not promise.get("name"):
+        return ""
+    pct = promise.get("percent")
+    size = f" ({pct}% off)" if pct else ""
+    when = f" on {promise['at']}" if promise.get("at") else ""
+    return (f"- You already gave this customer our {promise['name']}{size}"
+            f"{when}. THAT PRICE STANDS: quote it again if they come back to "
+            f"the same item, even if the offer has since ended — we do not take "
+            f"back a price we have given. Do not deepen it, and do not offer it "
+            f"a second time as though it were new.")
 
 
 # ── storage (app_settings row, redis-cached like the other live settings) ────

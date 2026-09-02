@@ -869,12 +869,13 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
     catalog = await svc.catalog_items(ctx.db, ctx.redis)
     try:
         from app.services import promotions as _promo
-        # ONLY if this conversation was actually granted the offer. A customer
-        # who paid list price without ever asking must not be discounted by a
-        # note nobody meant — that margin is the whole point of holding it back.
-        _promo_note = (
-            _promo.order_note(await _promo.campaign_now(ctx.redis))
-            if await _promo.was_granted(ctx.redis, ctx.channel, ctx.wa_id) else "")
+        # Built from what this customer was PROMISED, not from what is running
+        # now. Two things follow: a customer who never asked is never quietly
+        # discounted (no promise, no note), and one who was quoted the offer
+        # price still gets it even if the campaign ended in between — we do not
+        # withdraw a price we have already given.
+        _promo_note = _promo.promise_note(
+            await _promo.granted_promise(ctx.redis, ctx.channel, ctx.wa_id))
     except Exception:
         _promo_note = ""          # no offer recorded beats no order created
 
@@ -2084,8 +2085,10 @@ async def _apply_offer(args: dict, ctx: ToolContext) -> dict:
     out = {
         "offer": {"name": campaign["name"], "percent": campaign["percent"],
                   "ends_on": campaign["ends_on"]},
+        # Records the TERMS, not just the fact — so an order placed after the
+        # campaign ends still carries what this customer was actually told.
         "granted": await promo.mark_granted(ctx.redis, ctx.channel, ctx.wa_id,
-                                            campaign["name"]),
+                                            campaign),
     }
 
     wanted = (args.get("product") or "").strip().lower()
