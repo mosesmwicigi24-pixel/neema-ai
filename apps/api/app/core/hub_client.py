@@ -57,7 +57,14 @@ def _all_prices(prices_list) -> dict:
         code = (pr.get("currency_code") or "").upper()
         if not (code.isalpha() and len(code) == 3):
             continue
-        val = pr.get("sale_price") or pr.get("regular_price")
+        # effective_price is the hub's OWN answer to "what does this cost
+        # today" — window-aware, promotion-aware, and the exact number its
+        # order path will charge. Reading sale_price ourselves meant honouring
+        # a sale whose window had closed, and quoting 18,000 for a Preaching
+        # Gown the hub then billed at 20,000. Fall back for an older hub.
+        val = pr.get("effective_price")
+        if val in (None, ""):
+            val = pr.get("sale_price") or pr.get("regular_price")
         try:
             v = float(val) if val not in (None, "") else 0.0
         except (TypeError, ValueError):
@@ -342,6 +349,10 @@ def resolve_hub_line(item: dict, catalog: list[dict]) -> dict | None:
             "matched_by": matched_by,
             "product_type": p.get("product_type") or "simple",
             "is_producible": bool(p.get("is_producible")),
+            # Carried so a promised campaign can be matched against its scope
+            # without going back to the catalogue.
+            "sku": p.get("sku") or "",
+            "category": p.get("category") or "",
         }
 
     by_sku = {_norm(p.get("sku")): p for p in catalog if p.get("sku")}
@@ -471,6 +482,7 @@ async def push_pending_order(
     measurement_note: str = "",
     source_channel: str | None = None,
     campaign_note: str = "",
+    promise: dict | None = None,
 ) -> dict:
     """Create a pending order in the hub from a confirmed WhatsApp cart.
 
@@ -502,6 +514,34 @@ async def push_pending_order(
     # items are 'simple' in the hub and route via items[] (the stock path),
     # which has no per-line production_notes — the workshop must still see the
     # customer's figures whichever path the line took.
+    # ── the discount this customer was promised, as MONEY ───────────────────
+    # It used to travel only as a sentence in the order notes, so a customer
+    # quoted 117 got a link for 130 and could pay it before anyone read the
+    # note. The hub prices the line itself and applies the percentage to its
+    # own figure, so Neema asserts only what she PROMISED, never the amount.
+    #
+    # Made-to-order lines carry no discount field in the hub's production_items,
+    # so those still need a person — and the note now says which is which
+    # instead of telling them to apply a discount that is already on.
+    from app.services import promotions as _promo
+    _pct = (promise or {}).get("percent")
+    try:
+        _pct = float(_pct) if _pct not in (None, "") else 0.0
+    except (TypeError, ValueError):
+        _pct = 0.0
+
+    _applied = _pending = 0
+    if _pct > 0:
+        for line in stock_lines:
+            if _promo.promise_covers(promise, line):
+                line["discount_type"] = "percent"
+                line["discount_value"] = _pct
+                _applied += 1
+        _pending = sum(1 for m in mto_lines if _promo.promise_covers(promise, m))
+
+    if promise:
+        campaign_note = _promo.applied_note(promise, _applied, _pending)
+
     _any_producible = bool(mto_lines) or any(l.get("is_producible") for l in stock_lines)
     # `channel` stays 'whatsapp': it is the hub's SALES BUCKET (chat), and every
     # conversational order belongs there whichever app carried it.
@@ -533,6 +573,9 @@ async def push_pending_order(
             {
                 "product_id": l["product_id"], "quantity": l["quantity"],
                 "unit_price": l["unit_price"],
+                **({"discount_type": l["discount_type"],
+                    "discount_value": l["discount_value"]}
+                   if l.get("discount_type") else {}),
                 # Variable stock products track inventory per-variant, so the hub
                 # needs the variant_id (a bare product_id fails its stock check).
                 **({"variant_id": l["variant_id"]} if l.get("variant_id") else {}),

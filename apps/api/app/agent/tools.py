@@ -889,10 +889,9 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
         # discounted (no promise, no note), and one who was quoted the offer
         # price still gets it even if the campaign ended in between — we do not
         # withdraw a price we have already given.
-        _promo_note = _promo.promise_note(
-            await _promo.granted_promise(ctx.redis, ctx.channel, ctx.wa_id))
+        _granted = await _promo.granted_promise(ctx.redis, ctx.channel, ctx.wa_id)
     except Exception:
-        _promo_note = ""          # no offer recorded beats no order created
+        _granted = None           # no offer recorded beats no order created
 
     try:
         pushed = await hub_client.push_pending_order(
@@ -902,9 +901,11 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
             # reached the hub labelled WhatsApp, so a Messenger buyer's order
             # offered a WhatsApp button that could not reach them.
             source_channel=ctx.channel,
-            # Neema quoted the offer price; the hub gets list price. This note
-            # is what tells the person applying it that a discount is owed.
-            campaign_note=_promo_note,
+            # The promise itself, not a sentence about it: push_pending_order
+            # puts the percentage on the lines it covers so the customer is
+            # charged what they were quoted, and writes the note describing
+            # what it actually did.
+            promise=_granted,
         )
     except ValueError as exc:
         return {"error": "none of the cart items could be matched to the hub",
