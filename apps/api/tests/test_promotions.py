@@ -373,3 +373,109 @@ def test_the_order_note_no_longer_depends_on_a_running_campaign():
     src = inspect.getsource(tools._create_order)
     assert "granted_promise" in src and "promise_note" in src
     assert "campaign_now" not in src, "an ended campaign must not revoke a quoted price"
+
+
+# ── a promise is only made when the offer was actually quoted ────────────────
+# The grant used to be written the moment apply_offer ran, BEFORE the tool had
+# checked whether the campaign covered what the customer asked about. So asking
+# after an excluded product recorded a 45-day promise while Neema said, in the
+# same breath, that it was not covered — and the next order they placed, of
+# anything at all, carried a note telling the team a discount was owed.
+
+class _OfferCtx:
+    """The slice of ToolContext _apply_offer actually reads."""
+    def __init__(self, redis):
+        self.redis, self.channel, self.wa_id = redis, "whatsapp", "254700000000"
+        self.db, self.currency = None, "KES"
+
+
+def _run_apply_offer(monkeypatch, campaign, catalog, product):
+    from app.agent import tools
+    from app.services import promotions as _p
+
+    async def _campaign_now(_r):
+        return campaign
+    async def _catalog_items(_db, _r):
+        return catalog
+
+    monkeypatch.setattr(_p, "campaign_now", _campaign_now)
+    monkeypatch.setattr(tools.svc, "catalog_items", _catalog_items)
+
+    redis = _GrantRedis()
+    ctx = _OfferCtx(redis)
+    out = asyncio.run(tools._apply_offer({"product": product} if product else {}, ctx))
+    return out, asyncio.run(_p.was_granted(redis, "whatsapp", "254700000000"))
+
+
+def test_asking_about_an_excluded_product_records_no_promise(monkeypatch):
+    campaign = _c(scope="category", categories=["Gowns"])
+    catalog = [{"name": "Chalice Cup", "sku": "CH-1", "category": "Chalices",
+                "price": 5000, "aliases": []}]
+
+    out, granted = _run_apply_offer(monkeypatch, campaign, catalog, "chalice cup")
+
+    assert "not_covered" in out, "she must still say plainly that it is excluded"
+    assert out["granted"] is False
+    assert granted is False, "an excluded product must not buy a 45-day discount"
+
+
+def test_a_covered_product_is_quoted_and_promised(monkeypatch):
+    campaign = _c(scope="category", categories=["Gowns"])
+    catalog = [{"name": "Canon Gown", "sku": "CG-1", "category": "Gowns",
+                "price": 10000, "aliases": []}]
+
+    out, granted = _run_apply_offer(monkeypatch, campaign, catalog, "canon gown")
+
+    assert out["offer_price"] == 9000
+    assert out["granted"] is True
+    assert granted is True
+
+
+def test_a_product_we_do_not_stock_records_nothing(monkeypatch):
+    # Nothing was quoted, so nothing was promised.
+    campaign = _c()
+    catalog = [{"name": "Canon Gown", "sku": "CG-1", "category": "Gowns",
+                "price": 10000, "aliases": []}]
+
+    out, granted = _run_apply_offer(monkeypatch, campaign, catalog, "hovercraft")
+
+    assert out["granted"] is False
+    assert granted is False
+
+
+def test_asking_what_is_on_offer_still_counts_as_a_quote(monkeypatch):
+    # No product named: stating the campaign IS the quote.
+    out, granted = _run_apply_offer(monkeypatch, _c(), [], None)
+
+    assert out["granted"] is True
+    assert granted is True
+
+
+def test_no_campaign_promises_nothing(monkeypatch):
+    out, granted = _run_apply_offer(monkeypatch, None, [], "canon gown")
+
+    assert out["offer"] is None
+    assert granted is False
+
+
+# ── the note names its own limit ─────────────────────────────────────────────
+
+def test_the_note_says_what_a_scoped_offer_does_not_cover():
+    r = _GrantRedis()
+    asyncio.run(promo.mark_granted(r, "whatsapp", "254700000000",
+                                   _c(scope="category", categories=["Gowns"])))
+    note = promo.promise_note(
+        asyncio.run(promo.granted_promise(r, "whatsapp", "254700000000")))
+
+    assert "Gowns" in note
+    assert "full price for anything else" in note, \
+        "a person reading this must not discount the whole order"
+
+
+def test_an_everything_offer_needs_no_limit_clause():
+    r = _GrantRedis()
+    asyncio.run(promo.mark_granted(r, "whatsapp", "254700000000", _c()))
+    note = promo.promise_note(
+        asyncio.run(promo.granted_promise(r, "whatsapp", "254700000000")))
+
+    assert "covers ONLY" not in note

@@ -229,6 +229,15 @@ async def mark_granted(redis, channel: str, key: str, campaign) -> bool:
     c = campaign if isinstance(campaign, dict) else {"name": str(campaign or "")}
     promise = {"name": c.get("name") or "", "percent": c.get("percent"),
                "at": _today().isoformat()}
+    # What the offer COVERS travels with it. The note a person reads before
+    # taking payment used to say only "X% off — honour it", so an offer scoped
+    # to one category read as an offer on the whole order. Carrying the scope
+    # means the note can name its own limit.
+    scope = c.get("scope")
+    if scope in ("category", "products"):
+        promise["scope"] = scope
+        promise["covers"] = _clean_list(
+            c.get("categories") if scope == "category" else c.get("skus"))
     try:
         await redis.set(_grant_key(channel, key), json.dumps(promise), ex=_GRANT_TTL)
         return True
@@ -277,9 +286,16 @@ def promise_note(promise: dict | None) -> str:
     pct = promise.get("percent")
     size = f"{pct}% off" if pct else "the offer price"
     when = f" on {promise['at']}" if promise.get("at") else ""
+    covers = promise.get("covers") or []
+    if covers:
+        what = ", ".join(covers[:8]) + ("…" if len(covers) > 8 else "")
+        limit = (f" It covers ONLY {what} — charge full price for anything else "
+                 f"on this order.")
+    else:
+        limit = ""
     return (f"{promise['name']}: {size} was QUOTED to this customer{when}. "
             f"Honour it — APPLY before taking payment, even if the offer has "
-            f"since ended.")
+            f"since ended.{limit}")
 
 
 def promise_line(promise: dict | None) -> str:
