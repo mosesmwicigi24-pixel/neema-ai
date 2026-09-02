@@ -479,3 +479,66 @@ def test_an_everything_offer_needs_no_limit_clause():
         asyncio.run(promo.granted_promise(r, "whatsapp", "254700000000")))
 
     assert "covers ONLY" not in note
+
+
+# ── the promise travels as money, not as a sentence ──────────────────────────
+# It used to reach the hub only as a note in the order: lines were pushed at
+# list price and a person was expected to apply the discount by hand. Meanwhile
+# the customer already had the durable order link — so someone quoted 117 could
+# open it, see 130, and pay 130 before anybody read the note.
+
+def test_a_promise_covers_everything_when_it_named_no_scope():
+    r = _GrantRedis()
+    asyncio.run(promo.mark_granted(r, "whatsapp", "254700000000", _c()))
+    p = asyncio.run(promo.granted_promise(r, "whatsapp", "254700000000"))
+
+    assert promo.promise_covers(p, {"sku": "ANY-1", "category": "Chalices"})
+
+
+def test_a_category_promise_covers_only_that_category():
+    r = _GrantRedis()
+    asyncio.run(promo.mark_granted(r, "whatsapp", "254700000000",
+                                   _c(scope="category", categories=["Gowns"])))
+    p = asyncio.run(promo.granted_promise(r, "whatsapp", "254700000000"))
+
+    assert promo.promise_covers(p, {"sku": "CG-1", "category": "gowns"})
+    assert not promo.promise_covers(p, {"sku": "CH-1", "category": "Chalices"})
+
+
+def test_a_sku_promise_covers_only_those_skus():
+    r = _GrantRedis()
+    asyncio.run(promo.mark_granted(r, "whatsapp", "254700000000",
+                                   _c(scope="products", skus=["GOWN-01"])))
+    p = asyncio.run(promo.granted_promise(r, "whatsapp", "254700000000"))
+
+    assert promo.promise_covers(p, {"sku": "gown-01", "category": "Gowns"})
+    assert not promo.promise_covers(p, {"sku": "GOWN-02", "category": "Gowns"})
+
+
+def test_no_promise_covers_nothing():
+    assert not promo.promise_covers(None, {"sku": "X", "category": "Y"})
+
+
+def test_the_note_says_it_is_already_on_the_order():
+    # The old note said "APPLY before taking payment". Said now, over lines that
+    # already carry the discount, it would have a person discount it twice.
+    note = promo.applied_note({"name": "Harvest Offer", "percent": 10, "at": "2026-09-02"},
+                              applied=2, pending=0)
+
+    assert "ALREADY ON" in note
+    assert "Do not apply it again" in note
+
+
+def test_the_note_singles_out_the_made_to_order_lines():
+    # The hub's production_items carry no discount field, so those still need a
+    # person — and the note must say WHICH, not "apply it" over everything.
+    note = promo.applied_note({"name": "Harvest Offer", "percent": 10, "at": None},
+                              applied=1, pending=1)
+
+    assert "already on the stocked lines" in note
+    assert "made-to-order" in note
+
+
+def test_a_promise_that_touches_nothing_in_this_order_says_nothing():
+    assert promo.applied_note({"name": "Harvest Offer", "percent": 10},
+                              applied=0, pending=0) == ""

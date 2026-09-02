@@ -298,6 +298,54 @@ def promise_note(promise: dict | None) -> str:
             f"since ended.{limit}")
 
 
+def promise_covers(promise: dict | None, item: dict) -> bool:
+    """Does a promise already made cover this order line?
+
+    The promise records its own scope (see mark_granted), so this asks the
+    question against WHAT THE CUSTOMER WAS TOLD rather than against whatever
+    campaign happens to be running now. An older promise stored without a scope
+    was, at the time, an offer on everything — honour it that way.
+    """
+    if not promise or not promise.get("name"):
+        return False
+    scope = promise.get("scope")
+    if scope not in ("category", "products"):
+        return True                      # 'all', or a promise from before scopes
+    covers = {str(x).strip().lower() for x in (promise.get("covers") or [])}
+    if not covers:
+        return False
+    field = "category" if scope == "category" else "sku"
+    return str(item.get(field) or "").strip().lower() in covers
+
+
+def applied_note(promise: dict | None, applied: int, pending: int) -> str:
+    """The order note once the discount has been PUT ON THE ORDER as money.
+
+    The old note said "APPLY before taking payment", which was right when the
+    order always arrived at list price. Now that the covered lines carry the
+    discount themselves, that same sentence would have a person discount the
+    order a SECOND time. So the note has to say exactly what happened.
+    """
+    if not promise or not promise.get("name"):
+        return ""
+    pct = promise.get("percent")
+    size = f"{pct}% off" if pct else "the offer price"
+    when = f" on {promise['at']}" if promise.get("at") else ""
+
+    if applied and not pending:
+        return (f"{promise['name']}: {size} was quoted{when} and IS ALREADY ON "
+                f"THIS ORDER. Do not apply it again.")
+    if applied and pending:
+        return (f"{promise['name']}: {size} was quoted{when}. It is already on "
+                f"the stocked lines. The made-to-order line(s) still need it "
+                f"applied by hand before payment.")
+    if pending:
+        return (f"{promise['name']}: {size} was quoted{when} and is NOT yet on "
+                f"this order — apply it to the made-to-order line(s) before "
+                f"taking payment.")
+    return ""
+
+
 def promise_line(promise: dict | None) -> str:
     """What Neema must be told, so she does not contradict her own quote.
 
