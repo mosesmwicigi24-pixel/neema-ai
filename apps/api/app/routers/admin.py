@@ -1547,6 +1547,27 @@ async def update_order(
 
 # ── Catalog ───────────────────────────────────────────────────────────────────
 
+@router.get("/catalog/audit")
+async def catalog_price_audit(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Where the hub's prices disagree with themselves.
+
+    Two kinds of finding, both hub-data problems Neema can only repeat: a USD
+    row that is not KES / rate (a hand-set dollar column with a $10 floor put
+    a KES 10 cup at $10 and a KES 36,000 tray set at $600), and a pack good
+    priced per single piece with no quantity in its name. Nothing here changes
+    a price — it says which rows to fix in the hub.
+    """
+    from app.core.config import settings
+    from app.services import n8n_bridge as svc
+    from app.services.price_audit import audit
+    items = await svc.catalog_items(db, request.app.state.redis)
+    return audit(items, settings.usd_kes_rate or 100)
+
+
 @router.get("/catalog")
 async def list_catalog(
     request: Request,

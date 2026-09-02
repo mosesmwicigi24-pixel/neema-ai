@@ -549,7 +549,27 @@ export const catalogApi = {
     toggleStock: (id: string, in_stock: boolean) =>
         patch<ApiCatalogItem>(`/admin/catalog/${id}`, { in_stock }),
     delete: (id: string) => del<void>(`/admin/catalog/${id}`),
+    /** Where the hub's prices disagree with themselves — rows to fix in the hub. */
+    audit: () => get<ApiPriceAudit>("/admin/catalog/audit"),
 };
+
+export interface ApiPriceGap {
+    name: string;
+    category: string | null;
+    kes: number;
+    /** The hub's own USD row. */
+    usd: number;
+    /** KES ÷ rate — what USD should be if it is derived. */
+    usd_expected: number;
+    factor: number | null;
+}
+
+export interface ApiPriceAudit {
+    currency_gaps: ApiPriceGap[];
+    per_piece: { name: string; category: string | null; kes: number | null }[];
+    checked: number;
+    rate: number;
+}
 
 // ── Orders ────────────────────────────────────────────────────────────────────
 

@@ -104,8 +104,12 @@ def test_prompt_prices_the_photo_instead_of_asking_which_item():
     # Lead with the primary object's price, never a clarifying question.
     assert "which item are you asking about" in p
     assert "ONE primary object" in p
-    # The second item in the same photo is quoted and offered in one breath.
+    # The second item in the same photo is quoted and offered in one breath —
+    # at its per-piece price, with the quantity asked, never a pack price the
+    # prompt made up (a hardcoded "50-cup pack at KES 500" here is how a
+    # customer was told a pack cost KES 10: the hub row is per cup).
     assert "Aluminium Tray is KES 7,000" in p
-    assert "50-cup pack of plastic cups is KES 500" in p
-    # Cups are catalogued per piece — never quote the unit price beside a tray.
-    assert "Cups are catalogued PER PIECE" in p
+    assert "plastic cups are KES 10 each" in p
+    # Cups are priced per piece — say so, ask how many, never invent a pack.
+    assert "SOME GOODS ARE PRICED PER PIECE" in p
+    assert "NEVER turn a per-piece price into a pack" in p

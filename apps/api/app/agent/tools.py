@@ -572,6 +572,21 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
                                    "'free'; call check_availability, tell them "
                                    "you're confirming the price, keep selling "
                                    "the rest")
+        # A PACK good priced like a single piece. KES 10 for "Plastic Communion
+        # Cups" is the per-cup price; there is no pack on this row. A customer
+        # was told "KES 10 per pack of 50" because the number was real and the
+        # pack size was invented. The price stays — it is true per piece — but
+        # it is labelled, and inventing a pack from it is forbidden.
+        from app.services.price_audit import looks_per_piece
+        if looks_per_piece(p):
+            row["unit"] = "per piece"
+            row["price_status"] = ("PER-PIECE price: this row is one cup/host/"
+                                   "wafer, NOT a pack. Say it that way — "
+                                   f"'{_fmt_price(row['price'], ctx.currency)} "
+                                   "each' — and ask how many they need. NEVER "
+                                   "state a pack size or a pack price for it; "
+                                   "if they want a pack, call check_availability "
+                                   "so the team confirms the pack price.")
         # THE OFFER — held, not spent. `price` stays the LIST price, because
         # most customers buy at it and never ask; leading with a discount gives
         # away margin on every one of them. This block is the card Neema holds

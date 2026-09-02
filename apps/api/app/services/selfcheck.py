@@ -406,6 +406,21 @@ async def _probe_webhook_signature(db, redis) -> list[str]:
     return out
 
 
+async def _probe_price_consistency(db, redis) -> list[str]:
+    """Does the hub's USD price agree with its KES price, product by product?
+
+    2026-09-02: a customer was quoted $10, then "KES 10", for a pack of 50
+    cups — both read faithfully from the hub, both wrong, and 38 other rows
+    were wrong the same way. Nothing had looked. This looks, daily, and names
+    the worst row so the fix is a hub edit and not an investigation."""
+    from app.core.config import settings
+    from app.services import n8n_bridge as svc
+    from app.services.price_audit import audit, summary_line
+    catalog = await svc.catalog_items(db, redis)
+    line = summary_line(audit(catalog, settings.usd_kes_rate or 100))
+    return [line] if line else []
+
+
 PROBES = [
     ("agent_failures", _probe_agent_failures),
     ("meta_tokens", _probe_meta_tokens),
@@ -419,6 +434,7 @@ PROBES = [
     ("missing_wamids", _probe_missing_wamids),
     ("briefings", _probe_briefings),
     ("waiting_customers", _probe_waiting_customers),
+    ("price_consistency", _probe_price_consistency),
 ]
 
 
