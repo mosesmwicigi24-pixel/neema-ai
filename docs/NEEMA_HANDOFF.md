@@ -31,7 +31,9 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   ("we can't wait to have you in Zambia", "welcome", "congratulations") → a real,
   personal public reply from the model, no DM; on a post that sells nothing (a
   journey, a milestone) the comment rules make Neema the HOST, not the shopkeeper
-  (owner, 2026-09-03). Spam → silent. Per-post cap `meta_comment_agent_cap` (30): first N buying comments get
+  (owner, 2026-09-03). The promise she may repeat to "where are you in my
+  country?" is `expansion_note` (env `EXPANSION_NOTE`: Zambia 2027, serving the
+  southern region) — said with its year, never as if already open. Spam → silent. Per-post cap `meta_comment_agent_cap` (30): first N buying comments get
   the full agent reply, rest get a lighter warm line (cost/rate control). The DM is
   a SILENT BONUS (best-effort; no public DM promise) — real DMs to non-testers need
   App Review of `pages_messaging` (subcode 33 otherwise). SET `BUSINESS_INFO` +

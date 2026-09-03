@@ -146,15 +146,96 @@ def test_comment_rules_say_goodwill_is_never_a_complaint():
     a = rt._public_comment_addendum("USD")
     assert "GOODWILL IS NEVER A COMPLAINT" in a
     assert "the word 'wait' in it is anticipation, not a grievance" in a
-    assert "end with ONE warm question that is not a sales question" in a
+    assert "ONE warm question that is a gift, not a hook" in a
 
 
 def test_comment_rules_answer_where_are_you_in_my_country_as_an_invitation():
     a = rt._public_comment_addendum("USD")
     assert "'WHERE ARE YOU IN MY COUNTRY?' is a person asking us to come" in a
     assert "answer as an invitation, never as a correction" in a
-    assert "never open with what we don't have" in a
-    # honesty guard: the model repeats only what the post itself promises
-    assert "Say back ONLY what the post's own words state" in a
+    assert "Never open with what we don't have" in a
+    # the promise comes from the owner's own line in the rules, with its year
+    assert "WHERE WE ARE GOING, in your rules" in a
+    assert "say it with its year, never as if it were already open" in a
+    # honesty guard: nothing beyond the rules or the post's own words
     assert "a hashtag is not a branch" in a
     assert "Never invent a branch, a city or a year" in a
+
+
+# ── 5. where we are going — the owner's promise, in the prompt ───────────────
+
+def test_the_prompt_carries_the_owners_promise_with_its_year():
+    from app.agent.prompt import build_system_prompt
+    for p in (build_system_prompt(country_iso="", currency="USD"),
+              build_system_prompt(country_iso="MW", currency="USD"),
+              build_system_prompt(country_iso="KE", currency="KES")):
+        assert "WHERE WE ARE GOING (the owner's words)" in p
+        assert "Zambia in 2027" in p
+        assert "South Africa" in p and "Malawi" in p and "Zimbabwe" in p
+        assert "WITH ITS YEAR" in p and "never as if it were already open" in p
+        assert "no other city, no other date" in p
+    # today's facts are still today's facts
+    p = build_system_prompt(country_iso="", currency="USD")
+    assert "TODAY our only physical presence is Nairobi" in p
+
+
+def test_an_empty_expansion_note_says_nothing(monkeypatch):
+    from app.agent import prompt as pr
+    from app.agent.prompt import build_system_prompt
+    monkeypatch.setattr(pr.settings, "expansion_note", "", raising=False)
+    p = build_system_prompt(country_iso="", currency="USD")
+    assert "WHERE WE ARE GOING (the owner's words)" not in p
+    assert "2027" not in p
+
+
+# ── 6. the host's language, and the launch list ──────────────────────────────
+
+def test_comment_rules_teach_the_hosts_language():
+    a = rt._public_comment_addendum("USD")
+    assert "THE HOST'S LANGUAGE" in a
+    assert "mirror their energy in your first five words" in a
+    assert "use their title as they wear it (Apostle, Bishop, Reverend, Pastor" in a
+    assert "one promise and one open door, never two pitches" in a
+    for chilling in ("'reach out'", "'a member of our team'", "'unfortunately'",
+                     "'no branch'", "'your patience'"):
+        assert chilling in a, chilling
+    assert "THE LAUNCH LIST" in a and "capture_contact" in a
+
+
+def test_the_complaint_line_is_human_and_uncheerful():
+    line = rt._PUBLIC_EMPATHY.replace("{name}", " Sydney")
+    for corporate in ("reach out", "member of our team", "patience", "💛"):
+        assert corporate not in line, corporate
+    assert "🙏" in line and "Sydney" in line
+    assert "put it right" in line
+
+
+# ── 7. over the cap, goodwill still gets warmth — never a form, never a pitch ─
+
+def test_goodwill_over_the_cap_gets_a_warm_line_not_a_neutral_ack():
+    out = rt._comment_public_reply("", dm_sent=False, name_tag=" Sydney", seed="s",
+                                   goodwill=True)
+    assert out in [p.replace("{name}", " Sydney") for p in rt._GOODWILL_POOL]
+    assert out not in [p.replace("{name}", " Sydney") for p in rt._NEUTRAL_ACK_POOL]
+
+
+def test_goodwill_over_the_cap_never_sells_even_on_a_product_post():
+    out = rt._comment_public_reply("", dm_sent=False, name_tag=" Sydney", seed="s",
+                                   product_known=True, product_name="Preaching Gown",
+                                   price_text="$130", goodwill=True)
+    assert "$130" not in out and "Gown" not in out
+    assert out in [p.replace("{name}", " Sydney") for p in rt._GOODWILL_POOL]
+
+
+def test_goodwill_pool_makes_no_promise_it_cannot_keep():
+    # No year, no city, no branch, no link — those need the post in hand.
+    for line in rt._GOODWILL_POOL:
+        low = line.lower()
+        for word in ("2027", "branch", "lusaka", "zambia", "http", "order"):
+            assert word not in low, (line, word)
+        assert "{name}" in line
+
+
+def test_the_engine_hands_goodwill_to_the_fallback():
+    src = inspect.getsource(rt._run_comment_engage)
+    assert 'goodwill=(intent == "goodwill")' in src

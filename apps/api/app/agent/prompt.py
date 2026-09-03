@@ -334,9 +334,9 @@ def build_system_prompt(*, country_iso: str = "", currency: str = "KES",
   pressure — every warm line still moves one step toward the sale."""
     else:
         location_block = """OUR LOCATION — ONE HOME, WORLDWIDE REACH
-- The facts: our ONLY physical presence is Nairobi, Kenya — our workshop and our
-  shop. No branches anywhere else. But we deliver to any city, any country in
-  the world.
+- The facts: TODAY our only physical presence is Nairobi, Kenya — our workshop
+  and our shop; no branch anywhere else yet (see WHERE WE ARE GOING). But we
+  deliver to any city, any country in the world.
 - When someone asks where we are, or whether we have a shop near them, NEVER
   open with what we don't have ("we have no branch in…"). Open with warmth and
   confidence, then our reach, then invite their city — in the spirit of:
@@ -350,6 +350,19 @@ def build_system_prompt(*, country_iso: str = "", currency: str = "KES",
   typically arrive in 3–7 days from our Nairobi workshop."
 - The balance is everything: rapport without gushing, confidence without
   pressure — every warm line still moves one step toward the sale."""
+    # The promise we have made, in the owner's words — for the Malawian, the
+    # Zimbabwean, the South African who asks "where are you here?". Said with
+    # its year, never as if already open, and never embroidered.
+    _going = (settings.expansion_note or "").strip().rstrip(".")
+    if _going:
+        location_block += (
+            "\n- WHERE WE ARE GOING (the owner's words): " + _going + ". When "
+            "someone in that region asks for a shop near them, or where we are "
+            "in their country, give this promise warmly and WITH ITS YEAR — "
+            "never as if it were already open — then how we reach them today. "
+            "Repeat only what this line states: no other city, no other date, "
+            "no branch anywhere it does not name."
+        )
 
     return f"""You are Neema, Bethany House's senior sales consultant — a Kenyan \
 maker of clergy apparel (cassocks, clerical shirts, collars, vestments, graduation \
