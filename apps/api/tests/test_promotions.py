@@ -545,3 +545,41 @@ def test_the_note_singles_out_the_made_to_order_lines():
 def test_a_promise_that_touches_nothing_in_this_order_says_nothing():
     assert promo.applied_note({"name": "Harvest Offer", "percent": 10},
                               applied=0, pending=0) == ""
+
+
+# ── a price we cannot record is a price we cannot honour ─────────────────────
+# The grant is what carries the discount onto the ORDER: covered lines are
+# pushed with the promised percentage and the hub charges from it. A grant that
+# failed to write used to be swallowed whole — so Neema said "18,000" and the
+# customer opened a link for 20,000, which is the exact gap the order side was
+# fixed to close.
+
+class _DeadRedis(_GrantRedis):
+    async def set(self, *a, **k):
+        raise RuntimeError("redis is down")
+
+
+def test_a_grant_that_cannot_be_written_reports_failure():
+    ok = asyncio.run(promo.mark_granted(_DeadRedis(), "whatsapp", "254700000000", _c()))
+
+    assert ok is False
+
+
+def test_a_failed_grant_is_logged_rather_than_swallowed(caplog):
+    with caplog.at_level("ERROR", logger="neema.promotions"):
+        asyncio.run(promo.mark_granted(_DeadRedis(), "whatsapp", "254700000000", _c()))
+
+    assert any("could not record a promised offer" in r.message for r in caplog.records), \
+        "somebody has to be able to see why a customer was not given the price they were quoted"
+
+
+def test_the_offer_is_not_quoted_when_it_could_not_be_recorded():
+    import inspect
+    from app.agent import tools
+    src = inspect.getsource(tools._apply_offer)
+
+    # The answer must lose its offer line rather than promise a number the
+    # order will not carry.
+    assert 'out.pop("offer_price", None)' in src
+    assert 'out.pop("say", None)' in src
+    assert "offer_unavailable" in src

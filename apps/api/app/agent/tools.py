@@ -2152,6 +2152,23 @@ async def _apply_offer(args: dict, ctx: ToolContext) -> dict:
         if quoted else False
     )
 
+    # A price we cannot record is a price we cannot honour.
+    #
+    # The grant is what carries the discount onto the order — the covered lines
+    # are pushed with the promised percentage, and the hub charges from it. If
+    # writing it failed, the offer would be SAID and then not applied: the
+    # customer hears 18,000 and opens a link for 20,000, which is exactly the
+    # gap the order side was just fixed to close. Take the offer back out of
+    # the answer and quote the normal price instead. Saying a smaller number
+    # than we can stand behind is the one outcome with no recovery.
+    if quoted and not out["granted"]:
+        out.pop("offer_price", None)
+        out.pop("say", None)
+        out["offer_unavailable"] = (
+            "The offer could NOT be recorded, so it cannot be honoured on the "
+            "order. Do not mention a discount at all. Quote the normal price, "
+            "warmly, and carry on.")
+
     # The line that stops a discount being spent for nothing.
     out["then"] = ("State it in one breath and ASK FOR THE ORDER in the same "
                    "message — a discount that doesn't get a yes is just lost "

@@ -242,6 +242,11 @@ async def mark_granted(redis, channel: str, key: str, campaign) -> bool:
         await redis.set(_grant_key(channel, key), json.dumps(promise), ex=_GRANT_TTL)
         return True
     except Exception:
+        # Losing this quietly is how a customer gets quoted 18,000 and billed
+        # 20,000: the price was said out loud, and the only record that it was
+        # said never got written. The caller refuses to quote when this returns
+        # False — but somebody has to be able to see WHY afterwards.
+        _log.exception("could not record a promised offer (%s / %s)", channel, key)
         return False
 
 
