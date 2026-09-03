@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, func, delete, or_
+from app.core import money
 from app.database import get_db
 from app.models.conversation import Conversation, InterceptMode
 from app.models.message import Message
@@ -732,7 +733,7 @@ async def get_conversation_activity(
                 "label": f"Order {o.status}"
                          + (f" · {o.payment_status}" if o.payment_status else ""),
                 "detail": f"{n_items} item{'s' if n_items != 1 else ''} — "
-                          f"{o.currency} {float(o.subtotal or 0):,.0f}",
+                          f"{o.currency} {money.num(o.subtotal or 0)}",
                 "at": o.created_at.isoformat() if o.created_at else None,
             })
 

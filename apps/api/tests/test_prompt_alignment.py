@@ -69,10 +69,13 @@ def test_kenya_never_converts():
     assert "Kenyan Shillings (KES)" in p
 
 
-def test_non_kenya_converts_from_usd_and_rounds_up():
+def test_non_kenya_converts_from_usd_without_rounding():
+    # Owner rule (2026-09-03): the price is what the hub holds — a converted
+    # figure is the arithmetic's, never rounded up to a tidy ten.
     p = _unknown()
     assert "convert from the USD amount (never from KES)" in p
-    assert "nearest 10" in p
+    assert "nearest 10" not in p
+    assert "never rounded up, down or to a tidy number" in p
     assert "US Dollars (USD)" in p
 
 

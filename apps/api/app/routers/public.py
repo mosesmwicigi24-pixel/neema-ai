@@ -13,7 +13,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Request, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import hub_client
+from app.core import hub_client, money
 from app.core.config import settings
 from app.database import get_db
 
@@ -37,8 +37,9 @@ def _order_url(name: str | None) -> str | None:
 
 
 def _money(v):
-    """Whole units for anything ≥ 1 (KES 12,000 · ZMW 1,260 · $130), cents below
-    a unit so a small item never shows as 0 (a $0.30 cup, not $0)."""
+    """The hub's figure, untouched (KES 12,000 · ZMW 1,260 · $130 · $4.50):
+    whole when whole, to the cent otherwise — never rounded to a unit. A
+    positive amount never shows as 0 (a $0.30 cup, not $0); None for nothing."""
     if v is None:
         return None
     try:
@@ -47,7 +48,7 @@ def _money(v):
         return None
     if v <= 0:
         return None
-    return round(v) if v >= 1 else max(round(v, 2), 0.01)
+    return money.exact(v, floor_cent=True)
 
 
 def _resolve_price(prices: dict, ccy: str):

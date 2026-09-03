@@ -34,6 +34,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
+from app.core import money
 from app.core.config import settings
 from app.database import AsyncSessionLocal
 # Full model set so SQLAlchemy's mapper registry is complete in a standalone job.
@@ -162,7 +163,8 @@ def compose(order: OrderEvent, name: str | None = None) -> str:
     num = f" {order.hub_order_number}" if order.hub_order_number else ""
     cur = order.hub_currency or order.currency or "KES"
     total = order.hub_total if order.hub_total is not None else order.subtotal
-    amount = f"{cur} {float(total):,.0f}" if total is not None else ""
+    _n = money.num(total)
+    amount = f"{cur} {_n}" if _n else ""
     return (
         f"Hi{who} 🙏 Just checking in on your order{num}"
         + (f" ({amount})" if amount else "") + ".\n\n"

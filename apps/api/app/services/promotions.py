@@ -28,6 +28,8 @@ import logging
 from datetime import date, datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 
+from app.core import money
+
 _log = logging.getLogger("neema.promotions")
 
 CAMPAIGN_KEY = "sales_campaign"
@@ -133,14 +135,17 @@ def applies_to(c: dict | None, item: dict) -> bool:
     return bool(sku) and sku in {x.lower() for x in c["skus"]}
 
 
-def offer_price(c: dict | None, price) -> float | None:
-    """The price after the offer — Decimal, half-up, never the model's guess.
+def offer_price(c: dict | None, price) -> int | float | None:
+    """The price after the offer — Decimal, half-up to the cent, never the
+    model's guess.
 
-    Rounded the way the catalogue rounds: whole units at or above 1, cents
-    below it, so the number Neema says matches the shape of every other price
-    she quotes. Returns None when there is nothing to discount, and never
-    returns a number equal to or above the original — an "offer" that saves
-    nothing must not be announced as one.
+    Exact, because the hub is exact: it applies the percentage to ITS OWN
+    figure and charges that (the order lines carry discount_type/value), so
+    the number Neema says must be the number the hub bills — 10% off USD 45
+    is 40.50, not 41. Whole-dollar rounding here was the last place a quote
+    could disagree with the charge. Returns None when there is nothing to
+    discount, and never returns a number equal to or above the original — an
+    "offer" that saves nothing must not be announced as one.
     """
     if not c:
         return None
@@ -151,13 +156,11 @@ def offer_price(c: dict | None, price) -> float | None:
     if p <= 0:
         return None
     net = p * (Decimal(100 - c["percent"]) / Decimal(100))
-    # Granularity comes from the DISCOUNTED value, exactly as the catalogue
-    # rounds the value it is about to display — whole units at or above 1,
-    # cents below. Keying it off the original instead rounded half of a
-    # 1-unit item up to 1 and then discarded the offer as saving nothing.
-    q = Decimal("1") if net >= 1 else Decimal("0.01")
-    out = float(net.quantize(q, rounding=ROUND_HALF_UP))
-    return out if 0 < out < float(p) else None
+    # To the cent, half-up — money's own granularity, and the hub's. Python's
+    # round() is banker's rounding and would quietly hand the customer a cent
+    # that isn't theirs on every half-cent price.
+    out = money.exact(net.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+    return out if out is not None and 0 < out < float(p) else None
 
 
 def order_note(c: dict | None) -> str:

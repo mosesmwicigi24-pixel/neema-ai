@@ -90,7 +90,9 @@ function PriceAuditBanner() {
     if (!audit) return null;
     const gaps = audit.currency_gaps, pp = audit.per_piece;
     if (gaps.length === 0 && pp.length === 0) return null;
-    const usd = (v: number) => (v < 1 ? `$${v.toFixed(2)}` : `$${Math.round(v).toLocaleString()}`);
+    const usd = (v: number) => "$" + (Number.isInteger(v)
+        ? v.toLocaleString("en-US")
+        : v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
     return (
         <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4">
             <button onClick={() => setOpen((o) => !o)} className="w-full text-left">

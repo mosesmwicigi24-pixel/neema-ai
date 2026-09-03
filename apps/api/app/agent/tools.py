@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import hub_client
+from app.core import hub_client, money
 from app.core.config import settings
 from app.routers.order_link import assign_short_ref
 from app.core.countries import resolve_country
@@ -59,12 +59,14 @@ def _kes_rate_for(ctx: "ToolContext", ccy: str):
 
 
 def _display(kes, ctx: "ToolContext"):
-    """Convert a KES amount to the customer's display currency. Catalogue/cart
-    amounts are stored in KES; Kenyan customers see KES, everyone else sees
-    KES / their currency's rate (USD ÷100, ZMW ÷5). Whole numbers keep quotes
-    clean — but small items (communion cups, wafers) keep cents: whole-dollar
-    rounding floored a real KES price to '$0' and the agent told a customer
-    cups were free."""
+    """Convert a KES amount to the customer's display currency — the fallback
+    for when the hub carries no price row in it. Catalogue/cart amounts are
+    stored in KES; Kenyan customers see KES, everyone else sees KES / their
+    currency's rate (USD ÷100, ZMW ÷5), to the cent and exactly as the
+    arithmetic gives it: KES 1,250 is $12.50, not $13 (owner rule: no
+    rounding). A positive amount never collapses to 0 — whole-dollar rounding
+    once floored a real KES price to '$0' and the agent told a customer cups
+    were free."""
     if kes is None:
         return None
     rate = _kes_rate_for(ctx, ctx.currency)
@@ -75,7 +77,7 @@ def _display(kes, ctx: "ToolContext"):
             return kes
         if v <= 0:
             return 0
-        return round(v) if v >= 1 else max(round(v, 2), 0.01)
+        return money.exact(v, floor_cent=True)
     return kes
 
 
@@ -93,23 +95,18 @@ def _to_display(kes, ctx: "ToolContext", price_usd=None, prices=None):
     try:
         v = float(own)
         if v > 0:
-            return round(v) if v >= 1 else round(v, 2)   # cents for small items, never 0
+            return money.exact(v, floor_cent=True)   # the hub's own figure, untouched: 4.5 stays 4.5
     except (TypeError, ValueError):
         pass
     return _display(kes, ctx)
 
 
 def _fmt_price(v, currency: str) -> str:
-    """Human price string for a card body: 'KES 4,000', '$40', '$0.50'."""
+    """Human price string for a card body — the hub's figure, untouched:
+    'KES 4,000', '$40', '$4.50', '$0.50'. Never rounded to a whole unit."""
     if v is None:
         return ""
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return str(v)
-    if currency == "USD":
-        return f"${f:,.0f}" if f >= 1 else f"${f:,.2f}"
-    return f"{currency} {f:,.0f}"
+    return money.fmt(v, currency) or str(v)
 
 
 # ── Tool schemas (Anthropic format) ──────────────────────────────────────────
@@ -712,7 +709,9 @@ async def _cart_display(cart: dict, ctx: ToolContext) -> tuple[list, object]:
             total += (unit or 0) * int(i.get("qty") or 1)
         except (TypeError, ValueError):
             pass
-    return out, total
+    # To the cent only — float sums drift (0.1 × 3 = 0.30000000000000004),
+    # and the total must read like the unit prices it was summed from.
+    return out, money.exact(total)
 
 
 async def _get_cart(args: dict, ctx: ToolContext) -> dict:
@@ -2040,14 +2039,11 @@ async def _prepare_quotation(args: dict, ctx: ToolContext) -> dict:
         name = i.get("name") or "Item"
         try:
             unit = float(i.get("unit_price"))
-            lines.append(f"- {name} ×{qty} @ {ctx.currency} {unit:,.0f} "
-                         f"= {ctx.currency} {unit * float(qty):,.0f}")
+            lines.append(f"- {name} ×{qty} @ {ctx.currency} {money.num(unit)} "
+                         f"= {ctx.currency} {money.num(unit * float(qty))}")
         except (TypeError, ValueError):
             lines.append(f"- {name} ×{qty}")
-    try:
-        total_s = f"{float(total):,.0f}"
-    except (TypeError, ValueError):
-        total_s = str(total)
+    total_s = money.num(total) or str(total)
     lines += ["",
               f"{star}TOTAL: {ctx.currency} {total_s}{star}",
               f"Valid until {(nairobi + _td(days=14)).strftime('%d %b %Y')}.",

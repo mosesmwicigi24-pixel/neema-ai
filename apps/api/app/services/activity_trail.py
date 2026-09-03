@@ -17,6 +17,8 @@ from __future__ import annotations
 import json
 import logging
 
+from app.core import money
+
 from sqlalchemy import or_, select
 
 _log = logging.getLogger("neema.agent")
@@ -57,12 +59,12 @@ def describe(tool: str, args: dict, out) -> tuple[str, str | None]:
             ccy = o.get("currency") or ""
             d = " ".join(str(x) for x in (act, item, f"×{qty}" if qty else "") if x).strip()
             if total is not None:
-                d += f" → total {ccy} {total:,.0f}" if isinstance(total, (int, float)) else f" → total {total}"
+                d += f" → total {ccy} {money.num(total)}" if isinstance(total, (int, float)) else f" → total {total}"
             return "Updated the cart", d or None
         if tool == "create_order":
             num = o.get("order_number") or ""
             total, ccy = o.get("total"), o.get("currency") or ""
-            d = f"{num}" + (f" — {ccy} {total:,.0f}" if isinstance(total, (int, float)) else "")
+            d = f"{num}" + (f" — {ccy} {money.num(total)}" if isinstance(total, (int, float)) else "")
             return "Created an order", d.strip(" —") or None
         if tool == "check_availability":
             return "Asked the team to confirm availability", (a.get("item") or a.get("query") or None)

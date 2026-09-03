@@ -18,15 +18,22 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   read-only tools; checkout routed to WhatsApp.
 - **Currency gate**: Kenya(+254)→KES; everyone else + all Meta→USD. USD prefers the
   hub's own `price_usd`, falls back to KES÷`usd_kes_rate` (default 100). On request,
-  Neema converts USD→local at the central-bank rate, rounding up to nearest 10.
+  Neema converts USD→local at the central-bank rate, as the arithmetic gives it.
+  Prices are quoted EXACTLY as the hub holds them — never rounded to a unit or
+  a ten (owner rule 2026-09-03; `app/core/money.py` is the one formatter).
 - **WhatsApp formatting**: agent emits `*bold*` (not `**`); Messenger = plain text;
   the web inbox renders WhatsApp markup (`apps/web/src/lib/waText.tsx`).
 - **FB comment funnel** (Bethany House page, LIVE): a comment → intent classify →
   the PUBLIC reply IS the sale. High-intent → real agent reply in `public_comment`
   mode (brief, personal, CATALOGUE-ACCURATE price via search_catalog) + a one-tap
   `wa.me` order link appended in code → close in the comment. Praise/emoji → VARIED
-  warm thanks (picked by commenter id, no pitch). Negative → empathy + human. Spam →
-  silent. Per-post cap `meta_comment_agent_cap` (30): first N buying comments get
+  warm thanks (picked by commenter id, no pitch). Negative → empathy + human. Goodwill
+  ("we can't wait to have you in Zambia", "welcome", "congratulations") → a real,
+  personal public reply from the model, no DM; on a post that sells nothing (a
+  journey, a milestone) the comment rules make Neema the HOST, not the shopkeeper
+  (owner, 2026-09-03). The promise she may repeat to "where are you in my
+  country?" is `expansion_note` (env `EXPANSION_NOTE`: Zambia 2027, serving the
+  southern region) — said with its year, never as if already open. Spam → silent. Per-post cap `meta_comment_agent_cap` (30): first N buying comments get
   the full agent reply, rest get a lighter warm line (cost/rate control). The DM is
   a SILENT BONUS (best-effort; no public DM promise) — real DMs to non-testers need
   App Review of `pages_messaging` (subcode 33 otherwise). SET `BUSINESS_INFO` +

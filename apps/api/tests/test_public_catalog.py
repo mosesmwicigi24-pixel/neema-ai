@@ -37,6 +37,8 @@ def test_resolve_price_speaks_each_customers_currency(monkeypatch):
     assert _resolve_price({"KES": 5000}, "KES") == (5000, "KES")
     assert _resolve_price({"KES": 5000}, "ZMW") == (50, "USD")  # 5000/100
     assert _resolve_price({"KES": 30}, "USD") == (0.3, "USD")   # small item keeps cents
+    assert _resolve_price({"USD": 4.5}, "USD") == (4.5, "USD")  # the hub's figure, not $5
+    assert _resolve_price({"KES": 1250}, "USD") == (12.5, "USD")  # 1250/100, not $13
     # Kenyan but only USD priced → converted to KES
     assert _resolve_price({"USD": 10}, "KES") == (1000, "KES")
 

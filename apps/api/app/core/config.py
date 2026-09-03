@@ -199,8 +199,21 @@ class Settings(BaseSettings):
     # Public image URL of the how-to-measure diagram (labelled chest/length/
     # sleeve...). Empty = the send_measurement_guide tool is not registered.
     measurement_guide_url: str = ""
+    # WHERE WE ARE GOING — the promise Neema may repeat to someone who asks for
+    # a shop near them, in the owner's words (2026-09-03: "Zambia will serve
+    # southern countries and all bordering countries and South Africa"). The
+    # year and the countries change as the plan does, so change it in .env
+    # (EXPANSION_NOTE), never in code. Empty = she says nothing about it.
+    expansion_note: str = (
+        "our second home opens in Zambia in 2027, and from there we will serve "
+        "the whole southern region — Zambia, every country on its borders "
+        "(Malawi, Mozambique, Zimbabwe, Botswana, Namibia, Angola, DR Congo and "
+        "Tanzania) and South Africa; until it opens, all of them are served "
+        "from our Nairobi workshop by DHL"
+    )
     # Currency display gate: Kenya (+254) customers are quoted KES; everyone else
-    # (and all Messenger/IG, which have no phone) is quoted USD = round(KES / rate).
+    # (and all Messenger/IG, which have no phone) is quoted the hub's own USD row,
+    # else KES / rate to the cent. Never rounded (owner rule, 2026-09-03).
     usd_kes_rate: int = 100
     # KES per 1 Zambian Kwacha (owner: "5 KES to be one Kwacha") — the fallback
     # for ZMW display when a product somehow lacks its hub ZMW price row.

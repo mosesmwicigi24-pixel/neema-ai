@@ -14,6 +14,7 @@ import json
 import httpx
 from datetime import datetime, timezone, timedelta
 
+from app.core import money
 from app.models.conversation import Conversation, InterceptMode
 from app.models.message import Message, MsgDirection, MsgSender
 from app.models.user import User
@@ -1619,10 +1620,8 @@ async def save_outbound_channel_message(db, redis, channel: str, external_id: st
 async def _relay_order_confirmation(db, redis, wa_id, *, order_number, currency, total, pay_url) -> None:
     """WhatsApp the customer their order confirmation + secure payment link, and
     save it to history so it appears in the conversation (Loop C)."""
-    try:
-        amount = f"{currency or 'KES'} {float(total):,.0f}" if total is not None else ""
-    except (TypeError, ValueError):
-        amount = ""
+    _n = money.num(total)
+    amount = f"{currency or 'KES'} {_n}" if _n else ""
     num = f" {order_number}" if order_number else ""
     text = (
         f"✅ Your order{num} is confirmed{(' — total ' + amount) if amount else ''}.\n\n"
