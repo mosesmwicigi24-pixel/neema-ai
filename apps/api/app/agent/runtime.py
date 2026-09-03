@@ -17,6 +17,7 @@ from app.agent.llm import LLM, LLMResponse
 from app.agent.memory import build_memory_context
 from app.agent.prompt import build_system_prompt, customer_context
 from app.agent.tools import TOOLS, ToolContext, run_tool
+from app.core import money
 from app.core.config import settings
 from app.core.countries import resolve_country, market_currency, money_name
 from app.models.message import Message, MsgDirection, MsgSender
@@ -208,8 +209,9 @@ def _meta_addendum(currency: str = "USD") -> str:
             "quote our real KES prices for the SAME items already under "
             "discussion. For any OTHER local currency they ask for, convert from "
             "the USD amount (never from KES) at the country's current "
-            "central-bank rate, rounding UP to the nearest 10; state it "
-            "confidently, not as a guess."
+            "central-bank rate and give the figure the arithmetic produces — "
+            "never rounded up, down or to a tidy number; state it confidently, "
+            "not as a guess."
             " SWAHILI MEANS KENYA unless they say otherwise (owner rule): a "
             "customer writing in Swahili is almost always Kenyan — quote KES "
             "(search_catalog currency=\"KES\") without waiting to be asked. Only "
@@ -222,8 +224,9 @@ def _meta_addendum(currency: str = "USD") -> str:
     return (
         "\n\n## This conversation is on Facebook Messenger / Instagram (not WhatsApp)\n"
         f"- Answer product questions using the catalogue via search_catalog. Prices "
-        f"from the tool are already in {money} — quote them exactly, and never invent "
-        f"a product or price. When you cannot find an item, NEVER say we don't have "
+        f"from the tool are already in {money} — quote them exactly, to the cent "
+        f"(4.5 is $4.50), never rounded to a whole number or a tidy figure, and "
+        f"never invent a product or price. When you cannot find an item, NEVER say we don't have "
         f"it — follow NEVER SPEAK THE ABSENCE above: ask for time warmly, call "
         f"check_availability, and keep serving the closest family of items "
         f"meanwhile.{local}\n"
@@ -2382,7 +2385,7 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     product_name = (matched.get("name") or "").strip()
     # The post identity carries hub prices — comments quote USD by default.
     _usd, _kes = matched.get("price_usd"), matched.get("price_kes") or matched.get("price")
-    price_text = (f"${_usd:g}" if _usd else (f"KES {_kes:,.0f}" if _kes else ""))
+    price_text = money.fmt(_usd, "USD") if _usd else (money.fmt(_kes, "KES") if _kes else "")
     public_text = _comment_public_reply(answer, dm_sent, name_tag, ext,
                                         product_known=bool(product_name),
                                         product_name=product_name,

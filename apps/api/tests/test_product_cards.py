@@ -42,6 +42,9 @@ def test_fmt_price():
     assert tools._fmt_price(4000, "KES") == "KES 4,000"
     assert tools._fmt_price(40, "USD") == "$40"
     assert tools._fmt_price(0.5, "USD") == "$0.50"
+    assert tools._fmt_price(4.5, "USD") == "$4.50"       # the hub's figure, not $5
+    assert tools._fmt_price(1250, "USD") == "$1,250"
+    assert tools._fmt_price(12.5, "KES") == "KES 12.50"
     assert tools._fmt_price(None, "KES") == ""
 
 

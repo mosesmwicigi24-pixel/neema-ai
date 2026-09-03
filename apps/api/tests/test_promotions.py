@@ -38,7 +38,8 @@ def test_the_owners_own_example():
     (130, 10, 117.0),      # the example
     (100, 10, 90.0),
     (4000, 15, 3400.0),    # KES prices are whole units too
-    (99, 33, 66.0),
+    (99, 33, 66.33),       # to the cent — the hub bills 66.33, so she says 66.33
+    (45, 10, 40.5),        # 10% off USD 45 is 40.50, not a rounded 41
     (0.50, 10, 0.45),      # under a unit keeps its cents
     (1, 50, 0.50),
 ])
@@ -47,9 +48,12 @@ def test_prices_are_exact_not_approximately_right(price, percent, expected):
 
 
 def test_half_up_never_banker_s_rounding():
-    # 125 * 0.9 = 112.5 → 113. Python's own round() gives 112, which quietly
-    # hands the customer a shilling that isn't theirs on every such price.
-    assert promo.offer_price(_c(percent=10), 125) == 113.0
+    # 0.30 * 0.85 = 0.255 → 0.26 at the cent. Python's own round() gives 0.25,
+    # which quietly hands the customer a cent that isn't theirs on every such
+    # price. And a figure that already sits on a cent is not touched at all:
+    # 125 * 0.9 = 112.5 stays 112.5 — neither 113 nor 112.
+    assert promo.offer_price(_c(percent=15), 0.30) == 0.26
+    assert promo.offer_price(_c(percent=10), 125) == 112.5
 
 
 @pytest.mark.parametrize("price", [0, -5, None, "", "abc"])

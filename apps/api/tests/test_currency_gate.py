@@ -2,7 +2,8 @@
 
 Rule: Kenya (+254) customers are quoted KES; everyone else — and all
 Messenger/IG, which carry no phone — is quoted USD. USD prefers the hub's own
-`price_usd`, falling back to round(KES / usd_kes_rate) when the hub has none.
+`price_usd`, falling back to KES / usd_kes_rate — to the cent, never rounded to
+a whole dollar — when the hub has none.
 Conversion happens in the tools; the LLM only quotes what it's handed.
 """
 import asyncio
@@ -22,7 +23,7 @@ def _ctx(currency="KES", rate=100):
 def test_display_converts_only_for_usd():
     usd, kes = _ctx("USD"), _ctx("KES")
     assert _display(10000, usd) == 100      # 10000 / 100
-    assert _display(12345, usd) == 123      # rounds to whole USD
+    assert _display(12345, usd) == 123.45   # to the cent — never a whole-dollar 123
     assert _display(10000, kes) == 10000    # Kenya sees raw KES
     assert _display(None, usd) is None      # missing price stays missing
 
@@ -41,11 +42,15 @@ def test_display_small_items_keep_cents_never_zero_dollars():
     assert _display(50, usd) == 0.5
     assert _display(99, usd) == 0.99
     assert _display(1, usd) == 0.01       # never rounds below a cent
-    assert _display(100, usd) == 1        # $1+ stays whole-dollar
+    assert _display(100, usd) == 1        # a whole amount reads whole
+    assert _display(1250, usd) == 12.5    # KES 1,250 is $12.50, not $13
     assert _display(0, usd) == 0          # genuinely zero stays zero
     # A hub USD price under a dollar keeps its cents too
     assert _to_display(None, usd, price_usd=0.5) == 0.5
     assert _to_display(None, usd, price_usd=130) == 130
+    # The hub's own USD figure passes through untouched — never rounded up
+    assert _to_display(None, usd, price_usd=4.5) == 4.5
+    assert _to_display(None, usd, price_usd=12.75) == 12.75
 
 
 def test_to_display_prefers_hub_usd_else_divides():

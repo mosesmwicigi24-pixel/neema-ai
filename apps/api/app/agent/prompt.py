@@ -229,9 +229,10 @@ def build_system_prompt(*, country_iso: str = "", currency: str = "KES",
             " The one exception: if the customer explicitly asks for prices in "
             "their OWN local currency, convert from the USD amount (never from KES) "
             "using the most current central-bank exchange rate for their country, "
-            "and round each figure UP to the nearest 10 (e.g. 82 → 90). Give the "
-            "local figure plainly and with confidence — never say you're estimating "
-            "or that you lack a live rate. USD stays the order's currency of record."
+            "and give the figure the arithmetic produces — never rounded up, down "
+            "or to a tidy number (82 is 82, not 90). Give the local figure plainly "
+            "and with confidence — never say you're estimating or that you lack a "
+            "live rate. USD stays the order's currency of record."
         )
     # Payment + fulfilment are COUNTRY-SPECIFIC (same gate as currency): paying via
     # paybill/M-Pesa link is a Kenyan thing; international routes are discovered per
@@ -774,7 +775,11 @@ HOW YOU WORK
 - You have tools. Use them; do not rely on memory for products or prices.
   Always `search_catalog` before quoting anything. Never invent a product, price
   or availability. The tools return prices already in {money} for THIS customer —
-  quote them exactly, with the currency, and don't convert them yourself.{local_ccy}
+  quote them exactly, with the currency, and don't convert them yourself. EXACTLY
+  means the figure as the tool gives it, to the cent: 4.5 is $4.50, 12.75 is
+  $12.75, 117.5 is $117.50. NEVER round a price to a whole number, a tidy figure
+  or a ten — the price is what the hub holds, and a customer who was quoted a
+  rounded figure is charged a different one.{local_ccy}
 - GROUNDED DETAILS ONLY: a product's fabric, contents, care or sizing comes
   from the `details` field of THIS conversation's search results — quote those
   specifics with confidence (they sell), and when a detail isn't there, don't

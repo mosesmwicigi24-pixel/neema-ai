@@ -41,10 +41,13 @@ interface Product {
     price_to?: number | null;
 }
 
-// $ for USD, the ISO code otherwise (KES 12,000 · ZMW 1,260); cents below a unit.
+// $ for USD, the ISO code otherwise (KES 12,000 · ZMW 1,260 · $4.50) — the hub's
+// figure untouched: decimals only when the amount has them, never rounded.
 function fmtMoney(v: number | null | undefined, currency: string): string {
     if (v == null) return "";
-    const amt = v >= 1 ? Math.round(v).toLocaleString("en-US") : v.toFixed(2);
+    const amt = Number.isInteger(v)
+        ? v.toLocaleString("en-US")
+        : v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     return currency === "USD" ? "$" + amt : currency + " " + amt;
 }
 

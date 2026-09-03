@@ -200,7 +200,8 @@ class Settings(BaseSettings):
     # sleeve...). Empty = the send_measurement_guide tool is not registered.
     measurement_guide_url: str = ""
     # Currency display gate: Kenya (+254) customers are quoted KES; everyone else
-    # (and all Messenger/IG, which have no phone) is quoted USD = round(KES / rate).
+    # (and all Messenger/IG, which have no phone) is quoted the hub's own USD row,
+    # else KES / rate to the cent. Never rounded (owner rule, 2026-09-03).
     usd_kes_rate: int = 100
     # KES per 1 Zambian Kwacha (owner: "5 KES to be one Kwacha") — the fallback
     # for ZMW display when a product somehow lacks its hub ZMW price row.

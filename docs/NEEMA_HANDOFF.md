@@ -18,7 +18,9 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   read-only tools; checkout routed to WhatsApp.
 - **Currency gate**: Kenya(+254)→KES; everyone else + all Meta→USD. USD prefers the
   hub's own `price_usd`, falls back to KES÷`usd_kes_rate` (default 100). On request,
-  Neema converts USD→local at the central-bank rate, rounding up to nearest 10.
+  Neema converts USD→local at the central-bank rate, as the arithmetic gives it.
+  Prices are quoted EXACTLY as the hub holds them — never rounded to a unit or
+  a ten (owner rule 2026-09-03; `app/core/money.py` is the one formatter).
 - **WhatsApp formatting**: agent emits `*bold*` (not `**`); Messenger = plain text;
   the web inbox renders WhatsApp markup (`apps/web/src/lib/waText.tsx`).
 - **FB comment funnel** (Bethany House page, LIVE): a comment → intent classify →
