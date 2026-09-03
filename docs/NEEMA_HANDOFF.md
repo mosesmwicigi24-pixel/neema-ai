@@ -27,8 +27,11 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   the PUBLIC reply IS the sale. High-intent → real agent reply in `public_comment`
   mode (brief, personal, CATALOGUE-ACCURATE price via search_catalog) + a one-tap
   `wa.me` order link appended in code → close in the comment. Praise/emoji → VARIED
-  warm thanks (picked by commenter id, no pitch). Negative → empathy + human. Spam →
-  silent. Per-post cap `meta_comment_agent_cap` (30): first N buying comments get
+  warm thanks (picked by commenter id, no pitch). Negative → empathy + human. Goodwill
+  ("we can't wait to have you in Zambia", "welcome", "congratulations") → a real,
+  personal public reply from the model, no DM; on a post that sells nothing (a
+  journey, a milestone) the comment rules make Neema the HOST, not the shopkeeper
+  (owner, 2026-09-03). Spam → silent. Per-post cap `meta_comment_agent_cap` (30): first N buying comments get
   the full agent reply, rest get a lighter warm line (cost/rate control). The DM is
   a SILENT BONUS (best-effort; no public DM promise) — real DMs to non-testers need
   App Review of `pages_messaging` (subcode 33 otherwise). SET `BUSINESS_INFO` +

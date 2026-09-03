@@ -87,7 +87,12 @@ def _public_comment_addendum(currency: str = "USD") -> str:
     the shop (owner, 2026-08-10): onboard, sell and close right here — never
     deflect a question to the inbox or WhatsApp. The private message that rides
     along carries the storefront link and is where delivery details are taken;
-    it supports the sale, it is not where the sale is sent."""
+    it supports the sale, it is not where the sale is sent.
+
+    On a post that sells nothing — a journey, a milestone, an announcement — she
+    is the HOST, not the shopkeeper (owner, 2026-09-03: warm, kind and welcoming
+    while we build toward Zambia). "This post isn't about a product … no branch
+    in Malawi to point you to" was a shopkeeper's answer to a guest."""
     money = money_name(currency)
     example = {"KES": "'This gown is KES 13,000.'",
                "ZMW": "'This gown is ZMW 1,300.'"}.get(currency, "'This gown is $130.'")
@@ -173,7 +178,34 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "seamlessly the moment a cue lands. Location talk belongs only where "
         "THEY ask where we are, or where you're giving shipping details — and "
         "then it reassures: Nairobi workshop, worldwide DHL delivery.\n"
-        "- IDENTIFY THE PRODUCT in this order: (1) OUR RECORDS of this post — "
+        "- WHEN THE POST IS NOT A PRODUCT — a journey, a milestone, an "
+        "announcement, a celebration, a greeting, a thank-you (the caption tells "
+        "you) — you are the HOST, not the shopkeeper. There is no product to "
+        "identify and no price to lead with. Reply the way the owner would to a "
+        "friend who stopped by: warm, personal, specific to what the post "
+        "celebrates and to what THEY said. NEVER tell anyone the post 'isn't "
+        "about a product', that there is 'nothing to point you to', or anything "
+        "that makes their comment sound beside the point. Sell nothing unless "
+        "they ask for an item.\n"
+        "- GOODWILL IS NEVER A COMPLAINT. 'We can't wait to have you in Zambia', "
+        "'welcome', 'congratulations', 'see you soon', 'God bless' — a person "
+        "cheering us on is the warmest thing that can happen under a post, and "
+        "the word 'wait' in it is anticipation, not a grievance. Return it in "
+        "kind, by name, in the spirit of their own words ('Neither can we, "
+        "Sydney! 🇿🇲 Lusaka is going to feel like home.'), and end with ONE warm "
+        "question that is not a sales question ('What would you love us to "
+        "bring when we come?').\n"
+        "- 'WHERE ARE YOU IN MY COUNTRY?' is a person asking us to come — answer "
+        "as an invitation, never as a correction: honoured to be asked; not yet, "
+        "and how we already reach them (from our Nairobi workshop, DHL to their "
+        "door); and what the post itself promises about coming closer. Say back "
+        "ONLY what the post's own words state — 'see you in 2027' is a promise "
+        "you may repeat; a hashtag is not a branch; a date you were not given "
+        "is not a date. Never invent a branch, a city or a year, and never open "
+        "with what we don't have.\n"
+        "- IDENTIFY THE PRODUCT in this order: (0) a post that plainly is not "
+        "about a product has nothing to identify — be the host (above); "
+        "(1) OUR RECORDS of this post — "
         "records exist only for posts already identified (or set by the team), "
         "so when your context names what this post sells, price THAT product, "
         "never re-guess it from the frame; (2) the post's CAPTION; (3) what "
@@ -1498,7 +1530,7 @@ _PUBLIC_EMPATHY = (
     "So sorry to hear this{name} 🙏 A member of our team will reach out to you "
     "personally to make it right — thank you for your patience. 💛"
 )
-_INTENTS = ("high", "low", "negative", "spam")
+_INTENTS = ("high", "low", "negative", "spam", "goodwill")
 
 # Dissatisfaction is often three words long ("this is wrong"), and a light model
 # reading a clergy-store comment biased toward "buying interest" has labelled
@@ -1548,6 +1580,42 @@ def looks_negative(text: str) -> bool:
     return bool(_NEGATIVE_RE.search((text or "").strip()))
 
 
+# A person CHEERING US ON. "We can't wait to have you Bethany in Zambia" was
+# answered with "So sorry to hear this — a member of our team will reach out to
+# make it right" and a complaint ticket (2026-09-03): the classifier's model
+# is told to lean negative on anything wait-shaped, and this had "wait" in it.
+# Anticipation, welcome, congratulation and blessing are the warmest things
+# that happen under a post — and under an expansion post they are the whole
+# point. Read deterministically, ahead of the model, ahead of the negative
+# guard; a grievance cue in the same breath ("can't wait any longer, where is
+# my order?") hands it back to the ordinary path.
+_GOODWILL_RE = re.compile(
+    r"(?:^|\b)("
+    r"can'?t\s+wait|cannot\s+wait|looking\s+forward|"
+    r"welcome|karibu(?:ni)?|see\s+you\s+(?:soon|there|in\b)|"
+    r"congrat(?:s|ulations?)|hongera|god\s+bless|blessings|"
+    r"(?:so\s+)?proud\s+of\s+you|well\s+done|all\s+the\s+best|"
+    r"safe\s+(?:travels?|journey|flight|trip)|"
+    r"we\s+love\s+you|much\s+love|"
+    r"waiting\s+for\s+you\s+(?:in|here|to\s+(?:come|arrive|visit|open))"
+    r")(?:$|\b)",
+    re.IGNORECASE,
+)
+_GRIEVANCE_CUE_RE = re.compile(
+    r"\b(order|refund|deliver(?:y|ed)?|received?|repl(?:y|ied)|answer(?:ed)?|"
+    r"paid|payment|money|scam|wrong|fake|cheat(?:ed)?|complain(?:t|ed)?)\b",
+    re.IGNORECASE,
+)
+
+
+def looks_goodwill(text: str) -> bool:
+    """True when a comment is a person cheering us on — anticipation ("can't
+    wait to have you"), a welcome, congratulations, a blessing — and NOT a
+    grievance wearing those words. Never a complaint, never a sales lead."""
+    t = (text or "").strip()
+    return bool(_GOODWILL_RE.search(t)) and not _GRIEVANCE_CUE_RE.search(t)
+
+
 async def classify_comment_intent(text: str, redis=None) -> str:
     """Label a public comment so we react appropriately. Cheap light-model call.
     Errs toward 'high' (engage) on uncertainty — better to help than go silent —
@@ -1560,6 +1628,11 @@ async def classify_comment_intent(text: str, redis=None) -> str:
     t = (text or "").strip()
     if not t:
         return "low"
+    # Cheering us on is read FIRST: "we can't wait to have you in Zambia" has
+    # the word "wait" in it, and a model told to lean negative on anything
+    # wait-shaped answered it with an apology and a complaint ticket.
+    if looks_goodwill(t):
+        return "goodwill"
     # Plain displeasure never goes to the model — and never becomes a sales pitch.
     if looks_negative(t):
         return "negative"
@@ -1590,13 +1663,18 @@ async def classify_comment_intent(text: str, redis=None) -> str:
         "'poor quality', 'still waiting', 'you never replied'. If a comment could be "
         "read as either a question OR displeasure, answer negative — a pitch sent to "
         "an unhappy person in public is far costlier than a careful reply.\n"
+        "- goodwill: a person CHEERING US ON — 'we can't wait to have you in Zambia', "
+        "'welcome', 'congratulations', 'see you soon', 'God bless you', 'safe "
+        "travels'. This is NOT negative even when it contains the word 'wait': "
+        "anticipation is the warmest thing under a post. A bare 'amen' or emoji "
+        "stays low; a sentence addressed to us is goodwill\n"
         "- spam: ONLY bots, ads, promotional links, or abuse\n"
         "Comments come in many languages (French, Swahili, Sheng, Chinese, Dutch…). "
         "A comment you don't understand is NOT spam: if it asks anything, answer "
         "'high'; if it's short and friendly or just a person's name, answer 'low'. "
         "Never answer 'spam' merely because it isn't English.\n"
         f'Comment: "{t[:300]}"\n'
-        "Answer with exactly one word: high, low, negative, or spam."
+        "Answer with exactly one word: high, low, negative, goodwill, or spam."
     )
     try:
         llm = build_llm(model=settings.tier2_model_light)
@@ -1611,6 +1689,7 @@ async def classify_comment_intent(text: str, redis=None) -> str:
 def plan_comment_actions(intent: str) -> dict:
     """Map a comment intent to Neema's response plan.
     high → brief public answer + open a DM · low → light public thanks only ·
+    goodwill → a real, personal public reply (the model, post in hand), no DM ·
     negative → empathetic public line + route to a human, no auto-sell ·
     spam → do nothing."""
     if intent == "spam":
@@ -1619,6 +1698,12 @@ def plan_comment_actions(intent: str) -> dict:
         return {"public": True, "style": "empathy", "dm": False, "human": True}
     if intent == "low":
         return {"public": True, "style": "light", "dm": False, "human": False}
+    if intent == "goodwill":
+        # Answered by the model, in public, with the post in hand — but no DM:
+        # nobody who wrote "welcome to Zambia" asked to be sold to in their
+        # inbox. (The DM still opens when the post sells a product — see
+        # _run_comment_engage — because then the link IS the answer.)
+        return {"public": True, "style": "answer", "dm": False, "human": False}
     return {"public": True, "style": "answer", "dm": True, "human": False}   # high
 
 
@@ -2236,7 +2321,9 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
 
     # ── Low intent (praise/emoji): a brief, VARIED, human thank-you — no pitch.
     # ── Negative: an empathetic line + route the conversation to a human.
-    if not plan["dm"]:
+    # Keyed on the STYLE, not the DM flag: goodwill gets a real answer from the
+    # model below without opening a DM.
+    if plan["style"] != "answer":
         if plan["public"]:
             if plan["style"] == "welcome":
                 text = _pick(_LIVE_WELCOME_POOL, ext).replace("{name}", name_tag)
@@ -2356,7 +2443,9 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # post: Facebook suppresses the reach of link-carrying posts and comments,
     # so the private reply is the ONLY place the storefront link may travel.
     dm_sent = False
-    if answer:
+    # Goodwill opens no DM — unless the post sells a product, where the link is
+    # the most useful thing we can hand them.
+    if answer and (plan["dm"] or product_link):
         dm_text = _dm_text(answer, product_link, ext)
         try:
             await send_private_reply(cid, dm_text, page_id=comment.get("page_id"),
