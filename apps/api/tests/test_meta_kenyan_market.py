@@ -1,7 +1,6 @@
-"""Meta channels open on the HOME price (KES, with the USD figure for outside
-Kenya carried beside it by search_catalog — owner, 2026-09-05), and a customer
-whose captured location resolves to Kenya IS the Kenyan market (the Meshack
-'Kenya money' case): real KES
+"""Meta channels default to USD — ONE currency, never two (owner, 2026-09-05) —
+and a customer whose captured location resolves to Kenya IS the Kenyan market
+(the Meshack 'Kenya money' case): real KES
 catalogue prices — never a USD conversion — flipped in the SAME turn the
 location is captured. Also: fuller name wins so a self-stated 'Meshack' never
 shadows the profile's 'Meshack Munyao'."""
@@ -62,14 +61,13 @@ def test_meta_market_flips_to_kes_for_captured_kenyan_location():
     assert src is None
 
 
-def test_meta_market_opens_on_the_home_price_without_location():
-    # Nobody has placed Jane: the home price leads (the tools carry the USD
-    # figure for outside Kenya beside it), and no country question is asked.
+def test_meta_market_defaults_usd_without_location():
+    # No evidence of Kenya on Jane's record → USD, and no country question.
     person = _person(name="Jane")
     db = _FakeDB([_ident(person), None, []], person=person)
     currency, loc, _, _ = asyncio.run(_meta_market(db, "messenger", PSID))
-    assert currency == "KES" and loc == {}
-    # A placed customer abroad is USD — only Kenya is the KES market
+    assert currency == "USD" and loc == {}
+    # South Africa stays USD too — only Kenya is the KES market
     person2 = _person(location="Somerset East, South Africa")
     db2 = _FakeDB([_ident(person2), None, []], person=person2)
     currency2, loc2, _, _ = asyncio.run(_meta_market(db2, "messenger", PSID))

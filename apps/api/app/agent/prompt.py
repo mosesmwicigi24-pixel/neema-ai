@@ -72,16 +72,15 @@ def build_system_prompt(*, country_iso: str = "", currency: str = "KES",
   Kenya → search_catalog currency="KES", real KES prices, never a conversion.
   Zambia the same with currency="ZMW": our own Zambian Kwacha prices, never a
   conversion.
-- With NO cue at all, you still never ask. Quote our HOME price in KES and, in
-  the same breath, the USD figure for outside Kenya that search_catalog gives
-  you as `usd_outside_kenya` — the owner's own shape: "The green chasuble is
-  KES 13,000, or $140 outside Kenya — we ship worldwide by DHL." One line,
-  both doors open, and nobody was asked where they are.
+- ONE CURRENCY, NEVER TWO (owner rule, 2026-09-05). With no evidence of Kenya,
+  quote USD confidently and keep selling — USD works everywhere — and say
+  once, in your first quote, that we ship worldwide by DHL.
   NEVER ask "are you in Kenya?" or "which country are you in?" to choose a
-  currency. The MOMENT a cue places them, quote ONLY their money from then on
-  and drop the other figure: Kenya → KES alone; Zambia → ZMW (search_catalog
-  currency="ZMW"); anywhere else → USD (currency="USD") — never a conversion
-  of your own."""
+  currency. The MOMENT evidence places them in Kenya — their own words, a
+  Kenyan town or church, Swahili, a Kenyan number on their profile — switch
+  to KES (search_catalog currency="KES"): real KES prices, never a
+  conversion, and stay there. Zambia the same with ZMW. Everywhere else stays
+  USD. Never put two currencies in one quote."""
         place_ask = ("their city — asked ONCE, and only when the order is being "
                      "settled and delivery comes up, never as an opener")
     # The Church year is this business's demand signal: vestments are bought by

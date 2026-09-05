@@ -81,7 +81,7 @@ _READONLY_TOOL_NAMES = {"search_catalog", "get_cart", "check_order_status",
                         "church_calendar"}   # pure computation — drafts may check the season
 
 
-def _public_comment_addendum(currency: str = "USD", placed: bool = True) -> str:
+def _public_comment_addendum(currency: str = "USD") -> str:
     """System addendum for a PUBLIC comment reply — warm, human, and helpful, so
     it reads like a friendly shopkeeper, not a price bot. The comment thread IS
     the shop (owner, 2026-08-10): onboard, sell and close right here — never
@@ -96,20 +96,14 @@ def _public_comment_addendum(currency: str = "USD", placed: bool = True) -> str:
     money = money_name(currency)
     example = {"KES": "'This gown is KES 13,000.'",
                "ZMW": "'This gown is ZMW 1,300.'"}.get(currency, "'This gown is $130.'")
-    # Nobody has placed this commenter, and the whole post's audience reads the
-    # reply: the KES home price leads, the USD figure for outside Kenya rides
-    # beside it, and "we ship worldwide" is said once (owner, 2026-09-05).
-    if not placed and currency == "KES":
-        example = ("'The green gown is KES 13,000, or $130 outside Kenya — we ship "
-                   "worldwide by DHL.'")
-    placed_rule = (
-        "- NOT YET PLACED: nothing yet says where this person is, and everyone "
-        "reading this thread is somewhere else. Quote `price` (KES, our home "
-        "price) and `usd_outside_kenya` in ONE breath, and add once that we "
-        "ship worldwide by DHL. Never ask which country they are in. The moment "
-        "a cue places them — Swahili, a named city, 'dollars' — quote only "
-        "their money (search_catalog currency=\"KES\"/\"USD\"/\"ZMW\").\n"
-        if (not placed and currency == "KES") else ""
+    # ONE currency (owner, 2026-09-05): the tool's money is this commenter's —
+    # KES only when the evidence on their record says Kenya, USD otherwise.
+    one_currency = (
+        f"- ONE CURRENCY, NEVER TWO: quote in {money} — the `price` search_catalog "
+        "gives you is already this commenter's money (the market their record "
+        "shows: Kenya → KES, Zambia → ZMW, anywhere else or unknown → USD). "
+        "Never put two currencies in one reply, and never ask which country "
+        "they are in. Say once that we ship worldwide by DHL.\n"
     )
     return (
         "\n\n## Replying under a Facebook/Instagram comment — warm, human, helpful\n"
@@ -151,7 +145,7 @@ def _public_comment_addendum(currency: str = "USD", placed: bool = True) -> str:
         f"- Lead with the answer: the item + its real price in the first line, e.g. "
         f"{example} Quote in {money} (the `price` from search_catalog is already in "
         f"{money}) — never invent it.\n"
-        f"{placed_rule}"
+        f"{one_currency}"
         "- SAY WHAT THEY SEE. Name the item as it appears in THIS post — colour, "
         "pattern, trim — in plain words: 'the green chasuble with the "
         "African-print stole down the middle and gold piping', never the bare "
@@ -275,20 +269,10 @@ def _public_comment_addendum(currency: str = "USD", placed: bool = True) -> str:
     )
 
 
-def _meta_addendum(currency: str = "USD", placed: bool = True) -> str:
+def _meta_addendum(currency: str = "USD") -> str:
     money = money_name(currency)
     # Local-currency conversion only for the USD-quoted customer, and only on request.
     local = ""
-    if not placed and currency == "KES":
-        local = (
-            " NOT YET PLACED: nothing yet says where this person is. Quote `price` "
-            "(KES, our home price) and `usd_outside_kenya` from search_catalog in "
-            "ONE breath — 'KES 13,000, or $140 outside Kenya — we ship worldwide by "
-            "DHL' — and never ask which country they are in. The moment a cue "
-            "places them (Swahili or a Kenyan town → KES alone; a foreign city, "
-            "country or 'dollars' → USD; Zambia → ZMW), call search_catalog with "
-            "that currency and quote only their money from then on."
-        )
     if currency == "USD":
         local = (
             " If they ask for Kenyan Shillings or say they're in Kenya, do NOT "
@@ -307,7 +291,7 @@ def _meta_addendum(currency: str = "USD", placed: bool = True) -> str:
             "And NEVER ask 'are you in Kenya?' or any country question to pick "
             "a currency — asking makes them feel far from the shop. Choose from "
             "cues, quote confidently, switch seamlessly if a cue proves you "
-            "wrong."
+            "wrong. One currency at a time — never two in one reply."
         )
     return (
         "\n\n## This conversation is on Facebook Messenger / Instagram (not WhatsApp)\n"
@@ -375,7 +359,7 @@ def _meta_addendum(currency: str = "USD", placed: bool = True) -> str:
     )
 
 
-def _tiktok_addendum(currency: str = "USD", placed: bool = True) -> str:
+def _tiktok_addendum(currency: str = "USD") -> str:
     """System addendum for a TikTok DM (relayed by ManyChat). Same shopkeeper,
     same KES catalogue and order flow as Messenger/IG — with TikTok's physics:
     links don't open when tapped, every automated reply spends one of a capped
@@ -383,13 +367,6 @@ def _tiktok_addendum(currency: str = "USD", placed: bool = True) -> str:
     side. So: one short message per turn, and the phone number matters early."""
     money = money_name(currency)
     local = ""
-    if not placed and currency == "KES":
-        local = (
-            " NOT YET PLACED: quote `price` (KES, our home price) and "
-            "`usd_outside_kenya` in ONE breath — 'KES 13,000, or $140 outside "
-            "Kenya' — never ask which country they are in; the moment a cue "
-            "places them, quote only their money (search_catalog currency=)."
-        )
     if currency == "USD":
         local = (
             " If they ask for Kenyan Shillings or say they're in Kenya, do NOT "
@@ -400,7 +377,7 @@ def _tiktok_addendum(currency: str = "USD", placed: bool = True) -> str:
             "to be asked; only a STATED other country overrides this. NEVER ask "
             "'are you in Kenya?' or any country question to pick a currency — "
             "read the cues, quote confidently, switch seamlessly if proven "
-            "wrong."
+            "wrong. One currency at a time — never two in one reply."
         )
     return (
         "\n\n## This conversation is on TikTok (DMs relayed by ManyChat — not WhatsApp)\n"
@@ -747,19 +724,20 @@ async def _history(db: AsyncSession, key: str, limit: int = 20,
 
 async def _meta_market(db: AsyncSession, channel: str, key: str) -> tuple[str, dict, str, dict | None]:
     """(currency, loc, customer_name, source_post) for a Meta contact.
-    Messenger/IG carry no phone, so until a cue places the customer the market
-    is our HOME one — KES, with the USD figure for outside Kenya carried beside
-    it by search_catalog (owner, 2026-09-05: "we sell it at 13,000; if outside
-    Kenya, we use USD"). A captured location (their own words via
-    capture_contact, or a panel edit) then settles it: Kenya → real KES prices,
-    M-Pesa, local delivery; Zambia → ZMW; anywhere else → USD. The name comes from
+    Messenger/IG carry no phone, so the market is USD — ONE currency — until
+    the EVIDENCE on this person's record says Kenya (owner, 2026-09-05): a
+    captured location (their own words via capture_contact, or a panel edit),
+    the profile's country, or a Kenyan number linked to this same person — a
+    WhatsApp identity merged with this one, or a phone they gave us. Then it is
+    the Kenyan market: real KES catalogue prices, M-Pesa, local delivery —
+    never a USD conversion. Zambia → ZMW the same way. The name comes from
     the person / identity so a known customer is greeted by name from turn one.
     source_post ({post_id, comment}) is the post their comment funnelled in
     from — a "How much?" DM refers to THAT product, so the agent must never ask
     "what are you looking for?"."""
     from app.core.countries import iso_from_text
     from app.models.person import Person, Identity
-    currency, loc, name, source_post = "KES", {}, "", None
+    currency, loc, name, source_post = "USD", {}, "", None
     try:
         ident = (await db.execute(select(Identity).where(
             Identity.channel == channel,
@@ -774,9 +752,41 @@ async def _meta_market(db: AsyncSession, channel: str, key: str) -> tuple[str, d
         name = ((person.display_name if person else None)
                 or getattr(ident, "display_name", None)
                 or (u.name if u else None) or "")
+        # WHERE THEY ARE — from evidence only, never a guess from a name or a
+        # page: their own words first (a captured location, a panel edit),
+        # then the profile's country, then a Kenyan number linked to this same
+        # person (a merged WhatsApp identity, a phone they gave us).
         iso = iso_from_text(location)
+        country = location
+        if not iso and u is not None:
+            iso = ((u.country_iso or "").strip().upper() or None)
+            country = u.country or iso or ""
+            if not iso and u.phone:
+                r = resolve_country(u.phone) or {}
+                iso, country = r.get("country_iso"), r.get("country") or ""
+        # Siblings serve twice: a linked WhatsApp number places the person, and
+        # a facebook comment identity carries the post a DM funnelled in from.
+        sibs = (await db.execute(select(Identity).where(
+            Identity.person_id == ident.person_id))).scalars().all() or []
+        if not iso:
+            for s in sibs:
+                if getattr(s, "channel", "") == "whatsapp":
+                    r = resolve_country(getattr(s, "external_id", "") or "") or {}
+                    if r.get("country_iso"):
+                        iso, country = r["country_iso"], r.get("country") or ""
+                        break
+        if not iso:
+            from app.models.person import Identifier
+            phones = (await db.execute(select(Identifier).where(
+                Identifier.person_id == ident.person_id,
+                Identifier.type == "phone"))).scalars().all() or []
+            for ph in phones:
+                r = resolve_country(getattr(ph, "value", "") or "") or {}
+                if r.get("country_iso"):
+                    iso, country = r["country_iso"], r.get("country") or ""
+                    break
         if iso:
-            loc = {"country_iso": iso, "country": location}
+            loc = {"country_iso": iso, "country": country or iso}
             # Same market gate as WhatsApp: KE → KES, ZM → ZMW, else USD.
             currency = market_currency(iso)
         # Source post: this identity first, then siblings on the same person
@@ -785,8 +795,6 @@ async def _meta_market(db: AsyncSession, channel: str, key: str) -> tuple[str, d
         rp = getattr(ident, "raw_profile", None) or {}
         src, comment = rp.get("source_post"), rp.get("comment")
         if not src:
-            sibs = (await db.execute(select(Identity).where(
-                Identity.person_id == ident.person_id))).scalars().all()
             for s in sibs:
                 rp2 = getattr(s, "raw_profile", None) or {}
                 if rp2.get("source_post"):
@@ -856,14 +864,10 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             loc = {"country_iso": user.country_iso,
                    "country": user.country or user.country_iso}
         # Market gate: Kenya → KES; a country whose currency the hub prices
-        # (Zambia → ZMW) → that currency; everyone else → USD. A visitor nobody
-        # could place (a web session with no resolvable country) gets the home
-        # price, with the USD figure beside it — never a guess of USD alone.
-        currency = (market_currency(loc.get("country_iso"))
-                    if loc.get("country_iso") else "KES")
+        # (Zambia → ZMW) → that currency; everyone else → USD.
+        currency = market_currency(loc.get("country_iso"))
         customer_name = (user.name if user else "") or ""
         source_post = None
-    placed = bool(loc.get("country_iso"))
     # Standing orders + learned rules: the owner's live steering and the rules
     # they approved from Neema's own weekly distillation.
     try:
@@ -898,10 +902,9 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         offer=_offer,
     )
     if is_meta:
-        system += (_public_comment_addendum(currency, placed) if public_comment
-                   else _meta_addendum(currency, placed))
+        system += _public_comment_addendum(currency) if public_comment else _meta_addendum(currency)
     elif is_tiktok:
-        system += _tiktok_addendum(currency, placed)
+        system += _tiktok_addendum(currency)
     elif is_web:
         system += _web_addendum()
     # Everything about THIS customer goes in a SECOND system block ("the tail"),
@@ -1088,7 +1091,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     ctx = ToolContext(db=db, redis=redis, wa_id=key, channel=channel,
                       currency=currency, usd_rate=settings.usd_kes_rate,
                       seen_products=(product_sink if product_sink is not None else []),
-                      read_only=read_only, placed=placed)
+                      read_only=read_only)
     totals = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0,
               "cache_write_tokens": 0, "cache_write_1h_tokens": 0}
 
@@ -2664,12 +2667,20 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     if product_name and _known_product.get("seen") \
             and _known_product.get("name") == product_name:
         product_name = _known_product["seen"]
-    # The post identity carries hub prices. A public reply is read by the
-    # Kenyan and the reader abroad alike, and nobody here has been placed: the
-    # KES home price leads, the USD figure for outside Kenya rides beside it
-    # (owner, 2026-09-05), and a per-piece good says "each".
+    # The post identity carries hub prices. ONE currency (owner, 2026-09-05):
+    # the canned line is priced in the commenter's own money — KES only when
+    # their record (a captured location, a linked Kenyan number) says Kenya,
+    # USD otherwise — and a per-piece good says "each". Looked up only when a
+    # canned line is actually going out; the model path resolved it already.
     _usd, _kes = matched.get("price_usd"), matched.get("price_kes") or matched.get("price")
-    price_text = _public_price_text(_kes, _usd)
+    _ccy = "USD"
+    if not answer and product_name and (_kes or _usd):
+        try:
+            async with AsyncSessionLocal() as _db3:
+                _ccy = (await _meta_market(_db3, channel, ext))[0]
+        except Exception:
+            _ccy = "USD"
+    price_text = _public_price_text(_kes, _usd, _ccy)
     from app.services.price_audit import looks_per_piece as _per_piece
     per_piece = bool(matched) and _per_piece(matched)
     first = False
@@ -2697,15 +2708,22 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
               cid, not skip_model, free_ask, dm_sent)
 
 
-def _public_price_text(kes, usd) -> str:
-    """The price as a PUBLIC reply says it: the KES home price, with the USD
-    figure for outside Kenya beside it when the hub has one — 'KES 13,000, or
-    $140 outside Kenya'. One currency alone when only one is known."""
-    k = money.fmt(kes, "KES") if kes else ""
-    u = money.fmt(usd, "USD") if usd else ""
-    if k and u:
-        return f"{k}, or {u} outside Kenya"
-    return k or u
+def _public_price_text(kes, usd, currency: str = "USD") -> str:
+    """The price as a PUBLIC reply says it — ONE currency (owner, 2026-09-05):
+    KES when the commenter's record shows Kenya, USD otherwise. The hub's own
+    figure in that currency when it has one; else the other converted at the
+    owner's rate, exactly as the tools do."""
+    rate = settings.usd_kes_rate or 100
+    try:
+        if (currency or "").upper() == "KES":
+            if kes:
+                return money.fmt(kes, "KES")
+            return money.fmt(money.exact(float(usd) * rate), "KES") if usd else ""
+        if usd:
+            return money.fmt(usd, "USD")
+        return money.fmt(money.exact(float(kes) / rate, floor_cent=True), "USD") if kes else ""
+    except (TypeError, ValueError):
+        return ""
 
 
 def schedule_comment_engage(redis, channel: str, comment: dict, own_pages: set) -> None:

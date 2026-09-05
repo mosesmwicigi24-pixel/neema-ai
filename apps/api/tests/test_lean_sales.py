@@ -13,8 +13,10 @@ Each of the four was contradicted somewhere — in the canned pools, in the
 comment rules, in the currency default — while the system prompt itself said
 the opposite ("never open with 'how many?'"; the owner's own welcome shape).
 These tests pin the aligned version: ONE PIECE IS THE DEFAULT; the item named
-as seen; the KES home price with the USD figure for outside Kenya beside it
-until a cue places the customer; and "we ship worldwide by DHL", once.
+as seen; ONE currency — KES only when the evidence on the customer's record
+says Kenya (a captured location, the profile's country, a Kenyan number linked
+to the same person), USD otherwise, never two in one quote (owner, later the
+same day); and "we ship worldwide by DHL", once.
 """
 import asyncio
 import inspect
@@ -73,19 +75,24 @@ def test_live_which_pool_keeps_the_calm_register():
         assert not line.startswith(("Great", "Happy", "Perfect", "Awesome")), line
 
 
-# ── 2. the public price: KES home price, USD for outside Kenya beside it ─────
+# ── 2. the public price: ONE currency, the commenter's own ───────────────────
 
-def test_public_price_text_carries_both_doors():
-    assert rt._public_price_text(13000, 140) == "KES 13,000, or $140 outside Kenya"
-    assert rt._public_price_text(13000, None) == "KES 13,000"
-    assert rt._public_price_text(None, 140) == "$140"
-    assert rt._public_price_text(450, 4.5) == "KES 450, or $4.50 outside Kenya"
-    assert rt._public_price_text(None, None) == ""
+def test_public_price_text_is_one_currency(monkeypatch):
+    monkeypatch.setattr(rt.settings, "usd_kes_rate", 100, raising=False)
+    assert rt._public_price_text(13000, 140, "KES") == "KES 13,000"
+    assert rt._public_price_text(13000, 140, "USD") == "$140"      # the hub's own USD
+    assert rt._public_price_text(13000, None, "USD") == "$130"     # no hub USD → KES / rate
+    assert rt._public_price_text(None, 140, "KES") == "KES 14,000"  # no hub KES → USD × rate
+    assert rt._public_price_text(450, 4.5, "USD") == "$4.50"
+    assert rt._public_price_text(None, None, "USD") == ""
+    for args in ((13000, 140, "KES"), (13000, 140, "USD")):
+        assert "outside Kenya" not in rt._public_price_text(*args)
 
 
-def test_the_engine_composes_the_public_line_from_these_parts():
+def test_the_engine_prices_the_canned_line_in_the_commenters_money():
     src = inspect.getsource(rt._run_comment_engage)
-    assert "price_text = _public_price_text(_kes, _usd)" in src
+    assert "price_text = _public_price_text(_kes, _usd, _ccy)" in src
+    assert "_ccy = (await _meta_market(_db3, channel, ext))[0]" in src
     assert "per_piece=per_piece, first_contact=first" in src
     assert 'product_name = _known_product["seen"]' in src
     assert "_remember_post_product(redis, channel, post_id, matched, thumb=thumb)" in src
@@ -106,39 +113,25 @@ def _catalog():
              "prices": {"KES": 3600}, "category": "Vestments", "product_type": "simple"}]
 
 
-def test_unplaced_customer_rows_carry_the_usd_figure_for_outside_kenya(monkeypatch):
-    async def fake_catalog(db, redis):
-        return _catalog()
-    monkeypatch.setattr(tools.svc, "catalog_items", fake_catalog)
-    ctx = ToolContext(db=None, redis=None, wa_id="PSID", currency="KES", placed=False)
-    out = asyncio.run(_search_catalog({"query": "chasuble stole"}, ctx))
-    rows = {r["name"]: r for r in out["results"]}
-    ch = rows["Ornate Chasuble — Embroidered"]
-    assert ch["price"] == 13000 and ch["currency"] == "KES"
-    assert ch["usd_outside_kenya"] == 140                  # the hub's own USD, untouched
-    assert ch["variants"][0]["usd_outside_kenya"] == 140
-    assert rows["Plain Stole"]["usd_outside_kenya"] == 36  # no hub USD → KES / rate
-    assert "quote_rule" in out and "usd_outside_kenya" in out["quote_rule"]
-    assert "never ask which country" in out["quote_rule"]
-
-
-def test_placed_customers_get_one_currency_only(monkeypatch):
+def test_search_catalog_rows_carry_one_currency_only(monkeypatch):
     async def fake_catalog(db, redis):
         return _catalog()
     monkeypatch.setattr(tools.svc, "catalog_items", fake_catalog)
     kenyan = asyncio.run(_search_catalog({"query": "chasuble"},
                                          ToolContext(db=None, redis=None, wa_id="254700",
-                                                     currency="KES", placed=True)))
-    assert "usd_outside_kenya" not in kenyan["results"][0] and "quote_rule" not in kenyan
+                                                     currency="KES")))
+    row = kenyan["results"][0]
+    assert row["price"] == 13000 and row["currency"] == "KES"
+    assert "usd_outside_kenya" not in row and "quote_rule" not in kenyan
+    assert "usd_outside_kenya" not in row["variants"][0]
     abroad = asyncio.run(_search_catalog({"query": "chasuble"},
                                          ToolContext(db=None, redis=None, wa_id="PSID",
-                                                     currency="USD", placed=False)))
-    assert abroad["results"][0]["price"] == 140
-    assert "usd_outside_kenya" not in abroad["results"][0]
-    assert ToolContext(db=None, redis=None, wa_id="x").placed is True
+                                                     currency="USD")))
+    assert abroad["results"][0]["price"] == 140 and abroad["results"][0]["currency"] == "USD"
+    assert not hasattr(ToolContext(db=None, redis=None, wa_id="x"), "placed")
 
 
-# ── 4. the market: home price until a cue places them ───────────────────────
+# ── 4. the market: USD until the evidence on their record says Kenya ────────
 
 class _FakeDB:
     def __init__(self, results, person=None):
@@ -155,33 +148,78 @@ class _FakeDB:
         return self._person
 
 
-def test_meta_market_home_price_until_placed_then_their_money():
+def _person(name="Nicole Kioko", location=None):
     import uuid
     from app.models.person import Person
-    p = Person(display_name="Nicole Kioko", state={})
+    p = Person(display_name=name, state={"location": location} if location else {})
     p.id = uuid.uuid4()
-    ident = types.SimpleNamespace(person_id=p.id, channel="facebook", external_id="PSID",
-                                  display_name=None, raw_profile=None)
-    cur, loc, name, _ = asyncio.run(rt._meta_market(_FakeDB([ident, None, []], p),
-                                                    "facebook", "PSID"))
-    assert cur == "KES" and loc == {} and name == "Nicole Kioko"
-    q = Person(display_name="Amos", state={"location": "Kampala, Uganda"})
-    q.id = uuid.uuid4()
-    ident2 = types.SimpleNamespace(person_id=q.id, channel="facebook", external_id="PSID",
-                                   display_name=None, raw_profile=None)
-    cur2, loc2, _, _ = asyncio.run(rt._meta_market(_FakeDB([ident2, None, []], q),
-                                                   "facebook", "PSID"))
-    assert cur2 == "USD" and loc2["country_iso"] == "UG"
+    return p
 
 
-def test_run_turn_passes_placed_into_the_tools_and_the_addenda():
+def _ident(p, channel="facebook"):
+    return types.SimpleNamespace(person_id=p.id, channel=channel, external_id="PSID",
+                                 display_name=None, raw_profile=None)
+
+
+def _market(results, p):
+    return asyncio.run(rt._meta_market(_FakeDB(results, p), "facebook", "PSID"))
+
+
+def test_meta_market_is_usd_until_the_evidence_says_kenya():
+    # A Kenyan-looking name is not evidence: nothing on the record → USD.
+    p = _person()
+    cur, loc, name, _ = _market([_ident(p), None, [], []], p)
+    assert cur == "USD" and loc == {} and name == "Nicole Kioko"
+    # Their own words: a captured location.
+    q = _person("Amos", "Kampala, Uganda")
+    cur, loc, _, _ = _market([_ident(q), None, [], []], q)
+    assert cur == "USD" and loc["country_iso"] == "UG"
+    k = _person("Grace", "Machakos, Kenya")
+    cur, loc, _, _ = _market([_ident(k), None, [], []], k)
+    assert cur == "KES" and loc["country_iso"] == "KE"
+
+
+def test_meta_market_reads_the_merged_whatsapp_number():
+    # The same person, merged: this Facebook identity and a WhatsApp identity
+    # on a +254 number. The number is the evidence — KES.
+    p = _person()
+    wa = types.SimpleNamespace(person_id=p.id, channel="whatsapp", external_id="254712345678",
+                               display_name=None, raw_profile=None)
+    cur, loc, _, _ = _market([_ident(p), None, [_ident(p), wa], []], p)
+    assert cur == "KES" and loc["country_iso"] == "KE"
+    # A merged Ugandan number is evidence the other way.
+    p2 = _person()
+    wa2 = types.SimpleNamespace(person_id=p2.id, channel="whatsapp", external_id="256700111222",
+                                display_name=None, raw_profile=None)
+    cur, loc, _, _ = _market([_ident(p2), None, [wa2], []], p2)
+    assert cur == "USD" and loc["country_iso"] == "UG"
+
+
+def test_meta_market_reads_the_profile_and_a_phone_they_gave_us():
+    # The profile's country (set by capture_contact from their words or number).
+    p = _person()
+    user = types.SimpleNamespace(location=None, name=None, country_iso="KE", country="Kenya",
+                                 phone=None)
+    cur, loc, _, _ = _market([_ident(p), user, [], []], p)
+    assert cur == "KES" and loc == {"country_iso": "KE", "country": "Kenya"}
+    # A phone they gave us, on the profile.
+    p2 = _person()
+    user2 = types.SimpleNamespace(location=None, name=None, country_iso=None, country=None,
+                                  phone="+254722000111")
+    cur, loc, _, _ = _market([_ident(p2), user2, [], []], p2)
+    assert cur == "KES" and loc["country_iso"] == "KE"
+    # A phone identifier attached to the person (a number matched or volunteered).
+    p3 = _person()
+    ph = types.SimpleNamespace(type="phone", value="+254733000111")
+    cur, loc, _, _ = _market([_ident(p3), None, [], [ph]], p3)
+    assert cur == "KES" and loc["country_iso"] == "KE"
+
+
+def test_run_turn_and_the_tools_speak_one_currency():
     src = inspect.getsource(rt.run_turn)
-    assert 'placed = bool(loc.get("country_iso"))' in src
-    assert "read_only=read_only, placed=placed)" in src
-    assert "_public_comment_addendum(currency, placed)" in src
-    assert "_meta_addendum(currency, placed)" in src
-    assert "_tiktok_addendum(currency, placed)" in src
-    assert 'if loc.get("country_iso") else "KES"' in src   # a web visitor nobody placed
+    assert 'currency = market_currency(loc.get("country_iso"))' in src
+    assert "placed" not in src
+    assert "_public_comment_addendum(currency)" in src and "_meta_addendum(currency)" in src
 
 
 # ── 5. the rules agree with each other ───────────────────────────────────────
@@ -192,24 +230,27 @@ def test_the_prompt_has_one_piece_as_the_default_everywhere():
               build_system_prompt(country_iso="US", currency="USD")):
         assert "ONE PIECE IS THE DEFAULT" in p
         assert '"Shall I reserve it for you?" is a sale' in p
-        assert "quote USD confidently" not in p
         # a photo is priced AS SEEN, never by its catalogue label alone
         assert "naming it as THEY see it" in p
 
 
-def test_the_unplaced_prompt_quotes_both_doors_and_never_asks():
-    p = build_system_prompt(country_iso="", currency="KES")
-    assert "Quote our HOME price in KES" in p
-    assert "usd_outside_kenya" in p
+def test_the_unknown_country_prompt_is_one_currency():
+    p = build_system_prompt(country_iso="", currency="USD")
+    assert "ONE CURRENCY, NEVER TWO" in p
+    assert "quote USD confidently" in p
     assert "we ship worldwide by DHL" in p
     assert 'NEVER ask "are you in Kenya?"' in p
-    assert "quote ONLY their money from then on" in p
+    assert "a Kenyan number on their profile" in p
+    assert "Never put two currencies in one quote" in p
+    assert "usd_outside_kenya" not in p and "or $140 outside Kenya" not in p
 
 
 def test_comment_rules_are_aligned_with_the_owner():
-    a = rt._public_comment_addendum("KES", placed=False)
-    assert "NOT YET PLACED" in a and "usd_outside_kenya" in a
-    assert "KES 13,000, or $130 outside Kenya — we ship worldwide by DHL" in a
+    a = rt._public_comment_addendum("KES")
+    assert "ONE CURRENCY, NEVER TWO" in a and "Kenyan Shillings (KES)" in a
+    assert "Never put two currencies in one reply" in a
+    assert "Say once that we ship worldwide by DHL" in a
+    assert "usd_outside_kenya" not in a and "outside Kenya" not in a
     assert "SAY WHAT THEY SEE" in a
     assert "never the bare catalogue label ('Ornate Chasuble — Embroidered')" in a
     assert "ONE PIECE IS THE DEFAULT" in a
@@ -219,19 +260,18 @@ def test_comment_rules_are_aligned_with_the_owner():
     # the owner's first-contact welcome and the no-daypart rule no longer collide
     assert "FIRST CONTACT — THE WELCOME" in a and "never 'Good morning' under a comment" in a
     assert "the FIRST CONTACT greeting rules do not apply" not in a
-    # placed: one currency, no dual line
-    b = rt._public_comment_addendum("USD", placed=True)
-    assert "NOT YET PLACED" not in b and "SAY WHAT THEY SEE" in b
+    b = rt._public_comment_addendum("USD")
+    assert "ONE CURRENCY, NEVER TWO" in b and "US Dollars (USD)" in b and "SAY WHAT THEY SEE" in b
     # the ZMW example the market tests pin still holds
     assert "ZMW 1,300" in rt._public_comment_addendum("ZMW")
 
 
 def test_messenger_and_tiktok_rules_carry_the_same_default():
-    assert "NOT YET PLACED" in rt._meta_addendum("KES", placed=False)
-    assert "NOT YET PLACED" not in rt._meta_addendum("KES", placed=True)
-    assert "convert" in rt._meta_addendum("USD").lower()           # placed abroad, unchanged
-    assert "NOT YET PLACED" in rt._tiktok_addendum("KES", placed=False)
-    for a in (rt._meta_addendum("KES", placed=False), rt._tiktok_addendum("KES", placed=False)):
+    for a in (rt._meta_addendum("USD"), rt._tiktok_addendum("USD")):
+        assert "One currency at a time — never two in one reply" in a
+        assert "convert" in a.lower()                                 # switch to KES on evidence
+        assert "NOT YET PLACED" not in a and "usd_outside_kenya" not in a
+    for a in (rt._meta_addendum("KES"), rt._tiktok_addendum("KES")):
         assert "ONE PIECE IS THE DEFAULT" in a
         assert "size → quantity → their city" not in a
 

@@ -82,9 +82,8 @@ def test_cart_display_usd_uses_hub_price_and_sums_lines(monkeypatch):
 
 
 def test_search_catalog_public_comment_price_is_usd(monkeypatch):
-    """A PLACED customer abroad (ctx USD) is quoted USD alone — the hub's own
-    figure. (A customer nobody has placed opens on KES with the USD figure
-    beside it — see test_lean_sales.)"""
+    """A customer abroad, or one nobody has placed (ctx USD), is quoted USD
+    alone — the hub's own figure. One currency, never two."""
     from app.agent import tools
     from app.agent.tools import _search_catalog, ToolContext
 
