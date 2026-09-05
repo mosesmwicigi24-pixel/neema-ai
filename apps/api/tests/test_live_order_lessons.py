@@ -223,4 +223,4 @@ def test_post_records_feed_resolution_and_compose():
     assert "Our records identify this post's product as" in src2
     # …and the comment flow writes the identification back.
     src3 = inspect.getsource(runtime)
-    assert "_remember_post_product(redis, channel, post_id, matched)" in src3
+    assert "_remember_post_product(redis, channel, post_id, matched, thumb=thumb)" in src3

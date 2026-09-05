@@ -16,8 +16,13 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
 ## Live in prod now
 - **WhatsApp + Messenger/IG agent** (one brain, one KES hub catalogue). Messenger/IG
   read-only tools; checkout routed to WhatsApp.
-- **Currency gate**: Kenya(+254)→KES; everyone else + all Meta→USD. USD prefers the
-  hub's own `price_usd`, falls back to KES÷`usd_kes_rate` (default 100). On request,
+- **Currency gate**: Kenya(+254)→KES; a placed customer abroad→USD (Zambia→ZMW).
+  A customer NOBODY has placed yet (Meta/TikTok contact, web visitor with no
+  country) is quoted the KES home price WITH the USD figure for outside Kenya
+  beside it (`usd_outside_kenya` on search_catalog rows; owner 2026-09-05: "we
+  sell it at 13,000; if outside Kenya we use USD") — one line, no country
+  question. USD prefers the hub's own `price_usd`, falls back to KES÷`usd_kes_rate`
+  (default 100). On request,
   Neema converts USD→local at the central-bank rate, as the arithmetic gives it.
   Prices are quoted EXACTLY as the hub holds them — never rounded to a unit or
   a ten (owner rule 2026-09-03; `app/core/money.py` is the one formatter).

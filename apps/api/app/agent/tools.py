@@ -43,6 +43,12 @@ class ToolContext:
     # Draft/preview mode: look-only. Tools must not write ANYTHING — not even a
     # best-effort side log like a demand signal.
     read_only: bool = False
+    # Do we know where this customer is? False for a Meta/TikTok contact, or a
+    # web visitor, nobody has placed yet — search_catalog then carries the USD
+    # figure for outside Kenya beside the KES home price, so one line serves
+    # both without asking (owner rule, 2026-09-05: "we sell it at 13,000; if
+    # outside Kenya, we use USD").
+    placed: bool = True
 
 
 def _channel_label(ctx: "ToolContext") -> str:
@@ -101,6 +107,18 @@ def _to_display(kes, ctx: "ToolContext", price_usd=None, prices=None):
     return _display(kes, ctx)
 
 
+def _outside_kenya_usd(kes, ctx: "ToolContext", price_usd=None, prices=None):
+    """The USD figure a customer OUTSIDE Kenya pays for a row — the hub's own
+    USD when it has one, else KES / rate — quoted beside the KES home price to
+    a customer nobody has placed yet."""
+    from dataclasses import replace as _dc_replace
+    v = _to_display(kes, _dc_replace(ctx, currency="USD"), price_usd, prices=prices)
+    try:
+        return v if float(v) > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _fmt_price(v, currency: str) -> str:
     """Human price string for a card body — the hub's figure, untouched:
     'KES 4,000', '$40', '$4.50', '$0.50'. Never rounded to a whole unit."""
@@ -125,7 +143,7 @@ TOOLS: list[dict] = [
             "properties": {
                 "query": {"type": "string", "description": "What the customer is looking for, e.g. 'cassock', 'communion cups', 'anointing oil'"},
                 "currency": {"type": "string", "enum": ["KES", "USD", "ZMW"],
-                             "description": "Override the display currency: set 'KES' when the customer says they are in Kenya or asks for Kenyan shillings (our native prices), 'ZMW' when they say they are in Zambia (our own Kwacha prices); otherwise leave unset."},
+                             "description": "Override the display currency the moment a cue places the customer: 'KES' when they say they are in Kenya, write in Swahili, or ask for shillings (our home prices); 'ZMW' when they say they are in Zambia (our own Kwacha prices); 'USD' when they say or show they are outside Kenya (a foreign city or country, 'dollars'). Leave unset while nothing places them."},
             },
             "required": ["query"],
         },
@@ -556,6 +574,15 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
         row["price"] = _to_display(p.get("price"), ctx, p.get("price_usd"),
                                    prices=p.get("prices"))
         row["currency"] = ctx.currency
+        # Nobody has placed this customer yet: the KES home price leads and the
+        # USD figure for outside Kenya rides beside it, so ONE line serves the
+        # Kenyan and the reader abroad — "KES 13,000, or $140 outside Kenya" —
+        # and nobody is asked where they are.
+        if not ctx.placed and ctx.currency == "KES":
+            _abroad = _outside_kenya_usd(p.get("price"), ctx, p.get("price_usd"),
+                                         prices=p.get("prices"))
+            if _abroad:
+                row["usd_outside_kenya"] = _abroad
         # An unpriced hub row (e.g. "Bread container", KES 0 — no price set)
         # must NEVER surface as 0 or "free". Strip the number and say why, so
         # the model confirms with the team instead of quoting nothing-money.
@@ -640,6 +667,12 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
                                       prices=v.get("prices"))}
                 for v in variants
             ]
+            if not ctx.placed and ctx.currency == "KES":
+                for v, vr in zip(variants, row["variants"]):
+                    _va = _outside_kenya_usd(v.get("price_kes"), ctx, v.get("price_usd"),
+                                             prices=v.get("prices"))
+                    if _va:
+                        vr["usd_outside_kenya"] = _va
             # A size L cassock is in the offer exactly as much as the size S.
             # Each variant carries its own held figure; `price` stays list here
             # too, for the same reason it does above.
@@ -672,7 +705,13 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
             pid = None
         await demand.record(ctx.db, query, kind="no_match", channel=_channel_label(ctx),
                             wa_id=ctx.wa_id, person_id=pid)
-    return {"count": len(results), "currency": ctx.currency, "results": results}
+    out = {"count": len(results), "currency": ctx.currency, "results": results}
+    if not ctx.placed and ctx.currency == "KES":
+        out["quote_rule"] = ("this customer is not yet placed: quote `price` (KES, our "
+                             "home price) and `usd_outside_kenya` in ONE breath — 'KES "
+                             "13,000, or $140 outside Kenya' — and say once that we ship "
+                             "worldwide by DHL; never ask which country they are in")
+    return out
 
 
 async def _cart_display(cart: dict, ctx: ToolContext) -> tuple[list, object]:

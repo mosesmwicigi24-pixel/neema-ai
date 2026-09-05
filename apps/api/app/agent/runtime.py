@@ -81,7 +81,7 @@ _READONLY_TOOL_NAMES = {"search_catalog", "get_cart", "check_order_status",
                         "church_calendar"}   # pure computation — drafts may check the season
 
 
-def _public_comment_addendum(currency: str = "USD") -> str:
+def _public_comment_addendum(currency: str = "USD", placed: bool = True) -> str:
     """System addendum for a PUBLIC comment reply — warm, human, and helpful, so
     it reads like a friendly shopkeeper, not a price bot. The comment thread IS
     the shop (owner, 2026-08-10): onboard, sell and close right here — never
@@ -96,6 +96,21 @@ def _public_comment_addendum(currency: str = "USD") -> str:
     money = money_name(currency)
     example = {"KES": "'This gown is KES 13,000.'",
                "ZMW": "'This gown is ZMW 1,300.'"}.get(currency, "'This gown is $130.'")
+    # Nobody has placed this commenter, and the whole post's audience reads the
+    # reply: the KES home price leads, the USD figure for outside Kenya rides
+    # beside it, and "we ship worldwide" is said once (owner, 2026-09-05).
+    if not placed and currency == "KES":
+        example = ("'The green gown is KES 13,000, or $130 outside Kenya — we ship "
+                   "worldwide by DHL.'")
+    placed_rule = (
+        "- NOT YET PLACED: nothing yet says where this person is, and everyone "
+        "reading this thread is somewhere else. Quote `price` (KES, our home "
+        "price) and `usd_outside_kenya` in ONE breath, and add once that we "
+        "ship worldwide by DHL. Never ask which country they are in. The moment "
+        "a cue places them — Swahili, a named city, 'dollars' — quote only "
+        "their money (search_catalog currency=\"KES\"/\"USD\"/\"ZMW\").\n"
+        if (not placed and currency == "KES") else ""
+    )
     return (
         "\n\n## Replying under a Facebook/Instagram comment — warm, human, helpful\n"
         "- THE THREAD IS THE SHOP. Sell RIGHT HERE, in the comments, like a "
@@ -127,12 +142,29 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "IN THAT TURN. When they decide on an item, build it with update_cart. "
         "When their phone is on file (they volunteered it, or it's in your "
         "context), create_order closes the sale right from the thread.\n"
-        "- No greeting ritual here: a comment reply's first line is the ANSWER, "
-        "never 'Good morning' — the FIRST CONTACT greeting rules do not apply to "
-        "public comments.\n"
+        "- No daypart ritual here — never 'Good morning' under a comment. But a "
+        "person's FIRST comment to us is their first time in the shop, and it "
+        "gets the owner's welcome shape (FIRST CONTACT — THE WELCOME): welcome "
+        "them by name to Bethany House, name the very thing they are looking at "
+        "in plain words, give its price, and end with one step forward. A "
+        "returning commenter gets the answer first, no re-welcome.\n"
         f"- Lead with the answer: the item + its real price in the first line, e.g. "
         f"{example} Quote in {money} (the `price` from search_catalog is already in "
         f"{money}) — never invent it.\n"
+        f"{placed_rule}"
+        "- SAY WHAT THEY SEE. Name the item as it appears in THIS post — colour, "
+        "pattern, trim — in plain words: 'the green chasuble with the "
+        "African-print stole down the middle and gold piping', never the bare "
+        "catalogue label ('Ornate Chasuble — Embroidered'). Your context carries "
+        "how the post's product looks whenever our records hold it; otherwise "
+        "read the image you were given. The colour and trim they can see are "
+        "what they are buying.\n"
+        "- ONE PIECE IS THE DEFAULT (owner rule): most people commenting on a "
+        "vestment want ONE. Never ask 'how many?' for a garment or a single "
+        "item — close on the one piece: 'Shall I reserve it for you?', its "
+        "colour, its size, the matching stole. Ask a quantity only for goods "
+        "bought in numbers (cups, wafers, hosts, trays for a congregation) or "
+        "when THEY speak of many.\n"
         "- ANSWER THE QUESTION THEY ACTUALLY ASKED. If it isn't about price — where we "
         "are, delivery, opening hours, whether we ship to their country — answer THAT "
         "first, briefly, and only add a price if it's relevant.\n"
@@ -149,13 +181,14 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "very well, asante Sylvia! 🙏 Is it the Bible in the photo you'd like?' "
         "Never answer a greeting with a canned thanks.\n"
         "- END WITH THE PULL: after the answer, ONE short inviting question that "
-        "draws them into the conversation (which colour? how many? which country "
-        "for delivery?) — a comment that answers AND asks is what starts the "
-        "sale, and their answer lands right back in this thread.\n"
+        "draws them into the conversation (shall I reserve it for you? which "
+        "colour? which city for delivery?) — a comment that answers AND asks is "
+        "what starts the sale, and their answer lands right back in this "
+        "thread. 'How many?' is a pull only for goods bought in numbers.\n"
         "- SELL THE WAY YOU WOULD ON WHATSAPP: acknowledge what they said, name "
-        "the item and its price, give one concrete benefit, then ask the one "
-        "question that moves it forward. That is the whole shape of a comment "
-        "reply — and the next one continues it.\n"
+        "the item as they see it and its price, give one concrete benefit, then "
+        "ask the one question that moves it forward. That is the whole shape of "
+        "a comment reply — and the next one continues it.\n"
         "- If the comment is grief, condolence, illness or a prayer request, respond "
         "with warmth alone — a brief blessing. Sell NOTHING. Not every comment under a "
         "post is a customer at a till.\n"
@@ -174,10 +207,11 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "- NEVER ASK WHERE THEY ARE to choose a currency — no 'are you in "
         "Kenya?', no 'which country are you in?'. Asking makes the shop feel "
         "far away. Read the cues (language, currency words, a named city), "
-        "quote confidently — USD when nothing places them — and switch "
-        "seamlessly the moment a cue lands. Location talk belongs only where "
-        "THEY ask where we are, or where you're giving shipping details — and "
-        "then it reassures: Nairobi workshop, worldwide DHL delivery.\n"
+        "quote confidently, and switch seamlessly the moment a cue lands. "
+        "Location talk belongs only where THEY ask where we are, where you're "
+        "giving shipping details, or as the one clause 'we ship worldwide by "
+        "DHL' in a first quote to someone nobody has placed — and then it "
+        "reassures: Nairobi workshop, worldwide DHL delivery.\n"
         "- WHEN THE POST IS NOT A PRODUCT — a journey, a milestone, an "
         "announcement, a celebration, a greeting, a thank-you (the caption tells "
         "you) — you are the HOST, not the shopkeeper. There is no product to "
@@ -241,10 +275,20 @@ def _public_comment_addendum(currency: str = "USD") -> str:
     )
 
 
-def _meta_addendum(currency: str = "USD") -> str:
+def _meta_addendum(currency: str = "USD", placed: bool = True) -> str:
     money = money_name(currency)
     # Local-currency conversion only for the USD-quoted customer, and only on request.
     local = ""
+    if not placed and currency == "KES":
+        local = (
+            " NOT YET PLACED: nothing yet says where this person is. Quote `price` "
+            "(KES, our home price) and `usd_outside_kenya` from search_catalog in "
+            "ONE breath — 'KES 13,000, or $140 outside Kenya — we ship worldwide by "
+            "DHL' — and never ask which country they are in. The moment a cue "
+            "places them (Swahili or a Kenyan town → KES alone; a foreign city, "
+            "country or 'dollars' → USD; Zambia → ZMW), call search_catalog with "
+            "that currency and quote only their money from then on."
+        )
     if currency == "USD":
         local = (
             " If they ask for Kenyan Shillings or say they're in Kenya, do NOT "
@@ -295,8 +339,9 @@ def _meta_addendum(currency: str = "USD") -> str:
         "is a lost customer record.\n"
         "- CLOSE THE SALE RIGHT HERE — the WHOLE order happens in this chat, the "
         "same way it does on WhatsApp. Walk it one warm step at a time: item → "
-        "colour/design → size → quantity → their city. Build the cart as they "
-        "decide (`update_cart`), then show the items + total and confirm.\n"
+        "colour/design → size → their city (a quantity only for goods bought in "
+        "numbers — ONE PIECE IS THE DEFAULT). Build the cart as they decide "
+        "(`update_cart`), then show the items + total and confirm.\n"
         "- THE PHONE IS WHAT MAKES THE ORDER REAL. Once the items are settled, "
         "warmly ask for their WhatsApp/phone number — for the order confirmation "
         "and delivery — and pass it to capture_contact IN THAT SAME TURN. It also "
@@ -330,7 +375,7 @@ def _meta_addendum(currency: str = "USD") -> str:
     )
 
 
-def _tiktok_addendum(currency: str = "USD") -> str:
+def _tiktok_addendum(currency: str = "USD", placed: bool = True) -> str:
     """System addendum for a TikTok DM (relayed by ManyChat). Same shopkeeper,
     same KES catalogue and order flow as Messenger/IG — with TikTok's physics:
     links don't open when tapped, every automated reply spends one of a capped
@@ -338,6 +383,13 @@ def _tiktok_addendum(currency: str = "USD") -> str:
     side. So: one short message per turn, and the phone number matters early."""
     money = money_name(currency)
     local = ""
+    if not placed and currency == "KES":
+        local = (
+            " NOT YET PLACED: quote `price` (KES, our home price) and "
+            "`usd_outside_kenya` in ONE breath — 'KES 13,000, or $140 outside "
+            "Kenya' — never ask which country they are in; the moment a cue "
+            "places them, quote only their money (search_catalog currency=)."
+        )
     if currency == "USD":
         local = (
             " If they ask for Kenyan Shillings or say they're in Kenya, do NOT "
@@ -371,8 +423,9 @@ def _tiktok_addendum(currency: str = "USD") -> str:
         "role/title or church/ministry — even partially — call capture_contact IN "
         "THAT SAME TURN with everything they said.\n"
         "- CLOSE THE SALE RIGHT HERE, one warm step at a time: item → "
-        "colour/design → size → quantity → their city. Build the cart as they "
-        "decide (update_cart), then show items + total and confirm.\n"
+        "colour/design → size → their city (a quantity only for goods bought in "
+        "numbers — ONE PIECE IS THE DEFAULT). Build the cart as they decide "
+        "(update_cart), then show items + total and confirm.\n"
         "- THE PHONE IS WHAT MAKES THE ORDER REAL — and on TikTok it is also our "
         "lifeline if this thread goes quiet (we cannot restart a TikTok chat; "
         "they must message first). Once items are settled, warmly ask for their "
@@ -694,17 +747,19 @@ async def _history(db: AsyncSession, key: str, limit: int = 20,
 
 async def _meta_market(db: AsyncSession, channel: str, key: str) -> tuple[str, dict, str, dict | None]:
     """(currency, loc, customer_name, source_post) for a Meta contact.
-    Messenger/IG carry no phone, so the default market is USD/worldwide — but a
-    customer whose captured location (their own words via capture_contact, or a
-    panel edit) resolves to Kenya IS the Kenyan market: real KES catalogue
-    prices, M-Pesa, local delivery — never a USD conversion. The name comes from
+    Messenger/IG carry no phone, so until a cue places the customer the market
+    is our HOME one — KES, with the USD figure for outside Kenya carried beside
+    it by search_catalog (owner, 2026-09-05: "we sell it at 13,000; if outside
+    Kenya, we use USD"). A captured location (their own words via
+    capture_contact, or a panel edit) then settles it: Kenya → real KES prices,
+    M-Pesa, local delivery; Zambia → ZMW; anywhere else → USD. The name comes from
     the person / identity so a known customer is greeted by name from turn one.
     source_post ({post_id, comment}) is the post their comment funnelled in
     from — a "How much?" DM refers to THAT product, so the agent must never ask
     "what are you looking for?"."""
     from app.core.countries import iso_from_text
     from app.models.person import Person, Identity
-    currency, loc, name, source_post = "USD", {}, "", None
+    currency, loc, name, source_post = "KES", {}, "", None
     try:
         ident = (await db.execute(select(Identity).where(
             Identity.channel == channel,
@@ -801,10 +856,14 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             loc = {"country_iso": user.country_iso,
                    "country": user.country or user.country_iso}
         # Market gate: Kenya → KES; a country whose currency the hub prices
-        # (Zambia → ZMW) → that currency; everyone else → USD.
-        currency = market_currency(loc.get("country_iso"))
+        # (Zambia → ZMW) → that currency; everyone else → USD. A visitor nobody
+        # could place (a web session with no resolvable country) gets the home
+        # price, with the USD figure beside it — never a guess of USD alone.
+        currency = (market_currency(loc.get("country_iso"))
+                    if loc.get("country_iso") else "KES")
         customer_name = (user.name if user else "") or ""
         source_post = None
+    placed = bool(loc.get("country_iso"))
     # Standing orders + learned rules: the owner's live steering and the rules
     # they approved from Neema's own weekly distillation.
     try:
@@ -839,9 +898,10 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         offer=_offer,
     )
     if is_meta:
-        system += _public_comment_addendum(currency) if public_comment else _meta_addendum(currency)
+        system += (_public_comment_addendum(currency, placed) if public_comment
+                   else _meta_addendum(currency, placed))
     elif is_tiktok:
-        system += _tiktok_addendum(currency)
+        system += _tiktok_addendum(currency, placed)
     elif is_web:
         system += _web_addendum()
     # Everything about THIS customer goes in a SECOND system block ("the tail"),
@@ -1001,6 +1061,10 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             line += (f". Our records identify this post's product as: "
                      f"{_known['name']} — price THAT product; do not "
                      "re-identify it from the image")
+            if _known.get("seen"):
+                line += (f"; as it appears in the post: {_known['seen']} — name it "
+                         "to the customer in those plain words, colour and trim "
+                         "included, never the catalogue label alone")
         line += (". Unless they say otherwise, their questions refer to the product "
                  "in that post — identify it, find it with search_catalog, and "
                  "answer about THAT item. Do not ask what they are looking for.)")
@@ -1024,7 +1088,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     ctx = ToolContext(db=db, redis=redis, wa_id=key, channel=channel,
                       currency=currency, usd_rate=settings.usd_kes_rate,
                       seen_products=(product_sink if product_sink is not None else []),
-                      read_only=read_only)
+                      read_only=read_only, placed=placed)
     totals = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0,
               "cache_write_tokens": 0, "cache_write_1h_tokens": 0}
 
@@ -1833,8 +1897,8 @@ _CATALOGUE_RE = re.compile(
 # When a live viewer asks a price without naming the item. The camera has shown
 # many things — guessing is how a vestment stream quoted a children's book.
 _LIVE_WHICH_POOL = [
-    "Great question{name} 🙏 Which item are you asking about? Tell me and I'll give you the price right away 💛",
-    "Happy to help{name}! 🙏 Which one caught your eye? Name it and I'll share the price 💛",
+    "Which item are you asking about{name}? 🙏 Tell me and I'll give you the price right away 💛",
+    "Which one caught your eye{name}? 🙏 Name it and I'll share the price 💛",
     "Of course{name} 🙏 Which piece do you mean? Let me know and I'll quote it for you 💛",
 ]
 
@@ -1890,11 +1954,33 @@ _OVER_CAP_POOL = [
 # recorded identity): the no-LLM line still SELLS — price + one pull question —
 # instead of deflecting to the inbox. The owner's law is the comment thread is
 # the shop; running out of model budget must not turn it back into a signpost.
+#
+# ONE PIECE IS THE DEFAULT (owner, 2026-09-05): "many people want a piece. We
+# should not ask how many do you want. We should make sales." So the pull is
+# the piece itself — reserve it, its colour — never a quantity. `{product}` is
+# the item AS SEEN in the post when our records describe it ("the green
+# chasuble with the African-print stole and gold piping"), else its name;
+# `{price}` carries the USD figure for outside Kenya beside the KES home price.
 _OVER_CAP_SELL_POOL = [
-    "Thank you{name} 🙏 {product} is {price} — how many would you like? 💛",
-    "Karibu{name} 🙏 {product} is {price}, ready for you — how many should we prepare? 💛",
-    "Bless you{name}! 🙏 {product} is {price} — which quantity works for you? 💛",
-    "We'd love to serve you{name} 🙏 {product} is {price} — how many would you like? 💛",
+    "Thank you{name} 🙏 {product} is {price}, and we ship worldwide by DHL. Shall I reserve one for you? 💛",
+    "Karibu{name} 🙏 {product} is {price}, made with care in our Nairobi workshop and delivered anywhere by DHL. Shall I set one aside for you? 💛",
+    "Bless you{name}! 🙏 {product} is {price}, and we deliver worldwide by DHL. Shall I reserve it for you in this colour? 💛",
+    "We'd love to serve you{name} 🙏 {product} is {price}, delivered anywhere by DHL. Shall I reserve one for you? 💛",
+]
+# A person's FIRST comment to us — the owner's welcome shape: welcome them by
+# name, name what they are looking at, the price, one step. No re-welcome for
+# anyone we have answered before.
+_FIRST_SELL_POOL = [
+    "Welcome to Bethany House{name} 🙏 {product} is {price}, and we ship worldwide by DHL. Shall I reserve one for you? 💛",
+    "Karibu Bethany House{name} 🙏 {product} is {price}, made in our Nairobi workshop and delivered anywhere by DHL. Shall I set one aside for you? 💛",
+    "Welcome{name}, we're glad you found us 🙏 {product} is {price}, and we deliver worldwide by DHL. Shall I reserve it for you? 💛",
+]
+# Goods bought in numbers (cups, hosts, wafers — the per-piece rows): here
+# "how many?" IS the sale, and the price is per piece.
+_OVER_CAP_SELL_EACH_POOL = [
+    "Thank you{name} 🙏 {product} is {price} each, and we ship worldwide by DHL. How many do you need? 💛",
+    "Karibu{name} 🙏 {product} is {price} each, ready for you. How many shall we prepare? 💛",
+    "Bless you{name}! 🙏 {product} is {price} each, delivered anywhere by DHL. How many would you like? 💛",
 ]
 # Said when we could not compose a real answer (over the per-post cap, or the
 # agent turn failed) AND we could not identify a product. It must be safe to send
@@ -1946,7 +2032,8 @@ def _dm_text(answer: str, product_link: str, seed: str) -> str:
 
 def _comment_public_reply(answer: str, dm_sent: bool, name_tag: str, seed: str,
                           product_known: bool = False, product_name: str = "",
-                          price_text: str = "", goodwill: bool = False) -> str:
+                          price_text: str = "", goodwill: bool = False,
+                          per_piece: bool = False, first_contact: bool = False) -> str:
     """The PUBLIC comment text, given the agent's answer and whether the DM landed.
 
     THIS FUNCTION CANNOT PRODUCE A LINK, by construction: it takes no URL. Meta
@@ -1983,7 +2070,11 @@ def _comment_public_reply(answer: str, dm_sent: bool, name_tag: str, seed: str,
         # signposting the inbox.
         subject = f"the {product_name.strip()}" if product_name.strip() else "it"
         if price_text:
-            return (_pick(_OVER_CAP_SELL_POOL, seed).replace("{name}", name_tag)
+            # A per-piece good is sold by the count; anything else is ONE piece,
+            # and a first-time commenter is welcomed the owner's way.
+            pool = (_OVER_CAP_SELL_EACH_POOL if per_piece
+                    else (_FIRST_SELL_POOL if first_contact else _OVER_CAP_SELL_POOL))
+            return (_pick(pool, seed).replace("{name}", name_tag)
                     .replace("{product}", subject).replace("{price}", price_text))
         return (_pick(_OVER_CAP_POOL, seed)
                 .replace("{name}", name_tag).replace("{product}", subject))
@@ -2066,18 +2157,82 @@ async def _recall_post_product(redis, channel: str, post_id: str) -> dict:
         return {}
 
 
-async def _remember_post_product(redis, channel: str, post_id: str, product: dict) -> None:
-    """Record the post's identified product (30 days, best-effort)."""
+async def _describe_post_image(thumb: str) -> str:
+    """How the item in a post's photo LOOKS, in a shopkeeper's plain words —
+    "green chasuble with an African-print stole down the middle and gold
+    piping". Read once per post by the light model (owner, 2026-09-05: "get
+    the colour and some details from the image"), then remembered with the
+    post's identity so every later reply — the free path included, which
+    never sees the picture — names the item as the customer sees it instead
+    of by its catalogue label. Empty on any failure; never blocks a reply."""
+    if not thumb or not settings.tier2_vision:
+        return ""
+    try:
+        from app.agent.media import load_image_block
+        block = await asyncio.to_thread(load_image_block, thumb)
+        if not block:
+            return ""
+        llm = build_llm(model=settings.tier2_model_light)
+        resp = await llm.complete(
+            system=("You describe one product photo for a shopkeeper's reply. Plain "
+                    "words only: no price, no brand, no praise, no full stop."),
+            messages=[{"role": "user", "content": [
+                block,
+                {"type": "text", "text": (
+                    "In at most 18 words, name the item for sale in this photo the way a "
+                    "shopkeeper would to a buyer: its colour, then any pattern or trim "
+                    "(for example: green chasuble with an African-print stole down the "
+                    "middle and gold piping). One lowercase phrase. If no single item is "
+                    "clear, reply with the single word NONE.")},
+            ]}],
+            tools=[])
+        text = " ".join((resp.text or "").split()).strip(" .\"'")
+        if not text or text.upper() == "NONE" or not (3 < len(text.split()) <= 24):
+            return ""
+        return text[:140]
+    except Exception as exc:
+        _log.info("post image description skipped: %s", exc)
+        return ""
+
+
+async def _remember_post_product(redis, channel: str, post_id: str, product: dict,
+                                 thumb: str = "") -> None:
+    """Record the post's identified product (30 days, best-effort) — and, once,
+    how it looks in the post's photo, so replies can name it as seen."""
     if redis is None or not post_id or not (product or {}).get("name"):
         return
     try:
-        await redis.set(_post_product_key(channel, post_id),
-                        json.dumps({"name": product.get("name"),
-                                    "slug": product.get("slug") or "",
-                                    "hub_product_id": product.get("hub_product_id")}),
+        known = await _recall_post_product(redis, channel, post_id)
+        seen = (known.get("seen") or "") if known.get("name") == product.get("name") else ""
+        if not seen and thumb:
+            seen = await _describe_post_image(thumb)
+        record = {"name": product.get("name"),
+                  "slug": product.get("slug") or "",
+                  "hub_product_id": product.get("hub_product_id")}
+        if seen:
+            record["seen"] = seen
+        await redis.set(_post_product_key(channel, post_id), json.dumps(record),
                         ex=30 * 24 * 3600)
     except Exception:
         pass
+
+
+async def _first_contact(channel: str, ext: str) -> bool:
+    """Has this person never been answered by us on this channel? A first
+    comment gets the owner's welcome shape; anyone we have replied to before
+    gets the answer first, no re-welcome. False on any doubt."""
+    try:
+        from app.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as db:
+            row = (await db.execute(
+                select(Message.id).where(
+                    Message.channel == channel,
+                    Message.external_id == ext,
+                    Message.direction == MsgDirection.outbound,
+                ).limit(1))).first()
+            return row is None
+    except Exception:
+        return False
 
 
 def _post_identity_compatible(known: dict, caption: str | None, matched: dict) -> bool:
@@ -2126,8 +2281,10 @@ async def _post_identity(redis, channel: str, pctx: dict) -> dict:
             catalog = await svc.catalog_items(db, redis)
         hit = await post_catalog.resolve_post(redis, pctx, catalog)
         if hit is not None:
-            await _remember_post_product(redis, channel, post_id, hit)
-            return {"name": hit.get("name"), "slug": hit.get("slug") or ""}
+            await _remember_post_product(redis, channel, post_id, hit,
+                                         thumb=(pctx.get("thumb") or "").strip())
+            return await _recall_post_product(redis, channel, post_id) or \
+                {"name": hit.get("name"), "slug": hit.get("slug") or ""}
     except Exception as exc:
         _log.info("deep post resolve failed for %s/%s: %s", channel, post_id, exc)
     return {}
@@ -2463,7 +2620,7 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
             # identity, and pinning one makes every later comment wrong.
             _log.info("post %s is live — not recording a product identity", post_id)
         elif _post_identity_compatible(_known_product, post_ctx.get("title"), matched):
-            await _remember_post_product(redis, channel, post_id, matched)
+            await _remember_post_product(redis, channel, post_id, matched, thumb=thumb)
         else:
             _log.info("post %s: not recording %r as identity (known=%r, caption disagrees)",
                       post_id, (matched or {}).get("name"), _known_product.get("name"))
@@ -2503,14 +2660,27 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # A public reply no longer carries a link, so it no longer needs one to be
     # useful — knowing WHAT they're asking about is enough to answer warmly.
     product_name = (matched.get("name") or "").strip()
-    # The post identity carries hub prices — comments quote USD by default.
+    # The no-model line names the item AS SEEN when our records describe it.
+    if product_name and _known_product.get("seen") \
+            and _known_product.get("name") == product_name:
+        product_name = _known_product["seen"]
+    # The post identity carries hub prices. A public reply is read by the
+    # Kenyan and the reader abroad alike, and nobody here has been placed: the
+    # KES home price leads, the USD figure for outside Kenya rides beside it
+    # (owner, 2026-09-05), and a per-piece good says "each".
     _usd, _kes = matched.get("price_usd"), matched.get("price_kes") or matched.get("price")
-    price_text = money.fmt(_usd, "USD") if _usd else (money.fmt(_kes, "KES") if _kes else "")
+    price_text = _public_price_text(_kes, _usd)
+    from app.services.price_audit import looks_per_piece as _per_piece
+    per_piece = bool(matched) and _per_piece(matched)
+    first = False
+    if not answer and product_name and price_text and not per_piece:
+        first = await _first_contact(channel, ext)
     public_text = _comment_public_reply(answer, dm_sent, name_tag, ext,
                                         product_known=bool(product_name),
                                         product_name=product_name,
                                         price_text=price_text,
-                                        goodwill=(intent == "goodwill"))
+                                        goodwill=(intent == "goodwill"),
+                                        per_piece=per_piece, first_contact=first)
 
     await _post_public(public_text)
 
@@ -2525,6 +2695,17 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
 
     _log.info("comment %s engaged: agent=%s free_ask=%s dm=%s",
               cid, not skip_model, free_ask, dm_sent)
+
+
+def _public_price_text(kes, usd) -> str:
+    """The price as a PUBLIC reply says it: the KES home price, with the USD
+    figure for outside Kenya beside it when the hub has one — 'KES 13,000, or
+    $140 outside Kenya'. One currency alone when only one is known."""
+    k = money.fmt(kes, "KES") if kes else ""
+    u = money.fmt(usd, "USD") if usd else ""
+    if k and u:
+        return f"{k}, or {u} outside Kenya"
+    return k or u
 
 
 def schedule_comment_engage(redis, channel: str, comment: dict, own_pages: set) -> None:

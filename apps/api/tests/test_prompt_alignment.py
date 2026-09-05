@@ -42,7 +42,10 @@ def test_unknown_country_reads_cues_instead_of_asking():
     assert "never ASK" in p and "SELL FIRST" in p
     assert "CUES" in p
     assert 'NEVER ask "are you in Kenya?"' in p
-    assert "quote USD confidently" in p
+    # Owner rule (2026-09-05): with no cue, the KES home price and the USD figure
+    # for outside Kenya in one breath — never a USD-only guess, never a question.
+    assert "Quote our HOME price in KES" in p and "usd_outside_kenya" in p
+    assert "quote USD confidently" not in p
     # the old opener interrogation is gone, and the false claim stays absent
     assert "which city and country are you in" not in p
     assert "ALREADY know their country" not in p
