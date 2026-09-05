@@ -12,7 +12,7 @@ import { Toggle } from "@/components/ui/Layout";
 import { timeAgo, formatPhone, displayName, countryName } from "@/lib/utils";
 import { formatWa } from "@/lib/waText";
 import { CHANNEL_CONFIG, ALL_CHANNELS } from "@/lib/channels";
-import { conversationsApi, profileApi, type ApiActivityEvent } from "@/lib/api";
+import { conversationsApi, mapConversation, profileApi, type ApiActivityEvent } from "@/lib/api";
 import { useConversationEvents, buildSystemEventFromWs } from "@/lib/websocket";
 import { CustomerSidebar } from "@/components/ui/CustomerSidebar";
 import type {
@@ -1031,15 +1031,38 @@ export function ConversationsView({
             // identities (the Meta case: order carries a phone, thread a PSID).
             conversationsApi
                 .resolve(key, refPart || undefined)
-                .then(({ conversation_id }) => {
-                    if (conversation_id) handleSelectConv(conversation_id);
-                    else onToast?.("No conversation yet — they haven't messaged. Use Invite to WhatsApp.", "warning");
+                .then(async ({ conversation_id }) => {
+                    if (!conversation_id) {
+                        onToast?.("No conversation yet — they haven't messaged. Use Invite to WhatsApp.", "warning");
+                        return;
+                    }
+                    // Selecting an id the LIST does not contain shows "Select a
+                    // conversation" — the thread pane reads
+                    // conversations.find(c => c.id === activeConvId). The list
+                    // paints from a snapshot capped at 600 rows, so every link
+                    // to a thread older than the 600 most recent landed on an
+                    // empty pane even though resolution had succeeded. Fetch
+                    // the one conversation and put it in the list first.
+                    if (!conversations.some((c) => c.id === conversation_id)) {
+                        try {
+                            const one = await conversationsApi.get(conversation_id);
+                            setConversations?.((prev) =>
+                                prev.some((c) => c.id === conversation_id)
+                                    ? prev
+                                    : [mapConversation(one), ...prev],
+                            );
+                        } catch {
+                            // Still select it: messages load by id, so the
+                            // thread opens even if the row could not be added.
+                        }
+                    }
+                    handleSelectConv(conversation_id);
                 })
                 .catch(() => onToast?.("Could not look up that chat.", "error"));
         }
         onConsumeOpenConvKey?.();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [openConvKey, conversations, freshLoaded, onConsumeOpenConvKey, onToast]);
+    }, [openConvKey, conversations, freshLoaded, onConsumeOpenConvKey, onToast, setConversations]);
 
     const openIdentityConversation = (channel: string, externalId: string) => {
         const conv = conversations.find(

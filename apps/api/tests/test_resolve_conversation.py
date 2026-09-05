@@ -110,3 +110,46 @@ def test_a_captured_phone_resolves_through_identifiers_with_no_order_ref():
     out = asyncio.run(resolve_conversation(key="+23672582495", ref="", db=db, agent=None))
 
     assert out == {"conversation_id": "conv-psid"}
+
+
+# ── resolving is only half the job: the inbox has to be able to RENDER it ────
+# The link resolved correctly and still showed "Select a conversation". The
+# thread pane reads conversations.find(c => c.id === activeConvId), and the
+# client paints from a snapshot capped at 600 rows — so every link to a thread
+# older than the 600 most recent selected an id the list did not contain. The
+# full list is 13,000+ rows and 13 MB, so waiting for it is not an answer.
+# GET /admin/conversations/{id} lets the client fetch just that one row.
+
+def test_one_conversation_is_served_in_the_same_shape_as_the_list():
+    import inspect
+    from app.routers import admin
+
+    # Both the list and the single fetch go through ONE serializer, so a row
+    # fetched by id can never drift from the same row inside the list.
+    assert hasattr(admin, "_conversation_rows")
+    assert "_conversation_rows" in inspect.getsource(admin.list_conversations)
+    assert "_conversation_rows" in inspect.getsource(admin.get_conversation)
+
+
+def test_the_literal_resolve_path_is_registered_before_the_id_route():
+    # /conversations/resolve must keep winning over /conversations/{conv_id};
+    # FastAPI matches in registration order, so a wrongly-ordered pair would
+    # send "resolve" into the id handler and 422 on the UUID parse.
+    from app.routers import admin
+
+    paths = [r.path for r in admin.router.routes]
+    assert "/conversations/resolve" in paths
+    assert "/conversations/{conv_id}" in paths
+    assert paths.index("/conversations/resolve") < paths.index("/conversations/{conv_id}")
+
+
+def test_an_unknown_conversation_is_a_404_not_an_empty_body():
+    import pytest
+    from fastapi import HTTPException
+    from app.routers.admin import get_conversation
+
+    db = _DB([[]])                            # no such conversation
+
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(get_conversation(conv_id=uuid.uuid4(), db=db, agent=None))
+    assert e.value.status_code == 404
