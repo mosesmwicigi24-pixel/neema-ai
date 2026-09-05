@@ -539,9 +539,14 @@ def test_capture_contact_location_sets_country(monkeypatch):
 
     class _DB:
         async def execute(self, stmt):
-            # identity select → ident; any User select → none
-            return types.SimpleNamespace(scalar_one_or_none=lambda: (
-                ident if "identities" in str(stmt) else None))
+            # identity select → ident; any User select → none (a person may own
+            # several user rows after a merge, so user reads go through scalars())
+            hit = ident if "identities" in str(stmt) else None
+            items = [hit] if hit is not None else []
+            return types.SimpleNamespace(
+                scalar_one_or_none=lambda: hit,
+                scalars=lambda: types.SimpleNamespace(all=lambda: items,
+                                                      first=lambda: hit))
         async def get(self, model, pk): return person
         async def commit(self): pass
 

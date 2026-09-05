@@ -21,6 +21,7 @@ from app.core.countries import resolve_country
 from app.models.order_event import OrderEvent
 from app.models.user import User
 from app.services import n8n_bridge as svc
+from app.services.market import users_for_person
 from app.agent import cart as cartmod
 from app.agent import memory as memorymod
 
@@ -843,8 +844,8 @@ async def _order_identity(ctx: ToolContext):
     if ph and ph.value:
         phone = ph.value.lstrip("+")
     else:
-        u = (await ctx.db.execute(select(User).where(
-            User.person_id == ident.person_id))).scalar_one_or_none()
+        _users = await users_for_person(ctx.db, ident.person_id)
+        u = _users[0] if _users else None
         if u is not None and u.phone:
             phone = u.phone.lstrip("+")
             # The phone reached us but never became an Identifier — persist the
@@ -1108,8 +1109,8 @@ async def _capture_contact(args: dict, ctx: ToolContext) -> dict:
         ident.display_name = full
         if person is not None:
             person.display_name = full
-        _u = (await ctx.db.execute(
-            select(User).where(User.person_id == ident.person_id))).scalar_one_or_none()
+        _users = await users_for_person(ctx.db, ident.person_id)
+        _u = _users[0] if _users else None
         if _u is not None:
             cur = (_u.name or "").strip()
             if not cur or (cur.lower() in full.lower() and len(full) > len(cur)):
@@ -1128,8 +1129,8 @@ async def _capture_contact(args: dict, ctx: ToolContext) -> dict:
             state["country_iso"] = loc_iso
             state["country"] = name_for_iso(loc_iso)
             state["flag_url"] = flag_url_for(loc_iso)
-            _shim = (await ctx.db.execute(
-                select(User).where(User.person_id == ident.person_id))).scalar_one_or_none()
+            _shims = await users_for_person(ctx.db, ident.person_id)
+            _shim = _shims[0] if _shims else None
             if _shim is not None and not _shim.country_iso:
                 _shim.country_iso = loc_iso
                 _shim.country = state["country"]
@@ -1155,19 +1156,30 @@ async def _capture_contact(args: dict, ctx: ToolContext) -> dict:
         # A number shared without a country code ("0799223329") must be resolved
         # against THEIR country, not Kenya's — we know it from their captured
         # location (this turn's or the profile's).
-        _user = (await ctx.db.execute(
-            select(User).where(User.person_id == ident.person_id))).scalar_one_or_none()
-        region = (iso_from_text(location)
-                  or iso_from_text((person.state or {}).get("location") if person else None)
-                  or iso_from_text(_user.location if _user else None)   # panel-edited location
-                  or "KE")
+        _users = await users_for_person(ctx.db, ident.person_id)
+        _user = _users[0] if _users else None
+        region_from_words = (iso_from_text(location)
+                             or iso_from_text((person.state or {}).get("location") if person else None)
+                             or iso_from_text(_user.location if _user else None))   # panel-edited location
+        region = region_from_words or "KE"
         e164 = to_e164(phone, region)
         if e164:
-            await attach_identifier(ctx.db, ident.person_id, "phone", e164,
-                                    source=f"{ctx.channel}_capture", confidence="self_reported")
+            from app.core.phone import carries_country_code
             # Link to the WhatsApp person for that number, if one exists — keep the
             # phone-anchored WhatsApp person as primary (it can transact + be paid).
             wa_ident = await _select_identity(ctx.db, WHATSAPP, e164.lstrip("+"))
+            # Is the country EVIDENCE or a parsing default? They gave it
+            # ("+254…"/"254…"), or the number was read against a location they
+            # stated, or a real WhatsApp contact exists on exactly that number
+            # — any of these places them. A bare "0712…" with none of them was
+            # assumed Kenyan so the digits could be stored at all: it is
+            # recorded as assumed, and it never stamps a country (owner,
+            # 2026-09-05: no evidence, no KES).
+            assumed = (not carries_country_code(phone, e164) and not region_from_words
+                       and wa_ident is None)
+            await attach_identifier(ctx.db, ident.person_id, "phone", e164,
+                                    source=f"{ctx.channel}_capture", confidence="self_reported",
+                                    raw={"as_given": phone[:40], "region_assumed": assumed})
             if wa_ident is not None and wa_ident.person_id != ident.person_id:
                 from app.services.merge import merge_persons
                 try:
@@ -1180,13 +1192,18 @@ async def _capture_contact(args: dict, ctx: ToolContext) -> dict:
             # The phone becomes the customer's primary contact identity: show it
             # on their profile (the shim User row), keeping the Messenger id
             # linked so future DMs still resolve to the same customer.
-            user = (await ctx.db.execute(
-                select(User).where(User.person_id == ident.person_id))).scalar_one_or_none()
+            # After a merge this person has TWO user rows (the WhatsApp one and
+            # the Messenger shim): the phone-anchored row comes first.
+            _users2 = await users_for_person(ctx.db, ident.person_id)
+            user = _users2[0] if _users2 else None
             if user is not None and not user.phone:
                 user.phone = e164
             # The dialing prefix is the strongest country signal — set the
             # profile's country from it (overwrites a location-derived guess).
-            loc = resolve_country(e164)
+            # Never from a prefix we only assumed.
+            loc = resolve_country(e164) if not assumed else {}
+            if assumed:
+                out["country_assumed"] = True
             if loc.get("country_iso"):
                 if person is not None:
                     from sqlalchemy.orm.attributes import flag_modified as _fm
@@ -1516,24 +1533,20 @@ def _product_url(slug: str | None) -> str | None:
 
 
 async def _customer_currency(ctx: ToolContext) -> str:
-    """This customer's own currency for the shared catalog: Kenya → KES, Zambia
-    → ZMW, etc., from their phone prefix (WhatsApp) or captured country (Meta).
-    USD for anyone we can't place. The catalog shows their currency where the
-    hub prices it, else USD."""
-    from app.core.countries import currency_for_country, iso_from_text
+    """This customer's own currency for the shared catalog — from the SAME
+    evidence as every quote (services/market): their phone prefix (WhatsApp),
+    the IP-geolocated user row (web), or the social identity's evidence chain
+    (Meta / TikTok). USD for anyone we can't place. The catalog shows their
+    currency where the hub prices it, else USD."""
+    from app.core.countries import currency_for_country
+    from app.services.market import customer_market
     iso = None
     if ctx.channel == "whatsapp":
         iso = (resolve_country(ctx.wa_id) or {}).get("country_iso")
     else:
         try:
-            from app.models.person import Identity, Person
-            ident = (await ctx.db.execute(select(Identity).where(
-                Identity.channel == ctx.channel,
-                Identity.external_id == ctx.wa_id))).scalar_one_or_none()
-            if ident is not None:
-                person = await ctx.db.get(Person, ident.person_id)
-                st = (person.state or {}) if person else {}
-                iso = st.get("country_iso") or iso_from_text(st.get("location"))
+            _, _loc = await customer_market(ctx.db, ctx.channel, ctx.wa_id)
+            iso = _loc.get("country_iso")
         except Exception:
             pass
     if iso:

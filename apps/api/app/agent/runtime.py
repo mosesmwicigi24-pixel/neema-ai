@@ -725,18 +725,19 @@ async def _history(db: AsyncSession, key: str, limit: int = 20,
 async def _meta_market(db: AsyncSession, channel: str, key: str) -> tuple[str, dict, str, dict | None]:
     """(currency, loc, customer_name, source_post) for a Meta contact.
     Messenger/IG carry no phone, so the market is USD — ONE currency — until
-    the EVIDENCE on this person's record says Kenya (owner, 2026-09-05): a
-    captured location (their own words via capture_contact, or a panel edit),
-    the profile's country, or a Kenyan number linked to this same person — a
-    WhatsApp identity merged with this one, or a phone they gave us. Then it is
-    the Kenyan market: real KES catalogue prices, M-Pesa, local delivery —
-    never a USD conversion. Zambia → ZMW the same way. The name comes from
-    the person / identity so a known customer is greeted by name from turn one.
+    the EVIDENCE on this person's record says Kenya (owner, 2026-09-05; the
+    chain lives in services/market.evidence_for_person): a captured location
+    (their own words, or a panel edit), a country on a user row (IP, a real
+    prefix), a phone on the profile, a WhatsApp identity merged with this
+    one, or a phone identifier that carried its country code. Then it is the
+    Kenyan market: real KES catalogue prices, M-Pesa, local delivery — never
+    a USD conversion. Zambia → ZMW the same way. The name comes from the
+    person / identity so a known customer is greeted by name from turn one.
     source_post ({post_id, comment}) is the post their comment funnelled in
     from — a "How much?" DM refers to THAT product, so the agent must never ask
     "what are you looking for?"."""
-    from app.core.countries import iso_from_text
     from app.models.person import Person, Identity
+    from app.services.market import evidence_for_person
     currency, loc, name, source_post = "USD", {}, "", None
     try:
         ident = (await db.execute(select(Identity).where(
@@ -745,50 +746,18 @@ async def _meta_market(db: AsyncSession, channel: str, key: str) -> tuple[str, d
         if ident is None:
             return currency, loc, name, source_post
         person = await db.get(Person, ident.person_id)
-        u = (await db.execute(select(User).where(
-            User.person_id == ident.person_id))).scalar_one_or_none()
-        location = (((person.state or {}).get("location") if person else None)
-                    or (u.location if u else None) or "")
+        ev = await evidence_for_person(db, ident, person)
+        users, sibs = ev["users"], ev["siblings"]
+        u = users[0] if users else None
         name = ((person.display_name if person else None)
                 or getattr(ident, "display_name", None)
                 or (u.name if u else None) or "")
-        # WHERE THEY ARE — from evidence only, never a guess from a name or a
-        # page: their own words first (a captured location, a panel edit),
-        # then the profile's country, then a Kenyan number linked to this same
-        # person (a merged WhatsApp identity, a phone they gave us).
-        iso = iso_from_text(location)
-        country = location
-        if not iso and u is not None:
-            iso = ((u.country_iso or "").strip().upper() or None)
-            country = u.country or iso or ""
-            if not iso and u.phone:
-                r = resolve_country(u.phone) or {}
-                iso, country = r.get("country_iso"), r.get("country") or ""
-        # Siblings serve twice: a linked WhatsApp number places the person, and
-        # a facebook comment identity carries the post a DM funnelled in from.
-        sibs = (await db.execute(select(Identity).where(
-            Identity.person_id == ident.person_id))).scalars().all() or []
-        if not iso:
-            for s in sibs:
-                if getattr(s, "channel", "") == "whatsapp":
-                    r = resolve_country(getattr(s, "external_id", "") or "") or {}
-                    if r.get("country_iso"):
-                        iso, country = r["country_iso"], r.get("country") or ""
-                        break
-        if not iso:
-            from app.models.person import Identifier
-            phones = (await db.execute(select(Identifier).where(
-                Identifier.person_id == ident.person_id,
-                Identifier.type == "phone"))).scalars().all() or []
-            for ph in phones:
-                r = resolve_country(getattr(ph, "value", "") or "") or {}
-                if r.get("country_iso"):
-                    iso, country = r["country_iso"], r.get("country") or ""
-                    break
-        if iso:
-            loc = {"country_iso": iso, "country": country or iso}
+        if ev.get("country_iso"):
+            loc = {"country_iso": ev["country_iso"],
+                   "country": ev.get("country") or ev["country_iso"]}
             # Same market gate as WhatsApp: KE → KES, ZM → ZMW, else USD.
-            currency = market_currency(iso)
+            currency = market_currency(ev["country_iso"])
+            _log.info("market for %s/%s: %s by %s", channel, key, currency, ev.get("evidence"))
         # Source post: this identity first, then siblings on the same person
         # (a facebook comment identity funnels into a messenger DM identity),
         # then the person state (stamped by the WhatsApp handover link).
