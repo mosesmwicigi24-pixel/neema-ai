@@ -57,7 +57,10 @@ def test_the_inbox_resolves_each_country_once():
     and it was being called twice per row — on every 60s poll."""
     import inspect
     from app.routers import admin
-    src = inspect.getsource(admin.list_conversations)
+    # The row-building moved into _conversation_rows so a single
+    # conversation fetched by id shares ONE serializer with the list.
+    # Same code, same guarantee — just no longer inline in the route.
+    src = inspect.getsource(admin._conversation_rows)
     assert "country_map = {str(c.id): _list_country(c) for c in conversations}" in src
     assert src.count("_list_country(c)") == 1     # built once, read from the map
 
