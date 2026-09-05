@@ -78,6 +78,21 @@ def national_digits(raw: str | None, region: str = DEFAULT_REGION) -> str | None
     return str(p.national_number)
 
 
+def carries_country_code(raw: str | None, e164: str | None) -> bool:
+    """Did the customer GIVE the country — "+254712…" or "254712…" — or was
+    it a bare local number ("0712…") whose region we assumed? The difference
+    is evidence versus a parsing default (owner, 2026-09-05: no evidence, no
+    KES)."""
+    s = str(raw or "").strip()
+    if not s or not e164:
+        return False
+    if s.startswith("+"):
+        return True
+    digs = "".join(ch for ch in s if ch.isdigit())
+    e = str(e164).lstrip("+")
+    return digs == e or digs == "00" + e
+
+
 def is_plausible_phone(raw: str | None) -> bool:
     """Cheap guard: could this string be a phone number at all?
 

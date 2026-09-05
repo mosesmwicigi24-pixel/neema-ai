@@ -461,9 +461,9 @@ async def _resolve_customer_user(
     identity = (await db.execute(iq.order_by(Identity.created_at))).scalars().first()
     if identity is None or identity.person_id is None:
         return None
-    user = (await db.execute(
-        select(User).where(User.person_id == identity.person_id)
-    )).scalar_one_or_none()
+    from app.services.market import users_for_person
+    _users = await users_for_person(db, identity.person_id)   # merged → 2 rows; phone first
+    user = _users[0] if _users else None
     if user or not create:
         return user
 

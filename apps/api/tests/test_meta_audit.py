@@ -138,8 +138,13 @@ def test_capture_contact_no_longer_denies_profile_names():
 def test_public_comments_skip_the_greeting_ritual():
     from app.agent.runtime import _public_comment_addendum
     a = _public_comment_addendum("KES")
-    assert "No greeting ritual" in a
-    assert "first line is the ANSWER" in a
+    # No daypart ritual under a comment — but the owner's own FIRST CONTACT
+    # welcome shape applies to a person's first comment (2026-09-05: the two
+    # rules used to contradict each other; now they agree).
+    assert "never 'Good morning' under a comment" in a
+    assert "FIRST CONTACT — THE WELCOME" in a
+    assert "the FIRST CONTACT greeting rules do not apply" not in a
+    assert "returning commenter gets the answer first" in a
 
 
 def test_neutral_ack_pool_carries_no_cheerful_emoji():

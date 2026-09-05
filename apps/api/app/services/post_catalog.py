@@ -207,7 +207,8 @@ async def sweep_page_posts(db, redis, limit: int = 25) -> dict:
             pctx = await _post_context(pid, redis=redis, channel="facebook") or {}
             hit = await resolve_post(redis, pctx, catalog)
             if hit is not None:
-                await _remember_post_product(redis, "facebook", pid, hit)
+                await _remember_post_product(redis, "facebook", pid, hit,
+                                             thumb=(pctx.get("thumb") or "").strip())
                 resolved += 1
                 _log.info("post %s identified ahead of contact: %s", pid, hit.get("name"))
             else:

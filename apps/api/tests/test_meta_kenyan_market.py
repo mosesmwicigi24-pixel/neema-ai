@@ -1,5 +1,6 @@
-"""Meta channels default to USD, but a customer whose captured location resolves
-to Kenya IS the Kenyan market (the Meshack 'Kenya money' case): real KES
+"""Meta channels default to USD — ONE currency, never two (owner, 2026-09-05) —
+and a customer whose captured location resolves to Kenya IS the Kenyan market
+(the Meshack 'Kenya money' case): real KES
 catalogue prices — never a USD conversion — flipped in the SAME turn the
 location is captured. Also: fuller name wins so a self-stated 'Meshack' never
 shadows the profile's 'Meshack Munyao'."""
@@ -61,6 +62,7 @@ def test_meta_market_flips_to_kes_for_captured_kenyan_location():
 
 
 def test_meta_market_defaults_usd_without_location():
+    # No evidence of Kenya on Jane's record → USD, and no country question.
     person = _person(name="Jane")
     db = _FakeDB([_ident(person), None, []], person=person)
     currency, loc, _, _ = asyncio.run(_meta_market(db, "messenger", PSID))

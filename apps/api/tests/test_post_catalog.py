@@ -160,7 +160,7 @@ def test_sweep_resolves_and_counts(monkeypatch):
     remembered = {}
     async def _recall(redis, channel, pid):
         return {"name": "Known"} if pid == "postB" else {}
-    async def _remember(redis, channel, pid, product):
+    async def _remember(redis, channel, pid, product, thumb=""):
         remembered[pid] = product.get("slug")
     monkeypatch.setattr("app.agent.runtime._recall_post_product", _recall)
     monkeypatch.setattr("app.agent.runtime._remember_post_product", _remember)
@@ -204,7 +204,7 @@ def test_team_override_sets_the_post_identity(monkeypatch):
     async def _catalog(db, redis): return _CATALOG
     monkeypatch.setattr("app.services.n8n_bridge.catalog_items", _catalog)
     stored = {}
-    async def _remember(redis, channel, pid, product):
+    async def _remember(redis, channel, pid, product, thumb=""):
         stored[pid] = (channel, product.get("slug"))
     monkeypatch.setattr("app.agent.runtime._remember_post_product", _remember)
 

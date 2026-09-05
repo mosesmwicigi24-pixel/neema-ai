@@ -42,7 +42,10 @@ def test_unknown_country_reads_cues_instead_of_asking():
     assert "never ASK" in p and "SELL FIRST" in p
     assert "CUES" in p
     assert 'NEVER ask "are you in Kenya?"' in p
+    # Owner rule (2026-09-05): ONE currency — USD until the evidence says Kenya,
+    # never two in one quote, never a question.
     assert "quote USD confidently" in p
+    assert "ONE CURRENCY, NEVER TWO" in p
     # the old opener interrogation is gone, and the false claim stays absent
     assert "which city and country are you in" not in p
     assert "ALREADY know their country" not in p

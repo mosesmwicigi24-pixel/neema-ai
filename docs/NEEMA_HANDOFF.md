@@ -16,8 +16,16 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
 ## Live in prod now
 - **WhatsApp + Messenger/IG agent** (one brain, one KES hub catalogue). Messenger/IG
   read-only tools; checkout routed to WhatsApp.
-- **Currency gate**: Kenya(+254)→KES; everyone else + all Meta→USD. USD prefers the
-  hub's own `price_usd`, falls back to KES÷`usd_kes_rate` (default 100). On request,
+- **Currency gate** — ONE currency, never two (owner 2026-09-05; the chain is
+  `services/market.py`, the only place it is decided): KES only when the EVIDENCE
+  says Kenya — a +254 WhatsApp number; the website visitor's IP (web_chat
+  geolocates it onto the user row); a Facebook/Messenger/Instagram/TikTok id
+  merged with a +254 WhatsApp number (a linked WhatsApp identity, the WhatsApp
+  user row, a phone given WITH its country code); or their own words (a
+  captured Kenyan location, a panel edit). Zambia→ZMW the same way; everyone
+  else, and anyone unplaced, USD. NOT evidence: a Facebook locale, a name, a
+  bare "0712…" whose country we assumed. No country question, ever. USD prefers
+  the hub's own `price_usd`, falls back to KES÷`usd_kes_rate` (default 100). On request,
   Neema converts USD→local at the central-bank rate, as the arithmetic gives it.
   Prices are quoted EXACTLY as the hub holds them — never rounded to a unit or
   a ten (owner rule 2026-09-03; `app/core/money.py` is the one formatter).

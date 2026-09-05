@@ -88,7 +88,8 @@ def test_no_public_comment_template_contains_a_link():
     """Every canned line that can reach the public square, swept in one place —
     the leak was a template, so templates are what this pins."""
     pools = (rt._DM_NUDGE_POOL + rt._COMMENT_INVITE_POOL + rt._OVER_CAP_POOL
-             + rt._NEUTRAL_ACK_POOL + rt._THANKS_POOL + rt._GOODWILL_POOL)
+             + rt._NEUTRAL_ACK_POOL + rt._THANKS_POOL + rt._GOODWILL_POOL
+             + rt._OVER_CAP_SELL_POOL + rt._FIRST_SELL_POOL + rt._OVER_CAP_SELL_EACH_POOL)
     for line in pools:
         low = line.lower()
         assert "http" not in low

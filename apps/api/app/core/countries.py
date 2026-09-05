@@ -284,10 +284,29 @@ def resolve_country(wa_id_or_phone: str | None) -> dict:
     return empty
 
 
+# Kenyan towns a customer names as their location ("I'm in Nakuru") — their
+# own words are evidence of Kenya even when the word "Kenya" is not said
+# (owner, 2026-09-05). Home market only, well-known names only, matched as
+# whole words so "Meru" never fires inside another word.
+_KENYAN_TOWNS = (
+    "nairobi", "mombasa", "kisumu", "nakuru", "eldoret", "thika", "machakos",
+    "nyeri", "meru", "kakamega", "kitale", "malindi", "garissa", "kericho",
+    "embu", "naivasha", "kiambu", "ruiru", "kisii", "kitui", "bungoma",
+    "nanyuki", "voi", "lamu", "kilifi", "kajiado", "ngong", "rongai", "athi river",
+    "murang'a", "muranga", "nyahururu", "narok", "isiolo", "wajir", "mandera",
+    "marsabit", "lodwar", "busia", "homa bay", "migori", "siaya", "bomet",
+    "kapsabet", "webuye", "mumias", "limuru", "karen", "westlands", "kasarani",
+    "githurai", "kikuyu", "juja", "ongata rongai", "kitengela", "mtwapa",
+    "ukunda", "diani", "nyamira", "kerugoya", "kiserian", "mlolongo",
+)
+_KENYAN_TOWNS_RE = None
+
+
 def iso_from_text(text: str | None) -> str | None:
     """Best-effort ISO country from free text (e.g. a captured location like
     'Somerset East, Eastern Cape, South Africa'). Longest country name wins so
-    'South Sudan' never matches plain 'Sudan'. None when nothing matches."""
+    'South Sudan' never matches plain 'Sudan'. A Kenyan town named on its own
+    ("Nakuru") is Kenya. None when nothing matches."""
     t = (text or "").lower()
     if not t:
         return None
@@ -296,7 +315,14 @@ def iso_from_text(text: str | None) -> str | None:
         n = name.lower()
         if n in t and (best is None or len(n) > best[0]):
             best = (len(n), iso)
-    return best[1] if best else None
+    if best:
+        return best[1]
+    global _KENYAN_TOWNS_RE
+    if _KENYAN_TOWNS_RE is None:
+        import re as _re
+        _KENYAN_TOWNS_RE = _re.compile(
+            r"(?<![a-z])(?:" + "|".join(_re.escape(w) for w in _KENYAN_TOWNS) + r")(?![a-z])")
+    return "KE" if _KENYAN_TOWNS_RE.search(t) else None
 
 
 def name_for_iso(iso: str | None) -> str | None:
