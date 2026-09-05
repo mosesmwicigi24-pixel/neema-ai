@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, func, delete, or_
@@ -207,9 +209,45 @@ async def list_conversations(
     db: AsyncSession = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
 ):
+    return await _conversation_rows(db, mode=mode)
+
+
+@router.get("/conversations/{conv_id}")
+async def get_conversation(
+    conv_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """ONE conversation, in exactly the shape the list returns.
+
+    The hub's chat deep link resolves to a conversation id, and the inbox then
+    has to render it. It could not: the client paints from a snapshot capped at
+    600 rows, and the thread pane reads `conversations.find(c => c.id === ...)`,
+    so a link to anything older than the 600 most recent threads selected an id
+    that was not in the list and showed "Select a conversation" — the exact
+    complaint. The full list is 13,000+ rows and 13 MB, so waiting for it is
+    not an answer either.
+
+    Declared after /conversations/resolve so that literal path still wins.
+    """
+    rows = await _conversation_rows(db, conv_id=conv_id)
+    if not rows:
+        raise HTTPException(status_code=404, detail="conversation not found")
+    return rows[0]
+
+
+async def _conversation_rows(
+    db: AsyncSession,
+    mode: str | None = None,
+    conv_id=None,
+) -> list[dict]:
+    """The inbox row shape. One code path, so a single conversation fetched by
+    id can never drift from the same conversation inside the list."""
     from sqlalchemy import and_, case, literal
 
     q = select(Conversation)
+    if conv_id is not None:
+        q = q.where(Conversation.id == conv_id)
     if mode:
         q = q.where(Conversation.intercept_mode == mode)
     result = await db.execute(q)

@@ -15,7 +15,10 @@ import app.main  # noqa: F401 — registers all SQLAlchemy models
 
 def test_inbox_rows_count_paid_hub_orders_only():
     from app.routers import admin
-    src = inspect.getsource(admin.list_conversations)
+    # The row-building moved into _conversation_rows so a single
+    # conversation fetched by id shares ONE serializer with the list.
+    # Same code, same guarantee — just no longer inline in the route.
+    src = inspect.getsource(admin._conversation_rows)
     assert '"orders_count"' in src
     assert "PAID_STATES" in src                        # money landed, not "open"
     assert "hub_order_id.isnot(None)" in src           # real hub orders only
