@@ -18,6 +18,7 @@ from app.agent.memory import build_memory_context
 from app.agent.prompt import build_system_prompt, customer_context
 from app.agent.tools import TOOLS, ToolContext, run_tool
 from app.core import money
+from app.core.synonyms import canonical as _canonical
 from app.core.config import settings
 from app.core.countries import resolve_country, market_currency, money_name
 from app.models.message import Message, MsgDirection, MsgSender
@@ -1844,7 +1845,8 @@ def _mentions_catalogue_item(text: str) -> bool:
     The bias is deliberate: a miss costs a friendly "which one?", while a false
     match costs an arriving viewer a sales reply where a welcome belonged.
     """
-    return bool(_CATALOGUE_RE.search(text or ""))
+    # "the pendant" names our Pectoral Cross (core/synonyms) — read it so.
+    return bool(_CATALOGUE_RE.search(_canonical(text or "")))
 
 
 # The vocabulary of the shop. Not the catalogue itself: this runs on every live
@@ -2297,7 +2299,10 @@ def _hub_caption_match(catalog: list, title: str) -> dict | None:
     can SEE the frame) or the both-options rule decide, never silently pick
     one. This is what identifies the product when a reel has a thin caption:
     the hub's own names and aliases ARE the intelligence."""
-    text_l = (title or "").lower()
+    # The caption in the hub's words first: "Cross and chain available" is
+    # a Pectoral Cross post (core/synonyms), and scores as one.
+    title = _canonical(title or "")
+    text_l = title.lower()
     toks = _caption_tokens(title)
     cap_seq = _caption_token_seq(title)
     if not toks:

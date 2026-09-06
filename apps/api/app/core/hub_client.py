@@ -19,6 +19,7 @@ import re as _re
 import httpx
 
 from app.core.config import settings
+from app.core.synonyms import canonical as _canonical
 
 _log = logging.getLogger("neema.hub")
 _CACHE_KEY = "hub:catalog"
@@ -319,7 +320,9 @@ def resolve_hub_line(item: dict, catalog: list[dict]) -> dict | None:
     line {product_id, quantity, unit_price, name, matched_by} using the hub's own
     price (source of truth), or None if nothing matched.
     """
-    name = _norm(item.get("name") or item.get("product") or item.get("title"))
+    # A line in the customer's words ("cross and chain") lands on the hub's
+    # row (Pectoral Cross) — core/synonyms is the owner's table for that.
+    name = _norm(_canonical(item.get("name") or item.get("product") or item.get("title")))
     sku = _norm(item.get("sku"))
     qty = item.get("qty") or item.get("quantity") or 1
     try:
