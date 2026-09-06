@@ -94,8 +94,11 @@ def test_the_report_names_the_worst_row_first_and_counts_the_rest():
            _p("Cassock Set", 19500, 200), _p("Host", 20, 0.2)]
     r = pa.audit(cat, RATE)
     assert r["checked"] == 4
+    # worst first: $240 over, $9.90 over, then the Cassock Set's $5 (195 → 200,
+    # which the old 15% tolerance let through and the exact rule does not)
     assert [g["name"] for g in r["currency_gaps"]] == ["Double Stacked Silver Tray Set",
-                                                        "Plastic Communion Cups"]
+                                                        "Plastic Communion Cups",
+                                                        "Cassock Set"]
     assert [x["name"] for x in r["per_piece"]] == ["Plastic Communion Cups", "Host"]
 
 

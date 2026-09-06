@@ -70,7 +70,8 @@ def currency_gap(item: dict, rate: float) -> dict | None:
     if kes is None or usd is None or not rate:
         return None
     expect = kes / rate
-    if abs(usd - expect) <= max(TOLERANCE_ABS, TOLERANCE_PCT * expect):
+    # (+1e-9: 1 - 0.99 is 0.010000000000000009 in floating point)
+    if abs(usd - expect) <= max(TOLERANCE_ABS, TOLERANCE_PCT * expect) + 1e-9:
         return None
     return {"name": item.get("name"), "category": item.get("category"),
             "kes": kes, "usd": usd, "usd_expected": round(expect, 2),
