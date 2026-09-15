@@ -44,6 +44,12 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   the close "Tafadhali weka oda yako — tuambie rangi na idadi unayohitaji.
   Unaihitaji lini?"; `voice.looks_swahili` picks the Swahili canned pools
   (`_SW_*`) for a Swahili comment; "Upo wapi?" is stripped at the send boundary.
+  ASK ONLY WHAT THE HUB CANNOT ANSWER (owner 2026-09-15): a stock item (trays,
+  cups, wafers, wine, tallits — `made_to_order` false in the hub) is never asked
+  its colour or size; its specifics come from `details`, and the close asks how
+  many, how soon, which city. A made-to-order item (cassocks, shirts, stoles…)
+  is asked colour then size/measurements. Every search row carries `ask_next`;
+  the canned pools split the same way (`_STOCK_*` vs the made-to-order pools).
 - **One item, many names** (`app/core/synonyms.py`, owner 2026-09-06): "cross
   and chain", "pendant", "pastor's / bishop's cross" ARE the hub's Pectoral
   Cross. The table rewrites the customer's words at every seam (catalogue

@@ -187,7 +187,13 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "in one breath, the owner's own shape: 'The Round Collar Shirt is ZMW 900. "
         "Kindly place your order — let us know the colour and how many you need. "
         "How soon do you want the shirt?' Every question must move the order: "
-        "colour, size, how many, how soon, where it is going. A question that only "
+        "how many, how soon, where it is going — and colour or size ONLY for a "
+        "made-to-order item (`ask_next` on every search result says which: a "
+        "stock tray, cup, wafer or tallit has its colour in its name and its "
+        "contents in `details` — state them, never ask them; the stock shape is "
+        "'The Silver Communion Tray is KES 18,000 — it holds 40 cups and comes "
+        "with its lid, holder and basin. Kindly place your order — tell us how "
+        "many you need and your city. How soon do you want it?'). A question that only "
         "keeps the chat going ('which colour would you prefer?' on its own, 'would "
         "you like to know more?') is not a pull — a comment that answers AND asks is "
         "what starts the sale, and their answer lands right back in this thread.\n"
@@ -218,7 +224,11 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "no English verbs dressed as Swahili ('tunaship', 'unaweza order' → "
         "'tunasafirisha', 'unaweza kuagiza'), 'vikombe 40' never 'cup 40', no "
         "invented descriptions in brackets. Close by taking the order: 'Tafadhali "
-        "weka oda yako — tuambie rangi na idadi unayohitaji. Unaihitaji lini?' "
+        "weka oda yako — tuambie rangi na idadi unayohitaji. Unaihitaji lini?' for a "
+        "made-to-order item; for a stock item state its specifics from `details` "
+        "('inabeba vikombe 40, inakuja na kifuniko, kishikilio na beseni' — never an "
+        "invention like 'mfuko wa kumshika') and close with 'Tafadhali weka oda yako "
+        "— tuambie idadi unayohitaji na mji wako. Unaihitaji lini?'. "
         "Never 'Upo wapi?' to place them.\n"
         "- SWAHILI MEANS KENYA unless they say otherwise (owner rule): a comment "
         "written in Swahili is almost always a Kenyan buyer — quote our native KES "
@@ -1994,6 +2004,20 @@ _FIRST_SELL_POOL = [
     "Welcome to Bethany House{name} 🙏 {product} is {price}, made in our Nairobi workshop and delivered anywhere by DHL. Kindly place your order — tell us the colour and how many you need. How soon would you like it? 💛",
     "Welcome{name}, we're glad you found us 🙏 {product} is {price}, and we deliver worldwide by DHL. Kindly place your order — let us know the colour and how many you need. How soon would you like it? 💛",
 ]
+# A STOCK item (a tray, a chalice, a tallit — `made_to_order` false in the hub)
+# has its colour in its name and its contents in its description: nothing to
+# ask but how many, where to and how soon (owner, 2026-09-15: "we have all
+# this information, which we do not need to ask"). The pools above are the
+# made-to-order shape, where the colour IS the customer's to choose.
+_STOCK_SELL_POOL = [
+    "Thank you{name} 🙏 {product} is {price}, and we ship worldwide by DHL. Kindly place your order — tell us how many you need and your city. How soon do you want it? 💛",
+    "Thank you{name} 🙏 {product} is {price}, from our Nairobi shop and delivered anywhere by DHL. Kindly place your order — how many you need and your city. How soon would you like it? 💛",
+    "Bless you{name}! 🙏 {product} is {price}, and we deliver worldwide by DHL. Kindly place your order — let us know how many you need and where to deliver. When do you want it by? 💛",
+]
+_STOCK_FIRST_SELL_POOL = [
+    "Welcome to Bethany House{name} 🙏 {product} is {price}, and we ship worldwide by DHL. Kindly place your order — tell us how many you need and your city. How soon do you want it? 💛",
+    "Welcome to Bethany House{name} 🙏 {product} is {price}, from our Nairobi shop and delivered anywhere by DHL. Kindly place your order — how many you need and your city. How soon would you like it? 💛",
+]
 # Goods bought in numbers (cups, hosts, wafers — the per-piece rows): here
 # "how many?" IS the sale, and the price is per piece.
 _OVER_CAP_SELL_EACH_POOL = [
@@ -2066,6 +2090,13 @@ _SW_FIRST_SELL_POOL = [
     "Karibu Bethany House{name} 🙏 {product} ni {price}, na tunasafirisha kote duniani kwa DHL. Tafadhali weka oda yako — tuambie rangi na idadi unayohitaji. Unaihitaji lini? 💛",
     "Karibu Bethany House{name} 🙏 {product} ni {price}, inatengenezwa Nairobi na kufikishwa popote kwa DHL. Tafadhali weka oda yako — tuambie rangi na idadi unayohitaji. Ungependa kuipata lini? 💛",
 ]
+_SW_STOCK_SELL_POOL = [
+    "Asante{name} 🙏 {product} ni {price}, na tunasafirisha kote duniani kwa DHL. Tafadhali weka oda yako — tuambie idadi unayohitaji na mji wako. Unaihitaji lini? 💛",
+    "Asante{name} 🙏 {product} ni {price}, kutoka duka letu Nairobi na kufikishwa popote kwa DHL. Tafadhali weka oda yako — idadi unayohitaji na mji wako. Ungependa kuipata lini? 💛",
+]
+_SW_STOCK_FIRST_SELL_POOL = [
+    "Karibu Bethany House{name} 🙏 {product} ni {price}, na tunasafirisha kote duniani kwa DHL. Tafadhali weka oda yako — tuambie idadi unayohitaji na mji wako. Unaihitaji lini? 💛",
+]
 _SW_OVER_CAP_SELL_EACH_POOL = [
     "Asante{name} 🙏 {product} ni {price} kila kimoja, na tunasafirisha kote duniani kwa DHL. Tafadhali weka oda yako — unahitaji ngapi, na lini? 💛",
     "Karibu{name} 🙏 {product} ni {price} kila kimoja, tayari kwa ajili yako. Tafadhali weka oda yako — unahitaji ngapi, na unazihitaji lini? 💛",
@@ -2105,7 +2136,7 @@ def _comment_public_reply(answer: str, dm_sent: bool, name_tag: str, seed: str,
                           product_known: bool = False, product_name: str = "",
                           price_text: str = "", goodwill: bool = False,
                           per_piece: bool = False, first_contact: bool = False,
-                          swahili: bool = False) -> str:
+                          swahili: bool = False, made_to_order: bool = False) -> str:
     """The PUBLIC comment text, given the agent's answer and whether the DM landed.
 
     THIS FUNCTION CANNOT PRODUCE A LINK, by construction: it takes no URL. Meta
@@ -2147,12 +2178,23 @@ def _comment_public_reply(answer: str, dm_sent: bool, name_tag: str, seed: str,
         if price_text:
             # A per-piece good is sold by the count; anything else is ONE piece,
             # and a first-time commenter is welcomed the owner's way.
+            # A per-piece good is sold by the count; a made-to-order item asks
+            # its colour; a stock item never does — its details are the hub's
+            # (ASK ONLY WHAT THE HUB CANNOT ANSWER, owner 2026-09-15).
             if swahili:
-                pool = (_SW_OVER_CAP_SELL_EACH_POOL if per_piece
-                        else (_SW_FIRST_SELL_POOL if first_contact else _SW_OVER_CAP_SELL_POOL))
+                if per_piece:
+                    pool = _SW_OVER_CAP_SELL_EACH_POOL
+                elif made_to_order:
+                    pool = _SW_FIRST_SELL_POOL if first_contact else _SW_OVER_CAP_SELL_POOL
+                else:
+                    pool = _SW_STOCK_FIRST_SELL_POOL if first_contact else _SW_STOCK_SELL_POOL
             else:
-                pool = (_OVER_CAP_SELL_EACH_POOL if per_piece
-                        else (_FIRST_SELL_POOL if first_contact else _OVER_CAP_SELL_POOL))
+                if per_piece:
+                    pool = _OVER_CAP_SELL_EACH_POOL
+                elif made_to_order:
+                    pool = _FIRST_SELL_POOL if first_contact else _OVER_CAP_SELL_POOL
+                else:
+                    pool = _STOCK_FIRST_SELL_POOL if first_contact else _STOCK_SELL_POOL
             return (_pick(pool, seed).replace("{name}", name_tag)
                     .replace("{product}", subject).replace("{price}", price_text))
         return (_pick(_SW_OVER_CAP_POOL if swahili else _OVER_CAP_POOL, seed)
@@ -2767,6 +2809,10 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     price_text = _public_price_text(_kes, _usd, _ccy)
     from app.services.price_audit import looks_per_piece as _per_piece
     per_piece = bool(matched) and _per_piece(matched)
+    # The hub says whether this is made to order (its colour and size are the
+    # customer's) or a stock item (its details are already known — never ask).
+    made_to_order = bool(matched) and matched.get("product_type") == "variable" \
+        and bool(matched.get("is_producible"))
     first = False
     if not answer and product_name and price_text and not per_piece:
         first = await _first_contact(channel, ext)
@@ -2776,7 +2822,7 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
                                         price_text=price_text,
                                         goodwill=(intent == "goodwill"),
                                         per_piece=per_piece, first_contact=first,
-                                        swahili=swahili)
+                                        swahili=swahili, made_to_order=made_to_order)
     public_text = plain_public_voice(public_text)
 
     await _post_public(public_text)

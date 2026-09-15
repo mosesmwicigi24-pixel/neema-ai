@@ -658,6 +658,22 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
                 row["price_range"] = {"from": min(prices), "to": max(prices)}
                 row["price_note"] = ("price depends on the variant — quote the one the "
                                      "customer picks, or give the range and ask")
+        # ASK ONLY WHAT THE HUB CANNOT ANSWER (owner, 2026-09-15): the row says
+        # which questions the order still needs, so a stock tray is never asked
+        # its colour and a made-to-order cassock always is.
+        if mto:
+            row["ask_next"] = ("made to order — the open details are the customer's: ask "
+                               "the colour first, then the size or measurements "
+                               "(measurements_needed), then how many and how soon")
+        elif variants:
+            row["ask_next"] = ("stock item with a FIXED set of options (see variants) — "
+                               "offer those options by name, never an open 'which "
+                               "colour?'; then how many, how soon and the delivery city")
+        else:
+            row["ask_next"] = ("stock item — every detail is fixed and in `details` (colour "
+                               "in the name, capacity, pack size): state them, never ask "
+                               "colour or size; ask only how many, how soon and the "
+                               "delivery city")
         results.append(row)
         # Remember the FULL hub row (it has `slug`) so the caller can link to the
         # exact product the agent priced — the model's row above omits the slug.
