@@ -19,7 +19,7 @@ from app.agent.prompt import build_system_prompt, customer_context
 from app.agent.tools import TOOLS, ToolContext, run_tool
 from app.core import money
 from app.core.synonyms import canonical as _canonical
-from app.agent.voice import plain_public_voice
+from app.agent.voice import looks_swahili, plain_public_voice
 from app.core.config import settings
 from app.core.countries import resolve_country, market_currency, money_name
 from app.models.message import Message, MsgDirection, MsgSender
@@ -211,6 +211,15 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "Swahili. English, Sheng, a mix, or a language you cannot place → English. "
         "No Swahili sprinkles in an English reply — 'Welcome' and 'Thank you', not "
         "'Karibu' and 'Asante'.\n"
+        "- KISWAHILI SANIFU (owner rule, 2026-09-15): a Swahili reply is standard, "
+        "official Swahili, and every rule here holds in it — the hub's name for the "
+        "item exactly as the hub writes it, its hub price, ONE price per item (never "
+        "'KES 1,000 au 1,500'), the 2–3 closest items and no menu dump. No Sheng, "
+        "no English verbs dressed as Swahili ('tunaship', 'unaweza order' → "
+        "'tunasafirisha', 'unaweza kuagiza'), 'vikombe 40' never 'cup 40', no "
+        "invented descriptions in brackets. Close by taking the order: 'Tafadhali "
+        "weka oda yako — tuambie rangi na idadi unayohitaji. Unaihitaji lini?' "
+        "Never 'Upo wapi?' to place them.\n"
         "- SWAHILI MEANS KENYA unless they say otherwise (owner rule): a comment "
         "written in Swahili is almost always a Kenyan buyer — quote our native KES "
         "prices (call search_catalog with currency=\"KES\"), even when your default "
@@ -1612,6 +1621,11 @@ _PUBLIC_EMPATHY = (
     "Thank you for telling us{name} 🙏 We take this seriously, and one of us "
     "will speak with you personally to put it right."
 )
+# The same line in Kiswahili sanifu — for a complaint written in Swahili.
+_SW_PUBLIC_EMPATHY = (
+    "Asante kwa kutuambia{name} 🙏 Tunalichukulia hili kwa uzito, na mmoja wetu "
+    "atazungumza nawe binafsi ili kulirekebisha."
+)
 _INTENTS = ("high", "low", "negative", "spam", "goodwill")
 
 # Dissatisfaction is often three words long ("this is wrong"), and a light model
@@ -2020,25 +2034,78 @@ _GOODWILL_POOL = [
 ]
 
 
+# ── Kiswahili sanifu (owner, 2026-09-15): when THEY wrote Swahili, the canned
+# line is Swahili — standard and official, the hub's name for the item kept
+# exactly as the hub writes it, and the pull is the order. No Sheng, no
+# English verbs dressed as Swahili, one question each. `{product}` is the
+# bare hub name ("Round Collar Shirt ni KES 4,500").
+_SW_LIVE_WHICH_POOL = [
+    "Ni bidhaa ipi unayouliza{name}? 🙏 Niambie na nitakupa bei mara moja 💛",
+    "Ni ipi iliyokuvutia{name}? 🙏 Itaje na nitakupa bei na kuchukua oda yako 💛",
+]
+_SW_LIVE_WELCOME_POOL = [
+    "Karibu{name} 🙏 Tunafurahi umejiunga nasi — jisikie nyumbani! 💛",
+    "Karibu sana{name} 🙏 Ni furaha kuwa nawe leo 💛",
+    "Karibu{name}! 🙏 Tazama pamoja nasi na utusalimie wakati wowote 💛",
+]
+_SW_THANKS_POOL = [
+    "Amina{name} 🙏 Asante sana — Mungu akubariki! 💛",
+    "Asante{name}! 🙏 Maneno yako mazuri yanatutia moyo 💛",
+    "Tunashukuru{name} 🙏 Utukufu kwa Mungu! 💛",
+]
+_SW_OVER_CAP_POOL = [
+    "Asante{name} 🙏 Ndiyo, {product} inapatikana — tutumie ujumbe na tutakupa bei na kukuhudumia 💛",
+    "Mungu akubariki{name}! 🙏 Tunayo {product} — tutumie ujumbe na tutashughulikia maelezo na usafirishaji 💛",
+]
+_SW_OVER_CAP_SELL_POOL = [
+    "Asante{name} 🙏 {product} ni {price}, na tunasafirisha kote duniani kwa DHL. Tafadhali weka oda yako — tuambie rangi na idadi unayohitaji. Unaihitaji lini? 💛",
+    "Asante{name} 🙏 {product} ni {price}, inatengenezwa katika karakana yetu Nairobi na kufikishwa popote kwa DHL. Tafadhali weka oda yako — tuambie rangi na idadi unayohitaji. Ungependa kuipata lini? 💛",
+    "Mungu akubariki{name} 🙏 {product} ni {price}, na tunafikisha kote duniani kwa DHL. Tafadhali weka oda yako — rangi na idadi unayohitaji. Unaihitaji kufikia lini? 💛",
+]
+_SW_FIRST_SELL_POOL = [
+    "Karibu Bethany House{name} 🙏 {product} ni {price}, na tunasafirisha kote duniani kwa DHL. Tafadhali weka oda yako — tuambie rangi na idadi unayohitaji. Unaihitaji lini? 💛",
+    "Karibu Bethany House{name} 🙏 {product} ni {price}, inatengenezwa Nairobi na kufikishwa popote kwa DHL. Tafadhali weka oda yako — tuambie rangi na idadi unayohitaji. Ungependa kuipata lini? 💛",
+]
+_SW_OVER_CAP_SELL_EACH_POOL = [
+    "Asante{name} 🙏 {product} ni {price} kila kimoja, na tunasafirisha kote duniani kwa DHL. Tafadhali weka oda yako — unahitaji ngapi, na lini? 💛",
+    "Karibu{name} 🙏 {product} ni {price} kila kimoja, tayari kwa ajili yako. Tafadhali weka oda yako — unahitaji ngapi, na unazihitaji lini? 💛",
+]
+_SW_NEUTRAL_ACK_POOL = [
+    "Asante kwa kutufikia{name} 🙏 Tuambie zaidi kidogo na tutakusaidia kwa furaha.",
+    "Asante{name} 🙏 Tuko hapa — tuambie unachohitaji na tutakusaidia.",
+]
+_SW_GOODWILL_POOL = [
+    "Asante{name} 🙏 Ukarimu wako unatutia nguvu sana.",
+    "Mungu akubariki{name} 🙏 Maneno kama haya yanatupeleka mbali.",
+]
+_SW_DM_CONTINUE_POOL = [
+    "Jibu hapa na nitakushughulikia. 💛",
+    "Jibu hapa na tutaendelea kutoka hapa. 💛",
+]
+
+
 def _pick(pool: list, seed: str) -> str:
     import hashlib
     i = int(hashlib.sha1((seed or "x").encode()).hexdigest(), 16) % len(pool)
     return pool[i]
 
 
-def _dm_text(answer: str, product_link: str, seed: str) -> str:
+def _dm_text(answer: str, product_link: str, seed: str, swahili: bool = False) -> str:
     """The DM: the answer, THE product link, and the warm continue line. Links
     live here by design — Facebook suppresses the reach of posts and comments
     carrying external links, so the private message is where the storefront
     link travels."""
-    link_line = f"Order here 👉 {product_link}\n" if product_link else ""
-    return f"{answer}\n\n{link_line}{_pick(_DM_CONTINUE_POOL, seed)}"
+    lead = "Agiza hapa" if swahili else "Order here"
+    link_line = f"{lead} 👉 {product_link}\n" if product_link else ""
+    tail = _pick(_SW_DM_CONTINUE_POOL if swahili else _DM_CONTINUE_POOL, seed)
+    return f"{answer}\n\n{link_line}{tail}"
 
 
 def _comment_public_reply(answer: str, dm_sent: bool, name_tag: str, seed: str,
                           product_known: bool = False, product_name: str = "",
                           price_text: str = "", goodwill: bool = False,
-                          per_piece: bool = False, first_contact: bool = False) -> str:
+                          per_piece: bool = False, first_contact: bool = False,
+                          swahili: bool = False) -> str:
     """The PUBLIC comment text, given the agent's answer and whether the DM landed.
 
     THIS FUNCTION CANNOT PRODUCE A LINK, by construction: it takes no URL. Meta
@@ -2067,23 +2134,30 @@ def _comment_public_reply(answer: str, dm_sent: bool, name_tag: str, seed: str,
     if goodwill:
         # We DO know what they said — they cheered us on. Warmth in kind, and
         # never the product line: "welcome to Zambia" is not a buying question.
-        return _pick(_GOODWILL_POOL, seed).replace("{name}", name_tag)
+        return _pick(_SW_GOODWILL_POOL if swahili else _GOODWILL_POOL, seed).replace("{name}", name_tag)
     if product_known:
         # We know WHICH product the post is about, so a buying question still gets
         # a real, warm answer with no model call — with its PRICE when the post's
         # identity carries one, so even the over-cap line sells instead of
         # signposting the inbox.
-        subject = f"the {product_name.strip()}" if product_name.strip() else "it"
+        _pn = product_name.strip()
+        # Swahili takes the hub's name bare ("Round Collar Shirt ni KES 4,500");
+        # English says "the Round Collar Shirt".
+        subject = (_pn or "bidhaa hii") if swahili else (f"the {_pn}" if _pn else "it")
         if price_text:
             # A per-piece good is sold by the count; anything else is ONE piece,
             # and a first-time commenter is welcomed the owner's way.
-            pool = (_OVER_CAP_SELL_EACH_POOL if per_piece
-                    else (_FIRST_SELL_POOL if first_contact else _OVER_CAP_SELL_POOL))
+            if swahili:
+                pool = (_SW_OVER_CAP_SELL_EACH_POOL if per_piece
+                        else (_SW_FIRST_SELL_POOL if first_contact else _SW_OVER_CAP_SELL_POOL))
+            else:
+                pool = (_OVER_CAP_SELL_EACH_POOL if per_piece
+                        else (_FIRST_SELL_POOL if first_contact else _OVER_CAP_SELL_POOL))
             return (_pick(pool, seed).replace("{name}", name_tag)
                     .replace("{product}", subject).replace("{price}", price_text))
-        return (_pick(_OVER_CAP_POOL, seed)
+        return (_pick(_SW_OVER_CAP_POOL if swahili else _OVER_CAP_POOL, seed)
                 .replace("{name}", name_tag).replace("{product}", subject))
-    return _pick(_NEUTRAL_ACK_POOL, seed).replace("{name}", name_tag)
+    return _pick(_SW_NEUTRAL_ACK_POOL if swahili else _NEUTRAL_ACK_POOL, seed).replace("{name}", name_tag)
 
 
 def _product_matching_answer(answer: str, seen: list) -> dict:
@@ -2492,6 +2566,9 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     #
     # So while live: greet the greeters, and never guess a product.
     is_live = bool((comment.get("post_context") or {}).get("is_live"))
+    # Kiswahili sanifu for a comment written in Swahili (owner, 2026-09-15);
+    # every other canned line is English — never guessed from a name or flag.
+    swahili = looks_swahili(comment_text)
     if is_live and intent in {"high", "low"} and not _mentions_catalogue_item(comment_text):
         # Nothing nameable in the comment. Either they are saying hello (welcome
         # them) or asking a price without saying of what (ask — never guess).
@@ -2524,13 +2601,13 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     if plan["style"] != "answer":
         if plan["public"]:
             if plan["style"] == "welcome":
-                text = _pick(_LIVE_WELCOME_POOL, ext).replace("{name}", name_tag)
+                text = _pick(_SW_LIVE_WELCOME_POOL if swahili else _LIVE_WELCOME_POOL, ext).replace("{name}", name_tag)
             elif plan["style"] == "which":
-                text = _pick(_LIVE_WHICH_POOL, ext).replace("{name}", name_tag)
+                text = _pick(_SW_LIVE_WHICH_POOL if swahili else _LIVE_WHICH_POOL, ext).replace("{name}", name_tag)
             elif plan["style"] == "light":
-                text = _pick(_THANKS_POOL, ext).replace("{name}", name_tag)
+                text = _pick(_SW_THANKS_POOL if swahili else _THANKS_POOL, ext).replace("{name}", name_tag)
             else:
-                text = _PUBLIC_EMPATHY.replace("{name}", name_tag)
+                text = (_SW_PUBLIC_EMPATHY if swahili else _PUBLIC_EMPATHY).replace("{name}", name_tag)
             await _post_public(text)
             # Persist it threaded under the comment — the inbox must show every
             # outgoing reply, not just the high-intent ones.
@@ -2644,7 +2721,7 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # Goodwill opens no DM — unless the post sells a product, where the link is
     # the most useful thing we can hand them.
     if answer and (plan["dm"] or product_link):
-        dm_text = _dm_text(plain_public_voice(answer), product_link, ext)
+        dm_text = _dm_text(plain_public_voice(answer), product_link, ext, swahili=swahili)
         try:
             await send_private_reply(cid, dm_text, page_id=comment.get("page_id"),
                                      channel=channel)
@@ -2698,7 +2775,8 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
                                         product_name=product_name,
                                         price_text=price_text,
                                         goodwill=(intent == "goodwill"),
-                                        per_piece=per_piece, first_contact=first)
+                                        per_piece=per_piece, first_contact=first,
+                                        swahili=swahili)
     public_text = plain_public_voice(public_text)
 
     await _post_public(public_text)

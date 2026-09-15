@@ -38,7 +38,12 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   own sake; human, not bot (no "Very well", no product poetry, no boilerplate,
   no markdown, "$170" not "$170 USD"). `app/agent/voice.py` strips markdown,
   the redundant currency word and butler openers at the public seams; the canned
-  pools close on the order.
+  pools close on the order. KISWAHILI SANIFU: a Swahili reply (only when THEY
+  wrote Swahili) is standard, official Swahili under the same rules — hub names
+  kept as written, one price per item, no Sheng, no "tunaship"/"unaweza order",
+  the close "Tafadhali weka oda yako — tuambie rangi na idadi unayohitaji.
+  Unaihitaji lini?"; `voice.looks_swahili` picks the Swahili canned pools
+  (`_SW_*`) for a Swahili comment; "Upo wapi?" is stripped at the send boundary.
 - **One item, many names** (`app/core/synonyms.py`, owner 2026-09-06): "cross
   and chain", "pendant", "pastor's / bishop's cross" ARE the hub's Pectoral
   Cross. The table rewrites the customer's words at every seam (catalogue
