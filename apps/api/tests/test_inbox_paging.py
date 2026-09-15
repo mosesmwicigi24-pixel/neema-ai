@@ -17,6 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy.dialects import postgresql
 
 from app.routers import admin
 
@@ -65,9 +66,14 @@ def test_a_page_expands_to_every_thread_of_its_people():
     ids = asyncio.run(admin._conversations_for_rows(db, [person, "c:" + solo]))
 
     assert ids == ["wa-thread", "msg-thread", solo]
-    sql = str(db.stmt.compile(compile_kwargs={"literal_binds": True}))
-    assert "person_id IN" in sql and person in sql      # all of that person's threads
-    assert solo in sql                                  # the person-less conversation itself
+    # Compiled for PostgreSQL with bound params: UUID columns cannot be
+    # rendered as literals from strings, and production binds, not inlines.
+    compiled = db.stmt.compile(dialect=postgresql.dialect())
+    bound = [str(v) for vals in compiled.params.values()
+             for v in (vals if isinstance(vals, (list, tuple)) else [vals])]
+    assert "person_id IN" in str(compiled)
+    assert person in bound          # all of that person's threads
+    assert solo in bound            # the person-less conversation itself
 
 
 def test_an_empty_page_asks_the_database_nothing():
@@ -83,18 +89,21 @@ def test_an_empty_page_asks_the_database_nothing():
 # (12,241 / 940 / 11,431 / 7 / 0 / ... — identical sets, zero duplicates).
 
 
-def _sql(conds):
+def _compiled(conds):
     from sqlalchemy import and_, select
     from app.models.conversation import Conversation
-    return str(select(Conversation.id).where(and_(*conds)).compile(
-        compile_kwargs={"literal_binds": True}))
+    return select(Conversation.id).where(and_(*conds)).compile(dialect=postgresql.dialect())
+
+
+def _sql(conds):
+    return str(_compiled(conds))
 
 
 def test_yours_means_human_held_by_me():
     me = uuid.uuid4()
-    sql = _sql(admin._inbox_conditions(agent_id=me, tab="yours"))
-    assert "intercept_mode" in sql and "assigned_agent_id" in sql
-    assert str(me).replace("-", "") in sql.replace("-", "")
+    compiled = _compiled(admin._inbox_conditions(agent_id=me, tab="yours"))
+    assert "intercept_mode" in str(compiled) and "assigned_agent_id" in str(compiled)
+    assert me in compiled.params.values()
 
 
 def test_unread_ignores_messages_that_belong_to_no_conversation():
