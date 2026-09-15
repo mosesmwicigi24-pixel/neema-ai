@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { usePolling } from "@/hooks/useApi";
+import { useInbox } from "@/hooks/useInbox";
 
 import {
     conversationsApi,
@@ -152,7 +153,6 @@ export default function NeemaDashboard(): React.ReactElement {
     // ── Sidebar expanded by default (Figma) — collapsible to an icon rail ──────
     const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
     const [sessionExpired, setSessionExpired] = useState(false);
-    const [localConversations, setLocalConversations] = useState<Conversation[]>([]);
     const isMobile = useIsMobile();
 
     // ── Deep links (?open=<wa_id> opens the chat; ?view=calls&caller=<wa_id>
@@ -339,13 +339,12 @@ export default function NeemaDashboard(): React.ReactElement {
     // so they run at a slow cadence.
     // cacheKey => stale-while-revalidate: a refresh paints instantly from the
     // last snapshot while the real fetch replaces it in the background.
-    const { data: rawConversations, refetch: refetchConversations } =
-        usePolling(
-            () => hasToken ? conversationsApi.list() : Promise.resolve(null),
-            60000,
-            [hasToken],
-            "conversations",
-        );
+    // The inbox pages itself, one page of people at a time, and counts its
+    // badges on the server. It used to fetch EVERY conversation here — 14,000
+    // rows, 13 MB — every 60 seconds. See hooks/useInbox.ts.
+    const agentId = ((nextAuthSession as any)?.user?.id as string | undefined) ?? null;
+    const inbox = useInbox(hasToken, agentId);
+    const refetchConversations = inbox.refresh;
 
     const { data: rawAgents, refetch: refetchAgents } = usePolling(
         () => (hasToken ? agentsApi.list() : Promise.resolve(null)),
@@ -372,34 +371,15 @@ export default function NeemaDashboard(): React.ReactElement {
     // Memoized on the raw poll payloads (which useApi only replaces when the
     // data actually changed), so unchanged polls keep stable array identities
     // and the views below skip re-rendering.
-    const mappedConversations: Conversation[] = useMemo(
-        () => (rawConversations ?? []).map(mapConversation), [rawConversations]);
     const agents: Agent[]        = useMemo(() => (rawAgents ?? []).map(mapAgent), [rawAgents]);
     const catalog: CatalogItem[] = useMemo(() => (rawCatalog ?? []).map(mapCatalogItem), [rawCatalog]);
     const orders: Order[]        = useMemo(() => (rawOrders ?? []).map(mapOrder), [rawOrders]);
 
-    // Sync local conversations whenever polling brings fresh data
-    useEffect(() => {
-        if (mappedConversations.length > 0) {
-            setLocalConversations(mappedConversations);
-        }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [rawConversations]);
-
-    const conversations = localConversations.length > 0
-        ? localConversations
-        : mappedConversations;
+    // Every conversation loaded so far — the inbox's lookup cache, not the page.
+    const conversations = inbox.conversations;
 
     // ── Setters ───────────────────────────────────────────────────────────────
-    const setConversations = useCallback(
-        (updater: React.SetStateAction<Conversation[]>) => {
-            setLocalConversations((prev) =>
-                typeof updater === "function" ? updater(prev) : updater,
-            );
-            setTimeout(refetchConversations, 2000);
-        },
-        [refetchConversations],
-    );
+    const setConversations = inbox.setConversations;
 
     const setAgents = useCallback(
         (_updater: React.SetStateAction<Agent[]>) => {
@@ -511,7 +491,8 @@ export default function NeemaDashboard(): React.ReactElement {
         can(PERMS.MANAGE_AGENTS);
 
     // ── Badges ────────────────────────────────────────────────────────────────
-    const humanConvs    = conversations.filter((c) => c.intercept_mode === "human").length;
+    // Counted by the server over ALL conversations; the loaded rows are a page.
+    const humanConvs    = inbox.summary?.human ?? 0;
     const pendingOrders = orders.filter((o) => o.status === "pending").length;
 
     // Only block on auth when there's nothing to paint — with a snapshot the
@@ -609,7 +590,8 @@ export default function NeemaDashboard(): React.ReactElement {
                 refetchConversations={refetchConversations}
                 openConvKey={openConvKey}
                 onConsumeOpenConvKey={() => setOpenConvKey(null)}
-                freshLoaded={rawConversations !== null}
+                freshLoaded={inbox.freshLoaded}
+                inbox={inbox}
                 {...viewProps}
             />
         ),
@@ -633,7 +615,6 @@ export default function NeemaDashboard(): React.ReactElement {
         leads: <LeadsView {...viewProps} />,
         reports: (
             <ReportsView
-                conversations={conversations}
                 agents={agents}
                 orders={orders}
                 {...viewProps}

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Avatar } from "@/components/ui/Avatar";
 import { timeAgo, fmtCurrency, fmtDate, formatPhone, displayName } from "@/lib/utils";
 import { ALL_CHANNELS, CHANNEL_CONFIG } from "@/lib/channels";
-import { statsApi, attributionApi } from "@/lib/api";
+import { statsApi, attributionApi, conversationsApi, mapConversation } from "@/lib/api";
 import type { Conversation, Agent, Order, CatalogItem, SharedViewProps } from "@/types";
 import type { ApiStats, ApiAttribution } from "@/lib/api";
 
@@ -88,6 +88,9 @@ export function OverviewView({
     const [apiStats,     setApiStats]     = useState<ApiStats | null>(null);
     const [statsLoading, setStatsLoading] = useState(true);
     const [attrib,       setAttrib]       = useState<ApiAttribution | null>(null);
+    // Human-held threads, asked of the server: the inbox's loaded rows are a
+    // page now, so scanning them would miss any intercept not on it.
+    const [humanRows,    setHumanRows]    = useState<Conversation[] | null>(null);
 
     useEffect(() => {
         setStatsLoading(true);
@@ -96,10 +99,15 @@ export function OverviewView({
             .catch(() => setApiStats(null))
             .finally(() => setStatsLoading(false));
         attributionApi.get().then(setAttrib).catch(() => setAttrib(null));
+        const loadHuman = () => conversationsApi.page({ tab: "human", limit: 10 })
+            .then((r) => setHumanRows(r.items.map(mapConversation)))
+            .catch(() => {});
+        loadHuman();
 
         const timer = setInterval(() => {
             if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
             statsApi.overview().then(setApiStats).catch(() => {});
+            loadHuman();
         }, 30000);
         return () => clearInterval(timer);
     }, []);
@@ -132,7 +140,11 @@ export function OverviewView({
               open:  conversations.filter((c) => c.channel === ch && c.status === "open").length,
           })).filter((x) => x.count > 0);
 
-    const totalConvs = Math.max(conversations.length, 1);
+    // The bars divide each channel's SERVER count by a total. That total was
+    // the number of rows the browser held — with a paged inbox, ~50 — so every
+    // bar would run past 100% and clip to full width. Use the server's total.
+    const serverTotal = apiStats?.channel_breakdown?.reduce((n, x) => n + x.count, 0) ?? 0;
+    const totalConvs = Math.max(serverTotal || conversations.length, 1);
 
     const orderStatusItems = [
         { label: "Delivered", count: stats.deliveredOrders, color: "bg-emerald-500", text: "text-emerald-600" },
@@ -161,8 +173,8 @@ export function OverviewView({
             });
         });
 
-    // Recent human intercepts from conversations
-    conversations
+    // Recent human intercepts
+    (humanRows ?? conversations)
         .filter((c) => c.intercept_mode === "human" && c.last_message_at)
         .sort((a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime())
         .slice(0, 3)

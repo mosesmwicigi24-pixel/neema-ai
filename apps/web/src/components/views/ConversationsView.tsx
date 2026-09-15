@@ -13,6 +13,7 @@ import { timeAgo, formatPhone, displayName, countryName } from "@/lib/utils";
 import { formatWa } from "@/lib/waText";
 import { CHANNEL_CONFIG, ALL_CHANNELS } from "@/lib/channels";
 import { conversationsApi, mapConversation, profileApi, type ApiActivityEvent } from "@/lib/api";
+import type { Inbox } from "@/hooks/useInbox";
 import { useConversationEvents, buildSystemEventFromWs } from "@/lib/websocket";
 import { CustomerSidebar } from "@/components/ui/CustomerSidebar";
 import type {
@@ -677,6 +678,10 @@ interface ConversationsViewProps extends SharedViewProps {
     // True once the conversations list is fresh from the server (not a cached
     // snapshot) — gates the "no conversation yet" verdict on deep links.
     freshLoaded?: boolean;
+    // The paged inbox. `conversations` above is its lookup cache (every row
+    // ever loaded); inbox.visibleIds says which of them the current filters'
+    // server pages returned — that, not the cache, is what the list shows.
+    inbox?: Inbox;
 }
 
 const CHANNEL_TABS: { id: "all" | Channel; label: string; short: string }[] = [
@@ -736,6 +741,7 @@ export function ConversationsView({
     openConvKey,
     onConsumeOpenConvKey,
     freshLoaded,
+    inbox,
 }: ConversationsViewProps): React.ReactElement {
     const [activeConvId, setActiveConvId] = useState<string>("");
     const [mobilePanel, setMobilePanel] = useState<MobilePanel>("list");
@@ -1045,11 +1051,12 @@ export function ConversationsView({
                     // the one conversation and put it in the list first.
                     if (!conversations.some((c) => c.id === conversation_id)) {
                         try {
-                            const one = await conversationsApi.get(conversation_id);
-                            setConversations?.((prev) =>
-                                prev.some((c) => c.id === conversation_id)
-                                    ? prev
-                                    : [mapConversation(one), ...prev],
+                            const one = mapConversation(await conversationsApi.get(conversation_id));
+                            // Revealed, not just cached: the paged inbox would
+                            // otherwise drop its list row on the next refresh.
+                            if (inbox) inbox.reveal([one]);
+                            else setConversations?.((prev) =>
+                                prev.some((c) => c.id === conversation_id) ? prev : [one, ...prev],
                             );
                         } catch {
                             // Still select it: messages load by id, so the
@@ -1064,14 +1071,25 @@ export function ConversationsView({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [openConvKey, conversations, freshLoaded, onConsumeOpenConvKey, onToast, setConversations]);
 
-    const openIdentityConversation = (channel: string, externalId: string) => {
-        const conv = conversations.find(
-            (c) =>
-                c.channel === channel &&
-                (c.external_id === externalId || c.wa_id === externalId),
-        );
-        if (conv) handleSelectConv(conv.id);
-        else onToast?.("No conversation on that channel yet.", "warning");
+    const openIdentityConversation = async (channel: string, externalId: string) => {
+        const matches = (c: Conversation) =>
+            c.channel === channel &&
+            (c.external_id === externalId || c.wa_id === externalId);
+        const conv = conversations.find(matches);
+        if (conv) { handleSelectConv(conv.id); return; }
+        // Not among the rows loaded — the inbox is paged, so absence here is
+        // not absence. This used to say "No conversation on that channel yet"
+        // for any thread that simply was not loaded. Ask for THAT channel and
+        // THAT id, and accept only an exact match: the general resolver would
+        // prefer a WhatsApp thread when the customer clicked Messenger.
+        if (inbox) {
+            try {
+                const res = await conversationsApi.page({ limit: 5, channel, q: externalId });
+                const hit = res.items.map(mapConversation).find(matches);
+                if (hit) { inbox.reveal([hit]); handleSelectConv(hit.id); return; }
+            } catch { /* fall through to the honest message */ }
+        }
+        onToast?.("No conversation on that channel yet.", "warning");
     };
 
     // ── Ownership helpers (depend on activeConv) ──────────────────────────────
@@ -1759,8 +1777,16 @@ export function ConversationsView({
     // keystroke in the reply box and every websocket event, and recomputing
     // these (especially the O(n log n) Date-allocating sort) inline made the
     // names list stutter while scrolling.
+    // Badges are counted by the SERVER over every conversation. Counted here,
+    // over a paged list, they would be counts of one page. Same units as ever:
+    // the chips sum unread MESSAGES; the Unread tab counts conversations.
+    const summary = inbox?.summary ?? null;
     const channelCounts = useMemo(() => CHANNEL_TABS.reduce<Record<string, number>>(
         (acc, tab) => {
+            if (summary) {
+                acc[tab.id] = summary.unread_messages[tab.id] ?? 0;
+                return acc;
+            }
             acc[tab.id] =
                 tab.id === "all"
                     ? conversations
@@ -1772,18 +1798,65 @@ export function ConversationsView({
             return acc;
         },
         {},
-    ), [conversations]);
+    ), [conversations, summary]);
 
     // Collect all unique tags across all conversations for the tag filter UI
-    const allTags = useMemo(() => Array.from(
+    // Every tag in use — not just those on the rows loaded so far.
+    const allTags = useMemo(() => summary?.tags ?? (Array.from(
         new Set(conversations.flatMap((c) => (c as any).tags ?? [])),
-    ).sort() as string[], [conversations]);
+    ).sort() as string[]), [conversations, summary]);
 
     const unreadCount = useMemo(
-        () => conversations.filter((c) => c.unread > 0).length, [conversations]);
+        () => summary?.unread ?? conversations.filter((c) => c.unread > 0).length,
+        [conversations, summary]);
+
+    // ── Filters run on the SERVER ─────────────────────────────────────────────
+    // Each change starts that filter's own paged list; search waits for a
+    // pause in typing so every keystroke is not a query.
+    const setInboxFilters = inbox?.setFilters;
+    useEffect(() => {
+        setInboxFilters?.({
+            tab: readFilter,
+            channel: channelTab,
+            mode: interceptFilter,
+            tag: tagFilter === "all" ? null : tagFilter,
+        });
+    }, [setInboxFilters, readFilter, channelTab, interceptFilter, tagFilter]);
+    useEffect(() => {
+        if (!setInboxFilters) return;
+        const t = window.setTimeout(() => setInboxFilters({ q: searchQ }), 300);
+        return () => window.clearTimeout(t);
+    }, [setInboxFilters, searchQ]);
+    const visibleIds = inbox?.visibleIds;
+
+    // Tell the inbox which thread is open, so every refresh keeps its row
+    // current even when it is not on page one.
+    const watchInbox = inbox?.watch;
+    useEffect(() => { watchInbox?.(activeConvId || null); }, [watchInbox, activeConvId]);
+
+    // Next page when the list nears its end. And if a page does not fill the
+    // pane at all there is nothing to scroll, so top it up once rendered.
+    const listRef = useRef<HTMLDivElement>(null);
+    const loadMoreInbox = inbox?.loadMore;
+    const onListScroll = useCallback(() => {
+        const el = listRef.current;
+        if (!el || !loadMoreInbox) return;
+        if (el.scrollHeight - el.scrollTop - el.clientHeight < 400) loadMoreInbox();
+    }, [loadMoreInbox]);
+    const inboxHasMore = inbox?.hasMore ?? false;
+    const inboxLoadingMore = inbox?.loadingMore ?? false;
+    useEffect(() => {
+        const el = listRef.current;
+        if (!el || !loadMoreInbox || !inboxHasMore || inboxLoadingMore) return;
+        if (el.scrollHeight <= el.clientHeight + 40) loadMoreInbox();
+    }, [loadMoreInbox, inboxHasMore, inboxLoadingMore, visibleIds]);
 
     const filteredConvs = useMemo(() => conversations
         .filter((c) => {
+            // The current filters' server pages decide WHO is listed. The checks
+            // below then show each person's qualifying threads, exactly as they
+            // did over the full list — on Unread, only their unread threads.
+            if (visibleIds && !visibleIds.has(c.id)) return false;
             if (channelTab !== "all" && c.channel !== channelTab) return false;
             // Tag filter: only show conversations whose customer has the selected tag
             if (tagFilter !== "all") {
@@ -1802,7 +1875,10 @@ export function ConversationsView({
             if (readFilter === "yours" &&
                 !(c.intercept_mode === "human" && c.assigned_agent_id === currentAgentId))
                 return false;
+            // Paged: the server searched every conversation (names, phone,
+            // everything said). Only without it does the browser search itself.
             if (
+                !visibleIds &&
                 searchQ &&
                 !c.name?.toLowerCase().includes(searchQ.toLowerCase()) &&
                 !c.last_message?.toLowerCase().includes(searchQ.toLowerCase())
@@ -1824,7 +1900,7 @@ export function ConversationsView({
                   ? new Date(b.created_at).getTime()
                   : 0;
             return bTime - aTime;
-        }), [conversations, channelTab, tagFilter, interceptFilter, readFilter, searchQ,
+        }), [conversations, visibleIds, channelTab, tagFilter, interceptFilter, readFilter, searchQ,
              currentAgentId]);
 
     // ── Collapse siblings into one row per person ─────────────────────────────
@@ -1869,13 +1945,13 @@ export function ConversationsView({
         });
     }, [filteredConvs]);
 
-    const humanCount = useMemo(() => conversations.filter(
+    const humanCount = useMemo(() => summary?.human ?? conversations.filter(
         (c) => c.intercept_mode === "human",
-    ).length, [conversations]);
+    ).length, [conversations, summary]);
 
-    const yoursCount = useMemo(() => conversations.filter(
+    const yoursCount = useMemo(() => summary?.yours ?? conversations.filter(
         (c) => c.intercept_mode === "human" && c.assigned_agent_id === currentAgentId,
-    ).length, [conversations, currentAgentId]);
+    ).length, [conversations, summary, currentAgentId]);
 
     // ── Bulk selection ────────────────────────────────────────────────────────
     // Picking up ten threads is one click each; handing them back was ten more.
@@ -2245,15 +2321,22 @@ export function ConversationsView({
                 )}
             </div>
 
-            {/* Conversation list */}
+            {/* Conversation list — paged: the next page of people loads as the
+                list nears its end. */}
             <div
+                ref={listRef}
+                onScroll={onListScroll}
                 className={`flex-1 overflow-y-auto scrollbar-none ${isMobile ? "pb-16" : ""}`}
                 style={{ backgroundColor: "#ffffff" }}
             >
                 {filteredConvs.length === 0 && (
                     <div className="py-16 text-center">
                         <p className="text-sm" style={{ color: "#b5c9a8" }}>
-                            No conversations found
+                            {/* A filter's first page is on its way — "none found"
+                                would be a claim the server has not made yet. */}
+                            {inbox && (inbox.loading || !inbox.freshLoaded)
+                                ? "Loading…"
+                                : "No conversations found"}
                         </p>
                     </div>
                 )}
@@ -2547,6 +2630,24 @@ export function ConversationsView({
                         </button>
                     );
                 })}
+                {inbox && filteredConvs.length > 0 && (inbox.loadingMore || inbox.hasMore) && (
+                    <div className="py-4 text-center">
+                        {inbox.loadingMore ? (
+                            <p className="text-xs" style={{ color: "#b5c9a8" }}>Loading more…</p>
+                        ) : (
+                            // Scrolling loads the next page on its own; the button is
+                            // for a keyboard, a screen reader, or a list too short to scroll.
+                            <button
+                                type="button"
+                                onClick={() => inbox.loadMore()}
+                                className="text-xs font-medium hover:underline"
+                                style={{ color: "#589b31" }}
+                            >
+                                Load more conversations
+                            </button>
+                        )}
+                    </div>
+                )}
             </div>
 
             {/* Bulk action bar — only while selecting, so it never costs space */}
