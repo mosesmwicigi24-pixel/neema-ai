@@ -206,10 +206,107 @@ async def resolve_conversation(
 @router.get("/conversations")
 async def list_conversations(
     mode: str | None = None,
+    limit: int | None = None,
+    cursor: str | None = None,
+    tab: str | None = None,
+    channel: str | None = None,
+    tag: str | None = None,
+    q: str | None = None,
     db: AsyncSession = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
 ):
-    return await _conversation_rows(db, mode=mode)
+    """The inbox, one page of PEOPLE at a time.
+
+    With `limit`: {"items": [...conversation rows...], "next_cursor": str|null}.
+    Items are every thread of the people on the page, so the per-person
+    collapse is complete; pass next_cursor back to continue.
+
+    Without `limit`: the legacy full array, kept for Reports (which aggregates
+    over a date range and still needs every row) and for any browser holding a
+    cached older bundle. The inbox itself no longer asks for it.
+    """
+    if limit is None:
+        return await _conversation_rows(db, mode=mode)
+    if not 1 <= limit <= 200:
+        raise HTTPException(status_code=400, detail="limit must be 1-200")
+
+    conditions = _inbox_conditions(
+        agent_id=agent.id if agent else None,
+        tab=tab, channel=channel, mode=mode, tag=tag, q=q,
+    )
+    keys, nxt = await _inbox_page(db, limit=limit, cursor=cursor, conditions=conditions)
+    ids = await _conversations_for_rows(db, keys)
+    return {"items": await _conversation_rows(db, conv_ids=ids), "next_cursor": nxt}
+
+
+@router.get("/conversations/summary")
+async def conversations_summary(
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Every inbox badge, counted by the database over ALL conversations.
+
+    These were counted in the browser over the list it held. Once the list is
+    paged, that is a count of one page — so they come from here instead, in
+    the same units as before:
+
+      unread              conversations with an unread message (Unread tab)
+      human / yours       human-held; human-held by me (Human, Yours, "N live")
+      unread_messages     unread MESSAGE totals, overall and per channel —
+                          the channel chips have always summed messages, not
+                          conversations, and still do
+      tags                every tag in use, not just those on loaded rows
+    """
+    from sqlalchemy import or_
+    from app.models.conversation import InterceptMode
+    from app.models.user import User
+
+    unread_ids = _unread_conv_ids().subquery()
+    unread_n = (await db.execute(select(func.count()).select_from(unread_ids))).scalar() or 0
+
+    human_n, yours_n = (await db.execute(select(
+        func.count().filter(Conversation.intercept_mode == InterceptMode.human),
+        func.count().filter(
+            (Conversation.intercept_mode == InterceptMode.human)
+            & (Conversation.assigned_agent_id == (agent.id if agent else None))
+        ),
+    ))).one()
+
+    # Unread message totals per channel, same definition as the row's `unread`.
+    last_out = (
+        select(Message.conversation_id.label("cid"), func.max(Message.created_at).label("last_out"))
+        .where(Message.direction == "outbound")
+        .where(or_(Message.media_type.is_(None), Message.media_type != "note"))
+        .group_by(Message.conversation_id)
+        .subquery()
+    )
+    per_channel = (await db.execute(
+        select(Conversation.channel, func.count(Message.id))
+        .select_from(Message)
+        .join(Conversation, Conversation.id == Message.conversation_id)
+        .outerjoin(last_out, last_out.c.cid == Message.conversation_id)
+        .where(Message.direction == "inbound")
+        .where(or_(last_out.c.last_out.is_(None), Message.created_at > last_out.c.last_out))
+        .group_by(Conversation.channel)
+    )).all()
+    by_channel = {ch: int(n) for ch, n in per_channel if ch}
+
+    # Only customers who HAVE a conversation: the filter narrows conversations,
+    # so a tag worn only by someone who never messaged would offer an empty list.
+    tag_rows = (await db.execute(
+        select(func.jsonb_array_elements_text(User.state["tags"]).label("t"))
+        .where(func.jsonb_typeof(User.state["tags"]) == "array")
+        .where(User.wa_id.in_(select(Conversation.wa_id).where(Conversation.wa_id.isnot(None))))
+        .distinct()
+    )).scalars().all()
+
+    return {
+        "unread":          int(unread_n),
+        "human":           int(human_n),
+        "yours":           int(yours_n),
+        "unread_messages": {"all": sum(by_channel.values()), **by_channel},
+        "tags":            sorted({t for t in tag_rows if t}, key=str.lower),
+    }
 
 
 @router.get("/conversations/{conv_id}")
@@ -236,18 +333,233 @@ async def get_conversation(
     return rows[0]
 
 
+# ── Inbox paging ──────────────────────────────────────────────────────────────
+# The list used to return EVERY conversation — 14,000 rows, 13 MB, rebuilt and
+# re-sent on a 60-second poll, with a 30-second client timeout it could lose to.
+# Paging keys on inbox ROWS, not conversations: the inbox shows one row per
+# PERSON (their WhatsApp, Messenger and Facebook threads collapse together), so
+# a page holds whole people. Paging raw conversations would put someone's
+# WhatsApp thread on page 1 and their Messenger thread on page 7 as a second,
+# duplicate row.
+#
+# Order is the TRUE latest message, computed from messages through the
+# (conversation_id, created_at) index — not conversations.last_message_at,
+# which has drifted on ~2,300 threads because roughly eight write paths add a
+# message without touching it. ~80 ms for a page at today's volume; if message
+# volume grows ~10x, maintain the column instead and order by it.
+
+_NEG_INF = "-infinity"
+
+
+def _encode_cursor(sort_ts, row_key: str) -> str:
+    import base64
+    import json as _json
+    ts = sort_ts.isoformat() if hasattr(sort_ts, "isoformat") else _NEG_INF
+    raw = _json.dumps([ts, row_key]).encode()
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def _decode_cursor(cursor: str):
+    """-> (sort_ts datetime | '-infinity', row_key) or None for a bad cursor."""
+    import base64
+    import json as _json
+    from datetime import datetime as _dt
+    try:
+        pad = "=" * (-len(cursor) % 4)
+        ts, key = _json.loads(base64.urlsafe_b64decode(cursor + pad))
+        if not isinstance(key, str) or not key:
+            return None
+        return (ts if ts == _NEG_INF else _dt.fromisoformat(ts)), key
+    except Exception:
+        return None
+
+
+def _row_key_expr():
+    """One inbox row per person; a conversation with no person is its own row."""
+    from sqlalchemy import String, cast, func, literal
+    return func.coalesce(
+        cast(Conversation.person_id, String),
+        literal("c:") + cast(Conversation.id, String),
+    )
+
+
+def _latest_message_subq():
+    """Each conversation's true latest message, staff notes excluded — the same
+    definition the row builder uses for its preview and sort."""
+    from sqlalchemy import func, or_
+    return (
+        select(
+            Message.conversation_id.label("cid"),
+            func.max(Message.created_at).label("last_at"),
+        )
+        .where(or_(Message.media_type.is_(None), Message.media_type != "note"))
+        .group_by(Message.conversation_id)
+        .subquery()
+    )
+
+
+async def _inbox_page(db: AsyncSession, *, limit: int, cursor: str | None, conditions: list):
+    """One page of inbox rows -> (row_keys in order, next_cursor | None).
+
+    `conditions` filter which CONVERSATIONS count toward a row; a person
+    appears if any of their conversations qualifies, ordered by the latest of
+    those.
+    """
+    from sqlalchemy import DateTime, func, literal, literal_column, tuple_
+
+    latest = _latest_message_subq()
+    neg_inf = literal_column("'-infinity'::timestamptz")
+    per_conv = (
+        select(_row_key_expr().label("row_key"), latest.c.last_at)
+        .select_from(Conversation)
+        .outerjoin(latest, latest.c.cid == Conversation.id)
+        .where(*conditions)
+        .subquery()
+    )
+    rows = (
+        select(
+            per_conv.c.row_key,
+            func.coalesce(func.max(per_conv.c.last_at), neg_inf).label("sort_ts"),
+        )
+        .group_by(per_conv.c.row_key)
+        .subquery()
+    )
+    q = select(rows.c.row_key, rows.c.sort_ts)
+    if cursor:
+        dec = _decode_cursor(cursor)
+        if dec is None:
+            raise HTTPException(status_code=400, detail="bad cursor")
+        ts, key = dec
+        ts_val = neg_inf if ts == _NEG_INF else literal(ts, type_=DateTime(timezone=True))
+        q = q.where(tuple_(rows.c.sort_ts, rows.c.row_key) < tuple_(ts_val, key))
+    q = q.order_by(rows.c.sort_ts.desc(), rows.c.row_key.desc()).limit(limit + 1)
+
+    got = (await db.execute(q)).all()
+    more = len(got) > limit
+    got = got[:limit]
+    nxt = _encode_cursor(got[-1][1], got[-1][0]) if (more and got) else None
+    return [r[0] for r in got], nxt
+
+
+def _unread_conv_ids():
+    """Conversations with an inbound message after our last reply (staff notes
+    don't count as a reply) — the row builder's own definition of unread, so a
+    count, a filter and a row can never disagree."""
+    from sqlalchemy import or_
+    last_out = (
+        select(
+            Message.conversation_id.label("cid"),
+            func.max(Message.created_at).label("last_out"),
+        )
+        .where(Message.direction == "outbound")
+        .where(or_(Message.media_type.is_(None), Message.media_type != "note"))
+        .group_by(Message.conversation_id)
+        .subquery()
+    )
+    return (
+        select(Message.conversation_id)
+        .outerjoin(last_out, last_out.c.cid == Message.conversation_id)
+        # 8 inbound messages carry no conversation; grouped, they formed one
+        # phantom "unread conversation" the inbox could never show.
+        .where(Message.conversation_id.isnot(None))
+        .where(Message.direction == "inbound")
+        .where(or_(last_out.c.last_out.is_(None), Message.created_at > last_out.c.last_out))
+        .group_by(Message.conversation_id)
+    )
+
+
+_TABS = ("all", "unread", "read", "human", "yours")
+
+
+def _inbox_conditions(*, agent_id, tab=None, channel=None, mode=None, tag=None, q=None) -> list:
+    """The inbox filters, evaluated per CONVERSATION. A person's row appears
+    when any of their threads qualifies — the client then shows the qualifying
+    siblings, exactly as it filtered the full list before."""
+    from sqlalchemy import or_
+    from app.models.conversation import InterceptMode
+    from app.models.person import Person
+    from app.models.user import User
+
+    conds = []
+    tab = (tab or "all").lower()
+    if tab not in _TABS:
+        raise HTTPException(status_code=400, detail=f"tab must be one of {', '.join(_TABS)}")
+    if tab == "unread":
+        conds.append(Conversation.id.in_(_unread_conv_ids()))
+    elif tab == "read":
+        conds.append(Conversation.id.notin_(_unread_conv_ids()))
+    elif tab == "human":
+        conds.append(Conversation.intercept_mode == InterceptMode.human)
+    elif tab == "yours":
+        conds.append(Conversation.intercept_mode == InterceptMode.human)
+        conds.append(Conversation.assigned_agent_id == agent_id)
+
+    if channel and channel != "all":
+        conds.append(Conversation.channel == channel)
+    if mode and mode != "all":
+        try:
+            conds.append(Conversation.intercept_mode == InterceptMode(mode))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="unknown mode")
+    if tag:
+        # Tags live on the WhatsApp user's state, keyed by wa_id — the same
+        # place the row reads them from.
+        tagged = select(User.wa_id).where(User.state["tags"].contains([tag]))
+        conds.append(Conversation.wa_id.in_(tagged))
+
+    term = (q or "").strip()
+    if term:
+        # Server-side now, so it searches EVERY conversation, not the page the
+        # browser holds. Name, phone/handle, and what was said — the old
+        # client search matched only the name and the latest preview, so a
+        # phone number found nothing.
+        like = f"%{term}%"
+        conds.append(or_(
+            Conversation.wa_id.ilike(like),
+            Conversation.external_id.ilike(like),
+            Conversation.wa_id.in_(select(User.wa_id).where(User.name.ilike(like))),
+            Conversation.person_id.in_(select(Person.id).where(Person.display_name.ilike(like))),
+            Conversation.id.in_(
+                select(Message.conversation_id).where(Message.text.ilike(like)).distinct()
+            ),
+        ))
+    return conds
+
+
+async def _conversations_for_rows(db: AsyncSession, row_keys: list[str]) -> list:
+    """Every conversation behind these inbox rows — ALL of a person's threads,
+    so the client's per-person collapse is complete within the page."""
+    from sqlalchemy import or_
+    people = [k for k in row_keys if not k.startswith("c:")]
+    solos  = [k[2:] for k in row_keys if k.startswith("c:")]
+    clauses = []
+    if people:
+        clauses.append(Conversation.person_id.in_(people))
+    if solos:
+        clauses.append(Conversation.id.in_(solos))
+    if not clauses:
+        return []
+    return list((await db.execute(select(Conversation.id).where(or_(*clauses)))).scalars().all())
+
+
 async def _conversation_rows(
     db: AsyncSession,
     mode: str | None = None,
     conv_id=None,
+    conv_ids: list | None = None,
 ) -> list[dict]:
     """The inbox row shape. One code path, so a single conversation fetched by
-    id can never drift from the same conversation inside the list."""
+    id — or one page of them — can never drift from the same conversation
+    inside the full list."""
     from sqlalchemy import and_, case, literal
 
     q = select(Conversation)
     if conv_id is not None:
         q = q.where(Conversation.id == conv_id)
+    if conv_ids is not None:
+        if not conv_ids:
+            return []
+        q = q.where(Conversation.id.in_(conv_ids))
     if mode:
         q = q.where(Conversation.intercept_mode == mode)
     result = await db.execute(q)
@@ -1722,37 +2034,84 @@ async def overview_stats(
     db: AsyncSession = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
 ):
+    """Headline counts, counted by the DATABASE.
+
+    This used to load every conversation, agent, order and catalogue row as a
+    Python object and count them in a loop — 14,000 conversations per call. It
+    is also what the inbox's totals must now come from: once the list is
+    paginated, a count taken over the rows the browser happens to hold is a
+    count of one page.
+
+    Every field keeps its exact previous meaning, NULLs included: an order
+    whose status is NULL was "not cancelled" to the Python and still is.
+
+    channel_breakdown used to walk a hard-coded list — whatsapp, messenger,
+    instagram, tiktok, email, sms — with no "facebook". Facebook comment
+    threads are 55% of all conversations, so the server-side breakdown dropped
+    more than half the inbox. It now groups by whatever channels exist.
+    """
     from app.models.order_event import OrderEvent
     from app.models.catalog import Catalog
-    from sqlalchemy import func
+    from app.models.conversation import ConvStatus, InterceptMode
+    from sqlalchemy import func, or_
 
-    convs   = (await db.execute(select(Conversation))).scalars().all()
-    agents  = (await db.execute(select(Agent))).scalars().all()
-    orders  = (await db.execute(select(OrderEvent))).scalars().all()
-    catalog = (await db.execute(select(Catalog))).scalars().all()
+    open_c, human_c, ai_c = (await db.execute(select(
+        func.count().filter(Conversation.status == ConvStatus.open),
+        func.count().filter(Conversation.intercept_mode == InterceptMode.human),
+        func.count().filter(Conversation.intercept_mode == InterceptMode.ai),
+    ))).one()
+
+    active_a, total_a = (await db.execute(select(
+        func.count().filter(Agent.is_available.is_(True)),
+        func.count(),
+    ).select_from(Agent))).one()
+
+    not_cancelled = or_(OrderEvent.status.is_(None), OrderEvent.status != "cancelled")
+    (revenue, total_o, pending_o, delivered_o, confirmed_o, cancelled_o) = (await db.execute(select(
+        func.coalesce(func.sum(OrderEvent.subtotal).filter(not_cancelled), 0),
+        func.count(),
+        func.count().filter(OrderEvent.status.in_(("open", "pending"))),
+        func.count().filter(OrderEvent.status == "delivered"),
+        func.count().filter(OrderEvent.status == "confirmed"),
+        func.count().filter(OrderEvent.status == "cancelled"),
+    ).select_from(OrderEvent))).one()
+
+    in_stock, total_items = (await db.execute(select(
+        func.count().filter(Catalog.in_stock.is_(True)),
+        func.count(),
+    ).select_from(Catalog))).one()
+
+    by_channel = (await db.execute(
+        select(
+            Conversation.channel,
+            func.count(),
+            func.count().filter(Conversation.status == ConvStatus.open),
+        ).group_by(Conversation.channel)
+    )).all()
+    # Known channels keep their familiar order; anything new follows by name.
+    order = ("whatsapp", "messenger", "facebook", "instagram", "tiktok", "email", "sms", "web")
+    by_channel = sorted(
+        by_channel,
+        key=lambda r: (order.index(r[0]) if r[0] in order else len(order), r[0] or ""),
+    )
 
     return {
-        "open_conversations":   sum(1 for c in convs if c.status == "open"),
-        "human_conversations":  sum(1 for c in convs if c.intercept_mode == "human"),
-        "ai_conversations":     sum(1 for c in convs if c.intercept_mode == "ai"),
-        "active_agents":        sum(1 for a in agents if a.is_available),
-        "total_agents":         len(agents),
-        "total_revenue":        float(sum(o.subtotal or 0 for o in orders if o.status not in ("cancelled",))),
-        "total_orders":         len(orders),
-        "pending_orders":       sum(1 for o in orders if o.status in ("open", "pending")),
-        "delivered_orders":     sum(1 for o in orders if o.status == "delivered"),
-        "confirmed_orders":     sum(1 for o in orders if o.status == "confirmed"),
-        "cancelled_orders":     sum(1 for o in orders if o.status == "cancelled"),
-        "in_stock_items":       sum(1 for c in catalog if c.in_stock),
-        "total_items":          len(catalog),
+        "open_conversations":   int(open_c),
+        "human_conversations":  int(human_c),
+        "ai_conversations":     int(ai_c),
+        "active_agents":        int(active_a),
+        "total_agents":         int(total_a),
+        "total_revenue":        float(revenue or 0),
+        "total_orders":         int(total_o),
+        "pending_orders":       int(pending_o),
+        "delivered_orders":     int(delivered_o),
+        "confirmed_orders":     int(confirmed_o),
+        "cancelled_orders":     int(cancelled_o),
+        "in_stock_items":       int(in_stock),
+        "total_items":          int(total_items),
         "channel_breakdown":    [
-            {"channel": ch, "count": cnt, "open": opn}
-            for ch, cnt, opn in (
-                (ch,
-                 sum(1 for c in convs if getattr(c, "channel", None) == ch),
-                 sum(1 for c in convs if getattr(c, "channel", None) == ch and c.status == "open"))
-                for ch in ("whatsapp", "messenger", "instagram", "tiktok", "email", "sms")
-            )
+            {"channel": ch, "count": int(cnt), "open": int(opn)}
+            for ch, cnt, opn in by_channel
             if cnt > 0
         ],
     }
