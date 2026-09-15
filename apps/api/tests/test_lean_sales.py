@@ -32,13 +32,20 @@ from app.agent.prompt import build_system_prompt
 
 # ── 1. one piece is the default — the pools never ask a quantity ─────────────
 
-def test_single_piece_pools_close_on_the_piece_not_a_count():
+def test_single_piece_pools_take_the_order_after_the_price():
+    """Owner, 2026-09-15: "Kindly make your order, let us know how many you
+    need and the colour too. How soon do you want the shirt?" — the pull is
+    the order; "how many" rides with the colour and the timing, never as a
+    gate before the price (ONE PIECE IS THE DEFAULT still holds)."""
     for line in rt._OVER_CAP_SELL_POOL + rt._FIRST_SELL_POOL:
         low = line.lower()
-        assert "how many" not in low and "quantity" not in low, line
-        assert "reserve" in low or "set one aside" in low, line
+        assert low.index("{price}") < low.index("place your order"), line   # price first
+        assert "colour" in low and "how many you need" in low, line
+        assert "how soon" in low or "when do you want it" in low, line
+        assert "quantity" not in low and "reserve" not in low, line
         assert "dhl" in low, line                       # "we ship worldwide", once
         assert "{product}" in line and "{price}" in line
+        assert line.count("?") <= 1, line                # one question mark
 
 
 def test_per_piece_goods_are_still_sold_by_the_count():
@@ -58,7 +65,10 @@ def test_public_reply_picks_the_piece_pool_the_each_pool_or_the_welcome():
     out = rt._comment_public_reply("", dm_sent=False, name_tag=" Nicole", seed="s",
                                    product_known=True, product_name=seen, price_text=price)
     assert f"the {seen} is {price}" in out
-    assert "how many" not in out.lower() and "quantity" not in out.lower()
+    # the pull is the order (owner, 2026-09-15): colour + how many + how soon,
+    # after the price — never a quantity form before it
+    assert "place your order" in out.lower() and "how many you need" in out.lower()
+    assert "quantity" not in out.lower() and out.lower().index(price.lower()) < out.lower().index("how many")
     assert "Nicole" in out
     first = rt._comment_public_reply("", dm_sent=False, name_tag=" Nicole", seed="s",
                                      product_known=True, product_name=seen,
@@ -229,7 +239,7 @@ def test_the_prompt_has_one_piece_as_the_default_everywhere():
               build_system_prompt(country_iso="KE", currency="KES"),
               build_system_prompt(country_iso="US", currency="USD")):
         assert "ONE PIECE IS THE DEFAULT" in p
-        assert '"Shall I reserve it for you?" is a sale' in p
+        assert 'then "kindly place your order" is a sale' in p
         # a photo is priced AS SEEN, never by its catalogue label alone
         assert "naming it as THEY see it" in p
 
@@ -254,8 +264,8 @@ def test_comment_rules_are_aligned_with_the_owner():
     assert "SAY WHAT THEY SEE" in a
     assert "never the bare catalogue label ('Ornate Chasuble — Embroidered')" in a
     assert "ONE PIECE IS THE DEFAULT" in a
-    assert "'How many?' is a pull only for goods bought in numbers" in a
-    assert "(shall I reserve it for you? which colour? which city for delivery?)" in a
+    assert "the pull is the ORDER" in a and "Kindly place your order" in a
+    assert "A question that only keeps the chat going" in a
     assert "which colour? how many? which country" not in a
     # the owner's first-contact welcome and the no-daypart rule no longer collide
     assert "FIRST CONTACT — THE WELCOME" in a and "never 'Good morning' under a comment" in a

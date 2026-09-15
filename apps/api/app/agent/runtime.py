@@ -19,6 +19,7 @@ from app.agent.prompt import build_system_prompt, customer_context
 from app.agent.tools import TOOLS, ToolContext, run_tool
 from app.core import money
 from app.core.synonyms import canonical as _canonical
+from app.agent.voice import plain_public_voice
 from app.core.config import settings
 from app.core.countries import resolve_country, market_currency, money_name
 from app.models.message import Message, MsgDirection, MsgSender
@@ -147,19 +148,25 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         f"{example} Quote in {money} (the `price` from search_catalog is already in "
         f"{money}) — never invent it.\n"
         f"{one_currency}"
-        "- SAY WHAT THEY SEE. Name the item as it appears in THIS post — colour, "
-        "pattern, trim — in plain words: 'the green chasuble with the "
-        "African-print stole down the middle and gold piping', never the bare "
-        "catalogue label ('Ornate Chasuble — Embroidered'). Your context carries "
-        "how the post's product looks whenever our records hold it; otherwise "
-        "read the image you were given. The colour and trim they can see are "
-        "what they are buying.\n"
+        "- THE HUB NAMES IT, THE HUB PRICES IT (owner rule, 2026-09-15 — the hub "
+        "is the source of truth): the item you quote is a hub row search_catalog "
+        "returned, called by the hub's own name and priced by the hub's own "
+        "figure — never a name you composed ('the Round Collar Shirt for "
+        "bishops'), never a price from memory. Then SAY WHAT THEY SEE. After the "
+        "hub's name, say the item as it appears in THIS post — colour, pattern, "
+        "trim — in plain words: 'the Chasuble — the green one with the "
+        "African-print stole down the middle and gold piping'; never the bare "
+        "catalogue label ('Ornate Chasuble — Embroidered') with nothing they can "
+        "see, and never a description in place of the hub's name. Your context "
+        "carries how the post's product looks whenever our records hold it; "
+        "otherwise read the image you were given. The colour and trim they can "
+        "see are what they are buying.\n"
         "- ONE PIECE IS THE DEFAULT (owner rule): most people commenting on a "
-        "vestment want ONE. Never ask 'how many?' for a garment or a single "
-        "item — close on the one piece: 'Shall I reserve it for you?', its "
-        "colour, its size, the matching stole. Ask a quantity only for goods "
-        "bought in numbers (cups, wafers, hosts, trays for a congregation) or "
-        "when THEY speak of many.\n"
+        "vestment want ONE. Never make 'how many?' the gate before the price — "
+        "quote the piece, then take the order for it (colour, size, how many "
+        "they need, how soon); one is a fine answer. Quantity leads only for "
+        "goods bought in numbers (cups, wafers, hosts, trays for a "
+        "congregation) or when THEY speak of many.\n"
         "- ANSWER THE QUESTION THEY ACTUALLY ASKED. If it isn't about price — where we "
         "are, delivery, opening hours, whether we ship to their country — answer THAT "
         "first, briefly, and only add a price if it's relevant.\n"
@@ -173,25 +180,37 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "- A GREETING comment ('How are you', 'Habari', 'Bonjour') is a person "
         "OPENING a conversation — never 'kind words'. Greet them warmly back, in "
         "their language, and connect them to the post in the same breath: 'We're "
-        "very well, asante Sylvia! 🙏 Is it the Bible in the photo you'd like?' "
+        "very well, thank you Sylvia! 🙏 Is it the Bible in the photo you'd like?' "
         "Never answer a greeting with a canned thanks.\n"
-        "- END WITH THE PULL: after the answer, ONE short inviting question that "
-        "draws them into the conversation (shall I reserve it for you? which "
-        "colour? which city for delivery?) — a comment that answers AND asks is "
-        "what starts the sale, and their answer lands right back in this "
-        "thread. 'How many?' is a pull only for goods bought in numbers.\n"
+        "- END WITH THE PULL — and the pull is the ORDER (owner rule, 2026-09-15). "
+        "After the price, invite the order and ask for what fulfilling it needs, "
+        "in one breath, the owner's own shape: 'The Round Collar Shirt is ZMW 900. "
+        "Kindly place your order — let us know the colour and how many you need. "
+        "How soon do you want the shirt?' Every question must move the order: "
+        "colour, size, how many, how soon, where it is going. A question that only "
+        "keeps the chat going ('which colour would you prefer?' on its own, 'would "
+        "you like to know more?') is not a pull — a comment that answers AND asks is "
+        "what starts the sale, and their answer lands right back in this thread.\n"
         "- SELL THE WAY YOU WOULD ON WHATSAPP: acknowledge what they said, name "
-        "the item as they see it and its price, give one concrete benefit, then "
-        "ask the one question that moves it forward. That is the whole shape of "
-        "a comment reply — and the next one continues it.\n"
+        "the item the hub's way and as they see it, its price, then take the "
+        "order. No benefit blurb, no boilerplate ('made to fit you perfectly, "
+        "lasts for years') — that is bot language. That is the whole shape of a "
+        "comment reply — and the next one continues it.\n"
         "- If the comment is grief, condolence, illness or a prayer request, respond "
         "with warmth alone — a brief blessing. Sell NOTHING. Not every comment under a "
         "post is a customer at a till.\n"
         "- If you genuinely cannot tell what they mean, say nothing salesy: thank them "
         "and invite them to tell you more. A pitch aimed at a misread comment is worse "
         "than a plain thank-you.\n"
-        "- Reply in the SAME language the comment is written in (French → French, "
-        "Swahili → Swahili, etc.). Never answer a French or Swahili comment in English.\n"
+        "- THE LANGUAGE (owner rule, 2026-09-15): English is our official selling "
+        "language and the default. Reply in the SAME language THIS comment is "
+        "written in — Swahili only when the comment itself is in Swahili, French "
+        "when it is in French. Never answer a French or Swahili comment in English, "
+        "and never answer an English comment in Swahili: not for a Kenyan name, not "
+        "for the post's language, not because an earlier reply in the thread was "
+        "Swahili. English, Sheng, a mix, or a language you cannot place → English. "
+        "No Swahili sprinkles in an English reply — 'Welcome' and 'Thank you', not "
+        "'Karibu' and 'Asante'.\n"
         "- SWAHILI MEANS KENYA unless they say otherwise (owner rule): a comment "
         "written in Swahili is almost always a Kenyan buyer — quote our native KES "
         "prices (call search_catalog with currency=\"KES\"), even when your default "
@@ -255,7 +274,15 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "stand and basin. Find the "
         "identified item with search_catalog and quote THAT item. Still unsure "
         "after all three? Give both closest options rather than guessing the "
-        "dearer one. If they name a different item, price that.\n"
+        "dearer one. If they name a different item, price that. (4) CONFIRM "
+        "against the hub before you quote: the name you say is the hub row's "
+        "name and the price is its price. 'The one you are wearing' / 'the "
+        "dress you have on' means the garment on the PERSON in the frame, not "
+        "the post's headline item — if you cannot confirm it as one hub row, "
+        "do not guess a dearer or unrelated item; ask which one in a closing "
+        "way ('Is it the blue clergy dress I'm wearing, or the white cassock "
+        "with the green trim? Tell me which and I'll give you the price and "
+        "take your order.').\n"
         "- Be genuinely warm and human — a brief friendly word is welcome — but "
         "CONCISE: this is a public comment, so 2–4 short lines, plain text, no "
         "markdown or asterisks.\n"
@@ -324,8 +351,9 @@ def _meta_addendum(currency: str = "USD") -> str:
         "is a lost customer record.\n"
         "- CLOSE THE SALE RIGHT HERE — the WHOLE order happens in this chat, the "
         "same way it does on WhatsApp. Walk it one warm step at a time: item → "
-        "colour/design → size → their city (a quantity only for goods bought in "
-        "numbers — ONE PIECE IS THE DEFAULT). Build the cart as they decide "
+        "colour/design → size → how many they need (ONE PIECE IS THE DEFAULT; "
+        "one is a fine answer) → how soon they want it → their city. Build the "
+        "cart as they decide "
         "(`update_cart`), then show the items + total and confirm.\n"
         "- THE PHONE IS WHAT MAKES THE ORDER REAL. Once the items are settled, "
         "warmly ask for their WhatsApp/phone number — for the order confirmation "
@@ -335,7 +363,7 @@ def _meta_addendum(currency: str = "USD") -> str:
         "the order.\n"
         "- That number request IS your one natural WhatsApp invitation (see THE "
         "WHATSAPP INVITATION above) — and once they HAVE shared a phone/WhatsApp "
-        "number, DO suggest it, politely and exactly once: 'Asante — saved for "
+        "number, DO suggest it, politely and exactly once: 'Thank you — saved for "
         "your order. If it's ever easier, we're also on WhatsApp at this same "
         "number — but we can finish everything right here.' Then keep selling "
         "HERE regardless of whether they take it up. Never repeat the "
@@ -401,8 +429,9 @@ def _tiktok_addendum(currency: str = "USD") -> str:
         "role/title or church/ministry — even partially — call capture_contact IN "
         "THAT SAME TURN with everything they said.\n"
         "- CLOSE THE SALE RIGHT HERE, one warm step at a time: item → "
-        "colour/design → size → their city (a quantity only for goods bought in "
-        "numbers — ONE PIECE IS THE DEFAULT). Build the cart as they decide "
+        "colour/design → size → how many they need (ONE PIECE IS THE DEFAULT; "
+        "one is a fine answer) → how soon they want it → their city. Build the "
+        "cart as they decide "
         "(update_cart), then show items + total and confirm.\n"
         "- THE PHONE IS WHAT MAKES THE ORDER REAL — and on TikTok it is also our "
         "lifeline if this thread goes quiet (we cannot restart a TikTok chat; "
@@ -1264,7 +1293,7 @@ def _hold_line(channel: str = "whatsapp") -> str:
     else:
         parts.append("For samples, further inquiries, or to place your order, "
                      "leave us a message here and we will get right back to you.")
-    parts.append("Asante for choosing Bethany House 💛")
+    parts.append("Thank you for choosing Bethany House 💛")
     return "\n\n".join(parts)
 
 
@@ -1873,7 +1902,7 @@ _CATALOGUE_RE = re.compile(
 _LIVE_WHICH_POOL = [
     "Which item are you asking about{name}? 🙏 Tell me and I'll give you the price right away 💛",
     "Which one caught your eye{name}? 🙏 Name it and I'll share the price 💛",
-    "Of course{name} 🙏 Which piece do you mean? Let me know and I'll quote it for you 💛",
+    "Of course{name} 🙏 Which piece do you mean? Tell me which and I'll give you the price and take your order 💛",
 ]
 
 # A live viewer saying "watching from Liberia" is arriving, not shopping. The
@@ -1881,7 +1910,7 @@ _LIVE_WHICH_POOL = [
 # warm, varied, and sell NOTHING — the broadcast itself is the pitch.
 _LIVE_WELCOME_POOL = [
     "Welcome{name} 🙏 So glad you could join us live — make yourself at home! 💛",
-    "Karibu sana{name} 🙏 Lovely to have you with us today 💛",
+    "A warm welcome{name} 🙏 Lovely to have you with us today 💛",
     "Bless you for joining{name} 🙏 Enjoy the show — ask us anything as we go! 💛",
     "Welcome in{name}! 🙏 Great to see you here with us 💛",
     "So good to have you{name} 🙏 Watch along and say hello anytime 💛",
@@ -1891,7 +1920,7 @@ _THANKS_POOL = [
     "Amen{name} 🙏 Thank you so much — God bless you! 💛",
     "Bless you{name} 🙏 We're so glad this speaks to you! 💛",
     "Thank you{name}! 🙏 Your kind words mean the world to us 💛",
-    "Asante{name}! 🙏 May God bless you abundantly 💛",
+    "Thank you kindly{name} 🙏 May God bless you abundantly 💛",
     "So grateful{name} 🙏 Glory to God! 💛",
 ]
 # RETIRED from the answered path (2026-08-10: the comment thread IS the shop —
@@ -1922,7 +1951,7 @@ _OVER_CAP_POOL = [
     "Thank you{name} 🙏 Yes, {product} is available — send us a message and we'll share the price and get you sorted 💛",
     "Bless you{name}! 🙏 We do have {product} — DM us and we'll take care of the details and delivery 💛",
     "We'd love to help{name} 🙏 {product} is in — send us a message and we'll sort out size, colour and delivery 💛",
-    "Karibu{name} 🙏 Yes, we have {product} — message us and we'll handle the price and delivery from there 💛",
+    "Welcome{name} 🙏 Yes, we have {product} — message us and we'll handle the price and delivery from there 💛",
 ]
 # Over-cap AND we know the post's product WITH its price (from the post's
 # recorded identity): the no-LLM line still SELLS — price + one pull question —
@@ -1930,30 +1959,32 @@ _OVER_CAP_POOL = [
 # the shop; running out of model budget must not turn it back into a signpost.
 #
 # ONE PIECE IS THE DEFAULT (owner, 2026-09-05): "many people want a piece. We
-# should not ask how many do you want. We should make sales." So the pull is
-# the piece itself — reserve it, its colour — never a quantity. `{product}` is
+# should not ask how many do you want. We should make sales." And the pull is
+# the ORDER (owner, 2026-09-15): "Kindly make your order, let us know how many
+# you need and the colour too. How soon do you want the shirt?" — never a
+# question that only keeps the chat going. `{product}` is
 # the item AS SEEN in the post when our records describe it ("the green
 # chasuble with the African-print stole and gold piping"), else its name;
 # `{price}` carries the USD figure for outside Kenya beside the KES home price.
 _OVER_CAP_SELL_POOL = [
-    "Thank you{name} 🙏 {product} is {price}, and we ship worldwide by DHL. Shall I reserve one for you? 💛",
-    "Karibu{name} 🙏 {product} is {price}, made with care in our Nairobi workshop and delivered anywhere by DHL. Shall I set one aside for you? 💛",
-    "Bless you{name}! 🙏 {product} is {price}, and we deliver worldwide by DHL. Shall I reserve it for you in this colour? 💛",
-    "We'd love to serve you{name} 🙏 {product} is {price}, delivered anywhere by DHL. Shall I reserve one for you? 💛",
+    "Thank you{name} 🙏 {product} is {price}, and we ship worldwide by DHL. Kindly place your order — tell us the colour and how many you need. How soon do you want it? 💛",
+    "Thank you{name} 🙏 {product} is {price}, made in our Nairobi workshop and delivered anywhere by DHL. Kindly place your order — tell us the colour and how many you need. How soon would you like it? 💛",
+    "Bless you{name}! 🙏 {product} is {price}, and we deliver worldwide by DHL. Kindly place your order — let us know the colour and how many you need. How soon would you like it? 💛",
+    "We'd love to serve you{name} 🙏 {product} is {price}, delivered anywhere by DHL. Kindly place your order — the colour and how many you need. When do you want it by? 💛",
 ]
 # A person's FIRST comment to us — the owner's welcome shape: welcome them by
 # name, name what they are looking at, the price, one step. No re-welcome for
 # anyone we have answered before.
 _FIRST_SELL_POOL = [
-    "Welcome to Bethany House{name} 🙏 {product} is {price}, and we ship worldwide by DHL. Shall I reserve one for you? 💛",
-    "Karibu Bethany House{name} 🙏 {product} is {price}, made in our Nairobi workshop and delivered anywhere by DHL. Shall I set one aside for you? 💛",
-    "Welcome{name}, we're glad you found us 🙏 {product} is {price}, and we deliver worldwide by DHL. Shall I reserve it for you? 💛",
+    "Welcome to Bethany House{name} 🙏 {product} is {price}, and we ship worldwide by DHL. Kindly place your order — tell us the colour and how many you need. How soon do you want it? 💛",
+    "Welcome to Bethany House{name} 🙏 {product} is {price}, made in our Nairobi workshop and delivered anywhere by DHL. Kindly place your order — tell us the colour and how many you need. How soon would you like it? 💛",
+    "Welcome{name}, we're glad you found us 🙏 {product} is {price}, and we deliver worldwide by DHL. Kindly place your order — let us know the colour and how many you need. How soon would you like it? 💛",
 ]
 # Goods bought in numbers (cups, hosts, wafers — the per-piece rows): here
 # "how many?" IS the sale, and the price is per piece.
 _OVER_CAP_SELL_EACH_POOL = [
     "Thank you{name} 🙏 {product} is {price} each, and we ship worldwide by DHL. How many do you need? 💛",
-    "Karibu{name} 🙏 {product} is {price} each, ready for you. How many shall we prepare? 💛",
+    "Thank you{name} 🙏 {product} is {price} each, ready for you. Kindly place your order — how many shall we prepare, and how soon? 💛",
     "Bless you{name}! 🙏 {product} is {price} each, delivered anywhere by DHL. How many would you like? 💛",
 ]
 # Said when we could not compose a real answer (over the per-post cap, or the
@@ -1966,7 +1997,7 @@ _NEUTRAL_ACK_POOL = [
     "Thank you for reaching out{name} 🙏 Tell us a little more and we'll gladly help.",
     "We appreciate you{name} 🙏 Send us a message and we'll help however we can.",
     "Thank you{name} 🙏 We're here — let us know what you need and we'll assist.",
-    "Asante{name} 🙏 We'd be glad to help — just tell us a bit more.",
+    "Thank you{name} 🙏 We'd be glad to help — just tell us a bit more.",
 ]
 # The line that continues the sale INSIDE the DM the comment opens. Kept SHORT
 # on purpose: this rides under the model's answer + the order link, and a long
@@ -1984,7 +2015,7 @@ _GOODWILL_POOL = [
     "Thank you{name} 🙏 A welcome like yours means the world to us.",
     "Bless you{name} 🙏 Kind words like these carry us a long way.",
     "Thank you{name} 🙏 It's an honour to be cheered on like this.",
-    "Asante sana{name} 🙏 We're so grateful for your warmth.",
+    "Thank you so much{name} 🙏 We're so grateful for your warmth.",
     "Thank you{name} 🙏 We felt that — and we're so glad you're with us.",
 ]
 
@@ -2479,7 +2510,9 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
             _log.warning("META_PAGE_ID unset — skipping public reply for %s", cid)
             return
         try:
-            await reply_to_comment(cid, (text or "").strip(),
+            # Plain and human at the seam (voice.py): no markdown, no "$450
+            # USD", no butler's "Very well." — whatever composed the text.
+            await reply_to_comment(cid, plain_public_voice(text),
                                    page_id=comment.get("page_id"), channel=channel)
         except Exception as exc:
             _log.warning("public comment reply failed for %s: %s", cid, exc)
@@ -2611,7 +2644,7 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # Goodwill opens no DM — unless the post sells a product, where the link is
     # the most useful thing we can hand them.
     if answer and (plan["dm"] or product_link):
-        dm_text = _dm_text(answer, product_link, ext)
+        dm_text = _dm_text(plain_public_voice(answer), product_link, ext)
         try:
             await send_private_reply(cid, dm_text, page_id=comment.get("page_id"),
                                      channel=channel)
@@ -2666,6 +2699,7 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
                                         price_text=price_text,
                                         goodwill=(intent == "goodwill"),
                                         per_piece=per_piece, first_contact=first)
+    public_text = plain_public_voice(public_text)
 
     await _post_public(public_text)
 

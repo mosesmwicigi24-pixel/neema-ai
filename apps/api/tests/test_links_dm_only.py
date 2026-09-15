@@ -111,7 +111,7 @@ def test_the_send_boundary_guard_backs_all_of_this_up():
 
 def test_comment_flow_builds_the_dm_after_the_product():
     src = inspect.getsource(rt._run_comment_engage)
-    assert "_dm_text(answer, product_link, ext)" in src
+    assert "_dm_text(plain_public_voice(answer), product_link, ext)" in src
     # The product/link resolution must happen ABOVE the DM send — otherwise
     # there is no link to put in the message.
     dm_call = src.index("await send_private_reply(")   # the call, not the import

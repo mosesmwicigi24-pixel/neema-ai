@@ -29,6 +29,16 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   Neema converts USD→local at the central-bank rate, as the arithmetic gives it.
   Prices are quoted EXACTLY as the hub holds them — never rounded to a unit or
   a ten (owner rule 2026-09-03; `app/core/money.py` is the one formatter).
+- **The official voice** (owner 2026-09-15, from the green-cassock thread): English
+  is the selling language — Swahili ONLY when the comment itself is Swahili, no
+  Swahili sprinkles in English; the hub names the item and prices it (a hub row's
+  own name + what they see, never a composed name or a remembered price; 'the one
+  you're wearing' is the presenter's garment); every question takes the order
+  ("Kindly place your order — colour, how many, how soon?"), never chat for its
+  own sake; human, not bot (no "Very well", no product poetry, no boilerplate,
+  no markdown, "$170" not "$170 USD"). `app/agent/voice.py` strips markdown,
+  the redundant currency word and butler openers at the public seams; the canned
+  pools close on the order.
 - **One item, many names** (`app/core/synonyms.py`, owner 2026-09-06): "cross
   and chain", "pendant", "pastor's / bishop's cross" ARE the hub's Pectoral
   Cross. The table rewrites the customer's words at every seam (catalogue
