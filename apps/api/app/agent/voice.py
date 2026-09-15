@@ -23,15 +23,51 @@ _MD_HEADING = re.compile(r"^\s{0,3}#{1,6}\s+", re.M)
 # "$450 USD", "USD $450", "$450 US dollars", "KES 12,000 Kenyan Shillings"
 _USD_TAIL = re.compile(r"(\$\s?\d[\d,]*(?:\.\d+)?)\s*(?:USD|US\s*dollars?|dollars?)\b", re.I)
 _USD_HEAD = re.compile(r"\bUSD\s*\$", re.I)
-_KES_TAIL = re.compile(r"(KES\s?\d[\d,]*(?:\.\d+)?)\s*(?:KES|Kenyan?\s+shillings?|shillings?)\b", re.I)
+_KES_TAIL = re.compile(r"(KES\s?\d[\d,]*(?:\.\d+)?)\s*(?:KES|Kenyan?\s+shillings?|shillings?|shilingi)\b", re.I)
 
 # The butler's openers — never how the owner would start a reply. "Of course"
 # and "Thank you" are a person's words and stay.
 _BUTLER = re.compile(
     r"^\s*(?:very\s+well|certainly|absolutely|definitely|sure(?:\s+thing)?|"
-    r"great\s+question|good\s+question|excellent\s+question)\s*[.!,;:—–-]*\s*",
+    r"great\s+question|good\s+question|excellent\s+question|"
+    r"vema|hakika|bila\s+shaka)\s*[.!,;:—–-]*\s*",           # and the Swahili butler
     re.I,
 )
+
+
+# Does the customer's own message read as Swahili? Whole words only, and a
+# short list of everyday shop words — the point is to pick the Swahili canned
+# line for "Bei gani?" or "Nataka hii", never to guess from a name or a flag.
+# Weak connectives ("na", "ya", "ni") are left out: they are too short to mean
+# anything on their own.
+_SW_WORDS = frozenset("""
+    bei gani ngapi pesa shilingi nataka ninataka nahitaji ninahitaji naomba ninaomba
+    nipe nitumie tuma tuambie niambie tafadhali habari asante karibu sana
+    unauza mnauza unayo mnayo mnaweza unaweza kuagiza agiza oda hii hiyo hizi hizo
+    ile kiasi je ndiyo ndio hapana sawa leo kesho wapi niko nipo nataka bado
+    divai mkate vifaa meza bwana kanisa mchungaji askofu kasisi kasoki joho stola
+    kikombe vikombe sinia msalaba rangi vipimo ukubwa saizi bidhaa nunua kununua
+    inauzwa zinauzwa hapa huko kwako yako zako wangu yangu mimi wewe nyinyi sisi
+""".split())
+_EN_WORDS = frozenset("""
+    the is are how much price want need this one please have you do it for me
+    my your what which where can i would like get buy order send us cost
+""".split())
+_SW_ASK_RE = re.compile(r"\b(?:bei(?:\s+gani)?|(?:pesa\s+|shilingi\s+|ni\s+)?ngapi)\b", re.I)
+
+
+def looks_swahili(text: str | None) -> bool:
+    """True when THEIR words are Swahili — "Bei gani?", "Nataka hii cassock",
+    "Divai na mkate" — and False for English, a lone "Karibu Zambia", or a
+    message you cannot place. A bare Swahili price ask counts on its own."""
+    toks = re.findall(r"[a-z']+", (text or "").lower())
+    if not toks:
+        return False
+    sw = sum(1 for t in toks if t in _SW_WORDS)
+    en = sum(1 for t in toks if t in _EN_WORDS)
+    if _SW_ASK_RE.search(text or "") and sw > en:
+        return True
+    return sw >= 2 and sw > en
 
 
 def strip_markdown(text: str | None) -> str:

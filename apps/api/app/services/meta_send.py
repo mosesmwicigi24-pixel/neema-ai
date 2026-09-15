@@ -172,7 +172,10 @@ LINK_FREE_FALLBACK = "Thank you 🙏 Send us a message and we'll help you order 
 # clause only, so "We're based in Nairobi, Kenya" is untouched.
 _COUNTRY_ASK_RE = re.compile(
     r"(?i)[^.!?\n]*\b(?:are you (?:in|from|writing from) kenya"
-    r"|(?:which|what) country are you)\b[^.!?\n]*[.!?]?")
+    r"|(?:which|what) country are you"
+    # the same hedge in Swahili — "Upo wapi?" went out under a thread
+    r"|u(?:po|ko) wapi|uko nchi gani|unatoka (?:wapi|nchi gani)|je,? u(?:po|ko) kenya"
+    r")\b[^.!?\n]*[.!?]?")
 
 
 def sanitize_public_comment(text: str) -> tuple[str, list[str]]:

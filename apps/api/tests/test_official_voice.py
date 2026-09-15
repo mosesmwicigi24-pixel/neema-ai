@@ -62,6 +62,9 @@ def test_no_rule_text_sprinkles_swahili_into_its_own_examples():
         low = (text.replace('"Welcome" and "Thank you", not "Karibu" and "Asante"', "")
                    .replace("'Welcome' and 'Thank you', not 'Karibu' and 'Asante'", "")
                    .lower())
+        # the KISWAHILI SANIFU rule speaks Swahili on purpose — it governs a
+        # reply that is ALREADY Swahili, never an English one
+        low = re.sub(r"kiswahili sanifu \(owner rule.*?(?=- what a colleague said stands|$)", "", low)
         assert "karibu" not in low and "asante" not in low
 
 
@@ -186,7 +189,7 @@ def test_the_public_seams_go_through_the_plain_voice():
     src = inspect.getsource(rt._run_comment_engage)
     assert "await reply_to_comment(cid, plain_public_voice(text)," in src   # every public reply
     assert "public_text = plain_public_voice(public_text)" in src           # the saved copy too
-    assert "_dm_text(plain_public_voice(answer), product_link, ext)" in src  # and the comment DM
+    assert "_dm_text(plain_public_voice(answer), product_link, ext, swahili=swahili)" in src  # and the DM
 
 
 def test_messenger_and_instagram_sends_lose_their_asterisks(monkeypatch):
