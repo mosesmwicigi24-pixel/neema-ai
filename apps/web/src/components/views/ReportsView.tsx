@@ -3,10 +3,10 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { fmtCurrency, fmtDate, timeAgo, formatPhone, displayName } from "@/lib/utils";
+import { conversationsApi, mapConversation } from "@/lib/api";
 import type { Conversation, Agent, Order, SharedViewProps } from "@/types";
 
 interface ReportsViewProps extends SharedViewProps {
-    conversations: Conversation[];
     agents: Agent[];
     orders: Order[];
 }
@@ -95,7 +95,25 @@ function Table({ cols, rows, emptyText = "No data" }: {
     );
 }
 
-export function ReportsView({ conversations, agents, orders, onToast, isMobile }: ReportsViewProps) {
+export function ReportsView({ agents, orders, onToast, isMobile }: ReportsViewProps) {
+    // Reports aggregate a date range over EVERY conversation, so they fetch
+    // the full list themselves, only while this view is open. The dashboard
+    // used to fetch it for everyone every 60 seconds; the inbox now pages.
+    // Computing these from the inbox's loaded rows would report on one page.
+    const [allConvs, setAllConvs] = useState<Conversation[] | null>(null);
+    useEffect(() => {
+        let alive = true;
+        conversationsApi.list()
+            .then((rows) => { if (alive) setAllConvs(rows.map(mapConversation)); })
+            .catch(() => {
+                if (!alive) return;
+                setAllConvs([]);
+                onToast?.("Could not load conversations for this report.", "error");
+            });
+        return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+    const conversations = allConvs ?? [];
     const [tab,       setTab]       = useState<ReportTab>("overview");
     const [range,     setRange]     = useState<Range>("30d");
     const [customFrom, setCustomFrom] = useState("");
@@ -179,6 +197,15 @@ export function ReportsView({ conversations, agents, orders, onToast, isMobile }
         URL.revokeObjectURL(url);
         onToast("Report exported");
     };
+
+    // Never show zeros that look like real figures while the data is loading.
+    if (allConvs === null) {
+        return (
+            <div className={`flex-1 flex items-center justify-center bg-[#f3f9ec] ${isMobile ? "p-4 pb-24" : "p-6"}`}>
+                <p className="text-sm text-[#699a32]">Loading every conversation for the report…</p>
+            </div>
+        );
+    }
 
     return (
         <div className={`flex-1 overflow-y-auto bg-[#f3f9ec] ${isMobile ? "p-4 pb-24" : "p-6"}`}>

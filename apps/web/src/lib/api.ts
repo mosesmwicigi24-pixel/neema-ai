@@ -247,6 +247,8 @@ export interface ApiConversation {
     updated_at: string;
     name?: string;
     avatar_url?: string | null;
+    /** paid hub orders for this customer — the repeat-buyer badge */
+    orders_count?: number;
     channel?: string;
     unread?: number;
     country?: string | null;
@@ -323,6 +325,29 @@ export const conversationsApi = {
         return get<ApiConversation[]>(`/admin/conversations${q}`);
     },
     get: (id: string) => get<ApiConversation>(`/admin/conversations/${id}`),
+
+    /** One page of the inbox — whole PEOPLE, with every thread each has. */
+    page: (p: InboxQuery & { limit: number; cursor?: string | null }) => {
+        const q = new URLSearchParams({ limit: String(p.limit) });
+        if (p.cursor)                        q.set("cursor", p.cursor);
+        if (p.tab && p.tab !== "all")        q.set("tab", p.tab);
+        if (p.channel && p.channel !== "all") q.set("channel", p.channel);
+        if (p.mode && p.mode !== "all")      q.set("mode", p.mode);
+        if (p.tag)                           q.set("tag", p.tag);
+        if (p.q && p.q.trim())               q.set("q", p.q.trim());
+        return get<{ items: ApiConversation[]; next_cursor: string | null } | ApiConversation[]>(
+            `/admin/conversations?${q.toString()}`,
+        ).then((res) =>
+            // The API and web images deploy separately, sometimes a minute
+            // apart. An API older than this client ignores `limit` and returns
+            // the bare legacy array — take it as a single, final page rather
+            // than failing, so deploy order can never blank the inbox.
+            Array.isArray(res) ? { items: res, next_cursor: null } : res,
+        );
+    },
+
+    /** Every inbox badge, counted by the server over ALL conversations. */
+    summary: () => get<InboxSummary>(`/admin/conversations/summary`),
 
     /** The person-scoped journey ledger the Activity Log panel renders. */
     activity: (id: string) =>
@@ -802,6 +827,29 @@ export const rolesApi = {
 
 // ── Data mappers (API → UI types) ─────────────────────────────────────────────
 
+/** The inbox's server-side filters. Mirrors GET /admin/conversations. */
+export interface InboxQuery {
+    tab?: "all" | "unread" | "read" | "human" | "yours";
+    channel?: string;
+    mode?: string;
+    tag?: string | null;
+    q?: string;
+}
+
+/** GET /admin/conversations/summary — every badge, in the inbox's own units. */
+export interface InboxSummary {
+    /** conversations with an unread message (the Unread tab) */
+    unread: number;
+    /** human-held (Human tab, "N live", the sidebar badge) */
+    human: number;
+    /** human-held by me (Yours tab) */
+    yours: number;
+    /** unread MESSAGE totals — overall under "all", then per channel (the chips) */
+    unread_messages: Record<string, number>;
+    /** every tag in use, not just those on loaded rows */
+    tags: string[];
+}
+
 export function mapConversation(c: ApiConversation): Conversation {
     return {
         id: c.id,
@@ -826,6 +874,11 @@ export function mapConversation(c: ApiConversation): Conversation {
         country:     c.country     ?? null,
         flag_url:    c.flag_url,
         tags:        c.tags        ?? [],
+        // The server has always sent these; the mapper dropped them, so list
+        // avatars fell back to initials and the repeat-buyer badge never showed.
+        avatar_url:   c.avatar_url ?? null,
+        orders_count: c.orders_count ?? 0,
+        created_at:   c.created_at,
     };
 }
 
