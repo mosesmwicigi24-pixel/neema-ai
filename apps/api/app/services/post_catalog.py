@@ -38,6 +38,7 @@ import re
 import httpx
 
 from app.core.config import settings
+from app.core.synonyms import canonical as _canonical
 
 _log = logging.getLogger("neema.postcat")
 
@@ -59,7 +60,7 @@ def product_from_caption(text: str, catalog: list[dict]) -> dict | None:
     """Rungs 1+2: a storefront slug link, else a product name/alias contained
     in the caption. Longest match wins so 'Silver Communion Tray' beats
     'Silver Tray' when both appear."""
-    t = " ".join((text or "").lower().split())
+    t = " ".join(_canonical(text or "").lower().split())
     if not t:
         return None
     m = _SLUG_RE.search(t)

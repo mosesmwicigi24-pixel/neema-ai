@@ -18,6 +18,7 @@ from app.core import hub_client, money
 from app.core.config import settings
 from app.routers.order_link import assign_short_ref
 from app.core.countries import resolve_country
+from app.core.synonyms import canonical as _canonical
 from app.models.order_event import OrderEvent
 from app.models.user import User
 from app.services import n8n_bridge as svc
@@ -516,7 +517,9 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
     if cur in ("KES", "USD", "ZMW") and cur != ctx.currency:
         from dataclasses import replace as _dc_replace
         ctx = _dc_replace(ctx, currency=cur)
-    query = (args.get("query") or "").lower().strip()
+    # The owner's "same item, many names" table first (core/synonyms): a
+    # "pendant" or a "cross and chain" searches as the hub's Pectoral Cross.
+    query = _canonical(args.get("query") or "").lower().strip()
     catalog = await svc.catalog_items(ctx.db, ctx.redis)
     # An offer the owner declared (services/promotions). Fetched once per
     # search, and priced by CODE below — a model doing 10% off 130 in its head
@@ -1587,7 +1590,7 @@ async def _share_catalog(args: dict, ctx: ToolContext) -> dict:
 def _match_product(query: str, catalog: list[dict]) -> dict | None:
     """Find the catalogue product for a name/SKU: exact name or SKU first, then the
     longest substring match. Only products with a storefront `slug` are eligible."""
-    ql = (query or "").lower().strip()
+    ql = _canonical(query or "").lower().strip()
     if not ql:
         return None
     for p in catalog:                                    # exact name / sku
@@ -2122,7 +2125,7 @@ async def _apply_offer(args: dict, ctx: ToolContext) -> dict:
     #
     # Asking with no product named is a general "what's on?" — stating the
     # campaign IS the quote, so that still grants. Anything else has to earn it.
-    wanted = (args.get("product") or "").strip().lower()
+    wanted = _canonical(args.get("product") or "").strip().lower()
     quoted = not wanted
     if wanted:
         quoted = False

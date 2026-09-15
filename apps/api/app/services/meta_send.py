@@ -577,6 +577,12 @@ async def send_to_channel(channel: str, recipient: str, text: str,
     customer's message — Meta's DM Send API has no equivalent, so it's ignored there.
     Returns the sent message's wamid on WhatsApp (None on Meta channels) so the
     caller can stamp it on the outbound row and make it reply-quotable."""
+    if channel != "whatsapp":
+        # Messenger, Instagram and TikTok show markdown raw ("**$450 USD**"
+        # went out under a comment, asterisks and all) — strip the marks at
+        # the seam, keep the words. WhatsApp keeps its single *bold*.
+        from app.agent.voice import strip_markdown
+        text = strip_markdown(text)
     if channel == "tiktok":
         # Two eras, one seam. Native (Business Messaging API authorized):
         # send like any other channel — this is what lets the async agent path,

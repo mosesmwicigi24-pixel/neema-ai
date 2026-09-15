@@ -34,16 +34,22 @@ def test_the_cups_row_from_the_incident_is_flagged():
     ("Straight Collar", 400, 10),                 # $10 floor on a $4 item
     ("Double Stacked Silver Tray Set", 36000, 600),   # $600 where 360 was right
     ("Red Apostolic Cassock", 21000, 170),        # UNDER-priced: leaves $40
+    # 2026-09-06, the shirt quoted at $50 on Facebook: KES 4,500 is $45. The
+    # hub rounded KES/100 UP to the nearest ten — a finding, not drift.
+    ("Round Collar Shirt", 4500, 50),
+    ("Cassock Set", 19500, 200),                  # 195 rounded up to 200
+    ("White Shirt - Normal", 2500, 30),           # 25 rounded up to 30
 ])
 def test_real_rows_from_the_audit_are_flagged(name, kes, usd):
     assert pa.currency_gap(_p(name, kes, usd), RATE) is not None
 
 
 @pytest.mark.parametrize("kes,usd", [
-    (500, 5), (19500, 200), (4500, 45), (2500, 25), (150, 1.5), (99, 1),
+    (500, 5), (19500, 195), (4500, 45), (2500, 25), (150, 1.5), (99, 1),
 ])
-def test_rounding_drift_is_not_a_finding(kes, usd):
-    # A round rate and whole-unit prices leave a shilling or two of noise.
+def test_only_sub_cent_noise_is_not_a_finding(kes, usd):
+    # The owner's rule is exact (USD = KES / rate); a cent of rounding on a
+    # sub-dollar item (KES 99 → $0.99 ≈ $1) is the only tolerated drift.
     assert pa.currency_gap(_p("x", kes, usd), RATE) is None
 
 
@@ -88,8 +94,11 @@ def test_the_report_names_the_worst_row_first_and_counts_the_rest():
            _p("Cassock Set", 19500, 200), _p("Host", 20, 0.2)]
     r = pa.audit(cat, RATE)
     assert r["checked"] == 4
+    # worst first: $240 over, $9.90 over, then the Cassock Set's $5 (195 → 200,
+    # which the old 15% tolerance let through and the exact rule does not)
     assert [g["name"] for g in r["currency_gaps"]] == ["Double Stacked Silver Tray Set",
-                                                        "Plastic Communion Cups"]
+                                                        "Plastic Communion Cups",
+                                                        "Cassock Set"]
     assert [x["name"] for x in r["per_piece"]] == ["Plastic Communion Cups", "Host"]
 
 

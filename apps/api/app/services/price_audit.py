@@ -19,11 +19,14 @@ from __future__ import annotations
 
 import re
 
-# A USD row is "consistent" when it is within this of KES / rate. Tolerance is
-# generous on purpose: the rate is a round 100 and prices are rounded to whole
-# units, so a shilling or two of drift is noise, not a finding.
-TOLERANCE_PCT = 0.15
-TOLERANCE_ABS = 1.0            # in the display currency (USD)
+# A USD row is "consistent" only when it IS KES / rate (owner, 2026-09-06: the
+# hub's shirts are "25 to 45 dollars" — KES 2,500 to 4,500 at 100 — so a $50
+# row on a KES 4,500 shirt is an error, not drift). The hub derived its USD
+# column by rounding KES/100 UP to the nearest ten with a $10 floor, once, and
+# 41 of 96 rows disagreed with KES/100 on 2026-09-06 (36 by exactly that
+# rounding, 5 stale after a KES change). Only sub-cent noise is tolerated.
+TOLERANCE_PCT = 0.01
+TOLERANCE_ABS = 0.01           # in the display currency (USD)
 
 # Goods that are sold by the pack but that the hub may price by the piece.
 PACK_GOODS = re.compile(r"\b(cups?|hosts?|wafers?|bread)\b", re.IGNORECASE)
@@ -67,7 +70,8 @@ def currency_gap(item: dict, rate: float) -> dict | None:
     if kes is None or usd is None or not rate:
         return None
     expect = kes / rate
-    if abs(usd - expect) <= max(TOLERANCE_ABS, TOLERANCE_PCT * expect):
+    # (+1e-9: 1 - 0.99 is 0.010000000000000009 in floating point)
+    if abs(usd - expect) <= max(TOLERANCE_ABS, TOLERANCE_PCT * expect) + 1e-9:
         return None
     return {"name": item.get("name"), "category": item.get("category"),
             "kes": kes, "usd": usd, "usd_expected": round(expect, 2),

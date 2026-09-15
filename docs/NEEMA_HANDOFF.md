@@ -29,6 +29,23 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   Neema converts USD→local at the central-bank rate, as the arithmetic gives it.
   Prices are quoted EXACTLY as the hub holds them — never rounded to a unit or
   a ten (owner rule 2026-09-03; `app/core/money.py` is the one formatter).
+- **The official voice** (owner 2026-09-15, from the green-cassock thread): English
+  is the selling language — Swahili ONLY when the comment itself is Swahili, no
+  Swahili sprinkles in English; the hub names the item and prices it (a hub row's
+  own name + what they see, never a composed name or a remembered price; 'the one
+  you're wearing' is the presenter's garment); every question takes the order
+  ("Kindly place your order — colour, how many, how soon?"), never chat for its
+  own sake; human, not bot (no "Very well", no product poetry, no boilerplate,
+  no markdown, "$170" not "$170 USD"). `app/agent/voice.py` strips markdown,
+  the redundant currency word and butler openers at the public seams; the canned
+  pools close on the order.
+- **One item, many names** (`app/core/synonyms.py`, owner 2026-09-06): "cross
+  and chain", "pendant", "pastor's / bishop's cross" ARE the hub's Pectoral
+  Cross. The table rewrites the customer's words at every seam (catalogue
+  search, product cards, order lines, post captions, live-comment vocabulary)
+  and the prompt says the same, so Neema guides them to the hub row instead of
+  "let me confirm". Add a family there when the owner rules two names one item;
+  the hub's own aliases still carry everything else.
 - **WhatsApp formatting**: agent emits `*bold*` (not `**`); Messenger = plain text;
   the web inbox renders WhatsApp markup (`apps/web/src/lib/waText.tsx`).
 - **FB comment funnel** (Bethany House page, LIVE): a comment → intent classify →
@@ -158,7 +175,8 @@ variants — hub doesn't expose variant lists yet; agent captures via remember).
 - Is the **Messenger DM** reply (not just comments) working end-to-end in prod?
 
 ## Key files
-- Agent: `app/agent/{runtime,tools,prompt,cart,memory}.py`
+- Agent: `app/agent/{runtime,tools,prompt,cart,memory}.py`; the owner's
+  same-item names: `app/core/synonyms.py`
 - Meta: `app/routers/meta_webhook.py`, `app/services/meta_send.py`
 - Identity: `app/services/{identity,merge,reconcile}.py`, `app/models/person.py`
 - WhatsApp bridge/hook: `app/routers/n8n_bridge.py`, `app/services/n8n_bridge.py`
