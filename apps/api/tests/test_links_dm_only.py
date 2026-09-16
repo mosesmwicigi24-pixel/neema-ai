@@ -35,14 +35,16 @@ def test_dm_carries_the_product_link():
     dm = rt._dm_text("The Aluminium Tray is $70, cups included.", _LINK, "seedX")
     assert f"Order here 👉 {_LINK}" in dm
     assert dm.startswith("The Aluminium Tray is $70, cups included.")
-    # …and still ends on the warm continue line that sells inside the DM.
-    assert any(dm.endswith(line) for line in rt._DM_CONTINUE_POOL)
+    # …and ENDS on the link: the answer already closed on the order, and a
+    # line after it ("tell me a little more…") was a second, aimless ask
+    # (owner, 2026-09-16).
+    assert dm.endswith(f"Order here 👉 {_LINK}")
 
 
 def test_dm_without_a_product_stays_clean():
     dm = rt._dm_text("Karibu! What size do you need?", "", "seedX")
     assert "Order here" not in dm and "http" not in dm
-    assert any(dm.endswith(line) for line in rt._DM_CONTINUE_POOL)
+    assert dm == "Karibu! What size do you need?"
 
 
 # ── the public square stays link-free when the DM landed ─────────────────────

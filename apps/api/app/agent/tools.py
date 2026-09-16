@@ -18,7 +18,7 @@ from app.core import hub_client, money
 from app.core.config import settings
 from app.routers.order_link import assign_short_ref
 from app.core.countries import resolve_country
-from app.core.synonyms import canonical as _canonical
+from app.core.synonyms import canonical as _canonical, range_for as _range_for, range_members as _range_members
 from app.models.order_event import OrderEvent
 from app.models.user import User
 from app.services import n8n_bridge as svc
@@ -535,13 +535,52 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
     def hit(p: dict) -> bool:
         return all(t in _hay(p) for t in toks) if toks else True
 
-    matched = [p for p in catalog if hit(p)]
+    def _kes(p: dict) -> tuple[int, float]:
+        # CHEAPEST FIRST (owner, 2026-09-16): among equal matches the humblest
+        # piece leads — people say "the cheapest" and then climb. Unpriced
+        # rows go last.
+        try:
+            v = float(p.get("price") or 0)
+        except (TypeError, ValueError):
+            v = 0.0
+        return (0, v) if v > 0 else (1, 0.0)
+
+    # A KIND of thing rather than one row ("that holy communion set", "your
+    # communion trays"): the owner-declared RANGE (core/synonyms.RANGES) — its
+    # hub rows, cheapest first, and none of the neighbours a name-search drags
+    # in (a chalice, a bag of wafers, a cup). The live miss: three dear sets
+    # and a chalice offered for "how much is that Holy communion set?", and
+    # nothing under $280 when the range starts at a $50 wooden tray.
+    rng = _range_for(query)
+    family_note = None
+    if rng:
+        matched = _range_members(rng, catalog)
+        if matched:
+            family_note = {
+                "range": rng["name"],
+                "order": "CHEAPEST FIRST — these rows are already in that order; "
+                         "list them from the humblest up, each with its own hub "
+                         "price, and let them climb",
+                "stay_in_range": "these are the trays and sets only; chalices, cups, "
+                                 "wafers, bread and wine are other things — mention "
+                                 "one only if THEY ask for it",
+            }
+    else:
+        # The row whose NAME carries the most of their words leads ("silver
+        # communion tray" is the Silver Communion Tray, not the Silver Bread
+        # Tray that the category word "Communion" lets in); among equals, the
+        # cheapest first.
+        def _name_hits(p: dict) -> int:
+            name = (p.get("name") or "").lower()
+            return sum(t in name for t in toks)
+        matched = sorted([p for p in catalog if hit(p)],
+                         key=lambda p: (-_name_hits(p), _kes(p)))
     if not matched and len(toks) > 1:
         # All-token match found nothing ("clerical shirt", "cassock set") — fall
         # back to any-token so the model gets candidates instead of a dead end,
-        # best matches (most tokens hit) first.
+        # best matches (most tokens hit) first, the cheapest among equals.
         scored = [(sum(t in _hay(p) for t in toks), p) for p in catalog]
-        matched = [p for s, p in sorted(scored, key=lambda x: -x[0]) if s > 0]
+        matched = [p for s, p in sorted(scored, key=lambda x: (-x[0], _kes(x[1]))) if s > 0]
 
     results = []
     for p in matched:
@@ -692,7 +731,10 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
             pid = None
         await demand.record(ctx.db, query, kind="no_match", channel=_channel_label(ctx),
                             wa_id=ctx.wa_id, person_id=pid)
-    return {"count": len(results), "currency": ctx.currency, "results": results}
+    out = {"count": len(results), "currency": ctx.currency, "results": results}
+    if family_note:
+        out["range"] = family_note
+    return out
 
 
 async def _cart_display(cart: dict, ctx: ToolContext) -> tuple[list, object]:
