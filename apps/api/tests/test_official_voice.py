@@ -83,7 +83,7 @@ def test_no_canned_line_speaks_swahili():
     pools = (rt._LIVE_WHICH_POOL + rt._LIVE_WELCOME_POOL + rt._THANKS_POOL
              + rt._OVER_CAP_POOL + rt._OVER_CAP_SELL_POOL + rt._FIRST_SELL_POOL
              + rt._OVER_CAP_SELL_EACH_POOL + rt._NEUTRAL_ACK_POOL + rt._GOODWILL_POOL
-             + rt._DM_CONTINUE_POOL + [rt._PUBLIC_EMPATHY])
+             + [rt._PUBLIC_EMPATHY])
     for line in pools:
         low = line.lower()
         for sw in ("karibu", "asante", "sana", "habari", "pole"):

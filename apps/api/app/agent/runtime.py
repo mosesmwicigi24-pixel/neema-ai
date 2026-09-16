@@ -147,6 +147,18 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         f"- Lead with the answer: the item + its real price in the first line, e.g. "
         f"{example} Quote in {money} (the `price` from search_catalog is already in "
         f"{money}) — never invent it.\n"
+        "- SAY IT LIKE A PERSON WHO KNOWS THE STOCK (owner, 2026-09-16). When you "
+        "are sure which item the post shows, say so the way the owner does: "
+        "'This is our Silver Communion Tray, and it goes for $180. It comes "
+        "with a lid, a holder and a basin, and 40 cups are included in the "
+        "package for free. Kindly place your order now and let us know how "
+        "many trays you may need and how soon you want them delivered.' Two "
+        "or three flowing sentences: the hub's name, 'goes for' the hub's "
+        "price, what it comes with in plain words, then the order. Never 'The "
+        "photo shows our…', never a dash-chain of features ('$180 — comes "
+        "with lid, holder, basin'), never a list, never a line after the "
+        "order — and not one more sentence than that. Scanty is a bot; "
+        "wordy is a bot; this is a person.\n"
         f"{one_currency}"
         "- THE HUB NAMES IT, THE HUB PRICES IT (owner rule, 2026-09-15 — the hub "
         "is the source of truth): the item you quote is a hub row search_catalog "
@@ -827,6 +839,31 @@ async def _meta_market(db: AsyncSession, channel: str, key: str) -> tuple[str, d
     return currency, loc, name, source_post
 
 
+async def _ad_headline(db: AsyncSession, channel: str, key: str) -> str:
+    """The headline of the ad this Meta contact first arrived through, or "".
+
+    Meta's referral block on a click-to-Messenger ad carries
+    ads_context_data.ad_title; routers/meta_webhook stores it on the person
+    (state["ad_ref"]["headline"]). "How much is that Holy Communion set?" from
+    someone who tapped an ad for the Silver Communion Tray is a question about
+    THAT tray — the agent must know which ad they came from (owner,
+    2026-09-16), the same way a comment's post is carried into its DM."""
+    from app.models.person import Person, Identity
+    try:
+        ident = (await db.execute(select(Identity).where(
+            Identity.channel == channel,
+            Identity.external_id == key))).scalar_one_or_none()
+        if ident is None:
+            return ""
+        person = await db.get(Person, ident.person_id)
+        st = (getattr(person, "state", None) or {}) if person is not None else {}
+        title = ((st.get("ad_ref") or {}).get("headline") or "").strip()
+        return title[:200]
+    except Exception:
+        _log.warning("ad headline lookup failed for %s/%s", channel, key, exc_info=True)
+        return ""
+
+
 async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM,
                    media: dict | None = None,
                    *, channel: str = "whatsapp", external_id: str | None = None,
@@ -868,7 +905,11 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         # proves Kenya, then real KES prices, exactly like Messenger/IG.
         user = None
         currency, loc, customer_name, source_post = await _meta_market(db, channel, key)
+        # The ad they tapped, when there is no post to carry: "that set" in
+        # their first message is the product this ad shows.
+        ad_headline = (await _ad_headline(db, channel, key)) if is_meta else ""
     else:
+        ad_headline = ""
         user = (await db.execute(
             select(User).where(User.wa_id == wa_id))).scalar_one_or_none()
         # A web session key ("web_<sha1>") is NOT a phone — its hex digits used to
@@ -1094,6 +1135,18 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                 and not any(m["role"] == "assistant" for m in messages)):
             from app.agent.media import load_image_block
             post_img = await asyncio.to_thread(load_image_block, pctx["thumb"])
+    elif ad_headline:
+        # They tapped one of our ads (owner, 2026-09-16): "that set", "that
+        # one", "how much is it" in their first messages mean the product the
+        # ad shows — price THAT item first, from the hub, then take the order;
+        # never open with a menu of dearer siblings.
+        lead_ctx.append(
+            f'(Context — this customer reached us from our ad "{ad_headline}". '
+            "Unless they say otherwise, 'that set', 'that one' and 'how much is "
+            "it?' refer to the product this ad shows: find it with "
+            "search_catalog by the hub's own name, price THAT item first and "
+            "take the order. Do not ask what they are looking for, and do not "
+            "open with a list of other products.)")
     if settings.tier2_memory:
         mem_ctx = await build_memory_context(db, redis, key, user=user, channel=channel)
         if mem_ctx:
@@ -2037,14 +2090,6 @@ _NEUTRAL_ACK_POOL = [
     "Thank you{name} 🙏 We're here — let us know what you need and we'll assist.",
     "Thank you{name} 🙏 We'd be glad to help — just tell us a bit more.",
 ]
-# The line that continues the sale INSIDE the DM the comment opens. Kept SHORT
-# on purpose: this rides under the model's answer + the order link, and a long
-# closing line is what made comment-DMs read like essays (2026-08-11).
-_DM_CONTINUE_POOL = [
-    "Reply here and I'll get yours sorted. 💛",
-    "Reply here and we'll take it from there. 💛",
-    "Tell me a little more and I'll sort you out. 💛",
-]
 # Over the per-post cap (or the turn failed) on a GOODWILL comment — the line a
 # host gives when the room is full. Never the neutral "tell us a little more",
 # which reads as a form handed to someone who just said "welcome". No promise,
@@ -2109,10 +2154,6 @@ _SW_GOODWILL_POOL = [
     "Asante{name} 🙏 Ukarimu wako unatutia nguvu sana.",
     "Mungu akubariki{name} 🙏 Maneno kama haya yanatupeleka mbali.",
 ]
-_SW_DM_CONTINUE_POOL = [
-    "Jibu hapa na nitakushughulikia. 💛",
-    "Jibu hapa na tutaendelea kutoka hapa. 💛",
-]
 
 
 def _pick(pool: list, seed: str) -> str:
@@ -2122,14 +2163,18 @@ def _pick(pool: list, seed: str) -> str:
 
 
 def _dm_text(answer: str, product_link: str, seed: str, swahili: bool = False) -> str:
-    """The DM: the answer, THE product link, and the warm continue line. Links
-    live here by design — Facebook suppresses the reach of posts and comments
-    carrying external links, so the private message is where the storefront
-    link travels."""
+    """The DM: the answer and THE product link — nothing after. The answer
+    already ends on the order pull ("Kindly place your order now and let us
+    know how many you need and how soon"), and a second line after it ("Tell
+    me a little more and I'll sort you out") was a second, aimless ask that
+    made the message read like a bot (owner, 2026-09-16). Links live here by
+    design — Facebook suppresses the reach of posts and comments carrying
+    external links, so the private message is where the storefront link
+    travels. `seed` is kept for the callers' signature."""
     lead = "Agiza hapa" if swahili else "Order here"
-    link_line = f"{lead} 👉 {product_link}\n" if product_link else ""
-    tail = _pick(_SW_DM_CONTINUE_POOL if swahili else _DM_CONTINUE_POOL, seed)
-    return f"{answer}\n\n{link_line}{tail}"
+    if not product_link:
+        return answer.strip()
+    return f"{answer.strip()}\n\n{lead} 👉 {product_link}"
 
 
 def _comment_public_reply(answer: str, dm_sent: bool, name_tag: str, seed: str,

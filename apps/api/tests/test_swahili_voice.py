@@ -48,7 +48,7 @@ def test_english_and_a_lone_swahili_word_are_not_swahili(text):
 _SW_SELL = rt._SW_OVER_CAP_SELL_POOL + rt._SW_FIRST_SELL_POOL + rt._SW_OVER_CAP_SELL_EACH_POOL
 _SW_ALL = (_SW_SELL + rt._SW_LIVE_WHICH_POOL + rt._SW_LIVE_WELCOME_POOL + rt._SW_THANKS_POOL
            + rt._SW_OVER_CAP_POOL + rt._SW_NEUTRAL_ACK_POOL + rt._SW_GOODWILL_POOL
-           + rt._SW_DM_CONTINUE_POOL + [rt._SW_PUBLIC_EMPATHY])
+           + [rt._SW_PUBLIC_EMPATHY])
 
 
 def test_swahili_sell_lines_take_the_order_after_the_price_with_one_question():
@@ -111,10 +111,9 @@ def test_english_stays_english_when_the_flag_is_off():
 def test_the_swahili_dm_orders_in_swahili():
     dm = rt._dm_text("Round Collar Shirt ni KES 4,500.", "https://bethanyhouse.co.ke/product/x", "s",
                      swahili=True)
-    assert "Agiza hapa 👉 https://bethanyhouse.co.ke/product/x" in dm
-    assert any(dm.endswith(line) for line in rt._SW_DM_CONTINUE_POOL)
+    assert dm.endswith("Agiza hapa 👉 https://bethanyhouse.co.ke/product/x")
     en = rt._dm_text("It is $45.", "https://bethanyhouse.co.ke/product/x", "s")
-    assert "Order here 👉" in en and any(en.endswith(line) for line in rt._DM_CONTINUE_POOL)
+    assert en.endswith("Order here 👉 https://bethanyhouse.co.ke/product/x")
 
 
 def test_the_engine_detects_once_and_uses_it_everywhere():

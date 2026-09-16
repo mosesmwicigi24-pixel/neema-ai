@@ -50,6 +50,24 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   many, how soon, which city. A made-to-order item (cassocks, shirts, stoles…)
   is asked colour then size/measurements. Every search row carries `ask_next`;
   the canned pools split the same way (`_STOCK_*` vs the made-to-order pools).
+- **Cheapest first, then climb; say it like a person** (owner 2026-09-16). A
+  KIND of thing ("how much is that Holy Communion set?") is a RANGE, not a row:
+  `synonyms.RANGES` names the hub rows in it (communion trays and sets — the
+  wooden and aluminium trays, the silver and golden trays, the stacked sets)
+  and the neighbours that are NOT (chalices, cups, wafers, bread, wine);
+  `search_catalog` returns the range cheapest first with a `range` note, and
+  every ordinary search leads with the row whose NAME carries the words, then
+  the cheapest. The prompt rule CHEAPEST FIRST, THEN CLIMB lists from the
+  humblest up and stays in the range. A customer who tapped one of our ads
+  carries its headline into the context (`runtime._ad_headline`), so "that
+  set" is the ad's product. The photo/comment reply takes the owner's spoken
+  shape — "This is our Silver Communion Tray, and it goes for $180. It comes
+  with a lid, a holder and a basin, and 40 cups are included in the package
+  for free. Kindly place your order now and let us know how many trays you may
+  need and how soon you want them delivered." — and the comment-DM is the
+  answer + the order link, nothing after (the "tell me a little more" tail is
+  gone). Hub row to fix (owner-side): "Double Stacked Silver Tray Set" is USD
+  600 against KES 36,000 — it belongs in the USD rows CSV.
 - **One item, many names** (`app/core/synonyms.py`, owner 2026-09-06): "cross
   and chain", "pendant", "pastor's / bishop's cross" ARE the hub's Pectoral
   Cross. The table rewrites the customer's words at every seam (catalogue

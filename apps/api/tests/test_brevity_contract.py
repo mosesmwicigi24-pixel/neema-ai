@@ -177,15 +177,20 @@ def test_meta_and_web_addenda_bind_the_contract_by_name():
     assert "Keep replies short, precise" not in _meta_addendum("USD")
 
 
-def test_comment_dm_continue_lines_stay_short():
-    """The comment-DM is answer + order link + continue line stacked together —
-    a long continue line turns every DM into an essay. Keep each under 50
-    characters so the composite reads like a note, not a letter."""
+def test_comment_dm_is_the_answer_and_the_link_and_nothing_after():
+    """The comment-DM is the answer + the order link — nothing stacked after
+    it. The answer already ends on the order pull, and the old continue line
+    ("Tell me a little more and I'll sort you out") was a second, aimless
+    ask that made the DM read like a bot (owner, 2026-09-16)."""
     import app.main  # noqa: F401
-    from app.agent.runtime import _DM_CONTINUE_POOL
-    assert _DM_CONTINUE_POOL, "pool must not be empty"
-    for line in _DM_CONTINUE_POOL:
-        assert len(line) <= 50, f"DM continue line too long ({len(line)}): {line!r}"
+    from app.agent.runtime import _dm_text
+    link = "https://bethanyhouse.co.ke/product/silver-communion-tray?ref=AB12CD"
+    answer = ("This is our Silver Communion Tray, and it goes for $180. Kindly "
+              "place your order now and let us know how many trays you may need "
+              "and how soon you want them delivered.")
+    dm = _dm_text(answer, link, "seed")
+    assert dm == f"{answer}\n\nOrder here 👉 {link}"
+    assert "sort you out" not in dm and "little more" not in dm
 
 
 # ── 6: deploys are verifiable — /health names the running commit ─────────────
