@@ -147,6 +147,16 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         f"- Lead with the answer: the item + its real price in the first line, e.g. "
         f"{example} Quote in {money} (the `price` from search_catalog is already in "
         f"{money}) — never invent it.\n"
+        "- NEVER PRICE A GUESS (owner, 2026-09-21 — a tallit post was sold "
+        "anointing oil, a dress design a bell, a cope a ring). The item you "
+        "price must be CONFIRMED: our records name it, the caption names it, or "
+        "the image plainly IS one hub row you found with search_catalog. A row "
+        "marked `match: \"partial\"` is not the item — it merely shares a word. "
+        "If nothing confirms it, quote NOTHING: give the two closest options "
+        "with their prices, or ask which item they mean. A 'what is X?' "
+        "question is answered with one plain sentence of what X is (from the "
+        "row's `details`), then its price, then the order — never a price "
+        "alone.\n"
         "- SAY IT LIKE A PERSON WHO KNOWS THE STOCK (owner, 2026-09-16). When you "
         "are sure which item the post shows, say so the way the owner does: "
         "'This is our Silver Communion Tray, and it goes for $180. It comes "
@@ -1120,9 +1130,20 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         except Exception:
             _known = {}
         if _known.get("name"):
-            line += (f". Our records identify this post's product as: "
-                     f"{_known['name']} — price THAT product; do not "
-                     "re-identify it from the image")
+            from app.services.post_catalog import identity_trusted as _trusted_id
+            if _trusted_id(_known):
+                line += (f". Our records identify this post's product as: "
+                         f"{_known['name']} — price THAT product; do not "
+                         "re-identify it from the image")
+            else:
+                # A model's earlier read, or a record from before provenance:
+                # a lead, not a fact (owner, 2026-09-21). The image decides.
+                line += (f". An earlier reply under this post priced: {_known['name']} "
+                         "— a lead, not a record: CONFIRM it against the caption and "
+                         "the image before you rely on it (search_catalog it, compare "
+                         "what you see). If the photo plainly shows something else, "
+                         "price what you see; if you cannot tell, give the two closest "
+                         "options or ask which — never a price on a guess")
             if _known.get("seen"):
                 line += (f"; as it appears in the post: {_known['seen']} — name it "
                          "to the customer in those plain words, colour and trim "
@@ -2181,7 +2202,8 @@ def _comment_public_reply(answer: str, dm_sent: bool, name_tag: str, seed: str,
                           product_known: bool = False, product_name: str = "",
                           price_text: str = "", goodwill: bool = False,
                           per_piece: bool = False, first_contact: bool = False,
-                          swahili: bool = False, made_to_order: bool = False) -> str:
+                          swahili: bool = False, made_to_order: bool = False,
+                          ask_which: bool = False) -> str:
     """The PUBLIC comment text, given the agent's answer and whether the DM landed.
 
     THIS FUNCTION CANNOT PRODUCE A LINK, by construction: it takes no URL. Meta
@@ -2211,6 +2233,11 @@ def _comment_public_reply(answer: str, dm_sent: bool, name_tag: str, seed: str,
         # We DO know what they said — they cheered us on. Warmth in kind, and
         # never the product line: "welcome to Zambia" is not a buying question.
         return _pick(_SW_GOODWILL_POOL if swahili else _GOODWILL_POOL, seed).replace("{name}", name_tag)
+    if ask_which and not product_known:
+        # A price question under a post we could NOT identify with confidence
+        # (owner, 2026-09-21): ask which item — never price a guess. The same
+        # line a live broadcast uses, for the same reason.
+        return _pick(_SW_LIVE_WHICH_POOL if swahili else _LIVE_WHICH_POOL, seed).replace("{name}", name_tag)
     if product_known:
         # We know WHICH product the post is about, so a buying question still gets
         # a real, warm answer with no model call — with its PRICE when the post's
@@ -2308,6 +2335,19 @@ def _post_product_key(channel: str, post_id: str) -> str:
     return f"postprod:{channel}:{post_id}"
 
 
+def _names_product(text: str, product_name: str) -> bool:
+    """Does the comment itself name this product (at least half of the name's
+    words, plural-tolerant)? "How much is the tallit?" names the Tallit;
+    "share more designs for ladies" names nothing."""
+    core = set(_core_tokens({"name": product_name or ""})) or _caption_tokens(product_name or "")
+    if not core:
+        return False
+    shared = core & _caption_tokens(text or "")
+    if not shared:
+        return False
+    return len(shared) / len(core) >= 1 / 3 or any(len(t) >= 6 for t in shared)
+
+
 async def _recall_post_product(redis, channel: str, post_id: str) -> dict:
     """What our records say this post is about — identified once by an earlier
     reply on the same post, then reused so EVERY answer under that post names
@@ -2364,17 +2404,46 @@ async def _describe_post_image(thumb: str) -> str:
 async def _remember_post_product(redis, channel: str, post_id: str, product: dict,
                                  thumb: str = "") -> None:
     """Record the post's identified product (30 days, best-effort) — and, once,
-    how it looks in the post's photo, so replies can name it as seen."""
+    how it looks in the post's photo, so replies can name it as seen.
+
+    The record carries its PROVENANCE (owner, 2026-09-21): `source` is the rung
+    that identified it (team / link / caption / image / vision / vision-name /
+    model) and `confidence` its weight — read off the row's
+    `_identity_source` / `_identity_confidence` stamps (post_catalog
+    .with_provenance), "model" when the row came unstamped out of a reply.
+    Only a trusted source may ever price a canned reply (identity_trusted).
+    A record is never DOWNGRADED: a caption-identified post refreshed by a
+    model turn keeps "caption"."""
     if redis is None or not post_id or not (product or {}).get("name"):
         return
     try:
+        from app.services.post_catalog import SOURCE_CONFIDENCE
         known = await _recall_post_product(redis, channel, post_id)
-        seen = (known.get("seen") or "") if known.get("name") == product.get("name") else ""
+        same = known.get("name") == product.get("name")
+        seen = (known.get("seen") or "") if same else ""
         if not seen and thumb:
             seen = await _describe_post_image(thumb)
+        source = str(product.get("_identity_source") or "model")
+        try:
+            confidence = float(product.get("_identity_confidence")
+                               if product.get("_identity_confidence") is not None
+                               else SOURCE_CONFIDENCE.get(source, 0.6))
+        except (TypeError, ValueError):
+            confidence = SOURCE_CONFIDENCE.get(source, 0.6)
+        if same and known.get("source"):
+            try:
+                if float(known.get("confidence") or 0.0) > confidence:
+                    source, confidence = known["source"], float(known["confidence"])
+            except (TypeError, ValueError):
+                pass
         record = {"name": product.get("name"),
                   "slug": product.get("slug") or "",
-                  "hub_product_id": product.get("hub_product_id")}
+                  "hub_product_id": product.get("hub_product_id"),
+                  "source": source, "confidence": round(confidence, 2)}
+        if product.get("price_from"):
+            record["price_from"] = True
+        if product.get("family"):
+            record["family"] = [str(m) for m in product["family"]][:12]
         if seen:
             record["seen"] = seen
         await redis.set(_post_product_key(channel, post_id), json.dumps(record),
@@ -2401,31 +2470,45 @@ async def _first_contact(channel: str, ext: str) -> bool:
         return False
 
 
-def _post_identity_compatible(known: dict, caption: str | None, matched: dict) -> bool:
+def _post_identity_compatible(known: dict, caption: str | None, matched: dict,
+                              comment_text: str = "", saw_image: bool = True) -> bool:
     """May `matched` become (or refresh) this post's RECORDED product identity?
 
     The record outlives every conversation, so a wrong write poisons every
     future commenter (live: a Silver-tray post answered as 'Gold Bread Tray'
-    would have anchored the whole thread to the wrong product). Three rules:
+    would have anchored the whole thread to the wrong product). The rules:
       - an existing identity is never overwritten by a DIFFERENT product (the
         model pricing a sibling one customer asked about must not rewrite what
         the POST is);
+      - a product the COMMENT named ("what is an apostolic ring?") that the
+        caption does not is the commenter's question, not the post's identity
+        (owner, 2026-09-21: a cope post was recorded as a ring that way);
       - with a caption, the product must be supported by it (≥ half its name
         tokens appear there);
-      - a caption-less post (thin reels) trusts the identification — recording
-        the model's read is the whole point there."""
+      - a caption-less post (thin reels) trusts the identification only when
+        the reader SAW the frame (`saw_image`) — a text-only guess records
+        nothing."""
     name = (matched or {}).get("name") or ""
     if not name:
         return False
     if known and known.get("name"):
         return _caption_tokens(known["name"]) == _caption_tokens(name)   # refresh only
     cap = (caption or "").strip()
-    if not cap:
-        return True
     ntoks = _caption_tokens(name)
     if not ntoks:
         return False
-    return len(ntoks & _caption_tokens(cap)) / len(ntoks) >= 0.5
+    cap_toks = _caption_tokens(cap)
+    in_caption = bool(cap) and len(ntoks & cap_toks) / len(ntoks) >= 0.5
+    if comment_text:
+        # Named in the comment but not in the caption → their question, not
+        # the post. (Tokens of the name that the comment carries, minus the
+        # ones the caption carries too.)
+        com_toks = _caption_tokens(comment_text)
+        if (ntoks & com_toks) and not (ntoks & cap_toks):
+            return False
+    if not cap:
+        return bool(saw_image)
+    return in_caption
 
 
 async def _post_identity(redis, channel: str, pctx: dict) -> dict:
@@ -2437,7 +2520,7 @@ async def _post_identity(redis, channel: str, pctx: dict) -> dict:
     team can set it via POST /admin/posts/{post_id}/product)."""
     post_id = (pctx.get("post_id") or "").strip()
     known = await _recall_post_product(redis, channel, post_id)
-    if known.get("name"):
+    if known.get("name") and known.get("source"):
         return known
     try:
         from app.database import AsyncSessionLocal
@@ -2446,14 +2529,30 @@ async def _post_identity(redis, channel: str, pctx: dict) -> dict:
         async with AsyncSessionLocal() as db:
             catalog = await svc.catalog_items(db, redis)
         hit = await post_catalog.resolve_post(redis, pctx, catalog)
+        if known.get("name"):
+            # A record from before provenance existed (owner, 2026-09-21): the
+            # ladder re-reads the post; if it agrees, the record takes the
+            # ladder's rung, otherwise it stays as "legacy" — kept for the
+            # model's context, never trusted to price a canned reply.
+            if hit is not None and _caption_tokens(hit.get("name") or "") == \
+                    _caption_tokens(known["name"]):
+                await _remember_post_product(redis, channel, post_id, hit,
+                                             thumb=(pctx.get("thumb") or "").strip())
+            else:
+                await _remember_post_product(
+                    redis, channel, post_id,
+                    {**known, "_identity_source": "legacy", "_identity_confidence": 0.5})
+            return await _recall_post_product(redis, channel, post_id) or known
         if hit is not None:
             await _remember_post_product(redis, channel, post_id, hit,
                                          thumb=(pctx.get("thumb") or "").strip())
             return await _recall_post_product(redis, channel, post_id) or \
-                {"name": hit.get("name"), "slug": hit.get("slug") or ""}
+                {"name": hit.get("name"), "slug": hit.get("slug") or "",
+                 "source": hit.get("_identity_source") or "model",
+                 "confidence": hit.get("_identity_confidence") or 0.6}
     except Exception as exc:
         _log.info("deep post resolve failed for %s/%s: %s", channel, post_id, exc)
-    return {}
+    return known if known.get("name") else {}
 
 
 # Caption spelling drifts the hub's names don't: US spellings and plurals must
@@ -2499,9 +2598,26 @@ def _hub_caption_match(catalog: list, title: str) -> dict | None:
     cap_seq = _caption_token_seq(title)
     if not toks:
         return None
+    # Rows that are one item in several sizes share a CORE name once the size
+    # words are stripped ("Tallit (Prayer Shawl) - Medium", "Large Prayer Shawl
+    # / Tallit"). Only THOSE rows are scored on the core — a caption saying
+    # "Tallits / Prayer shawls" covers the item fully, the size word no
+    # longer dilutes it below the bar (owner, 2026-09-21). A lone "Small
+    # cross" or "Large bell" keeps its size word: there it is the product.
+    core_count: dict = {}
+    for prod in catalog:
+        c = _core_tokens(prod)
+        if c:
+            core_count[c] = core_count.get(c, 0) + 1
     scored = []
     for prod in catalog:
-        name_seq = _caption_token_seq(prod.get("name") or "")
+        full_seq = _caption_token_seq(prod.get("name") or "")
+        core = _core_tokens(prod)
+        if core and core_count.get(core, 0) > 1:
+            name_seq = [t for t in _caption_token_seq(_strip_size(prod.get("name") or ""))
+                        if t not in _SIZE_WORDS] or full_seq
+        else:
+            name_seq = full_seq
         ntoks = set(name_seq)
         if not ntoks:
             continue
@@ -2528,8 +2644,73 @@ def _hub_caption_match(catalog: list, title: str) -> dict | None:
     if best_score < 3.0:
         return None
     if len(scored) > 1 and (best_score - scored[1][0]) < 0.5:
-        return None                     # ambiguous siblings — don't guess
+        # Ambiguous siblings. When every tied row is the SAME item in another
+        # size ("Tallit (Prayer Shawl) - Medium", "Large Prayer Shawl /
+        # Tallit"), the caption named the item and the tie is only its sizes:
+        # one family identity, priced "from" the cheapest (owner, 2026-09-21:
+        # this tie left a tallit post unidentified and a guess sold oil).
+        tied = [prod for sc, prod in scored if best_score - sc < 0.5]
+        return _size_family(tied, toks)     # None: different products — don't guess
+    # A clear winner that has SIZE siblings (same core name) is still one item
+    # in several sizes: the family, priced from the cheapest.
+    siblings = [prod for _sc, prod in scored[1:] if _core_tokens(prod) == _core_tokens(best)]
+    if siblings:
+        fam = _size_family([best] + siblings, toks)
+        if fam is not None:
+            return fam
     return best
+
+
+def _core_tokens(prod: dict) -> frozenset:
+    """The name's tokens with its size words removed."""
+    return frozenset(t for t in _caption_token_seq(_strip_size(prod.get("name") or ""))
+                     if t not in _SIZE_WORDS)
+
+
+_SIZE_WORDS = {"small", "medium", "large", "big", "xl", "xxl", "xs", "sm", "md", "lg",
+               "mini", "jumbo", "size", "sized"}
+
+
+def _strip_size(name: str) -> str:
+    """'Tallit (Prayer Shawl) - Medium' → 'Tallit (Prayer Shawl)';
+    'Large Prayer Shawl / Tallit' → 'Prayer Shawl / Tallit'."""
+    n = re.sub(r"\s*[-—–:]\s*(?:" + "|".join(_SIZE_WORDS) + r")\b.*$", "", name or "", flags=re.I)
+    n = re.sub(r"^(?:" + "|".join(_SIZE_WORDS) + r")\s+", "", n, flags=re.I)
+    n = re.sub(r"\s*\((?:" + "|".join(_SIZE_WORDS) + r")\)\s*", " ", n, flags=re.I)
+    return " ".join(n.split()).strip(" -—–:/")
+
+
+def _size_family(rows: list, caption_toks: set) -> dict | None:
+    """One identity for rows that are the same item in different sizes: all of
+    them must share the caption's product word(s) once size words are removed,
+    and differ only by size words. Priced 'from' the cheapest, linked to it."""
+    if len(rows) < 2:
+        return None
+    cores = [set(_core_tokens(r)) for r in rows]
+    if any(not c for c in cores):
+        return None
+    shared = set.intersection(*cores)
+    if not shared or not (shared & caption_toks):
+        return None
+    # IDENTICAL cores only: "Silver Communion Tray" and "Golden Communion Tray"
+    # share a core but are two products; a stray word means a different item.
+    if any(core != shared for core in cores):
+        return None
+
+    def _kes(r):
+        try:
+            v = float(r.get("price") or 0)
+        except (TypeError, ValueError):
+            v = 0.0
+        return v if v > 0 else float("inf")
+
+    cheapest = min(rows, key=_kes)
+    prices = [_kes(r) for r in rows if _kes(r) != float("inf")]
+    fam = dict(cheapest)
+    fam["name"] = _strip_size(cheapest.get("name") or "") or cheapest.get("name")
+    fam["family"] = [r.get("slug") or r.get("name") for r in rows]
+    fam["price_from"] = bool(prices) and (max(prices) > min(prices))
+    return fam
 
 
 async def _resolve_post_product(redis, channel: str, ext: str,
@@ -2541,30 +2722,52 @@ async def _resolve_post_product(redis, channel: str, ext: str,
     storefront product page, never the bare wa.me fallback. Appends the
     matched hub rows into `sink` (the same seen_products list)."""
     known = await _post_identity(redis, channel, post_ctx)
-    title = (known.get("name") or "").strip() or (post_ctx.get("title") or "").strip()
-    if not title:
-        return
+    title = (post_ctx.get("title") or "").strip()
     from app.database import AsyncSessionLocal
     from app.agent import tools as _tools
-    q = " ".join(title.split()[:8])            # captions run long; lead words name the item
-    if not known.get("name"):
+    q = (known.get("name") or "").strip()
+    if not q and title:
         # No record yet: score the WHOLE caption against the hub's names and
-        # aliases. A confident winner narrows the search to its exact name, so
-        # the identified product (and its live hub price) is the one recorded.
+        # aliases. A confident winner is the post's identity (source
+        # "caption"), and the search runs on its exact name so the row
+        # priced is the one recorded. NO confident winner → NO search: the
+        # caption's lead words used to go into search_catalog here, and its
+        # any-token fallback handed back an arbitrary row that a canned line
+        # then sold — a tallit post priced anointing oil, a dress design a
+        # bell (owner, 2026-09-21). A post we cannot name gets no product.
         try:
             from app.services import n8n_bridge as _svc
+            from app.services.post_catalog import with_provenance
             async with AsyncSessionLocal() as _db0:
                 cat = await _svc.catalog_items(_db0, redis)
             hit = _hub_caption_match(cat, title)
             if hit is not None and hit.get("name"):
                 q = hit["name"]
+                known = {**known, "name": hit["name"], "family": hit.get("family"),
+                         "price_from": bool(hit.get("price_from"))}
+                await _remember_post_product(
+                    redis, channel, (post_ctx.get("post_id") or "").strip(),
+                    with_provenance(hit, "caption"),
+                    thumb=(post_ctx.get("thumb") or "").strip())
         except Exception:
             pass
+    if not q:
+        return
     try:
         async with AsyncSessionLocal() as db:
             ctx = _tools.ToolContext(db=db, redis=redis, wa_id=ext, channel=channel,
                                      seen_products=sink)
             await run_tool("search_catalog", {"query": q}, ctx)
+            # A family identity ("Tallit (Prayer Shawl)", priced from the
+            # cheapest size) is not a hub row name — search each member so
+            # the rows are in hand, and keep the family's own label and
+            # "from" price on the row the canned line will read.
+            if not sink and known.get("family"):
+                for member in known["family"]:
+                    await run_tool("search_catalog", {"query": str(member)}, ctx)
+            if sink and known.get("price_from"):
+                sink[0] = {**sink[0], "name": known.get("name") or sink[0].get("name"),
+                           "price_from": True}
     except Exception as exc:
         _log.info("post-product resolve failed for %s: %s", ext, exc)
 
@@ -2731,11 +2934,20 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # cached prefix) AND a forced upgrade to the main model, because the caller
     # pins every media turn there. A pure redis recall decides it.
     _known_product = await _recall_post_product(redis, channel, post_id)
+    # TRUST decides everything below (owner, 2026-09-21: see the image, compare
+    # it, and never price a guess). A trusted identity — the team's word, a
+    # storefront link, the hub's name in the caption, the hub's own photo, or a
+    # vision read confirmed against the catalogue photo — may answer a bare
+    # price ask with no model at all. Anything less (a model's earlier guess, a
+    # record from before provenance) keeps the model reading the post IMAGE on
+    # every turn until the ladder, the vision compare or the team settles it.
+    from app.services.post_catalog import identity_trusted
+    _trusted = identity_trusted(_known_product)
     # NEVER read the frame of a live broadcast for a product. A live frame is a
     # person talking in a shop full of stock — the match is a coin toss, and the
     # result gets recorded as the post's identity for every later comment.
     media = ({"type": "image", "url": thumb}
-             if thumb and not is_live and not _known_product.get("name") else None)
+             if thumb and not is_live and not _trusted else None)
 
     # THE FREE PATH (owner's affordability push, 2026-08-18). The single most
     # common comment is a naked "How much?"/"Bei gani?" — and on a post our
@@ -2749,7 +2961,7 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # stay in the commenter's tongue.
     # Checked BEFORE the cap counter: a free reply must not spend the post's
     # daily model budget (the counter increments on every call).
-    free_ask = bool(_known_product.get("name")) and is_bare_price_ask(prompt_text)
+    free_ask = _trusted and is_bare_price_ask(prompt_text)
     skip_model = free_ask or await _post_over_cap(redis, post_id)
 
     answer = ""
@@ -2777,6 +2989,10 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # "How do I order?" is answerable without a model.
     if not seen_products:
         await _resolve_post_product(redis, channel, ext, post_ctx, seen_products)
+        # The resolver may have just recorded a caption identity — re-read it,
+        # so the canned line below sells only what the record now trusts.
+        _known_product = await _recall_post_product(redis, channel, post_id)
+        _trusted = identity_trusted(_known_product)
     product_link = ""
     matched: dict = {}
     if seen_products:
@@ -2793,10 +3009,14 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
             # A broadcast shows many products over an hour; it HAS no single
             # identity, and pinning one makes every later comment wrong.
             _log.info("post %s is live — not recording a product identity", post_id)
-        elif _post_identity_compatible(_known_product, post_ctx.get("title"), matched):
+        elif _post_identity_compatible(_known_product, post_ctx.get("title"), matched,
+                                       comment_text=comment_text, saw_image=bool(media)):
+            # Recorded as the MODEL's read (source "model" unless the row came
+            # stamped by the ladder): enough to keep later replies on the same
+            # product, never enough to price a canned line on its own.
             await _remember_post_product(redis, channel, post_id, matched, thumb=thumb)
         else:
-            _log.info("post %s: not recording %r as identity (known=%r, caption disagrees)",
+            _log.info("post %s: not recording %r as identity (known=%r, caption or comment disagrees)",
                       post_id, (matched or {}).get("name"), _known_product.get("name"))
 
     # Open the DM (so the public CTA can honestly point to the inbox). The DM
@@ -2834,6 +3054,21 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # A public reply no longer carries a link, so it no longer needs one to be
     # useful — knowing WHAT they're asking about is enough to answer warmly.
     product_name = (matched.get("name") or "").strip()
+    # NO MODEL ANSWER → the canned line may name and price the product ONLY on
+    # a trusted identity, and only when the comment asks for it (a bare price
+    # ask, or the comment naming that very product). Everything else without
+    # an answer is a warm acknowledgement, or "which item?" for a price ask
+    # under a post we could not identify — never a price on a guess.
+    ask_which = False
+    if not answer:
+        asks_it = is_bare_price_ask(prompt_text) or _names_product(prompt_text, product_name)
+        if not _trusted or _caption_tokens(_known_product.get("name") or "") != _caption_tokens(product_name):
+            ask_which = is_bare_price_ask(prompt_text)
+            product_name = ""
+            matched = {}
+        elif not asks_it:
+            matched = {k: v for k, v in matched.items()
+                       if k not in ("price", "price_kes", "price_usd")}
     # The no-model line names the item AS SEEN when our records describe it.
     if product_name and _known_product.get("seen") \
             and _known_product.get("name") == product_name:
@@ -2852,6 +3087,8 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
         except Exception:
             _ccy = "USD"
     price_text = _public_price_text(_kes, _usd, _ccy)
+    if price_text and (matched.get("price_from") or _known_product.get("price_from")):
+        price_text = "from " + price_text        # one item in several sizes
     from app.services.price_audit import looks_per_piece as _per_piece
     per_piece = bool(matched) and _per_piece(matched)
     # The hub says whether this is made to order (its colour and size are the
@@ -2867,7 +3104,8 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
                                         price_text=price_text,
                                         goodwill=(intent == "goodwill"),
                                         per_piece=per_piece, first_contact=first,
-                                        swahili=swahili, made_to_order=made_to_order)
+                                        swahili=swahili, made_to_order=made_to_order,
+                                        ask_which=ask_which)
     public_text = plain_public_voice(public_text)
 
     await _post_public(public_text)

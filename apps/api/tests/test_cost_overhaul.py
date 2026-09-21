@@ -92,7 +92,8 @@ def test_free_path_skips_the_model_and_spares_the_cap():
     import inspect
     from app.agent import runtime
     src = inspect.getsource(runtime._run_comment_engage)
-    assert 'free_ask = bool(_known_product.get("name")) and is_bare_price_ask(prompt_text)' in src
+    # (owner, 2026-09-21) the free path needs a TRUSTED identity, not just a name
+    assert 'free_ask = _trusted and is_bare_price_ask(prompt_text)' in src
     assert "skip_model = free_ask or await _post_over_cap" in src
     assert "if not skip_model:" in src
 
@@ -111,7 +112,9 @@ def test_identified_posts_stop_buying_the_picture():
     from app.agent import runtime
     src = inspect.getsource(runtime._run_comment_engage)
     media_line = next(line for line in src.splitlines() if "if thumb and not" in line)
-    assert '_known_product.get("name")' in media_line, "identified posts must not buy the picture"
+    # (owner, 2026-09-21) a TRUSTED identity stops buying the picture; a guess
+    # keeps the model looking until the ladder, vision or the team settles it
+    assert "not _trusted" in media_line, "trusted-identified posts must not buy the picture"
     assert "is_live" in media_line, "a live broadcast must not buy the picture either"
     assert "else None" in media_line
 

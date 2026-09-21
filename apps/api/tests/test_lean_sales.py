@@ -107,7 +107,7 @@ def test_the_engine_prices_the_canned_line_in_the_commenters_money():
     assert 'product_name = _known_product["seen"]' in src
     assert "_remember_post_product(redis, channel, post_id, matched, thumb=thumb)" in src
     # the free path and the cap gate are exactly as the cost tests pin them
-    assert 'free_ask = bool(_known_product.get("name")) and is_bare_price_ask(prompt_text)' in src
+    assert 'free_ask = _trusted and is_bare_price_ask(prompt_text)' in src
 
 
 # ── 3. search_catalog: the USD figure rides beside KES until they are placed ─

@@ -50,6 +50,29 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   many, how soon, which city. A made-to-order item (cassocks, shirts, stoles…)
   is asked colour then size/measurements. Every search row carries `ask_next`;
   the canned pools split the same way (`_STOCK_*` vs the made-to-order pools).
+- **Never price a guess** (owner 2026-09-21: a tallit post sold anointing oil,
+  a dress design a bell, a cope a ring — each a canned line filled from an
+  arbitrary hub row). Every post identity now carries a `source` and a
+  `confidence` (`post_catalog.with_provenance`): team 1.0, storefront link 1.0,
+  caption 0.95, reposted catalogue photo 0.95, vision confirmed 0.9,
+  vision-name 0.7, a model's read 0.6, a pre-provenance record "legacy" 0.5.
+  `identity_trusted` (trusted source and ≥ 0.8) is the ONLY gate to a canned
+  price: an untrusted post keeps the model reading the post image every turn,
+  the free no-model path and the over-cap line sell nothing on it, and a bare
+  price ask under it gets "which item are you asking about?". The resolver
+  never searches with the caption's lead words any more (a post it cannot name
+  gets no product); the catalogue search matches whole words with stop-words
+  dropped, marks any-token fallbacks `match: "partial"`, and answers an
+  all-stop-word query with nothing. A caption naming one item in several sizes
+  ("Tallits / Prayer shawls" → Medium and Large) is one family identity priced
+  "from" the cheapest. A product the COMMENT named but the caption did not
+  ("what is an apostolic ring?") is never recorded as the post's identity, and
+  a caption-less post records a model read only when the model saw the frame.
+  The vision rung (`post_catalog.product_from_vision`): the light model picks
+  ONE exact catalogue name from the post photo (narrowed by the caption's
+  product words) at CONF=high, then confirms SAME/DIFFERENT against that
+  product's own catalogue photo; only SAME is trusted. A NONE is cached a day
+  per image. The team override stamps "team".
 - **Cheapest first, then climb; say it like a person** (owner 2026-09-16). A
   KIND of thing ("how much is that Holy Communion set?") is a RANGE, not a row:
   `synonyms.RANGES` names the hub rows in it (communion trays and sets — the
