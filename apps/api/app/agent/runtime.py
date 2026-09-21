@@ -157,6 +157,29 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "question is answered with one plain sentence of what X is (from the "
         "row's `details`), then its price, then the order — never a price "
         "alone.\n"
+        "- A SET IS PRICED AS ITS TOTAL (owner, 2026-09-21 — under a five-piece "
+        "cassock outfit, 'the Cassock is $120' was read as the price of the "
+        "whole set). When the post's product is a SET, or the caption presents "
+        "several items as one outfit, the price you give is the WHOLE set's: "
+        "the hub's own set row where it has one (search_catalog marks it `set` "
+        "and lists what it comes with), otherwise every listed item from "
+        "search_catalog TOTALLED — the items and the total in one breath. Never "
+        "one piece's price alone under a set post. If they ask about one "
+        "piece, give that piece's own price AND the set's total.\n"
+        "- A PRICE CARRIES ITS SCOPE (owner, 2026-09-21): a figure never stands "
+        "bare where it could be read two ways — the words that scope it sit "
+        "beside the number, in the same breath: 'it goes for $200, everything "
+        "included', 'the cassock alone is $120', 'from $60 for the medium', "
+        "'$10 each'. A reader takes a bare figure for the whole of what they "
+        "are looking at.\n"
+        "- 'DO YOU DO / MAKE / HAVE THIS FOR …?' IS A YES (owner, 2026-09-21: 'Do "
+        "you do for lay leaders' under the cassock set was answered with a "
+        "question about trays). We sew for every ministry — lay leaders, "
+        "choirs, ushers, children, bishops — so say yes first, in their own "
+        "words ('Yes Grace, we make this very set for lay leaders too'), then "
+        "the item they are looking at with its price and its scope, then the "
+        "one step. Never a clarifying question where a yes answers, and never "
+        "an example item the post never showed.\n"
         "- SAY IT LIKE A PERSON WHO KNOWS THE STOCK (owner, 2026-09-16). When you "
         "are sure which item the post shows, say so the way the owner does: "
         "'This is our Silver Communion Tray, and it goes for $180. It comes "
@@ -1129,12 +1152,23 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                                           {**pctx, "post_id": source_post.get("post_id") or ""})
         except Exception:
             _known = {}
+        # What the post SELLS, when it is more than one row: a hub set row
+        # (its contents from the hub's description), a combination the
+        # caption presents as one outfit, or a caption that merely LISTS
+        # several items (owner, 2026-09-21: the price of a set is its total).
+        _catalog: list = []
+        try:
+            from app.services import n8n_bridge as _svc_cat
+            _catalog = await _svc_cat.catalog_items(db, redis)
+        except Exception:
+            _catalog = []
         if _known.get("name"):
             from app.services.post_catalog import identity_trusted as _trusted_id
             if _trusted_id(_known):
                 line += (f". Our records identify this post's product as: "
                          f"{_known['name']} — price THAT product; do not "
                          "re-identify it from the image")
+                line += _set_context(_known, _catalog)
             else:
                 # A model's earlier read, or a record from before provenance:
                 # a lead, not a fact (owner, 2026-09-21). The image decides.
@@ -1148,6 +1182,8 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                 line += (f"; as it appears in the post: {_known['seen']} — name it "
                          "to the customer in those plain words, colour and trim "
                          "included, never the catalogue label alone")
+        elif pctx.get("title"):
+            line += _listed_items_context(pctx["title"], _catalog)
         line += (". Unless they say otherwise, their questions refer to the product "
                  "in that post — identify it, find it with search_catalog, and "
                  "answer about THAT item. Do not ask what they are looking for.)")
@@ -2177,6 +2213,127 @@ _SW_GOODWILL_POOL = [
 ]
 
 
+# ── A SET IS PRICED AS ITS TOTAL (owner, 2026-09-21) ─────────────────────────
+# "The explanation of the pricing for this cassock should include all the
+# items listed there — the shirt and the collar, the cassock, the signature
+# belt and the stole — so that you give the accurate figure from the hub …
+# if we give just one item, people will misunderstand it to mean that that is
+# the total amount of the entire set." And, the same day: "think wide and
+# deeply, as the best linguist in business and closing the sales."
+#
+# The line a closer says, in the owner's spoken shape (2026-09-16): name it,
+# then the figure WITH ITS SCOPE in the same breath ("goes for $200,
+# everything included" — a bare figure under a set is read as one piece's),
+# then what it comes with, the main piece first as "the" and the rest as "a"
+# ("the cassock, a stole, a belt, a straight collar shirt and a 12 inch
+# clergy collar"), "all in one order" (the hub's own promise), and ONE step:
+# the order, with the two details the hub cannot answer. No question mark —
+# the owner's sentence has none. `{product}` is the hub's bare name,
+# `{items}` what it comes with, `{ask}` the details (the colour for a
+# made-to-order set; how many sets for a stock one; how soon, always).
+_SET_SELL_POOL = [
+    "Thank you{name} 🙏 This is our {product}, and it goes for {price}, everything included. It comes with {items}. Kindly place your order now and let us know {ask} 💛",
+    "Thank you{name} 🙏 This is our {product}, and the whole set goes for {price}. It comes with {items}, all in one order, and we ship worldwide by DHL. Kindly place your order now and let us know {ask} 💛",
+    "Bless you{name}! 🙏 This is our {product}, and it goes for {price} for everything. It comes with {items}, all in one order. Kindly place your order now and let us know {ask} 💛",
+]
+_SET_FIRST_SELL_POOL = [
+    "Welcome to Bethany House{name} 🙏 This is our {product}, and it goes for {price}, everything included. It comes with {items}. Kindly place your order now and let us know {ask} 💛",
+    "Welcome to Bethany House{name} 🙏 This is our {product}, and the whole set goes for {price}. It comes with {items}, all in one order, and we ship worldwide by DHL. Kindly place your order now and let us know {ask} 💛",
+]
+# A combination with no hub set row: the total first (it answers "how much"),
+# then every item with its own price, so the total is accounted for.
+_BUNDLE_SELL_POOL = [
+    "Thank you{name} 🙏 The whole set comes to {price}: {items}. Kindly place your order now and let us know {ask} 💛",
+    "Thank you{name} 🙏 All of it together comes to {price} — {items} — and we ship worldwide by DHL. Kindly place your order now and let us know {ask} 💛",
+]
+_BUNDLE_FIRST_SELL_POOL = [
+    "Welcome to Bethany House{name} 🙏 The whole set comes to {price}: {items}. Kindly place your order now and let us know {ask} 💛",
+]
+_SW_SET_SELL_POOL = [
+    "Asante{name} 🙏 Hii ni {product} yetu, na seti kamili ni {price}. Inakuja na {items}, yote katika oda moja. Tafadhali weka oda yako sasa na utuambie {ask} 💛",
+    "Asante{name} 🙏 Hii ni {product} yetu, na seti kamili ni {price}. Inakuja na {items}, yote katika oda moja, na tunasafirisha kote duniani kwa DHL. Tafadhali weka oda yako sasa na utuambie {ask} 💛",
+]
+_SW_SET_FIRST_SELL_POOL = [
+    "Karibu Bethany House{name} 🙏 Hii ni {product} yetu, na seti kamili ni {price}. Inakuja na {items}, yote katika oda moja. Tafadhali weka oda yako sasa na utuambie {ask} 💛",
+]
+_SW_BUNDLE_SELL_POOL = [
+    "Asante{name} 🙏 Seti nzima ni {price} kwa jumla: {items}. Tafadhali weka oda yako sasa na utuambie {ask} 💛",
+]
+_SW_BUNDLE_FIRST_SELL_POOL = [
+    "Karibu Bethany House{name} 🙏 Seti nzima ni {price} kwa jumla: {items}. Tafadhali weka oda yako sasa na utuambie {ask} 💛",
+]
+
+
+def _set_ask(swahili: bool, made_to_order: bool, noun: str = "sets") -> str:
+    """The two details a set line asks for, in the owner's cadence ("let us
+    know how many trays you may need and how soon you want them delivered")
+    — ASK ONLY WHAT THE HUB CANNOT ANSWER (owner, 2026-09-15): the colour
+    for a made-to-order set; how many for a stock one; how soon, always.
+    `noun` is the thing counted ("sets"); "" for a combination."""
+    if swahili:
+        if made_to_order:
+            return "rangi unayohitaji na unaihitaji lini"
+        return ("seti ngapi unazohitaji na unazihitaji lini" if noun == "sets"
+                else "idadi unayohitaji na unaihitaji lini")
+    if made_to_order:
+        return "the colour you need and how soon you want it delivered"
+    what = f"how many {noun} you may need" if noun else "how many you may need"
+    return f"{what} and how soon you want them delivered"
+
+
+def _join_and(parts: list, swahili: bool = False) -> str:
+    parts = [str(p).strip() for p in parts if str(p).strip()]
+    if not parts:
+        return ""
+    if len(parts) == 1:
+        return parts[0]
+    joiner = " na " if swahili else " and "
+    return ", ".join(parts[:-1]) + joiner + parts[-1]
+
+
+def _with_article(part: str, definite: bool = False) -> str:
+    """'cassock' → 'a cassock' (or 'the cassock' for the set's own main
+    piece), '12 inch clergy collar' → 'a 12 inch clergy collar' (the hub's own
+    wording); a part that brings its article keeps it."""
+    low = part.lower()
+    if low.startswith(("a ", "an ", "the ")):
+        return part
+    if definite:
+        return "the " + part
+    return ("an " if low[:1] in "aeiou" else "a ") + part
+
+
+def _components_text(components: list, swahili: bool = False, set_name: str = "") -> str:
+    """'the cassock, a stole, a belt, a straight collar shirt and a 12 inch
+    clergy collar' — the hub's own words for what the set comes with. The
+    piece the set is NAMED for ("Cassock Set" → the cassock) is "the": it is
+    the thing they are looking at; the rest come with it."""
+    comps = [str(c).strip() for c in (components or []) if str(c).strip()]
+    if swahili:
+        return _join_and(comps, swahili=True)
+    name_toks = _caption_tokens(set_name or "")
+    out = []
+    for c in comps:
+        ctoks = _caption_tokens(c)
+        main = bool(ctoks) and bool(name_toks) and ctoks <= name_toks
+        out.append(_with_article(c, definite=main))
+    return _join_and(out)
+
+
+def _bundle_items_text(rows: list, currency: str = "USD", swahili: bool = False) -> str:
+    """'the Mitre at $60, the Cincture Rope at $20 and the Skull Cap at $20'
+    — every item of a combination with its own hub price, so the total that
+    follows is accounted for."""
+    parts = []
+    for r in rows or []:
+        name = str(r.get("name") or "").strip()
+        price = _public_price_text(r.get("price_kes") or r.get("price"), r.get("price_usd"), currency)
+        if not name or not price:
+            continue
+        parts.append(f"{name} {price}" if swahili else f"the {name} at {price}")
+    return _join_and(parts, swahili=swahili)
+
+
 def _pick(pool: list, seed: str) -> str:
     import hashlib
     i = int(hashlib.sha1((seed or "x").encode()).hexdigest(), 16) % len(pool)
@@ -2203,7 +2360,8 @@ def _comment_public_reply(answer: str, dm_sent: bool, name_tag: str, seed: str,
                           price_text: str = "", goodwill: bool = False,
                           per_piece: bool = False, first_contact: bool = False,
                           swahili: bool = False, made_to_order: bool = False,
-                          ask_which: bool = False) -> str:
+                          ask_which: bool = False, set_items: str = "",
+                          bundle: bool = False) -> str:
     """The PUBLIC comment text, given the agent's answer and whether the DM landed.
 
     THIS FUNCTION CANNOT PRODUCE A LINK, by construction: it takes no URL. Meta
@@ -2247,6 +2405,19 @@ def _comment_public_reply(answer: str, dm_sent: bool, name_tag: str, seed: str,
         # Swahili takes the hub's name bare ("Round Collar Shirt ni KES 4,500");
         # English says "the Round Collar Shirt".
         subject = (_pn or "bidhaa hii") if swahili else (f"the {_pn}" if _pn else "it")
+        if price_text and set_items and _pn:
+            # A SET IS PRICED AS ITS TOTAL (owner, 2026-09-21): the whole
+            # set's price and what it comes with — never one piece's price
+            # standing for the set.
+            if swahili:
+                pool = ((_SW_BUNDLE_FIRST_SELL_POOL if first_contact else _SW_BUNDLE_SELL_POOL) if bundle
+                        else (_SW_SET_FIRST_SELL_POOL if first_contact else _SW_SET_SELL_POOL))
+            else:
+                pool = ((_BUNDLE_FIRST_SELL_POOL if first_contact else _BUNDLE_SELL_POOL) if bundle
+                        else (_SET_FIRST_SELL_POOL if first_contact else _SET_SELL_POOL))
+            return (_pick(pool, seed).replace("{name}", name_tag).replace("{product}", _pn)
+                    .replace("{price}", price_text).replace("{items}", set_items)
+                    .replace("{ask}", _set_ask(swahili, made_to_order, noun="" if bundle else "sets")))
         if price_text:
             # A per-piece good is sold by the count; anything else is ONE piece,
             # and a first-time commenter is welcomed the owner's way.
@@ -2444,6 +2615,12 @@ async def _remember_post_product(redis, channel: str, post_id: str, product: dic
             record["price_from"] = True
         if product.get("family"):
             record["family"] = [str(m) for m in product["family"]][:12]
+        # A combination the caption presents as one outfit (owner, 2026-09-21):
+        # the items, so every later reply re-prices the same set from the hub.
+        items = product.get("bundle") or (known.get("bundle") if same else None)
+        if items:
+            record["bundle"] = [{"name": str(i.get("name") or ""), "slug": str(i.get("slug") or "")}
+                                for i in items if i.get("name")][:8]
         if seen:
             record["seen"] = seen
         await redis.set(_post_product_key(channel, post_id), json.dumps(record),
@@ -2520,8 +2697,24 @@ async def _post_identity(redis, channel: str, pctx: dict) -> dict:
     team can set it via POST /admin/posts/{post_id}/product)."""
     post_id = (pctx.get("post_id") or "").strip()
     known = await _recall_post_product(redis, channel, post_id)
+    stale = False
     if known.get("name") and known.get("source"):
-        return known
+        # A caption-stamped record of ONE piece under a caption that lists
+        # several (owner, 2026-09-21: "Cassock" under the five-piece outfit)
+        # is re-read by the ladder: the set row or the total replaces it,
+        # and nothing at all replaces it when neither can be named.
+        if known.get("source") == "caption" and (pctx.get("title") or "").strip():
+            try:
+                from app.database import AsyncSessionLocal as _ASL
+                from app.services import n8n_bridge as _svc
+                from app.services import post_catalog as _pc
+                async with _ASL() as _db:
+                    _cat = await _svc.catalog_items(_db, redis)
+                stale = _pc.caption_record_stale(known, pctx.get("title") or "", _cat)
+            except Exception:
+                stale = False
+        if not stale:
+            return known
     try:
         from app.database import AsyncSessionLocal
         from app.services import n8n_bridge as svc
@@ -2529,6 +2722,20 @@ async def _post_identity(redis, channel: str, pctx: dict) -> dict:
         async with AsyncSessionLocal() as db:
             catalog = await svc.catalog_items(db, redis)
         hit = await post_catalog.resolve_post(redis, pctx, catalog)
+        if stale:
+            if hit is not None:
+                await _remember_post_product(redis, channel, post_id, hit,
+                                             thumb=(pctx.get("thumb") or "").strip())
+                _log.info("post %s: stale caption identity %r replaced by %r",
+                          post_id, known.get("name"), hit.get("name"))
+                return await _recall_post_product(redis, channel, post_id) or known
+            try:
+                await redis.delete(_post_product_key(channel, post_id))
+            except Exception:
+                pass
+            _log.info("post %s: stale caption identity %r dropped — the caption lists "
+                      "several items and names no set", post_id, known.get("name"))
+            return {}
         if known.get("name"):
             # A record from before provenance existed (owner, 2026-09-21): the
             # ladder re-reads the post; if it agrees, the record takes the
@@ -2725,7 +2932,16 @@ async def _resolve_post_product(redis, channel: str, ext: str,
     title = (post_ctx.get("title") or "").strip()
     from app.database import AsyncSessionLocal
     from app.agent import tools as _tools
+    from app.services import post_catalog as _pc
     q = (known.get("name") or "").strip()
+    cat: list = []
+    if (not q and title) or known.get("bundle") or q:
+        try:
+            from app.services import n8n_bridge as _svc
+            async with AsyncSessionLocal() as _db0:
+                cat = await _svc.catalog_items(_db0, redis)
+        except Exception:
+            cat = []
     if not q and title:
         # No record yet: score the WHOLE caption against the hub's names and
         # aliases. A confident winner is the post's identity (source
@@ -2735,12 +2951,15 @@ async def _resolve_post_product(redis, channel: str, ext: str,
         # any-token fallback handed back an arbitrary row that a canned line
         # then sold — a tallit post priced anointing oil, a dress design a
         # bell (owner, 2026-09-21). A post we cannot name gets no product.
+        # A caption that LISTS several items ("cassock, shirt, collar, belt
+        # and stole") is never scored down to one of them either: the ladder
+        # already tried the set row and the total (post_catalog), and a set
+        # with no hub row and no clean total is the model's to price.
         try:
-            from app.services import n8n_bridge as _svc
             from app.services.post_catalog import with_provenance
-            async with AsyncSessionLocal() as _db0:
-                cat = await _svc.catalog_items(_db0, redis)
-            hit = _hub_caption_match(cat, title)
+            hit = None
+            if cat and len(_pc.caption_item_kinds(title, cat)) < 2:
+                hit = _hub_caption_match(cat, title)
             if hit is not None and hit.get("name"):
                 q = hit["name"]
                 known = {**known, "name": hit["name"], "family": hit.get("family"),
@@ -2757,6 +2976,24 @@ async def _resolve_post_product(redis, channel: str, ext: str,
         async with AsyncSessionLocal() as db:
             ctx = _tools.ToolContext(db=db, redis=redis, wa_id=ext, channel=channel,
                                      seen_products=sink)
+            if known.get("bundle"):
+                # A combination the caption presents as one outfit (owner,
+                # 2026-09-21): search every item by name and total them from
+                # the hub's fresh rows — the synthetic total row leads the
+                # sink, the items behind it. A piece the hub no longer sells
+                # leaves nothing to price: no row, no guess.
+                for item in known["bundle"]:
+                    await run_tool("search_catalog", {"query": str(item.get("name") or "")}, ctx)
+                rows = []
+                for item in known["bundle"]:
+                    row = _exact_row(sink, item.get("slug") or "", item.get("name") or "")
+                    if row is None:
+                        rows = []
+                        break
+                    rows.append(row)
+                total = _pc.bundle_row(rows) if rows else None
+                sink[:] = ([total] + rows) if total else []
+                return
             await run_tool("search_catalog", {"query": q}, ctx)
             # A family identity ("Tallit (Prayer Shawl)", priced from the
             # cheapest size) is not a hub row name — search each member so
@@ -2765,11 +3002,81 @@ async def _resolve_post_product(redis, channel: str, ext: str,
             if not sink and known.get("family"):
                 for member in known["family"]:
                     await run_tool("search_catalog", {"query": str(member)}, ctx)
+            # The row RECORDED leads the sink — by slug, else by exact name —
+            # not whichever row the search ranked first: "cassock set" also
+            # finds the cheaper Classic Princes Cassock Set, and the canned
+            # line reads sink[0] (owner, 2026-09-21: the hub names it, the
+            # hub prices it).
+            lead = _exact_row(sink, known.get("slug") or "", known.get("name") or "")
+            if lead is not None and sink and sink[0] is not lead:
+                sink.remove(lead)
+                sink.insert(0, lead)
             if sink and known.get("price_from"):
                 sink[0] = {**sink[0], "name": known.get("name") or sink[0].get("name"),
                            "price_from": True}
+            # A hub SET row carries what it comes with (the hub's own
+            # description), so the no-model line can say it.
+            if sink and _pc.is_set_row(sink[0]):
+                comps = _pc.set_components(sink[0], cat)
+                if comps:
+                    sink[0] = {**sink[0], "components": comps}
     except Exception as exc:
         _log.info("post-product resolve failed for %s: %s", ext, exc)
+
+
+def _exact_row(rows: list, slug: str = "", name: str = "") -> dict | None:
+    """The row that IS the recorded identity: the same slug, else the same
+    name word for word. None when the search brought back only neighbours."""
+    slug_l = (slug or "").strip().lower()
+    if slug_l:
+        for r in rows:
+            if (r.get("slug") or "").strip().lower() == slug_l:
+                return r
+    want = _caption_tokens(name or "")
+    if want:
+        for r in rows:
+            if _caption_tokens(r.get("name") or "") == want:
+                return r
+    return None
+
+
+def _set_context(known: dict, catalog: list) -> str:
+    """The model's line about a post that sells MORE than one row (owner,
+    2026-09-21): a hub set row — its one price for everything and what it
+    comes with — or a combination the caption presents as one outfit, to be
+    totalled. "" for an ordinary single product."""
+    from app.services import post_catalog as _pc
+    if known.get("bundle"):
+        names = ", ".join(str(i.get("name") or "") for i in known["bundle"] if i.get("name"))
+        return (f". This post presents ONE outfit made of several hub items: {names} — "
+                "search_catalog each of them and give the TOTAL of all of them with the "
+                "items, never one item's price as if it were the whole; if they ask about "
+                "one piece, give that piece's own price and the total in the same reply")
+    row = _exact_row(catalog or [], known.get("slug") or "", known.get("name") or "")
+    if row is None or not _pc.is_set_row(row):
+        return ""
+    comps = _pc.set_components(row, catalog)
+    contents = (f"; it comes with {', '.join(comps)}" if comps
+                else "; its contents are in the row's `details`")
+    return (". It is a SET the hub prices as ONE row: give that one price for the whole "
+            f"set{contents} — never one piece's price as the set's; if they ask about one "
+            "piece, give that piece's own hub price and the set's total in the same reply")
+
+
+def _listed_items_context(caption: str, catalog: list) -> str:
+    """When no identity is on record but the caption LISTS several items, tell
+    the model the rule (owner, 2026-09-21) instead of leaving it to pick one."""
+    from app.services import post_catalog as _pc
+    try:
+        kinds = _pc.caption_item_kinds(caption or "", catalog or [])
+    except Exception:
+        kinds = []
+    if len(kinds) < 2:
+        return ""
+    return (f". The caption lists several items ({', '.join(kinds)}). If the post presents "
+            "them as ONE outfit or set, find every listed item with search_catalog and "
+            "give the TOTAL with the items — never one item's price as if it were the "
+            "whole; if they are separate products, give each its own price")
 
 
 async def _order_link(redis, channel: str, ext: str, product: str = "") -> str:
@@ -3069,9 +3376,11 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
         elif not asks_it:
             matched = {k: v for k, v in matched.items()
                        if k not in ("price", "price_kes", "price_usd")}
-    # The no-model line names the item AS SEEN when our records describe it.
+    # The no-model line names the item AS SEEN when our records describe it —
+    # a SET keeps the hub's name: "This is our Cassock Set" (owner's shape).
     if product_name and _known_product.get("seen") \
-            and _known_product.get("name") == product_name:
+            and _known_product.get("name") == product_name \
+            and not (matched.get("components") or matched.get("bundle")):
         product_name = _known_product["seen"]
     # The post identity carries hub prices. ONE currency (owner, 2026-09-05):
     # the canned line is priced in the commenter's own money — KES only when
@@ -3098,6 +3407,15 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     first = False
     if not answer and product_name and price_text and not per_piece:
         first = await _first_contact(channel, ext)
+    # A SET IS PRICED AS ITS TOTAL (owner, 2026-09-21): a hub set row says
+    # what it comes with; a combination says every item with its price.
+    set_items, is_bundle = "", False
+    if not answer and product_name and price_text:
+        if matched.get("bundle") and matched.get("bundle_rows"):
+            is_bundle = True
+            set_items = _bundle_items_text(matched["bundle_rows"], _ccy, swahili)
+        elif matched.get("components"):
+            set_items = _components_text(matched["components"], swahili, set_name=product_name)
     public_text = _comment_public_reply(answer, dm_sent, name_tag, ext,
                                         product_known=bool(product_name),
                                         product_name=product_name,
@@ -3105,7 +3423,8 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
                                         goodwill=(intent == "goodwill"),
                                         per_piece=per_piece, first_contact=first,
                                         swahili=swahili, made_to_order=made_to_order,
-                                        ask_which=ask_which)
+                                        ask_which=ask_which, set_items=set_items,
+                                        bundle=is_bundle)
     public_text = plain_public_voice(public_text)
 
     await _post_public(public_text)

@@ -43,6 +43,16 @@ FAMILIES: tuple[dict, ...] = (
             r"pedants?",                 # how "pendant" arrives on a phone keyboard
         ),
     },
+    {
+        # Owner, 2026-09-21, describing the cassock outfit: "the shirt and the
+        # collar, the cassock, the signature belt and the stole" — the belt
+        # worn at the waist with a cassock is the hub's CINCTURE BELT.
+        "hub": "cincture belt",
+        "said": (
+            r"signature\s+belts?",
+            r"cassock\s+belts?",
+        ),
+    },
 )
 
 _COMPILED: tuple[tuple[re.Pattern, str], ...] = tuple(
