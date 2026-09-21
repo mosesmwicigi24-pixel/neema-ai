@@ -494,6 +494,8 @@ def bundle_row(items: list[dict]) -> dict | None:
         return None                       # an unpriced piece — no total to give
     usd = [_num(r.get("price_usd")) for r in items]
     dearest = max(items, key=lambda r: _num(r.get("price")) or 0.0)
+    # Tailored when any piece is: the colour is then the customer's to say.
+    mto = any(r.get("product_type") == "variable" and bool(r.get("is_producible")) for r in items)
     return {
         "name": " + ".join(str(r.get("name")) for r in items),
         "slug": dearest.get("slug") or "",
@@ -501,7 +503,7 @@ def bundle_row(items: list[dict]) -> dict | None:
         "category": dearest.get("category") or "",
         "price": float(sum(kes)),
         "price_usd": float(sum(usd)) if all(v is not None for v in usd) else None,
-        "product_type": "simple", "is_producible": False,
+        "product_type": "variable" if mto else "simple", "is_producible": mto,
         "description": "", "images": [],
         "bundle": [{"name": str(r.get("name")), "slug": r.get("slug") or ""} for r in items],
         "bundle_rows": [dict(r) for r in items],

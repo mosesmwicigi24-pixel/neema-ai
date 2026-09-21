@@ -166,6 +166,20 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "search_catalog TOTALLED — the items and the total in one breath. Never "
         "one piece's price alone under a set post. If they ask about one "
         "piece, give that piece's own price AND the set's total.\n"
+        "- A PRICE CARRIES ITS SCOPE (owner, 2026-09-21): a figure never stands "
+        "bare where it could be read two ways — the words that scope it sit "
+        "beside the number, in the same breath: 'it goes for $200, everything "
+        "included', 'the cassock alone is $120', 'from $60 for the medium', "
+        "'$10 each'. A reader takes a bare figure for the whole of what they "
+        "are looking at.\n"
+        "- 'DO YOU DO / MAKE / HAVE THIS FOR …?' IS A YES (owner, 2026-09-21: 'Do "
+        "you do for lay leaders' under the cassock set was answered with a "
+        "question about trays). We sew for every ministry — lay leaders, "
+        "choirs, ushers, children, bishops — so say yes first, in their own "
+        "words ('Yes Grace, we make this very set for lay leaders too'), then "
+        "the item they are looking at with its price and its scope, then the "
+        "one step. Never a clarifying question where a yes answers, and never "
+        "an example item the post never showed.\n"
         "- SAY IT LIKE A PERSON WHO KNOWS THE STOCK (owner, 2026-09-16). When you "
         "are sure which item the post shows, say so the way the owner does: "
         "'This is our Silver Communion Tray, and it goes for $180. It comes "
@@ -2204,53 +2218,67 @@ _SW_GOODWILL_POOL = [
 # items listed there — the shirt and the collar, the cassock, the signature
 # belt and the stole — so that you give the accurate figure from the hub …
 # if we give just one item, people will misunderstand it to mean that that is
-# the total amount of the entire set." The no-model line for a post whose
-# product is a hub SET row says the set's one price and what it comes with,
-# in the owner's spoken shape; for a combination the caption presents as one
-# outfit with no hub set row, every item with its own price and the total.
-# `{product}` is the hub's bare name, `{items}` what it comes with, `{ask}`
-# the order details the hub cannot answer (colour for made-to-order; how
-# many and the city for stock).
+# the total amount of the entire set." And, the same day: "think wide and
+# deeply, as the best linguist in business and closing the sales."
+#
+# The line a closer says, in the owner's spoken shape (2026-09-16): name it,
+# then the figure WITH ITS SCOPE in the same breath ("goes for $200,
+# everything included" — a bare figure under a set is read as one piece's),
+# then what it comes with, the main piece first as "the" and the rest as "a"
+# ("the cassock, a stole, a belt, a straight collar shirt and a 12 inch
+# clergy collar"), "all in one order" (the hub's own promise), and ONE step:
+# the order, with the two details the hub cannot answer. No question mark —
+# the owner's sentence has none. `{product}` is the hub's bare name,
+# `{items}` what it comes with, `{ask}` the details (the colour for a
+# made-to-order set; how many sets for a stock one; how soon, always).
 _SET_SELL_POOL = [
-    "Thank you{name} 🙏 This is our {product}, and it goes for {price}. It comes with {items}. Kindly place your order now and let us know {ask} 💛",
-    "Thank you{name} 🙏 This is our {product}, and it goes for {price} for the whole set. It comes with {items}, and we ship worldwide by DHL. Kindly place your order now and let us know {ask} 💛",
-    "Bless you{name}! 🙏 This is our {product}, and it goes for {price}. It comes with {items}, and we deliver anywhere by DHL. Kindly place your order now and let us know {ask} 💛",
+    "Thank you{name} 🙏 This is our {product}, and it goes for {price}, everything included. It comes with {items}. Kindly place your order now and let us know {ask} 💛",
+    "Thank you{name} 🙏 This is our {product}, and the whole set goes for {price}. It comes with {items}, all in one order, and we ship worldwide by DHL. Kindly place your order now and let us know {ask} 💛",
+    "Bless you{name}! 🙏 This is our {product}, and it goes for {price} for everything. It comes with {items}, all in one order. Kindly place your order now and let us know {ask} 💛",
 ]
 _SET_FIRST_SELL_POOL = [
-    "Welcome to Bethany House{name} 🙏 This is our {product}, and it goes for {price}. It comes with {items}. Kindly place your order now and let us know {ask} 💛",
-    "Welcome to Bethany House{name} 🙏 This is our {product}, and it goes for {price} for the whole set. It comes with {items}, and we ship worldwide by DHL. Kindly place your order now and let us know {ask} 💛",
+    "Welcome to Bethany House{name} 🙏 This is our {product}, and it goes for {price}, everything included. It comes with {items}. Kindly place your order now and let us know {ask} 💛",
+    "Welcome to Bethany House{name} 🙏 This is our {product}, and the whole set goes for {price}. It comes with {items}, all in one order, and we ship worldwide by DHL. Kindly place your order now and let us know {ask} 💛",
 ]
+# A combination with no hub set row: the total first (it answers "how much"),
+# then every item with its own price, so the total is accounted for.
 _BUNDLE_SELL_POOL = [
-    "Thank you{name} 🙏 The whole set — {items} — comes to {price} all together, and we ship worldwide by DHL. Kindly place your order now and let us know {ask} 💛",
-    "Thank you{name} 🙏 All together that is {price}: {items}. We deliver anywhere by DHL. Kindly place your order now and let us know {ask} 💛",
+    "Thank you{name} 🙏 The whole set comes to {price}: {items}. Kindly place your order now and let us know {ask} 💛",
+    "Thank you{name} 🙏 All of it together comes to {price} — {items} — and we ship worldwide by DHL. Kindly place your order now and let us know {ask} 💛",
 ]
 _BUNDLE_FIRST_SELL_POOL = [
-    "Welcome to Bethany House{name} 🙏 The whole set — {items} — comes to {price} all together, and we ship worldwide by DHL. Kindly place your order now and let us know {ask} 💛",
+    "Welcome to Bethany House{name} 🙏 The whole set comes to {price}: {items}. Kindly place your order now and let us know {ask} 💛",
 ]
 _SW_SET_SELL_POOL = [
-    "Asante{name} 🙏 Hii ni {product} yetu, na ni {price} kwa seti kamili. Inakuja na {items}. Tafadhali weka oda yako sasa na utuambie {ask} 💛",
-    "Asante{name} 🙏 Hii ni {product} yetu, na ni {price} kwa seti kamili. Inakuja na {items}, na tunasafirisha kote duniani kwa DHL. Tafadhali weka oda yako sasa na utuambie {ask} 💛",
+    "Asante{name} 🙏 Hii ni {product} yetu, na seti kamili ni {price}. Inakuja na {items}, yote katika oda moja. Tafadhali weka oda yako sasa na utuambie {ask} 💛",
+    "Asante{name} 🙏 Hii ni {product} yetu, na seti kamili ni {price}. Inakuja na {items}, yote katika oda moja, na tunasafirisha kote duniani kwa DHL. Tafadhali weka oda yako sasa na utuambie {ask} 💛",
 ]
 _SW_SET_FIRST_SELL_POOL = [
-    "Karibu Bethany House{name} 🙏 Hii ni {product} yetu, na ni {price} kwa seti kamili. Inakuja na {items}. Tafadhali weka oda yako sasa na utuambie {ask} 💛",
+    "Karibu Bethany House{name} 🙏 Hii ni {product} yetu, na seti kamili ni {price}. Inakuja na {items}, yote katika oda moja. Tafadhali weka oda yako sasa na utuambie {ask} 💛",
 ]
 _SW_BUNDLE_SELL_POOL = [
-    "Asante{name} 🙏 Seti nzima — {items} — ni {price} kwa jumla, na tunasafirisha kote duniani kwa DHL. Tafadhali weka oda yako sasa na utuambie {ask} 💛",
+    "Asante{name} 🙏 Seti nzima ni {price} kwa jumla: {items}. Tafadhali weka oda yako sasa na utuambie {ask} 💛",
 ]
 _SW_BUNDLE_FIRST_SELL_POOL = [
-    "Karibu Bethany House{name} 🙏 Seti nzima — {items} — ni {price} kwa jumla, na tunasafirisha kote duniani kwa DHL. Tafadhali weka oda yako sasa na utuambie {ask} 💛",
+    "Karibu Bethany House{name} 🙏 Seti nzima ni {price} kwa jumla: {items}. Tafadhali weka oda yako sasa na utuambie {ask} 💛",
 ]
 
 
-def _set_ask(swahili: bool, made_to_order: bool) -> str:
-    """The order details a set line asks for — ASK ONLY WHAT THE HUB CANNOT
-    ANSWER (owner, 2026-09-15): the colour for a made-to-order set, how many
-    and the city for a stock one; how soon, always."""
+def _set_ask(swahili: bool, made_to_order: bool, noun: str = "sets") -> str:
+    """The two details a set line asks for, in the owner's cadence ("let us
+    know how many trays you may need and how soon you want them delivered")
+    — ASK ONLY WHAT THE HUB CANNOT ANSWER (owner, 2026-09-15): the colour
+    for a made-to-order set; how many for a stock one; how soon, always.
+    `noun` is the thing counted ("sets"); "" for a combination."""
     if swahili:
-        return ("rangi unayohitaji na unaihitaji lini" if made_to_order
-                else "idadi unayohitaji, mji wako na unaihitaji lini")
-    return ("the colour you need and how soon you want it delivered" if made_to_order
-            else "how many you need, your city and how soon you want it delivered")
+        if made_to_order:
+            return "rangi unayohitaji na unaihitaji lini"
+        return ("seti ngapi unazohitaji na unazihitaji lini" if noun == "sets"
+                else "idadi unayohitaji na unaihitaji lini")
+    if made_to_order:
+        return "the colour you need and how soon you want it delivered"
+    what = f"how many {noun} you may need" if noun else "how many you may need"
+    return f"{what} and how soon you want them delivered"
 
 
 def _join_and(parts: list, swahili: bool = False) -> str:
@@ -2263,22 +2291,33 @@ def _join_and(parts: list, swahili: bool = False) -> str:
     return ", ".join(parts[:-1]) + joiner + parts[-1]
 
 
-def _with_article(part: str) -> str:
-    """'cassock' → 'a cassock', '12 inch clergy collar' → 'a 12 inch clergy
-    collar' (the hub's own wording); a part that brings its article keeps it."""
+def _with_article(part: str, definite: bool = False) -> str:
+    """'cassock' → 'a cassock' (or 'the cassock' for the set's own main
+    piece), '12 inch clergy collar' → 'a 12 inch clergy collar' (the hub's own
+    wording); a part that brings its article keeps it."""
     low = part.lower()
     if low.startswith(("a ", "an ", "the ")):
         return part
+    if definite:
+        return "the " + part
     return ("an " if low[:1] in "aeiou" else "a ") + part
 
 
-def _components_text(components: list, swahili: bool = False) -> str:
-    """'a cassock, a stole, a belt, a straight collar shirt and a 12 inch
-    clergy collar' — the hub's own words for what the set comes with."""
+def _components_text(components: list, swahili: bool = False, set_name: str = "") -> str:
+    """'the cassock, a stole, a belt, a straight collar shirt and a 12 inch
+    clergy collar' — the hub's own words for what the set comes with. The
+    piece the set is NAMED for ("Cassock Set" → the cassock) is "the": it is
+    the thing they are looking at; the rest come with it."""
     comps = [str(c).strip() for c in (components or []) if str(c).strip()]
     if swahili:
         return _join_and(comps, swahili=True)
-    return _join_and([_with_article(c) for c in comps])
+    name_toks = _caption_tokens(set_name or "")
+    out = []
+    for c in comps:
+        ctoks = _caption_tokens(c)
+        main = bool(ctoks) and bool(name_toks) and ctoks <= name_toks
+        out.append(_with_article(c, definite=main))
+    return _join_and(out)
 
 
 def _bundle_items_text(rows: list, currency: str = "USD", swahili: bool = False) -> str:
@@ -2378,7 +2417,7 @@ def _comment_public_reply(answer: str, dm_sent: bool, name_tag: str, seed: str,
                         else (_SET_FIRST_SELL_POOL if first_contact else _SET_SELL_POOL))
             return (_pick(pool, seed).replace("{name}", name_tag).replace("{product}", _pn)
                     .replace("{price}", price_text).replace("{items}", set_items)
-                    .replace("{ask}", _set_ask(swahili, made_to_order)))
+                    .replace("{ask}", _set_ask(swahili, made_to_order, noun="" if bundle else "sets")))
         if price_text:
             # A per-piece good is sold by the count; anything else is ONE piece,
             # and a first-time commenter is welcomed the owner's way.
@@ -3376,7 +3415,7 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
             is_bundle = True
             set_items = _bundle_items_text(matched["bundle_rows"], _ccy, swahili)
         elif matched.get("components"):
-            set_items = _components_text(matched["components"], swahili)
+            set_items = _components_text(matched["components"], swahili, set_name=product_name)
     public_text = _comment_public_reply(answer, dm_sent, name_tag, ext,
                                         product_known=bool(product_name),
                                         product_name=product_name,

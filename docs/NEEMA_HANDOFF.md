@@ -92,10 +92,19 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   row (by slug, then exact name — "cassock set" also finds the cheaper ladies'
   set) and attaches `components`; a bundle record keeps its items and is
   re-totalled from fresh hub rows. The canned lines (`_SET_*` / `_BUNDLE_*`,
-  Swahili too) say the set's one price and what it comes with in the owner's
-  shape; `search_catalog` marks a set row `set` with `comes_with`; the prompt
-  rule A SET IS PRICED AS ITS TOTAL and the comment addendum carry the same
-  law. "Signature belt" (the owner's word) is the hub's CINCTURE BELT
+  Swahili too) say the set's one price WITH ITS SCOPE ("goes for $200,
+  everything included"), what it comes with — the main piece as "the", the
+  rest as "a", "all in one order" — and the owner's one step ("let us know how
+  many sets you may need and how soon you want them delivered"; the colour
+  when made to order); `search_catalog` marks a set row `set` with
+  `comes_with`; the prompt rule A SET IS PRICED AS ITS TOTAL and the comment
+  addendum carry the same law, with two closing rules the post exposed
+  ("think as the best linguist in business and closing the sales"): A PRICE
+  CARRIES ITS SCOPE (the scoping words sit beside the number — "everything
+  included", "alone", "each", "from") and "DO YOU DO / MAKE THIS FOR …?" IS A
+  YES (yes first, in their own words, then the post's item with its price,
+  then the one step — never a clarifying question, never an example item the
+  post never showed). "Signature belt" (the owner's word) is the hub's CINCTURE BELT
   (`core/synonyms`). Hub row to check (owner-side): the "Cassock Set" row is
   $200 / KES 19,500 while its five pieces sum to $220 — the set row is the
   figure Neema gives, as the hub's own.

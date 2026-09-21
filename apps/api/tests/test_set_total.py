@@ -330,22 +330,30 @@ def test_a_bundle_record_survives_a_refresh(monkeypatch):
 # ── 5. the canned line: the set's one price and what it comes with ───────────
 
 def test_the_set_line_is_said_the_owners_way():
-    items = rt._components_text(pc.set_components(_by("Cassock Set"), CATALOG))
-    assert items == "a cassock, a stole, a belt, a straight collar shirt and a 12 inch clergy collar"
-    out = rt._comment_public_reply("", dm_sent=False, name_tag=" Grace", seed="g", product_known=True,
-                                   product_name="Cassock Set", price_text="$200", set_items=items)
-    assert "This is our Cassock Set, and it goes for $200" in out
-    assert f"It comes with {items}" in out
-    assert out.count("$200") == 1 and "$120" not in out
-    assert "place your order now" in out and "how many you need, your city" in out   # stock: no colour
+    items = rt._components_text(pc.set_components(_by("Cassock Set"), CATALOG), set_name="Cassock Set")
+    # the piece the set is named for is "the"; the rest come with it
+    assert items == "the cassock, a stole, a belt, a straight collar shirt and a 12 inch clergy collar"
+    for seed in ("g", "h", "i", "j", "k"):
+        out = rt._comment_public_reply("", dm_sent=False, name_tag=" Grace", seed=seed, product_known=True,
+                                       product_name="Cassock Set", price_text="$200", set_items=items)
+        assert "This is our Cassock Set, and " in out
+        # the figure carries its scope, in the same breath
+        assert ("$200, everything included" in out or "the whole set goes for $200" in out
+                or "$200 for everything" in out), out
+        assert f"It comes with {items}" in out
+        assert out.count("$200") == 1 and "$120" not in out and "?" not in out
+        # the owner's one step: the order, how many sets, how soon — no colour for a stock set
+        assert out.endswith("Kindly place your order now and let us know how many sets you may need "
+                            "and how soon you want them delivered 💛"), out
     mto = rt._comment_public_reply("", dm_sent=False, name_tag=" Grace", seed="g", product_known=True,
                                    product_name="Cassock Set", price_text="$200", set_items=items,
                                    made_to_order=True)
-    assert "the colour you need" in mto and "how many" not in mto
+    assert mto.endswith("let us know the colour you need and how soon you want it delivered 💛")
+    assert "how many" not in mto
     first = rt._comment_public_reply("", dm_sent=False, name_tag=" Grace", seed="g", product_known=True,
                                      product_name="Cassock Set", price_text="$200", set_items=items,
                                      first_contact=True)
-    assert first.startswith("Welcome to Bethany House Grace") and "It comes with" in first
+    assert first.startswith("Welcome to Bethany House Grace") and "It comes with the cassock" in first
 
 
 def test_the_set_line_in_swahili_keeps_the_hubs_name():
@@ -354,23 +362,41 @@ def test_the_set_line_in_swahili_keeps_the_hubs_name():
     out = rt._comment_public_reply("", dm_sent=False, name_tag=" Amina", seed="a", product_known=True,
                                    product_name="Cassock Set", price_text="KES 19,500", set_items=items,
                                    swahili=True, made_to_order=True)
-    assert "Hii ni Cassock Set yetu, na ni KES 19,500 kwa seti kamili" in out
-    assert f"Inakuja na {items}" in out and "rangi unayohitaji" in out
+    assert "Hii ni Cassock Set yetu, na seti kamili ni KES 19,500" in out
+    assert f"Inakuja na {items}, yote katika oda moja" in out
+    assert out.endswith("utuambie rangi unayohitaji na unaihitaji lini 💛")
+    stock = rt._comment_public_reply("", dm_sent=False, name_tag="", seed="a", product_known=True,
+                                     product_name="Cassock Set", price_text="KES 19,500", set_items=items,
+                                     swahili=True)
+    assert stock.endswith("utuambie seti ngapi unazohitaji na unazihitaji lini 💛")
 
 
 def test_the_bundle_line_accounts_for_every_item():
     total = pc.bundle_row([_by("Mitre"), _by("Cincture Rope"), _by("Skull Cap")])
+    # the Mitre is made to order, so the whole combination asks its colour
+    assert total["product_type"] == "variable" and total["is_producible"] is True
     items = rt._bundle_items_text(total["bundle_rows"], "USD")
     assert items == "the Mitre at $60, the Cincture Rope at $20 and the Skull Cap at $20"
-    out = rt._comment_public_reply("", dm_sent=False, name_tag=" Sam", seed="s", product_known=True,
-                                   product_name=total["name"], price_text="$100", set_items=items,
-                                   bundle=True)
-    assert items in out and "$100" in out and "all together" in out.lower()
+    for seed in ("s", "t", "u"):
+        out = rt._comment_public_reply("", dm_sent=False, name_tag=" Sam", seed=seed, product_known=True,
+                                       product_name=total["name"], price_text="$100", set_items=items,
+                                       bundle=True, made_to_order=True)
+        # the total first — it answers "how much" — then the account of it
+        assert ("The whole set comes to $100: " + items in out
+                or "comes to $100 — " + items in out), out
+        assert out.count("$100") == 1 and "?" not in out
+        assert out.endswith("let us know the colour you need and how soon you want it delivered 💛")
+    stock = pc.bundle_row([_by("Cincture Rope"), _by("Skull Cap")])
+    assert stock["product_type"] == "simple"
+    plain = rt._comment_public_reply("", dm_sent=False, name_tag="", seed="s", product_known=True,
+                                     product_name=stock["name"], price_text="$40",
+                                     set_items=rt._bundle_items_text(stock["bundle_rows"], "USD"), bundle=True)
+    assert plain.endswith("let us know how many you may need and how soon you want them delivered 💛")
     sw = rt._comment_public_reply("", dm_sent=False, name_tag="", seed="s", product_known=True,
                                   product_name=total["name"], price_text="KES 9,000",
                                   set_items=rt._bundle_items_text(total["bundle_rows"], "KES", swahili=True),
                                   bundle=True, swahili=True)
-    assert "Seti nzima — Mitre KES 5,500, Cincture Rope KES 2,000 na Skull Cap KES 1,500 — ni KES 9,000 kwa jumla" in sw
+    assert "Seti nzima ni KES 9,000 kwa jumla: Mitre KES 5,500, Cincture Rope KES 2,000 na Skull Cap KES 1,500" in sw
 
 
 def test_without_items_the_ordinary_line_is_unchanged():
@@ -382,7 +408,7 @@ def test_without_items_the_ordinary_line_is_unchanged():
 def test_the_engine_hands_the_set_line_its_items():
     src = inspect.getsource(rt._run_comment_engage)
     assert 'set_items = _bundle_items_text(matched["bundle_rows"], _ccy, swahili)' in src
-    assert 'set_items = _components_text(matched["components"], swahili)' in src
+    assert 'set_items = _components_text(matched["components"], swahili, set_name=product_name)' in src
     assert "ask_which=ask_which, set_items=set_items," in src and "bundle=is_bundle)" in src
     assert 'and not (matched.get("components") or matched.get("bundle"))' in src
 
@@ -409,11 +435,36 @@ def test_the_rules_say_a_set_is_its_total():
     for currency in ("USD", "KES"):
         p = build_system_prompt(country_iso="KE" if currency == "KES" else "", currency=currency)
         assert "A SET IS PRICED AS ITS TOTAL (owner rule, 2026-09-21)" in p
-        assert "It comes with a cassock, a stole, a belt" in p
+        assert "it goes for $200, everything\n  included. It comes with the cassock, a stole, a belt" in p
         assert "Separate items merely listed together" in p
+        assert "the cassock alone is\n  $120; the complete set with the stole, belt, shirt and collar is $200" in p
     add = rt._public_comment_addendum("USD")
     assert "A SET IS PRICED AS ITS TOTAL (owner, 2026-09-21" in add
     assert "Never one piece's price alone under a set post" in add
+
+
+def test_the_closing_rules_the_post_exposed():
+    """Owner, 2026-09-21: 'think wide and deeply, as the best linguist in
+    business and closing the sales' — a figure carries its scope, and a
+    'do you do this for …?' is a yes first, in their own words."""
+    p = build_system_prompt(currency="USD")
+    assert "A PRICE CARRIES ITS SCOPE (owner rule, 2026-09-21)" in p
+    assert "everything included" in p and '"the cassock alone is $120"' in p and '"$10 each"' in p
+    assert "IS A YES (owner, 2026-09-21" in p and "Do you\n  do for lay leaders" in p
+    assert "Yes Grace, we make this very set for lay\n  leaders too" in p
+    assert "never an example item the post never\n  showed" in p
+    add = " ".join(rt._public_comment_addendum("USD").split())
+    assert "A PRICE CARRIES ITS SCOPE (owner, 2026-09-21)" in add
+    assert "IS A YES (owner, 2026-09-21" in add and "lay leaders" in add
+    assert "never an example item the post never showed" in add
+    # the set lines never end on a question: the owner's sentence has none
+    for line in (rt._SET_SELL_POOL + rt._SET_FIRST_SELL_POOL + rt._BUNDLE_SELL_POOL
+                 + rt._BUNDLE_FIRST_SELL_POOL + rt._SW_SET_SELL_POOL + rt._SW_SET_FIRST_SELL_POOL
+                 + rt._SW_BUNDLE_SELL_POOL + rt._SW_BUNDLE_FIRST_SELL_POOL):
+        assert "?" not in line and "{ask}" in line and "{price}" in line and "{items}" in line, line
+        assert "Kindly place your order now" in line or "Tafadhali weka oda yako sasa" in line, line
+    for line in rt._SET_SELL_POOL + rt._SET_FIRST_SELL_POOL:
+        assert "everything included" in line or "whole set" in line or "for everything" in line, line
 
 
 # ── 7. the search tool marks a set row, and the owner's word for the belt ────
