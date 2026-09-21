@@ -162,17 +162,220 @@ async def product_from_image(redis, thumb_url: str, catalog: list[dict]) -> dict
     return scored[0][1]
 
 
+# ── provenance: how sure we are, and why ────────────────────────────────────
+# Every identity carries the rung that produced it and a confidence. The
+# canned (no-model) reply may PRICE a post's product only on a trusted rung:
+# the team's word, a storefront link, the hub's own name in the caption, the
+# hub's own photo reposted, or a vision read CONFIRMED against the product's
+# catalogue photo. A model's guess in a reply is never enough to sell blind
+# (owner, 2026-09-21: a tallit post sold anointing oil, a dress design sold
+# a bell, a cope post sold a ring — each a guess that reached a canned line).
+SOURCE_CONFIDENCE = {
+    "team": 1.0, "link": 1.0, "caption": 0.95, "image": 0.95,
+    "vision": 0.9, "vision-name": 0.7, "model": 0.6, "legacy": 0.5,
+}
+TRUSTED_SOURCES = ("team", "link", "caption", "image", "vision")
+TRUST_MIN = 0.8
+
+
+def with_provenance(row: dict | None, source: str, confidence: float | None = None) -> dict | None:
+    """A copy of the hub row stamped with how it was identified."""
+    if row is None:
+        return None
+    out = dict(row)
+    out["_identity_source"] = source
+    out["_identity_confidence"] = float(SOURCE_CONFIDENCE.get(source, 0.5)
+                                        if confidence is None else confidence)
+    return out
+
+
+def identity_trusted(record: dict | None) -> bool:
+    """May this recorded identity feed a PRICE into a reply no model reads?"""
+    if not record or not record.get("name"):
+        return False
+    src = str(record.get("source") or "")
+    try:
+        conf = float(record.get("confidence") or 0.0)
+    except (TypeError, ValueError):
+        conf = 0.0
+    return src in TRUSTED_SOURCES and conf >= TRUST_MIN
+
+
+_STOP = {
+    "the", "and", "for", "with", "our", "your", "you", "this", "that", "these",
+    "those", "from", "have", "has", "are", "was", "were", "new", "now", "today",
+    "order", "orders", "make", "call", "calling", "bethany", "house", "shop",
+    "available", "restocked", "restock", "stock", "stay", "tuned", "client",
+    "clients", "design", "designs", "finished", "work", "show", "going", "gave",
+    "share", "more", "please", "kindly", "all", "any", "one", "how", "much",
+    "what", "where", "when", "which", "who", "why", "can", "get", "buy",
+    "need", "want", "like", "just", "here", "there", "only", "also", "very",
+    "south", "africa", "kenya", "nairobi", "world", "worldwide", "ship",
+    "shipping", "delivery", "deliver", "price", "prices", "bei", "gani", "ngapi",
+    "na", "ya", "wa", "za", "kwa", "sasa", "leo",
+}
+
+
+def _sig_tokens(text: str) -> set[str]:
+    """Product-bearing words of a caption (no stop-words, no digits, stemmed of a
+    plural 's') — the words that can point at a hub row."""
+    out = set()
+    for t in re.findall(r"[a-z]+", (text or "").lower()):
+        if len(t) < 3 or t in _STOP:
+            continue
+        out.add(t[:-1] if t.endswith("s") and len(t) > 3 else t)
+    return out
+
+
+def vision_candidates(catalog: list[dict], caption: str = "", cap: int = 120) -> list[dict]:
+    """The rows to show the vision read: those sharing a product word with the
+    caption when it has any ("tallit", "cope"), else the whole shelf."""
+    toks = _sig_tokens(caption)
+    if toks:
+        narrowed = []
+        for p in catalog:
+            words = _sig_tokens(" ".join([p.get("name") or ""] + [str(a) for a in (p.get("aliases") or [])]))
+            if words & toks:
+                narrowed.append(p)
+        if narrowed:
+            return narrowed[:cap]
+    return [p for p in catalog if p.get("name")][:cap]
+
+
+_NAME_RE = re.compile(r"NAME\s*=\s*(.+?)\s*(?:\||CONF|$)", re.IGNORECASE | re.DOTALL)
+_CONF_RE = re.compile(r"CONF\s*=\s*(high|medium|low)", re.IGNORECASE)
+
+
+def parse_vision_pick(text: str, candidates: list[dict]) -> tuple[dict | None, str]:
+    """(row, confidence word) from the model's 'NAME=… CONF=…' line; (None, "")
+    for NONE, an unlisted name, or anything else. The name must be one of the
+    candidates EXACTLY (case-insensitive) — a paraphrase is not a row."""
+    t = " ".join((text or "").split())
+    if not t or t.strip().upper().startswith("NONE"):
+        return None, ""
+    m = _NAME_RE.search(t)
+    if not m:
+        return None, ""
+    name = m.group(1).strip().strip("\"'`.")
+    conf = (_CONF_RE.search(t).group(1).lower() if _CONF_RE.search(t) else "")
+    for p in candidates:
+        if (p.get("name") or "").strip().lower() == name.lower():
+            return p, conf
+    return None, ""
+
+
+async def product_from_vision(redis, thumb_url: str, catalog: list[dict],
+                              caption: str = "") -> dict | None:
+    """Rung 3.5 — SEE the post photo and COMPARE it to the catalogue (owner,
+    2026-09-21: "make the agent see the image, compare the image and give
+    the correct prices").
+
+    Two reads by the light model, no free text:
+      1. the post photo beside the catalogue NAMES (narrowed by the caption's
+         product words) — "which ONE listed item is the main item for sale?
+         NAME=<exact name> CONF=high|medium|low, or NONE". Only an exact
+         listed name at CONF=high goes on;
+      2. the post photo beside THAT product's own catalogue photo — "SAME
+         product or DIFFERENT?". Only SAME makes it a trusted identity
+         (source "vision", 0.9). A pick with no catalogue photo to compare
+         against is kept as "vision-name" (0.7): enough to steer the model's
+         careful read, never enough to price a canned reply.
+    A NONE / low / DIFFERENT result is remembered for a day per image so an
+    unidentifiable post costs one pair of reads, not one per comment. Any
+    failure → None; never blocks a reply."""
+    if not thumb_url or not settings.tier2_vision:
+        return None
+    none_key = "postcat:vision-none:" + hashlib.sha1(thumb_url.encode()).hexdigest()[:16]
+    if redis is not None:
+        try:
+            if await redis.get(none_key):
+                return None
+        except Exception:
+            pass
+    try:
+        import asyncio
+        from app.agent.runtime import build_llm      # lazy: runtime imports this module
+        from app.agent.media import load_image_block
+        post_block = await asyncio.to_thread(load_image_block, thumb_url)
+        if not post_block:
+            return None
+        cands = vision_candidates(catalog, caption)
+        if not cands:
+            return None
+        listing = "\n".join(f"{i + 1}. {p.get('name')}" for i, p in enumerate(cands))
+        llm = build_llm(model=settings.tier2_model_light)
+        resp = await llm.complete(
+            system=("You identify which catalogue item a shop's post photo shows. You "
+                    "answer only in the exact format asked, and you say NONE whenever "
+                    "you are not sure. Never invent a name that is not in the list."),
+            messages=[{"role": "user", "content": [
+                post_block,
+                {"type": "text", "text": (
+                    "Catalogue items (name only):\n" + listing + "\n\n"
+                    "Which ONE listed item is the main item for sale in this photo? "
+                    "Judge the object itself — its type, shape, finish and colour — not the "
+                    "caption. If it is a design drawing, a person, several items, or an item "
+                    "not in the list, answer NONE.\n"
+                    "Reply with exactly one line: NAME=<exact name from the list> | "
+                    "CONF=<high|medium|low>   or   NONE")}]}],
+            tools=[])
+        row, conf = parse_vision_pick(resp.text or "", cands)
+        result = None
+        if row is not None and conf == "high":
+            cat_url = ""
+            for im in (row.get("images") or [])[:1]:
+                cat_url = im.get("url") or im.get("image_url") or ""
+            cat_url = cat_url or row.get("image_url") or ""
+            if cat_url:
+                cat_block = await asyncio.to_thread(load_image_block, cat_url)
+                if cat_block:
+                    resp2 = await llm.complete(
+                        system=("You compare two product photos for a shop. Answer with one "
+                                "word only: SAME or DIFFERENT."),
+                        messages=[{"role": "user", "content": [
+                            {"type": "text", "text": "Photo A (a post):"}, post_block,
+                            {"type": "text", "text": f"Photo B (our catalogue photo of '{row.get('name')}'):"},
+                            cat_block,
+                            {"type": "text", "text": (
+                                "Is the main item in Photo A the SAME product as Photo B — the "
+                                "same kind of item, the same finish and colour? Lighting, angle "
+                                "and background may differ. Answer SAME or DIFFERENT.")}]}],
+                        tools=[])
+                    verdict = (resp2.text or "").strip().upper()
+                    if verdict.startswith("SAME"):
+                        result = with_provenance(row, "vision")
+                else:
+                    result = with_provenance(row, "vision-name")
+            else:
+                result = with_provenance(row, "vision-name")
+        if result is None and redis is not None:
+            try:
+                await redis.set(none_key, "1", ex=24 * 3600)
+            except Exception:
+                pass
+        return result
+    except Exception as exc:
+        _log.info("vision identification skipped: %s", exc)
+        return None
+
+
 # ── the resolver + the sweep ─────────────────────────────────────────────────
 
 
 async def resolve_post(redis, pctx: dict, catalog: list[dict]) -> dict | None:
-    """One post → its product, by the ladder. None = leave it to the model's
-    careful read and the team override."""
+    """One post → its product, by the ladder, each hit stamped with its rung
+    (`_identity_source`, `_identity_confidence` — see with_provenance). None =
+    leave it to the model's careful read and the team override."""
     title = (pctx.get("title") or "").strip()
     hit = product_from_caption(title, catalog)
-    if hit is None:
-        hit = await product_from_image(redis, (pctx.get("thumb") or "").strip(), catalog)
-    return hit
+    if hit is not None:
+        src = "link" if _SLUG_RE.search(title) else "caption"
+        return with_provenance(hit, src)
+    thumb = (pctx.get("thumb") or "").strip()
+    hit = await product_from_image(redis, thumb, catalog)
+    if hit is not None:
+        return with_provenance(hit, "image")
+    return await product_from_vision(redis, thumb, catalog, caption=title)
 
 
 async def sweep_page_posts(db, redis, limit: int = 25) -> dict:

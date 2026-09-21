@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -509,6 +510,44 @@ async def run_tool(name: str, args: dict, ctx: ToolContext) -> dict:
         return {"error": str(exc)[:300]}
 
 
+# The little words a product name never turns on. A caption or a comment
+# carries them by the dozen ("we have … at … our … from … this"); matching
+# them is how a random hub row became "the item they asked about".
+_SEARCH_STOP = frozenset({
+    "the", "and", "for", "with", "our", "your", "you", "this", "that", "these",
+    "those", "from", "have", "has", "are", "was", "were", "new", "now", "today",
+    "order", "make", "call", "calling", "bethany", "house", "shop", "available",
+    "restocked", "restock", "stay", "tuned", "client", "design", "designs",
+    "finished", "work", "show", "going", "gave", "share", "more", "please",
+    "kindly", "all", "any", "one", "how", "much", "what", "where", "when",
+    "which", "who", "why", "can", "get", "buy", "need", "want", "like", "just",
+    "here", "there", "only", "also", "very", "south", "africa", "kenya",
+    "nairobi", "world", "worldwide", "ship", "shipping", "delivery", "deliver",
+    "price", "prices", "cost", "bei", "gani", "ngapi", "pesa", "na", "ya", "wa",
+    "za", "kwa", "sasa", "leo", "is", "it", "its", "of", "in", "on", "to", "at",
+    "an", "a", "we", "us", "do", "does", "did", "be", "by", "or", "if", "so",
+})
+
+
+def _search_words(text: str) -> set:
+    """The words of a name / caption / query, lowercased, plural 's' stripped,
+    the stop-words and 1–2 letter fragments dropped."""
+    out = set()
+    for t in re.findall(r"[a-z0-9]+", (text or "").lower()):
+        if len(t) < 3 and not t.isdigit():
+            continue
+        if t in _SEARCH_STOP:
+            continue
+        if t.endswith("s") and len(t) > 3:
+            t = t[:-1]
+        out.add(t)
+    return out
+
+
+def _search_tokens(query: str) -> set:
+    return _search_words(query)
+
+
 async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
     # A customer can tell us where they are mid-conversation ("Kenyan money plz")
     # — the model then re-fetches with currency="KES"/"USD" instead of being
@@ -526,14 +565,32 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
     # is how a customer gets quoted 118.
     from app.services import promotions as promo
     campaign = await promo.campaign_now(ctx.redis)
-    toks = [t for t in query.split() if t]
+    # WORDS, not substrings, and no stop-words (owner, 2026-09-21). A caption's
+    # lead words used to reach this search — "We have restocked Tallits at…",
+    # "Our client from South Africa gave us this…" — and the any-token fallback
+    # matched "at" inside "boat", "we" inside "jewel", "us" inside "usher": a
+    # tallit post was sold anointing oil, a dress design a bell. A token now
+    # matches a whole word of the name / category / aliases (plural-tolerant),
+    # and the little words that carry no product are dropped before matching.
+    toks = _search_tokens(query)
+    # A query made ONLY of little words ("our client from south africa gave us
+    # this") names nothing: say so, rather than answering with the whole shelf
+    # the way an empty query (a browse) does.
+    only_stop_words = bool(re.findall(r"[a-z0-9]+", query)) and not toks
+    if only_stop_words:
+        return {"count": 0, "currency": ctx.currency, "results": [],
+                "note": "no product words in the query — nothing to match; ask which "
+                        "item they mean, or search by the item's name"}
 
-    def _hay(p: dict) -> str:
-        return " ".join([p.get("name", ""), p.get("category", ""),
-                         " ".join(p.get("aliases") or [])]).lower()
+    def _words(p: dict) -> set:
+        return _search_words(" ".join([p.get("name", ""), p.get("category", ""),
+                                       " ".join(p.get("aliases") or [])]))
+
+    def _hay(p: dict) -> set:      # kept name: the word-set the fallback scores
+        return _words(p)
 
     def hit(p: dict) -> bool:
-        return all(t in _hay(p) for t in toks) if toks else True
+        return toks.issubset(_words(p)) if toks else True
 
     def _kes(p: dict) -> tuple[int, float]:
         # CHEAPEST FIRST (owner, 2026-09-16): among equal matches the humblest
@@ -575,12 +632,16 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
             return sum(t in name for t in toks)
         matched = sorted([p for p in catalog if hit(p)],
                          key=lambda p: (-_name_hits(p), _kes(p)))
+    partial = False
     if not matched and len(toks) > 1:
         # All-token match found nothing ("clerical shirt", "cassock set") — fall
         # back to any-token so the model gets candidates instead of a dead end,
-        # best matches (most tokens hit) first, the cheapest among equals.
-        scored = [(sum(t in _hay(p) for t in toks), p) for p in catalog]
+        # best matches (most WORDS hit) first, the cheapest among equals. These
+        # rows are PARTIAL matches and say so: the model confirms the item
+        # before quoting, and no canned reply is ever built from them.
+        scored = [(len(toks & _hay(p)), p) for p in catalog]
         matched = [p for s, p in sorted(scored, key=lambda x: (-x[0], _kes(x[1]))) if s > 0]
+        partial = bool(matched)
 
     results = []
     for p in matched:
@@ -599,6 +660,11 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
         row["price"] = _to_display(p.get("price"), ctx, p.get("price_usd"),
                                    prices=p.get("prices"))
         row["currency"] = ctx.currency
+        if partial:
+            row["match"] = "partial"
+            row["caution"] = ("only SOME of their words match this row — confirm it "
+                              "is the item they mean (or what the photo shows) before "
+                              "you quote it; never present a partial match as THE item")
         # An unpriced hub row (e.g. "Bread container", KES 0 — no price set)
         # must NEVER surface as 0 or "free". Strip the number and say why, so
         # the model confirms with the team instead of quoting nothing-money.

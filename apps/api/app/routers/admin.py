@@ -1374,7 +1374,11 @@ async def set_post_product(post_id: str, request: Request, body: dict,
         or product_from_caption(q, catalog)
     if hit is None:
         raise HTTPException(status_code=404, detail=f"no catalogue product matches '{q}'")
-    await _remember_post_product(request.app.state.redis, channel, post_id, hit)
+    # The team's word is the strongest rung there is: source "team", 1.0 —
+    # the one identity a canned reply may always price.
+    from app.services.post_catalog import with_provenance
+    await _remember_post_product(request.app.state.redis, channel, post_id,
+                                 with_provenance(hit, "team"))
     return {"ok": True, "post_id": post_id, "channel": channel,
             "product": hit.get("name"), "slug": hit.get("slug")}
 
