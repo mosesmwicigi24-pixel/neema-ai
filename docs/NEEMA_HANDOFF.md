@@ -73,6 +73,32 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   product words) at CONF=high, then confirms SAME/DIFFERENT against that
   product's own catalogue photo; only SAME is trusted. A NONE is cached a day
   per image. The team override stamps "team".
+- **A set is priced as its total** (owner 2026-09-21: under a five-piece
+  cassock outfit, "the Cassock is $120" was read as the price of the whole
+  set — "if the description describes a product that has different
+  combinations of items, we should always do the total"). The identity ladder
+  reads a caption that ENUMERATES several items (`post_catalog
+  .caption_item_kinds`: a run of list pieces each naming one kind of hub row —
+  "cassock, shirt, collar, cincture belt and stole") and never resolves it to
+  one of them: with a set cue ("complete", "set", "comes with", a person
+  "robed in"…) it is the hub's own SET row whose contents cover the list
+  (`product_set_from_caption` — the row's `components` parsed from the hub
+  description, "Cassock Set" $200 comes with cassock, stole, belt, straight
+  collar shirt and a 12 inch clergy collar), else the listed rows TOTALLED
+  when each is exactly one hub row (`bundle_from_caption` → a synthetic
+  `bundle` row: names joined with " + ", KES/USD totals, the dearest item's
+  slug); anything less is no identity, and the model gets the rule and the
+  listed items in its context. The resolver leads the sink with the RECORDED
+  row (by slug, then exact name — "cassock set" also finds the cheaper ladies'
+  set) and attaches `components`; a bundle record keeps its items and is
+  re-totalled from fresh hub rows. The canned lines (`_SET_*` / `_BUNDLE_*`,
+  Swahili too) say the set's one price and what it comes with in the owner's
+  shape; `search_catalog` marks a set row `set` with `comes_with`; the prompt
+  rule A SET IS PRICED AS ITS TOTAL and the comment addendum carry the same
+  law. "Signature belt" (the owner's word) is the hub's CINCTURE BELT
+  (`core/synonyms`). Hub row to check (owner-side): the "Cassock Set" row is
+  $200 / KES 19,500 while its five pieces sum to $220 — the set row is the
+  figure Neema gives, as the hub's own.
 - **Cheapest first, then climb; say it like a person** (owner 2026-09-16). A
   KIND of thing ("how much is that Holy Communion set?") is a RANGE, not a row:
   `synonyms.RANGES` names the hub rows in it (communion trays and sets — the

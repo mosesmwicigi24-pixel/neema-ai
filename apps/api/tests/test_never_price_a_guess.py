@@ -266,7 +266,7 @@ def test_the_engine_sells_only_on_a_trusted_identity_that_was_asked_for():
     assert "ask_which = is_bare_price_ask(prompt_text)" in src
     assert 'price_text = "from " + price_text' in src
     assert "comment_text=comment_text, saw_image=bool(media)" in src
-    assert "ask_which=ask_which)" in src
+    assert "ask_which=ask_which, set_items=set_items," in src
 
 
 def test_names_product_reads_the_comment():

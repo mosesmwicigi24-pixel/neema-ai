@@ -572,6 +572,7 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
     # tallit post was sold anointing oil, a dress design a bell. A token now
     # matches a whole word of the name / category / aliases (plural-tolerant),
     # and the little words that carry no product are dropped before matching.
+    from app.services.post_catalog import is_set_row, set_components
     toks = _search_tokens(query)
     # A query made ONLY of little words ("our client from south africa gave us
     # this") names nothing: say so, rather than answering with the whole shelf
@@ -723,6 +724,15 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
         details = (p.get("description") or "").strip()
         if details:
             row["details"] = details[:260]
+        # A SET IS PRICED AS ITS TOTAL (owner, 2026-09-21): a hub set row is ONE
+        # price for everything in it — the row says so, and what it comes with.
+        if is_set_row(p):
+            row["set"] = {
+                "comes_with": set_components(p, catalog),
+                "note": ("ONE hub row priced as a whole set — quote `price` for the "
+                         "complete set and say what it comes with; never one piece's "
+                         "price as the set's"),
+            }
         # The workshop's own measurement spec for THIS item (production items
         # carry it in the hub) — the source of truth for WHAT to ask when
         # measuring. Compacted to one line; required figures lead.
