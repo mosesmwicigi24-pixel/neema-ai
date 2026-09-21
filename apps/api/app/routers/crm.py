@@ -17,13 +17,14 @@ from sqlalchemy import select, func, or_
 from app.database import get_db
 from app.models.agent import Agent
 from app.models.user import User
-from app.core.phone import is_plausible_phone
+from app.core.phone import is_plausible_phone, to_e164
 from app.models.order_event import OrderEvent
 from app.models.conversation import Conversation
 from app.models.customer_history import CustomerHistory
 from app.models.person import Person, Identity, Identifier, PersonMerge
 from app.routers.admin import get_current_agent
 from app.core import hub_client
+from app.services.identity import whatsapp_handle_proven
 from datetime import datetime, timezone
 import json
 import uuid as _uuid
@@ -581,7 +582,11 @@ async def get_customer(
             pass
     for cand in hub_candidates:
         try:
-            found = await hub_client.fetch_customer_summary(cand, redis)
+            # A handle the phone library can't validate (CI/CM pre-renumbering…)
+            # still resolves when WhatsApp has delivered messages from it.
+            proven = (to_e164(cand) is None
+                      and await whatsapp_handle_proven(db, cand))
+            found = await hub_client.fetch_customer_summary(cand, redis, proven=proven)
         except Exception:
             found = None
         if found:
@@ -1673,6 +1678,8 @@ async def push_production(
     except Exception:
         pass
 
+    proven = (to_e164(e.phone) is None
+              and await whatsapp_handle_proven(db, e.phone))
     try:
         result = await hub_client.create_production_order(
             wa_id=e.phone or "",
@@ -1683,6 +1690,7 @@ async def push_production(
             quantity=1,
             unit_price=unit_price,
             production_notes=_measurement_notes(e),
+            proven=proven,
         )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Hub rejected the order: {exc}")

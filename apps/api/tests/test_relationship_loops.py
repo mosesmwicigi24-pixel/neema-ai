@@ -428,7 +428,7 @@ def test_saved_figures_ride_the_production_order(monkeypatch):
     async def _fake_post_json(*a, **k):  # not used — we stop before HTTP
         raise AssertionError
 
-    async def _no_customer(wa_id): return None
+    async def _no_customer(wa_id, **_kw): return None
     monkeypatch.setattr(hc, "_find_customer_id", _no_customer)
 
     class _Resp:
@@ -471,7 +471,7 @@ def test_figures_reach_the_workshop_even_via_the_stock_path(monkeypatch):
     from app.core import hub_client as hc
     captured = {}
 
-    async def _no_customer(wa_id): return None
+    async def _no_customer(wa_id, **_kw): return None
     monkeypatch.setattr(hc, "_find_customer_id", _no_customer)
 
     class _Resp:

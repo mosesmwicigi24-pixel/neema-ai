@@ -436,7 +436,7 @@ def _is_made_to_order(line: dict) -> bool:
     return line.get("product_type") == "variable" and bool(line.get("is_producible"))
 
 
-async def _search_customer_match(wa_id: str) -> dict | None:
+async def _search_customer_match(wa_id: str, *, proven: bool = False) -> dict | None:
     """Find the hub customer that is the *same person* as this WhatsApp contact.
 
     The hub stores numbers in mixed formats (0712…, 254712…, +254712…), so we
@@ -444,9 +444,14 @@ async def _search_customer_match(wa_id: str) -> dict | None:
     the full country-aware E.164 — so a Kenyan contact never matches a Ugandan
     number that merely shares trailing digits. Hub numbers with no country code are
     read as Kenyan (the shop's home country). Returns {id, name, phone} or None.
+
+    `proven`: WhatsApp has delivered messages from this exact handle (see
+    `services.identity.whatsapp_handle_proven`), so a wa_id the phone library
+    can't validate (CI/CM pre-renumbering…) still matches the hub customer Neema
+    created with it — instead of a duplicate customer on every order.
     """
     from app.core.phone import national_digits, same_number
-    q = national_digits(wa_id) or "".join(ch for ch in wa_id if ch.isdigit())
+    q = national_digits(wa_id, proven=proven) or "".join(ch for ch in wa_id if ch.isdigit())
     base = settings.hub_api_url.rstrip("/")
     try:
         async with httpx.AsyncClient(timeout=12.0) as client:
@@ -457,22 +462,22 @@ async def _search_customer_match(wa_id: str) -> dict | None:
             )
             resp.raise_for_status()
             for c in (resp.json() or {}).get("data", []):
-                if same_number(wa_id, c.get("phone")):
+                if same_number(wa_id, c.get("phone"), proven=proven):
                     return {"id": c.get("id"), "name": c.get("name"), "phone": c.get("phone")}
     except Exception:
         pass  # dedupe is a nicety — fall back to new_customer
     return None
 
 
-async def _find_customer_id(wa_id: str) -> int | None:
+async def _find_customer_id(wa_id: str, *, proven: bool = False) -> int | None:
     """Reuse an existing hub customer by phone so repeat buyers don't duplicate."""
-    match = await _search_customer_match(wa_id)
+    match = await _search_customer_match(wa_id, proven=proven)
     return match["id"] if match else None
 
 
-async def _find_customer(wa_id: str) -> dict | None:
+async def _find_customer(wa_id: str, *, proven: bool = False) -> dict | None:
     """Like `_find_customer_id` but returns {id, name, phone} of the hub match."""
-    return await _search_customer_match(wa_id)
+    return await _search_customer_match(wa_id, proven=proven)
 
 
 async def push_pending_order(
@@ -486,6 +491,7 @@ async def push_pending_order(
     source_channel: str | None = None,
     campaign_note: str = "",
     promise: dict | None = None,
+    proven: bool = False,
 ) -> dict:
     """Create a pending order in the hub from a confirmed WhatsApp cart.
 
@@ -604,7 +610,7 @@ async def push_pending_order(
     if country_iso:
         payload["customer_country_code"] = country_iso.upper()
 
-    customer_id = await _find_customer_id(wa_id)
+    customer_id = await _find_customer_id(wa_id, proven=proven)
     if customer_id:
         payload["customer_id"] = customer_id
     else:
@@ -647,6 +653,7 @@ async def create_production_order(
     quantity: int = 1,
     unit_price: float | None = None,
     production_notes: str = "",
+    proven: bool = False,
 ) -> dict:
     """Create a made-to-order production order in the hub from a reviewed
     enquiry — a single production line, with the customer's measurements carried
@@ -669,7 +676,7 @@ async def create_production_order(
     if country_iso:
         payload["customer_country_code"] = country_iso.upper()
 
-    customer_id = await _find_customer_id(wa_id)
+    customer_id = await _find_customer_id(wa_id, proven=proven)
     if customer_id:
         payload["customer_id"] = customer_id
     else:
@@ -743,7 +750,7 @@ def _map_hub_order(o: dict) -> dict:
     }
 
 
-async def fetch_customer_summary(wa_id: str, redis=None) -> dict | None:
+async def fetch_customer_summary(wa_id: str, redis=None, *, proven: bool = False) -> dict | None:
     """The customer's hub record — lifetime stats + recent orders (POS, web AND
     WhatsApp), resolved by phone.
 
@@ -763,7 +770,7 @@ async def fetch_customer_summary(wa_id: str, redis=None) -> dict | None:
         except Exception:
             pass
 
-    match = await _find_customer(wa_id)
+    match = await _find_customer(wa_id, proven=proven)
     if not match:
         return None
     customer_id = match["id"]
