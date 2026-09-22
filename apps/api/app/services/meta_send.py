@@ -234,13 +234,18 @@ async def like_comment(comment_id: str, page_id: str | None = None,
                        channel: str = "facebook") -> bool:
     """The Page's Like on a comment (`POST /{comment-id}/likes`) — the reaction
     a shopkeeper gives a customer who spoke to them (owner, 2026-09-22: like
-    every answered comment). Facebook only: the Instagram Graph API has no
-    edge for a business account to like a comment. True when it landed;
-    False on any failure — a Like is never worth a failed reply, so callers
-    treat it as best-effort."""
+    every answered comment). THE HOUSE USES TWO REACTIONS ONLY, the Like and
+    the Love (owner, 2026-09-22: "only likes and love — we do not use any
+    other"); never Haha, Wow, Sad, Angry or Care. The Graph API lets a Page
+    put only the Like on a comment (the `/likes` edge; there is no write edge
+    for any other reaction), so the Like is the one reaction sent from here.
+    Facebook only: the Instagram Graph API has no edge for a business account
+    to like a comment. True when it landed; False on any failure — a Like is
+    never worth a failed reply, so callers treat it as best-effort."""
     if not comment_id or channel == "instagram":
         return False
     try:
+        # The Like edge, and nothing else: no reaction type is ever sent.
         await _graph_post(f"{comment_id}/likes", {}, "like comment", page_id=page_id)
         return True
     except Exception as exc:

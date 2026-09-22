@@ -45,6 +45,17 @@ def test_a_failed_like_is_false_never_an_error(monkeypatch):
     assert len(calls) == 1
 
 
+def test_the_house_reacts_with_the_like_only_never_another_reaction():
+    """Owner, 2026-09-22: only the Like and the Love are used — never Haha,
+    Wow, Sad, Angry or Care. The API offers a Page only the Like on a
+    comment, so the Like edge is the one write, with no reaction type."""
+    src = inspect.getsource(ms.like_comment)
+    assert 'f"{comment_id}/likes"' in src and "reactions" not in src.replace("reaction", "")
+    for word in ("HAHA", "WOW", "SAD", "ANGRY", "CARE", '"type"'):
+        assert word not in src, word
+    assert 'await _graph_post(f"{comment_id}/likes", {}, "like comment", page_id=page_id)' in src
+
+
 def test_instagram_and_empty_ids_are_never_liked(monkeypatch):
     calls = _graph(monkeypatch)
     assert asyncio.run(ms.like_comment("178_9", channel="instagram")) is False

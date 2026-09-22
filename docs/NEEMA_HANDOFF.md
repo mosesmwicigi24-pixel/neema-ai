@@ -81,9 +81,12 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   pages_manage_engagement permission the replies use), a beat later: a
   question, a hello, a cheer, an "amen", a live-stream welcome. Never on a
   complaint, never on spam (no reply, no Like), never on Instagram (no such
-  edge). `META_COMMENT_LIKE` (default on) switches it off. The commenter is
-  notified and comes back to the thread; the dashboard task moves with the
-  replies.
+  edge). THE HOUSE USES TWO REACTIONS ONLY — the Like and the Love (owner
+  2026-09-22: "only likes and love, we do not use any other"); never Haha,
+  Wow, Sad, Angry or Care. The API lets a Page put only the Like on a
+  comment, so the Like is the one reaction Neema sends. `META_COMMENT_LIKE`
+  (default on) switches it off. The commenter is notified and comes back to
+  the thread; the dashboard task moves with the replies.
 - **A set is priced as its total** (owner 2026-09-21: under a five-piece
   cassock outfit, "the Cassock is $120" was read as the price of the whole
   set — "if the description describes a product that has different
