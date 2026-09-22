@@ -215,6 +215,19 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "- ANSWER THE QUESTION THEY ACTUALLY ASKED. If it isn't about price — where we "
         "are, delivery, opening hours, whether we ship to their country — answer THAT "
         "first, briefly, and only add a price if it's relevant.\n"
+        "- READ THE INTENT, THEN ANSWER IT (owner, 2026-09-22). Every comment is "
+        "one of these, and your context names the reading: a REQUEST — they want "
+        "something shown, sent or offered ('share more designs for ladies', 'send "
+        "the catalogue', 'more photos') — is answered WITH THE SHELF: search_catalog "
+        "for it, name the two or three closest items with their prices, and say "
+        "you have sent photos to their inbox; never a bare 'send us a message'. A "
+        "QUESTION is answered first, exactly. A COMPLAINT gets no price and no "
+        "pitch: one humble line by its weight, and a colleague takes it up (the "
+        "team has been told). PRAISE is thanked in kind. A MIXED comment — kind "
+        "words and a grievance in one breath — is thanked first, then the "
+        "grievance is taken as a complaint. A GREETING is greeted back. When the "
+        "reading is unsure, the best interest of the customer and the shop "
+        "decides: answer what can be answered, hand a person the rest.\n"
         "- READ THE MOOD BEFORE YOU SELL. This is a PUBLIC square: everyone reading "
         "judges us by how we treat one person. If the comment carries displeasure, a "
         "correction, doubt, or a grievance — even three words like 'this is wrong' — do "
@@ -902,7 +915,8 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                    *, channel: str = "whatsapp", external_id: str | None = None,
                    public_comment: bool = False, read_only: bool = False,
                    scribe_only: bool = False,
-                   product_sink: list | None = None) -> str:
+                   product_sink: list | None = None,
+                   comment_reading: dict | None = None) -> str:
     """Run one agent turn and return the reply text (does NOT send it).
 
     WhatsApp is the default and unchanged. For Messenger/Instagram, pass
@@ -1208,6 +1222,12 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         mem_ctx = await build_memory_context(db, redis, key, user=user, channel=channel)
         if mem_ctx:
             lead_ctx.append(f"(Context — what you know about this customer:\n{mem_ctx})")
+    if public_comment and comment_reading:
+        # What this comment IS (owner, 2026-09-22): a request is answered with
+        # the shelf, a question with the answer, praise in kind.
+        _rline = _reading_context(comment_reading)
+        if _rline:
+            lead_ctx.append(_rline)
     if lead_ctx:
         content = "\n\n".join(lead_ctx)
         if post_img:
@@ -1746,7 +1766,82 @@ _SW_PUBLIC_EMPATHY = (
     "Asante kwa kutuambia{name} 🙏 Tunalichukulia hili kwa uzito, na mmoja wetu "
     "atazungumza nawe binafsi ili kulirekebisha."
 )
+# READ THE INTENT, GRADE IT, ROUTE IT (owner, 2026-09-22): "the agent should
+# read the intent, grade the intent — is it a request, a complaint, a
+# commendation? If a complaint, it should be graded on severity and referred
+# to a human agent. If a compliment, handled by Neema. If a statement that
+# looks like all three, resolve it wisely, in the best interest of the
+# business and the client."
+#
+# A complaint's WEIGHT decides the words and the hand-off: 1 — a correction
+# or a small disappointment (the line above: taken seriously, a person will
+# speak with them); 2 — an order gone wrong (not delivered, wrong item, paid
+# and nothing came, poor quality): an apology, a colleague today, and a
+# private message opened so the details come privately; 3 — grave (a scam or
+# fraud accusation, a threat to go public, abuse): the same, said with more
+# weight, and the team's bell rings. A MIXED comment (kind words and a
+# grievance in one breath) thanks first, then takes the grievance as a
+# complaint. No cheer, no price, no pitch on any of them.
+_EMPATHY_SERIOUS = (
+    "We're sorry{name} 🙏 This is not the experience we want for you. One of our "
+    "team is looking into it now{private}."
+)
+_EMPATHY_GRAVE = (
+    "We're truly sorry{name} 🙏 We hear you, and this will be handled personally "
+    "by our team today{private}."
+)
+_PRIVATE_SENT = ", and I've sent you a private message so we can put it right quickly"
+_PRIVATE_SENT_GRAVE = ", and I've sent you a private message so we can resolve it with you directly"
+_EMPATHY_MIXED = (
+    "Thank you for the kind words{name} 🙏 and we're sorry about the part that "
+    "went wrong. One of us will speak with you personally to put it right."
+)
+_SW_EMPATHY_SERIOUS = (
+    "Samahani{name} 🙏 Hii si huduma tunayokusudia kwako. Mmoja wa timu yetu "
+    "analishughulikia sasa{private}."
+)
+_SW_EMPATHY_GRAVE = (
+    "Samahani sana{name} 🙏 Tumekusikia, na timu yetu italishughulikia binafsi "
+    "leo{private}."
+)
+_SW_PRIVATE_SENT = ", na nimekutumia ujumbe wa faragha ili tulirekebishe haraka"
+_SW_PRIVATE_SENT_GRAVE = ", na nimekutumia ujumbe wa faragha ili tulitatue nawe moja kwa moja"
+_SW_EMPATHY_MIXED = (
+    "Asante kwa maneno yako mazuri{name} 🙏 na samahani kwa sehemu iliyoenda "
+    "vibaya. Mmoja wetu atazungumza nawe binafsi ili kulirekebisha."
+)
+# The private message that follows a serious or grave complaint: the details
+# come privately, a person takes it up. No link, no price, no pitch.
+_PRIVATE_COMPLAINT = (
+    "Hello{name}, this is Bethany House. We're sorry about this, and we want to "
+    "put it right. Please share the details here — your name, what you ordered "
+    "and when — and a colleague will take it up with you personally today."
+)
+_SW_PRIVATE_COMPLAINT = (
+    "Habari{name}, hapa ni Bethany House. Samahani kwa hili, na tunataka "
+    "kulirekebisha. Tafadhali tuandikie maelezo hapa — jina lako, ulichoagiza "
+    "na lini — na mwenzetu atalishughulikia nawe binafsi leo."
+)
+# A REQUEST or a QUESTION we could not answer in the thread (no model: the
+# spend stop, the per-post cap, a failed turn): never the old signpost
+# ("send us a message"). Their words are noted back to them, a person is
+# promised, and the team is handed the ask — so the thread stays the shop.
+_REQUEST_ACK_POOL = [
+    "Thank you{name} 🙏 Noted: {ask}. One of our team will send you the options right here shortly.",
+    "Thank you{name} 🙏 We have you: {ask}. Our team will come back to you here with what we have shortly.",
+]
+_QUESTION_ACK_POOL = [
+    "Thank you{name} 🙏 Good question — one of our team will answer you right here shortly.",
+    "Thank you{name} 🙏 Let us get you the exact answer — our team will reply to you here shortly.",
+]
+_SW_REQUEST_ACK_POOL = [
+    "Asante{name} 🙏 Tumepokea: {ask}. Mmoja wa timu yetu atakutumia chaguo hapa hivi karibuni.",
+]
+_SW_QUESTION_ACK_POOL = [
+    "Asante{name} 🙏 Swali zuri — mmoja wa timu yetu atakujibu hapa hivi karibuni.",
+]
 _INTENTS = ("high", "low", "negative", "spam", "goodwill")
+_KINDS = ("request", "question", "complaint", "praise", "mixed", "greeting", "other")
 
 # Dissatisfaction is often three words long ("this is wrong"), and a light model
 # reading a clergy-store comment biased toward "buying interest" has labelled
@@ -1763,7 +1858,8 @@ _NEGATIVE_RE = re.compile(
     r"not\s+(?:true|correct|right)|incorrect|misleading|"
     r"wrong\s+(?:information|info|price|colour|color|item|order)|"
     r"poor\s+(?:quality|service)|bad\s+(?:quality|service)|"
-    r"never\s+(?:replied|delivered|received|answered)|"
+    r"never\s+(?:replied|delivered|received|answered|came|arrived)|"
+    r"not\s+(?:delivered|received)|"
     r"still\s+(?:waiting|haven'?t)|no\s+one\s+(?:replied|answered)|"
     r"scam|fraud|cheat(?:ed|ing)?|con\s+men|thieves|"
     r"disappoint(?:ed|ing)|refund|"
@@ -1794,6 +1890,93 @@ def looks_negative(text: str) -> bool:
     """True when a comment plainly expresses displeasure, a correction, or a
     grievance. Deterministic first pass for `classify_comment_intent`."""
     return bool(_NEGATIVE_RE.search((text or "").strip()))
+
+
+# A REQUEST — they want something shown, sent or offered: "share more designs
+# for ladies", "send the catalogue", "post prices", "more photos please". Read
+# deterministically too, so the reading survives a model outage (Queen Gili,
+# 2026-09-21: "Please more designs for ladies" during the credit stop got
+# "send us a message and we'll help however we can").
+_REQUEST_RE = re.compile(
+    r"\b(?:share|send|show|post|upload|give|bring|tuma|tutumie|onyesha|weka)\b.{0,40}?"
+    r"\b(?:designs?|photos?|pictures?|pics?|images?|videos?|catalogue|catalog|"
+    r"options?|samples?|prices?|price\s+list|list|collection|styles?|models?|"
+    r"colou?rs?|sizes?|picha|bei|mitindo)\b"
+    r"|\b(?:more|other|different|zaidi|nyingine)\s+(?:designs?|photos?|pictures?|pics?|"
+    r"options?|styles?|colou?rs?|models?|samples?|picha|mitindo)\b"
+    r"|\b(?:designs?|photos?|pictures?|catalogue|price\s+list)\s+(?:please|pls|plz|tafadhali)\b",
+    re.IGNORECASE,
+)
+# Kind words — the praise half of a MIXED comment ("beautiful work, but my
+# order never came"), and a compliment on its own.
+_PRAISE_RE = re.compile(
+    r"\b(?:beautiful|lovely|nice|great|good\s+work|well\s+done|amazing|awesome|"
+    r"wonderful|excellent|gorgeous|elegant|superb|perfect|classy|smart|"
+    r"love\s+(?:it|this|them|your)|congrat\w*|bless\w*|amen|"
+    r"thank\s+you|thanks|asante|nzuri|safi|maridadi|hongera|barikiwa)\b",
+    re.IGNORECASE,
+)
+_QUESTION_MARK_RE = re.compile(r"\?|\b(?:how|what|where|when|which|can|do\s+you|is\s+it|"
+                               r"bei|ngapi|wapi|je\b)", re.IGNORECASE)
+# The weight of a grievance, from its own words (see the pools above).
+# ("stole" is a vestment here, never a theft; a lie is "you lied".)
+_GRAVE_RE = re.compile(
+    r"\b(?:scam\w*|fraud\w*|cheat\w*|con\s*men|thie\w+|steal\w*|stolen|lied|lying|liars?|"
+    r"shame\s+on\s+you|report(?:ed|ing)?\s+(?:you|this)|police|expose|"
+    r"wezi|wizi|tapeli|uongo)\b",
+    re.IGNORECASE,
+)
+_SERIOUS_RE = re.compile(
+    r"\b(?:refund|never\s+(?:delivered|received|came|arrived|sent)|not\s+(?:delivered|"
+    r"received|arrived)|still\s+(?:waiting|haven'?t)|wrong\s+(?:item|order|colour|color|"
+    r"size|product)|poor\s+quality|bad\s+quality|torn|broken|damaged|paid\s+(?:and|but)|"
+    r"my\s+money|no\s+one\s+(?:replied|answered)|never\s+(?:replied|answered)|"
+    r"weeks?\s+(?:ago|now)|months?\s+(?:ago|now)|sijapokea|haijafika|hela\s+yangu|"
+    r"pesa\s+yangu)\b",
+    re.IGNORECASE,
+)
+
+
+def looks_request(text: str) -> bool:
+    """A comment asking us to SHOW or SEND something (designs, photos, the
+    catalogue, prices, options) — answered with what the hub has for it."""
+    return bool(_REQUEST_RE.search((text or "").strip()))
+
+
+def looks_praise(text: str) -> bool:
+    return bool(_PRAISE_RE.search((text or "").strip()))
+
+
+def grade_complaint(text: str) -> int:
+    """The weight of a grievance, 1–3, from its own words: 3 grave (a scam or
+    fraud accusation, a threat to report, abuse), 2 serious (an order gone
+    wrong, money paid, nothing received, poor quality, weeks of waiting),
+    1 mild (a correction, a disappointment). Never 0 for a complaint."""
+    t = (text or "").strip()
+    if not t:
+        return 1
+    if _GRAVE_RE.search(t):
+        return 3
+    if _SERIOUS_RE.search(t):
+        return 2
+    return 1
+
+
+def request_ask(text: str, ask: str = "") -> str:
+    """What they asked for, in their own words, short enough for a reply:
+    the model's phrase when it gave one, else the comment itself trimmed of
+    its politeness ("Share more designs for ladies, interested." → "more
+    designs for ladies")."""
+    a = " ".join((ask or "").split()).strip(" .,;:!\"'")
+    if a and a != "-":
+        return a[:80]
+    t = " ".join((text or "").split())
+    t = re.sub(r"\b(?:please|pls|plz|kindly|tafadhali|interested|thanks?|thank\s+you|asante)\b",
+               " ", t, flags=re.IGNORECASE)
+    t = re.sub(r"^(?:share|send|show|post|upload|give|bring|tuma|tutumie|onyesha|weka)\s+",
+               "", t.strip(), flags=re.IGNORECASE)
+    t = " ".join(t.split()).strip(" .,;:!\"'")
+    return (t[:80] or "what you asked for").lower() if t else "what you asked for"
 
 
 # A person CHEERING US ON. "We can't wait to have you Bethany in Zambia" was
@@ -1832,44 +2015,195 @@ def looks_goodwill(text: str) -> bool:
     return bool(_GOODWILL_RE.search(t)) and not _GRIEVANCE_CUE_RE.search(t)
 
 
-async def classify_comment_intent(text: str, redis=None) -> str:
-    """Label a public comment so we react appropriately. Cheap light-model call.
-    Errs toward 'high' (engage) on uncertainty — better to help than go silent —
-    but returns 'low' for an empty comment (emoji/sticker with no text).
+def _reading(intent: str, kind: str = "other", severity: int = 0, ask: str = "") -> dict:
+    return {"intent": intent, "kind": kind, "severity": int(severity), "ask": ask}
 
-    `high` covers ANY genuine question, not just a price one: a location/delivery/
-    hours question ("where are you?", "are you in Kenya?") used to fit no bucket
-    and fell into `spam` by elimination, which meant total silence. `spam` is now
-    only actual spam, and a comment we can't read is never spam for that reason."""
+
+_READING_RE = re.compile(
+    r"intent\s*=\s*(?P<intent>[a-z]+)|kind\s*=\s*(?P<kind>[a-z]+)|"
+    r"severity\s*=\s*(?P<severity>[0-3])|ask\s*=\s*(?P<ask>[^|\n]*)",
+    re.IGNORECASE,
+)
+
+
+def parse_comment_reading(text: str) -> dict | None:
+    """The light model's one line — `intent=high | kind=request | severity=0 |
+    ask=more designs for ladies` — as a reading; a bare label ("high") is an
+    intent with nothing else; anything unreadable is None."""
     t = (text or "").strip()
     if not t:
-        return "low"
+        return None
+    found: dict = {}
+    for m in _READING_RE.finditer(t):
+        for k, v in m.groupdict().items():
+            if v is not None and k not in found:
+                found[k] = v.strip()
+    if "intent" not in found:
+        word = t.lower().split(" ")[0].strip(".,!\"'")
+        return _reading(word) if word in _INTENTS else None
+    intent = found["intent"].lower()
+    if intent not in _INTENTS:
+        return None
+    kind = found.get("kind", "other").lower()
+    kind = kind if kind in _KINDS else "other"
+    try:
+        severity = int(found.get("severity") or 0)
+    except ValueError:
+        severity = 0
+    ask = found.get("ask", "").strip(" .\"'")
+    return _reading(intent, kind, max(0, min(severity, 3)), "" if ask == "-" else ask)
+
+
+def _settle_reading(text: str, r: dict) -> dict:
+    """The reading with the deterministic readers laid over it: a grievance is
+    a complaint with a grade never below its own words; kind words beside a
+    grievance make it mixed; a request shape is a request even when the model
+    called it a question; a request always carries its ask."""
+    r = dict(r)
+    if r["intent"] == "negative":
+        r["kind"] = "mixed" if (r["kind"] == "mixed" or looks_praise(text)) else "complaint"
+        r["severity"] = max(int(r.get("severity") or 0), grade_complaint(text))
+    elif r["kind"] in ("complaint", "mixed"):
+        r["intent"] = "negative"
+        r["severity"] = max(int(r.get("severity") or 0), grade_complaint(text))
+    else:
+        r["severity"] = 0
+        if r["kind"] in ("other", "question") and looks_request(text):
+            r["kind"] = "request"
+        if r["intent"] == "goodwill" and r["kind"] in ("other", "question"):
+            r["kind"] = "praise"
+        # A short cheer ("Awesome 👍", "beautiful work", "❤️") is praise even
+        # with no model to say so: thanked, never handed to a person.
+        words = re.findall(r"[a-zA-Z']+", text or "")
+        if r["kind"] == "other" and r["intent"] in ("high", "low") \
+                and not _QUESTION_MARK_RE.search(text or "") \
+                and (not words or (len(words) <= 6 and looks_praise(text))):
+            r["kind"], r["intent"] = "praise", "low"
+    if r["kind"] == "request":
+        r["ask"] = request_ask(text, r.get("ask", ""))
+        if r["intent"] in ("low", "spam"):
+            r["intent"] = "high"          # a request is answered, never thanked away
+    else:
+        r["ask"] = "" if r["kind"] != "question" else (r.get("ask") or "")
+    return r
+
+
+async def _private_complaint_message(cid: str, page_id, channel: str, name_tag: str,
+                                     swahili: bool = False) -> bool:
+    """The private message that follows a serious or grave complaint — the
+    details come privately, a person takes it up. True when it went; a
+    failure is logged and the public line then makes no claim of it."""
+    from app.services.meta_send import send_private_reply
+    try:
+        await send_private_reply(
+            cid, (_SW_PRIVATE_COMPLAINT if swahili else _PRIVATE_COMPLAINT).replace("{name}", name_tag),
+            page_id=page_id, channel=channel)
+        return True
+    except Exception as exc:
+        _log.warning("private message for complaint %s not delivered: %s", cid, exc)
+        return False
+
+
+def empathy_text(kind: str, severity: int, swahili: bool = False,
+                 private_sent: bool = False) -> str:
+    """The public line for a grievance, by its weight (owner, 2026-09-22):
+    mild — taken seriously, a person will speak with them; serious — an
+    apology, a colleague now, the private message when it went; grave — the
+    same with more weight. A MIXED comment of mild weight thanks first. The
+    `{name}` stays for the caller."""
+    sev = max(1, min(int(severity or 1), 3))
+    if sev >= 3:
+        line = _SW_EMPATHY_GRAVE if swahili else _EMPATHY_GRAVE
+        tail = (_SW_PRIVATE_SENT_GRAVE if swahili else _PRIVATE_SENT_GRAVE) if private_sent else ""
+        return line.replace("{private}", tail)
+    if sev == 2:
+        line = _SW_EMPATHY_SERIOUS if swahili else _EMPATHY_SERIOUS
+        tail = (_SW_PRIVATE_SENT if swahili else _PRIVATE_SENT) if private_sent else ""
+        return line.replace("{private}", tail)
+    if kind == "mixed":
+        return _SW_EMPATHY_MIXED if swahili else _EMPATHY_MIXED
+    return _SW_PUBLIC_EMPATHY if swahili else _PUBLIC_EMPATHY
+
+
+def _reading_context(reading: dict | None) -> str:
+    """The model's line about what this comment IS (owner, 2026-09-22) — so a
+    request is answered with the shelf, a question with the answer, praise
+    in kind, a greeting with a greeting. "" when there is nothing to say."""
+    r = reading or {}
+    kind = str(r.get("kind") or "other")
+    ask = str(r.get("ask") or "").strip()
+    if kind == "request":
+        return ("(Reading: this comment is a REQUEST — they want: "
+                f"{ask or 'to be shown what we have'}. Answer it with what we have for it "
+                "from the hub: search_catalog it, give the two or three closest items with "
+                "their prices, and say you have sent photos to their inbox. Never a bare "
+                "'send us a message'.)")
+    if kind == "question":
+        return ("(Reading: this comment is a QUESTION"
+                + (f" — {ask}" if ask else "")
+                + ". Answer it first, briefly and exactly; add a price only if it is "
+                "relevant to the question.)")
+    if kind == "praise":
+        return ("(Reading: this comment is PRAISE. Thank them warmly, in kind and in their "
+                "words; no price and no pitch unless they ask for one.)")
+    if kind == "greeting":
+        return ("(Reading: this comment is a GREETING. Greet them warmly back, in their "
+                "language, and connect them to the post's item in the same breath.)")
+    if kind == "mixed":
+        return ("(Reading: this comment is MIXED — kind words and a grievance, severity "
+                f"{int(r.get('severity') or 1)}/3. Thank them first, then take the grievance "
+                "seriously in one humble line; no price, no pitch; a colleague has been told.)")
+    return ""
+
+
+async def read_comment(text: str, redis=None) -> dict:
+    """READ THE INTENT, GRADE IT (owner, 2026-09-22). One reading of a public
+    comment: `intent` — the plan's key (high / low / negative / goodwill /
+    spam, exactly as before); `kind` — what it IS: a request (show or send us
+    something), a question, a complaint, praise, a mixed comment (kind words
+    and a grievance), a greeting, or other; `severity` — a complaint's weight
+    1–3; `ask` — what a request wants, in a few words.
+
+    The deterministic readers go first and hold on every path (cheering,
+    displeasure, a greeting, a request shape, the grade of a grievance), then
+    one cheap light-model line fills the rest. Errs toward engaging on
+    uncertainty — better to help than go silent — and an empty comment is
+    low. A model outage never loses the reading: the readers still say a
+    request is a request and a scam accusation is grave."""
+    t = (text or "").strip()
+    if not t:
+        return _reading("low", "other")
     # Cheering us on is read FIRST: "we can't wait to have you in Zambia" has
     # the word "wait" in it, and a model told to lean negative on anything
     # wait-shaped answered it with an apology and a complaint ticket.
     if looks_goodwill(t):
-        return "goodwill"
+        return _settle_reading(t, _reading("goodwill", "praise"))
     # Plain displeasure never goes to the model — and never becomes a sales pitch.
     if looks_negative(t):
-        return "negative"
+        return _settle_reading(t, _reading("negative", "complaint"))
     # A hello is a door opening, not praise — engage, never the canned thanks.
     if looks_greeting(t):
-        return "high"
+        return _settle_reading(t, _reading("high", "greeting"))
     # Past the daily spend stop, even this light call waits for midnight: fall
     # to the same default the except-arm uses. "high" then flows into run_turn
-    # (which refuses for free) and lands on the canned sell pools — so under a
+    # (which refuses for free) and lands on the canned pools — so under a
     # budget stop the comment funnel keeps answering at exactly $0.
     try:
         from app.services import ai_budget
         if redis is not None and await ai_budget.mode(redis) == "stop":
-            return "high"
+            return _settle_reading(t, _reading("high", "other"))
     except Exception:
         pass
     prompt = (
-        "Classify this public comment on a Christian clergy/communion store's post "
-        "into ONE word:\n"
+        "Read this public comment on a Christian clergy/communion store's post and "
+        "answer on ONE line in exactly this shape:\n"
+        "intent=<high|low|negative|goodwill|spam> | kind=<request|question|complaint|"
+        "praise|mixed|greeting|other> | severity=<0-3> | ask=<what they want, in a "
+        "few words, or ->\n\n"
+        "intent — one of high, low, negative, goodwill, or spam:\n"
         "- high: buying interest OR any genuine question — price, availability, sizes, "
-        "how to order, where you are located, delivery, opening hours, 'I want this'\n"
+        "how to order, where you are located, delivery, opening hours, 'I want this' — "
+        "and any REQUEST to be shown or sent something\n"
         "- low: praise, emoji, tagging a friend, 'amen', generic positivity, no question. "
         "A GREETING ('how are you', 'habari', 'bonjour') is NOT low — it is a person "
         "opening a conversation: answer high\n"
@@ -1885,21 +2219,46 @@ async def classify_comment_intent(text: str, redis=None) -> str:
         "anticipation is the warmest thing under a post. A bare 'amen' or emoji "
         "stays low; a sentence addressed to us is goodwill\n"
         "- spam: ONLY bots, ads, promotional links, or abuse\n"
+        "kind — what the comment IS:\n"
+        "- request: they want something shown, sent or offered ('share more designs "
+        "for ladies', 'send the catalogue', 'post prices', 'more photos')\n"
+        "- question: they ask something (price, delivery, sizes, where, how)\n"
+        "- complaint: a grievance, correction or dissatisfaction\n"
+        "- praise: kind words, thanks, a blessing\n"
+        "- mixed: kind words AND a grievance in one breath ('beautiful work, but my "
+        "order never came')\n"
+        "- greeting: a hello\n"
+        "- other: none of these\n"
+        "severity — the weight of a complaint or mixed comment, else 0: 1 a "
+        "correction or a small disappointment; 2 an order gone wrong (not delivered, "
+        "wrong item, paid and nothing came, poor quality, weeks of waiting); 3 grave "
+        "(a scam or fraud accusation, a threat to report or expose, abuse).\n"
+        "ask — for a request or a question, what they want in a few words ('more "
+        "designs for ladies', 'delivery to Uganda'); otherwise -\n"
         "Comments come in many languages (French, Swahili, Sheng, Chinese, Dutch…). "
         "A comment you don't understand is NOT spam: if it asks anything, answer "
         "'high'; if it's short and friendly or just a person's name, answer 'low'. "
         "Never answer 'spam' merely because it isn't English.\n"
         f'Comment: "{t[:300]}"\n'
-        "Answer with exactly one word: high, low, negative, goodwill, or spam."
+        "Answer with the one line only."
     )
     try:
         llm = build_llm(model=settings.tier2_model_light)
-        resp = await llm.complete(system="You label comments precisely. One word only.",
+        resp = await llm.complete(system="You read comments precisely. One line only, in the shape asked.",
                                   messages=[{"role": "user", "content": prompt}], tools=[])
-        word = (resp.text or "").strip().lower().split(" ")[0].strip(".,!\"'")
-        return word if word in _INTENTS else "high"
+        r = parse_comment_reading(resp.text or "")
+        if r is None:
+            r = _reading("high", "other")
+        return _settle_reading(t, r)
     except Exception:
-        return "high"
+        return _settle_reading(t, _reading("high", "other"))
+
+
+async def classify_comment_intent(text: str, redis=None) -> str:
+    """The plan's key for a public comment — the `intent` of `read_comment`
+    (high / low / negative / goodwill / spam). Kept as the name every caller
+    and test knows; the full reading (kind, severity, ask) is `read_comment`."""
+    return (await read_comment(text, redis=redis))["intent"]
 
 
 def plan_comment_actions(intent: str) -> dict:
@@ -1923,30 +2282,86 @@ def plan_comment_actions(intent: str) -> dict:
     return {"public": True, "style": "answer", "dm": True, "human": False}   # high
 
 
+_SEVERITY_WORDS = {1: "mild", 2: "serious", 3: "grave"}
+
+
+def _human_note(kind: str, severity: int, comment: str = "", ask: str = "",
+                answered: str = "") -> str:
+    """The team's note — what this is, how heavy, what they said, what Neema
+    did. The kind decides the ask of the colleague: a graded COMPLAINT to
+    follow up and close (today, when serious; at once, when grave); a REQUEST
+    or QUESTION Neema could not answer in the thread, to answer right there."""
+    said = " ".join((comment or "").split())[:300]
+    lines = []
+    if kind in ("complaint", "mixed"):
+        sev = max(1, min(int(severity or 1), 3))
+        label = "MIXED — kind words and a grievance" if kind == "mixed" else "COMPLAINT"
+        urgency = {1: "a colleague must follow up and close this",
+                   2: "SERIOUS — a colleague must take this up TODAY and close it",
+                   3: "GRAVE / URGENT — a colleague must take this up NOW, personally"}[sev]
+        lines.append(f"{label} (public comment) — severity {sev}/3 ({_SEVERITY_WORDS[sev]}): {urgency}.")
+        if said:
+            lines.append(f'• Their comment: "{said}"')
+        lines.append("• Answered publicly with an apology only — no price, no pitch."
+                     + (" A private message was opened so the details come privately." if sev >= 2 else ""))
+        lines.append("• Neema stays available in the thread for factual questions.")
+    elif kind == "request":
+        lines.append("REQUEST (public comment) — they asked us to show or send something, and "
+                     "Neema could not answer it in the thread (no model): a colleague must "
+                     "answer them RIGHT THERE in the thread, with what we have.")
+        if ask:
+            lines.append(f"• They want: {ask}")
+        if said:
+            lines.append(f'• Their comment: "{said}"')
+        if answered:
+            lines.append(f'• Neema said: "{answered}"')
+    elif kind == "question":
+        lines.append("QUESTION (public comment) — Neema could not answer it in the thread (no "
+                     "model): a colleague must answer them RIGHT THERE in the thread.")
+        if said:
+            lines.append(f'• Their comment: "{said}"')
+        if answered:
+            lines.append(f'• Neema said: "{answered}"')
+    else:
+        lines.append("PUBLIC COMMENT Neema could not read or answer (no model): a colleague "
+                     "must look and reply in the thread.")
+        if said:
+            lines.append(f'• Their comment: "{said}"')
+        if answered:
+            lines.append(f'• Neema said: "{answered}"')
+    return "\n".join(lines)
+
+
 async def _route_comment_to_human(channel: str, external_id: str,
-                                  comment: str = "") -> None:
-    """Flag an unhappy commenter for the team — WITHOUT muting Neema.
+                                  comment: str = "", *, kind: str = "complaint",
+                                  severity: int = 1, ask: str = "", answered: str = "",
+                                  redis=None) -> None:
+    """Hand a commenter to the team — WITHOUT muting Neema — with the reading:
+    what it is (a complaint, mixed, a request, a question) and how heavy.
 
     This used to set intercept_mode=human, which stopped the agent replying at
     all and also dropped the thread out of the missed-reply sweeper (it only
     picks up intercept_mode=ai). So a public complaint got one apology and then
     silence until someone opened the dashboard. The team is still brought in and
     still has the final word — they just aren't the customer's only hope of a
-    reply in the meantime."""
+    reply in the meantime. A serious or grave complaint (severity ≥ 2) is an
+    ESCALATION: the bell rings for the team and the thread shows the pill
+    (services/conversation.record_escalation); everything else is a flag."""
     from sqlalchemy import select
     from app.database import AsyncSessionLocal
     from app.models.conversation import Conversation
     from app.models.intercept import Intercept, InterceptAction
+    note = _human_note(kind, severity, comment, ask=ask, answered=answered)
     async with AsyncSessionLocal() as db:
         conv = (await db.execute(select(Conversation).where(
             Conversation.channel == channel,
             Conversation.external_id == external_id))).scalar_one_or_none()
         if conv is None:
             return
-        note = ("COMPLAINT (public comment) — a colleague must follow up and close this."
-                + (f'\n• Their comment: "{" ".join(comment.split())[:300]}"' if comment else "")
-                + "\n• Answered publicly with an apology only — no price, no pitch."
-                + "\n• Neema stays available in the thread for factual questions.")
+        if kind in ("complaint", "mixed") and int(severity or 1) >= 2:
+            from app.services.conversation import record_escalation
+            await record_escalation(db, conv.id, note, redis=redis)
+            return
         db.add(Intercept(conversation_id=conv.id, action=InterceptAction.flag, note=note))
         await db.commit()
 
@@ -2057,25 +2472,10 @@ _THANKS_POOL = [
     "Thank you kindly{name} 🙏 May God bless you abundantly 💛",
     "So grateful{name} 🙏 Glory to God! 💛",
 ]
-# RETIRED from the answered path (2026-08-10: the comment thread IS the shop —
-# an answered comment stands alone). Kept only as safe warm lines; nothing
-# appends them to a selling reply anymore.
-_DM_NUDGE_POOL = [
-    "I've sent you a message — let's finish there 💬",
-    "Check your inbox 💬 I've messaged you the details 💛",
-    "Replied in your inbox — let's sort it out there 💛",
-    "Sent you a DM so we can get you sorted 💬",
-]
-# Public-comment CTA when the DM did NOT open. We answered them, so we close the
-# only way a public comment may: by asking them to write to us. This used to
-# append the storefront link ("their only door") — the door is now the inbox,
-# because a link in a comment taxes the reach of the whole post.
-_COMMENT_INVITE_POOL = [
-    "Send us a message and we'll sort you out 💛",
-    "DM us and we'll get you sorted — colour, size and delivery 💛",
-    "Message us and we'll take it from there 💛",
-    "Send us a DM and we'll help you order 💛",
-]
+# (The "DM nudge" and "comment invite" pools that once followed an answered
+# comment were retired on 2026-08-10 — the thread IS the shop, an answered
+# comment stands alone — and removed on 2026-09-22: nothing read them, and a
+# residue that says "send us a message" is a residue waiting to be used.)
 # Said to a buying comment when the agent could not run (over the per-post cap,
 # or the turn failed) but we DO know from the post WHAT they're looking at. "How
 # to order" is the highest-intent comment we get, so it gets a real, warm,
@@ -2141,11 +2541,14 @@ _OVER_CAP_SELL_EACH_POOL = [
 # and sells nothing at all.
 # No cheerful emoji here (a 🙏 reads as humble; a 💛 reads as cheer) — this
 # line may land on a complaint, and the mood rules forbid cheer on displeasure.
+# Owner, 2026-09-22 (Queen Gili: "Please more designs for ladies" answered
+# with "Send us a message and we'll help however we can"): the thread is the
+# shop, so this line never sends anyone away — it promises a person, and the
+# engine hands the team the comment to answer right there.
 _NEUTRAL_ACK_POOL = [
-    "Thank you for reaching out{name} 🙏 Tell us a little more and we'll gladly help.",
-    "We appreciate you{name} 🙏 Send us a message and we'll help however we can.",
-    "Thank you{name} 🙏 We're here — let us know what you need and we'll assist.",
-    "Thank you{name} 🙏 We'd be glad to help — just tell us a bit more.",
+    "Thank you for reaching out{name} 🙏 One of our team will come back to you right here shortly.",
+    "We appreciate you{name} 🙏 A colleague will pick this up with you here shortly.",
+    "Thank you{name} 🙏 We're here — one of us will reply to you right here shortly.",
 ]
 # Over the per-post cap (or the turn failed) on a GOODWILL comment — the line a
 # host gives when the room is full. Never the neutral "tell us a little more",
@@ -2204,8 +2607,8 @@ _SW_OVER_CAP_SELL_EACH_POOL = [
     "Karibu{name} 🙏 {product} ni {price} kila kimoja, tayari kwa ajili yako. Tafadhali weka oda yako — unahitaji ngapi, na unazihitaji lini? 💛",
 ]
 _SW_NEUTRAL_ACK_POOL = [
-    "Asante kwa kutufikia{name} 🙏 Tuambie zaidi kidogo na tutakusaidia kwa furaha.",
-    "Asante{name} 🙏 Tuko hapa — tuambie unachohitaji na tutakusaidia.",
+    "Asante kwa kutufikia{name} 🙏 Mmoja wa timu yetu atakujibu hapa hivi karibuni.",
+    "Asante{name} 🙏 Tuko hapa — mwenzetu atakujibu hapa hivi karibuni.",
 ]
 _SW_GOODWILL_POOL = [
     "Asante{name} 🙏 Ukarimu wako unatutia nguvu sana.",
@@ -2361,7 +2764,8 @@ def _comment_public_reply(answer: str, dm_sent: bool, name_tag: str, seed: str,
                           per_piece: bool = False, first_contact: bool = False,
                           swahili: bool = False, made_to_order: bool = False,
                           ask_which: bool = False, set_items: str = "",
-                          bundle: bool = False) -> str:
+                          bundle: bool = False, kind: str = "other",
+                          ask: str = "") -> str:
     """The PUBLIC comment text, given the agent's answer and whether the DM landed.
 
     THIS FUNCTION CANNOT PRODUCE A LINK, by construction: it takes no URL. Meta
@@ -2396,6 +2800,13 @@ def _comment_public_reply(answer: str, dm_sent: bool, name_tag: str, seed: str,
         # (owner, 2026-09-21): ask which item — never price a guess. The same
         # line a live broadcast uses, for the same reason.
         return _pick(_SW_LIVE_WHICH_POOL if swahili else _LIVE_WHICH_POOL, seed).replace("{name}", name_tag)
+    if kind == "request" and not (product_known and price_text):
+        # A REQUEST we could not answer here (owner, 2026-09-22): their words
+        # noted back, a person promised — never "send us a message".
+        return (_pick(_SW_REQUEST_ACK_POOL if swahili else _REQUEST_ACK_POOL, seed)
+                .replace("{name}", name_tag).replace("{ask}", (ask or "").strip() or "what you asked for"))
+    if kind == "question" and not (product_known and price_text):
+        return _pick(_SW_QUESTION_ACK_POOL if swahili else _QUESTION_ACK_POOL, seed).replace("{name}", name_tag)
     if product_known:
         # We know WHICH product the post is about, so a buying question still gets
         # a real, warm answer with no model call — with its PRICE when the post's
@@ -3149,7 +3560,13 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     first = (comment.get("from_name") or "").strip().split(" ")[0]
     name_tag = f" {first}" if first else ""
 
-    intent = await classify_comment_intent(comment_text, redis=redis)
+    # READ THE INTENT, GRADE IT, ROUTE IT (owner, 2026-09-22): one reading —
+    # the plan's intent, what the comment IS (a request, a question, a
+    # complaint, praise, mixed, a greeting), a complaint's weight, a request's
+    # ask — and everything below acts on it.
+    reading = await read_comment(comment_text, redis=redis)
+    intent = reading["intent"]
+    kind, severity, ask = reading["kind"], int(reading.get("severity") or 0), reading.get("ask") or ""
     plan = plan_comment_actions(intent)
 
     # ── LIVE BROADCAST ───────────────────────────────────────────────────────
@@ -3227,7 +3644,15 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
             elif plan["style"] == "light":
                 text = _pick(_SW_THANKS_POOL if swahili else _THANKS_POOL, ext).replace("{name}", name_tag)
             else:
-                text = (_SW_PUBLIC_EMPATHY if swahili else _PUBLIC_EMPATHY).replace("{name}", name_tag)
+                # A grievance: the private message FIRST for a serious or
+                # grave one (so the details come privately), then the public
+                # line by its weight — which claims the message only when it
+                # went. Never a price, never a pitch, never cheer.
+                private_sent = False
+                if severity >= 2:
+                    private_sent = await _private_complaint_message(
+                        cid, comment.get("page_id"), channel, name_tag, swahili)
+                text = empathy_text(kind, severity, swahili, private_sent=private_sent).replace("{name}", name_tag)
             posted = await _post_public(text)
             # Persist it threaded under the comment — the inbox must show every
             # outgoing reply, not just the high-intent ones.
@@ -3241,7 +3666,8 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
                 await _like_answered()
         if plan["human"]:
             try:
-                await _route_comment_to_human(channel, ext, comment_text)
+                await _route_comment_to_human(channel, ext, comment_text, kind=kind,
+                                              severity=severity, ask=ask, redis=redis)
             except Exception as exc:
                 _log.warning("route-to-human failed for comment %s: %s", cid, exc)
         return
@@ -3310,7 +3736,8 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
                     db, redis, wa_id=ext, user_text=prompt_text,
                     llm=build_llm(model=_cmodel),
                     media=media, channel=channel, external_id=ext,
-                    public_comment=True, product_sink=seen_products)).strip()
+                    public_comment=True, product_sink=seen_products,
+                    comment_reading=reading)).strip()
         except Exception as exc:
             _log.warning("public agent reply failed for %s: %s", cid, exc)
 
@@ -3449,10 +3876,22 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
                                         per_piece=per_piece, first_contact=first,
                                         swahili=swahili, made_to_order=made_to_order,
                                         ask_which=ask_which, set_items=set_items,
-                                        bundle=is_bundle)
+                                        bundle=is_bundle, kind=kind, ask=ask)
     public_text = plain_public_voice(public_text)
 
     posted = await _post_public(public_text)
+    # NO MODEL ANSWER and nothing sold: the canned line promised a person, so
+    # a person is told — the request, the question, or the comment we could
+    # not read goes to the team to answer RIGHT THERE in the thread (owner,
+    # 2026-09-22). A cheer needs no one; "which item?" is a real question back.
+    if not answer and intent != "goodwill" and not ask_which and not (product_name and price_text):
+        try:
+            await _route_comment_to_human(
+                channel, ext, comment_text,
+                kind=(kind if kind in ("request", "question") else "other"),
+                severity=0, ask=ask, answered=public_text, redis=redis)
+        except Exception as exc:
+            _log.warning("route-to-human failed for comment %s: %s", cid, exc)
 
     # Save our public reply THREADED to the comment it answers, so the inbox shows
     # comment → reply the way Facebook does (reply_to = this comment id).

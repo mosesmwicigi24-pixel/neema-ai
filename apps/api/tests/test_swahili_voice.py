@@ -122,7 +122,8 @@ def test_the_engine_detects_once_and_uses_it_everywhere():
     assert "_SW_LIVE_WELCOME_POOL if swahili else _LIVE_WELCOME_POOL" in src
     assert "_SW_LIVE_WHICH_POOL if swahili else _LIVE_WHICH_POOL" in src
     assert "_SW_THANKS_POOL if swahili else _THANKS_POOL" in src
-    assert "_SW_PUBLIC_EMPATHY if swahili else _PUBLIC_EMPATHY" in src
+    assert "text = empathy_text(kind, severity, swahili, private_sent=private_sent)" in src
+    assert "_SW_PUBLIC_EMPATHY if swahili else _PUBLIC_EMPATHY" in inspect.getsource(rt.empathy_text)
     assert "swahili=swahili)" in src                                 # the public composer
     assert "_dm_text(plain_public_voice(answer), product_link, ext, swahili=swahili)" in src
 

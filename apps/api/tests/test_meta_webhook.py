@@ -569,6 +569,16 @@ def test_public_cta_resolves_product_from_the_post_caption(monkeypatch):
         async def __aexit__(self, *a): return False
     monkeypatch.setattr(adb, "AsyncSessionLocal", lambda: _CM())
 
+    # The shelf the caption is read against — faked: this test used to call
+    # the LIVE hub for the catalogue and went red whenever the hub was down
+    # for the CI runner (a 502 on 2026-09-22), which is no test of the code.
+    async def fake_catalog(db, redis):
+        return [{"name": "Cope — Complete Set", "slug": "cope-complete-set", "hub_product_id": 7,
+                 "price": 45000, "price_usd": 450, "aliases": [], "images": [], "description": ""},
+                {"name": "Purple Red Cope", "slug": "purple-red-cope", "hub_product_id": 8,
+                 "price": 15000, "price_usd": 150, "aliases": [], "images": [], "description": ""}]
+    monkeypatch.setattr("app.services.n8n_bridge.catalog_items", fake_catalog)
+
     calls = []
     async def fake_run_tool(name, args, ctx):
         calls.append((name, args["query"]))

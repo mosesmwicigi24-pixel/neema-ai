@@ -409,7 +409,7 @@ def test_the_engine_hands_the_set_line_its_items():
     src = inspect.getsource(rt._run_comment_engage)
     assert 'set_items = _bundle_items_text(matched["bundle_rows"], _ccy, swahili)' in src
     assert 'set_items = _components_text(matched["components"], swahili, set_name=product_name)' in src
-    assert "ask_which=ask_which, set_items=set_items," in src and "bundle=is_bundle)" in src
+    assert "ask_which=ask_which, set_items=set_items," in src and "bundle=is_bundle, kind=kind, ask=ask)" in src
     assert 'and not (matched.get("components") or matched.get("bundle"))' in src
 
 
