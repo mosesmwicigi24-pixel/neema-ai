@@ -3141,7 +3141,7 @@ async def _post_over_cap(redis, post_id: str) -> bool:
 async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set) -> None:
     from app.database import AsyncSessionLocal
     from app.services import n8n_bridge as svc
-    from app.services.meta_send import reply_to_comment, send_private_reply
+    from app.services.meta_send import like_comment, reply_to_comment, send_private_reply
 
     cid = comment.get("comment_id")
     ext = comment.get("from_id")
@@ -3179,17 +3179,40 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
         await _note_silent_decision(channel, ext, cid, intent)
         return
 
-    async def _post_public(text: str) -> None:
+    async def _post_public(text: str) -> bool:
+        """The public reply. True when it landed — the Like below follows only
+        a reply that did."""
         if not own_pages:                        # loop guard: can't tell our own reply apart
             _log.warning("META_PAGE_ID unset — skipping public reply for %s", cid)
-            return
+            return False
         try:
             # Plain and human at the seam (voice.py): no markdown, no "$450
             # USD", no butler's "Very well." — whatever composed the text.
             await reply_to_comment(cid, plain_public_voice(text),
                                    page_id=comment.get("page_id"), channel=channel)
+            return True
         except Exception as exc:
             _log.warning("public comment reply failed for %s: %s", cid, exc)
+            return False
+
+    async def _like_answered() -> None:
+        """LIKE EVERY ANSWERED COMMENT (owner, 2026-09-22). The Page's Like
+        follows the reply — a beat later, the way a person reacts after
+        answering — on every comment we answered: a question, a hello, a
+        cheer, an "amen". Never on a complaint (a Like on a grievance reads
+        as mockery), never on spam (we did not reply), never on Instagram
+        (no such edge). Best-effort: it never delays or fails the reply."""
+        if not settings.meta_comment_like or intent in ("negative", "spam"):
+            return
+        if channel == "instagram":               # no comment-like edge on IG
+            return
+        try:
+            import random
+            await asyncio.sleep(random.uniform(1.0, 3.0))
+            if await like_comment(cid, page_id=comment.get("page_id"), channel=channel):
+                _log.info("comment %s liked after the reply (intent=%s)", cid, intent)
+        except Exception as exc:
+            _log.info("comment %s like skipped: %s", cid, exc)
 
     # ── Low intent (praise/emoji): a brief, VARIED, human thank-you — no pitch.
     # ── Negative: an empathetic line + route the conversation to a human.
@@ -3205,7 +3228,7 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
                 text = _pick(_SW_THANKS_POOL if swahili else _THANKS_POOL, ext).replace("{name}", name_tag)
             else:
                 text = (_SW_PUBLIC_EMPATHY if swahili else _PUBLIC_EMPATHY).replace("{name}", name_tag)
-            await _post_public(text)
+            posted = await _post_public(text)
             # Persist it threaded under the comment — the inbox must show every
             # outgoing reply, not just the high-intent ones.
             try:
@@ -3214,6 +3237,8 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
                                                             reply_to_comment_id=cid)
             except Exception as exc:
                 _log.warning("saving light reply failed for %s: %s", cid, exc)
+            if posted:
+                await _like_answered()
         if plan["human"]:
             try:
                 await _route_comment_to_human(channel, ext, comment_text)
@@ -3427,7 +3452,7 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
                                         bundle=is_bundle)
     public_text = plain_public_voice(public_text)
 
-    await _post_public(public_text)
+    posted = await _post_public(public_text)
 
     # Save our public reply THREADED to the comment it answers, so the inbox shows
     # comment → reply the way Facebook does (reply_to = this comment id).
@@ -3437,6 +3462,8 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
                                                     reply_to_comment_id=cid)
     except Exception as exc:
         _log.warning("saving public reply to thread failed for %s: %s", cid, exc)
+    if posted:
+        await _like_answered()
 
     _log.info("comment %s engaged: agent=%s free_ask=%s dm=%s",
               cid, not skip_model, free_ask, dm_sent)
