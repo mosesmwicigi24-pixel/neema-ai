@@ -73,6 +73,20 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   product words) at CONF=high, then confirms SAME/DIFFERENT against that
   product's own catalogue photo; only SAME is trusted. A NONE is cached a day
   per image. The team override stamps "team".
+- **Like every answered comment** (owner 2026-09-22, from the Page's
+  Professional dashboard: "Reply to 400 comments" half done, "React to 400
+  comments" at 0 — Neema replied to everything and reacted to nothing). After
+  every public reply that landed, the comment engine gives the Page's Like
+  (`meta_send.like_comment`, `POST /{comment-id}/likes`, the same
+  pages_manage_engagement permission the replies use), a beat later: a
+  question, a hello, a cheer, an "amen", a live-stream welcome. Never on a
+  complaint, never on spam (no reply, no Like), never on Instagram (no such
+  edge). THE HOUSE USES TWO REACTIONS ONLY — the Like and the Love (owner
+  2026-09-22: "only likes and love, we do not use any other"); never Haha,
+  Wow, Sad, Angry or Care. The API lets a Page put only the Like on a
+  comment, so the Like is the one reaction Neema sends. `META_COMMENT_LIKE`
+  (default on) switches it off. The commenter is notified and comes back to
+  the thread; the dashboard task moves with the replies.
 - **A set is priced as its total** (owner 2026-09-21: under a five-piece
   cassock outfit, "the Cassock is $120" was read as the price of the whole
   set — "if the description describes a product that has different
@@ -162,7 +176,7 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
 
 ## Enable/config flags (env on the box)
 `META_AGENT_REPLY`, `META_PAGE_TOKEN`, `META_VERIFY_TOKEN`, `META_APP_SECRET`,
-`META_COMMENT_REPLY`, `META_PAGE_ID` (FB page ids [+ IG account id]),
+`META_COMMENT_REPLY`, `META_COMMENT_LIKE`, `META_PAGE_ID` (FB page ids [+ IG account id]),
 `WHATSAPP_HANDOFF_NUMBER`, `USD_KES_RATE`, `BUSINESS_INFO`.
 
 ## Moses's open manual to-dos

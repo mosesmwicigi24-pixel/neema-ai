@@ -161,6 +161,15 @@ class Settings(BaseSettings):
     # sells 1:1). Needs meta_page_token + the pages_manage_engagement /
     # pages_messaging perms (App Review for beyond-tester reach). Default OFF.
     meta_comment_reply: bool = False
+    # LIKE EVERY ANSWERED COMMENT (owner, 2026-09-22). After Neema replies to a
+    # Facebook comment, the Page reacts to it with a Like — the commenter is
+    # told, comes back to the thread, and the Page's weekly "react to comments"
+    # task moves (it stood at 0 while replies were half done). Never on a
+    # complaint, never on spam, never without a reply. Same permission the
+    # replies use (pages_manage_engagement). Instagram has no comment-like
+    # edge, so it is Facebook only. Default ON; a switch for the day Meta
+    # objects.
+    meta_comment_like: bool = True
     # Comma-separated Page ID(s) WE own — used to skip our own comments/replies so
     # Neema never answers itself (infinite loop). Public replies are skipped when
     # this is unset, since we then can't tell our own comment from a customer's.
