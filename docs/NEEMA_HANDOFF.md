@@ -73,6 +73,37 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   product words) at CONF=high, then confirms SAME/DIFFERENT against that
   product's own catalogue photo; only SAME is trusted. A NONE is cached a day
   per image. The team override stamps "team".
+- **Read the intent, grade it, route it** (owner 2026-09-22: "is it a
+  request, a complaint, a commendation? A complaint graded on severity and
+  referred to a human; a compliment handled by Neema; a statement that looks
+  like all three resolved wisely"). `runtime.read_comment` is one reading of a
+  public comment — `intent` (the plan's key, unchanged: high / low / negative
+  / goodwill / spam), `kind` (request / question / complaint / praise / mixed
+  / greeting / other), `severity` (a complaint's weight 1–3) and `ask` (what a
+  request wants); the deterministic readers hold on every path (cheering,
+  displeasure, a greeting, the REQUEST shape `looks_request`, the grade
+  `grade_complaint`: 3 a scam or fraud accusation, a threat to report, abuse;
+  2 an order gone wrong, money paid, poor quality, weeks waiting; 1 a
+  correction or a disappointment), then one light-model line fills the rest;
+  `classify_comment_intent` is its intent. A grievance gets the line by its
+  weight (`empathy_text`: mild = the old line; serious/grave = an apology, a
+  colleague today, and a PRIVATE message opened first so the details come
+  privately — the public line claims it only when it went); a MIXED comment
+  thanks first. The team's note is typed and graded (`_human_note`); a
+  serious or grave complaint is an escalation (`record_escalation`: the bell
+  and the pill), the rest a flag. A REQUEST or QUESTION Neema could not
+  answer in the thread (no model) gets their words noted back and a person
+  promised (`_REQUEST_ACK_POOL` / `_QUESTION_ACK_POOL`), and the team is
+  handed it to answer RIGHT THERE; the model path gets the reading in its
+  context (`_reading_context`) and the rule READ THE INTENT, THEN ANSWER IT
+  (a request is answered with the shelf). Residues removed the same day: the
+  neutral line no longer says "send us a message" / "tell us a little more"
+  (it promises a person, and a person is told), and the retired DM-nudge and
+  comment-invite pools are gone. Why it lingered: the Florence work (2026-08)
+  made complaints one bucket with one line and one note, "the thread is the
+  shop" (2026-08-10) stopped the model deflecting but left the no-model
+  fallbacks as signposts, and a request was never a kind of its own — so a
+  request during the credit stop got the signpost.
 - **Like every answered comment** (owner 2026-09-22, from the Page's
   Professional dashboard: "Reply to 400 comments" half done, "React to 400
   comments" at 0 — Neema replied to everything and reacted to nothing). After

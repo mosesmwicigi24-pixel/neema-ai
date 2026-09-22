@@ -57,9 +57,10 @@ def test_public_reply_is_link_free_when_the_dm_landed():
     assert out == "The Aluminium Tray is $70."      # the answer IS the reply
 
 
-def test_nudge_pool_itself_is_link_free():
-    for line in rt._DM_NUDGE_POOL + rt._COMMENT_INVITE_POOL:
-        assert "http" not in line and "wa.me" not in line
+def test_the_retired_nudge_and_invite_pools_are_gone():
+    # Retired 2026-08-10 (the thread IS the shop), removed 2026-09-22: a residue
+    # that says "send us a message" is a residue waiting to be used.
+    assert not hasattr(rt, "_DM_NUDGE_POOL") and not hasattr(rt, "_COMMENT_INVITE_POOL")
 
 
 def test_public_reply_is_link_free_when_the_dm_did_NOT_open():
@@ -89,9 +90,10 @@ def test_the_public_composer_cannot_be_handed_a_url_at_all():
 def test_no_public_comment_template_contains_a_link():
     """Every canned line that can reach the public square, swept in one place —
     the leak was a template, so templates are what this pins."""
-    pools = (rt._DM_NUDGE_POOL + rt._COMMENT_INVITE_POOL + rt._OVER_CAP_POOL
-             + rt._NEUTRAL_ACK_POOL + rt._THANKS_POOL + rt._GOODWILL_POOL
-             + rt._OVER_CAP_SELL_POOL + rt._FIRST_SELL_POOL + rt._OVER_CAP_SELL_EACH_POOL)
+    pools = (rt._OVER_CAP_POOL + rt._NEUTRAL_ACK_POOL + rt._THANKS_POOL + rt._GOODWILL_POOL
+             + rt._OVER_CAP_SELL_POOL + rt._FIRST_SELL_POOL + rt._OVER_CAP_SELL_EACH_POOL
+             + rt._REQUEST_ACK_POOL + rt._QUESTION_ACK_POOL
+             + [rt._EMPATHY_SERIOUS, rt._EMPATHY_GRAVE, rt._EMPATHY_MIXED, rt._PRIVATE_COMPLAINT])
     for line in pools:
         low = line.lower()
         assert "http" not in low
