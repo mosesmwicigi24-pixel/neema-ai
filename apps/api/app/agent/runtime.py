@@ -115,12 +115,19 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "back to you with this whole thread in hand, so carry the sale forward "
         "turn by turn.\n"
         "- STAY ON THE POST'S PRODUCT. A follow-up comment — 'my order', 'yes', "
-        "'I'm interested', 'how much' — continues the SAME product as the post "
-        "and your own earlier replies in this thread. NEVER switch to a product "
-        "nobody named: answering a Silver-tray thread with a Gold Bread Tray is "
-        "a wrong answer even at the right price. Finish and colour are part of "
-        "identity — silver is not gold. Only if THEY name a different product do "
-        "you price that one, and the post's product stays what it was.\n"
+        "'I'm interested', 'how much', 'in Kenya shillings' — continues the SAME "
+        "product as the post and your own earlier replies under THIS post. The "
+        "transcript you see is THIS post's thread only; what this person said "
+        "under another post, on another channel, or in their memory is who they "
+        "are, never what this comment is about (owner, 2026-09-23: a ring post's "
+        "'in Kenya shillings' was answered with a cassock set from another post). "
+        "A reply inside a thread continues the comment it answers, which your "
+        "context quotes: a currency, a colour or a size named there means the "
+        "item quoted there. NEVER switch to a product nobody named: answering a "
+        "Silver-tray thread with a Gold Bread Tray is a wrong answer even at the "
+        "right price. Finish and colour are part of identity — silver is not "
+        "gold. Only if THEY name a different product do you price that one, and "
+        "the post's product stays what it was.\n"
         "- NEVER answer a question by sending them elsewhere — "
         "'DM us for the price' or 'message us and we'll sort you out' when you "
         "KNOW the answer is a lost sale and reads as a brush-off to everyone "
@@ -751,10 +758,14 @@ async def _recent_call_context(db, key: str, channel: str) -> str:
             "there):\n" + "\n".join(lines))
 
 
-async def _cross_channel_context(db, key: str, channel: str) -> str:
+async def _cross_channel_context(db, key: str, channel: str,
+                                 public_comment: bool = False) -> str:
     """The customer's recent messages on their OTHER linked channels — so a
     Facebook→WhatsApp hop continues the ACTUAL conversation ('the black cassock
-    at $130 we discussed'), not a vibe. Empty when unlinked or on failure."""
+    at $130 we discussed'), not a vibe. Empty when unlinked or on failure.
+    Under a PUBLIC COMMENT the same lines say who they are and what they told
+    us — never what this comment is about: the post decides that (owner,
+    2026-09-23)."""
     from app.models.person import Identity
     from app.models.conversation import Conversation
     ident = (await db.execute(select(Identity).where(
@@ -782,25 +793,62 @@ async def _cross_channel_context(db, key: str, channel: str) -> str:
             lines.append(f"- [{c.channel}] {who}: {t[:150]}")
     if not lines:
         return ""
+    if public_comment:
+        return ("\n\nTHEIR RECENT MESSAGES ON OTHER CHANNELS (same person, linked "
+                "identity — for WHO they are and what they already told us: name, "
+                "city, sizes, an order. The product of THIS comment is the POST's, "
+                "never one from here):\n" + "\n".join(lines[-8:]))
     return ("\n\nTHEIR RECENT MESSAGES ON OTHER CHANNELS (same person, linked "
             "identity — continue THAT conversation; never re-ask what's here):\n"
             + "\n".join(lines[-8:]))
 
 
+def _thread_rows(rows: list, post_id: str) -> list:
+    """The rows of ONE post's thread: this person's comments under that post
+    (their `comment_context.post_id`) and our replies to those comments
+    (`comment_context.reply_to` naming one of them). A comment conversation
+    is one per person across EVERY post, so without this a follow-up under
+    the ring post was answered with the cassock set this person had asked
+    about under another post the day before (owner, 2026-09-23: "we are
+    speaking the rings and you answer about cassock"). Rows with no post
+    attribution (before it existed) are left out — safer than guessing."""
+    pid = str(post_id or "")
+    if not pid:
+        return rows
+    mine: set = set()
+    kept = []
+    for m in rows:
+        ctx = getattr(m, "comment_context", None) or {}
+        if str(getattr(m.direction, "value", m.direction)) == "inbound":
+            if str(ctx.get("post_id") or "") == pid:
+                cid = getattr(m, "waba_msg_id", None)
+                if cid:
+                    mine.add(str(cid))
+                kept.append(m)
+        elif str(ctx.get("reply_to") or "") in mine:
+            kept.append(m)
+    return kept
+
+
 async def _history(db: AsyncSession, key: str, limit: int = 20,
-                   *, channel: str = "whatsapp") -> list[dict]:
+                   *, channel: str = "whatsapp", post_id: str | None = None) -> list[dict]:
     # WhatsApp keys on wa_id (the compat shim); other channels key on
     # (channel, external_id) since their messages carry no wa_id.
     where = (Message.wa_id == key) if channel == "whatsapp" else (
         (Message.channel == channel) & (Message.external_id == key))
+    # A public comment turn reads ONE post's thread (see _thread_rows): fetch
+    # wider, then keep the thread's last `limit` turns.
+    fetch = max(limit * 4, 60) if post_id else limit
     rows = list(reversed((await db.execute(
         select(Message).where(where)
         # Internal NOTES are operator-private (escalation notes, call summaries,
         # silent-decision records) — they were never sent to the customer and must
         # NEVER reach the model as assistant turns it could echo back.
         .where(Message.media_type.is_(None) | (Message.media_type != "note"))
-        .order_by(Message.created_at.desc()).limit(limit)
+        .order_by(Message.created_at.desc()).limit(fetch)
     )).scalars().all()))
+    if post_id:
+        rows = _thread_rows(rows, post_id)[-limit:]
     msgs: list[dict] = []
     for m in rows:
         text = (m.text or "").strip()
@@ -916,7 +964,9 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                    public_comment: bool = False, read_only: bool = False,
                    scribe_only: bool = False,
                    product_sink: list | None = None,
-                   comment_reading: dict | None = None) -> str:
+                   comment_reading: dict | None = None,
+                   comment_post_id: str | None = None,
+                   thread_parent: dict | None = None) -> str:
     """Run one agent turn and return the reply text (does NOT send it).
 
     WhatsApp is the default and unchanged. For Messenger/Instagram, pass
@@ -1033,8 +1083,11 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     # Comment threads are short exchanges under one post — 14 messages of
     # history covers them; DMs keep the full window (limit=40) because "the
     # colour named three messages ago is still the colour" needs reach.
+    # A public comment turn reads THIS post's thread only (owner, 2026-09-23):
+    # the same person's comments under another post are another conversation.
     messages = await _history(db, key,
-                              limit=(14 if public_comment else 40), channel=channel)
+                              limit=(14 if public_comment else 40), channel=channel,
+                              post_id=(comment_post_id if public_comment else None))
 
     # Voice + text are one memory: recent call summaries join the context
     # (best-effort — a calls hiccup never blocks a chat reply).
@@ -1048,7 +1101,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     # Cross-channel memory: what the SAME person said on their other linked
     # channels — the Facebook→WhatsApp bridge continues the real conversation.
     try:
-        _xc = await _cross_channel_context(db, key, channel)
+        _xc = await _cross_channel_context(db, key, channel, public_comment=public_comment)
         if _xc:
             tail += _xc
     except Exception:
@@ -1202,6 +1255,8 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                  "in that post — identify it, find it with search_catalog, and "
                  "answer about THAT item. Do not ask what they are looking for.)")
         lead_ctx.append(line)
+        if public_comment and thread_parent:
+            lead_ctx.append(_thread_parent_context(thread_parent))
         if (settings.tier2_vision and not img_block and pctx.get("thumb")
                 and not any(m["role"] == "assistant" for m in messages)):
             from app.agent.media import load_image_block
@@ -2123,6 +2178,53 @@ def empathy_text(kind: str, severity: int, swahili: bool = False,
     if kind == "mixed":
         return _SW_EMPATHY_MIXED if swahili else _EMPATHY_MIXED
     return _SW_PUBLIC_EMPATHY if swahili else _PUBLIC_EMPATHY
+
+
+def _thread_parent_context(parent: dict | None) -> str:
+    """The model's line for a REPLY inside a thread (owner, 2026-09-23): the
+    comment it answers and what we said there. 'In Kenya shillings' under
+    'How much is it?' — '$40' is that item in KES, never another item."""
+    p = parent or {}
+    said = " ".join(str(p.get("text") or "").split())[:300]
+    if not said:
+        return ""
+    who = str(p.get("by") or "").strip() or "another commenter"
+    ours = " ".join(str(p.get("our_reply") or "").split())[:400]
+    line = (f'(This comment is a REPLY inside a thread, under {who}\'s comment "{said}"')
+    if ours:
+        line += f' — which we answered: "{ours}"'
+    line += (". Their words continue THAT exchange: a currency, a colour, a size or "
+             "\"how much\" refers to the item quoted there — \"in Kenya shillings\" after a "
+             "dollar quote is the SAME item re-priced in KES (search_catalog it with "
+             "currency KES), never another item. The post's product stays what it is.)")
+    return line
+
+
+async def _thread_parent(parent_id: str) -> dict:
+    """The comment a reply answers, and our reply to it, from our own inbox
+    (every comment is captured with its id as `waba_msg_id`; our public
+    replies carry `comment_context.reply_to`). {} when unknown."""
+    pid = (parent_id or "").strip()
+    if not pid:
+        return {}
+    try:
+        from app.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as db:
+            parent = (await db.execute(
+                select(Message).where(Message.waba_msg_id == pid)
+                .order_by(Message.created_at.desc()).limit(1))).scalars().first()
+            if parent is None:
+                return {}
+            ours = (await db.execute(
+                select(Message).where(
+                    Message.direction == MsgDirection.outbound,
+                    Message.comment_context["reply_to"].astext == pid)
+                .order_by(Message.created_at.desc()).limit(1))).scalars().first()
+            return {"text": parent.text or "", "by": parent.name or "",
+                    "our_reply": (ours.text if ours is not None else "") or ""}
+    except Exception as exc:
+        _log.info("thread parent %s not read: %s", pid, exc)
+        return {}
 
 
 def _reading_context(reading: dict | None) -> str:
@@ -3058,6 +3160,11 @@ async def _first_contact(channel: str, ext: str) -> bool:
         return False
 
 
+def identity_trusted_record(record: dict | None) -> bool:
+    from app.services.post_catalog import identity_trusted
+    return identity_trusted(record)
+
+
 def _post_identity_compatible(known: dict, caption: str | None, matched: dict,
                               comment_text: str = "", saw_image: bool = True) -> bool:
     """May `matched` become (or refresh) this post's RECORDED product identity?
@@ -3109,6 +3216,37 @@ async def _post_identity(redis, channel: str, pctx: dict) -> dict:
     post_id = (pctx.get("post_id") or "").strip()
     known = await _recall_post_product(redis, channel, post_id)
     stale = False
+    if known.get("name") and known.get("source") and not identity_trusted_record(known):
+        # A model's read, a vision name with no photo to compare, a legacy
+        # record: a LEAD, not a fact. The ladder gets another go at a trusted
+        # identity — once an hour per post, so a comment storm costs one
+        # ladder — and a trusted hit replaces the lead (owner, 2026-09-23: the
+        # ring post carried the model's "Apostolic Ring" while the caption
+        # said "Bishop's Ring", the hub's own "Ring" row).
+        retry_key = f"postcat:retry:{channel}:{post_id}"
+        try:
+            fresh = bool(await redis.set(retry_key, "1", nx=True, ex=3600)) if redis is not None else True
+        except Exception:
+            fresh = True
+        if fresh and (pctx.get("title") or pctx.get("thumb")):
+            try:
+                from app.database import AsyncSessionLocal as _ASL2
+                from app.services import n8n_bridge as _svc2
+                from app.services import post_catalog as _pc2
+                async with _ASL2() as _db2:
+                    _cat2 = await _svc2.catalog_items(_db2, redis)
+                hit = await _pc2.resolve_post(redis, pctx, _cat2)
+                if hit is not None and _pc2.identity_trusted(
+                        {"name": hit.get("name"), "source": hit.get("_identity_source"),
+                         "confidence": hit.get("_identity_confidence")}):
+                    await _remember_post_product(redis, channel, post_id, hit,
+                                                 thumb=(pctx.get("thumb") or "").strip())
+                    _log.info("post %s: lead %r replaced by trusted %r (%s)", post_id,
+                              known.get("name"), hit.get("name"), hit.get("_identity_source"))
+                    return await _recall_post_product(redis, channel, post_id) or known
+            except Exception as exc:
+                _log.info("post %s: ladder retry failed: %s", post_id, exc)
+        return known
     if known.get("name") and known.get("source"):
         # A caption-stamped record of ONE piece under a caption that lists
         # several (owner, 2026-09-21: "Cassock" under the five-piece outfit)
@@ -3732,12 +3870,16 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
             # for comments carrying money or risk (see route_comment_model).
             _cmodel = settings.tier2_model if media else route_comment_model(prompt_text)
             async with AsyncSessionLocal() as db:
+                # A reply inside a thread carries the comment it answers and
+                # what we said there (owner, 2026-09-23).
+                _parent = await _thread_parent(comment.get("parent_id") or "")
                 answer = (await run_turn(
                     db, redis, wa_id=ext, user_text=prompt_text,
                     llm=build_llm(model=_cmodel),
                     media=media, channel=channel, external_id=ext,
                     public_comment=True, product_sink=seen_products,
-                    comment_reading=reading)).strip()
+                    comment_reading=reading, comment_post_id=post_id,
+                    thread_parent=_parent)).strip()
         except Exception as exc:
             _log.warning("public agent reply failed for %s: %s", cid, exc)
 

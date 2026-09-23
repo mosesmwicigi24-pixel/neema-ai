@@ -732,6 +732,17 @@ async def resolve_post(redis, pctx: dict, catalog: list[dict]) -> dict | None:
             return with_provenance(hit, "caption")
     else:
         hit = product_from_caption(title, catalog)
+        if hit is None and title:
+            # The hub's names SCORED against the whole caption (runtime's
+            # scorer: coverage, the phrase in order, an alias, size families,
+            # a near-tie is None). It used to run only as the comment
+            # resolver's fallback — after the model had already read the
+            # post; so a caption saying "Premium Bishop's Ring" (the hub's
+            # "Ring", too short a name for containment) went to the model,
+            # which picked the Apostolic Ring off a photo the two rows share
+            # (owner, 2026-09-23). Deterministic first.
+            from app.agent.runtime import _hub_caption_match
+            hit = _hub_caption_match(catalog, title)
         if hit is not None:
             return with_provenance(hit, "caption")
     thumb = (pctx.get("thumb") or "").strip()
