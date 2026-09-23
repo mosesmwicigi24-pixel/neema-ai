@@ -1030,10 +1030,18 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
     except Exception:
         _granted = None           # no offer recorded beats no order created
 
+    # A wa_id the phone library can't validate (an Ivorian account from before
+    # renumbering…) still finds the hub customer created with it when WhatsApp
+    # has delivered messages from it — instead of a duplicate customer per order.
+    from app.core.phone import to_e164
+    from app.services.identity import whatsapp_handle_proven
+    proven = (to_e164(order_wa_id) is None
+              and await whatsapp_handle_proven(ctx.db, order_wa_id))
+
     try:
         pushed = await hub_client.push_pending_order(
             catalog, wa_id=order_wa_id, first_name=first_name,
-            country_iso=country_iso, items=cart["items"],
+            country_iso=country_iso, items=cart["items"], proven=proven,
             # The app this customer actually used. Without it every chat order
             # reached the hub labelled WhatsApp, so a Messenger buyer's order
             # offered a WhatsApp button that could not reach them.
@@ -1212,6 +1220,56 @@ async def _capture_customer(args: dict, ctx: ToolContext) -> dict:
     return out
 
 
+async def _whatsapp_region(ctx: ToolContext, person_id) -> str | None:
+    """The country of the customer's own WhatsApp number — this chat's handle on
+    WhatsApp, else a WhatsApp identity linked to their person — for reading a
+    LOCAL number they share. None when they have no WhatsApp number."""
+    from app.core.phone import is_plausible_phone, region_of
+    from app.models.person import Identity
+    from app.services.identity import whatsapp_handle_proven
+    handles = [ctx.wa_id] if ctx.channel == "whatsapp" else []
+    handles += (await ctx.db.execute(select(Identity.external_id).where(
+        Identity.person_id == person_id, Identity.channel == "whatsapp",
+    ).order_by(Identity.created_at))).scalars().all()
+    for handle in handles:
+        if not is_plausible_phone(handle):
+            continue          # a web_ session key rides the whatsapp channel too
+        reg = region_of(handle)
+        if reg is None and await whatsapp_handle_proven(ctx.db, handle):
+            reg = region_of(handle, proven=True)
+        if reg:
+            return reg
+    return None
+
+
+async def _drop_assumed_readings(db, person_id, e164: str) -> list[str]:
+    """Delete this person's phone rows holding the same national digits as
+    `e164` under a country code we only ASSUMED (raw.region_assumed — no
+    location, no code given, no WhatsApp match). Returns the values dropped.
+    Rows without that flag (given with a code, read on evidence, or written
+    before 2026-09-05) are left alone."""
+    from app.core.phone import national_digits
+    from app.models.person import Identifier
+    nat = national_digits(e164, proven=True)
+    if not nat:
+        return []
+    rows = (await db.execute(select(Identifier).where(
+        Identifier.person_id == person_id, Identifier.type == "phone",
+    ))).scalars().all()
+    dropped = []
+    for row in rows:
+        if row.value == e164 or (row.raw or {}).get("region_assumed") is not True:
+            continue
+        if national_digits(row.value, proven=True) != nat:
+            continue
+        await db.delete(row)
+        dropped.append(row.value)
+    if dropped:
+        await db.flush()
+        _log.info("capture_contact: %s replaces assumed reading(s) %s", e164, dropped)
+    return dropped
+
+
 async def _capture_contact(args: dict, ctx: ToolContext) -> dict:
     """Messenger/IG: save the customer's name (Meta blocks reading it) and, if they
     share a phone, attach it and LINK their Messenger↔WhatsApp into one person."""
@@ -1288,23 +1346,32 @@ async def _capture_contact(args: dict, ctx: ToolContext) -> dict:
 
     if phone:
         from app.core.countries import iso_from_text
-        from app.core.phone import to_e164
+        from app.core.phone import whatsapp_ids
+        from app.services.identity import to_e164_with_proof
         from app.services.reconcile import attach_identifier
         # A number shared without a country code ("0799223329") must be resolved
         # against THEIR country, not Kenya's — we know it from their captured
-        # location (this turn's or the profile's).
+        # location (this turn's or the profile's), or else from their own
+        # WhatsApp number (this chat's, or one linked to them). Kenya only when
+        # nothing places them, and then it is recorded as assumed.
         _users = await users_for_person(ctx.db, ident.person_id)
         _user = _users[0] if _users else None
         region_from_words = (iso_from_text(location)
                              or iso_from_text((person.state or {}).get("location") if person else None)
                              or iso_from_text(_user.location if _user else None))   # panel-edited location
-        region = region_from_words or "KE"
-        e164 = to_e164(phone, region)
+        region_from_wa = await _whatsapp_region(ctx, ident.person_id)
+        region = region_from_words or region_from_wa or "KE"
+        e164 = await to_e164_with_proof(ctx.db, phone, region)
         if e164:
             from app.core.phone import carries_country_code
             # Link to the WhatsApp person for that number, if one exists — keep the
             # phone-anchored WhatsApp person as primary (it can transact + be paid).
-            wa_ident = await _select_identity(ctx.db, WHATSAPP, e164.lstrip("+"))
+            # An older Mexican/Brazilian account is keyed in WhatsApp's legacy form.
+            wa_ident = None
+            for wa_key in whatsapp_ids(e164):
+                wa_ident = await _select_identity(ctx.db, WHATSAPP, wa_key)
+                if wa_ident is not None:
+                    break
             # Is the country EVIDENCE or a parsing default? They gave it
             # ("+254…"/"254…"), or the number was read against a location they
             # stated, or a real WhatsApp contact exists on exactly that number
@@ -1313,16 +1380,26 @@ async def _capture_contact(args: dict, ctx: ToolContext) -> dict:
             # recorded as assumed, and it never stamps a country (owner,
             # 2026-09-05: no evidence, no KES).
             assumed = (not carries_country_code(phone, e164) and not region_from_words
-                       and wa_ident is None)
+                       and not region_from_wa and wa_ident is None)
+            # One number, one row. attach_identifier is idempotent on the VALUE,
+            # so "0724…" read as Kenyan before their location was known and as
+            # South African after it was stored twice — one person holding one
+            # number under two country codes (2026-09-21: 11 people). A reading
+            # made on evidence replaces the one we only assumed.
+            superseded = ([] if assumed
+                          else await _drop_assumed_readings(ctx.db, ident.person_id, e164))
+            raw = {"as_given": phone[:40], "region_assumed": assumed}
+            if superseded:
+                raw["supersedes"] = superseded
             await attach_identifier(ctx.db, ident.person_id, "phone", e164,
                                     source=f"{ctx.channel}_capture", confidence="self_reported",
-                                    raw={"as_given": phone[:40], "region_assumed": assumed})
+                                    raw=raw)
             if wa_ident is not None and wa_ident.person_id != ident.person_id:
                 from app.services.merge import merge_persons
                 try:
                     await merge_persons(ctx.db, primary_person_id=wa_ident.person_id,
                                         secondary_person_id=ident.person_id,
-                                        primary_wa_id=e164.lstrip("+"))
+                                        primary_wa_id=wa_ident.external_id)
                     out["linked_whatsapp"] = True
                 except Exception as exc:
                     _log.warning("capture_contact link failed for %s: %s", ctx.wa_id, exc)
@@ -1333,7 +1410,7 @@ async def _capture_contact(args: dict, ctx: ToolContext) -> dict:
             # the Messenger shim): the phone-anchored row comes first.
             _users2 = await users_for_person(ctx.db, ident.person_id)
             user = _users2[0] if _users2 else None
-            if user is not None and not user.phone:
+            if user is not None and (not user.phone or user.phone in superseded):
                 user.phone = e164
             # The dialing prefix is the strongest country signal — set the
             # profile's country from it (overwrites a location-derived guess).

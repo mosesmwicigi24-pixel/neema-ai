@@ -99,7 +99,7 @@ def test_push_order_sends_variant_id_and_price(monkeypatch):
             captured.update(json or {})
             return _Resp()
 
-    async def _no_customer(wa_id): return None
+    async def _no_customer(wa_id, **_kw): return None
     monkeypatch.setattr(hc.httpx, "AsyncClient", _Client)
     monkeypatch.setattr(hc, "_find_customer_id", _no_customer)
 

@@ -20,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.phone import DEFAULT_REGION, to_e164
 from app.models.person import Person, Identity
 
 _log = logging.getLogger("neema.identity")
@@ -170,6 +171,38 @@ async def resolve_person_id_for_wa_id(
         display_name=display_name, source=source, confidence="deterministic",
     )
     return ident.person_id
+
+
+# ── Proof of life: a WhatsApp handle the phone library can't validate ─────────
+
+async def whatsapp_handle_proven(db: AsyncSession, handle: str | None) -> bool:
+    """Proof of life for `to_e164(..., proven=True)`: WhatsApp itself delivered
+    at least one inbound message from exactly this handle. A users/identities row
+    alone is not proof — operators, imports and the old phantom bug created
+    those — and a Meta PSID never has WhatsApp traffic, so it can never pass."""
+    from app.models.message import Message, MsgDirection
+    h = (handle or "").strip().lstrip("+")
+    if not h.isdigit():
+        return False
+    return (await db.execute(
+        select(Message.id).where(
+            Message.wa_id == h,
+            Message.channel == WHATSAPP,
+            Message.direction == MsgDirection.inbound,
+        ).limit(1)
+    )).first() is not None
+
+
+async def to_e164_with_proof(db: AsyncSession, raw: str | None,
+                             region: str = DEFAULT_REGION) -> str | None:
+    """`to_e164`, and when the library rejects a digits-only string WhatsApp has
+    delivered messages from (CI/CM pre-renumbering, BJ 2024, unknown KE ranges),
+    that handle as-is. The query only runs on a rejection, so a number the
+    library knows costs nothing extra."""
+    e = to_e164(raw, region)
+    if e is None and await whatsapp_handle_proven(db, raw):
+        e = to_e164(raw, region, proven=True)
+    return e
 
 
 # ── Cross-channel bridge: WhatsApp arrival via a social deep link ────────────

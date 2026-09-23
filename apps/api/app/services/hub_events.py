@@ -107,21 +107,31 @@ def brief_for(event: dict) -> str | None:
 
 async def _conversation_for_phone(db, phone: str):
     """Newest conversation for this phone's PERSON (any channel) — WhatsApp
-    match first (wa_id == E.164 digits), then the identity spine."""
-    from app.core.phone import to_e164
+    match first (wa_id == E.164 digits), then the identity spine.
+
+    The hub's phone is often the very wa_id Neema pushed, so a handle the phone
+    library can't validate (CI/CM pre-renumbering…) is taken on proof of life,
+    and a Mexican/Brazilian number is also tried in WhatsApp's legacy form."""
+    from app.core.phone import whatsapp_ids
     from app.models.conversation import Conversation
     from app.models.person import Identity, Identifier
-    e164 = to_e164(phone or "", "KE")
+    from app.services.identity import to_e164_with_proof
+    e164 = await to_e164_with_proof(db, phone or "", "KE")
     if not e164:
         return None
-    wa_key = e164.lstrip("+")
-    conv = (await db.execute(select(Conversation).where(
-        Conversation.wa_id == wa_key))).scalar_one_or_none()
-    if conv is not None:
-        return conv
+    wa_keys = whatsapp_ids(e164)
+    for wa_key in wa_keys:
+        conv = (await db.execute(select(Conversation).where(
+            Conversation.wa_id == wa_key))).scalar_one_or_none()
+        if conv is not None:
+            return conv
     person_id = None
-    ident = (await db.execute(select(Identity).where(
-        Identity.channel == "whatsapp", Identity.external_id == wa_key))).scalar_one_or_none()
+    ident = None
+    for wa_key in wa_keys:
+        ident = (await db.execute(select(Identity).where(
+            Identity.channel == "whatsapp", Identity.external_id == wa_key))).scalar_one_or_none()
+        if ident is not None:
+            break
     if ident is not None:
         person_id = ident.person_id
     else:

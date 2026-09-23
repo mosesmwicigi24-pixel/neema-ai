@@ -37,7 +37,7 @@ def _payload_for(monkeypatch, channel):
 
     monkeypatch.setattr(hub_client.httpx, "AsyncClient", lambda **kw: _Client())
 
-    async def _no_customer(_wa):
+    async def _no_customer(_wa, **_kw):
         return None
 
     monkeypatch.setattr(hub_client, "_find_customer_id", _no_customer)

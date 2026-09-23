@@ -204,8 +204,9 @@ def _capture(results, person, phone, monkeypatch):
 def test_bare_local_number_is_stored_as_assumed_and_stamps_no_country(monkeypatch):
     p = _person()
     shim = _user(PSID)
-    # queries: select_identity → users → whatsapp identity for the number → users
-    out, rec, ctx = _capture([_ident(p), [shim], None, [shim]], p, "0712345678", monkeypatch)
+    # queries: select_identity → users → their own WhatsApp handles (none) →
+    # whatsapp identity for the number → users
+    out, rec, ctx = _capture([_ident(p), [shim], [], None, [shim]], p, "0712345678", monkeypatch)
     assert rec["value"] == "+254712345678"
     assert rec["raw"]["region_assumed"] is True and rec["raw"]["as_given"] == "0712345678"
     assert out.get("country_assumed") is True and "country" not in out
@@ -216,7 +217,8 @@ def test_bare_local_number_is_stored_as_assumed_and_stamps_no_country(monkeypatc
 def test_number_given_with_its_code_is_evidence(monkeypatch):
     p = _person()
     shim = _user(PSID)
-    out, rec, _ = _capture([_ident(p), [shim], None, [shim]], p, "+254712345678", monkeypatch)
+    # … → whatsapp identity for the number → assumed twins to replace (none) → users
+    out, rec, _ = _capture([_ident(p), [shim], [], None, [], [shim]], p, "+254712345678", monkeypatch)
     assert rec["raw"]["region_assumed"] is False
     assert out["country"] == "Kenya" and shim.country_iso == "KE"
     assert p.state["country_iso"] == "KE"
@@ -226,7 +228,8 @@ def test_a_real_whatsapp_contact_on_the_same_number_corroborates_a_bare_number(m
     p = _person()
     shim = _user(PSID)
     wa_ident = _ident(p, "whatsapp", "254712345678")          # same person already
-    out, rec, _ = _capture([_ident(p), [shim], wa_ident, [shim]], p, "0712345678", monkeypatch)
+    out, rec, _ = _capture([_ident(p), [shim], ["254712345678"], wa_ident, [], [shim]], p,
+                           "0712345678", monkeypatch)
     assert rec["raw"]["region_assumed"] is False
     assert out["country"] == "Kenya" and shim.country_iso == "KE"
 
