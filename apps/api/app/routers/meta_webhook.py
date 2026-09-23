@@ -442,12 +442,21 @@ def _parse_comment(change: dict) -> dict | None:
     if field == "feed":
         if value.get("item") != "comment" or value.get("verb") != "add":
             return None      # ignore likes, edits, removes, posts, shares
+        post_id = value.get("post_id") or value.get("parent_id") or ""
+        parent = str(value.get("parent_id") or "")
         return {
             "comment_id": value.get("comment_id"),
             "text": (value.get("message") or "").strip(),
             "from_id": str(frm.get("id") or ""),
             "from_name": frm.get("name") or "",
-            "post_id": value.get("post_id") or value.get("parent_id") or "",
+            "post_id": post_id,
+            # A REPLY inside a thread: the comment it answers (Facebook sends
+            # the post id as parent_id for a top-level comment — that is not a
+            # parent). The engine reads that comment and our reply to it, so
+            # "in Kenya shillings" under "How much is it?" — "$40" is the same
+            # item in KES, not whatever this person last discussed elsewhere
+            # (owner, 2026-09-23).
+            "parent_id": parent if parent and parent != str(post_id) else "",
         }
     if field == "comments":  # Instagram — every event is a new comment
         return {
@@ -456,6 +465,7 @@ def _parse_comment(change: dict) -> dict | None:
             "from_id": str(frm.get("id") or ""),
             "from_name": frm.get("username") or "",
             "post_id": (value.get("media") or {}).get("id") or "",
+            "parent_id": str(value.get("parent_id") or ""),
         }
     return None
 

@@ -50,6 +50,35 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   many, how soon, which city. A made-to-order item (cassocks, shirts, stoles…)
   is asked colour then size/measurements. Every search row carries `ask_next`;
   the canned pools split the same way (`_STOCK_*` vs the made-to-order pools).
+- **A comment thread is the post's thread** (owner 2026-09-23: under a ring
+  post, "How much is it?" was quoted the ring in dollars and a reply inside
+  that thread, "In Kenya shillings", was answered "KES 19,000 for the full set
+  — cassock, shirt, collar, stole and belt"). Where the cassock came from: a
+  comment conversation is ONE per person per channel across every post, so
+  the ring turn's transcript was that commenter's own earlier cassock-set
+  exchange under another post, "in Kenya shillings" re-priced the last item
+  in it, and the webhook had dropped `parent_id`, so nothing said he was
+  answering the ring quote. Now: a public-comment turn's transcript is THIS
+  post's thread only (`runtime._thread_rows` — their comments whose
+  `comment_context.post_id` is the post, and our replies whose
+  `comment_context.reply_to` names one of them; `_history(post_id=…)` fetches
+  wider, then keeps the thread's last turns; rows from before attribution are
+  left out); the webhook keeps `parent_id` (the post's own id is not a
+  parent); a reply inside a thread carries the comment it answers and our
+  reply to it (`_thread_parent` from our inbox, `_thread_parent_context`: "a
+  currency, a colour, a size after a quote is the SAME item — 'in Kenya
+  shillings' after a dollar quote is that item in KES"); the cross-channel
+  lines under a comment say who they are, never what the comment is about;
+  and the rule STAY ON THE POST'S PRODUCT says so. The same post was on record
+  as the model's "Apostolic Ring" ($40) when the caption said "Premium
+  Bishop's Ring" — the hub's "Ring" ($20), a name too short for containment,
+  and both ring rows share ONE photo, so neither the image nor the vision
+  rung can tell them apart. The caption scorer (`_hub_caption_match`) now
+  runs inside the ladder (`resolve_post`) before any model reads a post, and
+  an UNTRUSTED record (model / vision-name / legacy) is a lead the ladder
+  re-reads once an hour per post (`postcat:retry:*`), a trusted hit replacing
+  it. Hub-side, still open: name the premium bishop's ring as its own row and
+  give the two rings their own photos.
 - **Never price a guess** (owner 2026-09-21: a tallit post sold anointing oil,
   a dress design a bell, a cope a ring — each a canned line filled from an
   arbitrary hub row). Every post identity now carries a `source` and a
