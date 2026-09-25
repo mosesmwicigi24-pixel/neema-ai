@@ -1,5 +1,8 @@
 package ke.co.bethanyhouse.neema.feature.calls
 
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -25,7 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Notes
-import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.CallReceived
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PhoneCallback
@@ -61,6 +64,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.MediaItem
@@ -116,7 +120,11 @@ private fun recordingUrl(raw: String): String =
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CallsScreen(dash: DashboardViewModel) {
+fun CallsScreen(
+    dash: DashboardViewModel,
+    /** Tests only: fixes what the system allows instead of asking it. */
+    readinessOverride: CallReadiness? = null,
+) {
     val vm: CallsViewModel = viewModel { CallsViewModel(dash) }
     val calls by vm.calls.collectAsStateWithLifecycle()
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()
@@ -131,7 +139,13 @@ fun CallsScreen(dash: DashboardViewModel) {
     val missed = list.orEmpty().count { it.status == "missed" }
     val shown = if (missedOnly) list?.filter { it.status == "missed" } else list
     val sel = selected?.takeIf { !it.waId.isNullOrEmpty() }
-    val withMic = rememberMicPermission()
+    val ctx = LocalContext.current
+    var readiness by remember { mutableStateOf(readinessOverride ?: CallReadiness.of(ctx)) }
+    // Re-check on return from the system settings page.
+    LifecycleResumeEffect(readinessOverride) {
+        readiness = readinessOverride ?: CallReadiness.of(ctx)
+        onPauseOrDispose {}
+    }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(Neema.colors.surface)) {
         val wide = maxWidth >= 840.dp
@@ -148,6 +162,7 @@ fun CallsScreen(dash: DashboardViewModel) {
                         modifier = Modifier.widthIn(max = 560.dp).weight(1f, fill = false).fillMaxWidth(),
                         vm = vm, shown = shown, total = list?.size ?: 0, missed = missed, missedOnly = missedOnly,
                         selectedId = sel?.id, openTranscript = transcript,
+                        readiness = readiness,
                         onOpenConversation = { dash.openConversationFor(it) },
                     )
                 }
@@ -155,7 +170,6 @@ fun CallsScreen(dash: DashboardViewModel) {
                     CallerPanel(
                         dash = dash, vm = vm, sel = sel, calls = list.orEmpty(),
                         modifier = if (wide) Modifier.width(400.dp) else Modifier.fillMaxWidth(),
-                        onCallBack = { withMic { vm.callBack(sel) } },
                     )
                 }
             }
@@ -173,6 +187,7 @@ private fun CallLog(
     missedOnly: Boolean,
     selectedId: String?,
     openTranscript: TranscriptUi?,
+    readiness: CallReadiness,
     onOpenConversation: (String) -> Unit,
 ) {
     LazyColumn(modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 24.dp)) {
@@ -207,6 +222,7 @@ private fun CallLog(
                         )
                     }
                 }
+                if (!readiness.ready) ReadinessBanner(readiness)
                 when {
                     shown == null -> Text(
                         "Loading…", color = Muted, fontSize = 14.sp, textAlign = TextAlign.Center,
@@ -388,59 +404,88 @@ private fun TranscriptPanel(t: TranscriptUi, vm: CallsViewModel) {
     }
 }
 
-/** Play / pause + scrubber for the call recording (ExoPlayer). */
+/**
+ * Play / pause + scrubber for the call recording (ExoPlayer). The player is
+ * only built on the first tap of Play, so opening a transcript costs nothing.
+ */
 @Composable
 private fun RecordingPlayer(url: String) {
     val ctx = LocalContext.current
-    val player = remember(url) {
-        ExoPlayer.Builder(ctx).build().apply { setMediaItem(MediaItem.fromUri(url)); prepare() }
-    }
+    var player by remember(url) { mutableStateOf<ExoPlayer?>(null) }
     var playing by remember { mutableStateOf(false) }
     var buffering by remember { mutableStateOf(false) }
     var failed by remember { mutableStateOf(false) }
     var pos by remember { mutableLongStateOf(0L) }
     var dur by remember { mutableLongStateOf(0L) }
     var scrub by remember { mutableFloatStateOf(-1f) }
-    DisposableEffect(player) {
+    val p = player
+    DisposableEffect(p) {
+        if (p == null) return@DisposableEffect onDispose {}
         val l = object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying }
             override fun onPlaybackStateChanged(state: Int) {
                 buffering = state == Player.STATE_BUFFERING
-                if (state == Player.STATE_READY) dur = player.duration.coerceAtLeast(0)
-                if (state == Player.STATE_ENDED) { player.pause(); player.seekTo(0) }
+                if (state == Player.STATE_READY) dur = p.duration.coerceAtLeast(0)
+                if (state == Player.STATE_ENDED) { p.pause(); p.seekTo(0) }
             }
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) { failed = true }
         }
-        player.addListener(l)
-        onDispose { player.removeListener(l); player.release() }
+        p.addListener(l)
+        onDispose { p.removeListener(l); p.release() }
     }
-    LaunchedEffect(player, playing) {
-        while (isActive && playing) { pos = player.currentPosition; delay(250) }
-        pos = player.currentPosition
+    LaunchedEffect(p, playing) {
+        if (p == null) return@LaunchedEffect
+        while (isActive && playing) { pos = p.currentPosition; delay(250) }
+        pos = p.currentPosition
     }
     if (failed) {
         Text("Couldn't play the recording.", color = RedC, fontSize = 12.sp)
         return
     }
+    PlayerBar(
+        playing = playing, buffering = buffering,
+        progress = if (scrub >= 0f) scrub else if (dur > 0) pos.toFloat() / dur else 0f,
+        label = if (dur > 0) "${fmtMs(pos)} / ${fmtMs(dur)}" else fmtMs(pos),
+        onToggle = {
+            val cur = player ?: runCatching {
+                ExoPlayer.Builder(ctx).build().apply { setMediaItem(MediaItem.fromUri(url)); prepare() }
+            }.getOrElse { failed = true; null }.also { player = it }
+            if (cur != null) { if (playing) cur.pause() else cur.play() }
+        },
+        onScrub = { scrub = it },
+        onScrubDone = { if (dur > 0) { player?.seekTo((scrub * dur).toLong()); pos = (scrub * dur).toLong() }; scrub = -1f },
+    )
+}
+
+@Composable
+private fun PlayerBar(
+    playing: Boolean,
+    buffering: Boolean,
+    progress: Float,
+    label: String,
+    onToggle: () -> Unit,
+    onScrub: (Float) -> Unit,
+    onScrubDone: () -> Unit,
+) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Color(0x0FFFFFFF)).padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
-            Modifier.size(30.dp).clip(CircleShape).background(Green).clickable { if (playing) player.pause() else player.play() },
+            Modifier.size(30.dp).clip(CircleShape).background(Green).clickable(onClick = onToggle),
             contentAlignment = Alignment.Center,
         ) {
-            if (buffering && playing) CircularProgressIndicator(Modifier.size(14.dp), color = Ink, strokeWidth = 2.dp)
+            if (buffering) CircularProgressIndicator(Modifier.size(14.dp), color = Ink, strokeWidth = 2.dp)
             else Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (playing) "Pause" else "Play recording", tint = Ink, modifier = Modifier.size(18.dp))
         }
         Slider(
-            value = if (scrub >= 0f) scrub else if (dur > 0) pos.toFloat() / dur else 0f,
-            onValueChange = { scrub = it },
-            onValueChangeFinished = { if (dur > 0) { player.seekTo((scrub * dur).toLong()); pos = (scrub * dur).toLong() }; scrub = -1f },
+            value = progress,
+            onValueChange = onScrub,
+            onValueChangeFinished = onScrubDone,
             colors = SliderDefaults.colors(thumbColor = Green, activeTrackColor = Green, inactiveTrackColor = Color(0x33FFFFFF)),
             modifier = Modifier.weight(1f).padding(horizontal = 8.dp).heightIn(max = 32.dp),
         )
-        Text("${fmtMs(pos)} / ${fmtMs(dur)}", color = Muted, fontSize = 11.sp)
+        Text(label, color = Muted, fontSize = 11.sp)
     }
 }
 
@@ -454,7 +499,6 @@ private fun CallerPanel(
     sel: Call,
     calls: List<Call>,
     modifier: Modifier,
-    onCallBack: () -> Unit,
 ) {
     val wa = sel.waId!!
     val callerCalls = calls.filter { it.waId == wa }
@@ -481,14 +525,12 @@ private fun CallerPanel(
                 if (callerMissed > 0) Text(" · $callerMissed missed", color = Color(0xFFFF8A8D), fontSize = 12.sp)
                 callerCalls.firstOrNull()?.startedAt?.let { Text(" · last ${vm.ago(it)}", color = Sage, fontSize = 12.sp, maxLines = 1) }
             }
-            StripButton("Call", Icons.Filled.Call, onCallBack)
-            Spacer(Modifier.width(6.dp))
-            StripButton("Open chat →", null) { dash.openConversationFor(wa) }
+            StripButton("Open chat →") { dash.openConversationFor(wa) }
         }
         Spacer(Modifier.height(12.dp))
         Box(
             Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(16.dp))
-                .border(1.dp, Color(0xFFE7E5E4), RoundedCornerShape(16.dp))
+                .border(1.dp, if (Neema.colors.isDark) Neema.colors.border else Color(0xFFE7E5E4), RoundedCornerShape(16.dp))
                 .background(Neema.colors.bg2),
         ) {
             CustomerPanel(
@@ -504,14 +546,68 @@ private fun CallerPanel(
 }
 
 @Composable
-private fun StripButton(text: String, icon: ImageVector?, onClick: () -> Unit) {
+private fun StripButton(text: String, onClick: () -> Unit) {
     Row(
         Modifier.clip(RoundedCornerShape(50)).background(Color(0x2425D366))
             .border(1.dp, Color(0x4D25D366), RoundedCornerShape(50))
             .clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (icon != null) { Icon(icon, null, tint = Green, modifier = Modifier.size(13.dp)); Spacer(Modifier.width(4.dp)) }
         Text(text, color = Green, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+/**
+ * Why a call might not ring this phone like the web's take-over card, and the
+ * one tap that fixes it: notifications off (nothing rings in the background)
+ * or, on Android 14+, full-screen notifications not allowed (a call shows as a
+ * heads-up instead of waking the lock screen).
+ */
+@Composable
+private fun ReadinessBanner(r: CallReadiness) {
+    val ctx = LocalContext.current
+    val (title, body, button) = if (!r.notifications) Triple(
+        "Calls can't ring in the background",
+        "Turn on notifications so a WhatsApp call rings this phone when Neema isn't open.",
+        "Turn on",
+    ) else Triple(
+        "Let calls take over the lock screen",
+        "Allow full-screen notifications so a ringing WhatsApp call wakes the phone, the way the dashboard takes over when it rings.",
+        "Allow",
+    )
+    fun open() {
+        val first = if (!r.notifications) notificationSettings(ctx) else fullScreenIntentSettings(ctx)
+        val tries = listOf(
+            first,
+            notificationSettings(ctx),
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}")),
+        )
+        for (i in tries) {
+            if (runCatching { ctx.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess) return
+        }
+    }
+    Row(
+        Modifier
+            .padding(start = 24.dp, end = 24.dp, bottom = 16.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0x1AF5A623))
+            .border(1.dp, Color(0x4DF5A623), RoundedCornerShape(12.dp))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Filled.NotificationsActive, null, tint = Color(0xFFF5C451), modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, color = TextC, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(2.dp))
+            Text(body, color = Sage, fontSize = 12.sp, lineHeight = 17.sp)
+        }
+        Spacer(Modifier.width(12.dp))
+        Text(
+            button, color = Ink, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+            modifier = Modifier.clip(RoundedCornerShape(50)).background(Color(0xFFF5A623))
+                .clickable { open() }.padding(horizontal = 14.dp, vertical = 7.dp),
+        )
     }
 }
