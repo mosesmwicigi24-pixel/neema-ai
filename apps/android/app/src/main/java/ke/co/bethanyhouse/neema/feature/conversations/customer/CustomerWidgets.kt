@@ -89,6 +89,16 @@ val SOURCE_META = mapOf(
     "other" to ("Other" to "•"),
 )
 
+/**
+ * A lead source's label + icon. Besides SOURCE_META's keys the webhooks write
+ * "<base>_ad" for a click-to-message ad (wa_native._capture_referral →
+ * "facebook_ad", meta_webhook → "facebook_ad" / "instagram_ad"); the web prints
+ * those raw ("• facebook_ad"), here they read "📘 Facebook ad".
+ */
+fun sourceMeta(src: String): Pair<String, String>? =
+    SOURCE_META[src] ?: src.removeSuffix("_ad").takeIf { src.endsWith("_ad") }?.let { SOURCE_META[it] }
+        ?.let { (label, icon) -> "$label ad" to icon }
+
 /** Channel label + brand colour for the linked-identities list. */
 fun chMeta(channel: String): Pair<String, Color> = when (channel) {
     "whatsapp" -> "WhatsApp" to Color(0xFF25D366)

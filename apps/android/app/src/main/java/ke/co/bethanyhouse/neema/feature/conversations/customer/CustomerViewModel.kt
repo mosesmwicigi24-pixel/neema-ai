@@ -223,9 +223,14 @@ class CustomerViewModel(
                 StageCache.stages = r.stages
                 _customStages.value = r.stages
             } catch (e: Throwable) {
+                val api = e as? ApiException
                 dash.toast(
-                    if ((e as? ApiException)?.status == 403) "Only an admin can change pipeline stages."
-                    else "Couldn't save pipeline stages.",
+                    when {
+                        api?.status == 403 -> "Only an admin can change pipeline stages."
+                        // crm.py put_pipeline_stages: "At most 4 custom stages" — worth saying as is.
+                        api?.status == 422 && api.detail.startsWith("At most") -> api.detail.trimEnd('.') + "."
+                        else -> "Couldn't save pipeline stages."
+                    },
                     ToastType.Error,
                 )
             }
@@ -254,10 +259,22 @@ class CustomerViewModel(
                 toggleMerge(false)
                 onDone()
                 load(showSpinner = false)
-            } catch (_: Throwable) {
-                dash.toast("Failed to merge profiles", ToastType.Error)
+            } catch (e: Throwable) {
+                dash.toast(mergeError(e as? ApiException), ToastType.Error)
             }
         }
+    }
+
+    /**
+     * crm.py merge_customers refuses a typed target it can't find (404 "Secondary
+     * customer not found") and a profile merged into itself (422). The web says
+     * "Failed to merge profiles" to both; the operator can act on the difference.
+     */
+    private fun mergeError(e: ApiException?): String = when {
+        e?.status == 404 && e.detail.contains("Secondary", ignoreCase = true) ->
+            "Failed to merge profiles — no customer found for that phone / wa_id"
+        e?.status == 422 -> "Failed to merge profiles — that's this same profile"
+        else -> "Failed to merge profiles"
     }
 
     fun unmerge(mergedId: String) {
@@ -288,8 +305,15 @@ class CustomerViewModel(
                 val r = crm.pushProduction(e.id)
                 _enquiry.value = e.copy(status = "pushed", hubOrderNumber = r.hubOrderNumber)
                 dash.toast(r.hubOrderNumber?.let { "Sent to production · $it" } ?: "Sent to production")
-            } catch (_: Throwable) {
-                dash.toast("Couldn't send to production", ToastType.Error)
+            } catch (ex: Throwable) {
+                val api = ex as? ApiException
+                // 422: the enquiry has no linked hub product (crm.py push_production) — its detail
+                // tells the operator what to do instead. A hub failure (502) stays generic.
+                dash.toast(
+                    if (api?.status == 422 && api.detail.isNotBlank() && !api.detail.startsWith("[")) api.detail
+                    else "Couldn't send to production",
+                    ToastType.Error,
+                )
             } finally {
                 _pushing.value = false
             }

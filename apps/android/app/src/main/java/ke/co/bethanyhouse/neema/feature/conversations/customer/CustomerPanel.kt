@@ -151,7 +151,7 @@ private fun ColumnScope.PanelBody(
     }
     // Lifetime spend is the hub's; the client sum is only a fallback.
     val totalSpent = p.totalSpent.takeIf { it != 0.0 } ?: orders.sumOf { it.amount }
-    val lastOrder = orders.maxByOrNull { Fmt.millis(it.createdAt) ?: 0L }
+    val lastOrder = orders.maxByOrNull { Fmt.millis(it.createdIso) ?: 0L }
     val ctx = PanelCtx(p, orders, totalSpent, lastOrder, customStages, canEdit, canReply, isAdmin)
 
     // The web pins the made-to-order card and Quick Actions under the scroll. On a
@@ -236,7 +236,7 @@ private fun Hero(
                     Modifier.padding(top = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    val sm = stageMeta(p.leadStage)
+                    val sm = stageMeta(ctx.stage)
                     Row(
                         Modifier.clip(RoundedCornerShape(50)).background(sm.color.dim()).padding(horizontal = 6.dp, vertical = 2.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -464,7 +464,6 @@ private fun EnquiryCard(vm: CustomerViewModel, canProduce: Boolean, inline: Bool
 private fun QuickActions(vm: CustomerViewModel, ctx: PanelCtx) {
     if (!ctx.canEdit) return
     val c = Neema.colors
-    val p = ctx.profile
     HorizontalDivider(color = c.hairline)
     Column(Modifier.fillMaxWidth().background(c.bg2).padding(horizontal = 16.dp, vertical = 12.dp)) {
         Text("QUICK ACTIONS", fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp, color = c.textMid,
@@ -476,10 +475,8 @@ private fun QuickActions(vm: CustomerViewModel, ctx: PanelCtx) {
         Spacer(Modifier.height(6.dp))
         NeutralButton("→ Advance Stage", {
             // Next along the forward path (custom stages included); Lost re-opens at Won, as on the web.
-            val forward = listOf("new", "contacted", "qualified", "proposal", "negotiation") + ctx.customStages + "won"
-            val idx = forward.indexOf(p.leadStage)
-            val next = if (p.leadStage == "lost") "won" else forward[minOf(idx + 1, forward.size - 1)]
-            if (next != p.leadStage) vm.setStage(next)
+            val next = nextStage(ctx.stage, ctx.customStages)
+            if (next != ctx.stage) vm.setStage(next)
         }, Modifier.fillMaxWidth())
     }
 }

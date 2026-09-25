@@ -195,6 +195,45 @@ class CustomerPanelScreenshotTest {
         tall()
     }
 
+    /**
+     * crm.py normalise_stage lower-cases the stored stage, so a customer on the
+     * custom stage "Sampling" comes back as "sampling": the node still lights and
+     * the chip keeps the operator's spelling.
+     */
+    @Test fun customStageAsTheServerReturnsIt() {
+        fake.on("GET", "/admin/settings/pipeline-stages", body = """{"stages":["Sampling","Fitting"]}""")
+        fake.on("GET", "/admin/customers/${CustomerFixtures.PETER}",
+            body = CustomerFixtures.peter.replace("\"lead_stage\":\"proposal\",\"lead_stage_source\":\"auto\"", "\"lead_stage\":\"sampling\",\"lead_stage_source\":\"manual\""))
+        tall()
+    }
+
+    /**
+     * Hub orders as _map_hub_order passes them through: a USD order in its own
+     * currency, a SQL-style "YYYY-MM-DD HH:MM:SS" created_at, a null total (the
+     * subtotal stands in) and a quantity sent as a decimal string.
+     */
+    @Test fun hubOrdersAsTheHubSendsThem() {
+        val hubOrders = """"orders":[
+          {"id":"95001","order_number":"WEB-7710","status":"confirmed","payment_status":"paid","order_type":"online",
+           "total":null,"subtotal":240.0,"currency_code":"USD","created_at":"${java.time.LocalDateTime.now(java.time.ZoneOffset.UTC).minusHours(5).withNano(0).toString().replace('T', ' ')}",
+           "items":[{"name":"Chasuble — Purple","qty":"2.00","quantity":"2.00","unit_price":120.0,"total":240.0}],"source":"hub"},
+          {"id":"90412","order_number":"BH-1042","status":"delivered","payment_status":"paid","order_type":"pos",
+           "total":8000.0,"subtotal":8000.0,"currency_code":"KES","created_at":"${CustomerFixtures.py(60L * 24 * 70)}",
+           "items":[{"name":"Clergy Shirt — Black, 16 inch","qty":2,"quantity":2,"unit_price":3500.0,"total":7000.0}],"source":"hub"}
+        ],"""
+        fake.on("GET", "/admin/customers/${CustomerFixtures.PETER}",
+            body = CustomerFixtures.peter.replace(Regex("\"orders\":\\[.*?\"source\":\"hub\"\\}\\s*],", RegexOption.DOT_MATCHES_ALL), hubOrders)
+                // The newest order was stamped a few hours "ahead" by the hub's clock: _buying_rhythm floors to -1.
+                .replace("\"days_since_last\":70", "\"days_since_last\":-1").replace("\"overdue\":true", "\"overdue\":false"))
+        tall(prepare = { it.tab.value = CustomerTab.Activity })
+    }
+
+    @Test fun hubOrdersInsights() {
+        fake.on("GET", "/admin/customers/${CustomerFixtures.PETER}",
+            body = CustomerFixtures.peter.replace("\"days_since_last\":70", "\"days_since_last\":-1").replace("\"overdue\":true", "\"overdue\":false"))
+        tall(prepare = { it.tab.value = CustomerTab.Insights })
+    }
+
     @Test fun lostStage() {
         fake.on("GET", "/admin/customers/${CustomerFixtures.PETER}",
             body = CustomerFixtures.peter.replace("\"lead_stage\":\"proposal\",\"lead_stage_source\":\"auto\"", "\"lead_stage\":\"lost\",\"lead_stage_source\":\"manual\""))
