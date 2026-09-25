@@ -1082,6 +1082,25 @@ async def _flag_held_reply(db, channel: str, key: str, issues: list, draft: str)
         _log.info("held-reply flag not written for %s/%s: %s", channel, key, exc)
 
 
+async def _flag_guard(db, channel: str, key: str, note: str) -> None:
+    """A thread the church-goods guard paused is flagged for the team: what
+    was asked, that Neema declined, that she is silent for the pause."""
+    try:
+        from sqlalchemy import or_
+        from app.models.conversation import Conversation
+        from app.models.intercept import Intercept, InterceptAction
+        conv = (await db.execute(select(Conversation).where(
+            Conversation.channel == channel,
+            or_(Conversation.external_id == key, Conversation.wa_id == key),
+        ))).scalars().first()
+        if conv is None:
+            return
+        db.add(Intercept(conversation_id=conv.id, action=InterceptAction.flag, note=note[:900]))
+        await db.commit()
+    except Exception as exc:
+        _log.info("guard flag not written for %s/%s: %s", channel, key, exc)
+
+
 _REVIEW_HOLD_DM_PRICE = ("Let me confirm the exact item and price for you 🙏 One of our team "
                          "will confirm it right here shortly.")
 _SW_REVIEW_HOLD_DM_PRICE = ("Ngoja nihakikishe bidhaa kamili na bei sahihi 🙏 Mmoja wa timu yetu "
@@ -1327,6 +1346,38 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             tail += _call_ctx
     except Exception:
         pass
+
+    # WE SELL CHURCH GOODS ONLY (owner, 2026-09-25; agent/domain): an ask for
+    # goods we do not sell — beans, phones, loans — is declined in one line
+    # and the thread is paused for twelve hours (silence, the team flagged),
+    # lifted the moment they ask for church goods; with church business
+    # already in play the writer declines it inside the reply and sells on.
+    # Real customer turns only — never a draft, a scribe pass or an internal
+    # prompt. Fails open: any error here and the writer answers as before.
+    if not read_only and not scribe_only and _gate_applies(user_text):
+        try:
+            from app.agent import domain as _dom
+            _verdict = await _dom.guard_turn(
+                redis, channel=channel, key=key, text=user_text or "", transcript=messages,
+                public_comment=public_comment, swahili=looks_swahili(user_text or ""))
+        except Exception as exc:
+            _log.warning("church-goods guard failed open for %s/%s: %s", channel, key, exc)
+            _verdict = None
+        if _verdict and _verdict.get("action") == "silence":
+            if turn_facts is not None:
+                turn_facts.update({"tools": [], "held": [], "review": "guard", "guard": "silence"})
+            return ""
+        if _verdict and _verdict.get("action") == "decline":
+            try:
+                await _flag_guard(db, channel, key,
+                                  _dom.flag_note(_verdict.get("goods") or [], public=public_comment))
+            except Exception:
+                pass
+            if turn_facts is not None:
+                turn_facts.update({"tools": [], "held": [], "review": "guard", "guard": "decline"})
+            return _verdict["reply"]
+        if _verdict and _verdict.get("action") == "note":
+            tail += _verdict["note"]
 
     # Their OWN money, at today's rate (services/fx; owner, 2026-09-25): a
     # "how much in rands?" gets a FACT to convert with — and the gate verifies
@@ -2002,7 +2053,8 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
         # Meta-only edge — TikTok (which also rides this path natively) has no
         # typing indicator API.
         try:
-            if channel in META_CHANNELS:
+            from app.agent.domain import is_paused as _guard_paused
+            if channel in META_CHANNELS and not await _guard_paused(redis, channel, external_id):
                 await send_typing_on(external_id, page_id=page_id)
         except Exception:
             pass
@@ -4189,6 +4241,11 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
         except Exception as exc:
             _log.warning("public agent reply failed for %s: %s", cid, exc)
 
+    # WE SELL CHURCH GOODS ONLY (owner, 2026-09-25): a thread the guard
+    # paused hears nothing — no canned line, no DM, no one routed.
+    if _facts.get("guard") == "silence":
+        _log.info("comment %s: thread paused by the church-goods guard — no reply", cid)
+        return
     # THE GATE BEFORE POSTING (owner, 2026-09-25): run_turn verified the
     # draft — the item is the one they asked for, every figure is the hub's,
     # every question answered — rewrote it once if it failed, and returned

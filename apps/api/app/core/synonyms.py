@@ -98,6 +98,20 @@ FAMILIES: tuple[dict, ...] = (
             r"silver\s+cups?",
         ),
     },
+    {
+        # "Kasoki 2 na saples" (Messenger, 2026-09-25): a surplice, as Kenyans
+        # say and spell it — never a guess at something else.
+        "hub": "surplice",
+        "said": (
+            r"surplic(?:e|es|ess)",
+            r"surplis(?:e|es|i)?",
+            r"saplic(?:e|es)",
+            r"saplis(?:e|es|i)?",
+            r"saple(?:s|ss)?",
+            r"sapulis(?:i|e|es)?",
+            r"sapuris(?:i|e)?",
+        ),
+    },
 )
 
 _COMPILED: tuple[tuple[re.Pattern, str], ...] = tuple(

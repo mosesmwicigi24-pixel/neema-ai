@@ -58,4 +58,14 @@ async def health(request: Request):
                          "held": tally.get("held", 0)}
     except Exception:
         pass
+    # WE SELL CHURCH GOODS ONLY (owner, 2026-09-25): what the guard did today
+    # — asks for other goods declined, threads paused, silenced, lifted.
+    try:
+        from app.agent.domain import read_tally
+        g = await read_tally(getattr(request.app.state, "redis", None))
+        out["guard"] = {"declined": g.get("declined", 0), "paused": g.get("paused", 0),
+                        "silenced": g.get("silenced", 0), "lifted": g.get("lifted", 0),
+                        "noted": g.get("noted", 0)}
+    except Exception:
+        pass
     return out
