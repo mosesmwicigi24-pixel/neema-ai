@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import ke.co.bethanyhouse.neema.core.util.Fmt
+import ke.co.bethanyhouse.neema.feature.conversations.isWebVisitor
 import kotlin.math.roundToInt
 
 /** What every tab needs, computed once by the panel. */
@@ -49,7 +50,6 @@ class PanelCtx(
     val orderCount: Int get() = profile.totalOrders.takeIf { it > 0 } ?: orders.size
 }
 
-private fun digitsOf(s: String?) = (s ?: "").filter { it.isDigit() }
 
 // ── Profile tab ─────────────────────────────────────────────────────────────
 
@@ -78,7 +78,13 @@ fun ProfileTab(
         p.leadSource?.takeIf { it.isNotEmpty() }?.let { src ->
             val meta = SOURCE_META[src]
             val icon = (meta ?: SOURCE_META.getValue("other")).second
-            InfoRow("Source", "$icon ${meta?.first ?: src}", hint = "Where this lead first found us")
+            // The web draws this row apart from the others: 13px, spread edge to edge, no rule under it.
+            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Source", fontSize = 13.sp, color = c.muted, modifier = Modifier.weight(1f))
+                Hint("Where this lead first found us") {
+                    Text("$icon  ${meta?.first ?: src}", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = c.text)
+                }
+            }
         }
         p.adRef?.let { ad ->
             val what = ad.headline?.ifEmpty { null } ?: ad.adId?.ifEmpty { null }?.let { "Ad $it" }
@@ -155,13 +161,13 @@ private fun PipelineSection(vm: CustomerViewModel, ctx: PanelCtx) {
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 SmallInput(newStage, { newStage = it.take(18) }, "Stage label (e.g. Sampling)…", Modifier.weight(1f),
-                    fontSize = 11.sp, onDone = add)
+                    fontSize = 10.sp, onDone = add)
                 TintButton("Add", PIPE_GOLD_SOLID, add, filled = true)
-                TextButton(onClick = { vm.stageEditorOpen.value = false }) { Text("Done", fontSize = 11.sp, color = c.muted) }
+                TextButton(onClick = { vm.stageEditorOpen.value = false }) { Text("Done", fontSize = 10.sp, color = c.muted) }
             }
         } else {
             Text(
-                "+ Add stage", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = PIPE_GOLD,
+                "+ Add stage", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = PIPE_GOLD,
                 modifier = Modifier.clip(RoundedCornerShape(4.dp)).clickable { vm.stageEditorOpen.value = true }.padding(vertical = 4.dp, horizontal = 2.dp),
             )
         }
@@ -175,7 +181,7 @@ private fun RemovableChip(text: String, fg: Color, bg: Color, border: Color, ena
             .padding(start = 6.dp, end = if (enabled) 0.dp else 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(text, fontSize = 11.sp, color = fg, modifier = Modifier.padding(vertical = 3.dp))
+        Text(text, fontSize = 10.sp, color = fg, modifier = Modifier.padding(vertical = 3.dp))
         if (enabled) {
             Box(Modifier.size(24.dp).clickable(onClick = onRemove), contentAlignment = Alignment.Center) {
                 Icon(Icons.Default.Close, "Remove $text", tint = Neema.colors.muted, modifier = Modifier.size(12.dp))
@@ -220,9 +226,9 @@ private fun NotesSection(vm: CustomerViewModel, ctx: PanelCtx) {
             SmallInput(draft, { draft = it }, "Internal notes about this customer…", Modifier.fillMaxWidth(), singleLine = false, minLines = 4)
             Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 TextButton(onClick = { vm.saveNotes(draft); vm.editNotes.value = false }) {
-                    Text("Save", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF059669))
+                    Text("Save", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF059669))
                 }
-                TextButton(onClick = { draft = notes; vm.editNotes.value = false }) { Text("Cancel", fontSize = 11.sp, color = c.muted) }
+                TextButton(onClick = { draft = notes; vm.editNotes.value = false }) { Text("Cancel", fontSize = 10.sp, color = c.muted) }
             }
         } else {
             Box(
@@ -269,11 +275,13 @@ private fun IdentitySection(vm: CustomerViewModel, ctx: PanelCtx, onOpenIdentity
     ) {
         p.channels.forEachIndexed { i, ch ->
             Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                ChannelBadge(ch.channel)
+                ChannelBadge(badgeKey(ch.channel, ch.identifier))
                 Spacer(Modifier.width(8.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(ch.channel.replaceFirstChar { it.uppercase() }, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = c.text)
-                    Text(Fmt.formatPhone(ch.identifier), fontSize = 10.sp, color = c.muted, fontFamily = FontFamily.Monospace,
+                    Text(channelLabel(ch.channel, ch.identifier), fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = c.text)
+                    // formatPhone reads a web visitor's key as "Website visitor", never as a number.
+                    Text(Fmt.formatPhone(ch.identifier), fontSize = 10.sp, color = c.muted,
+                        fontFamily = if (isWebVisitor(ch.identifier)) null else FontFamily.Monospace,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 Column(horizontalAlignment = Alignment.End) {
@@ -288,10 +296,14 @@ private fun IdentitySection(vm: CustomerViewModel, ctx: PanelCtx, onOpenIdentity
         if (p.linkedIdentities.isNotEmpty()) {
             Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 p.linkedIdentities.forEach { id ->
-                    val (label, color) = chMeta(id.channel)
-                    val digits = digitsOf(id.externalId)
-                    // A real WhatsApp number opens a wa.me chat; any other channel jumps to that thread in Neema.
-                    val isRealPhone = id.channel == "whatsapp" && digits.length in 7..15
+                    val web = isWebVisitor(id.externalId)
+                    // A legacy web-visitor identity is not WhatsApp: no WhatsApp green.
+                    val color = if (web) Color(0xFF64748B).themed() else chMeta(id.channel).second
+                    val label = channelLabel(id.channel, id.externalId)
+                    val digits = realPhoneDigits(id.externalId)
+                    // A real WhatsApp number opens a wa.me chat; any other channel (and a legacy
+                    // `web_<hash>` identity, which is no number) jumps to that thread in Neema.
+                    val isRealPhone = id.channel == "whatsapp" && digits != null
                     Hint(if (isRealPhone) "Open WhatsApp chat" else "Open $label conversation") {
                         Row(
                             Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(c.surface)
@@ -309,11 +321,11 @@ private fun IdentitySection(vm: CustomerViewModel, ctx: PanelCtx, onOpenIdentity
                                 Text(label, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = color)
                                 Text(
                                     if (id.channel == "whatsapp") Fmt.formatPhone(id.externalId) else id.externalId,
-                                    fontSize = 10.sp, color = c.muted, fontFamily = FontFamily.Monospace,
+                                    fontSize = 10.sp, color = c.muted, fontFamily = if (web) null else FontFamily.Monospace,
                                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                                 )
                             }
-                            Text("↗", fontSize = 12.sp, color = color)
+                            Text("↗", fontSize = 11.sp, color = color)
                             id.confidence?.takeIf { it.isNotEmpty() }?.let {
                                 Spacer(Modifier.width(6.dp))
                                 Text(it, fontSize = 9.sp, color = c.muted,
@@ -337,7 +349,7 @@ private fun IdentitySection(vm: CustomerViewModel, ctx: PanelCtx, onOpenIdentity
                         Text(Fmt.formatPhone(mid), fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = c.text, modifier = Modifier.weight(1f))
                         if (ctx.canEdit) {
                             Text(
-                                "Unmerge", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = slate,
+                                "Unmerge", fontSize = 9.sp, fontWeight = FontWeight.SemiBold, color = slate,
                                 modifier = Modifier.clip(RoundedCornerShape(4.dp)).border(1.dp, c.border2, RoundedCornerShape(4.dp))
                                     .clickable { vm.unmerge(mid) }.padding(horizontal = 8.dp, vertical = 4.dp),
                             )
@@ -457,7 +469,7 @@ fun InsightsTab(ctx: PanelCtx) {
 
     p.buyingRhythm?.let { r ->
         CrmSection("Buying Rhythm") {
-            KvRow("Buys", r.cadenceLabel ?: "—")
+            KvRow("Buys", r.cadenceLabel?.ifEmpty { null } ?: "—")
             KvRow("Avg gap between orders", r.avgIntervalDays?.takeIf { it != 0.0 }?.let { "${Fmt.number(it)} days" } ?: "—")
             KvRow("Since last order", r.daysSinceLast?.let { "$it days" } ?: "—")
             if (r.overdue) {
@@ -535,7 +547,7 @@ fun ActivityTab(ctx: PanelCtx) {
                 ) {
                     Text("📇 ", fontSize = 11.sp)
                     Text(
-                        "Same customer in the shop" + (p.hubCustomerName?.let { " · $it" } ?: "") +
+                        "Same customer in the shop" + (p.hubCustomerName?.ifEmpty { null }?.let { " · $it" } ?: "") +
                             " — showing full in-shop + WhatsApp history",
                         fontSize = 11.sp, color = if (c.isDark) c.gold2 else Color(0xFF3F6417),
                     )
@@ -559,7 +571,7 @@ fun ActivityTab(ctx: PanelCtx) {
                             Spacer(Modifier.weight(1f))
                             Text(Fmt.timeAgo(o.createdAt), fontSize = 10.sp, color = c.muted)
                         }
-                        Text(Fmt.currency(o.amount), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.text)
+                        Text(Fmt.currency(o.total ?: o.subtotal ?: 0.0), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.text)
                         Text(
                             o.items.joinToString(", ") { it.name }.ifEmpty { "—" },
                             fontSize = 10.sp, color = c.textMid, maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -574,10 +586,10 @@ fun ActivityTab(ctx: PanelCtx) {
     CrmSection("Channel History") {
         p.channels.forEachIndexed { i, ch ->
             Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.Top) {
-                ChannelBadge(ch.channel)
+                ChannelBadge(badgeKey(ch.channel, ch.identifier))
                 Spacer(Modifier.width(8.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(ch.channel.replaceFirstChar { it.uppercase() }, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.text)
+                    Text(channelLabel(ch.channel, ch.identifier), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.text)
                     Text("${ch.conversationCount} conversation${if (ch.conversationCount != 1) "s" else ""}", fontSize = 10.sp, color = c.muted)
                     Text(
                         "First: ${ch.firstSeen?.let { Fmt.date(it) } ?: "—"} · Last: ${ch.lastSeen?.let { Fmt.timeAgo(it) } ?: "—"}",

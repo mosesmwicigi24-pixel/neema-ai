@@ -6,6 +6,7 @@ import ke.co.bethanyhouse.neema.app.DashboardViewModel
 import ke.co.bethanyhouse.neema.app.ToastType
 import ke.co.bethanyhouse.neema.core.model.Conversation
 import ke.co.bethanyhouse.neema.core.net.ApiException
+import ke.co.bethanyhouse.neema.feature.conversations.isWebVisitor
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -128,7 +129,8 @@ class CustomerViewModel(
         id = custId,
         waId = custId,
         name = conversation.name,
-        phone = conversation.waId,
+        // As the server does (crm.py phone_display): a web visitor's `web_<hash>` key is not a phone.
+        phone = conversation.waId?.takeUnless { isWebVisitor(it) },
         leadStage = "new",
         channels = listOf(
             CustomerChannel(
@@ -352,13 +354,20 @@ class CustomerViewModel(
     }
 
     // ── Reach-out: invite, template, call ────────────────────────────────────
+    // Only ever to a real phone (realPhoneDigits): never a web visitor's hash.
+
+    /** `profile.phone || digits`, as the web sends it — but never a web visitor's key. */
+    private fun sendTo(p: CustomerProfile, digits: String): String =
+        p.phone?.takeIf { it.isNotEmpty() && realPhoneDigits(it) != null } ?: digits
 
     /** Send the approved WhatsApp invite; if that fails, hand back a prefilled wa.me link to open instead. */
     fun inviteToWhatsApp(digits: String, openUrl: (String) -> Unit) {
         val p = _profile.value ?: return
+        // The web derives these digits from profile.phone; a profile without a real phone has no reach-out.
+        if (realPhoneDigits(p.phone) == null) return
         viewModelScope.launch {
             try {
-                dash.api.whatsappInvite(p.phone ?: digits, p.name ?: "")
+                dash.api.whatsappInvite(sendTo(p, digits), p.name ?: "")
                 dash.toast("WhatsApp invite sent ✓")
             } catch (_: Throwable) {
                 val first = (p.name ?: "").trim().split(Regex("\\s+")).firstOrNull().orEmpty()
@@ -371,10 +380,12 @@ class CustomerViewModel(
 
     fun sendTemplate(digits: String) {
         val p = _profile.value ?: return
+        // The web derives these digits from profile.phone; a profile without a real phone has no reach-out.
+        if (realPhoneDigits(p.phone) == null) return
         _templateBusy.value = true
         viewModelScope.launch {
             try {
-                dash.api.whatsappInvite(p.phone ?: digits, p.name ?: "")
+                dash.api.whatsappInvite(sendTo(p, digits), p.name ?: "")
                 dash.toast("Template sent ✓")
             } catch (_: Throwable) {
                 dash.toast("Couldn't send the template", ToastType.Error)
@@ -387,6 +398,8 @@ class CustomerViewModel(
     /** WhatsApp voice call; with no call permission yet, ask the customer for it automatically. */
     fun call(digits: String) {
         val p = _profile.value ?: return
+        // The web derives these digits from profile.phone; a profile without a real phone has no reach-out.
+        if (realPhoneDigits(p.phone) == null) return
         viewModelScope.launch {
             val r = placeCall(digits, p.name)
             if (r.isSuccess) return@launch

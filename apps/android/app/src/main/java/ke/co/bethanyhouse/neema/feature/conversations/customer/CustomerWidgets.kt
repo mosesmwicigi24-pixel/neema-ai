@@ -14,6 +14,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -62,15 +63,16 @@ private val PIPE_LABEL = mapOf(
 
 fun stageLabel(s: String): String = PIPE_LABEL[s] ?: s.replaceFirstChar { it.uppercase() }
 
-data class TierMeta(val label: String, val color: Color, val border: Color, val title: String)
+/** [bg] is the web's light Tailwind fill (amber-100, emerald-100, …); dark mode tints [color] instead. */
+data class TierMeta(val label: String, val color: Color, val border: Color, val title: String, val bg: Color)
 
 val TIER_META = mapOf(
-    "vip" to TierMeta("VIP", Color(0xFF92400E), Color(0xFFFCD34D), "Top spender / very frequent buyer"),
-    "loyal" to TierMeta("Loyal", Color(0xFF047857), Color(0xFF6EE7B7), "Repeat customer"),
-    "regular" to TierMeta("Regular", Color(0xFF0369A1), Color(0xFF7DD3FC), "A few orders"),
-    "new" to TierMeta("New", Color(0xFF57534E), Color(0xFFD6D3D1), "First order"),
-    "prospect" to TierMeta("Prospect", Color(0xFFA8A29E), Color(0xFFE7E5E4), "No orders yet"),
-    "at_risk" to TierMeta("At risk", Color(0xFFB91C1C), Color(0xFFFCA5A5), "Good customer who's gone quiet — worth a nudge"),
+    "vip" to TierMeta("VIP", Color(0xFF92400E), Color(0xFFFCD34D), "Top spender / very frequent buyer", Color(0xFFFEF3C7)),
+    "loyal" to TierMeta("Loyal", Color(0xFF047857), Color(0xFF6EE7B7), "Repeat customer", Color(0xFFD1FAE5)),
+    "regular" to TierMeta("Regular", Color(0xFF0369A1), Color(0xFF7DD3FC), "A few orders", Color(0xFFE0F2FE)),
+    "new" to TierMeta("New", Color(0xFF57534E), Color(0xFFD6D3D1), "First order", Color(0xFFF5F5F4)),
+    "prospect" to TierMeta("Prospect", Color(0xFFA8A29E), Color(0xFFE7E5E4), "No orders yet", Color(0xFFFAFAF9)),
+    "at_risk" to TierMeta("At risk", Color(0xFFB91C1C), Color(0xFFFCA5A5), "Good customer who's gone quiet — worth a nudge", Color(0xFFFEE2E2)),
 )
 
 /** Where a lead first found us (captured by the AI or set by an operator). */
@@ -95,7 +97,7 @@ fun chMeta(channel: String): Pair<String, Color> = when (channel) {
     "instagram" -> "Instagram" to Color(0xFFE1306C)
     "email" -> "Email" to Color(0xFF6366F1)
     "sms" -> "SMS" to Color(0xFF64748B)
-    else -> channel to Color(0xFF64748B)
+    else -> channel.replaceFirstChar { it.uppercase() } to Color(0xFF64748B)
 }
 
 // Goldenrod stepper palette (sampled by the web from its reference design).
@@ -141,7 +143,15 @@ fun ChannelBadge(channel: String, size: Dp = 20.dp) {
             listOf(Color(0xFFF09433), Color(0xFFE6683C), Color(0xFFDC2743), Color(0xFFCC2366), Color(0xFFBC1888)),
         )
         "email" -> SolidColor(Color(0xFF4D66B3))
+        "web" -> SolidColor(Color(0xFF64748B))
         else -> SolidColor(Color(0xFF2C4E18))
+    }
+    if (channel == "web") {
+        // A website visitor: a globe, never WhatsApp's mark.
+        Box(Modifier.size(size).clip(CircleShape).background(bg), contentAlignment = Alignment.Center) {
+            Icon(Icons.Default.Language, null, tint = Color.White, modifier = Modifier.size(size * 0.62f))
+        }
+        return
     }
     val glyph = when (channel) {
         "whatsapp" -> "W"; "messenger" -> "m"; "facebook" -> "f"; "instagram" -> "◎"
@@ -282,7 +292,7 @@ fun ScoreBar(score: Int) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         ProgressBar(score / 100f, color, Modifier.weight(1f).height(6.dp))
         Text("$score", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Neema.colors.textMid,
-            modifier = Modifier.width(28.dp), textAlign = androidx.compose.ui.text.style.TextAlign.End)
+            modifier = Modifier.width(24.dp), textAlign = androidx.compose.ui.text.style.TextAlign.End)
     }
 }
 

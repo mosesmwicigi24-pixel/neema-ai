@@ -38,6 +38,7 @@ import ke.co.bethanyhouse.neema.core.ui.components.Avatar
 import ke.co.bethanyhouse.neema.core.ui.components.Loading
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import ke.co.bethanyhouse.neema.core.util.Fmt
+import ke.co.bethanyhouse.neema.feature.conversations.isWebVisitor
 import kotlin.math.roundToInt
 
 /**
@@ -200,8 +201,10 @@ private fun Hero(
     val c = Neema.colors
     val uri = LocalUriHandler.current
     val templateBusy by vm.templateBusy.collectAsState()
-    val phoneDigits = (p.phone ?: "").filter { it.isDigit() }
-    val reachable = phoneDigits.length in 7..15
+    // A dialable phone — never a web visitor's `web_<hash>` key (see realPhoneDigits).
+    val phoneDigits = realPhoneDigits(p.phone)
+    // A website chat visitor with no phone on file: say so, never a number made from the hash.
+    val webVisitor = isWebVisitor(p.waId) && phoneDigits == null
 
     Column(Modifier.fillMaxWidth().background(c.bg2).padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 12.dp)) {
         Row(verticalAlignment = Alignment.Top) {
@@ -213,16 +216,20 @@ private fun Hero(
                         Text(p.name, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = c.text, maxLines = 1,
                             overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                     } else {
-                        Text("Unknown", fontSize = 14.sp, fontStyle = FontStyle.Italic, color = c.muted)
+                        // The thread header's words for an unnamed web visitor; otherwise the web's "Unknown".
+                        Text(if (isWebVisitor(p.waId)) "Website visitor" else "Unknown", fontSize = 14.sp, fontStyle = FontStyle.Italic, color = c.muted)
                     }
-                    if (p.nameConfirmed) Text(" ✓", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF059669))
+                    if (p.nameConfirmed) Text(" ✓", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF059669))
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val flag = Fmt.flagEmoji(p.countryIso)
                     if (flag.isNotEmpty()) Text("$flag ", fontSize = 12.sp)
+                    // The web: the phone when it has ≥ 7 digits, else the wa_id.
+                    val phoneLike = (p.phone ?: "").count { it.isDigit() } >= 7 && !isWebVisitor(p.phone)
                     Text(
-                        Fmt.formatPhone(if (phoneDigits.length >= 7) p.phone else p.waId),
-                        fontSize = 12.sp, color = c.muted, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        if (webVisitor) "Web chat" else Fmt.formatPhone(if (phoneLike) p.phone else p.waId),
+                        fontSize = 12.sp, color = c.muted, fontFamily = if (webVisitor) null else FontFamily.Monospace,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                 }
                 FlowRow(
@@ -266,7 +273,7 @@ private fun Hero(
         ScoreBar(score)
 
         // Segment badge + buying rhythm — a quick read while chatting.
-        p.tier?.let { tier ->
+        p.tier?.takeIf { it.isNotEmpty() }?.let { tier ->
             val tm = TIER_META[tier]
             FlowRow(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp),
                 itemVerticalAlignment = Alignment.CenterVertically) {
@@ -274,16 +281,17 @@ private fun Hero(
                     val fg = tm?.color?.themed() ?: c.textMid
                     Text(
                         p.tierLabel?.ifEmpty { null } ?: tm?.label ?: tier, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = fg,
-                        modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(fg.dim(0.1f))
+                        modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(if (c.isDark || tm == null) fg.dim(0.1f) else tm.bg)
                             .border(1.dp, tm?.border ?: c.hairline, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
                     )
                 }
-                p.buyingRhythm?.cadenceLabel?.let { Text("Buys $it", fontSize = 10.sp, color = c.textMid) }
+                p.buyingRhythm?.cadenceLabel?.takeIf { it.isNotEmpty() }?.let { Text("Buys $it", fontSize = 10.sp, color = c.textMid) }
                 if (p.buyingRhythm?.overdue == true) {
                     Hint("Past their usual buying gap — a good moment to reach out") {
                         Text(
                             "⏰ Overdue", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFB45309).themed(),
-                            modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(Color(0xFFF59E0B).dim(0.1f))
+                            modifier = Modifier.clip(RoundedCornerShape(4.dp))
+                                .background(if (c.isDark) Color(0xFFF59E0B).dim(0.1f) else Color(0xFFFFFBEB))
                                 .border(1.dp, Color(0xFFFCD34D), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
                         )
                     }
@@ -295,35 +303,38 @@ private fun Hero(
         FlowRow(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp),
             itemVerticalAlignment = Alignment.CenterVertically) {
             p.channels.forEach { ch ->
-                Hint("Open ${ch.channel} conversation") {
+                val label = channelLabel(ch.channel, ch.identifier)
+                Hint("Open $label conversation") {
                     Row(
-                        Modifier.clip(RoundedCornerShape(4.dp)).background(c.bg3).border(1.dp, c.border, RoundedCornerShape(4.dp))
+                        Modifier.clip(RoundedCornerShape(4.dp)).background(if (c.isDark) c.bg3 else Color(0xFFF1F5F9)).border(1.dp, c.border, RoundedCornerShape(4.dp))
                             .clickable {
                                 // Non-WhatsApp channels have no wa_id identifier; this thread's own handle stands in.
                                 val handle = ch.identifier ?: if (ch.channel == conversation.channel) conversation.handle else ""
                                 onOpenIdentity(ch.channel, handle)
                             }
-                            .padding(horizontal = 6.dp, vertical = 3.dp),
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        ChannelBadge(ch.channel, 16.dp)
+                        ChannelBadge(badgeKey(ch.channel, ch.identifier), 20.dp)
                         Spacer(Modifier.width(4.dp))
-                        Text(ch.channel.replaceFirstChar { it.uppercase() }, fontSize = 10.sp, color = c.text)
+                        Text(label, fontSize = 10.sp, color = c.text)
                     }
                 }
             }
             // A captured phone gives this customer a WhatsApp door before their first
-            // WhatsApp message — shown only when no WhatsApp thread exists yet.
-            val hasWa = p.channels.any { it.channel == "whatsapp" }
-            if (!hasWa && reachable && ctx.canReply) {
+            // WhatsApp message — shown only when no WhatsApp thread exists yet. A web
+            // visitor's thread rides the "whatsapp" channel but is not one, so a
+            // visitor who left a real number still gets the invite (to that number).
+            val hasWa = p.channels.any { it.channel == "whatsapp" && !isWebVisitor(it.identifier) }
+            if (!hasWa && phoneDigits != null && ctx.canReply) {
                 Hint("Send this customer a WhatsApp invite (delivers the approved template to their number)") {
                     Row(
                         Modifier.clip(RoundedCornerShape(4.dp)).background(WA_GREEN).border(1.dp, Color(0xFF1DA851), RoundedCornerShape(4.dp))
                             .clickable { vm.inviteToWhatsApp(phoneDigits) { url -> runCatching { uri.openUri(url) } } }
-                            .padding(horizontal = 6.dp, vertical = 3.dp),
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        ChannelBadge("whatsapp", 16.dp)
+                        ChannelBadge("whatsapp", 20.dp)
                         Spacer(Modifier.width(4.dp))
                         Text("Invite to WhatsApp", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
                     }
@@ -336,11 +347,11 @@ private fun Hero(
 
         // Reach-out actions: WhatsApp voice call + the approved template (re-opens
         // the chat / requests call permission). Only for a customer with a valid phone.
-        if (reachable && ctx.canReply) {
+        if (phoneDigits != null && ctx.canReply) {
             Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = { vm.call(phoneDigits) },
-                    modifier = Modifier.weight(1f).height(38.dp),
+                    modifier = Modifier.weight(1f).height(36.dp),
                     shape = RoundedCornerShape(8.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = WA_GREEN, contentColor = Color.White),
                     contentPadding = PaddingValues(horizontal = 8.dp),
@@ -352,9 +363,9 @@ private fun Hero(
                 OutlinedButton(
                     onClick = { vm.sendTemplate(phoneDigits) },
                     enabled = !templateBusy,
-                    modifier = Modifier.weight(1f).height(38.dp),
+                    modifier = Modifier.weight(1f).height(36.dp),
                     shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(containerColor = c.bg3, contentColor = c.textMid),
+                    colors = ButtonDefaults.outlinedButtonColors(containerColor = if (c.isDark) c.bg3 else Color(0xFFEEF2E8), contentColor = if (c.isDark) c.textMid else Color(0xFF3D5A30)),
                     border = androidx.compose.foundation.BorderStroke(1.dp, c.bg4),
                     contentPadding = PaddingValues(horizontal = 8.dp),
                 ) {
@@ -395,7 +406,7 @@ private fun Tabs(active: CustomerTab, onSelect: (CustomerTab) -> Unit) {
             ) {
                 Text(
                     t.label.uppercase(), fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp,
-                    color = if (on) c.text else c.muted, modifier = Modifier.padding(vertical = 10.dp),
+                    color = if (on) c.text else c.muted, modifier = Modifier.padding(vertical = 8.dp),
                 )
                 Box(Modifier.fillMaxWidth().height(2.dp).background(if (on) c.text else Color.Transparent))
             }

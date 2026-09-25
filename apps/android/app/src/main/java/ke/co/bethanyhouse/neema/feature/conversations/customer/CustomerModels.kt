@@ -1,6 +1,7 @@
 package ke.co.bethanyhouse.neema.feature.conversations.customer
 
 import ke.co.bethanyhouse.neema.core.net.NeemaHttp
+import ke.co.bethanyhouse.neema.feature.conversations.isWebVisitor
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
@@ -173,6 +174,29 @@ data class EnquiryResponse(val enquiry: ProductionEnquiry? = null)
 data class PushResponse(@SerialName("hub_order_number") val hubOrderNumber: String? = null)
 
 internal fun JsonElement.display(): String = (this as? JsonPrimitive)?.contentOrNull ?: toString()
+
+/**
+ * Dialable digits (7–15, E.164) of a phone — never a web-chat visitor's key.
+ * Web visitors are keyed `web_<sha1 hex>` (routers/web_chat.py) and that hash
+ * often holds 7–15 digits: the web reads them as a number and offers a Call,
+ * a template and an Invite to a phone that does not exist. The server already
+ * refuses to treat that key as a phone (core/phone.py is_plausible_phone).
+ */
+internal fun realPhoneDigits(raw: String?): String? =
+    if (isWebVisitor(raw?.trim())) null else (raw ?: "").filter { it.isDigit() }.takeIf { it.length in 7..15 }
+
+/**
+ * A channel's display name. The web writes the raw key through CSS
+ * `capitalize` in some places ("Whatsapp", "Sms") and CH_META's brand names
+ * in others ("WhatsApp", "SMS"); the panel uses the brand names everywhere.
+ * A web-chat visitor rides the default "whatsapp" channel but has no WhatsApp
+ * thread at all, so their row says what it really is.
+ */
+internal fun channelLabel(channel: String, identifier: String? = null): String =
+    if (isWebVisitor(identifier)) "Web chat" else chMeta(channel).first
+
+/** The badge for a channel row: a web visitor gets the web badge, not WhatsApp's. */
+internal fun badgeKey(channel: String, identifier: String?): String = if (isWebVisitor(identifier)) "web" else channel
 
 /**
  * The CRM routes the web reaches through its own `crmReq` (not api.ts), so they

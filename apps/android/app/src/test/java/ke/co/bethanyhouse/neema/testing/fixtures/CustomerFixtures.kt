@@ -17,7 +17,7 @@ object CustomerFixtures {
     const val MARY = "254722000111"
 
     fun conversation(id: String): Conversation =
-        NeemaJson.decodeFromString(Conversation.serializer(), Fixtures.conversations.first { it.contains("\"id\":\"$id\"") })
+        NeemaJson.decodeFromString(Conversation.serializer(), InboxFixtures.conversations.first { it.contains("\"id\":\"$id\"") })
 
     val peter get() = """{
       "id":"u1","wa_id":"$PETER","name":"Fr. Peter Kamau","name_confirmed":true,"email":"peter.kamau@stmarks.or.ke",
@@ -71,6 +71,28 @@ object CustomerFixtures {
       "notes":null,"created_at":"${ago(60 * 3)}","country_iso":null,"country":null,"flag_url":null
     }"""
 
+    /** c7's key (InboxFixtures.webVisitor): its hex hash holds 11 digits — enough to pass for a phone. */
+    const val WEB = "web_3fa9c1e20b7d4c5a9e11"
+
+    /**
+     * A website chat visitor as crm.py builds them: the thread rides the default
+     * "whatsapp" channel with the `web_` key as its identifier, and `phone` is
+     * null (is_plausible_phone refuses the key) unless the visitor typed one.
+     */
+    fun webVisitor(phone: String? = null, name: String? = null) = """{
+      "id":"u7","wa_id":"$WEB","name":${name?.let { "\"$it\"" }},"name_confirmed":false,"email":null,
+      "phone":${phone?.let { "\"$it\"" }},"location":null,"age":null,
+      "tags":[],"lead_stage":"new","lead_stage_source":null,"lead_source":"website","ad_ref":null,"role":null,"organization":null,
+      "orders":[],"orders_source":"whatsapp","hub_linked":false,"lead_score":8,"phone_verified":false,"cart_items":1,
+      "lead_score_breakdown":[{"label":"Items in cart","pts":8,"max":15}],"parish":null,
+      "channels":[{"channel":"whatsapp","identifier":"$WEB","first_seen":"${ago(40)}","last_seen":"${ago(20)}","conversation_count":1}],
+      "merged_ids":[],"person_id":null,
+      "linked_identities":[{"channel":"whatsapp","external_id":"$WEB","display_name":null,"source":"legacy","confidence":"probable"}],
+      "total_orders":0,"total_spent":0,"avg_order_value":0,"tier":"prospect","tier_label":"Prospect",
+      "buying_rhythm":null,"last_order_at":null,"last_seen_at":"${ago(20)}","first_seen_at":"${ago(40)}",
+      "notes":null,"created_at":"${ago(40)}","country_iso":"UG","country":"Uganda","flag_url":null
+    }"""
+
     val suggestions = """{"suggestions":[
       {"merge_with":"254799000222","name":"Peter Kamau","phone":"+254799000222","country":"Kenya","channel_hint":"whatsapp",
        "evidence":["Same phone on a Messenger profile","Same name"],"strength":"strong"},
@@ -86,6 +108,7 @@ object CustomerFixtures {
     fun install(f: FakeNeema) {
         f.on("GET", "/admin/customers/$PETER", body = peter)
         f.on("GET", "/admin/customers/$MARY", body = mary)
+        f.on("GET", "/admin/customers/$WEB", body = webVisitor())
         f.on("GET", "/admin/customers/[^/]+/merge_suggestions", body = suggestions)
         f.on("GET", "/admin/production/conversation/[^/]+", body = """{"enquiry":null}""")
         f.on("GET", "/admin/production/conversation/c1", body = enquiry())

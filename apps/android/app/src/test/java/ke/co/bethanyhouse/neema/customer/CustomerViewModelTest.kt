@@ -11,7 +11,10 @@ import ke.co.bethanyhouse.neema.feature.calls.CallManager
 import ke.co.bethanyhouse.neema.feature.conversations.customer.CustomerTab
 import ke.co.bethanyhouse.neema.feature.conversations.customer.CustomerViewModel
 import ke.co.bethanyhouse.neema.feature.conversations.customer.StageCache
+import ke.co.bethanyhouse.neema.feature.conversations.customer.badgeKey
 import ke.co.bethanyhouse.neema.feature.conversations.customer.canEditPipelineStages
+import ke.co.bethanyhouse.neema.feature.conversations.customer.channelLabel
+import ke.co.bethanyhouse.neema.feature.conversations.customer.realPhoneDigits
 import ke.co.bethanyhouse.neema.testing.FakeNeema
 import ke.co.bethanyhouse.neema.testing.Fixtures
 import ke.co.bethanyhouse.neema.testing.dashboard
@@ -536,5 +539,73 @@ class CustomerViewModelTest {
         vm.answerViaNeema("facts") { cleared = true }
         assertEquals("Couldn't send right now — try again.", vm.answerStatus.value)
         assertFalse(cleared)
+    }
+
+    // ── Web-chat visitors (`web_<sha1>` keys) and channel labels ────────────
+
+    @Test fun aWebVisitorsKeyIsNeverReadAsAPhone() {
+        // The hash holds 11 digits: the web's digits rule alone would call it a phone.
+        assertEquals(11, CustomerFixtures.WEB.count { it.isDigit() })
+        assertNull(realPhoneDigits(CustomerFixtures.WEB))
+        assertNull(realPhoneDigits(" ${CustomerFixtures.WEB}"))
+        assertEquals("254712345678", realPhoneDigits("+254 712 345 678"))
+        assertNull("too short", realPhoneDigits("12345"))
+        assertNull("a Meta PSID", realPhoneDigits("25898765432101234"))
+        assertNull(realPhoneDigits(null))
+        assertEquals("web", badgeKey("whatsapp", CustomerFixtures.WEB))
+        assertEquals("whatsapp", badgeKey("whatsapp", CustomerFixtures.PETER))
+    }
+
+    @Test fun channelsReadAsTheirBrandNamesAndAWebVisitorAsWebChat() {
+        assertEquals("WhatsApp", channelLabel("whatsapp", CustomerFixtures.PETER))
+        assertEquals("WhatsApp", channelLabel("whatsapp"))
+        assertEquals("Messenger", channelLabel("messenger"))
+        assertEquals("Facebook", channelLabel("facebook"))
+        assertEquals("Instagram", channelLabel("instagram"))
+        assertEquals("Email", channelLabel("email"))
+        assertEquals("SMS", channelLabel("sms"))
+        assertEquals("Tiktok", channelLabel("tiktok"))
+        assertEquals("Web chat", channelLabel("whatsapp", CustomerFixtures.WEB))
+    }
+
+    @Test fun aWebVisitorsProfileLoadsOnItsKeyAndHasNoPhone() {
+        val vm = vm("c7")
+        assertEquals("channel=whatsapp", calls("GET", "/admin/customers/${CustomerFixtures.WEB}").single().query)
+        assertNull(vm.profile.value!!.phone)
+    }
+
+    @Test fun aWebVisitorsFallbackProfileNeverTakesTheKeyAsItsPhone() {
+        fake.on("GET", "/admin/customers/${CustomerFixtures.WEB}", code = 500, body = """{"detail":"boom"}""")
+        val p = vm("c7").profile.value!!
+        assertEquals(CustomerFixtures.WEB, p.waId)
+        assertNull(p.phone)
+        // A real WhatsApp contact's fallback still carries the wa_id as its phone, as on the web.
+        fake.on("GET", "/admin/customers/${CustomerFixtures.PETER}", code = 500, body = """{"detail":"boom"}""")
+        assertEquals(CustomerFixtures.PETER, vm("c1").profile.value!!.phone)
+    }
+
+    @Test fun nothingIsEverSentToAWebVisitorsHash() {
+        fake.on("GET", "/admin/customers/${CustomerFixtures.WEB}", code = 500, body = """{"detail":"boom"}""")
+        var dialled = false
+        val vm = vm("c7", placeCall = { _, _ -> dialled = true; Result.success(Unit) })
+        val hashDigits = CustomerFixtures.WEB.filter { it.isDigit() }
+        var opened: String? = null
+        vm.inviteToWhatsApp(hashDigits) { opened = it }
+        vm.sendTemplate(hashDigits)
+        vm.call(hashDigits)
+        assertTrue(calls("POST", "/admin/whatsapp-invite").isEmpty())
+        assertTrue(fake.calls.none { it.path.contains("permission") })
+        assertFalse(dialled)
+        assertNull(opened)
+        assertFalse(vm.templateBusy.value)
+    }
+
+    @Test fun aWebVisitorWhoLeftARealNumberIsInvitedOnThatNumber() {
+        fake.on("GET", "/admin/customers/${CustomerFixtures.WEB}", body = CustomerFixtures.webVisitor(phone = "+256772123456", name = "Br. Joseph"))
+        val vm = vm("c7")
+        vm.inviteToWhatsApp("256772123456") {}
+        val body = lastBody("POST", "/admin/whatsapp-invite")
+        assertEquals("+256772123456", body["phone"]!!.jsonPrimitive.content)
+        assertEquals("Br. Joseph", body["name"]!!.jsonPrimitive.content)
     }
 }
