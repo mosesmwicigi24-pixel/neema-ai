@@ -46,18 +46,14 @@ class TeamScreenshotTest : AreaShots() {
     /** manage_agents without manage_roles: agents only, no Roles tab. */
     @Test fun agentsWithoutManageRoles() = team(
         f = fake().also {
-            it.on("GET", "/admin/agents", body = TeamFixtures.agents.replace(
-                "\"is_superuser\":true", "\"is_superuser\":false").replaceFirst(
-                "\"custom_permissions\":null", "\"custom_permissions\":[\"view_conversations\",\"manage_agents\"]"))
+            it.on("GET", "/admin/agents", body = TeamFixtures.agentsWithMe("agent", false, listOf("view_conversations", "manage_agents")))
         },
         role = "agent", superuser = false,
     )
 
     @Test fun noAccess() = team(
         f = fake().also {
-            it.on("GET", "/admin/agents", body = TeamFixtures.agents.replace(
-                "\"is_superuser\":true", "\"is_superuser\":false").replaceFirst(
-                "\"custom_permissions\":null", "\"custom_permissions\":[\"view_conversations\"]"))
+            it.on("GET", "/admin/agents", body = TeamFixtures.agentsWithMe("agent", false, listOf("view_conversations")))
         },
         role = "agent", superuser = false,
     )

@@ -26,7 +26,8 @@ class AgentsViewModelTest : AreaTest() {
 
     @Test fun loadsRolesOnOpen() {
         val v = AgentsViewModel(dash)
-        assertEquals(listOf("admin", "sales", "support", "trainee"), v.roles.value.map { it.id })
+        // roles.py list_roles: ORDER BY protected DESC, name.
+        assertEquals(listOf("super_admin", "agent", "sales", "support", "trainee", "viewer"), v.roles.value.map { it.id })
         assertFalse(v.rolesLoading.value)
     }
 
@@ -180,7 +181,7 @@ class AgentsViewModelTest : AreaTest() {
     }
 
     @Test fun assigningYourselfRefreshesMe() {
-        vm.saveAssign(agent(Fixtures.ME_ID), "admin", null, onDone)
+        vm.saveAssign(agent(Fixtures.ME_ID), "super_admin", null, onDone)
         assertTrue(fake.called("GET", "/admin/me"))
     }
 
@@ -215,8 +216,8 @@ class AgentsViewModelTest : AreaTest() {
     }
 
     @Test fun protectedRoleRefusalIsShown() {
-        fail("PATCH", "/admin/roles/admin", 403, "Cannot modify a protected role")
-        vm.saveRole(vm.roles.value.first { it.id == "admin" }, RoleForm("Admin"), onDone)
+        // The fixture answers as roles.py update_role does for a protected role.
+        vm.saveRole(vm.roles.value.first { it.id == "super_admin" }, RoleForm("Admin"), onDone)
         assertEquals("Cannot modify a protected role", lastToast()?.message)
         assertEquals(0, done)
     }

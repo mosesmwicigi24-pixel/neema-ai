@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import ke.co.bethanyhouse.neema.app.DashboardViewModel
 import ke.co.bethanyhouse.neema.app.ToastType
+import ke.co.bethanyhouse.neema.core.net.ApiException
 import ke.co.bethanyhouse.neema.feature.agents.TeamApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -64,6 +65,10 @@ class ProfileViewModel(private val dash: DashboardViewModel) : ViewModel() {
 
     fun saveProfile(name: String, email: String, onDone: () -> Unit) {
         if (name.isBlank() || email.isBlank()) return dash.toast("Name and email required", ToastType.Error)
+        // agents.email is UNIQUE and PATCH /admin/me turns a clash into a bare 500.
+        val myId = dash.me.value?.id ?: dash.session.value?.agentId
+        if (dash.agents.value.any { it.id != myId && it.email.trim().equals(email.trim(), ignoreCase = true) })
+            return dash.toast("Another agent already uses that email", ToastType.Error)
         if (_saving.value) return
         viewModelScope.launch {
             _saving.value = true
@@ -74,7 +79,7 @@ class ProfileViewModel(private val dash: DashboardViewModel) : ViewModel() {
                 onDone()
                 dash.toast("Profile updated")
             } catch (e: Exception) {
-                dash.toast(dash.errorText(e).ifBlank { "Failed to update profile" }, ToastType.Error)
+                dash.toast(failText(e, "Failed to update profile — that email may already be in use"), ToastType.Error)
             } finally { _saving.value = false }
         }
     }
@@ -90,8 +95,21 @@ class ProfileViewModel(private val dash: DashboardViewModel) : ViewModel() {
                 onDone()
                 dash.toast("Password changed successfully")
             } catch (e: Exception) {
-                dash.toast(dash.errorText(e).ifBlank { "Failed to change password" }, ToastType.Error)
+                dash.toast(failText(e, "Failed to change password"), ToastType.Error)
             } finally { _saving.value = false }
+        }
+    }
+
+    /**
+     * The server's words, except a 5xx: update_me has no error handling, so a
+     * refused write comes back as a bare "Internal Server Error".
+     */
+    private fun failText(e: Exception, serverError: String): String {
+        val status = (e as? ApiException)?.status
+        return when {
+            status == 409 -> "Another agent already uses that email"
+            status != null && status >= 500 -> serverError
+            else -> dash.errorText(e).ifBlank { serverError }
         }
     }
 

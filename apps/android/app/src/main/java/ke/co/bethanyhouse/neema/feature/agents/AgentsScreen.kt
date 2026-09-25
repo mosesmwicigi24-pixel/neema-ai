@@ -167,7 +167,7 @@ fun AgentsScreen(dash: DashboardViewModel) {
                             onRole = { assignId = agent.id },
                             onEdit = { editId = agent.id },
                             onPassword = { pwId = agent.id },
-                            onDelete = { delId = agent.id },
+                            onDelete = { if (vm.requestRemove(agent)) delId = agent.id },
                         )
                     }
                 }

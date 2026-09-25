@@ -37,11 +37,19 @@ class ProfileViewModelTest : AreaTest() {
     }
 
     @Test fun saveProfileFailureKeepsEditing() {
-        fail("PATCH", "/admin/me", 500, "Email already in use")
-        vm.saveProfile("Moses", "grace@bethanyhouse.co.ke") { done++ }
+        // update_me has no error handling: a refused write is a bare 500.
+        fake.on("PATCH", "/admin/me", code = 500, body = TeamFixtures.SERVER_ERROR)
+        vm.saveProfile("Moses", "moses.m@bethanyhouse.co.ke") { done++ }
         assertEquals(0, done)
-        assertEquals("Email already in use", lastToast()?.message)
+        assertEquals("Failed to update profile — that email may already be in use", lastToast()?.message)
         assertEquals(ToastType.Error, lastToast()?.type)
+    }
+
+    @Test fun anotherAgentsEmailIsCaughtBeforeTheServer500s() {
+        vm.saveProfile("Moses", " Grace@BethanyHouse.co.ke ") { done++ }
+        assertTrue(writes().isEmpty())
+        assertEquals("Another agent already uses that email", lastToast()?.message)
+        assertEquals(0, done)
     }
 
     @Test fun passwordMatchIsCheckedBeforeLength() {
@@ -105,7 +113,7 @@ class ProfileViewModelTest : AreaTest() {
     // ── Replies: PATCH /admin/me answers with the agent object ──────────────
 
     @Test fun saveAcceptsTheAgentRowReply() {
-        // admin.py update_me returns the agent (TeamFixtures answers with Fixtures.me).
+        // admin.py update_me returns the bare ORM agent (TeamFixtures.ormAgent, password_hash and all).
         vm.saveProfile("Moses", "moses@bethanyhouse.co.ke") { done++ }
         assertEquals(1, done)
         assertEquals("Profile updated", lastToast()?.message)

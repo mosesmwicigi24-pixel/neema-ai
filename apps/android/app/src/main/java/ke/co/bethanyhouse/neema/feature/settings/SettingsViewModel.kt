@@ -96,9 +96,30 @@ fun isoDateToUtcMillis(iso: String?): Long? =
 
 fun utcMillisToIsoDate(ms: Long): String = Instant.ofEpochMilli(ms).atZone(ZoneOffset.UTC).toLocalDate().toString()
 
-/** The server's own checks on an offer (promotions.set_campaign): a name, 1..max percent, an end date. */
-fun offerIsValid(c: Campaign, maxPercent: Int): Boolean =
-    c.name.isNotBlank() && c.percent >= 1 && c.percent <= maxPercent && c.endsOn.isNotBlank()
+/** promotions.SCOPES */
+val OFFER_SCOPES = setOf("all", "category", "products")
+
+/**
+ * What promotions.parse would refuse in [c] (set_campaign then answers 422),
+ * in words that say which field to fix; null when the server will accept it.
+ * The server keeps int(percent), so the percentage must be a whole number,
+ * and a category / products offer needs at least one category / SKU.
+ */
+fun offerProblem(c: Campaign, maxPercent: Int): String? = when {
+    c.name.isBlank() -> "Give the offer a name"
+    c.percent != Math.floor(c.percent) || c.percent < 1 || c.percent > maxPercent -> "The discount must be a whole number from 1 to $maxPercent%"
+    c.scope !in OFFER_SCOPES -> "Choose what the offer applies to"
+    c.scope == "category" && c.categories.none { it.isNotBlank() } -> "Pick at least one category for the offer"
+    c.scope == "products" && c.skus.none { it.isNotBlank() } -> "Pick at least one product for the offer"
+    runCatching { LocalDate.parse(c.endsOn) }.isFailure -> "Pick the offer's last day"
+    else -> null
+}
+
+/** The server's own checks on an offer (promotions.set_campaign). */
+fun offerIsValid(c: Campaign, maxPercent: Int): Boolean = offerProblem(c, maxPercent) == null
+
+/** The web's catch-all for a refused offer. */
+const val OFFER_SAVE_FAILED = "Couldn't save that offer (admin only, and it needs a name, a percentage and an end date)"
 
 /**
  * SettingsView.tsx. Four cards are live (standing orders, translation, the
@@ -194,7 +215,9 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel() {
                 (r["directives"] as? JsonPrimitive)?.content?.let { _directives.value = it }
                 dash.toast("Standing orders saved — Neema follows them within ~5 minutes")
             } catch (e: Exception) {
-                dash.toast("Couldn't save (admin only)", ToastType.Error)
+                // The API never refuses the text itself (it trims and cuts to max_chars); a
+                // refusal is the admin check. A dropped connection says so instead.
+                dash.toast(if ((e as? ApiException)?.status == 0) dash.errorText(e) else "Couldn't save (admin only)", ToastType.Error)
             } finally { _savingDirectives.value = false }
         }
     }
@@ -216,7 +239,7 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel() {
                 )
             } catch (e: Exception) {
                 _translation.update { it?.copy(enabled = !next) }   // put it back; nothing was saved
-                dash.toast("Couldn't change that (admin only)", ToastType.Error)
+                dash.toast(if ((e as? ApiException)?.status == 0) dash.errorText(e) else "Couldn't change that (admin only)", ToastType.Error)
             } finally { savingTranslation = false }
         }
     }
@@ -245,22 +268,37 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel() {
     fun saveOffer(campaign: Campaign?) {
         if (_savingOffer.value) return
         val max = _offer.value?.maxPercent?.toInt()?.takeIf { it > 0 } ?: 70
-        if (campaign != null && !offerIsValid(campaign, max)) {
-            // What the server would answer with a 422 — said without the round trip.
-            return dash.toast("Couldn't save that offer (admin only, and it needs a name, a percentage and an end date)", ToastType.Error)
-        }
+        // What the server would answer with a 422 — said without the round trip, and naming the field.
+        campaign?.let { offerProblem(it, max) }?.let { return dash.toast(it, ToastType.Error) }
         viewModelScope.launch {
             _savingOffer.value = true
             try {
                 val r = api.putOffer(campaign)
                 _offer.update { it?.copy(campaign = r.campaign, running = r.running, says = r.says) }
                 _draft.value = r.campaign ?: blankCampaign()
+                val saved = r.campaign
                 dash.toast(
-                    if (r.campaign != null) "Offer live — Neema will say: ${r.says}"
-                    else "Offer ended — Neema stops mentioning it from her next reply"
+                    when {
+                        saved == null -> "Offer ended — Neema stops mentioning it from her next reply"
+                        r.running && r.says.isNotBlank() -> "Offer live — Neema will say: ${r.says}"
+                        // Saved but not live today: `says` is empty, so "Neema will say: " would promise nothing.
+                        saved.startsOn?.let { runCatching { LocalDate.parse(it) }.getOrNull() }?.isAfter(LocalDate.now()) == true ->
+                            "Offer saved — Neema starts mentioning it on ${ke.co.bethanyhouse.neema.core.util.Fmt.date(saved.startsOn)}"
+                        else -> "Offer saved, but its last day has passed — Neema won't mention it"
+                    }
                 )
             } catch (e: Exception) {
-                dash.toast("Couldn't save that offer (admin only, and it needs a name, a percentage and an end date)", ToastType.Error)
+                val ex = e as? ApiException
+                dash.toast(
+                    when (ex?.status) {
+                        0 -> dash.errorText(e)
+                        403 -> "Couldn't save that offer (admin only)"
+                        // promotions.set_campaign's own reason ("a campaign needs a name, 1-70%, …").
+                        422 -> "Couldn't save that offer — ${ex.detail}"
+                        else -> OFFER_SAVE_FAILED
+                    },
+                    ToastType.Error,
+                )
             } finally { _savingOffer.value = false }
         }
     }

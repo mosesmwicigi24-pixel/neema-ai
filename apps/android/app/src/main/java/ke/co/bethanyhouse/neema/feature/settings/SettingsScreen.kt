@@ -358,7 +358,7 @@ private fun OfferCard(vm: SettingsViewModel, dash: DashboardViewModel) {
             Field("Discount %", "1–$max", hintColor = if (pctBad) c.red else null, modifier = Modifier.weight(1f)) {
                 SmallInput(
                     if (pct == pct.toLong().toDouble()) pct.toLong().toString() else pct.toString(),
-                    { v -> vm.editDraft { it.copy(percent = v.filter { ch -> ch.isDigit() || ch == '.' }.toDoubleOrNull() ?: 0.0) } },
+                    { v -> vm.editDraft { it.copy(percent = v.filter { ch -> ch.isDigit() }.take(3).toDoubleOrNull() ?: 0.0) } },  // whole percent: the server keeps int(percent)
                     keyboardType = KeyboardType.Number, isError = pctBad,
                 )
             }
