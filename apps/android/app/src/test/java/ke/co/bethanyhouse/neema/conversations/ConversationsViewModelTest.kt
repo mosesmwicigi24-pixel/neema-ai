@@ -424,7 +424,7 @@ class ConversationsViewModelTest {
         val b = lastBody("POST", "/admin/conversations/c1/reply")!!
         assertEquals("\"Ndiyo, tutafikisha Ijumaa.\"", b["text"].toString())
         assertEquals("\"Yes, Friday\"", b["original_text"].toString())
-        assertEquals("\"sw\"", b["original_lang"].toString())
+        assertEquals("\"Swahili\"", b["original_lang"].toString())   // translate_reply names the language
         vm.toggleTx()
         assertFalse(vm.txOn())
     }

@@ -275,6 +275,20 @@ internal fun Modifier.dashedBorder(color: Color, radius: androidx.compose.ui.uni
     )
 }
 
+/** CSS `border-t border-dashed`: a 1dp dashed hairline across the full width. */
+@Composable
+internal fun DashedRule(color: Color, modifier: Modifier = Modifier) {
+    Box(
+        modifier.fillMaxWidth().height(1.dp).drawBehind {
+            val y = size.height / 2
+            drawLine(
+                color, androidx.compose.ui.geometry.Offset(0f, y), androidx.compose.ui.geometry.Offset(size.width, y),
+                strokeWidth = 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 3.dp.toPx())),
+            )
+        },
+    )
+}
+
 @Composable
 private fun DividerPill(text: String, line: Color, bg: Color, fg: Color, border: Color? = null) {
     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -346,7 +360,13 @@ private fun MessageBubble(msg: ThreadMsg, album: List<ThreadMsg>?, channel: Stri
                 // Reading glass: the English under a foreign message (both directions).
                 if (!msg.translation.isNullOrBlank()) {
                     val tc = when { inbound -> Color(0xFF78716C); msg.sender == "ai" -> Color.White.copy(alpha = 0.7f); else -> Color(0xFF0A2E05).copy(alpha = 0.7f) }
-                    HorizontalDivider(Modifier.padding(top = 6.dp), color = tc.copy(alpha = 0.3f))
+                    // `border-t border-dashed`: stone-200 / white/25 / #0a2e05/25.
+                    val line = when {
+                        inbound -> if (c.isDark) c.border else Color(0xFFE7E5E4)
+                        msg.sender == "ai" -> Color.White.copy(alpha = 0.25f)
+                        else -> Color(0xFF0A2E05).copy(alpha = 0.25f)
+                    }
+                    DashedRule(line, Modifier.padding(top = 6.dp))
                     Row(Modifier.padding(top = 4.dp)) {
                         Text("🌐 ", fontSize = 11.sp)
                         Text(msg.translation, fontSize = 11.sp, lineHeight = 16.sp, fontStyle = FontStyle.Italic, color = tc, modifier = Modifier.weight(1f, fill = false))
@@ -529,7 +549,10 @@ internal fun ThreadHeader(
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(inboxHandle(conv), fontSize = 12.sp, color = Color(0xFFB5C9A8), fontFamily = if (isWebVisitor(conv.waId)) null else FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                // A Meta thread has no wa_id (its key is a PSID): no empty second line under the name.
+                inboxHandle(conv).takeIf { it.isNotBlank() }?.let { h ->
+                    Text(h, fontSize = 12.sp, color = Color(0xFFB5C9A8), fontFamily = if (isWebVisitor(conv.waId)) null else FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
             if (canCall) IconButton(onClick = onCall) { Icon(Icons.Filled.Call, "Call on WhatsApp", tint = Color(0xFF25D366)) }
             if (onProfile != null) IconButton(onClick = onProfile) { Icon(Icons.Filled.Person, "View customer profile", tint = Color(0xFF427425)) }
@@ -592,9 +615,17 @@ private fun HeaderButton(a: HeaderAction, convBusy: String, @Suppress("UNUSED_PA
 /** components/ui/Btn.tsx variants — primary is AMBER there, not moss. */
 internal enum class BtnVariant { Primary, Secondary, Danger, Ghost, Outline }
 
+/** components/ui/Btn.tsx sizes: `sm` (h-8, px-3, text-xs) and the default `md` (h-9, px-4, text-sm). */
+internal enum class BtnSize(val height: androidx.compose.ui.unit.Dp, val padX: androidx.compose.ui.unit.Dp, val font: androidx.compose.ui.unit.TextUnit) {
+    Sm(32.dp, 12.dp, 12.sp),
+    /** What the web's modals use (`<Btn>` with no size): 36 high, 14sp. */
+    Md(36.dp, 16.dp, 14.sp),
+}
+
 /**
- * The web's `<Btn small>`: h-8, px-3, text-xs medium, rounded-lg, gap-1.5,
- * disabled at 40 % — in each variant's own light and dark colours.
+ * The web's `<Btn>`: rounded-lg, medium weight, gap-1.5, disabled at 40 % —
+ * in each variant's own light and dark colours. [BtnSize.Sm] is `<Btn small>`
+ * (thread header, draft panel); modals use the default [BtnSize.Md].
  */
 @Composable
 internal fun WebBtn(
@@ -605,6 +636,7 @@ internal fun WebBtn(
     lead: String? = null,
     enabled: Boolean = true,
     busy: Boolean = false,
+    size: BtnSize = BtnSize.Sm,
 ) {
     val dark = Neema.colors.isDark
     val (bg, fg, bd) = when (variant) {
@@ -616,13 +648,13 @@ internal fun WebBtn(
     }
     val shape = RoundedCornerShape(8.dp)
     Row(
-        modifier.height(32.dp).alpha(if (enabled) 1f else 0.4f).clip(shape).background(bg).border(1.dp, bd, shape)
-            .clickable(enabled = enabled && !busy, onClick = onClick).padding(horizontal = 12.dp),
+        modifier.height(size.height).alpha(if (enabled) 1f else 0.4f).clip(shape).background(bg).border(1.dp, bd, shape)
+            .clickable(enabled = enabled && !busy, onClick = onClick).padding(horizontal = size.padX),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         if (busy) CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = fg)
-        else if (lead != null) Text(lead, fontSize = 12.sp, color = fg, maxLines = 1)
-        if (label != null) Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = fg, maxLines = 1)
+        else if (lead != null) Text(lead, fontSize = size.font, color = fg, maxLines = 1)
+        if (label != null) Text(label, fontSize = size.font, fontWeight = FontWeight.Medium, color = fg, maxLines = 1)
     }
 }
 

@@ -92,7 +92,16 @@ data class ThreadUi(
     val convBusy: String = "",
     /** Media re-fetched from Meta this session, by message id. */
     val recovered: Map<String, String> = emptyMap(),
+    /**
+     * The open person's CRM profile, as far as the thread menu needs it
+     * (CustomerSidebar's invite rule): their captured phone and whether a
+     * real WhatsApp thread exists. Null until loaded.
+     */
+    val reach: Reach? = null,
 )
+
+/** GET /admin/customers/{key}?channel= (crm.py) — phone + channels, for the invite shortcut. */
+data class Reach(val convId: String, val phone: String?, val hasWhatsApp: Boolean)
 
 data class ComposerUi(
     val replyText: String = "",
@@ -248,7 +257,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         }
         viewModelScope.launch {
             val res = try {
-                api.conversations.page(f, PAGE)
+                inboxApi.page(f, PAGE)
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 // Only the live filter's own failure counts; a superseded one says nothing.
@@ -286,7 +295,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
             // The open thread stays fresh even when it is not on page one.
             val w = watched
             if (w != null && w !in top) {
-                runCatching { api.conversations.get(w) }.onSuccess { one -> if (seq == firstSeq) upsert(listOf(one)) }
+                runCatching { inboxApi.get(w) }.onSuccess { one -> if (seq == firstSeq) upsert(listOf(one)) }
             }
         }
     }
@@ -301,7 +310,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         _inbox.update { it.copy(loadingMore = true) }
         viewModelScope.launch {
             try {
-                val res = api.conversations.page(f, PAGE, c)
+                val res = inboxApi.page(f, PAGE, c)
                 if (seq != moreSeq || key != filterKeyOf(_inbox.value.filters)) return@launch
                 upsert(res.items)
                 val o = _inbox.value
@@ -479,6 +488,34 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         refreshWindow()
         loadActivity()
         scheduleTranslate()
+        loadReach(id)
+    }
+
+    private var reachJob: Job? = null
+
+    /**
+     * The customer's captured phone and channels (the profile CustomerSidebar
+     * reads). A person already on WhatsApp needs no invite, so no fetch; a
+     * failure leaves the shortcut hidden rather than guessing.
+     */
+    private fun loadReach(id: String) {
+        reachJob?.cancel()
+        _thread.update { it.copy(reach = null) }
+        val conv = _inbox.value.cache[id] ?: return
+        val onWa = realWhatsApp(conv) || (conv.personId != null && _inbox.value.cache.values.any { it.personId == conv.personId && realWhatsApp(it) })
+        if (onWa) { _thread.update { it.copy(reach = Reach(id, phoneDigits(conv), hasWhatsApp = true)) }; return }
+        val key = conv.waId ?: conv.externalId ?: return
+        reachJob = viewModelScope.launch {
+            val p = try {
+                ke.co.bethanyhouse.neema.feature.conversations.customer.CrmApi(dash.api.http).profile(key, conv.channel.ifEmpty { null })
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                return@launch
+            }
+            if (_thread.value.activeId != id) return@launch
+            val hasWa = p.channels.any { it.channel == "whatsapp" && !isWebVisitor(it.identifier) }
+            _thread.update { it.copy(reach = Reach(id, p.phone, hasWa)) }
+        }
     }
 
     /** Open a conversation another view requested (Calls → "message in Neema", the hub). */
@@ -512,7 +549,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                 }
                 if (id !in _inbox.value.cache) {
                     // Revealed, not just cached: the paged list would drop it on the next refresh.
-                    runCatching { api.conversations.get(id) }.onSuccess { reveal(listOf(it)) }
+                    runCatching { inboxApi.get(id) }.onSuccess { reveal(listOf(it)) }
                 }
                 select(id)
             }
@@ -526,7 +563,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         _inbox.value.cache.values.find(::matches)?.let { select(it.id); return }
         // Paged: absence here is not absence. Ask for THAT channel and THAT id.
         viewModelScope.launch {
-            val hit = runCatching { api.conversations.page(InboxQuery(channel = channel, q = externalId), 5).items }
+            val hit = runCatching { inboxApi.page(InboxQuery(channel = channel, q = externalId), 5).items }
                 .getOrNull()?.map { it.normalized() }?.find(::matches)
             if (hit != null) { reveal(listOf(hit)); select(hit.id) }
             else dash.toast("No conversation on that channel yet.", ToastType.Warning)
@@ -598,7 +635,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         activityJob?.cancel()
         activityJob = viewModelScope.launch {
             while (isActive) {
-                val ev = runCatching { api.conversations.activity(id) }.getOrDefault(emptyList())
+                val ev = runCatching { inboxApi.activity(id) }.getOrDefault(emptyList())
                 if (_thread.value.activeId != id) return@launch
                 _thread.update { it.copy(activity = ev) }
                 if (!_thread.value.activityOpen) return@launch
@@ -636,45 +673,16 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
             socketRefreshJob = viewModelScope.launch { delay(1500); refresh() }
         }
         if (convId == null || convId != active) return
+        // Agent-level pings (`event: "notification"`) share type names with thread
+        // events but carry a title/body, not a message — never paint them.
+        if (e.s("event") == "notification") return
         when (type) {
             "ai_draft_ready" -> _composer.update {
                 it.copy(draftText = e.s("draft") ?: "", draftVisible = true, draftExpanded = false, draftEditing = false)
             }
             "new_message" -> {
-                val msg = ThreadMsg(
-                    id = e.s("id") ?: "ws-${UUID.randomUUID()}",
-                    type = "message",
-                    direction = e.s("direction") ?: "outbound",
-                    sender = e.s("sender") ?: "ai",
-                    text = e.s("text"),
-                    createdAt = e.s("created_at") ?: nowIso(),
-                    mediaType = e.s("mediaType"),
-                    mediaId = e.s("mediaId"),
-                    mediaUrl = e.s("mediaUrl"),
-                    mediaCaption = e.s("mediaCaption"),
-                    mimeType = e.s("mimeType"),
-                    filename = e.s("filename"),
-                    // Sent-in-their-language replies carry the human's English.
-                    translation = e.s("translation"),
-                    translatedFrom = e.s("translatedFrom"),
-                    replyTo = (e["replyTo"] as? JsonObject)?.let { runCatching { NeemaJson.decodeFromJsonElement(QuotedRef.serializer(), it) }.getOrNull() },
-                )
-                setMsgs(active) { existing ->
-                    when {
-                        // Primary dedup: exact DB id.
-                        existing.any { it.id == msg.id } -> existing
-                        // Audio replies broadcast before the DB row commits carry a made-up
-                        // id: guard with media_url + direction within 15 seconds.
-                        msg.mediaUrl != null && existing.any { x ->
-                            x.mediaUrl == msg.mediaUrl && x.direction == msg.direction && kotlin.math.abs(x.millis - msg.millis) < 15_000
-                        } -> existing
-                        // Our own reply echoing back while its optimistic bubble is still up.
-                        msg.sender == "human_agent" && existing.any { x ->
-                            x.id.startsWith("optimistic-") && !x.isNote && x.body.trim() == msg.body.trim()
-                        } -> existing
-                        else -> existing + msg
-                    }
-                }
+                val msg = wsMessageOf(e) ?: return
+                setMsgs(active) { existing -> appendWs(existing, msg) }
             }
             "translations" -> {
                 val items = (e["items"] as? JsonArray)?.mapNotNull { it as? JsonObject } ?: return
@@ -780,14 +788,16 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         viewModelScope.launch {
             try {
                 api.conversations.addNote(convId, text)
-                val msgs = inboxApi.messages(convId)
-                setMsgs(convId) { mergeServer(it, msgs) }
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 setMsgs(convId) { l -> l.filterNot { it.id.startsWith("optimistic-note-") } }
                 _dialogs.update { it.copy(note = true, noteText = text) }
                 dash.toast("Failed to save note", ToastType.Error)
+                return@launch
             }
+            // Saved. A failed refetch must not read as a failed save (a retry would
+            // write the note twice) — the optimistic bubble stays until the next poll.
+            runCatching { inboxApi.messages(convId) }.onSuccess { msgs -> setMsgs(convId) { mergeServer(it, msgs) } }
         }
     }
 
@@ -918,18 +928,19 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
             _composer.update { it.copy(replyText = "", quoted = null, txPreview = null) }
             try {
                 inboxApi.reply(convId, sendText, replyToId, origText, origLang)
-                val msgs = inboxApi.messages(convId)
-                // The server's row replaces the optimistic bubble (mergeServer).
-                setMsgs(convId) { l -> mergeServer(l, msgs) }
-                refresh()
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 setMsgs(convId) { l -> l.filterNot { it.id.startsWith("optimistic-") } }
-                _composer.update { it.copy(replyText = text, quoted = quoted) }
+                _composer.update { it.copy(replyText = text, quoted = quoted, sending = false) }
                 dash.toast(((e as? ApiException)?.detail ?: e.message)?.take(160)?.ifBlank { null } ?: "Failed to send message", ToastType.Error)
-            } finally {
-                _composer.update { it.copy(sending = false) }
+                return@launch
             }
+            _composer.update { it.copy(sending = false) }
+            // Delivered. The server's row replaces the optimistic bubble (mergeServer);
+            // if the refetch fails the send still succeeded — never restore the text
+            // (a second tap would message the customer twice).
+            runCatching { inboxApi.messages(convId) }.onSuccess { msgs -> setMsgs(convId) { l -> mergeServer(l, msgs) } }
+            refresh()
         }
     }
 
@@ -954,16 +965,17 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         viewModelScope.launch {
             try {
                 api.conversations.approveDraft(convId, textToSend.ifEmpty { null })
-                val msgs = inboxApi.messages(convId)
-                setMsgs(convId) { mergeServer(it, msgs) }
-                refresh()
-                dash.toast("AI draft approved & sent")
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 setMsgs(convId) { l -> l.filterNot { it.id.startsWith("optimistic-") } }
                 _composer.update { it.copy(draftVisible = true, draftExpanded = true, draftText = textToSend) }
                 dash.toast("Failed to approve draft", ToastType.Error)
+                return@launch
             }
+            // Sent. A failed refetch must not bring the draft back for a second send.
+            dash.toast("AI draft approved & sent")
+            runCatching { inboxApi.messages(convId) }.onSuccess { msgs -> setMsgs(convId) { mergeServer(it, msgs) } }
+            refresh()
         }
     }
 
@@ -1017,6 +1029,12 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                         bytes = compressImage(uri)
                         if (bytes != null) { mime = "image/jpeg"; name = name.substringBeforeLast('.') + ".jpg" }
                     }
+                    // upload-media refuses anything outside its ALLOWED_MIME with a 415;
+                    // the web's file picker never offers such a file — say so up front.
+                    if (!uploadable(mime, name)) {
+                        withContext(Dispatchers.Main) { dash.toast("$name can't be sent — unsupported file type", ToastType.Error) }
+                        return@mapNotNull null
+                    }
                     if (bytes == null && size > limit) {
                         withContext(Dispatchers.Main) { dash.toast("$name is too large (max $label)", ToastType.Error) }
                         return@mapNotNull null
@@ -1053,7 +1071,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                     } catch (e: Exception) {
                         if (e is CancellationException) throw e
                         failed++
-                        dash.toast("${it.name}: ${(e as? ApiException)?.detail ?: e.message ?: "failed"}", ToastType.Error)
+                        dash.toast("${it.name}: ${uploadErrorOf(e)}", ToastType.Error)
                     }
                 }
                 if (sent.isNotEmpty()) {
@@ -1186,6 +1204,19 @@ internal fun threadLangOf(t: ThreadUi): String? =
 /** Translate toggle: the agent's choice for this thread, else ON when the thread reads foreign. */
 internal fun txOnOf(t: ThreadUi, c: ComposerUi): Boolean =
     t.activeId.isNotEmpty() && (c.txMode[t.activeId] ?: (threadLangOf(t) != null))
+
+/** A genuine WhatsApp thread — a web-chat visitor rides the "whatsapp" channel but is not one. */
+internal fun realWhatsApp(c: Conversation): Boolean = c.channel == "whatsapp" && !isWebVisitor(c.waId)
+
+/**
+ * The thread menu's "Invite to WhatsApp" shortcut follows CustomerSidebar:
+ * only for a person with a real 7–15-digit phone on their profile and no
+ * WhatsApp thread yet.
+ */
+internal fun inviteTarget(reach: Reach?, convId: String): String? =
+    reach?.takeIf { it.convId == convId && !it.hasWhatsApp }?.phone?.let { p ->
+        if (isWebVisitor(p.trim())) null else p.filter { it.isDigit() }.takeIf { it.length in 7..15 }
+    }
 
 internal fun channelLabel(ch: String?): String = when (ch) {
     "whatsapp" -> "WhatsApp"; "messenger" -> "Messenger"; "facebook" -> "Facebook"; "instagram" -> "Instagram"

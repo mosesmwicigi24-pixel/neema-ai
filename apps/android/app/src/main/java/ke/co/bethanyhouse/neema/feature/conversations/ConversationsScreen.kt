@@ -175,13 +175,17 @@ fun ConversationsScreen(dash: DashboardViewModel) {
                 fontSize = 14.sp, color = if (Neema.colors.isDark) Neema.colors.textMid else Color(0xFF57534E), // text-sm text-stone-600
             )
         },
-        // <Btn variant="danger"> / <Btn variant="outline">, as on the web.
-        confirmButton = { WebBtn(if (dialogs.clearing) "Clearing…" else "Yes, clear history", BtnVariant.Danger, vm::clearHistory, enabled = !dialogs.clearing) },
-        dismissButton = { WebBtn("Cancel", BtnVariant.Outline, { vm.showClear(false) }) },
+        // <Btn variant="danger"> then <Btn variant="outline">, medium size, as on the web.
+        confirmButton = {
+            ModalButtons {
+                WebBtn(if (dialogs.clearing) "Clearing…" else "Yes, clear history", BtnVariant.Danger, vm::clearHistory, enabled = !dialogs.clearing, size = BtnSize.Md)
+                WebBtn("Cancel", BtnVariant.Outline, { vm.showClear(false) }, size = BtnSize.Md)
+            }
+        },
     )
     if (askDialog) AskNeemaDialog(vm) { askDialog = false }
     if (answerDialog) AnswerViaNeemaDialog(vm) { answerDialog = false }
-    if (inviteDialog && active != null) InviteDialog(dash, vm, active) { inviteDialog = false }
+    if (inviteDialog && active != null) InviteDialog(dash, vm, active, inviteTarget(thread.reach, active.id)) { inviteDialog = false }
     viewer?.let { v -> ViewerDialog(v, onClose = { viewer = null }, onVideoError = { id -> if (id != null) brokenVideos += id }) }
 }
 
@@ -252,13 +256,15 @@ private fun ThreadPane(
     }
     val digits = phoneDigits(conv).orEmpty()
     val hasPhone = digits.isNotEmpty()
-    val hasWaChannel = siblings.any { it.channel == "whatsapp" }
+    // CustomerSidebar's rule: the invite exists only for a person with a real
+    // 7–15-digit phone on their profile and no WhatsApp thread yet.
+    val invitePhone = inviteTarget(thread.reach, conv.id)
     val menu = buildList<Pair<String, () -> Unit>> {
         // Shortcuts to the customer panel's Ask Neema / Answer-via-Neema boxes and
         // Invite button (CustomerSidebar.tsx), which the web shows to everyone.
         add("🔎 Ask Neema" to onAsk)
         add("💬 Neema delivers a team answer" to onAnswer)
-        if (!hasWaChannel) add("🟢 Invite to WhatsApp" to onInvite)
+        if (invitePhone != null) add("🟢 Invite to WhatsApp" to onInvite)
         if (onActivity != null) add("🕘 Activity log" to onActivity)
     }
     // Phone (edge-to-edge, shell bars hidden): keep clear of the nav bar and the
@@ -399,7 +405,7 @@ private fun ActivityList(events: List<ActivityEvent>, modifier: Modifier) {
                 Spacer(Modifier.width(8.dp))
                 Column(Modifier.padding(bottom = 12.dp)) {
                     Text(e.label, fontSize = 11.sp, fontWeight = FontWeight.Medium, lineHeight = 15.sp)
-                    e.detail?.let { Text(it, fontSize = 10.sp, color = Color(0xFF8FA383), lineHeight = 14.sp, modifier = Modifier.padding(top = 2.dp)) }
+                    e.detail?.takeIf { it.isNotEmpty() }?.let { Text(it, fontSize = 10.sp, color = Color(0xFF8FA383), lineHeight = 14.sp, modifier = Modifier.padding(top = 2.dp)) }
                     Text(Fmt.timeAgo(e.at), fontSize = 10.sp, color = Color(0xFFA8A29E), modifier = Modifier.padding(top = 2.dp))
                 }
             }
@@ -442,9 +448,14 @@ internal fun TransferDialog(dash: DashboardViewModel, conv: Conversation?, busy:
                 }
             }
         },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        confirmButton = { ModalButtons { WebBtn("Cancel", BtnVariant.Outline, onDismiss, size = BtnSize.Md) } },
     )
+}
+
+/** The web modal footer: `flex gap-2` — left-aligned, the action first, then Cancel. */
+@Composable
+internal fun ModalButtons(content: @Composable RowScope.() -> Unit) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically, content = content)
 }
 
 @Composable
@@ -458,9 +469,13 @@ internal fun NoteDialog(text: String, onText: (String) -> Unit, onSave: () -> Un
                 placeholder = { Text("Internal note (not sent to customer)…") }, modifier = Modifier.fillMaxWidth(),
             )
         },
-        // <Btn variant="primary"> (amber) / <Btn variant="outline">, as on the web.
-        confirmButton = { WebBtn("Save Note", BtnVariant.Primary, onSave, enabled = text.isNotBlank()) },
-        dismissButton = { WebBtn("Cancel", BtnVariant.Outline, onDismiss) },
+        // <Btn variant="primary"> (amber) then <Btn variant="outline">, medium size, as on the web.
+        confirmButton = {
+            ModalButtons {
+                WebBtn("Save Note", BtnVariant.Primary, onSave, enabled = text.isNotBlank(), size = BtnSize.Md)
+                WebBtn("Cancel", BtnVariant.Outline, onDismiss, size = BtnSize.Md)
+            }
+        },
     )
 }
 
@@ -506,8 +521,12 @@ internal fun AskNeemaDialog(vm: ConversationsViewModel, initialQuestion: String 
                 }
             }
         },
-        confirmButton = { Button(onClick = { ask() }, enabled = !busy && q.isNotBlank()) { Text(if (busy) "…" else "Ask") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+        confirmButton = {
+            ModalButtons {
+                WebBtn("Ask", BtnVariant.Primary, { ask() }, enabled = q.isNotBlank(), busy = busy, size = BtnSize.Md)
+                WebBtn("Close", BtnVariant.Outline, onDismiss, size = BtnSize.Md)
+            }
+        },
     )
 }
 
@@ -534,26 +553,34 @@ internal fun AnswerViaNeemaDialog(vm: ConversationsViewModel, initialFacts: Stri
             }
         },
         confirmButton = {
-            Button(onClick = {
-                val f = facts.trim()
-                if (f.isNotEmpty() && !busy) {
-                    busy = true; status = null
-                    scope.launch { val (ok, s) = vm.answerViaNeema(f); status = s; if (ok) facts = ""; busy = false }
-                }
-            }, enabled = !busy && facts.isNotBlank()) { Text(if (busy) "…" else "Neema delivers") }
+            ModalButtons {
+                WebBtn("Neema delivers", BtnVariant.Primary, {
+                    val f = facts.trim()
+                    if (f.isNotEmpty() && !busy) {
+                        busy = true; status = null
+                        scope.launch { val (ok, s) = vm.answerViaNeema(f); status = s; if (ok) facts = ""; busy = false }
+                    }
+                }, enabled = facts.isNotBlank(), busy = busy, size = BtnSize.Md)
+                WebBtn("Close", BtnVariant.Outline, onDismiss, size = BtnSize.Md)
+            }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } },
     )
 }
 
-/** Send the approved WhatsApp invite template; if that fails, open WhatsApp with a prefilled message. */
+/**
+ * Send the approved WhatsApp invite template (POST /admin/whatsapp-invite
+ * {phone, name}) to the phone on the customer's profile; if that fails (not
+ * configured, Meta refused), open WhatsApp with a prefilled message instead —
+ * CustomerSidebar's invite button, behind one confirmation.
+ */
 @Composable
-internal fun InviteDialog(dash: DashboardViewModel, vm: ConversationsViewModel, conv: Conversation, onDismiss: () -> Unit) {
-    val guess = phoneDigits(conv).orEmpty()
+internal fun InviteDialog(dash: DashboardViewModel, vm: ConversationsViewModel, conv: Conversation, profilePhone: String?, onDismiss: () -> Unit) {
+    val guess = profilePhone ?: phoneDigits(conv).orEmpty()
     var phone by remember { mutableStateOf(guess) }
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val uri = LocalUriHandler.current
+    val digits = phone.filter { it.isDigit() }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Invite to WhatsApp") },
@@ -565,25 +592,26 @@ internal fun InviteDialog(dash: DashboardViewModel, vm: ConversationsViewModel, 
             }
         },
         confirmButton = {
-            Button(enabled = !busy && phone.filter { it.isDigit() }.length in 7..15, onClick = {
-                val digits = phone.filter { it.isDigit() }
-                busy = true
-                scope.launch {
-                    if (vm.invite(digits, conv.name)) {
-                        dash.toast("WhatsApp invite sent ✓")
-                    } else {
-                        // Fallback: open WhatsApp manually if the template send fails.
-                        val first = conv.name?.trim()?.split(Regex("\\s+"))?.firstOrNull().orEmpty()
-                        val text = "Hello${if (first.isNotEmpty()) " $first" else ""}, this is Bethany House. " +
-                            "Continuing our chat here on WhatsApp so we can finalise your order."
-                        runCatching { uri.openUri("https://wa.me/$digits?text=${java.net.URLEncoder.encode(text, "UTF-8").replace("+", "%20")}") }
-                            .onFailure { dash.toast("Couldn't send the invite", ToastType.Error) }
+            ModalButtons {
+                WebBtn(if (busy) "Sending…" else "Send invite", BtnVariant.Primary, {
+                    busy = true
+                    scope.launch {
+                        if (vm.invite(digits, conv.name)) {
+                            dash.toast("WhatsApp invite sent ✓")
+                        } else {
+                            // Fallback: open WhatsApp manually if the template send fails.
+                            val first = conv.name?.trim()?.split(Regex("\\s+"))?.firstOrNull().orEmpty()
+                            val text = "Hello${if (first.isNotEmpty()) " $first" else ""}, this is Bethany House. " +
+                                "Continuing our chat here on WhatsApp so we can finalise your order."
+                            runCatching { uri.openUri("https://wa.me/$digits?text=${java.net.URLEncoder.encode(text, "UTF-8").replace("+", "%20")}") }
+                                .onFailure { dash.toast("Couldn't send the invite", ToastType.Error) }
+                        }
+                        busy = false
+                        onDismiss()
                     }
-                    busy = false
-                    onDismiss()
-                }
-            }) { Text(if (busy) "Sending…" else "Send invite") }
+                }, enabled = !busy && digits.length in 7..15, size = BtnSize.Md)
+                WebBtn("Cancel", BtnVariant.Outline, onDismiss, size = BtnSize.Md)
+            }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
