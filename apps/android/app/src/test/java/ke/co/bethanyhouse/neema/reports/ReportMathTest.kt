@@ -6,6 +6,7 @@ import ke.co.bethanyhouse.neema.core.model.Order
 import ke.co.bethanyhouse.neema.core.net.NeemaJson
 import ke.co.bethanyhouse.neema.feature.reports.ReportRange
 import ke.co.bethanyhouse.neema.feature.reports.buildReport
+import ke.co.bethanyhouse.neema.feature.reports.capitalizeWords
 import ke.co.bethanyhouse.neema.feature.reports.csvField
 import ke.co.bethanyhouse.neema.feature.reports.csvFileName
 import ke.co.bethanyhouse.neema.feature.reports.reportCsv
@@ -29,6 +30,15 @@ class ReportMathTest {
 
     private fun report(range: ReportRange, from: LocalDate? = null, to: LocalDate? = null) =
         buildReport(convs, orders, agents, range, from, to, NOW.toEpochMilli(), NAIROBI)
+
+    /** CSS `capitalize` (the web's channel, role and attribution source cells): every word, the rest untouched. */
+    @Test fun capitalizeWords_likeCss() {
+        assertEquals("Whatsapp", capitalizeWords("whatsapp"))
+        assertEquals("Facebook Ads", capitalizeWords("facebook ads"))
+        assertEquals("Click_to_whatsapp", capitalizeWords("click_to_whatsapp"))
+        assertEquals("", capitalizeWords(""))
+        assertEquals("Admin", capitalizeWords("Admin"))
+    }
 
     @Test fun last30Days_countsAndRevenueExcludeCancelled() {
         val r = report(ReportRange.D30)

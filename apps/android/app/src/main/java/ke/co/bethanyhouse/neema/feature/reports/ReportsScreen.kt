@@ -33,10 +33,7 @@ import ke.co.bethanyhouse.neema.app.ToastType
 import ke.co.bethanyhouse.neema.core.model.Agent
 import ke.co.bethanyhouse.neema.core.model.Conversation
 import ke.co.bethanyhouse.neema.core.model.Order
-import ke.co.bethanyhouse.neema.core.perm.Perms
-import ke.co.bethanyhouse.neema.core.ui.components.ChannelChip
 import ke.co.bethanyhouse.neema.core.ui.components.Panel
-import ke.co.bethanyhouse.neema.core.ui.components.Pill
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import ke.co.bethanyhouse.neema.core.util.Fmt
 import java.io.File
@@ -49,12 +46,35 @@ import java.time.ZoneOffset
 import java.time.format.TextStyle
 import java.util.Locale
 
-// Badge hues the web takes from Tailwind (emerald / blue / red / amber).
-// By night the -400 shades, so the badges read on navy.
-private val Emerald @Composable get() = if (Neema.colors.isDark) Color(0xFF34D399) else Color(0xFF047857)
-private val Blue700 @Composable get() = if (Neema.colors.isDark) Color(0xFF60A5FA) else Color(0xFF1D4ED8)
-private val Red600 @Composable get() = if (Neema.colors.isDark) Color(0xFFF87171) else Color(0xFFDC2626)
-private val Amber700 @Composable get() = if (Neema.colors.isDark) Color(0xFFFBBF24) else Color(0xFFB45309)
+/**
+ * A badge as the web draws it: `px-1.5 py-0.5 rounded text-[10px] font-semibold`
+ * on a Tailwind -50 tint. By night the text takes the -400 shade and the tint
+ * becomes a wash of it, so the badges read on navy.
+ */
+private class Hue(val text: Color, val bg: Color, val nightText: Color)
+
+private val EmeraldHue = Hue(Color(0xFF047857), Color(0xFFECFDF5), Color(0xFF34D399))
+private val BlueHue = Hue(Color(0xFF1D4ED8), Color(0xFFEFF6FF), Color(0xFF60A5FA))
+private val RedHue = Hue(Color(0xFFDC2626), Color(0xFFFEF2F2), Color(0xFFF87171))
+private val AmberHue = Hue(Color(0xFFB45309), Color(0xFFFFFBEB), Color(0xFFFBBF24))
+// The web's own greens: open #427425 on #f0f9ec; anything else #699a32 on #e6f3d8.
+private val OpenHue = Hue(Color(0xFF427425), Color(0xFFF0F9EC), Color(0xFF9CCD65))
+private val QuietHue = Hue(Color(0xFF699A32), Color(0xFFE6F3D8), Color(0xFF8A9E80))
+
+@Composable
+private fun Badge(text: String, hue: Hue) {
+    val dark = Neema.colors.isDark
+    val fg = if (dark) hue.nightText else hue.text
+    Text(
+        text, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = fg, maxLines = 1,
+        modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(if (dark) fg.copy(alpha = 0.14f) else hue.bg)
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+    )
+}
+
+/** CSS `text-transform: capitalize`: the first letter of every word. */
+internal fun capitalizeWords(s: String): String =
+    s.split(" ").joinToString(" ") { w -> w.replaceFirstChar { it.uppercaseChar() } }
 
 /** Port of components/views/ReportsView.tsx — admin reports over a date range. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -92,8 +112,6 @@ fun ReportsScreen(
     val report = remember(convs, orders, agents, range, customFrom, customTo, clock) {
         buildReport(convs, orders, agents, range, customFrom, customTo, clock.millis(), clock.zone)
     }
-    dash.me.collectAsStateWithLifecycle() // recompose when permissions arrive
-    val canExport = dash.can(Perms.EXPORT_REPORTS)
 
     BoxWithConstraints(Modifier.fillMaxSize().background(c.bg)) {
         val wide = maxWidth >= 600.dp
@@ -120,7 +138,6 @@ fun ReportsScreen(
                         onRange = { vm.range.value = it },
                         onFrom = { vm.customFrom.value = it },
                         onTo = { vm.customTo.value = it },
-                        canExport = canExport,
                         onExport = {
                             runCatching { exportCsv(context, report.orders, range) }
                                 .onSuccess { dash.toast("Report exported") }
@@ -282,7 +299,6 @@ private fun RangeControls(
     onRange: (ReportRange) -> Unit,
     onFrom: (LocalDate) -> Unit,
     onTo: (LocalDate) -> Unit,
-    canExport: Boolean,
     onExport: () -> Unit,
 ) {
     val c = Neema.colors
@@ -310,7 +326,9 @@ private fun RangeControls(
             Text("to", fontSize = 12.sp, color = c.border2)
             DateButton(customTo) { picking = "to" }
         }
-        if (canExport) {
+        // The web shows Export CSV to everyone who can open Reports (it never
+        // checks export_reports), so this does too.
+        run {
             Button(
                 onClick = onExport, shape = RoundedCornerShape(8.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = c.gold, contentColor = MaterialTheme.colorScheme.onPrimary),
@@ -372,8 +390,9 @@ private fun OverviewTab(r: Report, wide: Boolean) {
     )
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         tiles.chunked(if (wide) 4 else 2).forEach { rowTiles ->
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                rowTiles.forEach { it(Modifier.weight(1f)) }
+            // Equal heights across a row, like the web's grid.
+            Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                rowTiles.forEach { it(Modifier.weight(1f).fillMaxHeight()) }
             }
         }
         val convChart: @Composable (Modifier) -> Unit = {
@@ -385,7 +404,7 @@ private fun OverviewTab(r: Report, wide: Boolean) {
         val revChart: @Composable (Modifier) -> Unit = {
             Panel(it) {
                 ChartTitle("Revenue over time (KES)")
-                MiniBar(r.orderByDay, c.blue) { v -> Fmt.currency(v) }
+                MiniBar(r.orderByDay, c.blue) { v -> plain(v) }
             }
         }
         if (wide) Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -433,28 +452,25 @@ private fun ChartTitle(text: String) {
 
 private fun conversationRow(conv: Conversation, agents: List<Agent>, now: Long): List<Cell> = listOf(
     textCell(Fmt.displayName(conv.name, conv.waId)),
-    { ChannelChip(conv.channel.ifEmpty { "whatsapp" }) },
+    // `<span className="capitalize">{c.channel || "whatsapp"}</span>`
+    textCell(capitalizeWords(conv.channel.ifEmpty { "whatsapp" })),
+    { Badge(conv.status, if (conv.status == "open") OpenHue else QuietHue) },
     {
-        val c = Neema.colors
-        Pill(conv.status, if (conv.status == "open") c.gold2 else c.textDim)
-    },
-    {
-        val c = Neema.colors
-        Pill(
+        Badge(
             conv.interceptMode,
-            when (conv.interceptMode) { "human" -> Amber700; "ai" -> Blue700; else -> c.textDim },
+            when (conv.interceptMode) { "human" -> AmberHue; "ai" -> BlueHue; else -> QuietHue },
         )
     },
     textCell(Fmt.timeAgo(conv.reportAt(), now)),
-    textCell(agents.find { it.id == conv.assignedAgentId }?.name ?: "—"),
+    // `?.name || "—"`: an agent with a blank name reads "—" too.
+    textCell(agents.find { it.id == conv.assignedAgentId }?.name?.takeIf { it.isNotEmpty() } ?: "—"),
 )
 
-@Composable
-private fun orderStatusColor(status: String): Color = when (status) {
-    "delivered" -> Emerald
-    "confirmed" -> Blue700
-    "cancelled" -> Red600
-    else -> Amber700
+private fun orderStatusHue(status: String): Hue = when (status) {
+    "delivered" -> EmeraldHue
+    "confirmed" -> BlueHue
+    "cancelled" -> RedHue
+    else -> AmberHue
 }
 
 private fun orderRow(o: Order): List<Cell> {
@@ -463,7 +479,7 @@ private fun orderRow(o: Order): List<Cell> {
         textCell(Fmt.displayName(o.contactName, phone)),
         textCell(Fmt.formatPhone(phone)),
         textCell(Fmt.currency(o.total)),
-        { Pill(o.status, orderStatusColor(o.status)) },
+        { Badge(o.status, orderStatusHue(o.status)) },
         textCell(Fmt.date(o.createdAt)),
     )
 }
@@ -473,7 +489,7 @@ private fun agentRow(s: AgentStat): List<Cell> = listOf(
     {
         val c = Neema.colors
         Text(
-            s.agent.role.replaceFirstChar { it.uppercase() },
+            capitalizeWords(s.agent.role),
             fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = c.gold2,
             modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(c.goldDim)
                 .border(1.dp, c.border, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
@@ -487,7 +503,7 @@ private fun agentRow(s: AgentStat): List<Cell> = listOf(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(6.dp).clip(CircleShape).background(if (on) c.gold else Color(0xFFD6D3D1)))
             Spacer(Modifier.width(4.dp))
-            Text(if (on) "Online" else "Offline", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = if (on) c.gold else c.border2)
+            Text(if (on) "Online" else "Offline", fontSize = 10.sp, fontWeight = FontWeight.Medium, color = if (on) c.gold else c.border2)
         }
     },
 )

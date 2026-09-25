@@ -97,6 +97,25 @@ class OverviewMathTest {
         assertEquals("An agent", feed.first { it.id == "conv-r1" }.user)
     }
 
+    /** mapConversation() gives a messageless thread its created_at, so the web's feed keeps it. */
+    @Test fun activity_messagelessHumanThread_datesFromCreation() {
+        val c = convs.first { it.id == "r1" }.copy(lastMessageAt = null, createdAt = ReportsFixtures.ago(30))
+        val feed = activityFeed(emptyList(), listOf(c), agents)
+        assertEquals(listOf("conv-r1"), feed.map { it.id })
+        assertEquals(c.createdAt, feed.single().at)
+        // Neither date: dropped, as `c.last_message_at` is then undefined on the web.
+        assertEquals(emptyList<Any>(), activityFeed(emptyList(), listOf(c.copy(createdAt = null)), agents))
+    }
+
+    /** `item.qty || item.quantity || 1`: only a zero (missing) quantity counts as one. */
+    @Test fun topProducts_onlyZeroQtyCountsAsOne() {
+        val o: Order = NeemaJson.decodeFromString(
+            """{"id":"z","status":"confirmed","created_at":"2026-09-25T08:00:00Z","subtotal":0,
+                "items":[{"name":"Refund line","qty":-2,"unit":100,"total":0}]}""",
+        )
+        assertEquals(-2.0, topProducts(listOf(o)).single().qty, 0.0)
+    }
+
     @Test fun activity_isAtMostFourOrdersAndThreeIntercepts() {
         val many = (1..10).map { orders[0].copy(id = "x$it") }
         assertEquals(4 + 3, activityFeed(many, convs, agents).size)

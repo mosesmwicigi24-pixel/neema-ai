@@ -65,7 +65,8 @@ class ReportsScreenshotTest {
     @Test fun agents() = shot(tab = ReportTab.Agents)
     @Test fun emptyOverview() = shot(empty = true)
     @Test fun emptyOrders() = shot(tab = ReportTab.Orders, empty = true)
-    @Test fun noExportPermission() = shot(canExport = false)
+    /** A Sales agent without export_reports still gets Export CSV — the web never checks it. */
+    @Test fun limitedPermissionsStillExport() = shot(canExport = false)
 
     @Test fun loading() {
         // Main never runs: the full-list fetch is still in flight.

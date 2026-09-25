@@ -24,7 +24,10 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -52,6 +55,7 @@ import ke.co.bethanyhouse.neema.core.ui.components.Panel
 import ke.co.bethanyhouse.neema.core.ui.components.channelStyle
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import ke.co.bethanyhouse.neema.core.util.Fmt
+import ke.co.bethanyhouse.neema.feature.reports.capitalizeWords
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
@@ -210,12 +214,14 @@ internal fun activityFeed(orders: List<Order>, human: List<Conversation>, agents
         )
     }
     // Recent human intercepts
-    human.filter { it.interceptMode == "human" && !it.lastMessageAt.isNullOrEmpty() }
-        .sortedByDescending { Fmt.millis(it.lastMessageAt) ?: 0 }.take(3).forEach { conv ->
+    // mapConversation() dates a thread with no messages yet from its creation,
+    // so the web's `c.last_message_at` test only drops a thread with neither.
+    human.filter { it.interceptMode == "human" && !(it.lastMessageAt ?: it.createdAt).isNullOrEmpty() }
+        .sortedByDescending { Fmt.millis(it.lastMessageAt ?: it.createdAt) ?: 0 }.take(3).forEach { conv ->
             out += ActivityEntry(
                 "conv-${conv.id}", agents.find { it.id == conv.assignedAgentId }?.name ?: "An agent",
                 "intercepted conversation with", Fmt.displayName(conv.name, conv.waId),
-                conv.lastMessageAt!!, "⚡",
+                (conv.lastMessageAt ?: conv.createdAt)!!, "⚡",
             )
         }
     return out.sortedByDescending { Fmt.millis(it.at) ?: 0 }.take(8)
@@ -239,7 +245,7 @@ internal fun topProducts(orders: List<Order>): List<TopProduct> {
     val map = linkedMapOf<String, Pair<Double, Double>>()
     orders.filter { it.status != "cancelled" }.forEach { o ->
         o.items.forEach { item ->
-            val qty = item.qty.takeIf { it > 0 } ?: 1.0
+            val qty = item.qty.takeIf { it != 0.0 } ?: 1.0
             val rev = item.total.takeIf { it != 0.0 } ?: (item.unit * qty)
             val (q, r) = map[item.name] ?: (0.0 to 0.0)
             map[item.name] = (q + qty) to (r + rev)
@@ -317,10 +323,10 @@ private fun AttributionPanel(a: Attribution, wide: Boolean) {
             HorizontalDivider(color = c.hairline)
             a.sources.take(8).forEach { r ->
                 Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(r.source.replaceFirstChar { it.uppercase() }, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = c.text, modifier = Modifier.weight(1.2f))
+                    Text(capitalizeWords(r.source), fontSize = 12.sp, fontWeight = FontWeight.Medium, color = c.text, modifier = Modifier.weight(1.2f))
                     Text(
                         r.postTitle ?: r.post ?: "—", fontSize = 10.sp, color = slate, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        fontFamily = if (r.postTitle == null) FontFamily.Monospace else null, modifier = Modifier.weight(2f),
+                        fontFamily = if (r.postTitle.isNullOrEmpty()) FontFamily.Monospace else null, modifier = Modifier.weight(2f),
                     )
                     Text("${r.leads}", fontSize = 12.sp, color = c.text, modifier = Modifier.weight(0.7f), textAlign = TextAlign.End)
                     Text("${r.orders}", fontSize = 12.sp, color = c.text, modifier = Modifier.weight(0.7f), textAlign = TextAlign.End)
@@ -343,8 +349,8 @@ private fun AttributionPanel(a: Attribution, wide: Boolean) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 a.sources.take(8).forEach { r ->
                     AttributionCard(
-                        source = r.source.replaceFirstChar { it.uppercase() },
-                        post = r.postTitle ?: r.post ?: "—", mono = r.postTitle == null,
+                        source = capitalizeWords(r.source),
+                        post = r.postTitle ?: r.post ?: "—", mono = r.postTitle.isNullOrEmpty(),
                         leads = "${r.leads}", orders = "${r.orders}", revenue = Fmt.currency(r.revenue), dim = false,
                     )
                 }
@@ -404,11 +410,18 @@ private fun RevenueChart(bars: List<DayBar>, modifier: Modifier) {
             bars.forEachIndexed { i, d ->
                 if (d.value <= 0) return@forEachIndexed
                 val h = (size.height * (d.value / max).toFloat()).coerceAtLeast(4.dp.toPx())
-                drawRoundRect(
+                val w = slot - gap
+                val r = minOf(6.dp.toPx(), h / 2, w / 2)
+                drawPath(
+                    Path().apply {
+                        addRoundRect(
+                            RoundRect(
+                                Rect(Offset(i * slot + gap / 2, size.height - h), Size(w, h)),
+                                topLeft = CornerRadius(r), topRight = CornerRadius(r),
+                            ),
+                        )
+                    },
                     color = when { d.isToday -> todayColor; picked == i -> pickedColor; else -> restColor },
-                    topLeft = Offset(i * slot + gap / 2, size.height - h),
-                    size = Size(slot - gap, h),
-                    cornerRadius = CornerRadius(5.dp.toPx()),
                 )
             }
         }
@@ -511,7 +524,7 @@ private fun ActivityPanel(feed: List<ActivityEntry>, now: Long, modifier: Modifi
                         buildAnnotatedString {
                             withStyle(SpanStyle(fontWeight = FontWeight.SemiBold, color = c.text)) { append(e.user) }
                             append(" ${e.action}")
-                            if (e.target != null) append(" · ${e.target}")
+                            if (!e.target.isNullOrEmpty()) append(" · ${e.target}")
                         },
                         fontSize = 12.sp, lineHeight = 16.sp, color = c.gold2, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                     )
