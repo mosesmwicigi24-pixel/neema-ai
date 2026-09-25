@@ -186,7 +186,7 @@ class LeadsViewModel(private val dash: DashboardViewModel) : ViewModel() {
                 api.update(lead.id, body)
                 dash.toast("Lead updated")
             } catch (e: Exception) {
-                dash.toast("Failed to update lead — ${dash.errorText(e)}", ToastType.Error)
+                dash.toast("Failed to update lead", ToastType.Error)
                 load()
             }
         }

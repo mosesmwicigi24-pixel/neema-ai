@@ -102,3 +102,24 @@ class OrdersTabletScreenshotTest {
         paparazzi.snapshot { AppFrame(false) { store.Provide { OrdersScreen(dash) } } }
     }
 }
+
+/**
+ * Page 2 of sixteen orders: the lone row closes the bordered card with its
+ * rounded bottom, and the pager ("Showing 16–16 of 16") sits under it.
+ */
+class OrdersLastPageScreenshotTest {
+    @get:Rule val main = MainDispatcherRule()
+    @get:Rule val paparazzi = Paparazzi(deviceConfig = DeviceConfig.PIXEL_6, showSystemUi = false)
+
+    private fun render(dark: Boolean) {
+        val fake = FakeNeema.withFixtures()
+        SalesFixtures.install(fake, SalesFixtures.manyOrders.take(16))
+        val dash = dashboard(paparazzi.context, fake)
+        val store = SeededStore()
+        store.seed(OrdersViewModel(dash)).setPage(2)
+        paparazzi.snapshot { AppFrame(dark) { store.Provide { OrdersScreen(dash) } } }
+    }
+
+    @Test fun lastPage() = render(false)
+    @Test fun lastPageDark() = render(true)
+}

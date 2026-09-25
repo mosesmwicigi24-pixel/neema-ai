@@ -9,9 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * OrdersView's local state. The orders themselves are the dashboard's polled
@@ -69,25 +67,18 @@ class OrdersViewModel(private val dash: DashboardViewModel) : ViewModel() {
     }
 
     /**
-     * Refetch and return once the round trip is over. `dash.refetchOrders()`
-     * is fire-and-forget and a StateFlow never re-emits an equal list, so
-     * waiting for an emission kept the spinner up for the whole timeout
-     * whenever nothing had changed — every quiet pull-to-refresh, and an
-     * empty shop's first load. So the fetch happens here, and the dashboard
-     * is asked to take the new list only when it actually moved.
+     * Refetch through the dashboard and return when the round trip is over
+     * ([DashboardViewModel.refreshOrders] suspends until the list has landed).
+     * A failure leaves the list as it was: the dashboard's poller keeps trying.
      */
     private suspend fun awaitRefetch() {
-        val fresh = try {
-            dash.api.orders.list()
+        try {
+            dash.refreshOrders()
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            return // the dashboard's poller keeps trying; the screen shows what it has
+            // the screen keeps showing what it has
         }
-        val before = dash.orders.value
-        if (fresh == before) return
-        dash.refetchOrders()
-        withTimeoutOrNull(8_000) { dash.orders.first { it != before } }
     }
 
     fun updateStatus(id: String, status: String) {
@@ -100,7 +91,7 @@ class OrdersViewModel(private val dash: DashboardViewModel) : ViewModel() {
                 if (_selectedId.value == id) _selectedId.value = null
                 dash.toast("Order marked as $status")
             } catch (e: Exception) {
-                dash.toast("Failed to update order — ${dash.errorText(e)}", ToastType.Error)
+                dash.toast("Failed to update order", ToastType.Error)
             } finally {
                 _updating.value = null
             }

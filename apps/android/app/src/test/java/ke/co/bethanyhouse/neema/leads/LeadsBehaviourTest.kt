@@ -76,7 +76,7 @@ class LeadsBehaviourTest {
         val gets = fake.calls.count { it.method == "GET" && it.path == "/admin/leads" }
         vm.moveTo(vm.leads.value.first { it.id == "u3" }, "contacted")
         assertEquals(ToastType.Error, toasts.all.last().type)
-        assertTrue(toasts.all.last().message.startsWith("Failed to update lead"))
+        assertEquals("Failed to update lead", toasts.all.last().message)
         assertEquals(gets + 1, fake.calls.count { it.method == "GET" && it.path == "/admin/leads" })
         // The reload rolled the optimistic move back.
         assertEquals("new", vm.leads.value.first { it.id == "u3" }.leadStage)

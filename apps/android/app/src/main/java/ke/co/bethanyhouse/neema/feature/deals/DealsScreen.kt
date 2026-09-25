@@ -25,6 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -100,7 +101,8 @@ fun DealsScreen(dash: DashboardViewModel) {
         if (key != null) dash.openConversationFor(key)
     }
 
-    BoxWithConstraints(Modifier.fillMaxSize().background(c.surface)) {
+    // The page is the web's own #f6f7f2, a shade off the shell's parchment.
+    BoxWithConstraints(Modifier.fillMaxSize().background(if (c.isDark) c.surface else Color(0xFFF6F7F2))) {
         val wide = maxWidth >= 600.dp
         PullToRefreshBox(isRefreshing = refreshing, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize()) {
             LazyColumn(
@@ -120,23 +122,24 @@ fun DealsScreen(dash: DashboardViewModel) {
 
                 // ── Initiative queue ───────────────────────────────────────
                 item(key = "queue") {
-                    Card16 {
+                    // mb-5: 4dp more than the list's 16dp rhythm.
+                    Card16(Modifier.padding(bottom = 4.dp)) {
                         Text(
                             "PLANNED ACTIONS — NEEMA'S NEXT MOVES",
-                            fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.5.sp, color = c.muted,
+                            fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.275.sp, color = c.muted,
                         )
                         Spacer(Modifier.height(8.dp))
                         val pending = actions
                         when {
-                            pending == null -> Text("Loading…", fontSize = 12.sp, color = c.muted)
+                            pending == null -> Text("Loading…", fontSize = 12.sp, color = stone400())
                             pending.isEmpty() -> Text(
                                 "Nothing queued. Promises made in chat (hers or the customer's) land here automatically.",
-                                fontSize = 12.sp, color = c.muted,
+                                fontSize = 12.sp, color = stone400(),
                             )
                             else -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 pending.forEach { a ->
                                     ActionRow(
-                                        a, busy = a.id in acting, canSend = canSend,
+                                        a, busy = a.id in acting, canSend = canSend, wide = wide,
                                         onSend = { vm.act(a.id, "approve") },
                                         onEdit = { vm.openDraft(a) },
                                         onVeto = { vm.act(a.id, "veto") },
@@ -202,7 +205,7 @@ private fun Card16(modifier: Modifier = Modifier, content: @Composable ColumnSco
     val c = Neema.colors
     Column(
         modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.bg2)
-            .border(1.dp, c.hairline, RoundedCornerShape(16.dp)).padding(16.dp),
+            .border(1.dp, stone200(), RoundedCornerShape(16.dp)).padding(16.dp),
         content = content,
     )
 }
@@ -213,6 +216,7 @@ private fun ActionRow(
     a: PlannedAction,
     busy: Boolean,
     canSend: Boolean,
+    wide: Boolean,
     onSend: () -> Unit,
     onEdit: () -> Unit,
     onVeto: () -> Unit,
@@ -231,7 +235,7 @@ private fun ActionRow(
         else -> Color(0xFFE8EDE4)
     }
     val shape = RoundedCornerShape(12.dp)
-    Column(Modifier.fillMaxWidth().clip(shape).background(bg).border(1.dp, border, shape).padding(horizontal = 12.dp, vertical = 10.dp)) {
+    val body: @Composable ColumnScope.() -> Unit = {
         Text(
             buildAnnotatedString {
                 withStyle(SpanStyle(fontWeight = FontWeight.Medium, color = c.text)) {
@@ -253,11 +257,12 @@ private fun ActionRow(
                 "“${a.draft}”",
                 fontSize = 11.sp, color = c.text, maxLines = 3, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(top = 4.dp).fillMaxWidth().clip(RoundedCornerShape(8.dp))
-                    .background(c.bg2).border(1.dp, c.hairline, RoundedCornerShape(8.dp))
+                    .background(c.bg2).border(1.dp, if (c.isDark) c.hairline else Color(0xFFF5F5F4), RoundedCornerShape(8.dp))
                     .padding(horizontal = 8.dp, vertical = 6.dp),
             )
         }
-        Spacer(Modifier.height(8.dp))
+    }
+    val buttons: @Composable () -> Unit = {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             if (canSend) {
                 SmallButton("Send", bg = Color(0xFF589B31), fg = Color.White, enabled = !busy, onClick = onSend)
@@ -270,6 +275,22 @@ private fun ActionRow(
             if (busy) CircularProgressIndicator(Modifier.size(18.dp).align(Alignment.CenterVertically), strokeWidth = 2.dp)
         }
     }
+    val box = Modifier.fillMaxWidth().clip(shape).background(bg).border(1.dp, border, shape).padding(horizontal = 12.dp, vertical = 10.dp)
+    if (wide) {
+        // The web's row: the text takes the room, the buttons sit on the right (gap-3).
+        Row(box, verticalAlignment = Alignment.Top) {
+            Column(Modifier.weight(1f), content = body)
+            Spacer(Modifier.width(12.dp))
+            Box(Modifier.widthIn(max = 320.dp)) { buttons() }
+        }
+    } else {
+        // A phone has no room beside the text for three buttons: they go beneath it.
+        Column(box) {
+            body()
+            Spacer(Modifier.height(8.dp))
+            buttons()
+        }
+    }
 }
 
 @Composable
@@ -280,6 +301,9 @@ private fun SmallButton(
     enabled: Boolean,
     border: Color? = null,
     fontSize: Int = 11,
+    hPad: Dp = 12.dp,
+    vPad: Dp = 6.dp,
+    weight: FontWeight = FontWeight.SemiBold,
     onClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(8.dp)
@@ -288,8 +312,10 @@ private fun SmallButton(
         modifier = Modifier.clip(shape).background(bg)
             .then(if (border != null) Modifier.border(1.dp, border, shape) else Modifier)
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 7.dp),
-        color = fg.copy(alpha = if (enabled) 1f else 0.5f), fontSize = fontSize.sp, fontWeight = FontWeight.SemiBold,
+            .padding(horizontal = hPad, vertical = vPad),
+        // The web's inherited 1.5 line height, not the theme's body 21sp.
+        color = fg.copy(alpha = if (enabled) 1f else 0.5f), fontSize = fontSize.sp, lineHeight = (fontSize * 1.5).sp,
+        fontWeight = weight, maxLines = 1,
     )
 }
 
@@ -311,9 +337,9 @@ private fun StageColumn(
 ) {
     val c = Neema.colors
     Column(
-        modifier.clip(RoundedCornerShape(16.dp)).background(c.bg2)
-            .border(1.dp, c.hairline, RoundedCornerShape(16.dp)).padding(12.dp)
-            .heightIn(min = 120.dp),
+        // min-h-[120px] counts the padding, as a border-box does.
+        modifier.heightIn(min = 120.dp).clip(RoundedCornerShape(16.dp)).background(c.bg2)
+            .border(1.dp, stone200(), RoundedCornerShape(16.dp)).padding(12.dp),
     ) {
         Row(Modifier.padding(horizontal = 4.dp).padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(8.dp).clip(CircleShape).background(stage.color))
@@ -332,7 +358,7 @@ private fun StageColumn(
                 )
             }
             if (col.isEmpty()) {
-                Text("—", fontSize = 11.sp, color = c.border, textAlign = TextAlign.Center,
+                Text("—", fontSize = 11.sp, color = if (c.isDark) c.border else Color(0xFFD6D3D1), textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp))
             }
         }
@@ -356,7 +382,7 @@ private fun DealCard(
     val c = Neema.colors
     val shape = RoundedCornerShape(12.dp)
     val canOpen = !d.waId.isNullOrBlank() || !d.conversationId.isNullOrBlank()
-    Column(Modifier.fillMaxWidth().clip(shape).border(1.dp, c.hairline, shape).padding(12.dp)) {
+    Column(Modifier.fillMaxWidth().clip(shape).border(1.dp, if (c.isDark) c.hairline else Color(0xFFF5F5F4), shape).padding(12.dp)) {
         Row(verticalAlignment = Alignment.Top) {
             Text(
                 d.customer.ifBlank { "Unknown" },
@@ -392,8 +418,9 @@ private fun DealCard(
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             )
             Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                SmallButton("Save", bg = Color(0xFF1E293B), fg = Color.White, enabled = true, fontSize = 10, onClick = onSave)
-                SmallButton("Cancel", bg = Color.Transparent, fg = slate(), enabled = true, fontSize = 10, onClick = onCancel)
+                SmallButton("Save", bg = Color(0xFF1E293B), fg = Color.White, enabled = true, fontSize = 10, hPad = 10.dp, vPad = 4.dp, onClick = onSave)
+                SmallButton("Cancel", bg = Color.Transparent, fg = slate(), enabled = true, fontSize = 10, hPad = 8.dp, vPad = 4.dp,
+                    weight = FontWeight.Normal, onClick = onCancel)
             }
         } else {
             // The web shows the guidance as a hover title; on a phone it is printed.
@@ -405,11 +432,13 @@ private fun DealCard(
                 Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     SmallButton(
                         if (!d.guidance.isNullOrBlank()) "📌 Guidance" else "＋ Guidance",
-                        bg = if (c.isDark) c.bg4 else Color(0xFFFAFAF9), fg = slate(), enabled = true, fontSize = 10, onClick = onEdit,
+                        bg = if (c.isDark) c.bg4 else Color(0xFFFAFAF9), fg = slate(), enabled = true, fontSize = 10,
+                        hPad = 8.dp, vPad = 4.dp, weight = FontWeight.Normal, onClick = onEdit,
                     )
                     SmallButton("Won", bg = if (c.isDark) c.greenDim else Color(0xFFE9F6DF), fg = if (c.isDark) c.green else Color(0xFF427425),
-                        enabled = true, fontSize = 10, onClick = onWon)
-                    SmallButton("Lost", bg = if (c.isDark) c.bg4 else Color(0xFFFAFAF9), fg = if (c.isDark) c.muted else Color(0xFF94A3B8), enabled = true, fontSize = 10, onClick = onLost)
+                        enabled = true, fontSize = 10, hPad = 8.dp, vPad = 4.dp, weight = FontWeight.Normal, onClick = onWon)
+                    SmallButton("Lost", bg = if (c.isDark) c.bg4 else Color(0xFFFAFAF9), fg = if (c.isDark) c.muted else Color(0xFF94A3B8), enabled = true, fontSize = 10,
+                        hPad = 8.dp, vPad = 4.dp, weight = FontWeight.Normal, onClick = onLost)
                 }
             }
         }
@@ -457,3 +486,11 @@ internal fun DraftDialogCard(action: PlannedAction, onDismiss: () -> Unit, onSen
 /** The web's slate-500 secondary text; lifted in dark mode so it stays legible on navy. */
 @Composable
 private fun slate(): Color = if (Neema.colors.isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+
+/** Tailwind stone-200, the web's card border; the theme hairline in dark mode. */
+@Composable
+private fun stone200(): Color = if (Neema.colors.isDark) Neema.colors.hairline else Color(0xFFE7E5E4)
+
+/** Tailwind stone-400, the queue's quiet text; the theme's muted in dark mode. */
+@Composable
+private fun stone400(): Color = if (Neema.colors.isDark) Neema.colors.muted else Color(0xFFA8A29E)

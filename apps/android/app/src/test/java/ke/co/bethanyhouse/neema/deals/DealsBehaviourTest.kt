@@ -90,7 +90,7 @@ class DealsBehaviourTest {
         vm.act("x1", "approve")
         val t = toasts.all.last()
         assertEquals(ToastType.Error, t.type)
-        assertTrue(t.message, t.message.startsWith("approve failed"))
+        assertEquals("approve failed", t.message)
         assertTrue(vm.acting.value.isEmpty())
     }
 
@@ -130,7 +130,7 @@ class DealsBehaviourTest {
         val vm = vm()
         vm.markWon("d1")
         assertEquals(ToastType.Error, toasts.all.last().type)
-        assertTrue(toasts.all.last().message.startsWith("Update failed"))
+        assertEquals("Update failed", toasts.all.last().message)
     }
 
     @Test fun dueLabels() {

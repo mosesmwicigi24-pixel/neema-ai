@@ -16,12 +16,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.Icon
 import ke.co.bethanyhouse.neema.core.model.Order
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
 import java.util.Locale
 
 /**
@@ -132,14 +142,22 @@ fun toneText(t: Tone): Color = if (Neema.colors.isDark) t.dot else t.text
 
 /** A small bordered status badge (the list's `text-[10px] rounded border` chips). */
 @Composable
-fun Badge(text: String, tone: Tone, modifier: Modifier = Modifier, fontSize: Int = 10) {
+fun Badge(
+    text: String,
+    tone: Tone,
+    modifier: Modifier = Modifier,
+    fontSize: Int = 10,
+    radius: Dp = 4.dp,
+    hPad: Dp = 6.dp,
+    vPad: Dp = 2.dp,
+) {
     Text(
         text,
         modifier = modifier
-            .clip(RoundedCornerShape(4.dp))
+            .clip(RoundedCornerShape(radius))
             .background(toneBg(tone))
-            .border(1.dp, toneBorder(tone), RoundedCornerShape(4.dp))
-            .padding(horizontal = 6.dp, vertical = 2.dp),
+            .border(1.dp, toneBorder(tone), RoundedCornerShape(radius))
+            .padding(horizontal = hPad, vertical = vPad),
         color = toneText(tone), fontSize = fontSize.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
     )
 }
@@ -169,4 +187,47 @@ fun OrderChannelPill(channel: String?) {
         }
         Text(ch.replaceFirstChar { it.titlecase(Locale.ROOT) }, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Medium)
     }
+}
+
+/**
+ * The web's compact search input: a fixed-height white box with a 1px
+ * `#b5da8b` border and the magnifier inside on the left (Orders: `h-9`,
+ * 16px text, rounded-xl; Leads: `h-8`, 14px text, rounded-lg).
+ */
+@Composable
+fun CompactSearchField(
+    value: String,
+    onChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    height: Dp = 36.dp,
+    radius: Dp = 12.dp,
+    fontSize: Int = 16,
+    iconSize: Dp = 16.dp,
+    iconStart: Dp = 12.dp,
+    textStart: Dp = 36.dp,
+    iconTint: Color = Color(0xFFD6D3D1),
+) {
+    val c = Neema.colors
+    val shape = RoundedCornerShape(radius)
+    val style = TextStyle(fontSize = fontSize.sp, color = c.text)
+    BasicTextField(
+        value = value, onValueChange = onChange, singleLine = true, textStyle = style,
+        cursorBrush = SolidColor(c.gold),
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        modifier = modifier.height(height).clip(shape).background(c.bg2).border(1.dp, c.border, shape),
+        decorationBox = { inner ->
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.CenterStart) {
+                Icon(
+                    Icons.Default.Search, contentDescription = null,
+                    tint = if (c.isDark) c.muted else iconTint,
+                    modifier = Modifier.padding(start = iconStart).size(iconSize),
+                )
+                Box(Modifier.padding(start = textStart, end = 12.dp)) {
+                    if (value.isEmpty()) Text(placeholder, style = style.copy(color = c.muted), maxLines = 1)
+                    inner()
+                }
+            }
+        },
+    )
 }
