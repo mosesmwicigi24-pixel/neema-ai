@@ -60,7 +60,7 @@ class CallsViewModel(private val dash: DashboardViewModel) : ViewModel() {
         // The WS handler below reloads on call events; this is only the
         // missed-event fallback, so a slow cadence is enough.
         viewModelScope.launch {
-            val fg = NeemaApplication.instance.foreground
+            val fg = dash.foreground
             while (isActive) {
                 delay(60_000)
                 if (!fg.value) fg.first { it }
@@ -119,7 +119,7 @@ class CallsViewModel(private val dash: DashboardViewModel) : ViewModel() {
         transcriptPoll = viewModelScope.launch {
             // A transcription job takes ~1-2 min — 5s resolution is plenty, and
             // a backgrounded app shouldn't keep polling for it.
-            val fg = NeemaApplication.instance.foreground
+            val fg = dash.foreground
             while (isActive) {
                 delay(5_000)
                 val cur = _transcript.value ?: break

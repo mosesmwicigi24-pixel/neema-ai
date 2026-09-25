@@ -160,7 +160,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
     private var windowJob: Job? = null
     private var activityJob: Job? = null
 
-    private val fg get() = NeemaApplication.instance.foreground
+    private val fg get() = dash.foreground
 
     init {
         // Seed from this agent's snapshot so the inbox paints instantly, then fetch.

@@ -6,8 +6,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /** Small device-level preferences (not secrets). Features may add their own keys via [raw]. */
-class AppPrefs(context: Context) {
-    val raw = context.getSharedPreferences("neema_prefs", Context.MODE_PRIVATE)
+class AppPrefs(context: Context, override: android.content.SharedPreferences? = null) {
+    val raw: android.content.SharedPreferences = override ?: context.getSharedPreferences("neema_prefs", Context.MODE_PRIVATE)
 
     private val _dark = MutableStateFlow(raw.getString("theme", "light") == "dark")
     val dark: StateFlow<Boolean> = _dark.asStateFlow()

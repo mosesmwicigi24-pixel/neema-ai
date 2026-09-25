@@ -7,9 +7,7 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import ke.co.bethanyhouse.neema.app.AppContainer
 import ke.co.bethanyhouse.neema.core.notify.LiveService
 import ke.co.bethanyhouse.neema.core.notify.Notifier
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
@@ -18,9 +16,8 @@ class NeemaApplication : Application() {
     lateinit var container: AppContainer
         private set
 
-    private val _foreground = MutableStateFlow(false)
     /** True while any activity of the app is visible. */
-    val foreground: StateFlow<Boolean> = _foreground.asStateFlow()
+    val foreground: StateFlow<Boolean> get() = container.foreground
 
     override fun onCreate() {
         super.onCreate()
@@ -29,8 +26,8 @@ class NeemaApplication : Application() {
         Notifier.createChannels(this)
 
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
-            override fun onStart(owner: LifecycleOwner) { _foreground.value = true; container.socket.nudge() }
-            override fun onStop(owner: LifecycleOwner) { _foreground.value = false }
+            override fun onStart(owner: LifecycleOwner) { container.foreground.value = true; container.socket.nudge() }
+            override fun onStop(owner: LifecycleOwner) { container.foreground.value = false }
         })
 
         // One socket per signed-in agent, for the life of the process; the

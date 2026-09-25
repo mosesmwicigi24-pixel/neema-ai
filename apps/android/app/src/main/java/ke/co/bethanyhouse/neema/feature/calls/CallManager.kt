@@ -11,7 +11,6 @@ import android.media.AudioManager
 import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
-import ke.co.bethanyhouse.neema.NeemaApplication
 import ke.co.bethanyhouse.neema.core.api.NeemaApi
 import ke.co.bethanyhouse.neema.core.api.UploadFile
 import ke.co.bethanyhouse.neema.core.model.IceConfig
@@ -96,6 +95,10 @@ class CallManager(
     private val api: NeemaApi,
     private val socket: LiveSocket,
     private val scope: CoroutineScope,
+    /** True while the app is on screen (the incoming-call notification only fires when not). */
+    private val foreground: StateFlow<Boolean>,
+    private val signedInFn: () -> Boolean,
+    private val prefs: ke.co.bethanyhouse.neema.core.util.AppPrefs,
 ) {
     private val _state = MutableStateFlow(CallUiState())
     val state: StateFlow<CallUiState> = _state.asStateFlow()
@@ -155,7 +158,7 @@ class CallManager(
     private fun ui(block: suspend CoroutineScope.() -> Unit): Job = scope.launch(Dispatchers.Main, block = block)
 
     private val signedIn: Boolean
-        get() = runCatching { NeemaApplication.instance.container.sessionStore.session.value != null }.getOrDefault(false)
+        get() = signedInFn()
 
     private fun micGranted() =
         ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
@@ -229,7 +232,7 @@ class CallManager(
             state.map { it.phase }.distinctUntilChanged().collect { p ->
                 if (p == CallPhase.Ringing) {
                     alert.startRinging()
-                    if (!NeemaApplication.instance.foreground.value) {
+                    if (!foreground.value) {
                         val s = _state.value
                         s.callId?.let { alert.postIncoming(it, who(s), s.from?.takeIf { f -> f.isNotEmpty() }) }
                     }
@@ -250,7 +253,7 @@ class CallManager(
         }
         // The app went to the background while a call is still ringing: notify.
         ui {
-            NeemaApplication.instance.foreground.collect { fg ->
+            foreground.collect { fg ->
                 val s = _state.value
                 if (!fg && s.phase == CallPhase.Ringing) s.callId?.let { alert.postIncoming(it, who(s), s.from?.takeIf { f -> f.isNotEmpty() }) }
             }
@@ -621,7 +624,6 @@ class CallManager(
         }
         if (liveForCall) {
             liveForCall = false
-            val prefs = NeemaApplication.instance.container.prefs
             if (prefs.backgroundLive.value && signedIn) LiveService.start(context) else LiveService.stop(context)
         }
     }

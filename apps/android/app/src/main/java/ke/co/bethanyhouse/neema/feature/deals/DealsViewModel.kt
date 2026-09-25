@@ -50,7 +50,7 @@ class DealsViewModel(private val dash: DashboardViewModel) : ViewModel() {
 
     init {
         viewModelScope.launch {
-            val fg = NeemaApplication.instance.foreground
+            val fg = dash.foreground
             while (isActive) {
                 load()
                 delay(60_000)

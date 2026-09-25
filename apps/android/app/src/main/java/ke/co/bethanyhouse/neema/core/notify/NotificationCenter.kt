@@ -38,8 +38,10 @@ class NotificationCenter(
     private val context: Context,
     private val scope: CoroutineScope,
     private val socket: LiveSocket,
+    private val appPrefs: ke.co.bethanyhouse.neema.core.util.AppPrefs,
+    override: android.content.SharedPreferences? = null,
 ) {
-    private val prefs = context.getSharedPreferences("neema_notifications", Context.MODE_PRIVATE)
+    private val prefs = override ?: context.getSharedPreferences("neema_notifications", Context.MODE_PRIVATE)
     private val listSer = ListSerializer(AppNotification.serializer())
 
     private val _items = MutableStateFlow(load())
@@ -82,7 +84,7 @@ class NotificationCenter(
      * the bell still records everything, as on the web.
      */
     private fun wantsSystemAlert(type: String): Boolean {
-        val p = context.getSharedPreferences("neema_prefs", Context.MODE_PRIVATE)
+        val p = appPrefs.raw
         return when (type) {
             "new_conversation" -> p.getBoolean("notif_new_conv", true)
             "human_transfer", "transfer" -> p.getBoolean("notif_human_transfer", true)

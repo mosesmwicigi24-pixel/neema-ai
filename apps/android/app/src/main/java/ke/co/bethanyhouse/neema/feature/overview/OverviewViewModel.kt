@@ -51,7 +51,7 @@ class OverviewViewModel(private val dash: DashboardViewModel) : ViewModel() {
     init {
         viewModelScope.launch { loadAll() }
         viewModelScope.launch {
-            val fg = NeemaApplication.instance.foreground
+            val fg = dash.foreground
             while (isActive) {
                 delay(30_000)
                 // Like the web's visibilityState check: no polling in the background.

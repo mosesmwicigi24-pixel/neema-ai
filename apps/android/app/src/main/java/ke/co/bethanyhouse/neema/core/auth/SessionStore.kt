@@ -23,8 +23,8 @@ data class Session(
     val nextAuthCookie: String? = null,
 )
 
-class SessionStore(context: Context) {
-    private val prefs: SharedPreferences = runCatching {
+class SessionStore(context: Context, override: SharedPreferences? = null) {
+    private val prefs: SharedPreferences = override ?: runCatching {
         val key = MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
         EncryptedSharedPreferences.create(
             context, "neema_session", key,

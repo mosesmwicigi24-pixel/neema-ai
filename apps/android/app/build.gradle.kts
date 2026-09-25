@@ -90,4 +90,5 @@ dependencies {
     implementation(libs.webrtc)
 
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
 }

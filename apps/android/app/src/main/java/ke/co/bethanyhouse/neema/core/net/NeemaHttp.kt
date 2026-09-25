@@ -54,6 +54,9 @@ val NeemaJson: Json = Json {
 class NeemaHttp(
     val baseUrl: String = BuildConfig.NEEMA_BASE_URL,
     private val tokens: TokenProvider,
+    /** Tests only: answers requests without the network. */
+    interceptor: okhttp3.Interceptor? = null,
+    private val io: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
 ) {
     val apiBase: String get() = "$baseUrl/api"
 
@@ -62,6 +65,7 @@ class NeemaHttp(
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
         .callTimeout(30, TimeUnit.SECONDS)
+        .apply { if (interceptor != null) addInterceptor(interceptor) }
         .build()
 
     /** Long-lived client for media uploads (videos up to 150 MB are transcoded server-side). */
@@ -84,7 +88,7 @@ class NeemaHttp(
     private val jsonType = "application/json".toMediaType()
 
     suspend fun raw(method: String, path: String, body: RequestBody? = null, upload: Boolean = false): String =
-        withContext(Dispatchers.IO) {
+        withContext(io) {
             val url = if (path.startsWith("http")) path else "$apiBase$path"
             fun build(token: String?): Request = Request.Builder()
                 .url(url)

@@ -65,8 +65,11 @@ data class Toast(val message: String, val type: ToastType = ToastType.Success, v
  * permissions, the current view, cross-view requests, and toasts. Every
  * feature screen receives this.
  */
-class DashboardViewModel : ViewModel() {
-    val container: AppContainer = NeemaApplication.instance.container
+class DashboardViewModel(
+    val container: AppContainer = NeemaApplication.instance.container,
+) : ViewModel() {
+    /** True while the app is on screen — polls pause in the background. */
+    val foreground: StateFlow<Boolean> get() = container.foreground
     val api: NeemaApi get() = container.api
 
     val session: StateFlow<Session?> = container.sessionStore.session
@@ -155,7 +158,7 @@ class DashboardViewModel : ViewModel() {
 
     /** Poll while the app is in the foreground; refetch once on return. */
     private fun poll(everyMs: Long, fetch: suspend () -> Unit): Job = viewModelScope.launch {
-        val fg = NeemaApplication.instance.foreground
+        val fg = container.foreground
         while (isActive) {
             runCatching { fetch() }
             delay(everyMs)
