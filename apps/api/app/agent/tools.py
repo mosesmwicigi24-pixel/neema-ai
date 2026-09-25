@@ -768,17 +768,22 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
             # One line per DISTINCT variant (the hub can repeat a variant six
             # times under one label — six "Straight Collar" rows at one price
             # said nothing about the six sizes).
+            from app.core.variants import variant_label as _vlabel
             _vseen: set = set()
             row["variants"] = []
             for v in variants:
+                _lab = v.get("label") or _vlabel(p.get("name"), v)
                 _opts = v.get("attributes") or v.get("name")
                 _vp = _to_display(v.get("price_kes"), ctx, v.get("price_usd"),
                                   prices=v.get("prices"))
-                _key = (json.dumps(_opts, sort_keys=True, default=str), _vp)
+                _key = (_lab.lower(), _vp)
                 if _key in _vseen:
                     continue
                 _vseen.add(_key)
-                row["variants"].append({"options": _opts, "sku": v.get("sku"), "price": _vp})
+                # ONE name for a variant (core/variants): quote it and pass it
+                # (or the SKU) to the cart exactly as shown.
+                row["variants"].append({"label": _lab, "options": _opts, "sku": v.get("sku"),
+                                        "price": _vp})
             # A size L cassock is in the offer exactly as much as the size S.
             # Each variant carries its own held figure; `price` stays list here
             # too, for the same reason it does above.

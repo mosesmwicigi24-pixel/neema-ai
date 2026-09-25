@@ -228,9 +228,11 @@ def transcript_figures(transcript: list | None) -> set[float]:
 
 
 def _close(a: float, b: float) -> bool:
-    """Exact to the unit — a whole-unit rounding of a conversion passes,
-    "KES 22,100" for a KES 22,000 tray does not (owner: correct figures)."""
-    return abs(a - b) <= max(0.5, 0.0005 * abs(b))
+    """Exact: to the cent below a hundred ($3.50 is not $4), to the unit above
+    it (a whole-unit rounding of a conversion, R1,972 for R1,971.60, passes),
+    and never looser than 0.05% ("KES 22,100" for a KES 22,000 tray fails)."""
+    unit = 0.5 if abs(b) >= 100 else 0.0051
+    return abs(a - b) <= max(unit, 0.0005 * abs(b))
 
 
 def _usd_of(base: set[float], seen: list) -> set[float]:
@@ -620,9 +622,9 @@ def variants_of(row: dict | None) -> list[tuple[str, float | None, float | None]
     """(label, KES, USD) per DISTINCT variant of a hub row."""
     out: list[tuple[str, float | None, float | None]] = []
     seen: set = set()
+    from app.core.variants import variant_label
     for v in (row or {}).get("variants") or []:
-        attrs = v.get("attributes") or {}
-        label = " ".join(str(x) for x in attrs.values()) if isinstance(attrs, dict) and attrs else str(v.get("name") or "")
+        label = str(v.get("label") or variant_label((row or {}).get("name"), v) or "")
         k, u = _num(v.get("price_kes") or v.get("price")), _num(v.get("price_usd"))
         key = (label.lower(), k, u)
         if key in seen:

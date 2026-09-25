@@ -177,6 +177,8 @@ export interface CatalogVariant {
     variant_id?: number | null;
     sku?: string;
     name?: string;
+    /** ONE name everywhere: "<product> — <what tells it apart>", e.g. "Straight Collar — 8 inch". */
+    label?: string;
     attributes?: Record<string, string>;
     price_kes?: number | null;
     price_usd?: number | null;

@@ -145,10 +145,23 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   read with the money figures stripped, so the "10" in "$10" names no size;
   a hyphen in "10-inch" is not a range). The canned comment line prices a
   varied product "from" its cheapest variant (`runtime._variant_floor`).
-  The prompt carries the short shape and the ban. HUB-SIDE, STILL OPEN: the
-  Straight Collar's variants need their sizes as attributes and their own
-  prices (8" $3.50, 10" $4 …) — today they are six identical rows at $10,
-  so Neema can only say "from $10" until the hub is corrected.
+  The prompt carries the short shape and the ban. The owner then entered the
+  collar's sizes and prices in the hub (8" $3.50 … 19" $12). ONE NAME FOR A
+  VARIANT, EVERYWHERE (owner: "take the variant + attribute to get the
+  product name and size and apply it to all variants"): `core/variants
+  .variant_label(product_name, v)` = "<product> — <what tells it apart>" —
+  the hub's own variant name minus the product's name inside it ("Navy
+  Straight Collar Shirt" → "Straight Collar Shirt — Navy"; "S / GOLD" stays,
+  it carries the colour), else the attributes ("Straight Collar" six times
+  over → "Straight Collar — 8 Inches"), else the product's name (never a
+  made-up size). The hub client stamps `label` on every variant as it loads
+  them (`label_variants`); the agent's search rows carry `label` first; the
+  public catalogue card shows it; a cart line resolves by it ("Straight
+  Collar — 10 inch", with or without the dash, or by SKU) and names the line
+  by it; the verifier reads it (`review.variants_of`), so "the 10 inch" names
+  one variant and its price is checked to the cent (`_close`: to the cent
+  below a hundred, to the unit above — $3.50 is not $4). The dashboard's
+  `CatalogVariant` type knows `label`.
 - **The gate before posting** (owner 2026-09-25: "someone is asking for
   golden trays and you give silver… put a gate to review before posting…
   when someone asks for Holy Communion Cups without specifying chalice, give

@@ -49,14 +49,16 @@ def _seen(*keys):
     return [ROWS[k] for k in keys]
 
 
-def _variants(*specs):
-    return [{"sku": f"V{i}", "name": "Straight Collar" if "size" in a else " ".join(a.values()),
-             "attributes": a, "price_kes": k, "price_usd": u, "prices": {"KES": k, "USD": u}}
+def _variants(pname, *specs):
+    """Variants the way the hub sends them at their barest: named after the
+    product, told apart by their attributes."""
+    return [{"sku": f"V{i}", "name": pname, "attributes": a, "price_kes": k, "price_usd": u,
+             "prices": {"KES": k, "USD": u}}
             for i, (a, k, u) in enumerate(specs)]
 
 
 COLLAR_DIFF = _row("Straight Collar", 400, 10, "Detachable white clergy collar.",
-                   variants=_variants(({"size": "8 inch"}, 350, 3.5), ({"size": "10 inch"}, 400, 4.0),
+                   variants=_variants("Straight Collar", ({"size": "8 inch"}, 350, 3.5), ({"size": "10 inch"}, 400, 4.0),
                                       ({"size": "12 inch"}, 450, 4.5), ({"size": "14 inch"}, 500, 5.0),
                                       ({"size": "17 inch"}, 550, 5.5), ({"size": "19 inch"}, 600, 6.0)))
 COLLAR_FLAT = _row("Straight Collar", 400, 10, "Detachable white clergy collar.",
@@ -64,10 +66,10 @@ COLLAR_FLAT = _row("Straight Collar", 400, 10, "Detachable white clergy collar."
                               "price_usd": 10, "prices": {"KES": 400, "USD": 10}} for i in range(6)])
 SHIRT_COLOURS = _row("Straight Collar Shirt", 2500, 30, "Smart straight-collar clergy shirt.",
                      product_type="variable", is_producible=True,
-                     variants=_variants(({"colour": "White"}, 2500, 30), ({"colour": "Navy"}, 2500, 30),
+                     variants=_variants("Straight Collar Shirt", ({"colour": "White"}, 2500, 30), ({"colour": "Navy"}, 2500, 30),
                                         ({"colour": "Black"}, 2500, 30)))
 THURIBLE = _row("Thurible", 12000, 120, "Brass thurible.",
-                variants=_variants(({"size": "small"}, 12000, 120), ({"size": "large"}, 15000, 150)))
+                variants=_variants("Thurible", ({"size": "small"}, 12000, 120), ({"size": "large"}, 15000, 150)))
 
 
 def _tool(name, out):

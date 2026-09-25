@@ -70,18 +70,13 @@ def _resolve_price(prices: dict, ccy: str):
     return _money(usd), "USD"
 
 
-def _variant_card(v: dict, ccy: str) -> dict:
-    """The variant as a shopper sees it: its name — and, when the hub's name
-    is only the product's own ("Straight Collar" six times over) while the
-    attributes tell the sizes apart, the attributes joined on (owner,
-    2026-09-25: six collar sizes at six prices under one label said nothing
-    about which was which)."""
-    attrs = v.get("attributes") or {}
-    values = [str(x).strip() for x in attrs.values() if str(x).strip()] if isinstance(attrs, dict) else []
-    name = str(v.get("name") or "").strip()
-    label = name or " / ".join(values)
-    if name and values and not any(val.lower() in name.lower() for val in values):
-        label = f"{name} — {' / '.join(values)}"
+def _variant_card(v: dict, ccy: str, product_name: str = "") -> dict:
+    """The variant as a shopper sees it — ONE label everywhere (core/variants):
+    the product's name plus what tells the variant apart, "Straight Collar —
+    8 inch" (owner, 2026-09-25: six collar sizes at six prices under one
+    label said nothing about which was which)."""
+    from app.core.variants import variant_label
+    label = v.get("label") or variant_label(product_name, v)
     price, cur = _resolve_price(v.get("prices") or {}, ccy)
     return {"label": label, "price": price, "currency": cur}
 
@@ -109,7 +104,7 @@ def _card(p: dict, ccy: str = "USD") -> dict:
     }
     variants = p.get("variants") or []
     if variants:
-        vcards = [_variant_card(v, ccy) for v in variants]
+        vcards = [_variant_card(v, ccy, p.get("name") or "") for v in variants]
         card["variants"] = vcards
         amts = [vc["price"] for vc in vcards if isinstance(vc["price"], (int, float))]
         if amts and min(amts) != max(amts):
