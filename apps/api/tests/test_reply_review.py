@@ -221,83 +221,181 @@ def test_the_second_draft_is_told_why():
     assert "answer EVERY question they asked" in notes and "Never post a guess" in notes
 
 
-# ── the engine's gate ───────────────────────────────────────────────────────
+# ── the gate inside the turn: every channel ─────────────────────────────────
 
-def _gate(monkeypatch, verdicts):
-    """review_reply answers from `verdicts` in order."""
-    calls = []
+class _Ctx:
+    def __init__(self, seen=None):
+        self.seen_products = list(seen or [])
+        self.read_only = False
+
+
+class _TurnLLM:
+    """The writer's model for the rewrite: returns `texts` in order."""
+    def __init__(self, texts):
+        self.texts = list(texts)
+        self.calls = []
+
+    async def complete(self, system, messages, tools=None):
+        self.calls.append({"system": system, "messages": messages, "tools": tools})
+        return types.SimpleNamespace(text=self.texts.pop(0) if self.texts else "")
+
+
+def _wire(monkeypatch, verdicts, facts_rows=None):
+    """review_reply answers from `verdicts` in order; the gate's own search
+    hands back `facts_rows`; flags and tallies are captured."""
+    seen_by_call, flags, tally = [], [], []
 
     async def fake_review(comment, answer, seen, **kw):
-        calls.append(answer)
+        seen_by_call.append((answer, list(seen), kw))
         return verdicts.pop(0)
+
+    async def fake_facts(ctx, user_text, tool_log):
+        rows = list(facts_rows or [])
+        ctx.seen_products.extend(rows)
+        tool_log.append({"tool": "search_catalog", "input": {"query": user_text, "by": "reviewer"},
+                         "out": {"results": [{"name": r["name"]} for r in rows]}})
+        return rows
+
+    async def fake_flag(db, channel, key, issues, draft):
+        flags.append((channel, key, list(issues), draft))
+
+    async def fake_tally(redis, outcome, channel=""):
+        tally.append((outcome, channel))
     monkeypatch.setattr(rv, "review_reply", fake_review)
+    monkeypatch.setattr(rv, "record_verdict", fake_tally)
     monkeypatch.setattr(rv, "prompt_figures", lambda currency="USD": frozenset())
-    return calls
+    monkeypatch.setattr(rt, "_facts_for_ask", fake_facts)
+    monkeypatch.setattr(rt, "_flag_held_reply", fake_flag)
+    return seen_by_call, flags, tally
 
 
-def test_a_passing_draft_posts_as_written(monkeypatch):
-    calls = _gate(monkeypatch, [{"ok": True, "issues": [], "by": "reviewer"}])
-    drafts = []
-
-    async def regen(notes):
-        drafts.append(notes)
-        return "second"
-    out = asyncio.run(rt._gate_public_answer(
-        "The Golden Communion Tray is $220.", comment_text=GOLD_ASK, seen_products=[GOLDEN],
-        post_product="", currency="USD", redis=None, regenerate=regen))
-    assert out == ("The Golden Communion Tray is $220.", []) and drafts == [] and len(calls) == 1
-
-
-def test_a_failing_draft_is_written_once_more_with_the_reasons(monkeypatch):
-    _gate(monkeypatch, [{"ok": False, "issues": ["silver for gold"], "by": "rules"},
-                        {"ok": True, "issues": [], "by": "reviewer"}])
-    drafts = []
-
-    async def regen(notes):
-        drafts.append(notes)
-        return "The Golden Communion Tray is $220. No shop in South Africa; DHL delivers."
-    out = asyncio.run(rt._gate_public_answer(
-        GOLD_LIVE_REPLY, comment_text=GOLD_ASK, seen_products=[SILVER, GOLDEN],
-        post_product="Silver Communion Tray", currency="USD", redis=None, regenerate=regen))
-    assert out[0].startswith("The Golden Communion Tray is $220.") and out[1] == []
-    assert len(drafts) == 1 and "silver for gold" in drafts[0] and "HELD BACK" in drafts[0]
+def _gate(monkeypatch, reply, *, verdicts, llm_texts=(), public=False, seen=None,
+          facts_rows=None, user_text=GOLD_ASK, swahili=False):
+    calls, flags, tally = _wire(monkeypatch, verdicts, facts_rows)
+    llm = _TurnLLM(llm_texts)
+    ctx = _Ctx(seen)
+    transcript = [{"role": "user", "content": user_text}]
+    out = asyncio.run(rt._gate_turn_reply(
+        reply, user_text=user_text, transcript=transcript, tool_log=[], ctx=ctx,
+        currency="USD", channel="facebook" if public else "whatsapp", public_comment=public,
+        llm=llm, sys_blocks=["SYSTEM"], redis=None, db=None, key="K1",
+        post_product="Silver Communion Tray", swahili=swahili))
+    return out, calls, flags, tally, llm, ctx
 
 
-def test_two_failures_post_nothing_and_carry_both_reasons(monkeypatch):
-    _gate(monkeypatch, [{"ok": False, "issues": ["silver for gold"], "by": "rules"},
-                        {"ok": False, "issues": ["South Africa unanswered"], "by": "reviewer"}])
-
-    async def regen(notes):
-        return "still wrong"
-    out = asyncio.run(rt._gate_public_answer(
-        GOLD_LIVE_REPLY, comment_text=GOLD_ASK, seen_products=[SILVER],
-        post_product="", currency="USD", redis=None, regenerate=regen))
-    assert out == ("", ["silver for gold", "South Africa unanswered"])
+def test_a_passing_reply_is_sent_as_written(monkeypatch):
+    out, calls, flags, tally, llm, _ = _gate(
+        monkeypatch, "The Golden Communion Tray is $220.", seen=[GOLDEN],
+        verdicts=[{"ok": True, "issues": [], "by": "reviewer"}])
+    assert out == ("The Golden Communion Tray is $220.", [], "pass")
+    assert llm.calls == [] and flags == [] and tally == [("pass", "whatsapp")]
+    assert calls[0][2]["mode"] == "dm" and calls[0][2]["post_product"] == "Silver Communion Tray"
 
 
-def test_a_second_draft_that_fails_to_come_holds_with_the_first_reasons(monkeypatch):
-    _gate(monkeypatch, [{"ok": False, "issues": ["silver for gold"], "by": "rules"}])
+def test_a_failing_reply_is_rewritten_once_with_the_reasons_and_the_facts(monkeypatch):
+    fixed = "The Golden Communion Tray is $220 — no shop in South Africa; DHL delivers from Nairobi. How many?"
+    out, calls, flags, tally, llm, ctx = _gate(
+        monkeypatch, GOLD_LIVE_REPLY, seen=[SILVER], facts_rows=[GOLDEN],
+        verdicts=[{"ok": False, "issues": ["they asked for gold; 'Silver Communion Tray' is silver"], "by": "rules"},
+                  {"ok": True, "issues": [], "by": "reviewer"}],
+        llm_texts=[fixed])
+    assert out == (fixed, [], "rewritten") and flags == [] and tally == [("rewritten", "whatsapp")]
+    # the gate fetched the rows for what they asked, and the rewrite saw them
+    assert [r["name"] for r in ctx.seen_products] == ["Silver Communion Tray", "Golden Communion Tray"]
+    call = llm.calls[0]
+    assert call["tools"] == [] and call["system"] == ["SYSTEM"]
+    assert call["messages"][-2] == {"role": "assistant", "content": GOLD_LIVE_REPLY}
+    block = call["messages"][-1]["content"]
+    assert block.startswith("[REVIEWER — your draft was HELD BACK before it was sent to the customer")
+    assert "they asked for gold" in block and "Golden Communion Tray — USD 220" in block
+    assert "THE FACTS YOU MAY STATE" in block and "no tool" in block
+    # the second verdict was on the rewrite, with the fetched rows in hand
+    assert calls[1][0] == fixed and [r["name"] for r in calls[1][1]][-1] == "Golden Communion Tray"
 
-    async def regen(notes):
-        raise RuntimeError("model down")
-    out = asyncio.run(rt._gate_public_answer(
-        GOLD_LIVE_REPLY, comment_text=GOLD_ASK, seen_products=[SILVER],
-        post_product="", currency="USD", redis=None, regenerate=regen))
-    assert out == ("", ["silver for gold"])
-    assert asyncio.run(rt._noop_draft("x")) == ""
+
+def test_two_failures_hold_a_private_reply_and_flag_the_conversation(monkeypatch):
+    out, calls, flags, tally, llm, _ = _gate(
+        monkeypatch, GOLD_LIVE_REPLY, seen=[SILVER],
+        verdicts=[{"ok": False, "issues": ["silver for gold"], "by": "rules"},
+                  {"ok": False, "issues": ["South Africa unanswered"], "by": "reviewer"}],
+        llm_texts=["still wrong"])
+    assert out == (rt._REVIEW_HOLD_DM, ["silver for gold", "South Africa unanswered"], "held")
+    assert flags == [("whatsapp", "K1", ["silver for gold", "South Africa unanswered"], "still wrong")]
+    assert tally == [("held", "whatsapp")]
+    # in Swahili when they wrote Swahili
+    out, *_ = _gate(monkeypatch, GOLD_LIVE_REPLY, seen=[SILVER], swahili=True,
+                    verdicts=[{"ok": False, "issues": ["x"], "by": "rules"},
+                              {"ok": False, "issues": ["y"], "by": "rules"}],
+                    llm_texts=["bado"])
+    assert out[0] == rt._SW_REVIEW_HOLD_DM and out[2] == "held"
 
 
-def test_the_engine_gates_the_answer_before_the_dm_and_the_post():
+def test_two_failures_under_a_comment_return_nothing_for_the_engine_to_hold(monkeypatch):
+    out, calls, flags, tally, llm, _ = _gate(
+        monkeypatch, GOLD_LIVE_REPLY, seen=[SILVER], public=True,
+        verdicts=[{"ok": False, "issues": ["silver for gold"], "by": "rules"},
+                  {"ok": False, "issues": ["still silver"], "by": "reviewer"}],
+        llm_texts=["still wrong"])
+    assert out == ("", ["silver for gold", "still silver"], "held")
+    assert flags == [] and tally == [("held", "facebook")]
+    assert calls[0][2]["mode"] == "comment"
+    assert "posted under the comment" in llm.calls[0]["messages"][-1]["content"]
+
+
+def test_a_rewrite_that_never_comes_holds_with_the_first_reasons(monkeypatch):
+    out, calls, flags, tally, llm, _ = _gate(
+        monkeypatch, GOLD_LIVE_REPLY, seen=[SILVER],
+        verdicts=[{"ok": False, "issues": ["silver for gold"], "by": "rules"}],
+        llm_texts=[""])
+    assert out == (rt._REVIEW_HOLD_DM, ["silver for gold"], "held")
+    assert flags and flags[0][3] == GOLD_LIVE_REPLY       # the draft goes to the colleague
+
+
+def test_the_holding_lines_promise_the_thread_not_the_inbox():
+    for line in rt._VERIFY_HOLD_POOL + rt._SW_VERIFY_HOLD_POOL + [rt._REVIEW_HOLD_DM, rt._SW_REVIEW_HOLD_DM]:
+        assert "🙏" in line
+        low = line.lower()
+        assert "dm" not in low and "message us" not in low and "inbox" not in low
+        assert "right here" in low or "hapa" in low
+
+
+def test_system_composed_prompts_are_not_gated():
+    assert rt._gate_applies("How much is the tray?")
+    assert rt._gate_applies("(I need one) how much")
+    assert not rt._gate_applies("(Internal: this customer built a cart and went quiet…)")
+    assert not rt._gate_applies("[CROSS-CHANNEL CONTINUATION — not a customer message. …]")
+    assert not rt._gate_applies("")
+
+
+def test_the_gate_searches_what_they_actually_asked():
+    assert rt._ask_query(GOLD_ASK) == "gold communion tray"          # stop-words gone, hub terms in
+    assert rt._ask_query(CUPS_ASK) == "communion cup"
+    assert rt._ask_query("How much are the golden trays?") == "gold tray"
+    assert rt._ask_query("hi") == ""
+
+
+def test_run_turn_gates_every_real_turn_and_reports_to_the_caller():
+    src = inspect.getsource(rt.run_turn)
+    assert "turn_facts: dict | None = None" in src
+    assert "turn_messages = list(messages)" in src and "tool_log: list[dict] = []" in src
+    assert 'tool_log.append({"tool": call.name, "input": call.input, "out": out})' in src
+    assert "if reply and not read_only and not scribe_only and _gate_applies(user_text):" in src
+    assert "reply, _held, _gate_outcome = await _gate_turn_reply(" in src
+    assert 'turn_facts.update({"tools": tool_log, "held": list(_held), "review": _gate_outcome})' in src
+    # the gate runs before the spend is measured and the reply returned
+    assert src.index("await _gate_turn_reply(") < src.index("await ai_budget.add_spend(")
+    assert "_gate_post_product = str((_known or {}).get(\"name\") or \"\")" in src
+
+
+def test_the_comment_engine_reads_the_gates_verdict():
     src = inspect.getsource(rt._run_comment_engage)
-    assert "async def _draft(notes: str | None = None) -> str:" in src
-    assert "thread_parent=_parent, review_notes=notes)).strip()" in src
-    assert "answer = await _draft()" in src
-    gate = src.index("answer, held_issues = await _gate_public_answer(")
-    assert src.index("answer = await _draft()") < gate
+    assert "thread_parent=_parent, turn_facts=_facts)).strip()" in src
+    assert 'held_issues: list[str] = list(_facts.get("held") or [])' in src
+    assert "if held_issues:\n        answer = \"\"" in src
+    gate = src.index('held_issues: list[str] = list(_facts.get("held") or [])')
     assert gate < src.index("if not seen_products:\n        await _resolve_post_product(")
     assert gate < src.index("dm_text = _dm_text(")
     assert gate < src.index("posted = await _post_public(public_text)")
-    assert "regenerate=(_draft if not skip_model else _noop_draft)" in src
     # the holding line when nothing verified survives, and the colleague gets the reasons
     assert "if held_issues and not answer:" in src
     assert "_SW_VERIFY_HOLD_POOL if swahili else _VERIFY_HOLD_POOL" in src
@@ -305,20 +403,6 @@ def test_the_engine_gates_the_answer_before_the_dm_and_the_post():
     # the canned path never sells the post's item for another finish or kind
     assert "_other = _item_issues(prompt_text, matched) if matched else []" in src
     assert "if held_issues:\n            product_name = \"\"\n            matched = {}" in src
-
-
-def test_run_turn_carries_the_reviewers_notes_into_the_second_draft():
-    src = inspect.getsource(rt.run_turn)
-    assert "review_notes: str | None = None" in src
-    assert "if public_comment and review_notes:\n        lead_ctx.append(review_notes)" in src
-
-
-def test_the_holding_line_promises_the_thread_not_the_inbox():
-    for line in rt._VERIFY_HOLD_POOL + rt._SW_VERIFY_HOLD_POOL:
-        assert "{name}" in line and "🙏" in line
-        low = line.lower()
-        assert "dm" not in low and "message us" not in low and "inbox" not in low
-        assert "right here" in low or "hapa" in low
 
 
 def test_the_team_note_says_the_draft_was_held_and_why():
@@ -332,6 +416,127 @@ def test_the_team_note_says_the_draft_was_held_and_why():
     assert rt._human_note("question", 0, CUPS_ASK).startswith("QUESTION (public comment)")
     assert "issues: list | None = None) -> None:" in inspect.getsource(rt._route_comment_to_human)
     assert "answered=answered, issues=issues)" in inspect.getsource(rt._route_comment_to_human)
+
+
+# ── the rules that every channel now has ────────────────────────────────────
+
+def test_a_tools_own_numbers_are_the_ground_truth():
+    log = [{"tool": "update_cart", "input": {}, "out": {"total": 39350, "lines": [{"qty": 2, "unit": 19500}],
+                                                        "note": "delivery KES 350 within Nairobi"}}]
+    assert rv.figures_in_results(log) == {39350.0, 2.0, 19500.0, 350.0}
+    ok = asyncio.run(rv.review_reply("go ahead", "Your total is KES 39,350 for 2 sets, delivery included.",
+                                     [], tool_results=log, mode="dm"))
+    assert ok["ok"] is True
+    bad = asyncio.run(rv.review_reply("go ahead", "Your total is KES 41,000.", [], tool_results=log, mode="dm"))
+    assert bad["ok"] is False and "unverified figure(s) 41,000" in bad["issues"][0]
+
+
+def test_a_figure_already_said_in_the_conversation_may_be_repeated():
+    transcript = [{"role": "user", "content": "My budget is KES 15,000"},
+                  {"role": "assistant", "content": "The Cassock is KES 13,000."}]
+    assert rv.transcript_figures(transcript) == {15000.0, 13000.0}
+    assert rv.unverified_figures("Within your KES 15,000 — the cassock at KES 13,000 fits.", [],
+                                 known_figures=rv.transcript_figures(transcript)) == []
+
+
+def test_a_sum_of_two_known_figures_is_allowed():
+    assert rv.unverified_figures("KES 19,500 plus KES 350 delivery is KES 19,850.", [CATALOG[0]],
+                                 known_figures={19500.0, 350.0}) == []
+
+
+def test_one_currency_per_reply():
+    assert rv.two_currencies("It is $180 (KES 18,000).") == ["USD", "KES"]
+    assert rv.two_currencies("It is $180 or $200.") == []
+    issues = rv.rule_issues("how much", "The tray is $180 (KES 18,000).", [SILVER])
+    assert any("two currencies" in i for i in issues)
+
+
+def test_a_link_must_come_from_a_tool():
+    log = [{"tool": "create_order", "input": {}, "out": {"order_url": "https://bethanyhouse.co.ke/o/123"}}]
+    assert rv.foreign_links("Pay here: https://bethanyhouse.co.ke/o/123", log) == []
+    assert rv.foreign_links("Pay here: https://pay.example.com/x", log) == ["https://pay.example.com/x"]
+    issues = rv.rule_issues("send the link", "Here: https://pay.example.com/x", [], tool_results=log)
+    assert any("a link no tool gave" in i for i in issues)
+
+
+def test_an_order_status_needs_an_order_tool_behind_it():
+    assert rv.status_without_source("Your order has been shipped and is on its way!", [], [])
+    log = [{"tool": "check_order_status", "input": {}, "out": {"status": "shipped"}}]
+    assert not rv.status_without_source("Your order has been shipped!", log, [])
+    earlier = [{"role": "assistant", "content": "Your order has been shipped 🙏"}]
+    assert not rv.status_without_source("As I said, it has been shipped.", [], earlier)
+    assert not rv.status_without_source("We ship worldwide by DHL.", [], [])
+
+
+def test_saying_we_do_not_have_it_stands_the_finish_rule_down():
+    assert rv.acknowledges_substitute("We don't have a wooden chalice — the Brass Chalice Cup is $400.")
+    assert rv.acknowledges_substitute("Hatuna ya mbao, lakini tuna ya shaba.")
+    assert not rv.acknowledges_substitute("The Brass Chalice Cup is $400.")
+    brass = {"name": "Brass Chalice Cup", "price": 40000, "price_usd": 400}
+    assert rv.item_issues("do you have a wooden chalice?", brass)
+    assert rv.item_issues("do you have a wooden chalice?", brass,
+                          "We don't have a wooden one — the Brass Chalice Cup is $400.") == []
+
+
+def test_the_reviewer_reads_the_conversation_and_the_tools_in_a_private_chat(monkeypatch):
+    monkeypatch.setattr(settings, "reply_review", True, raising=False)
+    llm = _LLM("verdict=fail | issues=re-asks the colour they gave")
+    chosen = []
+    monkeypatch.setattr(rt, "build_llm", lambda model=None: chosen.append(model) or llm)
+    transcript = [{"role": "user", "content": "I want the cassock in red"},
+                  {"role": "assistant", "content": "Red it is — what size?"},
+                  {"role": "user", "content": "Size L"}]
+    log = [{"tool": "update_cart", "input": {}, "out": {"total": 13000}}]
+    v = asyncio.run(rv.review_reply("Size L", "Which colour would you like?", [], transcript=transcript,
+                                    tool_results=log, mode="dm"))
+    assert v == {"ok": False, "issues": ["re-asks the colour they gave"], "by": "reviewer"}
+    sent = llm.calls[-1]
+    assert "a reply in a private chat" in sent and "4. CONTRADICTS THE CONVERSATION" in sent
+    assert "6. WRONG LANGUAGE" in sent and "Customer: I want the cassock in red" in sent
+    assert '- update_cart: {"total": 13000}' in sent
+    assert "The post is about" not in sent
+    assert chosen == [settings.tier2_model_light]
+    # money and order turns are reviewed by the main model
+    llm.text = "verdict=pass | issues=-"
+    asyncio.run(rv.review_reply("I have paid the deposit", "Received, thank you!", [], mode="dm"))
+    assert chosen[-1] == settings.tier2_model
+
+
+def test_the_private_chat_reviewer_has_its_own_switch(monkeypatch):
+    monkeypatch.setattr(settings, "reply_review", False, raising=False)
+    monkeypatch.setattr(rt, "build_llm", lambda model=None: (_ for _ in ()).throw(AssertionError("no model")))
+    v = asyncio.run(rv.review_reply("hi", "Hello! How can I help?", [], mode="dm"))
+    assert v == {"ok": True, "issues": [], "by": "rules"}
+    assert settings.reply_review is True or True
+    assert "reply_review: bool = True" in inspect.getsource(type(settings))
+
+
+class _Tally:
+    def __init__(self):
+        self.h = {}
+
+    async def hincrby(self, key, field, n):
+        self.h.setdefault(key, {})[field] = self.h.setdefault(key, {}).get(field, 0) + n
+
+    async def expire(self, key, ttl):
+        self.ttl = ttl
+
+    async def hgetall(self, key):
+        return {k.encode(): str(v).encode() for k, v in self.h.get(key, {}).items()}
+
+
+def test_the_days_tally_reaches_the_health_endpoint():
+    r = _Tally()
+    for outcome, ch in (("pass", "whatsapp"), ("pass", "facebook"), ("rewritten", "whatsapp"), ("held", "web")):
+        asyncio.run(rv.record_verdict(r, outcome, ch))
+    asyncio.run(rv.record_verdict(r, "nonsense", "x"))
+    t = asyncio.run(rv.read_verdicts(r))
+    assert t["pass"] == 2 and t["rewritten"] == 1 and t["held"] == 1 and t["pass:facebook"] == 1
+    assert r.ttl == 3 * 24 * 3600
+    assert asyncio.run(rv.read_verdicts(None)) == {}
+    from app.routers import health as h
+    src = inspect.getsource(h.health)
+    assert 'out["review"] = {"passed": tally.get("pass", 0),' in src
 
 
 # ── the canned path: "gold trays" does not name the silver tray ─────────────

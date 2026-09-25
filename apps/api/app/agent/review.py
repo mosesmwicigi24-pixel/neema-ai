@@ -1,4 +1,4 @@
-"""THE GATE BEFORE POSTING (owner, 2026-09-25).
+"""THE GATE BEFORE POSTING (owner, 2026-09-25) — every reply, every channel.
 
 Live, under one communion post: "How much are gold trays with holes to place
 tot glasses? Do you have shops in South Africa?" was answered with the silver
@@ -7,33 +7,48 @@ have some holycommunion cups" was answered with the Golden Chalice Cup with
 Paten Set at $650 and no location. The owner: "Someone is asking for golden
 trays and you give silver… Put a gate to review before posting accurate
 information to avoid on the fly mistakes… Every post should be verified before
-posting for accuracy and correct figures."
+posting for accuracy and correct figures." Then: "Extend the gate to WhatsApp,
+Chat, Messenger, Facebook. Make it very intelligent."
 
-This module is that gate. Every PUBLIC reply passes it before it posts:
+This module is that gate. Every reply Neema composes for a customer — a
+public comment, a WhatsApp / Messenger / Instagram / TikTok message, the
+website chat — passes it inside `runtime.run_turn` before it is sent:
 
 1. THE RULES (deterministic, always on):
-   - every money figure in the reply is a hub price of a row the turn looked
-     up (`search_catalog` results), its conversion at the house rate, a
-     quantity multiple of one, a half (a deposit), or a figure the owner's
-     own instructions state (shipping) — anything else is a figure from
-     nowhere and fails;
-   - the item the reply names is the item they asked for: the FINISH they
-     asked (gold is not silver, glass is not plastic) and the KIND (communion
-     cups are the small cups the tray holds — plastic, silver, glass,
-     pre-packed — never a chalice; a chalice only when they say chalice; a
-     tray is not cups).
-2. THE REVIEWER (one light-model line, switchable): reads the comment, the
-   hub rows looked up, the post's product and the draft, and fails a wrong
-   item, a wrong figure or a question left unanswered.
+   - every money figure in the reply is explained by this turn's GROUND
+     TRUTH — a hub price of a row the turn looked up, a number a tool
+     returned (a cart total, an order total, an offer price), a figure the
+     owner's own instructions state (shipping), a figure already said in
+     this conversation, a house-rate conversion, a quantity multiple, a
+     half (a deposit) or a sum of two of those — anything else is a figure
+     from nowhere;
+   - the item the reply sells is the item they asked for: the FINISH (gold
+     is not silver; stainless / steel are the Silver line) and the KIND
+     (communion cups are the small cups the tray holds — never a chalice
+     unless they say chalice; a tray is not cups) — unless the reply says
+     plainly that we do not have that one and offers the nearest;
+   - a where-question is answered; one currency per reply; no link that no
+     tool or instruction gave; no order-status claim ("shipped") without an
+     order tool or an earlier word from us.
+2. THE REVIEWER (one model line, switchable): reads the conversation, the
+   ground truth, the draft, and fails a wrong item, a wrong figure, an
+   unanswered question, a contradiction of the conversation (re-asking what
+   they already said), an invented detail, or the wrong language. Money and
+   order turns are reviewed by the main model; the rest by the light one.
 
-A draft that fails is written once more with the reviewer's notes in hand;
-a second failure never posts: the customer gets an honest holding line in
-the thread and a colleague gets the comment with the reviewer's reasons.
+A draft that fails is REWRITTEN once — not blindly retried: the writer gets
+the reasons AND the facts (the hub rows for what they actually asked, fetched
+by the gate itself; every tool result of the turn) and writes again without
+tools, so nothing is ordered or sent twice. A second failure never reaches
+the customer: they get an honest holding line, and a colleague gets the
+conversation flagged with the reviewer's reasons and the draft.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
+from datetime import datetime, timezone
 
 from app.core.config import settings
 
@@ -42,9 +57,13 @@ _log = logging.getLogger("neema.review")
 # ── money figures ────────────────────────────────────────────────────────────
 
 _MONEY_RE = re.compile(
-    r"(?:(?:US\$|\$|USD|KES|KSHS?|ZMW|ZK)\s?(?P<a>\d[\d,]*(?:\.\d+)?))"
-    r"|(?:(?P<b>\d[\d,]*(?:\.\d+)?)\s?(?:(?:USD|KES|KSHS?|ZMW|dollars?|shillings?|bob)\b|/=))",
+    r"(?:(?P<c1>US\$|\$|USD|KES|KSHS?|ZMW|ZK)\s?(?P<a>\d[\d,]*(?:\.\d+)?))"
+    r"|(?:(?P<b>\d[\d,]*(?:\.\d+)?)\s?(?:(?P<c2>USD|KES|KSHS?|ZMW|dollars?|shillings?|bob)\b|(?P<c3>/=)))",
     re.IGNORECASE)
+_CURRENCY_FAMILY = {"$": "USD", "US$": "USD", "USD": "USD", "DOLLAR": "USD", "DOLLARS": "USD",
+                    "KES": "KES", "KSH": "KES", "KSHS": "KES", "SHILLING": "KES",
+                    "SHILLINGS": "KES", "BOB": "KES", "/=": "KES",
+                    "ZMW": "ZMW", "ZK": "ZMW"}
 
 
 def _num(v) -> float | None:
@@ -55,14 +74,25 @@ def _num(v) -> float | None:
     return f if f > 0 else None
 
 
-def money_figures(text: str) -> list[float]:
-    """Every amount stated as MONEY in the text — a currency mark before or
-    after it ($40, USD 40, KES 19,000, Ksh 500, 500/=, 40 dollars). A bare
-    number ("40 cups") is a count, not a price."""
-    out: list[float] = []
+def money_with_currency(text: str) -> list[tuple[str, float]]:
+    """Every amount stated as MONEY in the text with its currency family —
+    a currency mark before or after it ($40, USD 40, KES 19,000, Ksh 500,
+    500/=, 40 dollars). A bare number ("40 cups") is a count, not a price."""
+    out: list[tuple[str, float]] = []
     for m in _MONEY_RE.finditer(text or ""):
         v = _num(m.group("a") or m.group("b"))
-        if v is not None and v not in out:
+        if v is None:
+            continue
+        mark = (m.group("c1") or m.group("c2") or m.group("c3") or "").upper()
+        fam = _CURRENCY_FAMILY.get(mark, "USD")
+        out.append((fam, v))
+    return out
+
+
+def money_figures(text: str) -> list[float]:
+    out: list[float] = []
+    for _fam, v in money_with_currency(text):
+        if v not in out:
             out.append(v)
     return out
 
@@ -110,33 +140,101 @@ def _row_figures(p: dict) -> set[float]:
     return out
 
 
+def figures_in_results(tool_results: list | None) -> set[float]:
+    """Every number a tool RETURNED this turn — the turn's ground truth: a
+    cart total, an order total, an offer price, a variant's price, a
+    figure inside a tool's own text. Numeric values anywhere in the result,
+    plus money-marked figures in its strings."""
+    out: set[float] = set()
+
+    def _walk(o):
+        if isinstance(o, bool):
+            return
+        if isinstance(o, (int, float)):
+            f = _num(o)
+            if f:
+                out.add(round(f, 2))
+        elif isinstance(o, str):
+            for v in money_figures(o):
+                out.add(round(v, 2))
+        elif isinstance(o, dict):
+            for v in o.values():
+                _walk(v)
+        elif isinstance(o, (list, tuple)):
+            for v in o:
+                _walk(v)
+    for entry in tool_results or []:
+        _walk((entry or {}).get("out"))
+    return out
+
+
+def transcript_text(transcript: list | None, limit: int = 8) -> list[tuple[str, str]]:
+    """The last turns of a conversation as (role, text) — string contents
+    only; tool blocks and images are skipped."""
+    rows: list[tuple[str, str]] = []
+    for m in transcript or []:
+        c = m.get("content")
+        if isinstance(c, list):
+            c = " ".join(str(p.get("text") or "") for p in c
+                         if isinstance(p, dict) and p.get("type") == "text")
+        t = " ".join(str(c or "").split())
+        if t:
+            rows.append((str(m.get("role") or "user"), t))
+    return rows[-limit:]
+
+
+def transcript_figures(transcript: list | None) -> set[float]:
+    """Money figures already said in this conversation — by them or by us."""
+    out: set[float] = set()
+    for _role, t in transcript_text(transcript, limit=40):
+        for v in money_figures(t):
+            out.add(round(v, 2))
+    return out
+
+
 def _close(a: float, b: float) -> bool:
     return abs(a - b) <= max(0.011, 0.005 * abs(b))
 
 
-def unverified_figures(answer: str, seen: list, comment: str = "",
-                       known_figures: set[float] | frozenset[float] = frozenset()) -> list[float]:
-    """The money figures in the reply that NO looked-up hub row explains —
-    not a row's price, not its conversion, not a quantity multiple of one
-    (the comment's or the reply's own counts), not a half of one (a
-    deposit), not a figure the owner's instructions state."""
-    figures = money_figures(answer)
-    if not figures:
-        return []
+def allowed_figures(seen: list, *, known: set[float] | frozenset[float] = frozenset(),
+                    comment: str = "", answer: str = "") -> set[float]:
+    """Every figure the reply may honestly state: the rows' prices and
+    conversions, the known figures (tools, instructions, the conversation),
+    a quantity multiple of a row's price, a half, and a sum of two."""
     base: set[float] = set()
     for p in seen or []:
         base |= _row_figures(p)
-    allowed: set[float] = set(base) | set(known_figures or ())
+    allowed: set[float] = set(base) | {round(k, 2) for k in (known or ())}
     qs = quantities(comment) + quantities(answer)
     for b in base:
         allowed.add(round(b / 2, 2))
         for q in qs:
             allowed.add(round(b * q, 2))
-    bad = []
-    for f in figures:
-        if not any(_close(f, a) for a in allowed):
-            bad.append(f)
-    return bad
+    # a price plus a delivery fee, two items together: the sum of two figures
+    parts = sorted(allowed)[:80]
+    for i, x in enumerate(parts):
+        for y in parts[i:]:
+            allowed.add(round(x + y, 2))
+    return allowed
+
+
+def unverified_figures(answer: str, seen: list, comment: str = "",
+                       known_figures: set[float] | frozenset[float] = frozenset()) -> list[float]:
+    """The money figures in the reply that NOTHING explains."""
+    figures = money_figures(answer)
+    if not figures:
+        return []
+    allowed = allowed_figures(seen, known=set(known_figures or ()), comment=comment, answer=answer)
+    return [f for f in figures if not any(_close(f, a) for a in allowed)]
+
+
+def two_currencies(answer: str) -> list[str]:
+    """ONE currency per reply (owner, 2026-09-05): the families of money in it."""
+    fams: list[str] = []
+    for fam, _v in money_with_currency(answer):
+        if fam not in fams:
+            fams.append(fam)
+    return fams if len(fams) > 1 else []
 
 
 # ── the item they asked for ──────────────────────────────────────────────────
@@ -165,13 +263,11 @@ KINDS: dict[str, tuple[str, ...]] = {
     "set": ("set", "sets"),
 }
 _KIND_WORD = {w: k for k, words in KINDS.items() for w in words}
+_TOT_GLASSES_RE = re.compile(r"\btots?\s+glass(?:es)?\b", re.IGNORECASE)
 
 
 def _words(text: str) -> list[str]:
     return re.findall(r"[a-z]+", (text or "").lower())
-
-
-_TOT_GLASSES_RE = re.compile(r"\btots?\s+glass(?:es)?\b", re.IGNORECASE)
 
 
 def finishes_of(text: str) -> set[str]:
@@ -184,12 +280,28 @@ def kinds_of(text: str) -> set[str]:
     return {_KIND_WORD[w] for w in _words(text) if w in _KIND_WORD}
 
 
-def item_issues(ask: str, product: dict | None) -> list[str]:
+# A reply that SAYS we do not have the one they asked and offers the nearest
+# is honest — the finish rule stands down for it (the reviewer still reads it).
+_SUBSTITUTE_RE = re.compile(
+    r"\b(?:(?:don'?t|do not|doesn'?t|does not|no longer|not)\s+(?:currently\s+)?(?:have|stock|make|carry|sell|come)"
+    r"|not\s+available|isn'?t\s+available|unavailable|only\s+(?:comes?|available|in|have)|instead"
+    r"|the\s+(?:closest|nearest)|hatuna|haipo|haipatikani|badala)\b",
+    re.IGNORECASE)
+
+
+def acknowledges_substitute(answer: str) -> bool:
+    return bool(_SUBSTITUTE_RE.search(answer or ""))
+
+
+def item_issues(ask: str, product: dict | None, answer: str = "") -> list[str]:
     """Why this hub row is NOT what the comment asked for — a different
     finish, a chalice for cups (or cups for a chalice), cups for a tray.
-    Empty when the row fits or the comment names no finish and no kind."""
+    Empty when the row fits, the ask names no finish and no kind, or the
+    reply says plainly we do not have that one."""
     name = str((product or {}).get("name") or "")
     if not name or not (ask or "").strip():
+        return []
+    if answer and acknowledges_substitute(answer):
         return []
     issues: list[str] = []
     asked_f, have_f = finishes_of(ask), finishes_of(name)
@@ -254,23 +366,70 @@ def where_unanswered(comment: str, answer: str) -> bool:
     return bool(_WHERE_ASK_RE.search(comment or "")) and not _WHERE_ANSWER_RE.search(answer or "")
 
 
+# A link the reply hands out must have come from a tool (an order link, a
+# product page, a payment link) or the owner's instructions — never typed
+# from memory.
+_URL_RE = re.compile(r"https?://[^\s)>\]\"']+", re.IGNORECASE)
+
+
+def foreign_links(answer: str, tool_results: list | None, known_text: str = "") -> list[str]:
+    urls = _URL_RE.findall(answer or "")
+    if not urls:
+        return []
+    pool = (known_text or "") + " " + " ".join(
+        json.dumps((e or {}).get("out"), default=str) for e in (tool_results or []))
+    return [u for u in urls if u.rstrip(".,") not in pool]
+
+
+# An order-status claim needs an order tool behind it, or our own earlier
+# word — never a guess that soothes.
+_STATUS_CLAIM_RE = re.compile(
+    r"\b(?:has\s+(?:been\s+)?(?:shipped|dispatched|sent\s+out|delivered)|is\s+on\s+its\s+way|"
+    r"was\s+(?:shipped|dispatched|delivered)|tracking\s+number|imetumwa|imefika|iko\s+njiani)\b",
+    re.IGNORECASE)
+_ORDER_TOOLS = {"check_order_status", "create_order", "prepare_quotation"}
+
+
+def status_without_source(answer: str, tool_results: list | None, transcript: list | None) -> bool:
+    if not _STATUS_CLAIM_RE.search(answer or ""):
+        return False
+    if any(str((e or {}).get("tool") or "") in _ORDER_TOOLS for e in (tool_results or [])):
+        return False
+    return not any(role == "assistant" and _STATUS_CLAIM_RE.search(t)
+                   for role, t in transcript_text(transcript, limit=40))
+
+
 def rule_issues(comment: str, answer: str, seen: list,
-                known_figures: set[float] | frozenset[float] = frozenset()) -> list[str]:
-    """The deterministic verdict on a draft: figures from nowhere, the wrong
-    item for the ask. Empty = the rules pass it (the reviewer may still not)."""
+                known_figures: set[float] | frozenset[float] = frozenset(), *,
+                tool_results: list | None = None, transcript: list | None = None,
+                known_text: str = "") -> list[str]:
+    """The deterministic verdict on a draft. Empty = the rules pass it (the
+    reviewer may still not)."""
     issues: list[str] = []
     bad = unverified_figures(answer, seen, comment, known_figures)
     if bad:
         looked = ", ".join(f"{p.get('name')} (KES {p.get('price')} / USD {p.get('price_usd')})"
                            for p in (seen or [])[:6]) or "no hub row was looked up"
         issues.append("unverified figure(s) " + ", ".join(_fmt(f) for f in bad)
-                      + " — not the hub price of any row looked up this turn: " + looked)
+                      + " — not the hub price of any row looked up this turn, nor a figure "
+                      "any tool returned: " + looked)
+    fams = two_currencies(answer)
+    if fams:
+        issues.append("two currencies in one reply (" + ", ".join(fams)
+                      + ") — quote ONE, the customer's own")
     named = product_named(answer, seen)
     if named is not None:
-        issues.extend(item_issues(comment, named))
+        issues.extend(item_issues(comment, named, answer))
     if where_unanswered(comment, answer):
         issues.append("their question about where we are / a shop in their country is "
                       "unanswered — say Nairobi, Kenya, no shop there, DHL delivers to them")
+    links = foreign_links(answer, tool_results, known_text)
+    if links:
+        issues.append("a link no tool gave: " + ", ".join(links[:3])
+                      + " — only links a tool returned may be sent")
+    if status_without_source(answer, tool_results, transcript):
+        issues.append("an order-status claim (shipped / on its way / delivered) with no "
+                      "check_order_status behind it — check the order, never assume")
     return issues
 
 
@@ -282,6 +441,10 @@ def _fmt(f: float) -> str:
 
 _VERDICT_RE = re.compile(r"verdict\s*=\s*(pass|fail)", re.IGNORECASE)
 _ISSUES_RE = re.compile(r"issues\s*=\s*(.*)$", re.IGNORECASE | re.DOTALL)
+# Turns where quality is money are reviewed by the main model.
+_MONEY_TURN_RE = re.compile(
+    r"\b(?:order|orders|pay|paid|payment|deposit|m-?pesa|invoice|refund|total|checkout|"
+    r"ship|shipped|deliver|delivered|tracking|lipa|malipo|agizo)\b", re.IGNORECASE)
 
 
 def parse_verdict(text: str) -> dict | None:
@@ -299,7 +462,7 @@ def parse_verdict(text: str) -> dict | None:
     return {"ok": ok, "issues": issues}
 
 
-def _rows_text(seen: list, currency: str) -> str:
+def rows_text(seen: list, currency: str) -> str:
     lines = []
     for p in (seen or [])[:8]:
         price = p.get("price_usd") if currency == "USD" else p.get("price")
@@ -309,12 +472,46 @@ def _rows_text(seen: list, currency: str) -> str:
     return "\n".join(lines) or "- (none — the draft looked nothing up)"
 
 
+def tools_text(tool_results: list | None, limit: int = 6) -> str:
+    """Other tool results of the turn, compact — the cart, an order, an
+    availability check — so the reviewer and the rewrite see the same truth."""
+    lines = []
+    for e in (tool_results or [])[-limit:]:
+        name = str((e or {}).get("tool") or "")
+        if name in ("search_catalog", "remember", "send_product_cards"):
+            continue
+        try:
+            body = json.dumps((e or {}).get("out"), default=str)
+        except Exception:
+            body = str((e or {}).get("out"))
+        lines.append(f"- {name}: {body[:400]}")
+    return "\n".join(lines)
+
+
+def conversation_text(transcript: list | None, limit: int = 8) -> str:
+    lines = []
+    for role, t in transcript_text(transcript, limit=limit):
+        who = "Customer" if role == "user" else "Neema"
+        lines.append(f"{who}: {t[:260]}")
+    return "\n".join(lines)
+
+
+def _reviewer_model(comment: str, answer: str) -> str:
+    if _MONEY_TURN_RE.search((comment or "") + " " + (answer or "")):
+        return settings.tier2_model
+    return settings.tier2_model_light
+
+
 async def reviewer_verdict(comment: str, answer: str, seen: list, *,
                            post_product: str = "", currency: str = "USD",
-                           redis=None) -> dict | None:
-    """One light-model line on the draft. None when the reviewer is off, the
+                           redis=None, transcript: list | None = None,
+                           tool_results: list | None = None,
+                           mode: str = "comment") -> dict | None:
+    """One model line on the draft. None when the reviewer is off, the
     budget is stopped, or the model fails — the rules' verdict then stands."""
-    if not settings.comment_reply_review:
+    if not settings.reply_review:
+        return None
+    if mode == "comment" and not settings.comment_reply_review:
         return None
     try:
         from app.services import ai_budget
@@ -322,10 +519,14 @@ async def reviewer_verdict(comment: str, answer: str, seen: list, *,
             return None
     except Exception:
         pass
+    where = ("a PUBLIC reply to a customer's comment under a post"
+             if mode == "comment" else "a reply in a private chat with a customer")
+    convo = conversation_text(transcript) if mode != "comment" else ""
+    other = tools_text(tool_results)
     prompt = (
         "You are the REVIEWER at a Christian clergy and communion store. A colleague "
-        "drafted a PUBLIC reply to a customer's comment. Check it against the hub rows "
-        "below and answer on ONE line in exactly this shape:\n"
+        f"drafted {where}. Check it against the facts below and answer on ONE line in "
+        "exactly this shape:\n"
         "verdict=<pass|fail> | issues=<the problems, separated by ';', or ->\n\n"
         "FAIL when any of these is true:\n"
         "1. WRONG ITEM — the reply names or prices something other than what they asked "
@@ -335,22 +536,32 @@ async def reviewer_verdict(comment: str, answer: str, seen: list, *,
         "about. A reply that says plainly we do not have the exact one and offers the "
         "nearest at its hub price PASSES.\n"
         "2. WRONG FIGURE — a price that is not the hub price of that row in the currency "
-        "shown, or an invented pack size, capacity, colour, material or delivery time.\n"
-        "3. UNANSWERED — a question in the comment gets no answer: where we are (Nairobi, "
-        "Kenya), whether we have a shop in their country, delivery to them, a price they "
-        "asked for.\n"
-        "PASS otherwise. Never fail for tone, warmth, length or emoji.\n\n"
-        f"The post is about: {post_product or 'unknown'}\n"
-        f"Hub rows the colleague looked up ({currency}):\n{_rows_text(seen, currency)}\n"
-        f'Customer\'s comment: "{" ".join((comment or "").split())[:400]}"\n'
+        "shown, a total no tool returned, or an invented pack size, capacity, colour, "
+        "material or delivery time.\n"
+        "3. UNANSWERED — a question in their message gets no answer: where we are "
+        "(Nairobi, Kenya), whether we have a shop in their country, delivery to them, "
+        "a price they asked for.\n"
+        + ("4. CONTRADICTS THE CONVERSATION — it re-asks a detail they already gave "
+           "(colour, size, quantity, city, name), or contradicts what we said earlier.\n"
+           "5. INVENTED — availability, stock, an order status (shipped, on its way), a "
+           "payment received, or a promise that no tool result or earlier message "
+           "supports.\n"
+           "6. WRONG LANGUAGE — they wrote in Swahili and the reply is English, or the "
+           "reverse (a mix is fine).\n" if mode != "comment" else "")
+        + "PASS otherwise. Never fail for tone, warmth, length or emoji.\n\n"
+        + (f"The post is about: {post_product or 'unknown'}\n" if mode == "comment" else "")
+        + f"Hub rows the colleague looked up ({currency}):\n{rows_text(seen, currency)}\n"
+        + (f"Other tool results this turn:\n{other}\n" if other else "")
+        + (f"The conversation so far (last turns):\n{convo}\n" if convo else "")
+        + f'Customer\'s message: "{" ".join((comment or "").split())[:400]}"\n'
         f'Draft reply: "{" ".join((answer or "").split())[:900]}"\n'
         "Answer with the one line only."
     )
     try:
         from app.agent.runtime import build_llm
-        llm = build_llm(model=settings.tier2_model_light)
+        llm = build_llm(model=_reviewer_model(comment, answer))
         resp = await llm.complete(
-            system="You verify a shop's replies before they post. One line only, in the shape asked.",
+            system="You verify a shop's replies before they are sent. One line only, in the shape asked.",
             messages=[{"role": "user", "content": prompt}], tools=[])
         return parse_verdict(resp.text or "")
     except Exception as exc:
@@ -361,14 +572,19 @@ async def reviewer_verdict(comment: str, answer: str, seen: list, *,
 async def review_reply(comment: str, answer: str, seen: list, *,
                        post_product: str = "", currency: str = "USD",
                        known_figures: set[float] | frozenset[float] = frozenset(),
-                       redis=None) -> dict:
+                       redis=None, transcript: list | None = None,
+                       tool_results: list | None = None, mode: str = "comment",
+                       known_text: str = "") -> dict:
     """The gate's verdict on one draft: {"ok", "issues", "by"}. The rules
     first (a rule failure is final for this draft); then the reviewer."""
-    issues = rule_issues(comment, answer, seen, known_figures)
+    known = set(known_figures or ()) | figures_in_results(tool_results) | transcript_figures(transcript)
+    issues = rule_issues(comment, answer, seen, known, tool_results=tool_results,
+                         transcript=transcript, known_text=known_text)
     if issues:
         return {"ok": False, "issues": issues, "by": "rules"}
     v = await reviewer_verdict(comment, answer, seen, post_product=post_product,
-                               currency=currency, redis=redis)
+                               currency=currency, redis=redis, transcript=transcript,
+                               tool_results=tool_results, mode=mode)
     if v is None:
         return {"ok": True, "issues": [], "by": "rules"}
     if v["ok"]:
@@ -392,6 +608,72 @@ def review_notes(issues: list[str]) -> str:
         "have the exact item, say so plainly and offer the nearest with its hub price. "
         "Never post a guess.)"
     )
+
+
+def rewrite_block(issues: list[str], draft: str, seen: list, currency: str,
+                  tool_results: list | None, mode: str = "comment") -> str:
+    """The reviewer's message to the writer for the ONE rewrite: the reasons,
+    the facts (every hub row in hand, every other tool result), the draft —
+    and the instruction to write the corrected reply only, from these facts,
+    with no tool (nothing is ordered or sent twice)."""
+    why = "; ".join(i.strip() for i in (issues or []) if i.strip()) or "it did not pass verification"
+    other = tools_text(tool_results, limit=8)
+    where = "posted under the comment" if mode == "comment" else "sent to the customer"
+    return (
+        f"[REVIEWER — your draft was HELD BACK before it was {where}. It failed "
+        f"verification: {why}.\n\n"
+        f"THE FACTS YOU MAY STATE (the hub's rows, in {currency}; nothing else is a price):\n"
+        f"{rows_text(seen, currency)}\n"
+        + (f"Other facts from this turn's tools:\n{other}\n" if other else "")
+        + f'\nYour held draft: "{" ".join((draft or "").split())[:900]}"\n\n'
+        "Write the corrected reply NOW — the reply only, nothing else, no tool. "
+        "Rules: the item is exactly what they asked for (their finish, their kind — "
+        "if we do not have it, say so plainly and offer the nearest from the rows "
+        "above with its price); every figure is one of the facts above, in ONE "
+        "currency; answer EVERY question they asked (where we are — Nairobi, Kenya; "
+        "a shop in their country — none, DHL delivers; delivery; the price); never "
+        "re-ask a detail they already gave; never invent a pack size, a capacity, "
+        "an order status or a delivery time; keep the warmth and the closing "
+        "question; write in their language.]"
+    )
+
+
+# ── the tally: what the gate did today (health, the team's eye) ──────────────
+
+def _day_key() -> str:
+    return "review:" + datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+async def record_verdict(redis, outcome: str, channel: str = "") -> None:
+    """pass / rewritten / held, per UTC day (kept three days), best-effort."""
+    if redis is None or outcome not in ("pass", "rewritten", "held"):
+        return
+    try:
+        key = _day_key()
+        await redis.hincrby(key, outcome, 1)
+        if channel:
+            await redis.hincrby(key, f"{outcome}:{channel}", 1)
+        await redis.expire(key, 3 * 24 * 3600)
+    except Exception:
+        pass
+
+
+async def read_verdicts(redis) -> dict:
+    """{"pass": n, "rewritten": n, "held": n} for today, {} when unknown."""
+    if redis is None:
+        return {}
+    try:
+        raw = await redis.hgetall(_day_key())
+    except Exception:
+        return {}
+    out: dict = {}
+    for k, v in (raw or {}).items():
+        ks = k.decode() if isinstance(k, bytes) else str(k)
+        try:
+            out[ks] = int(v)
+        except (TypeError, ValueError):
+            continue
+    return out
 
 
 _prompt_figures_cache: dict[str, frozenset[float]] = {}

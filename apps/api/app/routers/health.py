@@ -47,4 +47,14 @@ async def health(request: Request):
             out["agent"] = {"replies": "ok"}
     except Exception:
         pass
+    # THE GATE BEFORE POSTING (owner, 2026-09-25): what the reviewer did today
+    # — replies passed, rewritten once, held back for a colleague.
+    try:
+        from app.agent.review import read_verdicts
+        tally = await read_verdicts(getattr(request.app.state, "redis", None))
+        out["review"] = {"passed": tally.get("pass", 0),
+                         "rewritten": tally.get("rewritten", 0),
+                         "held": tally.get("held", 0)}
+    except Exception:
+        pass
     return out

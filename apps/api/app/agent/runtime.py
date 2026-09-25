@@ -976,6 +976,151 @@ async def _ad_headline(db: AsyncSession, channel: str, key: str) -> str:
         return ""
 
 
+# THE GATE BEFORE POSTING (owner, 2026-09-25) — what a private chat hears when
+# a draft failed verification twice: honest, warm, a promise the team keeps
+# (the conversation is flagged with the reviewer's reasons and the draft).
+_REVIEW_HOLD_DM = ("Let me confirm the exact details for you 🙏 One of our team will "
+                   "come back to you right here shortly.")
+_SW_REVIEW_HOLD_DM = ("Ngoja nihakikishe maelezo kamili 🙏 Mmoja wa timu yetu atakujibu "
+                      "hapa hivi karibuni.")
+
+
+def _gate_applies(user_text: str) -> bool:
+    """A customer's words are gated; a system-composed instruction ("(Internal:
+    …", "[CROSS-CHANNEL CONTINUATION — not a customer message…") is not a
+    question the rules can read."""
+    t = (user_text or "").lstrip()
+    if not t:
+        return False
+    if t[0] in "([" and re.search(r"internal|not a customer message|context —|\bsystem\b",
+                                  t[:160], re.IGNORECASE):
+        return False
+    return True
+
+
+def _ask_query(user_text: str) -> str:
+    """The product words of what they asked, in the hub's terms — what the
+    gate searches for the rewrite when the draft sold the wrong item."""
+    from app.agent.tools import _SEARCH_STOP, _search_words
+    from app.core.synonyms import canonical
+    text = canonical(user_text or "")
+    words: list[str] = []
+    for w in re.findall(r"[a-z0-9]+", text.lower()):
+        st = _search_words(w)              # the search's own word: stemmed, no stop-words
+        if st and next(iter(st)) not in _SEARCH_STOP and next(iter(st)) not in _ASK_FILLER:
+            words.append(next(iter(st)))
+    return " ".join(words[:6])
+
+
+# Words a question carries that name no product (the search's own stop-words
+# hold the rest).
+_ASK_FILLER = frozenset({"some", "few", "many", "location", "located", "looking",
+                         "interested", "still", "again", "yes", "yeah", "okay", "sure",
+                         "wat", "pls", "plz", "thanks", "thank", "hello", "hi", "hey"})
+
+
+async def _facts_for_ask(ctx, user_text: str, tool_log: list) -> list:
+    """The hub rows for what they ACTUALLY asked — fetched by the gate with
+    the read-only search so the rewrite has the right rows in hand even when
+    the first draft never looked them up. Appended to the turn's seen rows
+    (the link, the record) and to the tool log (the ground truth)."""
+    q = _ask_query(user_text)
+    if not q:
+        return []
+    try:
+        from app.agent import tools as _tools
+        from dataclasses import replace as _dc_replace
+        before = len(ctx.seen_products)
+        ro = _dc_replace(ctx, read_only=True)
+        out = await _tools.run_tool("search_catalog", {"query": q}, ro)
+        tool_log.append({"tool": "search_catalog", "input": {"query": q, "by": "reviewer"},
+                         "out": out})
+        return list(ctx.seen_products[before:])
+    except Exception as exc:
+        _log.info("gate facts search failed: %s", exc)
+        return []
+
+
+async def _flag_held_reply(db, channel: str, key: str, issues: list, draft: str) -> None:
+    """A held private reply is a colleague's to answer: the conversation is
+    flagged with the reviewer's reasons and the draft (never sent)."""
+    try:
+        from sqlalchemy import or_
+        from app.models.conversation import Conversation
+        from app.models.intercept import Intercept, InterceptAction
+        conv = (await db.execute(select(Conversation).where(
+            Conversation.channel == channel,
+            or_(Conversation.external_id == key, Conversation.wa_id == key),
+        ))).scalars().first()
+        if conv is None:
+            return
+        note = ("HELD BACK BY THE REVIEWER — Neema's reply did not pass verification and "
+                "was NOT sent; the customer was told a colleague will come back to them "
+                "here. Please answer them from the hub.\n• Why it was held: "
+                + "; ".join(str(i) for i in issues)[:600])
+        db.add(Intercept(conversation_id=conv.id, action=InterceptAction.flag, note=note,
+                         ai_reply_held=(draft or "")[:2000]))
+        await db.commit()
+    except Exception as exc:
+        _log.info("held-reply flag not written for %s/%s: %s", channel, key, exc)
+
+
+async def _gate_turn_reply(reply: str, *, user_text: str, transcript: list, tool_log: list,
+                           ctx, currency: str, channel: str, public_comment: bool,
+                           llm, sys_blocks, redis, db, key: str, post_product: str = "",
+                           swahili: bool = False) -> tuple[str, list[str], str]:
+    """Verify one reply; rewrite it once with the reasons and the facts; hold
+    it on a second failure. Returns (reply, held_issues, outcome) — outcome
+    "pass" / "rewritten" / "held". A held PUBLIC reply is "" (the comment
+    engine posts its holding line and hands the comment to a colleague); a
+    held PRIVATE reply is the holding line, and the conversation is flagged."""
+    from app.agent import review as _rv
+    mode = "comment" if public_comment else "dm"
+    known = _rv.prompt_figures(currency)
+    known_text = " ".join(str(b) for b in (sys_blocks if isinstance(sys_blocks, list) else [sys_blocks]))
+    seen = ctx.seen_products
+
+    async def _verdict(text: str) -> dict:
+        return await _rv.review_reply(
+            user_text, text, seen, post_product=post_product, currency=currency,
+            known_figures=known, redis=redis, transcript=transcript, tool_results=tool_log,
+            mode=mode, known_text=known_text)
+
+    v1 = await _verdict(reply)
+    if v1["ok"]:
+        await _rv.record_verdict(redis, "pass", channel)
+        return reply, [], "pass"
+    issues = list(v1["issues"])
+    _log.info("%s reply held by the %s for %s: %s", mode, v1["by"], key, "; ".join(issues)[:300])
+    # The facts for the rewrite: the rows for what they actually asked.
+    if any("asked for" in i for i in issues) or not seen:
+        await _facts_for_ask(ctx, user_text, tool_log)
+    block = _rv.rewrite_block(issues, reply, seen, currency, tool_log, mode=mode)
+    second = ""
+    try:
+        resp = await llm.complete(
+            system=sys_blocks,
+            messages=list(transcript) + [{"role": "assistant", "content": reply},
+                                         {"role": "user", "content": block}],
+            tools=[])
+        second = (resp.text or "").strip()
+    except Exception as exc:
+        _log.warning("rewrite failed for %s: %s", key, exc)
+    if second:
+        v2 = await _verdict(second)
+        if v2["ok"]:
+            await _rv.record_verdict(redis, "rewritten", channel)
+            return second, [], "rewritten"
+        issues = issues + list(v2["issues"])
+        _log.info("%s rewrite held by the %s for %s: %s", mode, v2["by"], key,
+                  "; ".join(v2["issues"])[:300])
+    await _rv.record_verdict(redis, "held", channel)
+    if public_comment:
+        return "", issues, "held"
+    await _flag_held_reply(db, channel, key, issues, second or reply)
+    return (_SW_REVIEW_HOLD_DM if swahili else _REVIEW_HOLD_DM), issues, "held"
+
+
 async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM,
                    media: dict | None = None,
                    *, channel: str = "whatsapp", external_id: str | None = None,
@@ -985,7 +1130,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                    comment_reading: dict | None = None,
                    comment_post_id: str | None = None,
                    thread_parent: dict | None = None,
-                   review_notes: str | None = None) -> str:
+                   turn_facts: dict | None = None) -> str:
     """Run one agent turn and return the reply text (does NOT send it).
 
     WhatsApp is the default and unchanged. For Messenger/Instagram, pass
@@ -1206,6 +1351,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     # prefix and ahead of the real transcript, and never touches the dedup
     # check above (which only looks at the last message).
     lead_ctx: list[str] = []
+    _gate_post_product = ""            # the post's product, for the gate's reviewer
     post_img = None
     if source_post:
         # The customer funnelled in from a specific post — their "How much?"
@@ -1238,6 +1384,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                                           {**pctx, "post_id": source_post.get("post_id") or ""})
         except Exception:
             _known = {}
+        _gate_post_product = str((_known or {}).get("name") or "")
         # What the post SELLS, when it is more than one row: a hub set row
         # (its contents from the hub's description), a combination the
         # caption presents as one outfit, or a caption that merely LISTS
@@ -1302,10 +1449,6 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         _rline = _reading_context(comment_reading)
         if _rline:
             lead_ctx.append(_rline)
-    # THE GATE BEFORE POSTING (owner, 2026-09-25): a second draft carries the
-    # reviewer's reasons for holding back the first.
-    if public_comment and review_notes:
-        lead_ctx.append(review_notes)
     if lead_ctx:
         content = "\n\n".join(lead_ctx)
         if post_img:
@@ -1366,6 +1509,11 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     sys_blocks: str | list[str] = [system, tail] if tail else [system]
 
     reply = None
+    # THE GATE BEFORE POSTING (owner, 2026-09-25): the transcript as the
+    # writer saw it, and every tool result of the turn — the ground truth
+    # the reply is verified against, and the facts a rewrite is given.
+    turn_messages = list(messages)
+    tool_log: list[dict] = []
     # A public comment reply is one search + one short answer; the full
     # 8-iteration budget belongs to real sales conversations (cart, order,
     # measurements). Half the ceiling caps the worst-case cost of the
@@ -1384,6 +1532,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         results = []
         for call in resp.tool_calls:
             out = await run_tool(call.name, call.input, ctx)
+            tool_log.append({"tool": call.name, "input": call.input, "out": out})
             _log.info("agent tool %s(%s) -> %s", call.name, json.dumps(call.input)[:120],
                       json.dumps(out)[:160])
             # The Activity Log's per-turn trail: every tool call becomes a row
@@ -1407,6 +1556,25 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     else:
         # Ran out of iterations — return the last text if any, else a safe fallback.
         reply = resp.text or "Let me get a colleague to help you with this."
+
+    # THE GATE BEFORE POSTING (owner, 2026-09-25) — EVERY channel: the reply
+    # is verified against this turn's ground truth before anyone sends it;
+    # a failing draft is rewritten once with the reasons and the facts; a
+    # second failure never reaches the customer (a holding line, a colleague
+    # flagged with the reasons). Real turns only: a draft or a scribe pass
+    # is not sent to anyone.
+    _gate_outcome, _held = "skipped", []
+    if reply and not read_only and not scribe_only and _gate_applies(user_text):
+        try:
+            reply, _held, _gate_outcome = await _gate_turn_reply(
+                reply, user_text=user_text, transcript=turn_messages, tool_log=tool_log,
+                ctx=ctx, currency=currency, channel=channel, public_comment=public_comment,
+                llm=llm, sys_blocks=sys_blocks, redis=redis, db=db, key=key,
+                post_product=_gate_post_product, swahili=looks_swahili(user_text or ""))
+        except Exception as exc:
+            _log.warning("reply gate failed open for %s: %s", key, exc)
+    if turn_facts is not None:
+        turn_facts.update({"tools": tool_log, "held": list(_held), "review": _gate_outcome})
 
     # Measure spend so cost is visible, not guessed at (best-effort). Two
     # honesty rules learned when the bill was audited (2026-08-18): log the
@@ -3737,46 +3905,6 @@ _SW_VERIFY_HOLD_POOL = [
 ]
 
 
-async def _noop_draft(*a, **k) -> str:
-    return ""
-
-
-async def _gate_public_answer(answer: str, *, comment_text: str, seen_products: list,
-                              post_product: str, currency: str, redis,
-                              regenerate) -> tuple[str, list[str]]:
-    """Every public reply is verified before it posts (owner, 2026-09-25).
-    The draft goes through review.review_reply (the rules, then the light-model
-    reviewer); a draft that fails is written ONCE more with the reviewer's
-    notes, and a second failure returns "" with the reasons — the caller
-    posts the holding line and hands the comment to a colleague."""
-    from app.agent import review as _rv
-    if not (answer or "").strip():
-        return answer, []
-    known = _rv.prompt_figures(currency)
-    verdict = await _rv.review_reply(comment_text, answer, seen_products,
-                                     post_product=post_product, currency=currency,
-                                     known_figures=known, redis=redis)
-    if verdict["ok"]:
-        return answer, []
-    issues = list(verdict["issues"])
-    _log.info("public draft held by the %s: %s", verdict["by"], "; ".join(issues)[:300])
-    try:
-        second = (await regenerate(_rv.review_notes(issues)) or "").strip()
-    except Exception as exc:
-        _log.warning("second draft failed: %s", exc)
-        second = ""
-    if not second:
-        return "", issues
-    verdict2 = await _rv.review_reply(comment_text, second, seen_products,
-                                      post_product=post_product, currency=currency,
-                                      known_figures=known, redis=redis)
-    if verdict2["ok"]:
-        return second, []
-    issues2 = list(verdict2["issues"])
-    _log.info("second public draft held by the %s: %s", verdict2["by"], "; ".join(issues2)[:300])
-    return "", issues + issues2
-
-
 async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set) -> None:
     from app.database import AsyncSessionLocal
     from app.services import n8n_bridge as svc
@@ -3952,6 +4080,7 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
 
     answer = ""
     seen_products: list = []          # the catalogue rows the agent actually priced
+    _facts: dict = {}                 # what run_turn's gate did (tools, held, review)
     if not skip_model:
         # Full agent reply — SEES the post image, quotes the REAL price, warm + short.
         try:
@@ -3959,38 +4088,28 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
             # bill. Light model by default; the main model for vision turns and
             # for comments carrying money or risk (see route_comment_model).
             _cmodel = settings.tier2_model if media else route_comment_model(prompt_text)
-            # A reply inside a thread carries the comment it answers and
-            # what we said there (owner, 2026-09-23).
-            _parent = await _thread_parent(comment.get("parent_id") or "")
-
-            async def _draft(notes: str | None = None) -> str:
-                async with AsyncSessionLocal() as db:
-                    return (await run_turn(
-                        db, redis, wa_id=ext, user_text=prompt_text,
-                        llm=build_llm(model=_cmodel),
-                        media=media, channel=channel, external_id=ext,
-                        public_comment=True, product_sink=seen_products,
-                        comment_reading=reading, comment_post_id=post_id,
-                        thread_parent=_parent, review_notes=notes)).strip()
-            answer = await _draft()
+            async with AsyncSessionLocal() as db:
+                # A reply inside a thread carries the comment it answers and
+                # what we said there (owner, 2026-09-23).
+                _parent = await _thread_parent(comment.get("parent_id") or "")
+                answer = (await run_turn(
+                    db, redis, wa_id=ext, user_text=prompt_text,
+                    llm=build_llm(model=_cmodel),
+                    media=media, channel=channel, external_id=ext,
+                    public_comment=True, product_sink=seen_products,
+                    comment_reading=reading, comment_post_id=post_id,
+                    thread_parent=_parent, turn_facts=_facts)).strip()
         except Exception as exc:
             _log.warning("public agent reply failed for %s: %s", cid, exc)
 
-    # THE GATE BEFORE POSTING (owner, 2026-09-25): the draft is verified —
-    # the item is the one they asked for, every figure is the hub's, every
-    # question answered — written once more if it fails, and never posted
-    # when it fails again.
-    held_issues: list[str] = []
-    if answer:
-        try:
-            async with AsyncSessionLocal() as _dbc:
-                _gate_ccy = (await _meta_market(_dbc, channel, ext))[0]
-        except Exception:
-            _gate_ccy = "USD"
-        answer, held_issues = await _gate_public_answer(
-            answer, comment_text=prompt_text, seen_products=seen_products,
-            post_product=str(_known_product.get("name") or ""), currency=_gate_ccy,
-            redis=redis, regenerate=(_draft if not skip_model else _noop_draft))
+    # THE GATE BEFORE POSTING (owner, 2026-09-25): run_turn verified the
+    # draft — the item is the one they asked for, every figure is the hub's,
+    # every question answered — rewrote it once if it failed, and returned
+    # nothing when it failed again: the thread gets the holding line below
+    # and a colleague gets the comment with the reasons.
+    held_issues: list[str] = list(_facts.get("held") or [])
+    if held_issues:
+        answer = ""
 
     # Resolve the product FIRST — the exact storefront link belongs in the DM.
     # The comment may never name the product ("where is the shop?") — the POST

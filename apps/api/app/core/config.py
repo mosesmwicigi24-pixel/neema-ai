@@ -271,6 +271,10 @@ class Settings(BaseSettings):
     # item is the one asked for); this switch is the light-model reviewer on
     # top (a wrong item, a wrong figure, a question left unanswered).
     comment_reply_review: bool = True
+    # …and the same reviewer on EVERY channel (owner, 2026-09-25: "extend the
+    # gate to WhatsApp, Chat, Messenger, Facebook"): the rules always; this
+    # switch is the model reviewer for private chats. Off = rules only.
+    reply_review: bool = True
     # ── Daily AI spend ceiling (services/ai_budget) — the cost-surprise breaker.
     # Metered per UTC day. Past the soft budget, main-model turns downgrade to
     # tier2_model_light; past the hard stop, agent turns refuse before buying a
