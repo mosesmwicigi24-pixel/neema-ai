@@ -86,7 +86,6 @@ fun ConversationsScreen(dash: DashboardViewModel) {
     var askDialog by remember { mutableStateOf(false) }
     var answerDialog by remember { mutableStateOf(false) }
     var inviteDialog by remember { mutableStateOf(false) }
-    var closeConfirm by remember { mutableStateOf(false) }
 
     val threadPane: @Composable (Modifier) -> Unit = { mod ->
         if (active == null) {
@@ -105,24 +104,24 @@ fun ConversationsScreen(dash: DashboardViewModel) {
                 onProfile = if (!wide || !roomy) ({ customerSheet = true }) else null,
                 onActivity = if (!roomy) ({ activitySheet = true; vm.setActivityOpen(true) }) else null,
                 onAsk = { askDialog = true }, onAnswer = { answerDialog = true }, onInvite = { inviteDialog = true },
-                onClose = { closeConfirm = true },
                 modifier = mod,
             )
         }
     }
 
-    if (!wide) {
+    // Text reads in the theme's ink wherever it sits (the shell's Scaffold does the same).
+    CompositionLocalProvider(LocalContentColor provides Neema.colors.text) { if (!wide) {
         if (phoneThread) threadPane(Modifier.fillMaxSize())
         else ConversationList(vm, inbox, listUi, rows, thread.activeId, perms, Modifier.fillMaxSize())
     } else {
         Row(Modifier.fillMaxSize()) {
             ConversationList(vm, inbox, listUi, rows, thread.activeId, perms, Modifier.width(if (widthDp >= 900) 380.dp else 320.dp).fillMaxHeight())
-            VerticalDivider(color = Color(0xFFEDF0EA))
+            VerticalDivider(color = if (Neema.colors.isDark) Neema.colors.border else Color(0xFFEDF0EA))
             threadPane(Modifier.weight(1f).fillMaxHeight())
             if (roomy && active != null) {
                 ActivityPane(thread.activity, thread.activityOpen) { vm.setActivityOpen(it) }
                 if (customerOpen) {
-                    VerticalDivider(color = Color(0xFFEDF0EA))
+                    VerticalDivider(color = if (Neema.colors.isDark) Neema.colors.border else Color(0xFFEDF0EA))
                     CustomerPanel(
                         dash = dash, conversation = active,
                         onClose = { customerOpen = false },
@@ -133,7 +132,7 @@ fun ConversationsScreen(dash: DashboardViewModel) {
                 } else SideRail("Customer", flipArrow = true) { customerOpen = true }
             }
         }
-    }
+    } }
 
     // ── Customer panel as a sheet (phones, narrower tablets) ──
     if (customerSheet && active != null) {
@@ -176,41 +175,27 @@ fun ConversationsScreen(dash: DashboardViewModel) {
         },
         dismissButton = { TextButton(onClick = { vm.showClear(false) }) { Text("Cancel") } },
     )
-    if (closeConfirm && active != null) AlertDialog(
-        onDismissRequest = { closeConfirm = false },
-        title = { Text("Close conversation") },
-        text = { Text("Close this conversation? Neema takes it back and it leaves the live queue.") },
-        confirmButton = { TextButton(onClick = { closeConfirm = false; vm.close(active.id) }) { Text("Close", color = Neema.colors.red) } },
-        dismissButton = { TextButton(onClick = { closeConfirm = false }) { Text("Cancel") } },
-    )
     if (askDialog) AskNeemaDialog(vm) { askDialog = false }
     if (answerDialog) AnswerViaNeemaDialog(vm) { answerDialog = false }
     if (inviteDialog && active != null) InviteDialog(dash, vm, active) { inviteDialog = false }
     viewer?.let { v -> ViewerDialog(v, onClose = { viewer = null }, onVideoError = { id -> if (id != null) brokenVideos += id }) }
 }
 
-/** The web's role rules (admin/superuser, agent) plus the matching permission for custom roles. */
+/**
+ * The web's role rules: `isAdminOrSuper = is_superuser || role === "admin"`,
+ * `canHandleConversations = isAdminOrSuper || role === "agent"`. The server
+ * enforces nothing finer for these controls, so neither does the app.
+ */
 @Composable
 private fun rememberInboxPerms(dash: DashboardViewModel): InboxPerms {
     val me by dash.me.collectAsStateWithLifecycle()
     val session by dash.session.collectAsStateWithLifecycle()
-    val agents by dash.agents.collectAsStateWithLifecycle()
-    return remember(me, session, agents) {
-        val role = me?.role ?: session?.role
-        val isAdmin = me?.isSuperuser == true || session?.isSuperuser == true || role == "admin"
-        val canHandle = isAdmin || role == "agent" || dash.can(Perms.INTERCEPT_RELEASE)
-        InboxPerms(
-            me = session?.agentId,
-            isAdminOrSuper = isAdmin,
-            canHandle = canHandle,
-            canTransfer = isAdmin || dash.can(Perms.TRANSFER_CONVERSATIONS),
-            canNote = canHandle && (isAdmin || dash.can(Perms.ADD_NOTES)),
-            canClear = isAdmin || dash.can(Perms.CLEAR_CHAT_HISTORY),
-            canClose = canHandle && (isAdmin || dash.can(Perms.CLOSE_CONVERSATIONS)),
-            canRelease = isAdmin || dash.can(Perms.INTERCEPT_RELEASE),
-            canReply = isAdmin || dash.can(Perms.REPLY_CONVERSATIONS),
-        )
-    }
+    return remember(me, session) { inboxPermsOf(me?.role ?: session?.role, me?.isSuperuser == true || session?.isSuperuser == true, session?.agentId) }
+}
+
+internal fun inboxPermsOf(role: String?, superuser: Boolean, me: String?): InboxPerms {
+    val isAdmin = superuser || role == "admin"
+    return InboxPerms(me = me, isAdminOrSuper = isAdmin, canHandle = isAdmin || role == "agent")
 }
 
 @Composable
@@ -231,7 +216,6 @@ private fun ThreadPane(
     onAsk: () -> Unit,
     onAnswer: () -> Unit,
     onInvite: () -> Unit,
-    onClose: () -> Unit,
     modifier: Modifier,
 ) {
     val me = perms.me
@@ -248,27 +232,29 @@ private fun ThreadPane(
         // Auto-escalated (media) but unclaimed: first one to tap gets it.
         if (mode == "human" && conv.assignedAgentId == null && perms.canHandle) add(HeaderAction("Pick up", "🙋", "intercept", primary = true) { vm.intercept(conv.id) })
         // Owner-restricted: only the intercepting agent or admin can release.
-        if (mode == "human" && (isOwner || perms.isAdminOrSuper) && perms.canRelease)
+        if (mode == "human" && (isOwner || perms.isAdminOrSuper))
             add(HeaderAction("Release", "↩", "release", primary = none { it.primary }) { vm.release(conv.id) })
         if (mode != "paused" && canAct) add(HeaderAction("Pause", "⏸", "pause") { vm.pause(conv.id) })
         if (mode == "paused" && canAct) add(HeaderAction("Resume", "▶", "release", primary = none { it.primary }) { vm.release(conv.id) })
-        if (canAct && perms.canTransfer) add(HeaderAction(if (wide) "" else "Transfer", "⇄") { vm.showTransfer(true) })
-        if (perms.canNote) add(HeaderAction(if (wide) "" else "Add note", "📝") { vm.showNote(true) })
-        if (perms.canClear) add(HeaderAction(if (wide) "" else "Clear history", "🗑️", danger = true) { vm.showClear(true) })
+        if (canAct) add(HeaderAction(if (wide) "" else "Transfer", "⇄") { vm.showTransfer(true) })
+        if (perms.canHandle) add(HeaderAction(if (wide) "" else "Add note", "📝") { vm.showNote(true) })
+        // Clear history — admin/superuser only (the server refuses anyone else).
+        if (perms.isAdminOrSuper) add(HeaderAction(if (wide) "" else "Clear history", "🗑️", danger = true) { vm.showClear(true) })
     }
     val siblings = remember(inbox.cache, conv.personId, conv.id) {
         if (conv.personId == null) listOf(conv)
         else inbox.cache.values.filter { it.personId == conv.personId }
             .sortedBy { ConversationsViewModel.CHAN_ORDER.indexOf(it.channel).let { i -> if (i < 0) 99 else i } }
     }
-    val digits = conv.waId?.filter { it.isDigit() }.orEmpty()
-    val hasPhone = digits.length in 7..15
+    val digits = phoneDigits(conv).orEmpty()
+    val hasPhone = digits.isNotEmpty()
     val hasWaChannel = siblings.any { it.channel == "whatsapp" }
     val menu = buildList<Pair<String, () -> Unit>> {
+        // Shortcuts to the customer panel's Ask Neema / Answer-via-Neema boxes and
+        // Invite button (CustomerSidebar.tsx), which the web shows to everyone.
         add("🔎 Ask Neema" to onAsk)
-        if (perms.canHandle && perms.canReply) add("💬 Neema delivers a team answer" to onAnswer)
-        if (perms.canHandle && !hasWaChannel) add("🟢 Invite to WhatsApp" to onInvite)
-        if (perms.canClose && conv.status == "open") add("✓ Close conversation" to onClose)
+        add("💬 Neema delivers a team answer" to onAnswer)
+        if (!hasWaChannel) add("🟢 Invite to WhatsApp" to onInvite)
         if (onActivity != null) add("🕘 Activity log" to onActivity)
     }
     // Phone (edge-to-edge, shell bars hidden): keep clear of the nav bar and the
@@ -420,7 +406,7 @@ private fun ActivityList(events: List<ActivityEvent>, modifier: Modifier) {
 // ═══════════════════════════ Dialogs ═══════════════════════════
 
 @Composable
-private fun TransferDialog(dash: DashboardViewModel, conv: Conversation?, busy: Boolean, onPick: (String, String?) -> Unit, onDismiss: () -> Unit) {
+internal fun TransferDialog(dash: DashboardViewModel, conv: Conversation?, busy: Boolean, onPick: (String, String?) -> Unit, onDismiss: () -> Unit) {
     val agents by dash.agents.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { dash.refetchAgents() }
     val available = agents.filter { it.isAvailable && it.id != conv?.assignedAgentId }
@@ -441,7 +427,7 @@ private fun TransferDialog(dash: DashboardViewModel, conv: Conversation?, busy: 
                             Avatar(a.name, a.avatarUrl, size = 32.dp)
                             Spacer(Modifier.width(12.dp))
                             Column {
-                                Text(a.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                Text(a.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Neema.colors.text)
                                 Text("${a.activeConvs} active conversations", fontSize = 12.sp, color = Color(0xFFB5C9A8))
                             }
                         }
@@ -458,7 +444,7 @@ private fun TransferDialog(dash: DashboardViewModel, conv: Conversation?, busy: 
 }
 
 @Composable
-private fun NoteDialog(text: String, onText: (String) -> Unit, onSave: () -> Unit, onDismiss: () -> Unit) {
+internal fun NoteDialog(text: String, onText: (String) -> Unit, onSave: () -> Unit, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Add Note") },
@@ -473,11 +459,22 @@ private fun NoteDialog(text: String, onText: (String) -> Unit, onSave: () -> Uni
     )
 }
 
+/** The answer / status under the Ask and Answer boxes (CustomerSidebar.tsx). */
+@Composable
+private fun ResultBox(text: String) {
+    val c = Neema.colors
+    Text(
+        text, fontSize = 13.sp, color = c.text,
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(if (c.isDark) c.bg3 else Color(0xFFF8FAF6))
+            .border(1.dp, if (c.isDark) c.border else Color(0xFFE8EDE4), RoundedCornerShape(8.dp)).padding(10.dp),
+    )
+}
+
 /** Ask Neema: the junior fetches — sizes, past orders, call context. Read-only. */
 @Composable
-private fun AskNeemaDialog(vm: ConversationsViewModel, onDismiss: () -> Unit) {
-    var q by remember { mutableStateOf("") }
-    var answer by remember { mutableStateOf<String?>(null) }
+internal fun AskNeemaDialog(vm: ConversationsViewModel, initialQuestion: String = "", initialAnswer: String? = null, onDismiss: () -> Unit) {
+    var q by remember { mutableStateOf(initialQuestion) }
+    var answer by remember { mutableStateOf(initialAnswer) }
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val ask = {
@@ -492,10 +489,15 @@ private fun AskNeemaDialog(vm: ConversationsViewModel, onDismiss: () -> Unit) {
         title = { Text("Ask Neema") },
         text = {
             Column {
-                OutlinedTextField(q, { q = it }, placeholder = { Text("Ask Neema… “what were his sizes?”") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(
+                    q, { q = it }, placeholder = { Text("Ask Neema… “what were his sizes?”") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    // Enter asks, as on the web.
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Send),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { ask() }),
+                )
                 answer?.let {
                     Spacer(Modifier.height(8.dp))
-                    Text(it, fontSize = 13.sp, modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color(0xFFF8FAF6)).border(1.dp, Color(0xFFE8EDE4), RoundedCornerShape(8.dp)).padding(10.dp))
+                    ResultBox(it)
                 }
             }
         },
@@ -509,9 +511,9 @@ private fun AskNeemaDialog(vm: ConversationsViewModel, onDismiss: () -> Unit) {
  * voice and language, and the thread stays in AI mode.
  */
 @Composable
-private fun AnswerViaNeemaDialog(vm: ConversationsViewModel, onDismiss: () -> Unit) {
-    var facts by remember { mutableStateOf("") }
-    var status by remember { mutableStateOf<String?>(null) }
+internal fun AnswerViaNeemaDialog(vm: ConversationsViewModel, initialFacts: String = "", initialStatus: String? = null, onDismiss: () -> Unit) {
+    var facts by remember { mutableStateOf(initialFacts) }
+    var status by remember { mutableStateOf(initialStatus) }
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     AlertDialog(
@@ -522,7 +524,7 @@ private fun AnswerViaNeemaDialog(vm: ConversationsViewModel, onDismiss: () -> Un
                 OutlinedTextField(facts, { facts = it }, placeholder = { Text("Team answer… “yes, we make it — KES 3,500, ~5 days”") }, minLines = 2, modifier = Modifier.fillMaxWidth())
                 status?.let {
                     Spacer(Modifier.height(8.dp))
-                    Text(it, fontSize = 13.sp, modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color(0xFFF8FAF6)).border(1.dp, Color(0xFFE8EDE4), RoundedCornerShape(8.dp)).padding(10.dp))
+                    ResultBox(it)
                 }
             }
         },
@@ -541,8 +543,8 @@ private fun AnswerViaNeemaDialog(vm: ConversationsViewModel, onDismiss: () -> Un
 
 /** Send the approved WhatsApp invite template; if that fails, open WhatsApp with a prefilled message. */
 @Composable
-private fun InviteDialog(dash: DashboardViewModel, vm: ConversationsViewModel, conv: Conversation, onDismiss: () -> Unit) {
-    val guess = conv.waId?.filter { it.isDigit() }?.takeIf { it.length in 7..15 }.orEmpty()
+internal fun InviteDialog(dash: DashboardViewModel, vm: ConversationsViewModel, conv: Conversation, onDismiss: () -> Unit) {
+    val guess = phoneDigits(conv).orEmpty()
     var phone by remember { mutableStateOf(guess) }
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()

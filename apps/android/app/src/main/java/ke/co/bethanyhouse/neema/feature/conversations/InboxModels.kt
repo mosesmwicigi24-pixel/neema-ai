@@ -256,6 +256,18 @@ class InboxApi(private val http: NeemaHttp) {
     }
 
     /**
+     * The conversation controls: POST /intercept, /release, /pause, /transfer.
+     * The server answers {ok, mode, …} — not a conversation row — so the body
+     * is not decoded (the web ignores it too); only the status code counts.
+     */
+    suspend fun intercept(id: String) { http.raw("POST", "/admin/conversations/$id/intercept", http.jsonBody(JsonObject(emptyMap()))) }
+    suspend fun release(id: String) { http.raw("POST", "/admin/conversations/$id/release", http.jsonBody(JsonObject(emptyMap()))) }
+    suspend fun pause(id: String) { http.raw("POST", "/admin/conversations/$id/pause", http.jsonBody(JsonObject(emptyMap()))) }
+    suspend fun transfer(id: String, agentId: String) {
+        http.raw("POST", "/admin/conversations/$id/transfer", http.jsonBody(buildJsonObject { put("agent_id", agentId) }))
+    }
+
+    /**
      * POST /reply. The server answers 200 {ok:false, error} when DELIVERY
      * failed (Graph refused, window closed, page token) — surfaced as a throw
      * so a failed send never vanishes silently.
@@ -289,3 +301,22 @@ class InboxApi(private val http: NeemaHttp) {
                 text = item.caption, createdAt = nowIso())
     }
 }
+
+/**
+ * Web-chat visitors (apps/api/app/routers/web_chat.py) are keyed `web_<sha1 hex>`
+ * on the default "whatsapp" channel. The web runs that key through
+ * formatPhone(), which turns the hash's digits into a made-up phone number —
+ * one an agent could dial or message by mistake. Say what they are instead;
+ * everything else (the channel chip, the filters) stays as the web has it.
+ */
+internal fun isWebVisitor(waId: String?): Boolean = waId?.startsWith("web_") == true
+
+internal fun inboxName(c: Conversation): String =
+    if (isWebVisitor(c.waId) && c.name.isNullOrBlank()) "Website visitor" else Fmt.displayName(c.name, c.waId)
+
+internal fun inboxHandle(c: Conversation): String =
+    if (isWebVisitor(c.waId)) "Web chat" else Fmt.formatPhone(c.waId)
+
+/** A real dialable number (7–15 digits) — never a web visitor's hash or a Meta PSID. */
+internal fun phoneDigits(c: Conversation): String? =
+    if (isWebVisitor(c.waId)) null else c.waId?.filter { it.isDigit() }?.takeIf { it.length in 7..15 }

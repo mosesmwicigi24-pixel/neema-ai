@@ -52,6 +52,11 @@ import kotlinx.coroutines.launch
 internal val InboundTint = Color(0xFF699A32)
 internal val InboundTintBg = Color(0xFFF0F9E8)
 
+/** The revealed transcript / analysis text inside an inbound bubble (light or dark page). */
+@Composable
+private fun revealInk(): Color =
+    if (ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.isDark) Color.White.copy(alpha = 0.7f) else Color(0xFF3A5C28).copy(alpha = 0.7f)
+
 /** "Show transcript" / "Show image analysis" pill toggle. */
 @Composable
 internal fun RevealToggle(open: Boolean, showLabel: String, hideLabel: String, inbound: Boolean, onClick: () -> Unit) {
@@ -76,17 +81,19 @@ internal fun RevealToggle(open: Boolean, showLabel: String, hideLabel: String, i
 internal fun MediaFallback(kind: String, messageId: String?, inbound: Boolean, onRecover: (String, (String?) -> Unit) -> Unit, onRecovered: (String) -> Unit) {
     var state by remember(messageId) { mutableStateOf("idle") }
     val label = if (kind == "video") "Video" else "Photo"
+    // An inbound bubble is dark in dark mode: its ink flips to light.
+    val dark = inbound && ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.isDark
     Column(
         Modifier.width(224.dp).clip(RoundedCornerShape(12.dp))
-            .background(if (inbound) Color.Black.copy(alpha = 0.03f) else Color.White.copy(alpha = 0.1f))
-            .border(1.dp, if (inbound) Color.Black.copy(alpha = 0.15f) else Color.White.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+            .background(if (inbound && !dark) Color.Black.copy(alpha = 0.03f) else Color.White.copy(alpha = 0.06f))
+            .border(1.dp, if (inbound && !dark) Color.Black.copy(alpha = 0.15f) else Color.White.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Text("${if (kind == "video") "🎬" else "📷"} $label sent", fontSize = 12.sp, fontWeight = FontWeight.Medium)
         Text(
             if (state == "gone") "Meta no longer has this file — ask the customer to resend." else "Preview link expired.",
-            fontSize = 11.sp, color = if (inbound) Color.Black.copy(alpha = 0.5f) else Color.White.copy(alpha = 0.7f),
+            fontSize = 11.sp, color = if (inbound && !dark) Color.Black.copy(alpha = 0.5f) else Color.White.copy(alpha = 0.7f),
         )
         if (messageId != null && state != "gone") {
             Text(
@@ -130,14 +137,14 @@ internal fun ImageBubble(
             RevealToggle(open, "Show image analysis", "Hide image analysis", inbound) { open = !open }
             if (open) Text(
                 analysis, fontSize = 11.sp, lineHeight = 16.sp, fontStyle = if (inbound) FontStyle.Italic else FontStyle.Normal,
-                color = if (inbound) Color(0xFF3A5C28).copy(alpha = 0.7f) else Color.White.copy(alpha = 0.8f),
+                color = if (inbound) revealInk() else Color.White.copy(alpha = 0.8f),
                 modifier = Modifier.padding(horizontal = 4.dp),
             )
         }
         if (!caption.isNullOrBlank() && !caption.startsWith("[")) {
             Text(
                 caption, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(horizontal = 4.dp),
-                color = if (inbound) Color(0xFF1A2E0F) else Color.White.copy(alpha = 0.9f),
+                color = if (inbound) (if (ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.isDark) ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.text else Color(0xFF1A2E0F)) else Color.White.copy(alpha = 0.9f),
             )
         }
     }
@@ -199,7 +206,8 @@ internal fun AudioBubble(src: String, transcription: String?, cartText: String?,
             delay(250)
         }
     }
-    val fg = if (inbound) Color(0xFF427425) else Color.White
+    val nc = ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors
+    val fg = if (inbound) (if (nc.isDark) nc.textMid else Color(0xFF427425)) else Color.White
     Column(Modifier.widthIn(min = 220.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = {
@@ -236,7 +244,7 @@ internal fun AudioBubble(src: String, transcription: String?, cartText: String?,
             RevealToggle(open, "Show transcript", "Hide transcript", inbound) { open = !open }
             if (open) Text(
                 transcription, fontSize = 11.sp, lineHeight = 16.sp, fontStyle = if (inbound) FontStyle.Italic else FontStyle.Normal,
-                color = if (inbound) Color(0xFF3A5C28).copy(alpha = 0.7f) else Color.White.copy(alpha = 0.8f),
+                color = if (inbound) revealInk() else Color.White.copy(alpha = 0.8f),
                 modifier = Modifier.padding(horizontal = 4.dp),
             )
         }
@@ -253,15 +261,16 @@ internal fun AudioBubble(src: String, transcription: String?, cartText: String?,
 @Composable
 internal fun DocumentTile(url: String, name: String, inbound: Boolean) {
     val uri = LocalUriHandler.current
+    val nc = ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors
     Row(
         Modifier.clip(RoundedCornerShape(12.dp))
-            .background(if (inbound) Color.White else Color.White.copy(alpha = 0.2f))
-            .border(1.dp, if (inbound) Color(0xFFEDF0EA) else Color.White.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+            .background(if (inbound) (if (nc.isDark) nc.bg3 else Color.White) else Color.White.copy(alpha = 0.2f))
+            .border(1.dp, if (inbound) (if (nc.isDark) nc.border else Color(0xFFEDF0EA)) else Color.White.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
             .clickable { runCatching { uri.openUri(url) } }
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        val c = if (inbound) Color(0xFF1C2917) else Color.White
+        val c = if (inbound) nc.text else Color.White
         Icon(Icons.Filled.Description, null, tint = c.copy(alpha = 0.7f), modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(8.dp))
         Text(name, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = c, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 160.dp))
@@ -338,10 +347,11 @@ internal fun CommentContextCard(
             }
         }
     }
+    val dark = inbound && ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.isDark
     Column(
         Modifier.clip(RoundedCornerShape(8.dp))
-            .background(if (inbound) Color(0xFFF0F4EC) else Color.White.copy(alpha = 0.15f))
-            .border(1.dp, if (inbound) Color(0xFFDDE8D5) else Color.White.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+            .background(if (dark) Color(0xFF589B31).copy(alpha = 0.10f) else if (inbound) Color(0xFFF0F4EC) else Color.White.copy(alpha = 0.15f))
+            .border(1.dp, if (dark) ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.border else if (inbound) Color(0xFFDDE8D5) else Color.White.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
             .padding(8.dp),
     ) {
         Text(
@@ -349,7 +359,7 @@ internal fun CommentContextCard(
             color = if (inbound) InboundTint else Color.White.copy(alpha = 0.7f),
         )
         Spacer(Modifier.height(4.dp))
-        Text(title, fontSize = 11.sp, lineHeight = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, color = if (inbound) Color(0xFF3A5C28) else Color.White.copy(alpha = 0.9f))
+        Text(title, fontSize = 11.sp, lineHeight = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, color = if (dark) ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.text else if (inbound) Color(0xFF3A5C28) else Color.White.copy(alpha = 0.9f))
         Spacer(Modifier.height(6.dp))
         if (thumb.isNotEmpty() && thumbOk) {
             Box(

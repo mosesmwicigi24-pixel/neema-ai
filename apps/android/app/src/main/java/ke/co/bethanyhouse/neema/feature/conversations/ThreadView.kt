@@ -44,7 +44,6 @@ import kotlin.math.roundToInt
 
 /** One rendered line of the thread. */
 internal sealed interface TRow { val key: String }
-internal data class TDay(val label: String, override val key: String) : TRow
 internal data class TNewDivider(val n: Int, override val key: String = "new-divider") : TRow
 internal data class TPostHead(val ctx: PostContext, override val key: String) : TRow
 internal data class TEscalated(val msg: ThreadMsg, val reason: String, override val key: String = msg.id) : TRow
@@ -95,7 +94,6 @@ internal fun buildThreadRows(sorted: List<ThreadMsg>, unreadSnap: Int): List<TRo
     flush()
 
     var escalationShown = false
-    var lastDay = ""
     sorted.forEachIndexed { idx, msg ->
         val showDivider = idx == dividerIdx
         val album = albumOf[msg.id]
@@ -122,10 +120,6 @@ internal fun buildThreadRows(sorted: List<ThreadMsg>, unreadSnap: Int): List<TRo
             }
             msg.isNote -> TNote(msg)
             else -> TBubble(msg, album?.second)
-        }
-        if (row != null) {
-            val day = Fmt.dayLabel(msg.createdAt)
-            if (day.isNotEmpty() && day != lastDay) { rows += TDay(day, "day-$day-${msg.id}"); lastDay = day }
         }
         if (showDivider && unreadSnap > 0) rows += TNewDivider(unreadSnap)
         if (row is TBubble) postHeadFor[msg.id]?.let { rows += TPostHead(it, "post-${msg.id}") }
@@ -209,12 +203,6 @@ internal fun ThreadMessages(
 @Composable
 private fun ThreadRowView(row: TRow, channel: String?, recovered: Map<String, String>, brokenVideos: Set<String>, cb: ThreadCallbacks) {
     when (row) {
-        is TDay -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            Text(
-                row.label, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Neema.colors.muted,
-                modifier = Modifier.clip(RoundedCornerShape(50)).background(Neema.colors.bg2).padding(horizontal = 10.dp, vertical = 3.dp),
-            )
-        }
         is TNewDivider -> DividerPill(
             "${row.n} new ${if (row.n == 1) "message" else "messages"}",
             line = Color(0xFF427425).copy(alpha = 0.3f), bg = Color(0xFFE6F3D8), fg = Color(0xFF427425),
@@ -327,7 +315,7 @@ private fun MessageBubble(msg: ThreadMsg, album: List<ThreadMsg>?, channel: Stri
                 Modifier.offset { IntOffset(drag.roundToInt(), 0) }
                     .fillMaxWidth(if (isMedia) 0.72f else 0.8f).wrapContentWidth(if (inbound) Alignment.Start else Alignment.End)
                     .clip(shape).background(bg)
-                    .then(if (inbound) Modifier.border(1.dp, if (c.isDark) c.border else Color(0xFFEDF0EA), shape) else Modifier)
+                    .then(if (inbound || (c.isDark && msg.sender == "ai")) Modifier.border(1.dp, if (c.isDark) c.border else Color(0xFFEDF0EA), shape) else Modifier)
                     .padding(if (isMedia) PaddingValues(6.dp) else PaddingValues(horizontal = 14.dp, vertical = 9.dp)),
             ) {
                 if (!inbound) {
@@ -355,7 +343,7 @@ private fun MessageBubble(msg: ThreadMsg, album: List<ThreadMsg>?, channel: Stri
                 ) {
                     if (msg.id.startsWith("optimistic-")) Icon(Icons.Filled.Schedule, "Sending", Modifier.size(10.dp), tint = fg.copy(alpha = 0.6f))
                     Text(
-                        msg.createdAt?.let { "${Fmt.time(it)} · ${Fmt.timeAgo(it)}" } ?: "", fontSize = 10.sp,
+                        msg.createdAt?.let { Fmt.timeAgo(it) } ?: "", fontSize = 10.sp,
                         color = if (inbound) Color(0xFFB5C9A8) else fg.copy(alpha = 0.6f),
                     )
                     // Reply to this message — a threaded quote (native on WhatsApp).
@@ -381,7 +369,7 @@ private fun QuoteStrip(q: QuotedRef, inbound: Boolean, fg: Color) {
     }
     Row(
         Modifier.padding(bottom = 6.dp).clip(RoundedCornerShape(3.dp))
-            .background(if (inbound) Color(0xFFF2F7EE) else Color.White.copy(alpha = 0.14f))
+            .background(if (inbound) (if (Neema.colors.isDark) Color(0xFF589B31).copy(alpha = 0.16f) else Color(0xFFF2F7EE)) else Color.White.copy(alpha = 0.14f))
             .border(width = 0.dp, color = Color.Transparent),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -404,11 +392,11 @@ private fun BubbleBody(
 ) {
     val cctx = msg.commentContext
     val raw = msg.body
-    val link = if (inbound) Color(0xFF2563EB) else if (msg.sender == "ai") Color(0xFF93C5FD) else Color(0xFF064E3B)
+    val link = if (inbound) (if (Neema.colors.isDark) Color(0xFF93C5FD) else Color(0xFF2563EB)) else if (msg.sender == "ai") Color(0xFF93C5FD) else Color(0xFF064E3B)
     // Our public reply to a comment: threaded (↳ indented) under the comment.
     if (cctx?.replyTo != null) {
-        Row(Modifier.border(width = 0.dp, color = Color.Transparent)) {
-            Box(Modifier.width(2.dp).heightIn(min = 16.dp).background(Color(0xFFFCD34D).copy(alpha = 0.6f)))
+        Row(Modifier.height(IntrinsicSize.Min)) {
+            Box(Modifier.width(2.dp).fillMaxHeight().background(Color(0xFFFCD34D).copy(alpha = 0.6f)))
             Text("↳ ", color = Color(0xFFFBBF24), modifier = Modifier.padding(start = 6.dp))
             Text(formatWa(raw, link), fontSize = 13.sp, lineHeight = 19.sp)
         }
@@ -474,17 +462,15 @@ private fun BubbleBody(
 
 // ═══════════════════════════ Header ═══════════════════════════
 
-/** Who may do what in the open thread — the web's role rules plus per-permission gates. */
+/**
+ * Who may do what in the open thread — exactly the web's rules
+ * (ConversationsView.tsx): admin/superuser, or the "agent" role, handles
+ * conversations; ownership decides the rest per thread.
+ */
 data class InboxPerms(
     val me: String?,
     val isAdminOrSuper: Boolean,
     val canHandle: Boolean,
-    val canTransfer: Boolean,
-    val canNote: Boolean,
-    val canClear: Boolean,
-    val canClose: Boolean,
-    val canRelease: Boolean,
-    val canReply: Boolean,
 )
 
 internal data class HeaderAction(
@@ -515,7 +501,7 @@ internal fun ThreadHeader(
     modifier: Modifier = Modifier,
 ) {
     val c = Neema.colors
-    val name = Fmt.displayName(conv.name, conv.waId)
+    val name = inboxName(conv)
     Column(Modifier.fillMaxWidth().background(c.bg2).then(modifier).padding(horizontal = 8.dp, vertical = 8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (showBack) IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = c.muted) }
@@ -523,12 +509,8 @@ internal fun ThreadHeader(
             Avatar(name, conv.avatarUrl, size = 34.dp)
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                Text(name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(Fmt.formatPhone(conv.waId), fontSize = 12.sp, color = Color(0xFFB5C9A8), fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            if (!wide) {
-                // Phone: the one state-changing action stays one tap away.
-                actions.firstOrNull { it.primary }?.let { a -> HeaderButton(a, convBusy, compact = true) }
+                Text(name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(inboxHandle(conv), fontSize = 12.sp, color = Color(0xFFB5C9A8), fontFamily = if (isWebVisitor(conv.waId)) null else FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             if (canCall) IconButton(onClick = onCall) { Icon(Icons.Filled.Call, "Call on WhatsApp", tint = Color(0xFF25D366)) }
             if (onProfile != null) IconButton(onClick = onProfile) { Icon(Icons.Filled.Person, "View customer profile", tint = Color(0xFF427425)) }
@@ -543,7 +525,8 @@ internal fun ThreadHeader(
                 }
             }
         }
-        FlowRowCompat(Modifier.padding(start = 8.dp, top = 6.dp)) {
+        Row(Modifier.padding(start = 8.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        FlowRowCompat(Modifier.weight(1f)) {
             InterceptBadge(conv.interceptMode)
             if (conv.assignedAgentId != null && conv.assignedAgentName != null) {
                 Text("→ ${conv.assignedAgentName}", fontSize = 12.sp, color = Color(0xFFB5C9A8))
@@ -567,6 +550,9 @@ internal fun ThreadHeader(
                 )
             }
             if (wide) actions.forEach { HeaderButton(it, convBusy, compact = false) }
+        }
+        // Phone: the one state-changing action stays one tap away, beside the badges.
+        if (!wide) actions.firstOrNull { it.primary }?.let { a -> Spacer(Modifier.width(8.dp)); HeaderButton(a, convBusy, compact = true) }
         }
     }
 }

@@ -271,7 +271,7 @@ private fun AttachButton(vm: ConversationsViewModel) {
     val camPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> if (granted) launchCamera() }
     Box {
         Box(
-            Modifier.size(48.dp).clip(RoundedCornerShape(16.dp)).background(Color(0xFFF1F3F5)).clickable { menu = true },
+            Modifier.size(48.dp).clip(RoundedCornerShape(16.dp)).background(if (ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.isDark) ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.bg3 else Color(0xFFF1F3F5)).clickable { menu = true },
             contentAlignment = Alignment.Center,
         ) { Icon(Icons.Filled.AttachFile, "Attach images or files (up to 5 MB each for images)", tint = Color(0xFF64748B), modifier = Modifier.size(18.dp)) }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
