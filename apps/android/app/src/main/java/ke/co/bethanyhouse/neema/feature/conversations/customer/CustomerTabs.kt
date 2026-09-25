@@ -48,6 +48,9 @@ class PanelCtx(
     val isAdmin: Boolean,
 ) {
     val orderCount: Int get() = profile.totalOrders.takeIf { it > 0 } ?: orders.size
+
+    /** The profile's stage matched to the pipeline's own spelling (see [canonicalStage]). */
+    val stage: String = canonicalStage(profile.leadStage, customStages)
 }
 
 
@@ -76,7 +79,7 @@ fun ProfileTab(
 
     CrmSection("Contact Details") {
         p.leadSource?.takeIf { it.isNotEmpty() }?.let { src ->
-            val meta = SOURCE_META[src]
+            val meta = sourceMeta(src)
             val icon = (meta ?: SOURCE_META.getValue("other")).second
             // The web draws this row apart from the others: 13px, spread edge to edge, no rule under it.
             Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -138,7 +141,7 @@ private fun PipelineSection(vm: CustomerViewModel, ctx: PanelCtx) {
                 )
             }
         }
-        PipelineStepper(stages, forward, p.leadStage, ctx.canEdit) { vm.setStage(it) }
+        PipelineStepper(stages, forward, ctx.stage, ctx.canEdit) { vm.setStage(it) }
         Spacer(Modifier.height(4.dp))
         // Operator-added stage labels — global, admin-saved (the server refuses others).
         if (!ctx.isAdmin) return@CrmSection
@@ -462,7 +465,8 @@ fun InsightsTab(ctx: PanelCtx) {
         )
         KvRow(
             "Last order",
-            ctx.lastOrder?.let { Fmt.timeAgo(it.createdAt) } ?: p.lastOrderAt?.let { Fmt.timeAgo(it) } ?: "—",
+            ctx.lastOrder?.createdIso?.takeIf { Fmt.millis(it) != null }?.let { Fmt.timeAgo(it) }
+                ?: p.lastOrderAt?.let { Fmt.timeAgo(it) } ?: "—",
         )
         KvRow("Customer since", p.firstSeenAt?.let { Fmt.date(it) } ?: "—")
     }
@@ -471,7 +475,9 @@ fun InsightsTab(ctx: PanelCtx) {
         CrmSection("Buying Rhythm") {
             KvRow("Buys", r.cadenceLabel?.ifEmpty { null } ?: "—")
             KvRow("Avg gap between orders", r.avgIntervalDays?.takeIf { it != 0.0 }?.let { "${Fmt.number(it)} days" } ?: "—")
-            KvRow("Since last order", r.daysSinceLast?.let { "$it days" } ?: "—")
+            // crm.py `_buying_rhythm` floors (now − last order).days; a hub order stamped in local
+            // time but read as UTC lands a few hours in the future and comes back as -1.
+            KvRow("Since last order", r.daysSinceLast?.let { "${maxOf(0, it)} days" } ?: "—")
             if (r.overdue) {
                 Text(
                     "⏰ Overdue — it's been longer than their usual gap. A good moment to check in.",
@@ -569,9 +575,9 @@ fun ActivityTab(ctx: PanelCtx) {
                             Text(o.status ?: "—", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = sc,
                                 modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(sc.dim(0.1f)).padding(horizontal = 6.dp, vertical = 2.dp))
                             Spacer(Modifier.weight(1f))
-                            Text(Fmt.timeAgo(o.createdAt), fontSize = 10.sp, color = c.muted)
+                            Text(Fmt.timeAgo(o.createdIso), fontSize = 10.sp, color = c.muted)
                         }
-                        Text(Fmt.currency(o.total ?: o.subtotal ?: 0.0), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.text)
+                        Text(Fmt.currency(o.total ?: o.subtotal ?: 0.0, o.displayCurrency), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.text)
                         Text(
                             o.items.joinToString(", ") { it.name }.ifEmpty { "—" },
                             fontSize = 10.sp, color = c.textMid, maxLines = 1, overflow = TextOverflow.Ellipsis,

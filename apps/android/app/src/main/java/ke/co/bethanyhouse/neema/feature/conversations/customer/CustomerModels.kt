@@ -2,8 +2,14 @@ package ke.co.bethanyhouse.neema.feature.conversations.customer
 
 import ke.co.bethanyhouse.neema.core.net.NeemaHttp
 import ke.co.bethanyhouse.neema.feature.conversations.isWebVisitor
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -26,12 +32,34 @@ data class CustomerChannel(
     @SerialName("conversation_count") val conversationCount: Int = 0,
 )
 
+/**
+ * A number the hub passes through untouched (`hub_client._map_hub_order` copies
+ * an item's `quantity` exactly as the hub sent it): a JSON number, a numeric
+ * string ("2", "2.00" — Laravel decimals) or something else entirely. Anything
+ * that is not a number reads as null, so one odd line never sinks the profile.
+ */
+internal object LenientDoubleSerializer : KSerializer<Double?> {
+    override val descriptor = PrimitiveSerialDescriptor("LenientDouble", PrimitiveKind.DOUBLE)
+    override fun deserialize(decoder: Decoder): Double? {
+        val el = (decoder as? JsonDecoder)?.decodeJsonElement() ?: return decoder.decodeDouble()
+        return (el as? JsonPrimitive)?.contentOrNull?.trim()?.toDoubleOrNull()
+    }
+    override fun serialize(encoder: Encoder, value: Double?) {
+        if (value == null) encoder.encodeNull() else encoder.encodeDouble(value)
+    }
+}
+
+/**
+ * An order line. Hub lines (`_map_hub_order`) carry name / qty / quantity /
+ * unit_price / total; a local WhatsApp order's lines are the agent's cart
+ * items (agent/tools.py: name, sku, qty, unit_price, …) with no `total`.
+ */
 @Serializable
 data class PanelOrderItem(
     val name: String = "",
-    val qty: Double? = null,
-    val quantity: Double? = null,
-    val total: Double? = null,
+    @Serializable(with = LenientDoubleSerializer::class) val qty: Double? = null,
+    @Serializable(with = LenientDoubleSerializer::class) val quantity: Double? = null,
+    @Serializable(with = LenientDoubleSerializer::class) val total: Double? = null,
 )
 
 /** An order as the panel renders it: hub-sourced (POS, web AND WhatsApp) or a local WhatsApp order_event. */
@@ -51,6 +79,63 @@ data class PanelOrder(
 ) {
     /** `o.total || o.subtotal` — the web treats 0 as missing. */
     val amount: Double get() = total?.takeIf { it != 0.0 } ?: subtotal ?: 0.0
+
+    /** A hub order's `created_at` is the hub's own string, passed through raw — normalised for parsing. */
+    val createdIso: String? get() = isoOf(createdAt)
+
+    /**
+     * The currency this order's amount is in. A hub order's total and
+     * currency_code come from the same hub record, so a USD or ZMW order reads
+     * as such (the web prints "KES" on everything). A local order's subtotal is
+     * the cart's KES total while its `currency` is the hub's, so it stays KES.
+     */
+    val displayCurrency: String
+        get() = currencyCode?.trim()?.uppercase()?.takeIf { source == "hub" && it.length == 3 } ?: "KES"
+}
+
+private val SQL_STYLE_TIMESTAMP = Regex("^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}")
+
+/**
+ * The hub's timestamps pass through `_map_hub_order` untouched, so besides
+ * ISO-8601 ("…T…Z", "…+03:00") a SQL-style "2026-09-20 08:15:30" can arrive,
+ * which java.time refuses. The space becomes a "T" (a naive time is UTC, as
+ * crm.py `_parse_dt` assumes); anything else is left exactly as it came.
+ */
+internal fun isoOf(raw: String?): String? {
+    val s = raw?.trim()?.ifEmpty { null } ?: return null
+    return if (SQL_STYLE_TIMESTAMP.containsMatchIn(s)) s.substring(0, 10) + "T" + s.substring(11).replace(" ", "") else s
+}
+
+private val CANONICAL_STAGES = setOf("new", "contacted", "qualified", "proposal", "negotiation", "won", "lost")
+
+/**
+ * The profile's stage as the pipeline knows it. crm.py `normalise_stage`
+ * LOWER-CASES whatever is stored, so a customer moved to the custom stage
+ * "Sampling" comes back as "sampling" while GET /settings/pipeline-stages keeps
+ * the label's case. Matched case-insensitively against the custom labels, the
+ * stepper still lights that node, the chip shows the operator's spelling and
+ * Advance Stage moves on from it (the web matches exactly, so after a reload it
+ * lights nothing and Advance sends the customer back to New).
+ */
+internal fun canonicalStage(stage: String?, customs: List<String>): String {
+    val s = stage?.trim().orEmpty().ifEmpty { "new" }
+    val lower = s.lowercase()
+    if (lower == "negotiating") return "negotiation"
+    if (lower in CANONICAL_STAGES) return lower
+    return customs.firstOrNull { it.equals(s, ignoreCase = true) } ?: s
+}
+
+/**
+ * Advance Stage: the next stop on the forward path (custom stages sit between
+ * Negotiating and Won); Lost re-opens at Won. A stage that is no longer on the
+ * path (a custom label an admin since removed) sat where the customs sit, so it
+ * advances from there rather than falling back to New.
+ */
+internal fun nextStage(current: String, customs: List<String>): String {
+    if (current == "lost") return "won"
+    val forward = listOf("new", "contacted", "qualified", "proposal", "negotiation") + customs + "won"
+    val idx = forward.indexOf(current).takeIf { it >= 0 } ?: forward.indexOf("negotiation")
+    return forward[minOf(idx + 1, forward.size - 1)]
 }
 
 @Serializable
@@ -86,7 +171,21 @@ data class LinkedIdentity(
     val confidence: String? = null,
 )
 
-/** GET /admin/customers/{id}?channel= — the full CRM profile. */
+/**
+ * GET /admin/customers/{id}?channel= — the full CRM profile (crm.py get_customer →
+ * `_build_profile`, returned as a plain dict, so no response_model reshapes it).
+ *
+ * The numbers, as the server makes them:
+ *  - lead_score: int 0–100; lead_score_breakdown pts/max: ints (max sums to 120).
+ *  - total_orders: int. total_spent / avg_order_value: the hub's floats (`_f(...) or 0.0`),
+ *    or, with no hub match, a Python sum of floats — `0` (an int) for no orders. Never a
+ *    Decimal string today; lenient decoding reads "1234.50" anyway.
+ *  - buying_rhythm: days_since_last int|null (floored days; -1 when an order is stamped
+ *    in the future), avg_interval_days float (1 dp)|null, cadence_label str|null, overdue bool.
+ *  - orders[]: at most 20, hub-mapped (`hub_client._map_hub_order`) or local
+ *    (`_map_local_order`); always a list, possibly empty — never null from the server.
+ *  - measurements: sent, but the panel (like the web) doesn't show it here.
+ */
 @Serializable
 data class CustomerProfile(
     val id: String = "",

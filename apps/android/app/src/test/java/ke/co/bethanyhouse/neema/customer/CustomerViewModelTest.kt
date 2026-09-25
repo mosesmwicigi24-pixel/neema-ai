@@ -291,9 +291,18 @@ class CustomerViewModelTest {
         vm.saveCustomStages(listOf("measuring", "x"))
         assertEquals("Only an admin can change pipeline stages.", lastToast()!!.message)
         assertEquals(listOf("measuring"), vm.customStages.value)
-        fake.on("PUT", "/admin/settings/pipeline-stages", code = 422, body = """{"detail":"At most 6"}""")
+        // crm.py put_pipeline_stages' own words for the cap are shown as they are…
+        fake.on("PUT", "/admin/settings/pipeline-stages", code = 422, body = """{"detail":"At most 4 custom stages"}""")
+        vm.saveCustomStages(listOf("a", "b", "c", "d", "e"))
+        assertEquals("At most 4 custom stages.", lastToast()!!.message)
+        // …anything else (a pydantic list, a 500) stays generic.
+        fake.on("PUT", "/admin/settings/pipeline-stages", code = 422, body = """{"detail":[{"loc":["body"],"msg":"field required","type":"missing"}]}""")
         vm.saveCustomStages(listOf("a"))
         assertEquals("Couldn't save pipeline stages.", lastToast()!!.message)
+        fake.on("PUT", "/admin/settings/pipeline-stages", code = 500, body = "Internal Server Error")
+        vm.saveCustomStages(listOf("a"))
+        assertEquals("Couldn't save pipeline stages.", lastToast()!!.message)
+        assertEquals(listOf("measuring"), vm.customStages.value)
     }
 
     @Test fun theStageEditorIsShownExactlyToWhomTheServerAdmits() {
@@ -359,8 +368,15 @@ class CustomerViewModelTest {
         vm.toggleMerge(true)
         fake.on("POST", "/admin/customers/[^/]+/merge", code = 404, body = """{"detail":"Secondary customer not found"}""")
         vm.merge("254700000000")
-        assertEquals("Failed to merge profiles", lastToast()!!.message)
+        assertEquals("Failed to merge profiles — no customer found for that phone / wa_id", lastToast()!!.message)
         assertEquals(ToastType.Error, lastToast()!!.type)
+        assertTrue(vm.showMerge.value)
+        fake.on("POST", "/admin/customers/[^/]+/merge", code = 422, body = """{"detail":"Cannot merge a profile into itself"}""")
+        vm.merge(CustomerFixtures.PETER)
+        assertEquals("Failed to merge profiles — that's this same profile", lastToast()!!.message)
+        fake.on("POST", "/admin/customers/[^/]+/merge", code = 500, body = "Internal Server Error")
+        vm.merge("254700000000")
+        assertEquals("Failed to merge profiles", lastToast()!!.message)
         assertTrue(vm.showMerge.value)
     }
 
@@ -379,16 +395,16 @@ class CustomerViewModelTest {
     // ── Made-to-order enquiry ───────────────────────────────────────────────
 
     @Test fun theConversationsEnquiryLoadsAndAThreadWithoutOneShowsNothing() {
-        assertEquals("e1", vm().enquiry.value!!.id)
+        assertEquals(CustomerFixtures.ENQUIRY_ID, vm().enquiry.value!!.id)
         assertTrue(calls("GET", "/admin/production/conversation/c1").isNotEmpty())
         assertNull(vm("c2").enquiry.value)
     }
 
     @Test fun pushingSendsToProductionAndShowsTheHubOrder() {
-        fake.on("POST", "/admin/production/e1/push", body = """{"ok":true,"hub_order_id":88,"hub_order_number":"BH-2001"}""")
+        fake.on("POST", "/admin/production/${CustomerFixtures.ENQUIRY_ID}/push", body = """{"ok":true,"hub_order_id":88,"hub_order_number":"BH-2001"}""")
         val vm = vm()
         vm.pushProduction()
-        assertEquals(1, calls("POST", "/admin/production/e1/push").size)
+        assertEquals(1, calls("POST", "/admin/production/${CustomerFixtures.ENQUIRY_ID}/push").size)
         assertEquals("pushed", vm.enquiry.value!!.status)
         assertEquals("BH-2001", vm.enquiry.value!!.hubOrderNumber)
         assertEquals("Sent to production · BH-2001", lastToast()!!.message)
@@ -403,7 +419,7 @@ class CustomerViewModelTest {
     }
 
     @Test fun aRejectedPushLeavesTheEnquiryNew() {
-        fake.on("POST", "/admin/production/e1/push", code = 502, body = """{"detail":"Hub rejected the order"}""")
+        fake.on("POST", "/admin/production/${CustomerFixtures.ENQUIRY_ID}/push", code = 502, body = """{"detail":"Hub rejected the order"}""")
         val vm = vm()
         vm.pushProduction()
         assertEquals("new", vm.enquiry.value!!.status)
@@ -414,12 +430,12 @@ class CustomerViewModelTest {
     @Test fun dismissIsOptimisticAndRevertsOnFailure() {
         val vm = vm()
         vm.declineProduction()
-        assertEquals(1, calls("POST", "/admin/production/e1/decline").size)
+        assertEquals(1, calls("POST", "/admin/production/${CustomerFixtures.ENQUIRY_ID}/decline").size)
         assertEquals("declined", vm.enquiry.value!!.status)
         assertTrue("a dismiss that worked is silent", toasts.none { it.message.contains("dismiss") })
 
         val vm2 = vm()
-        fake.on("POST", "/admin/production/e1/decline", code = 500, body = "{}")
+        fake.on("POST", "/admin/production/${CustomerFixtures.ENQUIRY_ID}/decline", code = 500, body = "{}")
         vm2.declineProduction()
         assertEquals("new", vm2.enquiry.value!!.status)
         assertEquals("Couldn't dismiss", lastToast()!!.message)
