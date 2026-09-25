@@ -112,6 +112,8 @@ object Fmt {
     fun formatPhone(raw: String?): String {
         if (raw.isNullOrBlank()) return ""
         val cleaned = raw.trim()
+        // Website chat visitors are keyed by a hash ("web_3f9a…"): never read it as a phone.
+        if (cleaned.startsWith("web_")) return "Website visitor"
         val digits = cleaned.filter { it.isDigit() }
         if (digits.isEmpty()) return cleaned
         if (digits.length > 15) return "Messenger ID " + cleaned.removePrefix("+")

@@ -204,6 +204,10 @@ class DashboardViewModel(
 
     fun refetchAgents() { viewModelScope.launch { runCatching { refetchAgentsNow() } } }
     fun refetchOrders() { viewModelScope.launch { runCatching { refetchOrdersNow() } } }
+    /** Refetch orders and return when done (pull-to-refresh spinners). Throws on failure. */
+    suspend fun refreshOrders() = refetchOrdersNow()
+    suspend fun refreshAgents() = refetchAgentsNow()
+    suspend fun refreshCatalog() = refetchCatalogNow()
     fun refetchCatalog() { viewModelScope.launch { runCatching { refetchCatalogNow() } } }
     fun refreshInbox() { _inboxRefresh.tryEmit(Unit) }
 

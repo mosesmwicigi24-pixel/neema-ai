@@ -83,7 +83,10 @@ fun AppFrame(dark: Boolean = false, content: @Composable () -> Unit) {
         androidx.activity.compose.LocalActivityResultRegistryOwner provides TestResults(),
     ) {
         NeemaTheme(dark = dark) {
-            Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) { content() }
+            // The shell's Scaffold sets the content colour; do the same so text renders as on device.
+            CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides MaterialTheme.colorScheme.onBackground) {
+                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) { content() }
+            }
         }
     }
 }

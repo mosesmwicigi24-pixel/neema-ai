@@ -111,7 +111,7 @@ object Fixtures {
     val deals get() = """{"deals":[
       {"id":"d1","conversation_id":"c1","customer":"Fr. Peter Kamau","wa_id":"254712345678","channel":"whatsapp","title":"2× Clergy Shirt (Black 16\")",
        "items":[{"name":"Clergy Shirt","qty":2,"price":3500}],"stage":"proposal","blocking":"Needs delivery date confirmed",
-       "next_action":{"kind":"follow_up","owner":"neema","due_at":"${Instant.now().plus(3, ChronoUnit.HOURS)}","note":"Confirm Nyeri delivery"},"guidance":"Offer free delivery","status":"open","updated_at":"${ago(12)}"},
+       "next_action":{"kind":"follow_up","owner":"ai","due_at":"${Instant.now().plus(3, ChronoUnit.HOURS)}","note":"Confirm Nyeri delivery"},"guidance":"Offer free delivery","status":"open","updated_at":"${ago(12)}"},
       {"id":"d2","conversation_id":"c2","customer":"Rev. Mary Achieng","wa_id":"254722000111","channel":"messenger","title":"Purple cassock",
        "items":[],"stage":"qualified","blocking":null,"next_action":null,"guidance":null,"status":"open","updated_at":"${ago(90)}"},
       {"id":"d3","conversation_id":"c6","customer":"Deacon James Mwangi","wa_id":"254733444555","channel":"whatsapp","title":"Made-to-measure alb",
@@ -144,7 +144,10 @@ object Fixtures {
         f.on("GET", "/admin/catalog/audit", body = """{"currency_gaps":[{"name":"Cassock","category":"Vestments","kes":12500,"usd":110,"usd_expected":96.2,"factor":1.14}],"per_piece":[],"checked":214,"rate":130}""")
         f.on("GET", "/admin/stats", body = stats)
         f.on("GET", "/admin/attribution", body = attribution)
-        f.on("GET", "/admin/conversations", body = conversationPage)
+        // Paged when the caller sends `limit` (the inbox); the bare legacy array otherwise (Reports).
+        f.on("GET", "/admin/conversations") { r, _ ->
+            200 to (if (r.url.queryParameter("limit") != null) conversationPage else "[${conversations.joinToString(",")}]")
+        }
         f.on("GET", "/admin/conversations/summary", body = summary)
         f.on("GET", "/admin/conversations/[^/]+/messages", body = messages)
         f.on("GET", "/admin/conversations/[^/]+/window", body = """{"mode":"open","channel":"whatsapp","last_inbound_at":"${ago(2)}","expires_at":"${Instant.now().plus(1438, ChronoUnit.MINUTES)}"}""")

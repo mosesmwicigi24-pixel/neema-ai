@@ -21,14 +21,35 @@ android {
         buildConfigField("String", "NEEMA_BASE_URL", "\"https://neema.bethanyhouse.co.ke\"")
     }
 
+    signingConfigs {
+        // One development key for every build (committed; not a secret), so a
+        // new APK always installs over the last. CI swaps in the production key
+        // from repository secrets via NEEMA_KEYSTORE et al. — see android.yml.
+        create("neema") {
+            val prod = System.getenv("NEEMA_KEYSTORE")?.takeIf { it.isNotBlank() && file(it).exists() }
+            if (prod != null) {
+                storeFile = file(prod)
+                storePassword = System.getenv("NEEMA_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("NEEMA_KEY_ALIAS")
+                keyPassword = System.getenv("NEEMA_KEY_PASSWORD")
+            } else {
+                storeFile = rootProject.file("keystore/dev.jks")
+                storePassword = "neema-dev"
+                keyAlias = "neema-dev"
+                keyPassword = "neema-dev"
+            }
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("neema")
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // Signed with the debug key unless a release keystore is configured,
-            // so `assembleRelease` always yields an installable APK.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("neema")
         }
     }
     compileOptions {

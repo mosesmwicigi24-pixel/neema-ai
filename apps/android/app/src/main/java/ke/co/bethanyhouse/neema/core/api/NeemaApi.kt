@@ -127,10 +127,12 @@ class NeemaApi(val http: NeemaHttp) {
         suspend fun messages(id: String, before: String? = null, limit: Int? = null): List<Message> =
             http.get("/admin/conversations/$id/messages${query("before" to before, "limit" to limit?.toString())}")
 
-        suspend fun intercept(id: String): Conversation = http.post("/admin/conversations/$id/intercept", JsonObject(emptyMap()))
-        suspend fun release(id: String): Conversation = http.post("/admin/conversations/$id/release", JsonObject(emptyMap()))
-        suspend fun pause(id: String): Conversation = http.post("/admin/conversations/$id/pause", JsonObject(emptyMap()))
-        suspend fun transfer(id: String, agentId: String): Conversation =
+        // These answer small envelopes ({ok, mode} / {ok, transferred_to}), not the
+        // conversation row — decode loosely so a success is never read as a failure.
+        suspend fun intercept(id: String): JsonObject = http.post("/admin/conversations/$id/intercept", JsonObject(emptyMap()))
+        suspend fun release(id: String): JsonObject = http.post("/admin/conversations/$id/release", JsonObject(emptyMap()))
+        suspend fun pause(id: String): JsonObject = http.post("/admin/conversations/$id/pause", JsonObject(emptyMap()))
+        suspend fun transfer(id: String, agentId: String): JsonObject =
             http.post("/admin/conversations/$id/transfer", buildJsonObject { put("agent_id", agentId) })
 
         suspend fun sendReply(
@@ -189,7 +191,7 @@ class NeemaApi(val http: NeemaHttp) {
 
     inner class Agents {
         suspend fun list(): List<Agent> = http.get("/admin/agents")
-        suspend fun create(name: String, email: String, password: String, role: String? = null): Agent =
+        suspend fun create(name: String, email: String, password: String, role: String? = null): JsonObject =
             http.post("/admin/agents", buildJsonObject {
                 put("name", name); put("email", email); put("password", password)
                 if (role != null) put("role", role)
@@ -261,7 +263,7 @@ class NeemaApi(val http: NeemaHttp) {
 
     inner class Profile {
         suspend fun me(): Agent = http.get("/admin/me")
-        suspend fun update(name: String? = null, email: String? = null, password: String? = null): Agent =
+        suspend fun update(name: String? = null, email: String? = null, password: String? = null): JsonObject =
             http.patch("/admin/me", buildJsonObject {
                 if (name != null) put("name", name)
                 if (email != null) put("email", email)
