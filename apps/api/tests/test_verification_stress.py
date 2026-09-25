@@ -49,6 +49,27 @@ def _seen(*keys):
     return [ROWS[k] for k in keys]
 
 
+def _variants(*specs):
+    return [{"sku": f"V{i}", "name": "Straight Collar" if "size" in a else " ".join(a.values()),
+             "attributes": a, "price_kes": k, "price_usd": u, "prices": {"KES": k, "USD": u}}
+            for i, (a, k, u) in enumerate(specs)]
+
+
+COLLAR_DIFF = _row("Straight Collar", 400, 10, "Detachable white clergy collar.",
+                   variants=_variants(({"size": "8 inch"}, 350, 3.5), ({"size": "10 inch"}, 400, 4.0),
+                                      ({"size": "12 inch"}, 450, 4.5), ({"size": "14 inch"}, 500, 5.0),
+                                      ({"size": "17 inch"}, 550, 5.5), ({"size": "19 inch"}, 600, 6.0)))
+COLLAR_FLAT = _row("Straight Collar", 400, 10, "Detachable white clergy collar.",
+                   variants=[{"sku": f"V{i}", "name": "Straight Collar", "attributes": {}, "price_kes": 400,
+                              "price_usd": 10, "prices": {"KES": 400, "USD": 10}} for i in range(6)])
+SHIRT_COLOURS = _row("Straight Collar Shirt", 2500, 30, "Smart straight-collar clergy shirt.",
+                     product_type="variable", is_producible=True,
+                     variants=_variants(({"colour": "White"}, 2500, 30), ({"colour": "Navy"}, 2500, 30),
+                                        ({"colour": "Black"}, 2500, 30)))
+THURIBLE = _row("Thurible", 12000, 120, "Brass thurible.",
+                variants=_variants(({"size": "small"}, 12000, 120), ({"size": "large"}, 15000, 150)))
+
+
 def _tool(name, out):
     return {"tool": name, "input": {}, "out": out}
 
@@ -242,6 +263,27 @@ S = [
     ("photos-swahili", "picha tafadhali", "Siwezi kutuma picha hapa, lakini tray ni KES 22,000.",
      _seen("golden"), [{"tool": "send_product_cards", "input": {"products": ["Golden Communion Tray"]},
                         "out": {"ok": True, "sent_cards": 1, "album_photos": 0}}], [], None, "hard"),
+    # ── variants: sizes and colours priced apart (owner, 2026-09-25) ─────────
+    ("collar-same-price-false", "How much", "The Straight Collar is $10, all sizes the same price. Which size?",
+     [COLLAR_DIFF], [], [], None, "hard"),
+    ("collar-same-price-placeholder", "How much", "The Straight Collar is $10, all sizes the same price. Which size?",
+     [COLLAR_FLAT], [], [], None, "soft"),
+    ("collar-flat-for-varied", "How much", "The Straight Collar is $10. Which size — 8, 10, 12, 14, 17 or 19 inches?",
+     [COLLAR_DIFF], [], [], None, "soft"),
+    ("collar-from", "How much", "The Straight Collar is from $3.50 by size — which size would you like?",
+     [COLLAR_DIFF], [], [], None, "pass"),
+    ("collar-variant-named", "the 10 inch", "The 10-inch Straight Collar is $4. How many?", [COLLAR_DIFF], [], [], None, "pass"),
+    ("collar-variant-asked", "how much is the 8 inch collar?", "It's $3.50 — how many?", [COLLAR_DIFF], [], [], None, "pass"),
+    ("collar-wrong-variant-price", "the 10 inch", "The 10-inch Straight Collar is $10.", [COLLAR_DIFF], [], [], None, "hard"),
+    ("shirt-colours-flat", "how much is the straight collar shirt", "The Straight Collar Shirt is $30 — which colour would you like?",
+     [SHIRT_COLOURS], [], [], None, "pass"),
+    ("shirt-colours-claim", "how much", "The Straight Collar Shirt is $30, the same price regardless of colour.",
+     [SHIRT_COLOURS], [], [], None, "soft"),
+    ("thurible-range", "thurible?", "The Thurible is from KES 12,000 for the small to KES 15,000 for the large — which size?",
+     [THURIBLE], [], [], None, "pass"),
+    ("thurible-flat", "thurible?", "The Thurible is KES 12,000.", [THURIBLE], [], [], None, "soft"),
+    ("thurible-large", "the large one", "The large Thurible is KES 15,000.", [THURIBLE], [], [], None, "pass"),
+    ("swahili-same-price", "bei", "Kola ni $10, bei moja kwa saizi zote.", [COLLAR_DIFF], [], [], None, "hard"),
     # ── SOFT only (asks for a rewrite, never holds) ──────────────────────────
     ("two-ccy", "how much", "The Silver Communion Tray is $180 (KES 18,000).", _seen("silver"), [], [], None, "soft"),
     ("where-unanswered", "Do you have shops in South Africa?", "The Golden Communion Tray is $220. How many?",
@@ -464,6 +506,60 @@ def test_the_writer_is_told_it_can_send_photos():
     src = inspect.getsource(tools._send_product_cards)
     assert "NEVER say you can't send photos: you can" in src
     assert "Rich cards aren't available here" not in src
+
+
+def test_the_search_tool_never_implies_one_price_for_every_size(monkeypatch):
+    from app.agent import tools
+    from app.services import n8n_bridge as svc
+    from app.services import promotions as promo
+
+    async def items(db, redis):
+        return [COLLAR_DIFF, COLLAR_FLAT, THURIBLE]
+
+    async def none(redis):
+        return None
+    monkeypatch.setattr(svc, "catalog_items", items)
+    monkeypatch.setattr(promo, "campaign_now", none)
+    ctx = tools.ToolContext(db=None, redis=None, wa_id="x", channel="messenger", currency="USD", read_only=True)
+    out = asyncio.run(tools._search_catalog({"query": "straight collar"}, ctx))
+    rows = {r["name"]: r for r in out["results"]}
+    diff = [r for r in out["results"] if r.get("price_range")][0]
+    assert diff["price_range"] == {"from": 3.5, "to": 6.0}
+    assert "from $3.50 by size/colour" in diff["variant_note"] and "NEVER one flat price" in diff["variant_note"]
+    assert len(diff["variants"]) == 6 and diff["variants"][0]["options"] == {"size": "8 inch"}
+    flat = [r for r in out["results"] if not r.get("price_range") and r["name"] == "Straight Collar"][0]
+    assert len(flat["variants"]) == 1                      # six identical rows collapse to one
+    assert "NEVER say 'all sizes / colours are the same price'" in flat["variant_note"]
+    assert "Thurible" not in rows
+
+
+def test_the_verifier_reads_variants():
+    assert rv.variant_prices_differ(COLLAR_DIFF) and not rv.variant_prices_differ(COLLAR_FLAT)
+    assert not rv.variant_prices_differ(SHIRT_COLOURS)
+    assert rv._variant_words(COLLAR_DIFF) >= {"8", "10", "inch"}
+    f = rv.variant_issues("how much", "The Straight Collar is $10, all sizes the same price.", COLLAR_DIFF)
+    assert f and f[0]["hard"] and "they are NOT" in f[0]["text"]
+    f = rv.variant_issues("how much", "The Straight Collar is $10, all sizes the same price.", COLLAR_FLAT)
+    assert f and not f[0]["hard"] and "never say that" in f[0]["text"]
+    assert rv.variant_issues("how much", "From $3.50 by size — which size?", COLLAR_DIFF) == []
+    assert rv.variant_issues("how much", "The Straight Collar is $10.", COLLAR_FLAT) == []
+    assert rv.variant_issues("how much", "It's $30 — which colour?", SHIRT_COLOURS) == []
+
+
+def test_the_canned_comment_line_prices_a_varied_product_from_its_cheapest_size():
+    assert rt._variant_floor(COLLAR_DIFF) == (350, 3.5)
+    assert rt._variant_floor(COLLAR_FLAT) is None and rt._variant_floor(SHIRT_COLOURS) is None
+    assert rt._variant_floor(_seen("golden")[0]) is None
+    src = inspect.getsource(rt._run_comment_engage)
+    assert "_vfloor = _variant_floor(matched)" in src and "or _vfloor is not None):" in src
+
+
+def test_the_writer_is_told_the_short_shape():
+    from app.agent.prompt import build_system_prompt
+    p = " ".join(build_system_prompt(currency="USD").split())
+    assert '"from $3.50 by size — which size would you like?"' in p
+    assert 'NEVER say "all sizes are the same price"' in p
+    assert "a hub row that shows one figure for every variant is a placeholder, not a fact" in p
 
 
 def test_every_channel_shares_one_policy():

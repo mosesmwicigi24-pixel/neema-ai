@@ -177,7 +177,7 @@ def test_the_reviewer_treats_ordinary_promises_as_promises(monkeypatch):
 
 
 def test_hard_and_soft_are_named_in_one_place():
-    assert rv.HARD_KINDS == ("figure", "item", "link", "status", "photos")
+    assert rv.HARD_KINDS == ("figure", "item", "link", "status", "photos", "variants")
     f = rv.rule_findings("gold trays", "The Silver Communion Tray is $180 (KES 18,000).",
                          [{"name": "Silver Communion Tray", "price": 18000, "price_usd": 180}])
     kinds = {x["kind"]: x["hard"] for x in f}

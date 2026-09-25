@@ -765,13 +765,20 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
         # price range when they haven't chosen yet — instead of one flat number.
         variants = p.get("variants") or []
         if variants:
-            row["variants"] = [
-                {"options": v.get("attributes") or v.get("name"),
-                 "sku": v.get("sku"),
-                 "price": _to_display(v.get("price_kes"), ctx, v.get("price_usd"),
-                                      prices=v.get("prices"))}
-                for v in variants
-            ]
+            # One line per DISTINCT variant (the hub can repeat a variant six
+            # times under one label — six "Straight Collar" rows at one price
+            # said nothing about the six sizes).
+            _vseen: set = set()
+            row["variants"] = []
+            for v in variants:
+                _opts = v.get("attributes") or v.get("name")
+                _vp = _to_display(v.get("price_kes"), ctx, v.get("price_usd"),
+                                  prices=v.get("prices"))
+                _key = (json.dumps(_opts, sort_keys=True, default=str), _vp)
+                if _key in _vseen:
+                    continue
+                _vseen.add(_key)
+                row["variants"].append({"options": _opts, "sku": v.get("sku"), "price": _vp})
             # A size L cassock is in the offer exactly as much as the size S.
             # Each variant carries its own held figure; `price` stays list here
             # too, for the same reason it does above.
@@ -786,6 +793,21 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
                 row["price_range"] = {"from": min(prices), "to": max(prices)}
                 row["price_note"] = ("price depends on the variant — quote the one the "
                                      "customer picks, or give the range and ask")
+                row["variant_note"] = (
+                    "ONE short line before they choose: "
+                    f"'from {_fmt_price(min(prices), ctx.currency)} by size/colour — which "
+                    "would you like?'; after they choose, that variant's own price. NEVER "
+                    "one flat price for all of them.")
+            elif prices:
+                # Every variant carries ONE figure in the hub. That may be a
+                # placeholder (owner, 2026-09-25: the collar's six sizes were all
+                # $10 in the hub while the 8-inch is $3.50 and the 10-inch $4) —
+                # so the price is said once, for the variant they choose, and the
+                # sentence "all sizes are the same price" is never spoken.
+                row["variant_note"] = (
+                    "the hub shows one figure for every variant: ask which size/colour "
+                    "they want, then quote that variant. NEVER say 'all sizes / colours "
+                    "are the same price' — quote the price once, for their choice.")
         # ASK ONLY WHAT THE HUB CANNOT ANSWER (owner, 2026-09-15): the row says
         # which questions the order still needs, so a stock tray is never asked
         # its colour and a made-to-order cassock always is.

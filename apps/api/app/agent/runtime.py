@@ -4308,6 +4308,11 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # USD otherwise — and a per-piece good says "each". Looked up only when a
     # canned line is actually going out; the model path resolved it already.
     _usd, _kes = matched.get("price_usd"), matched.get("price_kes") or matched.get("price")
+    # A product whose sizes / colours are priced apart is quoted "from" its
+    # cheapest variant (owner, 2026-09-25) — never one flat price.
+    _vfloor = _variant_floor(matched)
+    if _vfloor is not None:
+        _kes, _usd = _vfloor
     _ccy = "USD"
     if not answer and product_name and (_kes or _usd):
         try:
@@ -4316,7 +4321,8 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
         except Exception:
             _ccy = "USD"
     price_text = _public_price_text(_kes, _usd, _ccy)
-    if price_text and (matched.get("price_from") or _known_product.get("price_from")):
+    if price_text and (matched.get("price_from") or _known_product.get("price_from")
+                       or _vfloor is not None):
         price_text = "from " + price_text        # one item in several sizes
     from app.services.price_audit import looks_per_piece as _per_piece
     per_piece = bool(matched) and _per_piece(matched)
@@ -4380,6 +4386,18 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
 
     _log.info("comment %s engaged: agent=%s free_ask=%s dm=%s held=%s",
               cid, not skip_model, free_ask, dm_sent, bool(held_issues))
+
+
+def _variant_floor(row: dict | None) -> tuple | None:
+    """(KES, USD) of the cheapest variant when a row's variants are priced
+    apart; None when they are not (or there are none)."""
+    from app.agent.review import variant_prices_differ, variants_of
+    if not row or not variants_of(row) or not variant_prices_differ(row):
+        return None
+    vs = variants_of(row)
+    kes = [k for _l, k, _u in vs if k]
+    usd = [u for _l, _k, u in vs if u]
+    return (min(kes) if kes else None, min(usd) if usd else None)
 
 
 def _public_price_text(kes, usd, currency: str = "USD") -> str:
