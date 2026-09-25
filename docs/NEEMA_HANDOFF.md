@@ -164,7 +164,10 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   variant apart. The public card shows each distinct (label, price) once;
   rows the hub still leaves identical at different prices are a range to
   the verifier (soft), never a hard hold — the fix is in the hub: give those
-  rows a Size attribute. The hub client stamps `label` on every variant as it loads
+  rows a Size attribute. A cached copy of the catalogue (ten minutes; the
+  seven-day last-good mirror) is re-labelled as it is read
+  (`hub_client._relabelled`), so a label rule shows the moment it deploys,
+  not when the cache expires. The hub client stamps `label` on every variant as it loads
   them (`label_variants`); the agent's search rows carry `label` first; the
   public catalogue card shows it; a cart line resolves by it ("Straight
   Collar — 10 inch", with or without the dash, or by SKU) and names the line
