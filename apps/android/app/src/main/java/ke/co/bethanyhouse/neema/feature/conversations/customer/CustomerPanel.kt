@@ -66,17 +66,20 @@ fun CustomerPanel(
     hideHeader: Boolean = false,
 ) {
     val c = Neema.colors
-    // Re-read permissions when /me lands (can() reads plain values).
     val me by dash.me.collectAsState()
     val agents by dash.agents.collectAsState()
+    val session by dash.session.collectAsState()
     // Web parity (owner's call): CustomerSidebar is open to every signed-in
     // agent and the CRM routes only check login. Only the stage editor stays
-    // admin-only, which the server enforces too.
-    val isAdmin = remember(me, agents) { dash.isAdmin }
+    // admin-only — shown exactly to whom PUT /settings/pipeline-stages admits
+    // (superuser or the admin role), so nobody gets an editor that 403s.
+    val isAdmin = remember(me, agents, session) { canEditPipelineStages(dash) }
 
     Column(modifier.fillMaxSize().background(c.bg2)) {
         if (!hideHeader) PanelHeader(onClose)
         val vm: CustomerViewModel = viewModel(key = "customer:${conversation.id}") { CustomerViewModel(dash, conversation) }
+        // The web reloads the profile when the thread's row changes (new message, rename).
+        LaunchedEffect(vm, conversation) { vm.sync(conversation) }
         PanelBody(
             vm = vm, dash = dash, conversation = conversation,
             canEdit = true,
@@ -87,6 +90,13 @@ fun CustomerPanel(
             onNameChange = onNameChange,
         )
     }
+}
+
+/** The server's rule for PUT /admin/settings/pipeline-stages (crm.py): superuser or role admin. */
+internal fun canEditPipelineStages(dash: DashboardViewModel): Boolean {
+    val s = dash.session.value
+    val a = dash.currentAgent ?: dash.me.value
+    return s?.isSuperuser == true || s?.role == "admin" || a?.isSuperuser == true || a?.role == "admin"
 }
 
 @Composable
@@ -143,25 +153,38 @@ private fun ColumnScope.PanelBody(
     val lastOrder = orders.maxByOrNull { Fmt.millis(it.createdAt) ?: 0L }
     val ctx = PanelCtx(p, orders, totalSpent, lastOrder, customStages, canEdit, canReply, isAdmin)
 
-    PullToRefreshBox(isRefreshing = refreshing, onRefresh = { vm.load(showSpinner = false) }, modifier = Modifier.weight(1f)) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-            Hero(vm, ctx, saving, conversation, onOpenIdentity)
-            HorizontalDivider(color = c.hairline)
-            QuickStats(ctx)
-            HorizontalDivider(color = c.hairline)
-            Tabs(tab) { vm.tab.value = it }
-            Column(Modifier.fillMaxWidth().background(c.surface).padding(16.dp)) {
-                when (tab) {
-                    CustomerTab.Profile -> ProfileTab(vm, ctx, onNameChange, onOpenIdentity)
-                    CustomerTab.Insights -> InsightsTab(ctx)
-                    CustomerTab.Activity -> ActivityTab(ctx)
+    // The web pins the made-to-order card and Quick Actions under the scroll. On a
+    // short pane (a landscape tablet, a small sheet) that pair would leave almost no
+    // room to scroll, so there the card rides at the top of the scroll instead.
+    BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+        val pinEnquiry = maxHeight >= PIN_ENQUIRY_MIN_HEIGHT
+        Column(Modifier.fillMaxSize()) {
+            PullToRefreshBox(isRefreshing = refreshing, onRefresh = { vm.load(showSpinner = false) }, modifier = Modifier.weight(1f)) {
+                // The tab body's surface runs to the bottom even when a tab is short, as on the web.
+                Column(Modifier.fillMaxSize().background(c.surface).verticalScroll(rememberScrollState())) {
+                    Hero(vm, ctx, saving, conversation, onOpenIdentity)
+                    HorizontalDivider(color = c.hairline)
+                    QuickStats(ctx)
+                    HorizontalDivider(color = c.hairline)
+                    if (!pinEnquiry) EnquiryCard(vm, canProduce, inline = true)
+                    Tabs(tab) { vm.tab.value = it }
+                    Column(Modifier.fillMaxWidth().background(c.surface).padding(16.dp)) {
+                        when (tab) {
+                            CustomerTab.Profile -> ProfileTab(vm, ctx, onNameChange, onOpenIdentity)
+                            CustomerTab.Insights -> InsightsTab(ctx)
+                            CustomerTab.Activity -> ActivityTab(ctx)
+                        }
+                    }
                 }
             }
+            if (pinEnquiry) EnquiryCard(vm, canProduce, inline = false)
+            QuickActions(vm, ctx)
         }
     }
-    EnquiryCard(vm, canProduce)
-    QuickActions(vm, ctx)
 }
+
+/** Below this the made-to-order card scrolls with the panel instead of being pinned. */
+private val PIN_ENQUIRY_MIN_HEIGHT = 860.dp
 
 // ── Hero ────────────────────────────────────────────────────────────────────
 
@@ -180,7 +203,7 @@ private fun Hero(
     val phoneDigits = (p.phone ?: "").filter { it.isDigit() }
     val reachable = phoneDigits.length in 7..15
 
-    Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 12.dp)) {
+    Column(Modifier.fillMaxWidth().background(c.bg2).padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 12.dp)) {
         Row(verticalAlignment = Alignment.Top) {
             Avatar(Fmt.displayName(p.name, p.waId), size = 44.dp)
             Spacer(Modifier.width(12.dp))
@@ -213,7 +236,7 @@ private fun Hero(
                     ) {
                         Box(Modifier.size(6.dp).clip(RoundedCornerShape(50)).background(sm.dot))
                         Spacer(Modifier.width(4.dp))
-                        Text(sm.label, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = sm.color)
+                        Text(sm.label, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = sm.color.themed())
                     }
                     p.countryIso?.takeIf { it.isNotEmpty() }?.let { iso ->
                         Hint(p.country ?: iso) {
@@ -248,9 +271,9 @@ private fun Hero(
             FlowRow(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp),
                 itemVerticalAlignment = Alignment.CenterVertically) {
                 Hint(tm?.title) {
-                    val fg = tm?.color ?: c.textMid
+                    val fg = tm?.color?.themed() ?: c.textMid
                     Text(
-                        p.tierLabel ?: tm?.label ?: tier, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = fg,
+                        p.tierLabel?.ifEmpty { null } ?: tm?.label ?: tier, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = fg,
                         modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(fg.dim(0.1f))
                             .border(1.dp, tm?.border ?: c.hairline, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
                     )
@@ -259,7 +282,7 @@ private fun Hero(
                 if (p.buyingRhythm?.overdue == true) {
                     Hint("Past their usual buying gap — a good moment to reach out") {
                         Text(
-                            "⏰ Overdue", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFB45309),
+                            "⏰ Overdue", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFB45309).themed(),
                             modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(Color(0xFFF59E0B).dim(0.1f))
                                 .border(1.dp, Color(0xFFFCD34D), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
                         )
@@ -307,7 +330,7 @@ private fun Hero(
                 }
             }
             if (p.mergedIds.isNotEmpty()) {
-                Text("+${p.mergedIds.size} merged", fontSize = 10.sp, fontWeight = FontWeight.Medium, color = Color(0xFF7C3AED))
+                Text("+${p.mergedIds.size} merged", fontSize = 10.sp, fontWeight = FontWeight.Medium, color = Color(0xFF7C3AED).themed())
             }
         }
 
@@ -348,7 +371,7 @@ private fun Hero(
 private fun QuickStats(ctx: PanelCtx) {
     val c = Neema.colors
     val convs = ctx.profile.channels.sumOf { it.conversationCount }.takeIf { it > 0 } ?: 1
-    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+    Row(Modifier.fillMaxWidth().background(c.bg2).height(IntrinsicSize.Min)) {
         listOf("Orders" to "${ctx.orderCount}", "Spent" to Fmt.currency(ctx.totalSpent), "Convs" to "$convs")
             .forEachIndexed { i, (label, value) ->
                 Column(Modifier.weight(1f).padding(horizontal = 8.dp, vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -363,7 +386,7 @@ private fun QuickStats(ctx: PanelCtx) {
 @Composable
 private fun Tabs(active: CustomerTab, onSelect: (CustomerTab) -> Unit) {
     val c = Neema.colors
-    Row(Modifier.fillMaxWidth()) {
+    Row(Modifier.fillMaxWidth().background(c.bg2)) {
         CustomerTab.entries.forEach { t ->
             val on = t == active
             Column(
@@ -385,13 +408,13 @@ private fun Tabs(active: CustomerTab, onSelect: (CustomerTab) -> Unit) {
 
 /** Made-to-order enquiry (measurement form → hub production). */
 @Composable
-private fun EnquiryCard(vm: CustomerViewModel, canProduce: Boolean) {
+private fun EnquiryCard(vm: CustomerViewModel, canProduce: Boolean, inline: Boolean) {
     val enquiry by vm.enquiry.collectAsState()
     val pushing by vm.pushing.collectAsState()
     val e = enquiry ?: return
     val c = Neema.colors
     val green = if (c.isDark) c.gold2 else Color(0xFF3A5C28)
-    HorizontalDivider(color = c.hairline)
+    if (!inline) HorizontalDivider(color = c.hairline)
     Column(Modifier.fillMaxWidth().background(c.bg2).padding(horizontal = 16.dp, vertical = 12.dp)) {
         Text("🧵 MADE-TO-ORDER REQUEST", fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp, color = c.textMid,
             modifier = Modifier.padding(bottom = 8.dp))
@@ -407,13 +430,13 @@ private fun EnquiryCard(vm: CustomerViewModel, canProduce: Boolean) {
             e.notes?.takeIf { it.isNotEmpty() }?.let { Text("Notes: $it", fontSize = 10.sp, color = green, modifier = Modifier.padding(top = 4.dp)) }
             when (e.status) {
                 "pushed" -> Text("✓ In production" + (e.hubOrderNumber?.let { " · $it" } ?: ""), fontSize = 10.sp,
-                    fontWeight = FontWeight.SemiBold, color = c.gold, modifier = Modifier.padding(top = 8.dp))
+                    fontWeight = FontWeight.SemiBold, color = c.gold2, modifier = Modifier.padding(top = 8.dp))
                 "declined" -> Text("Dismissed", fontSize = 10.sp, color = c.muted, modifier = Modifier.padding(top = 8.dp))
                 else -> if (canProduce) {
                     Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         TintButton(if (pushing) "Sending…" else "→ Push to production", c.gold, { vm.pushProduction() },
                             Modifier.weight(1f), filled = true, enabled = !pushing && e.pushable)
-                        TintButton("Dismiss", c.muted, { vm.declineProduction() })
+                        NeutralButton("Dismiss", { vm.declineProduction() }, textColor = c.textMid)
                     }
                     if (!e.pushable) {
                         Text("No linked hub product — set this order up in the hub manually.", fontSize = 9.sp, color = c.muted,
@@ -423,6 +446,7 @@ private fun EnquiryCard(vm: CustomerViewModel, canProduce: Boolean) {
             }
         }
     }
+    if (inline) HorizontalDivider(color = c.hairline)
 }
 
 @Composable
@@ -435,11 +459,11 @@ private fun QuickActions(vm: CustomerViewModel, ctx: PanelCtx) {
         Text("QUICK ACTIONS", fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp, color = c.textMid,
             modifier = Modifier.padding(bottom = 8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            TintButton("✓ Mark Won", Color(0xFF047857), { vm.setStage("won") }, Modifier.weight(1f))
-            TintButton("✕ Mark Lost", Color(0xFFDC2626), { vm.setStage("lost") }, Modifier.weight(1f))
+            TintButton("✓ Mark Won", Color(0xFF047857).themed(), { vm.setStage("won") }, Modifier.weight(1f))
+            TintButton("✕ Mark Lost", Color(0xFFDC2626).themed(), { vm.setStage("lost") }, Modifier.weight(1f))
         }
         Spacer(Modifier.height(6.dp))
-        TintButton("→ Advance Stage", c.text, {
+        NeutralButton("→ Advance Stage", {
             // Next along the forward path (custom stages included); Lost re-opens at Won, as on the web.
             val forward = listOf("new", "contacted", "qualified", "proposal", "negotiation") + ctx.customStages + "won"
             val idx = forward.indexOf(p.leadStage)
