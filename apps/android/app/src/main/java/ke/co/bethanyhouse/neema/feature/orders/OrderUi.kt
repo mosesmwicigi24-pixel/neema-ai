@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.Icon
 import ke.co.bethanyhouse.neema.core.model.Order
+import ke.co.bethanyhouse.neema.core.model.OrderItem
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
@@ -127,6 +128,30 @@ fun pageWindow(page: Int, totalPages: Int): List<Int> = (0 until minOf(totalPage
         else -> page - 2 + i
     }
 }
+
+/** `i.qty || i.quantity || 1`. */
+val OrderItem.effectiveQty: Double get() = if (qty > 0) qty else 1.0
+
+/**
+ * The line's unit price. The rows the agent writes today (agent/tools.py
+ * `create_order`, from the cart) carry `unit_price` and no `unit`/`total`;
+ * older rows carry `unit` + `total`. The web reads only `unit`, so a current
+ * order's lines print "KES NaN". This takes `unit`, else the line total over
+ * its quantity (the modern `unit_price` needs [OrderItem] to decode it — see
+ * the round-3 report).
+ */
+val OrderItem.effectiveUnit: Double
+    get() = when {
+        unit > 0 -> unit
+        total > 0 -> total / effectiveQty
+        else -> 0.0
+    }
+
+/** Whether the row says what this line costs (a legacy `unit`/`total`). */
+val OrderItem.priceKnown: Boolean get() = unit > 0 || total > 0
+
+/** The line's money: its `total` when the row has one, else unit × qty (the web's formula). */
+val OrderItem.lineTotal: Double get() = if (total > 0) total else effectiveUnit * effectiveQty
 
 /** The order's money: `o.total || o.subtotal`. */
 val Order.amount: Double get() = if (total != 0.0) total else subtotal

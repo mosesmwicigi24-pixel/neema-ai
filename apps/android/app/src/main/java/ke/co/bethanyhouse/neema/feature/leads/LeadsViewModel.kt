@@ -185,6 +185,14 @@ class LeadsViewModel(private val dash: DashboardViewModel) : ViewModel() {
             try {
                 api.update(lead.id, body)
                 dash.toast("Lead updated")
+                // crm.py update_lead stores merge_notes(base, mine, current): the
+                // saved notes are the operator's paragraphs PLUS any the server
+                // appended since the sheet opened (call summaries, merges), and
+                // the reply is only {"ok": true}. Re-read quietly so the board
+                // shows what was actually stored, not just what was typed.
+                if (notes != null) {
+                    try { _leads.value = api.list() } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e }
+                }
             } catch (e: Exception) {
                 dash.toast("Failed to update lead", ToastType.Error)
                 load()

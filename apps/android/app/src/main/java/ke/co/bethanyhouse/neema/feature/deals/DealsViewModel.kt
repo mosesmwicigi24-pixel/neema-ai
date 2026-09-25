@@ -7,6 +7,7 @@ import ke.co.bethanyhouse.neema.app.DashboardViewModel
 import ke.co.bethanyhouse.neema.app.ToastType
 import ke.co.bethanyhouse.neema.core.model.Deal
 import ke.co.bethanyhouse.neema.core.model.PlannedAction
+import ke.co.bethanyhouse.neema.core.net.ApiException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -132,7 +133,19 @@ class DealsViewModel(private val dash: DashboardViewModel) : ViewModel() {
                 dash.toast(if (verb == "approve") "Sent ✓" else "Vetoed")
                 load()
             } catch (e: Exception) {
-                dash.toast("$verb failed", ToastType.Error)
+                // crm.py approve_action answers 409 "Action is sent|vetoed" when the
+                // scheduler (or a colleague) resolved it first, and 404 "Action not
+                // found" / "Conversation gone" when its row or chat is gone. The
+                // web toasts "approve failed" and leaves the stale row up to be
+                // tapped again; here the server's reason is shown and the queue
+                // reloads so the row goes. Anything else keeps the web's toast.
+                val api = e as? ApiException
+                if (api != null && (api.status == 409 || api.status == 404)) {
+                    dash.toast("$verb failed — ${api.detail}", ToastType.Error)
+                    load()
+                } else {
+                    dash.toast("$verb failed", ToastType.Error)
+                }
             } finally {
                 _acting.value = _acting.value - id
             }

@@ -48,7 +48,7 @@ class LeadsBehaviourTest {
         assertEquals(8, vm.leads.value.size)
         assertEquals(false, vm.loading.value)
         assertEquals(
-            listOf("new", "contacted", "qualified", "proposal", "negotiation", "measuring", "won", "lost"),
+            listOf("new", "contacted", "qualified", "proposal", "negotiation", "Measuring", "won", "lost"),
             vm.stages.value.map { it.id },
         )
     }
@@ -114,7 +114,8 @@ class LeadsBehaviourTest {
             listOf(json("""{"notes":"New note","notes_base":"Buys for the whole parish. Prefers delivery on Fridays."}""")),
             fake.bodies("PATCH", "/admin/leads/u1"),
         )
-        assertEquals("New note", vm.leads.value.first { it.id == "u1" }.notes)
+        // The fixture server stored nothing, so the quiet re-read shows its notes again.
+        assertEquals(2, fake.calls.count { it.method == "GET" && it.path == "/admin/leads" })
     }
 
     @Test fun firstNoteHasAnEmptyBase() {

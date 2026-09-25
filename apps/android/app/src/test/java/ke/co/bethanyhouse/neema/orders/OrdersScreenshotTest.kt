@@ -63,6 +63,8 @@ class OrdersScreenshotTest {
 
     @Test fun detailLinked() = detail(SalesFixtures.linkedOrder)
     @Test fun detailLinkedDark() = detail(SalesFixtures.linkedOrder, dark = true)
+    /** An agent-placed order: its lines carry `unit_price` only, so they show their quantity. */
+    @Test fun detailAgentOrder() = detail(SalesFixtures.agentOrder)
     @Test fun detailFailedPush() = detail(SalesFixtures.failedOrder)
     @Test fun detailUpdating() = detail(SalesFixtures.failedOrder, busy = true)
     @Test fun detailReadOnly() = detail(SalesFixtures.failedOrder, canManage = false)
