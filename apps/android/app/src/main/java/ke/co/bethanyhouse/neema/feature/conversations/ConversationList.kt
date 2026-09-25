@@ -20,6 +20,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -89,11 +90,11 @@ internal fun ConversationList(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     if (listUi.selectMode) "${listUi.selected.size} selected" else "Chats",
-                    fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
+                    fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = c.text, modifier = Modifier.weight(1f),
                 )
                 if (listUi.selectMode) {
                     TextButton(onClick = vm::selectAllOrClear) {
-                        Text(if (listUi.selected.size == rows.size && rows.isNotEmpty()) "Clear" else "Select all", fontSize = 12.sp, color = Color(0xFF427425))
+                        Text(if (listUi.selected.size == rows.size && rows.isNotEmpty()) "Clear" else "Select all", fontSize = 12.sp, color = if (c.isDark) Green else Color(0xFF427425))
                     }
                     TextButton(onClick = vm::exitSelect) { Text("Cancel", fontSize = 12.sp, color = c.muted) }
                 } else {
@@ -170,8 +171,8 @@ internal fun ConversationList(
                                 .clickable(onClickLabel = label) { vm.setChannel(id) },
                             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
                         ) {
-                            if (id == "all") Icon(Icons.Filled.AutoAwesome, null, tint = if (active) Color.White else accent, modifier = Modifier.size(14.dp))
-                            else Box(Modifier.size(10.dp).clip(CircleShape).background(if (active) Color.White else accent))
+                            ChannelIcons.of(id)?.let { Icon(it, null, tint = if (active) Color.White else accent, modifier = Modifier.size(14.dp)) }
+                                ?: Box(Modifier.size(10.dp).clip(CircleShape).background(if (active) Color.White else accent))
                             Spacer(Modifier.height(2.dp))
                             Text(short, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = if (active) Color.White else accent)
                         }
@@ -235,7 +236,7 @@ internal fun ConversationList(
                 Column(Modifier.weight(1f)) {
                     Text(
                         if (listUi.selected.isEmpty()) "Tap chats to select" else "${listUi.selected.size} chat${if (listUi.selected.size == 1) "" else "s"} selected",
-                        fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Color(0xFF3D5A30),
+                        fontSize = 12.sp, fontWeight = FontWeight.Medium, color = if (c.isDark) c.text else Color(0xFF3D5A30),
                     )
                     if (listUi.selected.isNotEmpty()) Text(
                         if (heldIds.isEmpty()) "none are human-held" else "${heldIds.size} to hand back to Neema",
@@ -243,7 +244,7 @@ internal fun ConversationList(
                     )
                 }
                 Button(
-                    onClick = vm::releaseSelected, enabled = perms.canRelease && !listUi.bulkBusy && heldIds.isNotEmpty(),
+                    onClick = vm::releaseSelected, enabled = !listUi.bulkBusy && heldIds.isNotEmpty(),
                     colors = ButtonDefaults.buttonColors(containerColor = Green), shape = RoundedCornerShape(8.dp),
                     contentPadding = PaddingValues(horizontal = 12.dp), modifier = Modifier.height(34.dp),
                 ) { Text(if (listUi.bulkBusy) "Releasing…" else "Release" + if (heldIds.isNotEmpty()) " ${heldIds.size}" else "", fontSize = 12.sp) }
@@ -276,7 +277,7 @@ private fun ConversationRow(g: RowGroup, activeId: String, me: String?, listUi: 
     val isActive = g.siblings.any { it.id == activeId }
     val hasUnread = g.unread > 0
     val multi = g.siblings.size > 1
-    val name = Fmt.displayName(conv.name, conv.waId)
+    val name = inboxName(conv)
     // Human pickup on ANY of this person's channels shows on the row.
     val chipConv = g.siblings.find { it.interceptMode == "human" } ?: conv
     val stage = g.siblings.firstNotNullOfOrNull { it.leadStage?.takeIf { s -> s.isNotBlank() } }
@@ -299,14 +300,13 @@ private fun ConversationRow(g: RowGroup, activeId: String, me: String?, listUi: 
         Row(Modifier.weight(1f).padding(start = 13.dp, end = 16.dp, top = 12.dp, bottom = 12.dp), verticalAlignment = Alignment.Top) {
             if (listUi.selectMode) {
                 Box(
-                    Modifier.padding(top = 10.dp, end = 10.dp).size(18.dp).clip(RoundedCornerShape(5.dp))
+                    Modifier.padding(top = 10.dp, end = 10.dp).alpha(if (heldHere || picked) 1f else 0.45f).size(18.dp).clip(RoundedCornerShape(5.dp))
                         .background(if (picked) Green else Color.White)
                         .border(1.dp, if (picked) Green else Color(0xFFCFDAC6), RoundedCornerShape(5.dp)),
                     contentAlignment = Alignment.Center,
                 ) {
                     // A row Neema already handles stays selectable but reads as a no-op.
                     if (picked) Icon(Icons.Filled.Check, null, tint = Color.White, modifier = Modifier.size(12.dp))
-                    else if (!heldHere) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.55f)))
                 }
             }
             Box {
@@ -322,7 +322,7 @@ private fun ConversationRow(g: RowGroup, activeId: String, me: String?, listUi: 
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(name, fontSize = 14.sp, fontWeight = if (hasUnread) FontWeight.SemiBold else FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    Text(name, fontSize = 14.sp, fontWeight = if (hasUnread) FontWeight.SemiBold else FontWeight.Medium, color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     // Repeat-buyer badge: completed (paid) orders.
                     if (orders > 0) Text(
                         if (orders > 99) "99+" else "$orders", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.White,
@@ -378,12 +378,6 @@ private fun ConversationRow(g: RowGroup, activeId: String, me: String?, listUi: 
                             )
                         }
                     }
-                    g.rep.tags.take(3).forEach { t ->
-                        Text(
-                            "#$t", fontSize = 10.sp, color = Color(0xFF699A32), maxLines = 1,
-                            modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(Color(0xFFE6F3D8)).padding(horizontal = 5.dp, vertical = 1.dp),
-                        )
-                    }
                     if (hasUnread) Text(
                         if (g.unread > 99) "99+" else "${g.unread}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White,
                         modifier = Modifier.clip(RoundedCornerShape(50)).background(Green).padding(horizontal = 6.dp, vertical = 1.dp),
@@ -393,7 +387,7 @@ private fun ConversationRow(g: RowGroup, activeId: String, me: String?, listUi: 
                 Text(
                     conv.lastMessagePreview?.takeIf { it.isNotBlank() } ?: "No messages yet",
                     fontSize = 12.sp, lineHeight = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    color = if (hasUnread) Color(0xFF3D5A30) else c.muted, fontWeight = if (hasUnread) FontWeight.Medium else FontWeight.Normal,
+                    color = if (hasUnread) (if (c.isDark) c.textMid else Color(0xFF3D5A30)) else c.muted, fontWeight = if (hasUnread) FontWeight.Medium else FontWeight.Normal,
                 )
             }
         }

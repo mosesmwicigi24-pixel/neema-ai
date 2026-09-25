@@ -421,7 +421,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         if (ids.isEmpty()) { dash.toast("None of those are held by a human", ToastType.Warning); return }
         _list.update { it.copy(bulkBusy = true) }
         viewModelScope.launch {
-            val results = ids.map { id -> async { runCatching { api.conversations.release(id) }.isSuccess } }.awaitAll()
+            val results = ids.map { id -> async { runCatching { inboxApi.release(id) }.isSuccess } }.awaitAll()
             val failed = results.count { !it }
             val ok = ids.size - failed
             _list.update { it.copy(bulkBusy = false) }
@@ -702,7 +702,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
 
     fun intercept(id: String) = busy("intercept") {
         try {
-            api.conversations.intercept(id)
+            inboxApi.intercept(id)
             refresh()
             dash.toast("Conversation claimed — you now control replies")
         } catch (e: Exception) {
@@ -713,7 +713,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
 
     fun release(id: String) = busy("release") {
         try {
-            api.conversations.release(id)
+            inboxApi.release(id)
             refresh()
             dash.toast("Conversation released back to AI")
         } catch (e: Exception) {
@@ -724,7 +724,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
 
     fun pause(id: String) = busy("pause") {
         try {
-            api.conversations.pause(id)
+            inboxApi.pause(id)
             refresh()
             dash.toast("Paused — Neema holds all replies until you resume")
         } catch (e: Exception) {
@@ -737,26 +737,13 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         val id = _thread.value.activeId.ifEmpty { return }
         busy("release") {
             try {
-                api.conversations.transfer(id, agentId)
+                inboxApi.transfer(id, agentId)
                 _dialogs.update { it.copy(transfer = false) }
                 refresh()
                 dash.toast("Transferred to ${agentName ?: "agent"}")
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 dash.toast("Failed to transfer", ToastType.Error)
-            }
-        }
-    }
-
-    fun close(id: String) {
-        viewModelScope.launch {
-            try {
-                api.conversations.close(id)
-                refresh()
-                dash.toast("Conversation closed")
-            } catch (e: Exception) {
-                if (e is CancellationException) throw e
-                dash.toast("Failed to close conversation", ToastType.Error)
             }
         }
     }
