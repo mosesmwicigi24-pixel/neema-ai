@@ -146,6 +146,25 @@ class CustomerPanelScreenshotTest {
         tall(conv = "c2")
     }
 
+    // ── Website chat visitor (`web_<hash>` on the default channel) ──────────
+
+    /** No phone: "Website visitor" / "Web chat", a web badge, and no Call, template or Invite. */
+    @Test fun webVisitor() = tall(conv = "c7")
+    @Test fun webVisitorActivity() = tall(conv = "c7", prepare = { it.tab.value = CustomerTab.Activity })
+    @Test fun webVisitorDark() = tall(conv = "c7", dark = true)
+
+    /** The profile call failed: the fallback still never turns the hash into a phone. */
+    @Test fun webVisitorFallback() {
+        fake.on("GET", "/admin/customers/${CustomerFixtures.WEB}", code = 500, body = """{"detail":"boom"}""")
+        tall(conv = "c7")
+    }
+
+    /** A visitor who typed a real number: that number, the Invite (no WhatsApp thread exists yet) and Call. */
+    @Test fun webVisitorWithPhone() {
+        fake.on("GET", "/admin/customers/${CustomerFixtures.WEB}", body = CustomerFixtures.webVisitor(phone = "+256772123456", name = "Br. Joseph Okello"))
+        tall(conv = "c7")
+    }
+
     // ── Open sub-editors ────────────────────────────────────────────────────
 
     @Test fun mergeWithSuggestions() = tall(prepare = { it.toggleMerge(true) })
