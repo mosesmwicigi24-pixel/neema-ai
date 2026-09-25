@@ -540,8 +540,15 @@ def _search_words(text: str) -> set:
             continue
         if t.endswith("s") and len(t) > 3:
             t = t[:-1]
-        out.add(t)
+        # ONE word for one finish (owner, 2026-09-25: "gold trays" found the
+        # Gold BREAD tray and never the GOLDEN Communion Tray): golden is gold,
+        # glasses are glass, aluminum is aluminium.
+        out.add(_SEARCH_STEM.get(t, t))
     return out
+
+
+_SEARCH_STEM = {"golden": "gold", "glasse": "glass", "aluminum": "aluminium",
+                "gilded": "gold", "wood": "wooden"}
 
 
 def _search_tokens(query: str) -> set:
@@ -619,9 +626,9 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
                 "order": "CHEAPEST FIRST — these rows are already in that order; "
                          "list them from the humblest up, each with its own hub "
                          "price, and let them climb",
-                "stay_in_range": "these are the trays and sets only; chalices, cups, "
-                                 "wafers, bread and wine are other things — mention "
-                                 "one only if THEY ask for it",
+                "stay_in_range": rng.get("stay") or (
+                    "these are the rows of that range only; its neighbours are other "
+                    "things — mention one only if THEY ask for it"),
             }
     else:
         # The row whose NAME carries the most of their words leads ("silver
@@ -640,8 +647,14 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
         # best matches (most WORDS hit) first, the cheapest among equals. These
         # rows are PARTIAL matches and say so: the model confirms the item
         # before quoting, and no canned reply is ever built from them.
+        # Among equal word-counts the row whose NAME carries the words leads
+        # (owner, 2026-09-25: "gold trays with holes…" led with the Gold
+        # bread tray over the Golden Communion Tray), then the cheapest.
+        def _in_name(p: dict) -> int:
+            return len(toks & _search_words(p.get("name") or ""))
         scored = [(len(toks & _hay(p)), p) for p in catalog]
-        matched = [p for s, p in sorted(scored, key=lambda x: (-x[0], _kes(x[1]))) if s > 0]
+        matched = [p for s, p in sorted(scored, key=lambda x: (-x[0], -_in_name(x[1]), _kes(x[1])))
+                   if s > 0]
         partial = bool(matched)
 
     results = []

@@ -50,6 +50,78 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   many, how soon, which city. A made-to-order item (cassocks, shirts, stoles…)
   is asked colour then size/measurements. Every search row carries `ask_next`;
   the canned pools split the same way (`_STOCK_*` vs the made-to-order pools).
+- **The gate before posting** (owner 2026-09-25: "someone is asking for
+  golden trays and you give silver… put a gate to review before posting…
+  when someone asks for Holy Communion Cups without specifying chalice, give
+  the plastic, stainless and glass cups, not chalice cups… every post should
+  be verified before posting for accuracy and correct figures"). Live: "gold
+  trays with holes to place tot glasses? shops in South Africa?" got the
+  silver set at $180 and no word on South Africa (the canned line: the post's
+  product, because "trays" was enough for `_names_product`); "where is your
+  location, holy communion cups" got the $650 chalice and no location.
+  `agent/review.py` is the gate, and EVERY public reply passes it before it
+  posts. The RULES (always on): every money figure in the reply is a hub
+  price of a row looked up this turn (`search_catalog`'s rows), its house-rate
+  conversion, a quantity multiple, a half (a deposit) or a figure the owner's
+  own instructions state — else "a figure from nowhere"; the item the reply
+  sells (the row it names, else the one row whose price it quotes) is the
+  finish they asked for (gold ≠ silver; stainless / steel ARE the Silver line)
+  and the kind (communion cups are the small cups — plastic, silver, glass,
+  pre-packed — never a chalice unless they say chalice; a tray is not cups);
+  a where-question ("your location", "shops in South Africa") is answered.
+  The REVIEWER (`COMMENT_REPLY_REVIEW`, default on; one light-model line;
+  skipped past the budget stop): fails a wrong item, a wrong figure or a
+  question left unanswered. A draft that fails is written ONCE more with the
+  reviewer's reasons in its context (`run_turn(review_notes=…)`); a second
+  failure never posts — the thread gets the honest holding line
+  (`_VERIFY_HOLD_POOL`: "let me confirm the exact item and price — one of our
+  team will answer you right here") and the comment is routed to a colleague
+  whose note opens "HELD BACK BY THE REVIEWER" with the reasons. The canned
+  (no-model) path refuses to sell the post's product for a comment asking
+  another finish or kind (`item_issues`; `_names_product` says no too) and
+  holds the same way. The search learned the same: golden is gold
+  (`_SEARCH_STEM`), the partial fallback ranks name hits first, "trays with
+  holes / tray for the cups / cup tray" are a communion tray, "holy communion
+  cups / tot glasses / wine cups" are communion cups, "stainless / steel /
+  metal cups" the Silver Communion Cups (`core/synonyms` families), and a
+  "communion cups" RANGE returns the four cup rows cheapest first, chalices
+  excluded. The prompt and the addendum carry the rules (THE FINISH THEY
+  ASKED FOR IS THE ITEM; COMMUNION CUPS ARE THE SMALL CUPS; ANSWER EVERY
+  QUESTION IN THE COMMENT; EVERY REPLY IS VERIFIED BEFORE IT POSTS).
+  EVERY CHANNEL (owner, the same day: "extend the gate to WhatsApp, Chat,
+  Messenger, Facebook — make it very intelligent"): the gate now lives
+  INSIDE `runtime.run_turn`, so a WhatsApp, Messenger, Instagram, TikTok or
+  website reply passes it exactly as a public comment does — real turns
+  only (a read-only draft, a scribe pass and a system-composed instruction
+  are not gated, `_gate_applies`). The turn keeps its GROUND TRUTH: the
+  transcript as the writer saw it and every tool result (`tool_log`). The
+  figure rule reads it all — a cart or order total, an offer price, a
+  figure already said in the conversation, a sum of two known figures — so
+  a DM's arithmetic passes and a figure from nowhere does not. New rules on
+  every channel: one currency per reply; no link a tool did not return; no
+  order-status claim ("shipped", "on its way") without `check_order_status`
+  or our own earlier word; and a reply that SAYS we do not have the finish
+  asked and offers the nearest stands the finish rule down. The reviewer in
+  a private chat reads the last turns and the tool results too, and fails a
+  reply that re-asks a detail already given, contradicts an earlier turn,
+  invents availability or a status, or answers in the wrong language; money
+  and order turns are reviewed by the MAIN model (`_reviewer_model`), the
+  rest by the light one; `REPLY_REVIEW` (default on) is the private-chat
+  switch, `COMMENT_REPLY_REVIEW` the comments'. A failing draft is
+  REWRITTEN, not retried: the gate first fetches the hub rows for what they
+  actually asked (`_facts_for_ask`, the read-only search on the canonical
+  ask), then one model call with NO tools gets the reasons, THE FACTS (every
+  row in hand, every other tool result) and the draft (`review
+  .rewrite_block`) — nothing is ordered or sent twice. A second failure: a
+  public reply returns "" (the engine's holding line + the colleague's
+  note); a private reply becomes `_REVIEW_HOLD_DM` ("let me confirm the
+  exact details — one of our team will come back to you right here") and
+  the conversation is FLAGGED with "HELD BACK BY THE REVIEWER", the reasons
+  and the unsent draft (`_flag_held_reply`, an Intercept flag the dashboard
+  shows). Each verdict is tallied per UTC day in Redis (`review:YYYY-MM-DD`:
+  pass / rewritten / held, per channel) and `/api/health` shows `review:
+  {passed, rewritten, held}` — the number to watch: a rising `held` is the
+  hub or the prompt drifting, a rising `rewritten` is the writer drifting.
 - **A comment thread is the post's thread** (owner 2026-09-23: under a ring
   post, "How much is it?" was quoted the ring in dollars and a reply inside
   that thread, "In Kenya shillings", was answered "KES 19,000 for the full set
