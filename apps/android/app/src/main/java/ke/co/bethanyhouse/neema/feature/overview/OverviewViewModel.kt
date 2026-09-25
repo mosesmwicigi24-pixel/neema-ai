@@ -8,6 +8,8 @@ import ke.co.bethanyhouse.neema.core.api.InboxQuery
 import ke.co.bethanyhouse.neema.core.model.Attribution
 import ke.co.bethanyhouse.neema.core.model.Conversation
 import ke.co.bethanyhouse.neema.core.model.Stats
+import ke.co.bethanyhouse.neema.feature.reports.quietly
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -89,11 +91,16 @@ class OverviewViewModel(private val dash: DashboardViewModel) : ViewModel() {
             .onSuccess { _humanRows.value = it.items }
     }
 
+    /** Pull-to-refresh: the three calls, plus the orders, team and catalogue the fallbacks read — the spinner lasts until all land. */
     fun refresh() {
         viewModelScope.launch {
             _refreshing.value = true
-            dash.refetchOrders(); dash.refetchAgents(); dash.refetchCatalog()
-            loadAll()
+            coroutineScope {
+                launch { quietly { dash.refreshOrders() } }
+                launch { quietly { dash.refreshAgents() } }
+                launch { quietly { dash.refreshCatalog() } }
+                loadAll()
+            }
             _refreshing.value = false
         }
     }

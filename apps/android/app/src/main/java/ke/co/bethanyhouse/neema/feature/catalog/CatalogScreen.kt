@@ -86,6 +86,9 @@ internal fun categoryBrush(category: String?): Brush {
 @Composable
 internal fun faint(): Color = if (Neema.colors.isDark) Neema.colors.muted.copy(alpha = 0.75f) else Neema.colors.border
 
+/** The web's catalog search border: `border-[#cee6b2]` (the other search fields use #b5da8b). */
+private val CatalogSearchBorder = Color(0xFFCEE6B2)
+
 internal val Emerald600 = Color(0xFF059669)
 private val Stone200 = Color(0xFFE7E5E4)
 internal val Red500 = Color(0xFFEF4444)
@@ -204,11 +207,11 @@ fun CatalogScreen(
                 item(key = "filters") {
                     Box(Modifier.padding(bottom = 20.dp)) {
                         if (wide) Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            SearchField(search, { vm.search.value = it }, "Search name, SKU or alias…", Modifier.weight(1f))
+                            SearchField(search, { vm.search.value = it }, "Search name, SKU or alias…", Modifier.weight(1f), borderColor = CatalogSearchBorder)
                             // A set width: the button's label fills it, and would otherwise squeeze the search to nothing.
                             CategoryDropdown(categories, filter, Modifier.width(240.dp)) { vm.filter.value = it }
                         } else Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            SearchField(search, { vm.search.value = it }, "Search name, SKU or alias…")
+                            SearchField(search, { vm.search.value = it }, "Search name, SKU or alias…", borderColor = CatalogSearchBorder)
                             CategoryDropdown(categories, filter, Modifier.fillMaxWidth()) { vm.filter.value = it }
                         }
                     }
@@ -424,7 +427,11 @@ private fun PriceAuditBanner(audit: PriceAudit, open: Boolean, onToggle: () -> U
                         Text(
                             buildAnnotatedString {
                                 withStyle(SpanStyle(color = fg950)) { append(g.name) }
-                                withStyle(SpanStyle(color = (if (dark) Color(0xFFFBBF24) else amber700).copy(alpha = 0.7f))) { append(" · ${g.category ?: ""}") }
+                                // The hub's category is "" for an uncategorised product (and null on
+                                // older rows): the web then prints a dangling " · "; drop it instead.
+                                g.category?.takeIf { it.isNotBlank() }?.let { cat ->
+                                    withStyle(SpanStyle(color = (if (dark) Color(0xFFFBBF24) else amber700).copy(alpha = 0.7f))) { append(" · $cat") }
+                                }
                             },
                             fontSize = 12.sp, modifier = Modifier.weight(2f),
                         )

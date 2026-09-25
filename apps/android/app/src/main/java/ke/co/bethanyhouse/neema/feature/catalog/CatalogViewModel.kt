@@ -5,13 +5,12 @@ import androidx.lifecycle.viewModelScope
 import ke.co.bethanyhouse.neema.app.DashboardViewModel
 import ke.co.bethanyhouse.neema.core.model.CatalogItem
 import ke.co.bethanyhouse.neema.core.model.PriceAudit
+import ke.co.bethanyhouse.neema.feature.reports.quietly
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 
 /** The web's category list: every distinct, non-empty category, in catalogue order. */
 internal fun catalogCategories(catalog: List<CatalogItem>): List<String> =
@@ -48,20 +47,25 @@ class CatalogViewModel(private val dash: DashboardViewModel) : ViewModel() {
     private val _refreshing = MutableStateFlow(false)
     val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
 
-    init { loadAudit() }
+    init { viewModelScope.launch { loadAudit() } }
 
-    /** A failed audit just stays hidden, as on the web. */
-    private fun loadAudit() {
-        viewModelScope.launch { runCatching { dash.api.catalog.audit() }.onSuccess { _audit.value = it } }
+    /**
+     * GET /admin/catalog/audit (admin.py `catalog_price_audit`). A failed
+     * audit just stays hidden, as on the web; a failed refresh keeps the
+     * banner already shown.
+     */
+    private suspend fun loadAudit() {
+        quietly { _audit.value = dash.api.catalog.audit() }
     }
 
-    /** Pull-to-refresh: the audit, and the shared catalogue (waiting briefly for it to land). */
+    /** Pull-to-refresh: the audit and the shared catalogue, the spinner lasting until both have landed (or failed). */
     fun refresh() {
         viewModelScope.launch {
             _refreshing.value = true
-            loadAudit()
-            dash.refetchCatalog()
-            withTimeoutOrNull(3_000) { dash.catalog.drop(1).first() }
+            coroutineScope {
+                launch { loadAudit() }
+                launch { quietly { dash.refreshCatalog() } }
+            }
             _refreshing.value = false
         }
     }

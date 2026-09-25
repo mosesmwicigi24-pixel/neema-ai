@@ -93,7 +93,9 @@ class AreaViewModelTest {
         assertEquals(128, vm.stats.value?.openConversations)
         assertFalse(vm.statsLoading.value)
         assertEquals(3, vm.attrib.value?.sources?.size)
-        assertEquals(listOf("r1", "r5", "r6"), vm.humanRows.value?.map { it.id })
+        // The page holds every thread of each person on it — r1's AI-held Messenger sibling too;
+        // the feed filters on intercept_mode, exactly as the web does.
+        assertEquals(listOf("r1", "r5", "r6", "r1b"), vm.humanRows.value?.map { it.id })
         // The human tab, 10 rows — exactly the web's conversationsApi.page({ tab: "human", limit: 10 }).
         val pages = f.gets("/admin/conversations").map { it.query }
         assertEquals(listOf<String?>("limit=10&tab=human"), pages)
@@ -110,7 +112,7 @@ class AreaViewModelTest {
         assertTrue(f.gets("/admin/conversations").any { it.query == "limit=50" })
         // Attribution and intercepts still load on their own.
         assertNotNull(vm.attrib.value)
-        assertEquals(3, vm.humanRows.value?.size)
+        assertEquals(4, vm.humanRows.value?.size)
     }
 
     /** The web's feed reads `humanRows ?? conversations`: no human tab → the inbox's first page. */

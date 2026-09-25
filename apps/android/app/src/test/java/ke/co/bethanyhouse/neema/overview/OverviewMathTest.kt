@@ -25,7 +25,7 @@ class OverviewMathTest {
     private val orders: List<Order> = NeemaJson.decodeFromString("[${ReportsFixtures.orders.joinToString(",")}]")
     private val agents: List<Agent> = NeemaJson.decodeFromString(Fixtures.agents)
     private val catalog: List<CatalogItem> = NeemaJson.decodeFromString(ReportsFixtures.catalog)
-    private val stats: Stats = NeemaJson.decodeFromString(Fixtures.stats)
+    private val stats: Stats = NeemaJson.decodeFromString(ReportsFixtures.stats)
     private val today = LocalDate.of(2026, 9, 25)
 
     @Test fun headline_prefersServerStats() {
@@ -62,7 +62,11 @@ class OverviewMathTest {
     @Test fun channels_fromServer_dropEmptyRows() {
         val s = stats.copy(channelBreakdown = stats.channelBreakdown + ke.co.bethanyhouse.neema.core.model.ChannelCount("sms", 0, 0))
         assertEquals(
-            listOf(ChannelRow("whatsapp", 96, 80), ChannelRow("messenger", 21, 30), ChannelRow("instagram", 11, 18)),
+            // In the server's order; "web" is kept here and skipped by the panel (not in CHANNEL_CONFIG).
+            listOf(
+                ChannelRow("whatsapp", 96, 80), ChannelRow("messenger", 21, 15), ChannelRow("facebook", 70, 22),
+                ChannelRow("instagram", 11, 9), ChannelRow("web", 3, 2),
+            ),
             channelRows(s, convs),
         )
     }
@@ -81,7 +85,8 @@ class OverviewMathTest {
             listOf("order-o1", "conv-r1", "order-o2", "order-o3", "order-o4", "conv-r5", "conv-r6"),
             feed.map { it.id },
         )
-        assertEquals("Fr. Peter Kamau", feed[0].user)
+        // Orders carry no contact_name on the wire: the buyer reads as their number (mapOrder).
+        assertEquals("+254 712 345 678", feed[0].user)
         assertEquals("KES 8,000", feed[0].target)
         assertEquals("Moses Mwicigi", feed[1].user)
         assertEquals("intercepted conversation with", feed[1].action)
@@ -132,11 +137,14 @@ class OverviewMathTest {
     @Test fun topProducts_byRevenue_excludingCancelled() {
         val top = topProducts(orders)
         assertEquals(
-            listOf("Clergy Shirt", "Alb — White, M", "Cassock — Purple, L", "Clergy Shirt — Black, 16 inch", "Stole — Green"),
+            listOf("Clergy Shirt", "Alb — White, M", "Clergy Shirt — Black, 16 inch", "Stole — Green", "Roman Collar Tab"),
             top.map { it.name },
         )
-        // "Clergy Shirt" is two orders (3,500 + 25,000) merged by name; the 6th product (collar tabs) is cut.
-        assertEquals(listOf(28500.0, 18000.0, 12500.0, 7000.0, 4800.0), top.map { it.revenue })
+        // "Clergy Shirt" is two orders (3,500 + 25,000) merged by name. The agent's own order (o2)
+        // stores cart lines priced by `unit_price` with no `unit`/`total`; the web reads
+        // `total || unit_price(= i.unit) * qty` and so counts it as 0 — here too, until the
+        // wire model carries unit_price (a core request). It ranks 6th and is cut.
+        assertEquals(listOf(28500.0, 18000.0, 7000.0, 4800.0, 1000.0), top.map { it.revenue })
         // Stole: the cancelled pair is not counted, the single pending one is.
         assertEquals(1.0, top.first { it.name == "Stole — Green" }.qty, 0.0)
         assertEquals(4800.0, top.first { it.name == "Stole — Green" }.revenue, 0.0)

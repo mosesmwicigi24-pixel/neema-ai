@@ -107,8 +107,9 @@ class ReportMathTest {
         val stats = report(ReportRange.D30).agentStats
         assertEquals(listOf("Grace Wanjiru", "Moses Mwicigi", "Brian Otieno"), stats.map { it.agent.name })
         assertEquals(listOf(2, 1, 0), stats.map { it.handled })
-        // Grace holds James (o3 18000, o6 3500) and Samuel (o4 9600, cancelled — the web counts it too).
-        assertEquals(listOf(31_100.0, 8_000.0, 0.0), stats.map { it.revenue })
+        // Grace holds James (o3 18000, o6 3500). Her other thread, Samuel's, is a Facebook comment
+        // thread with no wa_id — the web's `c.wa_id === o.wa_id` can never tie an order to it.
+        assertEquals(listOf(21_500.0, 8_000.0, 0.0), stats.map { it.revenue })
     }
 
     @Test fun emptyData() {
@@ -124,15 +125,19 @@ class ReportMathTest {
         assertEquals(
             """
             Date,Customer,Amount,Status
-            25 Sept 2026,Fr. Peter Kamau,8000,confirmed
-            24 Sept 2026,Rev. Mary Achieng,12500,pending
-            22 Sept 2026,Deacon James Mwangi,18000,delivered
-            21 Sept 2026,"Kariuki, Samuel",9600,cancelled
+            25 Sept 2026,+254 712 345 678,8000,confirmed
+            24 Sept 2026,+254 722 000 111,12500,pending
+            22 Sept 2026,+254 733 444 555,18000,delivered
+            21 Sept 2026,+254 700 111 222,9600,cancelled
             19 Sept 2026,+254 711 000 999,4800,pending
-            15 Sept 2026,Deacon James Mwangi,3500,delivered
+            15 Sept 2026,+254 733 444 555,3500,delivered
             """.trimIndent(),
             csv,
         )
+        // GET /admin/orders sends no contact_name (bare OrderEvent rows), so the customer is the
+        // phone, as the web's mapOrder makes it. Should a name ever arrive, a comma in it is quoted.
+        val named = report(ReportRange.D30).orders.first { it.id == "o4" }.copy(contactName = "Kariuki, Samuel")
+        assertEquals("Date,Customer,Amount,Status\n21 Sept 2026,\"Kariuki, Samuel\",9600,cancelled", reportCsv(listOf(named)))
         assertEquals("Date,Customer,Amount,Status\n", reportCsv(emptyList()))
         assertEquals("neema-report-custom.csv", csvFileName(ReportRange.Custom))
     }
