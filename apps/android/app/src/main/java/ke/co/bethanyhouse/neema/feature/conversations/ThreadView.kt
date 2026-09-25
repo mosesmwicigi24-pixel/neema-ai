@@ -19,7 +19,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -243,7 +247,7 @@ private fun ThreadRowView(row: TRow, channel: String?, recovered: Map<String, St
         is TNote -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
             Column(
                 Modifier.fillMaxWidth(0.85f).clip(RoundedCornerShape(12.dp)).background(Color(0xFFFFFBEB))
-                    .border(1.dp, Color(0xFFFDE68A), RoundedCornerShape(12.dp)).padding(horizontal = 12.dp, vertical = 8.dp),
+                    .dashedBorder(Color(0xFFFDE68A), 12.dp).padding(horizontal = 12.dp, vertical = 8.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("📝", fontSize = 12.sp)
@@ -257,6 +261,18 @@ private fun ThreadRowView(row: TRow, channel: String?, recovered: Map<String, St
         }
         is TBubble -> MessageBubble(row.msg, row.album, channel, recovered, brokenVideos, cb)
     }
+}
+
+/** CSS `border border-dashed`: a 1dp dashed outline following the rounded shape. */
+internal fun Modifier.dashedBorder(color: Color, radius: androidx.compose.ui.unit.Dp): Modifier = drawBehind {
+    val w = 1.dp.toPx()
+    val r = radius.toPx()
+    drawRoundRect(
+        color = color, topLeft = androidx.compose.ui.geometry.Offset(w / 2, w / 2),
+        size = androidx.compose.ui.geometry.Size(size.width - w, size.height - w),
+        cornerRadius = androidx.compose.ui.geometry.CornerRadius(r, r),
+        style = Stroke(width = w, pathEffect = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 3.dp.toPx()))),
+    )
 }
 
 @Composable
@@ -313,10 +329,10 @@ private fun MessageBubble(msg: ThreadMsg, album: List<ThreadMsg>?, channel: Stri
         CompositionLocalProvider(LocalContentColor provides fg) {
             Column(
                 Modifier.offset { IntOffset(drag.roundToInt(), 0) }
-                    .fillMaxWidth(if (isMedia) 0.72f else 0.8f).wrapContentWidth(if (inbound) Alignment.Start else Alignment.End)
+                    .fillMaxWidth(if (isMedia) 0.65f else 0.75f).wrapContentWidth(if (inbound) Alignment.Start else Alignment.End)
                     .clip(shape).background(bg)
                     .then(if (inbound || (c.isDark && msg.sender == "ai")) Modifier.border(1.dp, if (c.isDark) c.border else Color(0xFFEDF0EA), shape) else Modifier)
-                    .padding(if (isMedia) PaddingValues(6.dp) else PaddingValues(horizontal = 14.dp, vertical = 9.dp)),
+                    .padding(if (isMedia) PaddingValues(6.dp) else PaddingValues(horizontal = 16.dp, vertical = 10.dp)),
             ) {
                 if (!inbound) {
                     Text(
@@ -398,7 +414,7 @@ private fun BubbleBody(
         Row(Modifier.height(IntrinsicSize.Min)) {
             Box(Modifier.width(2.dp).fillMaxHeight().background(Color(0xFFFCD34D).copy(alpha = 0.6f)))
             Text("↳ ", color = Color(0xFFFBBF24), modifier = Modifier.padding(start = 6.dp))
-            Text(formatWa(raw, link), fontSize = 13.sp, lineHeight = 19.sp)
+            Text(formatWa(raw, link), fontSize = 12.sp, lineHeight = 19.5.sp)
         }
         return
     }
@@ -406,7 +422,7 @@ private fun BubbleBody(
     val isComment = (cctx != null && (cctx.title != null || cctx.postId != null)) || raw.startsWith("[comment]")
     if (isComment) {
         val body = raw.replace(Regex("^\\[comment]\\s*"), "")
-        if (body.isNotEmpty()) Text(formatWa(body, link), fontSize = 13.sp, lineHeight = 19.sp)
+        if (body.isNotEmpty()) Text(formatWa(body, link), fontSize = 12.sp, lineHeight = 19.5.sp)
         return
     }
     val mt = msg.mediaType
@@ -417,11 +433,11 @@ private fun BubbleBody(
         if (raw.isBlank()) {
             Text(
                 "Message can't be displayed (unsupported type) — ask them to resend as text.",
-                fontSize = 13.sp, fontStyle = FontStyle.Italic, color = Color(0xFFA8A29E),
+                fontSize = 12.sp, lineHeight = 19.5.sp, fontStyle = FontStyle.Italic, color = Color(0xFFA8A29E),
             )
             return
         }
-        Text(formatWa(raw, link), fontSize = 13.sp, lineHeight = 19.sp)
+        Text(formatWa(raw, link), fontSize = 12.sp, lineHeight = 19.5.sp)
         return
     }
     when {
@@ -477,7 +493,10 @@ internal data class HeaderAction(
     val label: String,
     val emoji: String,
     val busyKey: String? = null,
+    /** The web Btn variant: primary (amber) vs secondary. */
     val primary: Boolean = false,
+    /** Phone: the one state-changing action kept one tap away beside the badges. */
+    val pin: Boolean = primary,
     val danger: Boolean = false,
     val onClick: () -> Unit,
 )
@@ -506,7 +525,7 @@ internal fun ThreadHeader(
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (showBack) IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = c.muted) }
             else Spacer(Modifier.width(8.dp))
-            Avatar(name, conv.avatarUrl, size = 34.dp)
+            Avatar(name, conv.avatarUrl, size = 32.dp)
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -515,7 +534,7 @@ internal fun ThreadHeader(
             if (canCall) IconButton(onClick = onCall) { Icon(Icons.Filled.Call, "Call on WhatsApp", tint = Color(0xFF25D366)) }
             if (onProfile != null) IconButton(onClick = onProfile) { Icon(Icons.Filled.Person, "View customer profile", tint = Color(0xFF427425)) }
             var open by remember { mutableStateOf(false) }
-            val items = (if (wide) emptyList() else actions.filterNot { it.primary }.map { a -> "${a.emoji} ${a.label}" to a.onClick }) + menu
+            val items = (if (wide) emptyList() else actions.filterNot { it.pin }.map { a -> "${a.emoji} ${a.label}" to a.onClick }) + menu
             if (items.isNotEmpty()) Box {
                 IconButton(onClick = { open = true }) { Icon(Icons.Filled.MoreVert, "More", tint = c.muted) }
                 DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
@@ -528,7 +547,8 @@ internal fun ThreadHeader(
         Row(Modifier.padding(start = 8.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         FlowRowCompat(Modifier.weight(1f)) {
             InterceptBadge(conv.interceptMode)
-            if (conv.assignedAgentId != null && conv.assignedAgentName != null) {
+            // The web shows "→ agent" only on large screens (hidden lg:block).
+            if (wide && conv.assignedAgentId != null && conv.assignedAgentName != null) {
                 Text("→ ${conv.assignedAgentName}", fontSize = 12.sp, color = Color(0xFFB5C9A8))
             }
             if (locked != null) {
@@ -552,41 +572,75 @@ internal fun ThreadHeader(
             if (wide) actions.forEach { HeaderButton(it, convBusy, compact = false) }
         }
         // Phone: the one state-changing action stays one tap away, beside the badges.
-        if (!wide) actions.firstOrNull { it.primary }?.let { a -> Spacer(Modifier.width(8.dp)); HeaderButton(a, convBusy, compact = true) }
+        if (!wide) actions.firstOrNull { it.pin }?.let { a -> Spacer(Modifier.width(8.dp)); HeaderButton(a, convBusy, compact = true) }
         }
     }
 }
 
 @Composable
-private fun HeaderButton(a: HeaderAction, convBusy: String, compact: Boolean) {
-    val busy = a.busyKey != null && convBusy == a.busyKey
-    val colors = when {
-        a.primary -> ButtonDefaults.buttonColors(containerColor = Color(0xFF589B31), contentColor = Color.White)
-        a.danger -> ButtonDefaults.buttonColors(containerColor = Color(0xFFFEF2F2), contentColor = Color(0xFFB91C1C))
-        else -> ButtonDefaults.buttonColors(containerColor = Neema.colors.bg3, contentColor = Neema.colors.textMid)
+private fun HeaderButton(a: HeaderAction, convBusy: String, @Suppress("UNUSED_PARAMETER") compact: Boolean) {
+    WebBtn(
+        label = a.label.ifEmpty { null }, lead = a.emoji,
+        variant = when { a.primary -> BtnVariant.Primary; a.danger -> BtnVariant.Danger; else -> BtnVariant.Secondary },
+        // Exactly-once: while one control is in flight every control that changes state waits.
+        enabled = a.busyKey == null || convBusy.isEmpty(),
+        busy = a.busyKey != null && convBusy == a.busyKey,
+        onClick = a.onClick,
+    )
+}
+
+/** components/ui/Btn.tsx variants — primary is AMBER there, not moss. */
+internal enum class BtnVariant { Primary, Secondary, Danger, Ghost, Outline }
+
+/**
+ * The web's `<Btn small>`: h-8, px-3, text-xs medium, rounded-lg, gap-1.5,
+ * disabled at 40 % — in each variant's own light and dark colours.
+ */
+@Composable
+internal fun WebBtn(
+    label: String?,
+    variant: BtnVariant,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    lead: String? = null,
+    enabled: Boolean = true,
+    busy: Boolean = false,
+) {
+    val dark = Neema.colors.isDark
+    val (bg, fg, bd) = when (variant) {
+        BtnVariant.Primary -> Triple(Color(0xFFF59E0B), Color.White, Color(0xFFF59E0B))
+        BtnVariant.Secondary -> if (dark) Triple(Color(0xFF1F2937), Color(0xFFE5E7EB), Color(0xFF374151)) else Triple(Color.White, Color(0xFF374151), Color(0xFFE5E7EB))
+        BtnVariant.Danger -> if (dark) Triple(Color(0xFF450A0A).copy(alpha = 0.3f), Color(0xFFF87171), Color(0xFF991B1B)) else Triple(Color(0xFFFEF2F2), Color(0xFFDC2626), Color(0xFFFECACA))
+        BtnVariant.Ghost -> Triple(Color.Transparent, if (dark) Color(0xFF9CA3AF) else Color(0xFF6B7280), Color.Transparent)
+        BtnVariant.Outline -> Triple(Color.Transparent, if (dark) Color(0xFFE5E7EB) else Color(0xFF374151), if (dark) Color(0xFF4B5563) else Color(0xFFD1D5DB))
     }
-    Button(
-        onClick = a.onClick, enabled = a.busyKey == null || convBusy.isEmpty(), colors = colors,
-        contentPadding = PaddingValues(horizontal = if (compact) 10.dp else 10.dp, vertical = 0.dp),
-        modifier = Modifier.height(30.dp), shape = RoundedCornerShape(8.dp),
+    val shape = RoundedCornerShape(8.dp)
+    Row(
+        modifier.height(32.dp).alpha(if (enabled) 1f else 0.4f).clip(shape).background(bg).border(1.dp, bd, shape)
+            .clickable(enabled = enabled && !busy, onClick = onClick).padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        if (busy) CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = LocalContentColor.current)
-        else Text(a.emoji, fontSize = 12.sp)
-        if (a.label.isNotEmpty()) { Spacer(Modifier.width(4.dp)); Text(a.label, fontSize = 12.sp, maxLines = 1) }
+        if (busy) CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = fg)
+        else if (lead != null) Text(lead, fontSize = 12.sp, color = fg, maxLines = 1)
+        if (label != null) Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = fg, maxLines = 1)
     }
 }
 
-/** AI / Human / Paused (components/ui/Badges.tsx InterceptBadge). */
+/** AI / Human / Paused (components/ui/Badges.tsx InterceptBadge), light and dark. */
 @Composable
 internal fun InterceptBadge(mode: String) {
+    val dark = Neema.colors.isDark
     val (bg, fg, bd, label) = when (mode) {
-        "human" -> Quad(Color(0xFFFFFBEB), Color(0xFFB45309), Color(0xFFFDE68A), "Human")
-        "paused" -> Quad(Color(0xFFF3F4F6), Color(0xFF6B7280), Color(0xFFE5E7EB), "Paused")
-        else -> Quad(Color(0xFFEFF6FF), Color(0xFF1D4ED8), Color(0xFFBFDBFE), "AI")
+        "human" -> if (dark) Quad(Color(0xFF451A03).copy(alpha = 0.4f), Color(0xFFFBBF24), Color(0xFF92400E), "Human")
+        else Quad(Color(0xFFFFFBEB), Color(0xFFB45309), Color(0xFFFDE68A), "Human")
+        "paused" -> if (dark) Quad(Color(0xFF1F2937), Color(0xFF9CA3AF), Color(0xFF374151), "Paused")
+        else Quad(Color(0xFFF3F4F6), Color(0xFF6B7280), Color(0xFFE5E7EB), "Paused")
+        else -> if (dark) Quad(Color(0xFF172554).copy(alpha = 0.4f), Color(0xFF60A5FA), Color(0xFF1E40AF), "AI")
+        else Quad(Color(0xFFEFF6FF), Color(0xFF1D4ED8), Color(0xFFBFDBFE), "AI")
     }
     Text(
-        label, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = fg, maxLines = 1,
-        modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(bg).border(1.dp, bd, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 1.dp),
+        label, fontSize = 11.sp, lineHeight = 14.sp, fontWeight = FontWeight.Medium, color = fg, maxLines = 1,
+        modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(bg).border(1.dp, bd, RoundedCornerShape(4.dp)).padding(horizontal = 8.dp, vertical = 2.dp),
     )
 }
 
@@ -594,8 +648,8 @@ internal data class Quad<A, B, C, D>(val a: A, val b: B, val c: C, val d: D)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun FlowRowCompat(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    FlowRow(modifier, horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp), itemVerticalAlignment = Alignment.CenterVertically) { content() }
+internal fun FlowRowCompat(modifier: Modifier = Modifier, spacing: androidx.compose.ui.unit.Dp = 6.dp, content: @Composable () -> Unit) {
+    FlowRow(modifier, horizontalArrangement = Arrangement.spacedBy(spacing), verticalArrangement = Arrangement.spacedBy(spacing), itemVerticalAlignment = Alignment.CenterVertically) { content() }
 }
 
 internal val CH_SHORT = mapOf(

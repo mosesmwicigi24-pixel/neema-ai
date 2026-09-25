@@ -17,6 +17,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
@@ -86,7 +87,7 @@ internal fun MediaFallback(kind: String, messageId: String?, inbound: Boolean, o
     Column(
         Modifier.width(224.dp).clip(RoundedCornerShape(12.dp))
             .background(if (inbound && !dark) Color.Black.copy(alpha = 0.03f) else Color.White.copy(alpha = 0.06f))
-            .border(1.dp, if (inbound && !dark) Color.Black.copy(alpha = 0.15f) else Color.White.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+            .dashedBorder(if (inbound && !dark) Color.Black.copy(alpha = 0.15f) else Color.White.copy(alpha = 0.3f), 12.dp)
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -98,7 +99,7 @@ internal fun MediaFallback(kind: String, messageId: String?, inbound: Boolean, o
         if (messageId != null && state != "gone") {
             Text(
                 if (state == "loading") "Fetching…" else "Recover from Meta",
-                modifier = Modifier.clip(RoundedCornerShape(50))
+                modifier = Modifier.alpha(if (state == "loading") 0.6f else 1f).clip(RoundedCornerShape(50))
                     .background(if (inbound) InboundTintBg else Color.White.copy(alpha = 0.2f))
                     .clickable(enabled = state != "loading") {
                         state = "loading"

@@ -86,9 +86,14 @@ class ConversationsScreenshotTest {
         return Screen(fake, dash, vm, owner)
     }
 
+    /**
+     * The rows are computed in place when I/O is synchronous (as here), so the
+     * list is ready the moment the ViewModel is — no polling. Asserting it (not
+     * waiting for it) is what keeps these screenshots from ever being flaky.
+     */
     private fun Screen.settle(rowCount: Int? = null): Screen {
-        val end = System.currentTimeMillis() + 3000
-        while (System.currentTimeMillis() < end && (if (rowCount != null) vm.rows.value.size != rowCount else vm.rows.value.isEmpty())) Thread.sleep(5)
+        val n = vm.rows.value.size
+        check(if (rowCount != null) n == rowCount else n > 0) { "rows not ready on the first frame: $n" }
         return this
     }
 
@@ -105,9 +110,9 @@ class ConversationsScreenshotTest {
 
     // ═══════════════ The list ═══════════════
 
-    @Test fun inbox_all() = screen().settle(7).snap()
+    @Test fun inbox_all() = screen().settle(6).snap()
 
-    @Test fun inbox_all_dark() = screen().settle(7).snap(dark = true)
+    @Test fun inbox_all_dark() = screen().settle(6).snap(dark = true)
 
     @Test fun inbox_unreadTab_filtersOpen() = screen {
         on("GET", "/admin/conversations", body = """{"items":[${InboxFixtures.conversations.filter { it.contains("\"unread\":0").not() }.joinToString(",")}],"next_cursor":null}""")
@@ -122,16 +127,19 @@ class ConversationsScreenshotTest {
         on("GET", "/admin/conversations/summary", body = """{"unread":0,"human":0,"yours":0,"unread_messages":{},"tags":[]}""")
     }.snap()
 
-    /** The list could not load: like the web, it keeps saying "Loading…" (never a false "none"). */
+    /** The list could not load: never a false "none", and never "Loading…" forever — a quiet Retry. */
     @Test fun inbox_error() = screen {
         on("GET", "/admin/conversations", code = 500, body = """{"detail":"down"}""")
     }.snap()
 
-    @Test fun inbox_bulkSelect() = screen().settle(7).apply {
+    @Test fun inbox_error_dark() = screen {
+        on("GET", "/admin/conversations", code = 500, body = """{"detail":"down"}""")
+    }.snap(dark = true)
+    @Test fun inbox_bulkSelect() = screen().settle(6).apply {
         vm.enterSelect("p1"); vm.toggleRow("c6"); vm.toggleRow("c2")
     }.snap()
 
-    @Test fun inbox_bulkSelect_dark() = screen().settle(7).apply { vm.enterSelect("p1") }.snap(dark = true)
+    @Test fun inbox_bulkSelect_dark() = screen().settle(6).apply { vm.enterSelect("p1") }.snap(dark = true)
 
     // ═══════════════ The thread ═══════════════
 
@@ -195,6 +203,17 @@ class ConversationsScreenshotTest {
           {"id":"w2","type":"message","direction":"outbound","sender":"ai","text":"Yes! We ship across East Africa — Kampala takes 3–5 days.","created_at":"${Fixtures.ago(19)}"}]""")
     }.settle().apply { vm.select("c7") }.snap()
 
+    /** Inviting a web-chat visitor: the phone field starts EMPTY — never the hash's digits. */
+    @Test fun dialog_invite_webVisitor() = screen().settle().apply { vm.select("c7") }.let { s ->
+        s.snap { InviteDialog(s.dash, s.vm, s.vm.activeConv()!!) {} }
+    }
+
+    /** An admin on a paused thread: Resume (amber primary), Transfer, Note, Clear as the web's Btn variants. */
+    @Test fun thread_paused_tablet() {
+        paparazzi.unsafeUpdateConfig(deviceConfig = tabletPortrait)
+        screen().settle(6).apply { vm.select("c3") }.snap()
+    }
+
     /** A regular agent on a thread Grace holds: the lock badge and banner, no composer. */
     @Test fun thread_lockedByAnotherAgent() = screen(role = "agent", superuser = false) {
         on("GET", "/admin/me", body = Fixtures.me.replace("\"role\":\"admin\"", "\"role\":\"agent\"").replace("\"is_superuser\":true", "\"is_superuser\":false"))
@@ -256,16 +275,16 @@ class ConversationsScreenshotTest {
 
     @Test fun tablet_twoPane() {
         paparazzi.unsafeUpdateConfig(deviceConfig = tabletPortrait)
-        screen().settle(7).apply { vm.select("c1") }.snap()
+        screen().settle(6).apply { vm.select("c1") }.snap()
     }
 
     @Test fun tablet_landscape_sidePanes() {
         paparazzi.unsafeUpdateConfig(deviceConfig = DeviceConfig.PIXEL_C)
-        screen().settle(7).apply { vm.select("c1"); vm.setActivityOpen(true) }.snap()
+        screen().settle(6).apply { vm.select("c1"); vm.setActivityOpen(true) }.snap()
     }
 
     @Test fun tablet_twoPane_dark_bulkSelect() {
         paparazzi.unsafeUpdateConfig(deviceConfig = tabletPortrait)
-        screen().settle(7).apply { vm.select("c2"); vm.enterSelect("p1"); vm.toggleRow("c6") }.snap(dark = true)
+        screen().settle(6).apply { vm.select("c2"); vm.enterSelect("p1"); vm.toggleRow("c6") }.snap(dark = true)
     }
 }

@@ -68,7 +68,7 @@ class ConversationsViewModelTest {
     private fun page(vararg ids: String, cursor: String? = null) =
         """{"items":[${ids.map { id -> InboxFixtures.conversations.first { it.contains("\"id\":\"$id\"") } }.joinToString(",")}],"next_cursor":${cursor?.let { "\"$it\"" } ?: "null"}}"""
 
-    /** `rows` is computed off the main thread (flowOn(Default)); wait for it to settle. */
+    /** `rows` is computed in place when I/O is synchronous; this only guards against regressions. */
     private fun ConversationsViewModel.rowsWhen(ok: (List<ke.co.bethanyhouse.neema.feature.conversations.RowGroup>) -> Boolean): List<ke.co.bethanyhouse.neema.feature.conversations.RowGroup> {
         val end = System.currentTimeMillis() + 3000
         while (!ok(rows.value) && System.currentTimeMillis() < end) Thread.sleep(5)
@@ -88,6 +88,63 @@ class ConversationsViewModelTest {
         val row = rows.first { it.key == "p1" }
         assertEquals(listOf("whatsapp", "facebook"), row.siblings.map { it.channel })
         assertEquals(6, rows.size)
+    }
+
+    /** Carry-over: rows used flowOn(Default), so the first frame was sometimes empty. */
+    @Test fun rows_areReadyTheMomentTheViewModelIs_noWaiting() {
+        val (_, vm) = vm()
+        // Read straight away — no polling, no sleeping.
+        assertEquals(6, vm.rows.value.size)
+        vm.setTab("human")
+        assertEquals(setOf("c1", "c6"), vm.rows.value.map { it.rep.id }.toSet())
+    }
+
+    /** Carry-over: after a failure the list offers Retry instead of "Loading…" forever. */
+    @Test fun listLoadFailure_flagsTheError_andRetryRecovers() {
+        fake.on("GET", "/admin/conversations", code = 500, body = """{"detail":"down"}""")
+        val (_, vm) = vm()
+        vm.inbox.value.let {
+            assertTrue(it.loadError); assertFalse(it.loading); assertFalse(it.freshLoaded)
+        }
+        assertTrue(vm.rows.value.isEmpty())
+        fake.on("GET", "/admin/conversations", body = InboxFixtures.page)
+        vm.refresh()
+        vm.inbox.value.let { assertFalse(it.loadError); assertTrue(it.freshLoaded) }
+        assertEquals(6, vm.rows.value.size)
+    }
+
+    @Test fun listLoadFailure_isTheLiveFiltersOwn_aNewFilterStartsClean() {
+        fake.on("GET", "/admin/conversations") { r, _ ->
+            if (r.url.queryParameter("tab") == "unread") 500 to """{"detail":"down"}""" else 200 to InboxFixtures.page
+        }
+        val (_, vm) = vm()
+        assertFalse(vm.inbox.value.loadError)
+        vm.setTab("unread")
+        assertTrue(vm.inbox.value.loadError)
+        vm.setTab("all")
+        assertFalse(vm.inbox.value.loadError)
+        assertEquals(6, vm.rows.value.size)
+    }
+
+    @Test fun listLoadFailure_afterASnapshotOrPageOne_keepsTheRowsQuietly() {
+        val (_, vm) = vm()
+        fake.on("GET", "/admin/conversations", code = 500, body = """{"detail":"down"}""")
+        vm.refresh()
+        // A background refresh failing leaves the list as it was (the web's rule);
+        // the flag only matters when there is nothing to show.
+        assertEquals(6, vm.rows.value.size)
+        assertFalse(vm.inbox.value.loading)
+    }
+
+    /** Carry-over: a web-chat visitor's `web_<hash>` (or a Meta PSID) is never dialled. */
+    @Test fun call_isRefusedForWebVisitorsAndNonNumbers() {
+        val (_, vm) = vm()
+        val before = fake.calls.size
+        vm.call("web_3fa9c1e20b7d4c5a9e11", null)
+        vm.call("3fa9c1e20b7d4c5a9e11", null)
+        vm.call("25898765432101234567", null)   // a 20-digit PSID
+        assertEquals(before, fake.calls.size)
+        assertTrue(toasts.none { it.message.contains("call", ignoreCase = true) })
     }
 
     @Test fun newestRequestWins_anOlderResponseLandingLastIsDropped() {
