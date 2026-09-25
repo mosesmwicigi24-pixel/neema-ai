@@ -192,3 +192,13 @@ def test_a_cached_catalogue_is_relabelled_by_the_rule_deployed_now(monkeypatch):
     monkeypatch.setattr(hc, "_load_hub_catalog", _boom)
     items = asyncio.run(hc.fetch_hub_catalog(_LastGood()))
     assert items[0]["variants"][0]["label"] == "Red Apostolic Cassock — Black Pleats, Piping and Buttons / Size M"
+
+
+def test_an_attribute_that_repeats_the_products_name_says_only_what_is_left():
+    """Live, 2026-09-25: the preaching gown's colour attribute is 'BLACK
+    PREACHING GOWN', so the label read 'BLACK / BLACK PREACHING GOWN'."""
+    assert variant_label("Preaching Gown", {"name": "BLACK", "attributes": {"Colour": "BLACK PREACHING GOWN"}}) == "Preaching Gown — BLACK"
+    assert variant_label("Preaching Gown", {"name": "", "attributes": {"Colour": "OFF WHITE PREACHING GOWN"}}) == "Preaching Gown — OFF WHITE"
+    assert variant_label("Preaching Gown", {"name": "", "attributes": {"Type": "PREACHING GOWN"}}) == "Preaching Gown"
+    # the size still rides along
+    assert variant_label("Preaching Gown", {"name": "BLACK", "attributes": {"Colour": "BLACK PREACHING GOWN", "Size": "L"}}) == "Preaching Gown — BLACK / Size L"

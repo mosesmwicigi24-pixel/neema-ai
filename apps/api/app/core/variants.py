@@ -96,6 +96,10 @@ def variant_label(product_name: str | None, v: dict | None) -> str:
     bits: list[str] = []
     for key, val in attrs.items():
         val = " ".join(str(val or "").split())
+        if val and pname:
+            # an attribute that repeats the product's name ("BLACK PREACHING
+            # GOWN" under "Preaching Gown") says only "BLACK"
+            val = " ".join(_minus_product(val, pname).split()).strip(_EDGES)
         if not val or _says(tail, val) or _says(pname, val) or any(_says(b, val) for b in bits):
             continue
         key = " ".join(str(key or "").split())
