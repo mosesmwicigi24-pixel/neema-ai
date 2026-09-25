@@ -54,6 +54,7 @@ async def health(request: Request):
         tally = await read_verdicts(getattr(request.app.state, "redis", None))
         out["review"] = {"passed": tally.get("pass", 0),
                          "rewritten": tally.get("rewritten", 0),
+                         "soft": tally.get("soft", 0),
                          "held": tally.get("held", 0)}
     except Exception:
         pass

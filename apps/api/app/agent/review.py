@@ -57,21 +57,46 @@ _log = logging.getLogger("neema.review")
 # ── money figures ────────────────────────────────────────────────────────────
 
 _MONEY_RE = re.compile(
-    r"(?:(?P<c1>US\$|\$|USD|KES|KSHS?|ZMW|ZK)\s?(?P<a>\d[\d,]*(?:\.\d+)?))"
-    r"|(?:(?P<b>\d[\d,]*(?:\.\d+)?)\s?(?:(?P<c2>USD|KES|KSHS?|ZMW|dollars?|shillings?|bob)\b|(?P<c3>/=)))",
+    r"(?:(?<![A-Za-z])(?P<c1>US\$|\$|USD|KES|KSHS?|ZMW|ZK|ZAR|R(?=\s?\d)|NGN|₦|GHS|GH₵|UGX|USH|TZS|TSH|"
+    r"RWF|MWK|BWP|ETB|GBP|£|EUR|€)\s?(?P<a>\d[\d,]*(?:\.\d+)?k?))"
+    r"|(?:(?P<b>\d[\d,]*(?:\.\d+)?k?)\s?(?:(?P<c2>USD|KES|KSHS?|ZMW|ZAR|rands?|NGN|naira|GHS|cedis?|UGX|"
+    r"TZS|RWF|MWK|BWP|pula|ETB|birr|GBP|pounds?|EUR|euros?|dollars?|shillings?|bob)\b|(?P<c3>/=)))",
     re.IGNORECASE)
 _CURRENCY_FAMILY = {"$": "USD", "US$": "USD", "USD": "USD", "DOLLAR": "USD", "DOLLARS": "USD",
                     "KES": "KES", "KSH": "KES", "KSHS": "KES", "SHILLING": "KES",
                     "SHILLINGS": "KES", "BOB": "KES", "/=": "KES",
-                    "ZMW": "ZMW", "ZK": "ZMW"}
+                    "ZMW": "ZMW", "ZK": "ZMW",
+                    "ZAR": "ZAR", "R": "ZAR", "RAND": "ZAR", "RANDS": "ZAR",
+                    "NGN": "NGN", "₦": "NGN", "NAIRA": "NGN",
+                    "GHS": "GHS", "GH₵": "GHS", "CEDI": "GHS", "CEDIS": "GHS",
+                    "UGX": "UGX", "USH": "UGX", "TZS": "TZS", "TSH": "TZS",
+                    "RWF": "RWF", "MWK": "MWK", "BWP": "BWP", "PULA": "BWP",
+                    "ETB": "ETB", "BIRR": "ETB",
+                    "GBP": "GBP", "£": "GBP", "POUND": "GBP", "POUNDS": "GBP",
+                    "EUR": "EUR", "€": "EUR", "EURO": "EUR", "EUROS": "EUR"}
 
 
 def _num(v) -> float | None:
     try:
-        f = float(str(v).replace(",", ""))
+        raw = str(v).replace(",", "").strip()
+        mult = 1.0
+        if raw[-1:].lower() == "k":          # "22k" is 22,000
+            raw, mult = raw[:-1], 1000.0
+        f = float(raw) * mult
     except (TypeError, ValueError):
         return None
     return f if f > 0 else None
+
+
+_NUMBER_WORDS = {
+    "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+    "ten": 10, "eleven": 11, "twelve": 12, "dozen": 12, "fifteen": 15, "twenty": 20,
+    "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "hundred": 100, "thousand": 1000,
+    "pair": 2, "couple": 2,
+    "mbili": 2, "tatu": 3, "nne": 4, "tano": 5, "sita": 6, "saba": 7, "nane": 8, "tisa": 9,
+    "kumi": 10, "ishirini": 20, "thelathini": 30, "arobaini": 40, "hamsini": 50, "mia": 100,
+    "elfu": 1000,
+}
 
 
 def money_with_currency(text: str) -> list[tuple[str, float]]:
@@ -98,19 +123,26 @@ def money_figures(text: str) -> list[float]:
 
 
 def quantities(text: str) -> list[int]:
-    """Bare counts in the text (money figures removed): "2 trays", "100 cups"."""
+    """Bare counts in the text (money figures removed): "2 trays", "100 cups",
+    "two sets", "a pair", "tatu"."""
     stripped = _MONEY_RE.sub(" ", text or "")
     qs: list[int] = []
     for m in re.finditer(r"\b(\d{1,6})\b", stripped):
         q = int(m.group(1))
         if 1 < q <= 100000 and q not in qs:
             qs.append(q)
+    for w in re.findall(r"[a-z]+", stripped.lower()):
+        q = _NUMBER_WORDS.get(w)
+        if q and q not in qs:
+            qs.append(q)
     return qs
 
 
-def _row_figures(p: dict) -> set[float]:
-    """The prices ONE hub row can honestly put in a reply: its KES and USD,
-    any per-currency price, its variants', and the house-rate conversions."""
+def _row_figures(p: dict, currency: str = "USD") -> set[float]:
+    """The prices ONE hub row can honestly put in a reply — exactly what the
+    writer is shown (tools._to_display): its KES; its USD (the hub's own when
+    it has one, else KES at the house rate); ZMW at the house rate only for
+    a Zambian customer; any per-currency price; its variants'."""
     out: set[float] = set()
     usd_rate = float(settings.usd_kes_rate or 100)
     zmw_rate = float(settings.zmw_kes_rate or 5)
@@ -119,11 +151,14 @@ def _row_figures(p: dict) -> set[float]:
         k, u = _num(kes), _num(usd)
         if k:
             out.add(k)
-            out.add(round(k / usd_rate, 2))
-            out.add(round(k / zmw_rate, 2))
+            if not u:
+                out.add(round(k / usd_rate, 2))
+            if (currency or "").upper() == "ZMW":
+                out.add(round(k / zmw_rate, 2))
         if u:
             out.add(u)
-            out.add(round(u * usd_rate, 2))
+            if not k:
+                out.add(round(u * usd_rate, 2))
     _add_pair(p.get("price") or p.get("price_kes"), p.get("price_usd"))
     for v in (p.get("prices") or {}).values():
         f = _num(v)
@@ -136,7 +171,7 @@ def _row_figures(p: dict) -> set[float]:
             if f:
                 out.add(f)
     for r in (p.get("bundle_rows") or []):
-        out |= _row_figures(r)
+        out |= _row_figures(r, currency)
     return out
 
 
@@ -193,48 +228,127 @@ def transcript_figures(transcript: list | None) -> set[float]:
 
 
 def _close(a: float, b: float) -> bool:
-    return abs(a - b) <= max(0.011, 0.005 * abs(b))
+    """Exact to the unit — a whole-unit rounding of a conversion passes,
+    "KES 22,100" for a KES 22,000 tray does not (owner: correct figures)."""
+    return abs(a - b) <= max(0.5, 0.0005 * abs(b))
+
+
+def _usd_of(base: set[float], seen: list) -> set[float]:
+    """The USD figures a foreign-currency conversion starts from: the hub's
+    own USD price, else KES at the house rate — never both."""
+    out: set[float] = set()
+    for p in seen or []:
+        u = _num(p.get("price_usd"))
+        k = _num(p.get("price") or p.get("price_kes"))
+        if u:
+            out.add(u)
+        elif k:
+            out.add(round(k / float(settings.usd_kes_rate or 100), 2))
+        for v in (p.get("variants") or []):
+            u = _num(v.get("price_usd"))
+            if u:
+                out.add(u)
+    return out
 
 
 def allowed_figures(seen: list, *, known: set[float] | frozenset[float] = frozenset(),
-                    comment: str = "", answer: str = "") -> set[float]:
-    """Every figure the reply may honestly state: the rows' prices and
-    conversions, the known figures (tools, instructions, the conversation),
-    a quantity multiple of a row's price, a half, and a sum of two."""
+                    facts: set[float] | frozenset[float] = frozenset(),
+                    comment: str = "", answer: str = "",
+                    fx: dict | None = None, currency: str = "USD") -> set[float]:
+    """Every figure the reply may honestly state.
+
+    ANCHORS are the money this turn stands on: the rows' prices (as the
+    writer sees them), a quantity multiple of one, a half of one (a
+    deposit), the FACTS — numbers a tool returned, figures already said in
+    this conversation — and, when they asked for their own money, the USD
+    price at today's rate. KNOWN figures are the owner's own instructions
+    (shipping). A sum counts only when it is two rows together, or a PRICE
+    or FACT plus a small fee (a known figure no bigger than a quarter of
+    it): "KES 22,000 + KES 350 delivery = KES 22,350". Never two loose
+    figures, never a fee on a half or a conversion — the stress battery
+    found "R2,300" explained as a conversion plus a stray instruction
+    figure."""
     base: set[float] = set()
     for p in seen or []:
-        base |= _row_figures(p)
-    allowed: set[float] = set(base) | {round(k, 2) for k in (known or ())}
+        base |= _row_figures(p, currency)
     qs = quantities(comment) + quantities(answer)
+    fee_anchors: set[float] = set(base) | {round(f, 2) for f in (facts or ())}
     for b in base:
-        allowed.add(round(b / 2, 2))
         for q in qs:
-            allowed.add(round(b * q, 2))
-    # a price plus a delivery fee, two items together: the sum of two figures
-    parts = sorted(allowed)[:80]
-    for i, x in enumerate(parts):
-        for y in parts[i:]:
+            fee_anchors.add(round(b * q, 2))
+    anchors: set[float] = set(fee_anchors)
+    for b in base:
+        anchors.add(round(b / 2, 2))
+        for q in qs:
+            anchors.add(round(b * q / 2, 2))
+    # Their own money at TODAY'S rate (services/fx): the USD price times the
+    # rate, its quantity multiples and its half.
+    usd_base = _usd_of(base, seen)
+    for rate in (fx or {}).values():
+        try:
+            r = float(rate)
+        except (TypeError, ValueError):
+            continue
+        if r <= 0:
+            continue
+        for u in usd_base:
+            conv = round(u * r, 2)
+            anchors.add(conv)
+            anchors.add(round(conv / 2, 2))
+            for q in qs:
+                anchors.add(round(conv * q, 2))
+    allowed: set[float] = set(anchors) | {round(k, 2) for k in (known or ())}
+    # two rows together
+    rows_prices = sorted(base)[:60]
+    for i, x in enumerate(rows_prices):
+        for y in rows_prices[i + 1:]:
             allowed.add(round(x + y, 2))
+    # a price or a fact plus a fee
+    fees = [f for f in (set(known or ()) | set(facts or ())) if f > 0]
+    for x in list(fee_anchors)[:200]:
+        for fee in fees:
+            if fee <= 0.25 * x:
+                allowed.add(round(x + fee, 2))
     return allowed
 
 
 def unverified_figures(answer: str, seen: list, comment: str = "",
-                       known_figures: set[float] | frozenset[float] = frozenset()) -> list[float]:
+                       known_figures: set[float] | frozenset[float] = frozenset(),
+                       facts: set[float] | frozenset[float] = frozenset(),
+                       fx: dict | None = None, currency: str = "USD") -> list[float]:
     """The money figures in the reply that NOTHING explains."""
     figures = money_figures(answer)
     if not figures:
         return []
-    allowed = allowed_figures(seen, known=set(known_figures or ()), comment=comment, answer=answer)
+    allowed = allowed_figures(seen, known=set(known_figures or ()), facts=set(facts or ()),
+                              comment=comment, answer=answer, fx=fx, currency=currency)
     return [f for f in figures if not any(_close(f, a) for a in allowed)]
 
 
-def two_currencies(answer: str) -> list[str]:
-    """ONE currency per reply (owner, 2026-09-05): the families of money in it."""
+def two_currencies(answer: str, comment: str = "") -> list[str]:
+    """ONE currency per reply (owner, 2026-09-05): the families of money in it
+    — except the one THEY asked for by name ("in rands?"), which may stand
+    beside the USD price it converts (the prompt's one exception)."""
     fams: list[str] = []
     for fam, _v in money_with_currency(answer):
         if fam not in fams:
             fams.append(fam)
+    if len(fams) > 1 and comment:
+        from app.services.fx import currency_asked
+        asked = currency_asked(comment)
+        asked_fams = {f for f, _v in money_with_currency(comment)} | ({asked} if asked else set())
+        for fam, rx in _HOUSE_ASKED.items():
+            if rx.search(comment):
+                asked_fams.add(fam)
+        fams = [f for f in fams if f not in asked_fams]
     return fams if len(fams) > 1 else []
+
+
+_HOUSE_ASKED = {
+    "USD": re.compile(r"(?<![A-Za-z])(?:dollars?|usd|\$)(?![A-Za-z])", re.IGNORECASE),
+    "KES": re.compile(r"(?<![A-Za-z])(?:shillings?|shilingi|ksh|kes|bob)(?![A-Za-z])", re.IGNORECASE),
+    "ZMW": re.compile(r"(?<![A-Za-z])(?:kwacha|zmw)(?![A-Za-z])", re.IGNORECASE),
+}
 
 
 # ── the item they asked for ──────────────────────────────────────────────────
@@ -320,26 +434,38 @@ def item_issues(ask: str, product: dict | None, answer: str = "") -> list[str]:
     return issues
 
 
+def products_named(answer: str, seen: list) -> list[dict]:
+    """Every looked-up row the reply NAMES (a name inside another's — "Chalice
+    Cup -Medium" inside "Golden Chalice Cup with Paten Set" — counts once,
+    the longer)."""
+    a = " ".join((answer or "").lower().split())
+    named = [p for p in (seen or [])
+             if " ".join(str(p.get("name") or "").lower().split()) in a and p.get("name")]
+    named.sort(key=lambda p: -len(str(p.get("name") or "")))
+    out: list[dict] = []
+    for p in named:
+        n = " ".join(str(p.get("name") or "").lower().split())
+        if any(n in " ".join(str(q.get("name") or "").lower().split()) for q in out):
+            continue
+        out.append(p)
+    return out
+
+
 def product_named(answer: str, seen: list) -> dict | None:
     """The looked-up row the reply actually sells: the one it NAMES (longest
     name wins), else the ONE row whose price it quotes — a reply that
     describes "the glass communion set… in silver tones is $180" without the
     hub's name is still selling the Silver Communion Tray. None when the
     reply names none and prices none (or several)."""
-    a = " ".join((answer or "").lower().split())
-    best = None
-    for p in seen or []:
-        n = " ".join(str(p.get("name") or "").lower().split())
-        if n and n in a and (best is None or len(n) > len(str(best.get("name") or ""))):
-            best = p
-    if best is not None:
-        return best
+    named = products_named(answer, seen)
+    if named:
+        return named[0]
     figures = money_figures(answer)
     if not figures:
         return None
     priced = []
     for p in seen or []:
-        if any(_close(f, v) for f in figures for v in _row_figures(p)):
+        if any(_close(f, v) for f in figures for v in _row_figures(p, "ZMW")):
             if all(p.get("name") != q.get("name") for q in priced):
                 priced.append(p)
     return priced[0] if len(priced) == 1 else None
@@ -350,11 +476,11 @@ def product_named(answer: str, seen: list) -> dict | None:
 # Africa?" both went unanswered). The answer names a place, a shop or the
 # courier — anything else left it hanging.
 _WHERE_ASK_RE = re.compile(
-    r"\b(?:where\s+(?:are|is|r)\s+(?:you|your|u|the\s+shop)|your\s+location|location\s*\?|"
-    r"located|based\s+in|(?:shops?|stores?|branch(?:es)?|outlets?|offices?)\s+in\s+[A-Za-z]|"
-    r"in\s+(?:south\s+africa|nigeria|zambia|uganda|tanzania|ghana|zimbabwe|botswana|malawi|"
-    r"rwanda|usa|america|uk|london|kenya|nairobi)\s*\??\s*$|mko\s+wapi|uko\s+wapi|"
-    r"duka\s+(?:lenu|lako)\s+liko)",
+    r"(?:\bwhere\s+(?:are|is|r)\s+(?:you|your|u|the\s+shop)\b|\byour\s+(?:location|address)\b|"
+    r"\blocation\s*\?|\b(?:are\s+you|r\s+u|you\s+are)\s+(?:located|based)\b|"
+    r"\b(?:do\s+you\s+have|have\s+you|is\s+there|any)\s+(?:a\s+|an\s+)?(?:shops?|stores?|branch(?:es)?|outlets?|offices?)\s+in\s+[A-Za-z]|"
+    r"\b(?:shops?|stores?|branch(?:es)?|outlets?|offices?)\s+in\s+[A-Za-z][A-Za-z ]{1,30}\?|"
+    r"\bmko\s+wapi\b|\buko\s+wapi\b|\bduka\s+(?:lenu|lako)\s+liko\b)",
     re.IGNORECASE)
 _WHERE_ANSWER_RE = re.compile(
     r"\b(?:nairobi|kenya|dhl|deliver|delivery|ship|shipping|courier|located|based|"
@@ -372,20 +498,25 @@ def where_unanswered(comment: str, answer: str) -> bool:
 _URL_RE = re.compile(r"https?://[^\s)>\]\"']+", re.IGNORECASE)
 
 
-def foreign_links(answer: str, tool_results: list | None, known_text: str = "") -> list[str]:
+def foreign_links(answer: str, tool_results: list | None, known_text: str = "",
+                  transcript: list | None = None) -> list[str]:
     urls = _URL_RE.findall(answer or "")
     if not urls:
         return []
     pool = (known_text or "") + " " + " ".join(
         json.dumps((e or {}).get("out"), default=str) for e in (tool_results or []))
+    pool += " " + " ".join(t for _r, t in transcript_text(transcript, limit=40))
     return [u for u in urls if u.rstrip(".,") not in pool]
 
 
 # An order-status claim needs an order tool behind it, or our own earlier
 # word — never a guess that soothes.
 _STATUS_CLAIM_RE = re.compile(
-    r"\b(?:has\s+(?:been\s+)?(?:shipped|dispatched|sent\s+out|delivered)|is\s+on\s+its\s+way|"
-    r"was\s+(?:shipped|dispatched|delivered)|tracking\s+number|imetumwa|imefika|iko\s+njiani)\b",
+    r"\b(?:(?:your|the)\s+(?:order|parcel|package|item|delivery)|it|order\s*#?\s*\d+)\s+"
+    r"(?:(?:has|had)\s+(?:already\s+)?(?:been\s+)?(?:shipped|dispatched|sent\s+out|delivered)|"
+    r"was\s+(?:shipped|dispatched|delivered)|is\s+(?:already\s+)?on\s+its\s+way)"
+    r"|(?:your|the)\s+tracking\s+number\s+is\b|tracking\s+number\s*:\s*[A-Z0-9]"
+    r"|(?:agizo|kifurushi|oda)\s+(?:lako|yako)\s+(?:imetumwa|imeshatumwa|imefika|imeshafika|iko\s+njiani)",
     re.IGNORECASE)
 _ORDER_TOOLS = {"check_order_status", "create_order", "prepare_quotation"}
 
@@ -399,38 +530,77 @@ def status_without_source(answer: str, tool_results: list | None, transcript: li
                    for role, t in transcript_text(transcript, limit=40))
 
 
-def rule_issues(comment: str, answer: str, seen: list,
-                known_figures: set[float] | frozenset[float] = frozenset(), *,
-                tool_results: list | None = None, transcript: list | None = None,
-                known_text: str = "") -> list[str]:
-    """The deterministic verdict on a draft. Empty = the rules pass it (the
-    reviewer may still not)."""
-    issues: list[str] = []
-    bad = unverified_figures(answer, seen, comment, known_figures)
+HARD_KINDS = ("figure", "item", "link", "status")
+
+
+def rule_findings(comment: str, answer: str, seen: list,
+                  known_figures: set[float] | frozenset[float] = frozenset(), *,
+                  tool_results: list | None = None, transcript: list | None = None,
+                  known_text: str = "", fx: dict | None = None,
+                  currency: str = "USD") -> list[dict]:
+    """The deterministic findings on a draft, each with its weight:
+    {"kind", "text", "hard"}. HARD findings — a figure from nowhere, the
+    wrong item priced, a link no tool gave, an order status with no source —
+    are the ones that may hold a reply; SOFT ones ask for a rewrite and then
+    stand aside (owner, 2026-09-25: "change from gating to double
+    verifying" — a reply is corrected, not strangled)."""
+    out: list[dict] = []
+    # The facts: a tool's numbers, figures already said in this conversation,
+    # and the customer's own figure in THIS message ("my budget is KES 15,000").
+    facts = figures_in_results(tool_results) | transcript_figures(transcript) \
+        | {round(v, 2) for v in money_figures(comment)}
+    bad = unverified_figures(answer, seen, comment, known_figures, facts=facts, fx=fx,
+                             currency=currency)
     if bad:
         looked = ", ".join(f"{p.get('name')} (KES {p.get('price')} / USD {p.get('price_usd')})"
                            for p in (seen or [])[:6]) or "no hub row was looked up"
-        issues.append("unverified figure(s) " + ", ".join(_fmt(f) for f in bad)
-                      + " — not the hub price of any row looked up this turn, nor a figure "
-                      "any tool returned: " + looked)
-    fams = two_currencies(answer)
+        out.append({"kind": "figure", "hard": True,
+                    "text": "unverified figure(s) " + ", ".join(_fmt(f) for f in bad)
+                    + " — not the hub price of any row looked up this turn, nor a figure "
+                    "any tool returned: " + looked})
+    fams = two_currencies(answer, comment)
     if fams:
-        issues.append("two currencies in one reply (" + ", ".join(fams)
-                      + ") — quote ONE, the customer's own")
-    named = product_named(answer, seen)
-    if named is not None:
-        issues.extend(item_issues(comment, named, answer))
+        out.append({"kind": "currency", "hard": False,
+                    "text": "two currencies in one reply (" + ", ".join(fams)
+                    + ") — quote ONE, the customer's own"})
+    # THE ITEM: every row the reply names is read against the ask; the finding
+    # stands only when NONE of them fits ("the Golden Communion Tray is $220,
+    # or the Silver at $180 if you prefer" offers what they asked). It is
+    # HARD when the reply quotes money — the wrong item PRICED is the live
+    # miss — and soft when it merely mentions a row.
+    named_rows = products_named(answer, seen)
+    if not named_rows:
+        one = product_named(answer, seen)
+        named_rows = [one] if one is not None else []
+    conflicts = [item_issues(comment, r, answer) for r in named_rows]
+    if named_rows and all(conflicts):
+        for t in conflicts[0]:
+            out.append({"kind": "item", "hard": bool(money_figures(answer)), "text": t})
     if where_unanswered(comment, answer):
-        issues.append("their question about where we are / a shop in their country is "
-                      "unanswered — say Nairobi, Kenya, no shop there, DHL delivers to them")
-    links = foreign_links(answer, tool_results, known_text)
+        out.append({"kind": "where", "hard": False,
+                    "text": "their question about where we are / a shop in their country is "
+                    "unanswered — say Nairobi, Kenya, no shop there, DHL delivers to them"})
+    links = foreign_links(answer, tool_results, known_text, transcript)
     if links:
-        issues.append("a link no tool gave: " + ", ".join(links[:3])
-                      + " — only links a tool returned may be sent")
+        out.append({"kind": "link", "hard": True,
+                    "text": "a link no tool gave: " + ", ".join(links[:3])
+                    + " — only links a tool returned may be sent"})
     if status_without_source(answer, tool_results, transcript):
-        issues.append("an order-status claim (shipped / on its way / delivered) with no "
-                      "check_order_status behind it — check the order, never assume")
-    return issues
+        out.append({"kind": "status", "hard": True,
+                    "text": "an order-status claim (shipped / on its way / delivered) with no "
+                    "check_order_status behind it — check the order, never assume"})
+    return out
+
+
+def rule_issues(comment: str, answer: str, seen: list,
+                known_figures: set[float] | frozenset[float] = frozenset(), *,
+                tool_results: list | None = None, transcript: list | None = None,
+                known_text: str = "", fx: dict | None = None) -> list[str]:
+    """The deterministic verdict on a draft, as text. Empty = the rules pass
+    it (the reviewer may still not)."""
+    return [f["text"] for f in rule_findings(comment, answer, seen, known_figures,
+                                             tool_results=tool_results, transcript=transcript,
+                                             known_text=known_text, fx=fx)]
 
 
 def _fmt(f: float) -> str:
@@ -543,9 +713,10 @@ async def reviewer_verdict(comment: str, answer: str, seen: list, *,
         "a price they asked for.\n"
         + ("4. CONTRADICTS THE CONVERSATION — it re-asks a detail they already gave "
            "(colour, size, quantity, city, name), or contradicts what we said earlier.\n"
-           "5. INVENTED — availability, stock, an order status (shipped, on its way), a "
-           "payment received, or a promise that no tool result or earlier message "
-           "supports.\n"
+           "5. INVENTED — availability, stock, an order status (shipped, on its way) or a "
+           "payment received that no tool result or earlier message supports. (A "
+           "colleague reaching out, a delivery being arranged, a price to be confirmed "
+           "are ordinary promises, not inventions.)\n"
            "6. WRONG LANGUAGE — they wrote in Swahili and the reply is English, or the "
            "reverse (a mix is fine).\n" if mode != "comment" else "")
         + "PASS otherwise. Never fail for tone, warmth, length or emoji.\n\n"
@@ -574,23 +745,30 @@ async def review_reply(comment: str, answer: str, seen: list, *,
                        known_figures: set[float] | frozenset[float] = frozenset(),
                        redis=None, transcript: list | None = None,
                        tool_results: list | None = None, mode: str = "comment",
-                       known_text: str = "") -> dict:
-    """The gate's verdict on one draft: {"ok", "issues", "by"}. The rules
-    first (a rule failure is final for this draft); then the reviewer."""
-    known = set(known_figures or ()) | figures_in_results(tool_results) | transcript_figures(transcript)
-    issues = rule_issues(comment, answer, seen, known, tool_results=tool_results,
-                         transcript=transcript, known_text=known_text)
-    if issues:
-        return {"ok": False, "issues": issues, "by": "rules"}
+                       known_text: str = "", fx: dict | None = None) -> dict:
+    """DOUBLE VERIFICATION of one draft: the rules (deterministic) AND the
+    reviewer (a model's reading) both read it, and their findings merge —
+    {"ok", "issues", "hard", "soft", "by"}. `hard` are the findings that may
+    hold a reply (a figure or item from nowhere, a link, a status claim);
+    `soft` ask for a rewrite and then stand aside. The reviewer's findings
+    are always soft: a model's opinion improves a reply, it never strangles
+    one (owner, 2026-09-25)."""
+    findings = rule_findings(comment, answer, seen, set(known_figures or ()),
+                             tool_results=tool_results, transcript=transcript,
+                             known_text=known_text, fx=fx, currency=currency)
+    hard = [f["text"] for f in findings if f["hard"]]
+    soft = [f["text"] for f in findings if not f["hard"]]
+    by = "rules" if findings else ""
     v = await reviewer_verdict(comment, answer, seen, post_product=post_product,
                                currency=currency, redis=redis, transcript=transcript,
                                tool_results=tool_results, mode=mode)
-    if v is None:
-        return {"ok": True, "issues": [], "by": "rules"}
-    if v["ok"]:
-        return {"ok": True, "issues": [], "by": "reviewer"}
-    return {"ok": False, "issues": v["issues"] or ["the reviewer rejected the draft"],
-            "by": "reviewer"}
+    if v is not None and not v["ok"]:
+        soft.extend(v["issues"] or ["the reviewer rejected the draft"])
+        by = (by + "+reviewer").strip("+")
+    if v is not None and v["ok"] and not findings:
+        by = "reviewer"
+    issues = hard + soft
+    return {"ok": not issues, "issues": issues, "hard": hard, "soft": soft, "by": by or "rules"}
 
 
 def review_notes(issues: list[str]) -> str:
@@ -611,7 +789,8 @@ def review_notes(issues: list[str]) -> str:
 
 
 def rewrite_block(issues: list[str], draft: str, seen: list, currency: str,
-                  tool_results: list | None, mode: str = "comment") -> str:
+                  tool_results: list | None, mode: str = "comment",
+                  fx: dict | None = None, comment: str = "") -> str:
     """The reviewer's message to the writer for the ONE rewrite: the reasons,
     the facts (every hub row in hand, every other tool result), the draft —
     and the instruction to write the corrected reply only, from these facts,
@@ -625,17 +804,31 @@ def rewrite_block(issues: list[str], draft: str, seen: list, currency: str,
         f"THE FACTS YOU MAY STATE (the hub's rows, in {currency}; nothing else is a price):\n"
         f"{rows_text(seen, currency)}\n"
         + (f"Other facts from this turn's tools:\n{other}\n" if other else "")
+        + _fx_text(fx, comment)
         + f'\nYour held draft: "{" ".join((draft or "").split())[:900]}"\n\n'
         "Write the corrected reply NOW — the reply only, nothing else, no tool. "
         "Rules: the item is exactly what they asked for (their finish, their kind — "
         "if we do not have it, say so plainly and offer the nearest from the rows "
         "above with its price); every figure is one of the facts above, in ONE "
-        "currency; answer EVERY question they asked (where we are — Nairobi, Kenya; "
-        "a shop in their country — none, DHL delivers; delivery; the price); never "
-        "re-ask a detail they already gave; never invent a pack size, a capacity, "
-        "an order status or a delivery time; keep the warmth and the closing "
-        "question; write in their language.]"
+        "currency (plus the one they asked for by name, at today's rate above, if "
+        "any); answer every question they asked — and nothing they did not ask "
+        "(where we are is Nairobi, Kenya; a shop in their country — none, DHL "
+        "delivers — ONLY if they asked); never re-ask a detail they already gave; "
+        "never invent a pack size, a capacity, an order status, a delivery time or "
+        "an exchange rate; never promise to 'confirm' a figure with the team; keep "
+        "the warmth and the closing question; write in their language.]"
     )
+
+
+def _fx_text(fx: dict | None, comment: str) -> str:
+    """Today's rate for the currency they asked, for the rewrite."""
+    if not fx or not comment:
+        return ""
+    from app.services.fx import currency_asked
+    code = currency_asked(comment)
+    if not code or code not in fx:
+        return ""
+    return f"Today's rate (a fact): 1 USD = {float(fx[code]):g} {code} — convert from the USD price only.\n"
 
 
 # ── the tally: what the gate did today (health, the team's eye) ──────────────
@@ -645,8 +838,9 @@ def _day_key() -> str:
 
 
 async def record_verdict(redis, outcome: str, channel: str = "") -> None:
-    """pass / rewritten / held, per UTC day (kept three days), best-effort."""
-    if redis is None or outcome not in ("pass", "rewritten", "held"):
+    """pass / rewritten / soft (sent with notes) / held, per UTC day (kept
+    three days), best-effort."""
+    if redis is None or outcome not in ("pass", "rewritten", "soft", "held"):
         return
     try:
         key = _day_key()
@@ -658,8 +852,21 @@ async def record_verdict(redis, outcome: str, channel: str = "") -> None:
         pass
 
 
+async def held_recently(redis, channel: str, key: str, hours: int = 6) -> bool:
+    """Was this person already given a holding line in the last `hours`? A
+    colleague is already flagged; a second "let me confirm" in a row reads
+    like a wall (owner, 2026-09-25). Marks the hold when it is not."""
+    if redis is None:
+        return False
+    try:
+        return not bool(await redis.set(f"review:hold:{channel}:{key}", "1", nx=True,
+                                        ex=hours * 3600))
+    except Exception:
+        return False
+
+
 async def read_verdicts(redis) -> dict:
-    """{"pass": n, "rewritten": n, "held": n} for today, {} when unknown."""
+    """{"pass": n, "rewritten": n, "soft": n, "held": n} for today, {} when unknown."""
     if redis is None:
         return {}
     try:
@@ -679,16 +886,34 @@ async def read_verdicts(redis) -> dict:
 _prompt_figures_cache: dict[str, frozenset[float]] = {}
 
 
+_FEE_CONTEXT_RE = re.compile(
+    r"delivery\s+(?:fee|charge|cost|is|:)|(?:fee|charge|cost)\s+(?:for|of)\s+delivery|if\s+delivery|"
+    r"courier\s+(?:fee|charge)|postage|packaging\s+(?:fee|charge)|within\s+(?:nairobi|kenya)",
+    re.IGNORECASE)
+
+
 def prompt_figures(currency: str = "USD") -> frozenset[float]:
-    """The money figures the owner's own instructions state (shipping and the
-    like) — a reply may repeat them without a hub row."""
-    key = (currency or "USD").upper()
+    """The money figures the owner's own instructions state ABOUT SHIPPING,
+    DELIVERY AND FEES — a reply may repeat them without a hub row. Every
+    currency block of the prompt is read ("KES 350 within Nairobi" is a
+    fact whatever money this customer is quoted in), but an EXAMPLE price
+    in the prompt ("'This gown is $130.'") is not a fact — the stress
+    battery let "$130" through for a $120 cassock on its account."""
+    key = "fees"
     if key not in _prompt_figures_cache:
+        figs: set[float] = set()
         try:
             from app.agent.prompt import build_system_prompt
             from app.agent.runtime import _public_comment_addendum
-            text = build_system_prompt(currency=key) + _public_comment_addendum(key)
-            _prompt_figures_cache[key] = frozenset(money_figures(text))
+            for ccy in ("KES", "USD", "ZMW"):
+                text = build_system_prompt(currency=ccy) + _public_comment_addendum(ccy)
+                for m in _MONEY_RE.finditer(text):
+                    window = text[max(0, m.start() - 70): m.end() + 70]
+                    if _FEE_CONTEXT_RE.search(window):
+                        v = _num(m.group("a") or m.group("b"))
+                        if v:
+                            figs.add(v)
         except Exception:
-            _prompt_figures_cache[key] = frozenset()
+            pass
+        _prompt_figures_cache[key] = frozenset(figs)
     return _prompt_figures_cache[key]

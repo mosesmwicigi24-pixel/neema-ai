@@ -50,6 +50,72 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   many, how soon, which city. A made-to-order item (cassocks, shirts, stoles…)
   is asked colour then size/measurements. Every search row carries `ask_next`;
   the canned pools split the same way (`_STOCK_*` vs the made-to-order pools).
+- **Double verification, not gating** (owner 2026-09-25, two Messenger
+  threads after the gate went live: "When am in Uganda" and "My wansapp
+  number" were answered with the holding line, a thumbs-up with "I can't
+  open that image", "I'm saying ok" with the holding line, and "how much
+  that in rands" with "let me confirm the exact rate with our team" —
+  "change from gating to double verifying… make the logic consistent").
+  Every reply is now read TWICE — the rules and the reviewer both, every
+  draft — and their findings carry a WEIGHT (`review.rule_findings`):
+  HARD (a figure from nowhere, the wrong item priced, a link no tool gave, an
+  order status with no source) and SOFT (a where-question, two currencies,
+  and everything the reviewer says). The reply that goes out is the best
+  VERIFIED draft (`runtime._gate_turn_reply`): clean → sent; a finding →
+  one rewrite with the reasons and the facts, read twice again → sent when
+  clean; still not clean → the best draft with NO hard finding is sent and
+  the soft notes are logged (tally "soft") — a reply is corrected, never
+  strangled; only a hard finding on BOTH drafts holds: a public reply
+  returns "" (the engine's holding line + a colleague), a private reply gets
+  ONE holding line (the price one when the finding is a figure or an item),
+  never two in a row (`review.held_recently`, 6 h — the colleague is already
+  flagged), never for an acknowledgement (silence), and the conversation is
+  flagged with the reasons and the draft. The where-question rule reads a
+  QUESTION about where we are ("where are you located?", "do you have shops
+  in South Africa?"), never a sentence that names a place. A THUMBS-UP IS
+  THE END (owner: "satisfaction — you should not continue"): Messenger's
+  Like sticker (`meta_webhook._sticker`, three sticker ids) is the text
+  "👍", never a photo; any other sticker "[sticker]"; `runtime
+  .is_silent_ack` (👍 🙏 ❤️ 👌 🙌 ✅ …) makes `closer_gate` silent ALWAYS —
+  not even the one warm line a typed "thanks" gets; "I'm saying ok",
+  "noted", "alright", "kk", "sawa sawa" are acknowledgements (`_ACK_RE`);
+  and `_run_and_send` / `_run_and_send_meta` never send an empty reply.
+  THEIR OWN MONEY AT TODAY'S RATE (`services/fx`): a "how much in rands /
+  naira / pounds?" fetches USD rates once a day from a public source
+  (open.er-api.com; Redis 24 h, a stale copy a week; the house KES rate and
+  the hub's ZMW prices are never overridden), gives the writer "TODAY'S
+  RATE: 1 USD = 16.43 ZAR" and the verifier the same rate (the USD price ×
+  the rate is an allowed figure; the currency they asked for by name may
+  stand beside the USD price); no rate → the writer says the price is
+  charged in USD and converts at the day's rate, never invents a rate,
+  never promises to "confirm the rate with the team" (the prompt's
+  local-currency exception now says so). The reviewer no longer calls an
+  ordinary promise ("a colleague will reach out") an invention. Health:
+  `review: {passed, rewritten, soft, held}`. STRESS-TESTED before it shipped
+  (owner: "stress test many scenarios… to the level of human intelligence"):
+  `tests/test_verification_stress.py` runs ~100 real-chat shapes through
+  the real rules and gate, hunting FALSE HOLDS (a good reply strangled) and
+  FALSE PASSES (a figure from nowhere let through). What it found and fixed:
+  a figure matches to the UNIT (`_close`: ±0.5, or 0.05%), not to half a
+  percent ("KES 22,100" for a KES 22,000 tray is wrong); a conversion starts
+  from the hub's own USD, never from KES at the house rate when the hub has
+  a USD price; ZMW at the house rate only for a Zambian turn; a KES figure
+  derived from USD only when the row has no KES; a fee rides only on a
+  price, a quantity multiple or a fact — never on a half or a conversion
+  ("R2,300" had been explained as a conversion plus a stray instruction
+  figure); the owner's instruction figures count only ABOUT DELIVERY (the
+  prompt's "Eliad Oil at USD 50" is an example, not a fact — today the
+  allow-list is exactly KES 350); the customer's own figure in THIS
+  message is a fact ("my budget is KES 15,000"); number words are
+  quantities ("two trays", "tatu", "a dozen"); "22k" is 22,000; every row
+  the reply names is read against the ask and the item finding stands only
+  when NONE fits ("the Golden at $220, or the Silver at $180 if you
+  prefer" passes) and is hard only when money is quoted; an order-status
+  claim must be about THEIR order ("we have delivered to Kampala before" is
+  not one; "your tracking number is…" without a tool is); a link we sent
+  earlier in the conversation may be repeated; "where do I order?" is not
+  a where-question; the website never shows an empty bubble (a held
+  acknowledgement becomes "🙏").
 - **The gate before posting** (owner 2026-09-25: "someone is asking for
   golden trays and you give silver… put a gate to review before posting…
   when someone asks for Holy Communion Cups without specifying chalice, give
