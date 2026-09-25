@@ -1,7 +1,6 @@
 package ke.co.bethanyhouse.neema.feature.agents
 
 import ke.co.bethanyhouse.neema.core.model.OkResponse
-import ke.co.bethanyhouse.neema.core.model.RoleAssignResponse
 import ke.co.bethanyhouse.neema.core.net.NeemaHttp
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -29,9 +28,17 @@ class TeamApi(private val http: NeemaHttp) {
     /**
      * Give [agentId] a custom role. [customPermissions] = null clears any
      * per-agent override (the server writes NULL), so the agent gets exactly
-     * the role's permissions — which is what the web's Assign button does.
+     * the role's permissions — which is what the web's Assign button does; a
+     * list (even an empty one) replaces the role's set for this agent.
+     *
+     * admin.py assign_agent_role answers with the agent's joined row
+     * (id, name, email, role, is_available, custom_role_id,
+     * custom_permissions, role_name, role_color) — not the `{ok, permissions}`
+     * the web's type claims. Nothing in it is read (the list is refetched), so
+     * any JSON object counts as success. Errors: 422 "custom_role_id is
+     * required", 404 "Role not found" / "Agent not found".
      */
-    suspend fun assignRole(agentId: String, roleId: String, customPermissions: List<String>?): RoleAssignResponse =
+    suspend fun assignRole(agentId: String, roleId: String, customPermissions: List<String>?): JsonObject =
         http.patch("/admin/agents/$agentId/role", buildJsonObject {
             put("custom_role_id", roleId)
             if (customPermissions != null) {

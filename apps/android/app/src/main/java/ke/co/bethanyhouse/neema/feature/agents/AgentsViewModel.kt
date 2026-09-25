@@ -6,6 +6,7 @@ import ke.co.bethanyhouse.neema.app.DashboardViewModel
 import ke.co.bethanyhouse.neema.app.ToastType
 import ke.co.bethanyhouse.neema.core.model.Agent
 import ke.co.bethanyhouse.neema.core.model.CustomRole
+import ke.co.bethanyhouse.neema.core.net.ApiException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -71,16 +72,38 @@ class AgentsViewModel(private val dash: DashboardViewModel) : ViewModel() {
         }
     }
 
-    /** Runs [block] with the shared saving flag, toasting any failure. */
-    private fun save(fallbackError: String? = null, block: suspend () -> Unit) {
+    /**
+     * Runs [block] with the shared saving flag, toasting any failure.
+     * [fallbackError] replaces the server's words entirely (the web's fixed
+     * "Failed to remove"); [serverError] is what a 5xx says instead of the bare
+     * "Internal Server Error" body the API sends when the database refuses a
+     * write (admin.py has no handler for IntegrityError).
+     */
+    private fun save(fallbackError: String? = null, serverError: String = "Something went wrong — please try again", block: suspend () -> Unit) {
         if (_saving.value) return
         viewModelScope.launch {
             _saving.value = true
             try { block() }
-            catch (e: Exception) { dash.toast(fallbackError ?: dash.errorText(e), ToastType.Error) }
+            catch (e: Exception) { dash.toast(fallbackError ?: failText(e, serverError), ToastType.Error) }
             finally { _saving.value = false }
         }
     }
+
+    private fun failText(e: Exception, serverError: String): String {
+        val status = (e as? ApiException)?.status ?: return dash.errorText(e)
+        return when {
+            status == 409 -> "An agent with that email already exists"
+            status >= 500 -> serverError
+            else -> dash.errorText(e)
+        }
+    }
+
+    /**
+     * agents.email is UNIQUE and the API turns a clash into an unhandled 500,
+     * so a duplicate is caught here, against the list already on screen.
+     */
+    private fun emailTaken(email: String, exceptId: String? = null): Boolean =
+        dash.agents.value.any { it.id != exceptId && it.email.trim().equals(email.trim(), ignoreCase = true) }
 
     // ── Agent CRUD ────────────────────────────────────────────────────────────
 
@@ -88,7 +111,8 @@ class AgentsViewModel(private val dash: DashboardViewModel) : ViewModel() {
         if (name.isBlank() || email.isBlank() || password.isEmpty())
             return dash.toast("Name, email and password are required", ToastType.Error)
         if (password.length < 8) return dash.toast("Password must be ≥8 characters", ToastType.Error)
-        save {
+        if (emailTaken(email)) return dash.toast("An agent with that email already exists", ToastType.Error)
+        save(serverError = "Couldn't create the agent — that email may already be in use") {
             dash.api.agents.create(name.trim(), email.trim(), password, toDbRole(roleId))
             dash.refetchAgents()
             onDone()
@@ -98,7 +122,8 @@ class AgentsViewModel(private val dash: DashboardViewModel) : ViewModel() {
 
     fun saveEdit(agent: Agent, name: String, email: String, onDone: () -> Unit) {
         if (name.isBlank() || email.isBlank()) return dash.toast("Name and email required", ToastType.Error)
-        save {
+        if (emailTaken(email, exceptId = agent.id)) return dash.toast("An agent with that email already exists", ToastType.Error)
+        save(serverError = "Couldn't update the agent — that email may already be in use") {
             team.updateAgent(agent.id, buildJsonObject { put("name", name.trim()); put("email", email.trim()) })
             dash.refetchAgents()
             onDone()
@@ -116,7 +141,34 @@ class AgentsViewModel(private val dash: DashboardViewModel) : ViewModel() {
         }
     }
 
-    fun deleteAgent(agent: Agent, onDone: () -> Unit) = save("Failed to remove") {
+    /**
+     * Why [agent] can't be removed from here, or null when it can. The API
+     * deletes any row it is asked to — including the caller's own, after which
+     * every request answers 404 "Agent not found" (not 401), so the app could
+     * neither work nor sign out — and the last admin, which leaves nobody
+     * able to manage the team.
+     */
+    fun removalBlocker(agent: Agent): String? {
+        val meId = dash.me.value?.id ?: dash.session.value?.agentId
+        if (agent.id == meId) return "You can't remove your own account — ask another admin"
+        val isAdmin = { a: Agent -> a.role == "admin" || a.isSuperuser }
+        if (isAdmin(agent) && dash.agents.value.count(isAdmin) <= 1) return "You can't remove the last admin"
+        return null
+    }
+
+    /** The trash button: true opens the confirmation; false has already said why not. */
+    fun requestRemove(agent: Agent): Boolean {
+        val why = removalBlocker(agent) ?: return true
+        dash.toast(why, ToastType.Error)
+        return false
+    }
+
+    fun deleteAgent(agent: Agent, onDone: () -> Unit) {
+        removalBlocker(agent)?.let { return dash.toast(it, ToastType.Error) }
+        doDelete(agent, onDone)
+    }
+
+    private fun doDelete(agent: Agent, onDone: () -> Unit) = save("Failed to remove") {
         dash.api.agents.delete(agent.id)
         dash.refetchAgents()
         onDone()

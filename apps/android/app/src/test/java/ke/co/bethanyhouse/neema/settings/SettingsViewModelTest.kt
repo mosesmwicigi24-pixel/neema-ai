@@ -8,6 +8,7 @@ import ke.co.bethanyhouse.neema.feature.settings.isoDateToUtcMillis
 import ke.co.bethanyhouse.neema.feature.settings.offerIsValid
 import ke.co.bethanyhouse.neema.feature.settings.utcMillisToIsoDate
 import ke.co.bethanyhouse.neema.team.AreaTest
+import ke.co.bethanyhouse.neema.testing.FakeNeema
 import ke.co.bethanyhouse.neema.testing.fixtures.TeamFixtures
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.jsonObject
@@ -20,6 +21,8 @@ import java.time.LocalDate
 
 /** SettingsView.tsx's live cards (+ the pipeline stage list): endpoints, bodies, validation, failures. */
 class SettingsViewModelTest : AreaTest() {
+    /** crm.py's settings routes as the server answers them (max_chars 600, max_percent 70). */
+    override fun install(f: FakeNeema) = TeamFixtures.settings(f)
     private val vm by lazy { SettingsViewModel(dash).also { fake.calls.clear() } }
 
     @Test fun loadsEveryCard() {
@@ -28,7 +31,7 @@ class SettingsViewModelTest : AreaTest() {
             assertTrue(it, fake.called("GET", "/admin/settings/$it"))
         }
         assertEquals("Always offer free delivery within Nairobi on orders above KES 10,000.", v.directives.value)
-        assertEquals(2000, v.maxChars.value)
+        assertEquals(600, v.maxChars.value)
         assertTrue(v.directivesLoaded.value)
         assertEquals(true, v.translation.value?.enabled)
         assertEquals("Easter Sale", v.offer.value?.campaign?.name)
@@ -49,7 +52,7 @@ class SettingsViewModelTest : AreaTest() {
 
     @Test fun directivesAreCappedAtMaxChars() {
         vm.setDirectives("x".repeat(2500))
-        assertEquals(2000, vm.directives.value.length)
+        assertEquals(600, vm.directives.value.length)
     }
 
     @Test fun saveDirectivesPutsTheText() {
@@ -153,18 +156,34 @@ class SettingsViewModelTest : AreaTest() {
         assertEquals("Offer ended — Neema stops mentioning it from her next reply", lastToast()?.message)
     }
 
-    @Test fun offerOutsideThePercentRangeIsNotSent() {
-        val err = "Couldn't save that offer (admin only, and it needs a name, a percentage and an end date)"
+    @Test fun offerTheServerWouldRefuseIsNotSent() {
+        val pct = "The discount must be a whole number from 1 to 70%"
         vm.editDraft { it.copy(percent = 0.0) }
         vm.saveOffer(vm.draft.value)
-        vm.editDraft { it.copy(percent = 31.0) } // max_percent is 30 in the fixture
+        assertEquals(pct, lastToast()?.message)
+        vm.editDraft { it.copy(percent = 71.0) } // promotions.MAX_PERCENT is 70
         vm.saveOffer(vm.draft.value)
-        vm.editDraft { it.copy(percent = 30.0, name = " ") }
+        assertEquals(pct, lastToast()?.message)
+        vm.editDraft { it.copy(percent = 12.5) } // the server would keep int(12.5) = 12
         vm.saveOffer(vm.draft.value)
+        assertEquals(pct, lastToast()?.message)
+        vm.editDraft { it.copy(percent = 70.0, name = " ") }
+        vm.saveOffer(vm.draft.value)
+        assertEquals("Give the offer a name", lastToast()?.message)
         vm.editDraft { it.copy(name = "Easter", endsOn = "") }
         vm.saveOffer(vm.draft.value)
+        assertEquals("Pick the offer's last day", lastToast()?.message)
+        vm.editDraft { it.copy(endsOn = "30/04/2099") } // not YYYY-MM-DD: date.fromisoformat refuses it
+        vm.saveOffer(vm.draft.value)
+        assertEquals("Pick the offer's last day", lastToast()?.message)
+        vm.editDraft { it.copy(endsOn = "2099-04-30", scope = "category", categories = emptyList()) }
+        vm.saveOffer(vm.draft.value)
+        assertEquals("Pick at least one category for the offer", lastToast()?.message)
+        vm.editDraft { it.copy(scope = "products", skus = listOf(" ")) }
+        vm.saveOffer(vm.draft.value)
+        assertEquals("Pick at least one product for the offer", lastToast()?.message)
         assertTrue(writes().isEmpty())
-        assertEquals(4, toasts.count { it.message == err })
+        assertTrue(toasts.all { it.type == ToastType.Error })
     }
 
     @Test fun offerRangeBoundaries() {
@@ -173,13 +192,21 @@ class SettingsViewModelTest : AreaTest() {
         assertTrue(offerIsValid(c.copy(percent = 30.0), 30))
         assertFalse(offerIsValid(c.copy(percent = 0.5), 30))
         assertFalse(offerIsValid(c.copy(percent = 30.5), 30))
+        assertFalse("a whole number only", offerIsValid(c.copy(percent = 10.5), 30))
     }
 
     @Test fun offerServerRefusal() {
-        fail("PUT", "/admin/settings/offer", 422, "percent must be 1..30")
+        fail("PUT", "/admin/settings/offer", 422, TeamFixtures.OFFER_422)
+        vm.saveOffer(vm.draft.value)
+        assertEquals("Couldn't save that offer — ${TeamFixtures.OFFER_422}", lastToast()?.message)
+        assertFalse(vm.savingOffer.value)
+        fail("PUT", "/admin/settings/offer", 403, "Admin only")
+        vm.saveOffer(vm.draft.value)
+        assertEquals("Couldn't save that offer (admin only)", lastToast()?.message)
+        fake.on("PUT", "/admin/settings/offer", code = 500, body = "Internal Server Error")
         vm.saveOffer(vm.draft.value)
         assertEquals("Couldn't save that offer (admin only, and it needs a name, a percentage and an end date)", lastToast()?.message)
-        assertFalse(vm.savingOffer.value)
+        assertEquals("Easter Sale", vm.offer.value?.campaign?.name)
     }
 
     @Test fun datePickerRoundTripsInUtc() {
