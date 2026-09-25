@@ -192,19 +192,27 @@ internal class WebRtcMedia(private val context: Context) : CallMedia {
         }
     }
 
-    private fun iceServers(cfg: IceConfig): List<PeerConnection.IceServer> = cfg.iceServers.mapNotNull { s ->
-        // `urls` may be a single string or an array (RTCIceServer allows both).
-        val urls = when (val u = s.urls) {
-            is JsonArray -> u.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
-            is JsonPrimitive -> listOfNotNull(u.contentOrNull)
-            else -> emptyList()
-        }.filter { it.isNotBlank() }
-        if (urls.isEmpty()) null
-        else PeerConnection.IceServer.builder(urls)
-            .setUsername(s.username ?: "")
-            .setPassword(s.credential ?: "")
-            .createIceServer()
+    private fun iceServers(cfg: IceConfig): List<PeerConnection.IceServer> = iceSpecs(cfg).map { s ->
+        PeerConnection.IceServer.builder(s.urls).setUsername(s.username).setPassword(s.credential).createIceServer()
     }
+}
+
+/** One RTCIceServer, flattened for the WebRTC SDK's builder. */
+internal data class IceSpec(val urls: List<String>, val username: String, val credential: String)
+
+/**
+ * GET /admin/calls/ice-config's `ice_servers` (services/wa_calling.py
+ * ice_servers()) as the SDK wants them: `urls` is a single string for our
+ * coturn and the STUN, a LIST for the openrelay fallback; the STUN entry has no
+ * username/credential. Entries without a usable URL are dropped.
+ */
+internal fun iceSpecs(cfg: IceConfig): List<IceSpec> = cfg.iceServers.mapNotNull { s ->
+    val urls = when (val u = s.urls) {
+        is JsonArray -> u.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+        is JsonPrimitive -> listOfNotNull(u.contentOrNull)
+        else -> emptyList()
+    }.filter { it.isNotBlank() }
+    if (urls.isEmpty()) null else IceSpec(urls, s.username ?: "", s.credential ?: "")
 }
 
 /**

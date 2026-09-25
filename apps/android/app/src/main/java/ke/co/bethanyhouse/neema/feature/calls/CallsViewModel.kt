@@ -148,8 +148,15 @@ class CallsViewModel(private val dash: DashboardViewModel) : ViewModel() {
                 api.calls.transcribe(id)
                 fetchTranscript(id)
             } catch (e: Exception) {
-                val msg = if (e is ApiException && e.status == 409) "Turn on transcription on the server first (WHISPER_ENABLED)."
-                else "Couldn't start transcription."
+                // routers/admin.py calls_transcribe raises 409 for two reasons; the
+                // web shows the WHISPER copy for both, which misleads when the call
+                // simply has no recording.
+                val msg = when {
+                    e is ApiException && e.status == 409 && e.detail.startsWith("No recording") ->
+                        "No recording was captured for this call."
+                    e is ApiException && e.status == 409 -> "Turn on transcription on the server first (WHISPER_ENABLED)."
+                    else -> "Couldn't start transcription."
+                }
                 _transcript.value = _transcript.value?.takeIf { it.callId == id }?.copy(err = msg)
             } finally {
                 _transcript.value = _transcript.value?.takeIf { it.callId == id }?.copy(busy = false)

@@ -33,8 +33,8 @@ class CallsScreenshotTest {
     @get:Rule
     val paparazzi = Paparazzi(deviceConfig = DeviceConfig.PIXEL_6, showSystemUi = false)
 
-    private val peter = CallUiState(callId = "wacid.1", from = "254712345678", name = "Fr. Peter Kamau")
-    private val peterCall = Call(id = "k1", callId = "wacid.1", waId = "254712345678", name = "Fr. Peter Kamau", status = "answered", startedAt = Fixtures.ago(40))
+    private val peter = CallUiState(callId = CallsFixtures.C1, from = "254712345678", name = "Fr. Peter Kamau")
+    private val peterCall = Call(id = CallsFixtures.K1, callId = CallsFixtures.C1, waId = "254712345678", name = "Fr. Peter Kamau", status = "answered", startedAt = Fixtures.ago(40))
 
     private fun card(s: CallUiState, dark: Boolean = false) = paparazzi.snapshot {
         AppFrame(dark) { CallCard(s, CallActions()) }
@@ -55,6 +55,14 @@ class CallsScreenshotTest {
         CallUiState(phase = CallPhase.Connecting, callId = "pending", from = "254733444555", name = "Deacon James Mwangi",
             outbound = true, error = CallManager.NO_CALL_PERMISSION),
     )
+    @Test fun cardErrorTakenElsewhere() = card(peter.copy(phase = CallPhase.Connecting, error = CallManager.TAKEN_ELSEWHERE))
+    @Test fun transcriptNoRecording() = console(
+        fake = fake().also {
+            // The only way to reach that 409: a failed row whose recording_url is gone.
+            it.on("GET", CallsFixtures.route(CallsFixtures.C6, "transcript"), body = CallsFixtures.transcript(CallsFixtures.C6, "failed", hasRecording = false))
+            it.on("POST", CallsFixtures.route(CallsFixtures.C6, "transcribe"), code = 409, body = CallsFixtures.NO_RECORDING)
+        },
+    ) { it.toggleTranscript(CallsFixtures.C6); it.runTranscribe() }
     @Test fun cardInCallDark() = card(peter.copy(phase = CallPhase.InCall, seconds = 42), dark = true)
 
     // ── The console ──────────────────────────────────────────────────────────
@@ -92,17 +100,17 @@ class CallsScreenshotTest {
     @Test fun logNeedsFullScreen() = console(readiness = CallReadiness(fullScreen = false))
     @Test fun logNeedsFullScreenDark() = console(dark = true, readiness = CallReadiness(fullScreen = false))
 
-    @Test fun transcriptDone() = console { it.toggleTranscript("wacid.1") }
-    @Test fun transcriptDoneFull() = console { it.toggleTranscript("wacid.1"); it.toggleFull() }
-    @Test fun transcriptPending() = console { it.toggleTranscript("wacid.3") }
-    @Test fun transcriptRecorded() = console { it.toggleTranscript("wacid.5") }
-    @Test fun transcriptFailed() = console { it.toggleTranscript("wacid.6") }
-    @Test fun transcriptLoading() = console(fake = fake().also { it.on("GET", "/admin/calls/wacid.5/transcript", code = 500, body = "{}") }) {
-        it.toggleTranscript("wacid.5")
+    @Test fun transcriptDone() = console { it.toggleTranscript(CallsFixtures.C1) }
+    @Test fun transcriptDoneFull() = console { it.toggleTranscript(CallsFixtures.C1); it.toggleFull() }
+    @Test fun transcriptPending() = console { it.toggleTranscript(CallsFixtures.C3) }
+    @Test fun transcriptRecorded() = console { it.toggleTranscript(CallsFixtures.C5) }
+    @Test fun transcriptFailed() = console { it.toggleTranscript(CallsFixtures.C6) }
+    @Test fun transcriptLoading() = console(fake = fake().also { it.on("GET", CallsFixtures.route(CallsFixtures.C5, "transcript"), code = 500, body = "{}") }) {
+        it.toggleTranscript(CallsFixtures.C5)
     }
     @Test fun transcriptNotEnabled() = console(
-        fake = fake().also { it.on("POST", "/admin/calls/wacid.5/transcribe", code = 409, body = """{"detail":"Transcription isn't enabled yet."}""") },
-    ) { it.toggleTranscript("wacid.5"); it.runTranscribe() }
+        fake = fake().also { it.on("POST", CallsFixtures.route(CallsFixtures.C5, "transcribe"), code = 409, body = CallsFixtures.WHISPER_OFF) },
+    ) { it.toggleTranscript(CallsFixtures.C5); it.runTranscribe() }
 
     @Test fun callerPane() = console { vm -> vm.select(peterCall) }
     @Test fun callerPaneDark() = console(dark = true) { vm -> vm.select(peterCall) }
@@ -125,7 +133,7 @@ class CallsScreenshotTest {
 
     @Test fun tabletLog() = console(device = DeviceConfig.PIXEL_C)
     @Test fun tabletCallerPane() = console(device = DeviceConfig.PIXEL_C) { vm ->
-        vm.select(peterCall); vm.toggleTranscript("wacid.1")
+        vm.select(peterCall); vm.toggleTranscript(CallsFixtures.C1)
     }
     @Test fun tabletCallerPaneDark() = console(device = DeviceConfig.PIXEL_C, dark = true) { vm -> vm.select(peterCall) }
     @Test fun tabletCardRinging() {

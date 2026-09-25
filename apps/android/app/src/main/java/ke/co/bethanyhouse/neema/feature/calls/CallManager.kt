@@ -82,6 +82,9 @@ data class CallUiState(
  *    (the web left the customer's phone ringing with nobody on the line);
  *  - hang-up / callback taps on a call that already ended are ignored (a
  *    double tap re-terminated and restarted the "Call ended" timer);
+ *  - an answer refused with 409 ("call already answered" — a colleague picked
+ *    up first) says so and does NOT terminate: the web's hangup() there cut
+ *    off the colleague's live call;
  *  - the poll keeps running in the background (the web skips hidden tabs)
  *    so a call still rings the phone through the notification.
  */
@@ -444,7 +447,11 @@ class CallManager internal constructor(
                 if (!stillMine()) return@launch
                 update { it.copy(error = answerError(e)) }
                 delay(1_800)
-                if (_state.value.callId == callId && live) hangup()
+                if (_state.value.callId != callId || !live) return@launch
+                // 409 "call already answered": a colleague won the redis lock and is
+                // talking to the customer. The web's hangup() here terminated THEIR
+                // call; only tear down this device's side.
+                if (e.isTakenElsewhere()) finish() else hangup()
             }
         }
     }
@@ -575,9 +582,18 @@ class CallManager internal constructor(
         const val MIC_PROMPT_TIMEOUT_MS = 60_000L
         const val MIN_RECORDING_BYTES = 2_000L
 
-        /** answer()'s catch in lib/callContext.tsx. */
-        internal fun answerError(e: Throwable): String =
-            if (e is MicBlocked) MIC_BLOCKED else "Couldn't connect the call"
+        const val TAKEN_ELSEWHERE = "Another agent already answered this call"
+
+        /** POST /admin/calls/{id}/answer's 409 (routers/admin.py calls_answer: "call already answered"). */
+        private fun Throwable.isTakenElsewhere() =
+            this is ApiException && status == 409 && path.endsWith("/answer")
+
+        /** answer()'s catch in lib/callContext.tsx (plus the 409 a colleague's answer causes). */
+        internal fun answerError(e: Throwable): String = when {
+            e is MicBlocked -> MIC_BLOCKED
+            e.isTakenElsewhere() -> TAKEN_ELSEWHERE
+            else -> "Couldn't connect the call"
+        }
 
         /** initiateCall()'s catch in lib/callContext.tsx. */
         internal fun outboundError(e: Throwable): String = when {

@@ -58,6 +58,11 @@ class CallManagerTest {
         fun ring(id: String = "wacid.1", from: String = "254712345678", name: String? = "Fr. Peter Kamau") =
             if (name != null) frame("type" to "incoming_call", "call_id" to id, "from" to from, "name" to name)
             else frame("type" to "incoming_call", "call_id" to id, "from" to from)
+        /** A frame exactly as routers/whatsapp_webhook.py publishes it (json.dumps), parsed as LiveSocket does. */
+        fun raw(json: String) {
+            frames.tryEmit(ke.co.bethanyhouse.neema.core.net.NeemaJson.parseToJsonElement(json) as JsonObject)
+            scope.runCurrent()
+        }
         fun at(ago: Long) = Instant.ofEpochMilli(base + scope.testScheduler.currentTime - ago).toString()
         fun settle() = scope.runCurrent()
     }
@@ -257,7 +262,12 @@ class CallManagerTest {
         r.api.answerError = ApiException(409, "POST", "/admin/calls/wacid.1/answer", """{"detail":"call already answered"}""")
         r.ring()
         r.calls.answer(); r.settle()
-        assertEquals("Couldn't connect the call", r.state.error)
+        assertEquals(CallManager.TAKEN_ELSEWHERE, r.state.error)
+        advanceTimeBy(1_801); runCurrent()
+        // The colleague who won the call keeps it: no terminate from this device.
+        assertFalse(r.api.log.any { it.startsWith("terminate") })
+        assertTrue(r.media.peer.closed)
+        assertEquals(CallPhase.Ended, r.state.phase)
     }
 
     @Test fun answerAsksForTheMicAndProceedsWhenAllowed() = rig { r ->
@@ -553,6 +563,47 @@ class CallManagerTest {
         assertEquals("Couldn't place the call", CallManager.outboundError(ApiException(502, "POST", "/x", "{}")))
         assertEquals("Couldn't place the call", CallManager.outboundError(IllegalStateException("sdp")))
         assertEquals("Couldn't connect the call", CallManager.answerError(e409))
+    }
+
+    // ── WebSocket frames, byte for byte as the webhook publishes them ────────
+    private val wacid = "wacid.HBgMMjU0NzEyMzQ1Njc4FQIAEhggQUFBQTFCMkMzRDRFNUY2QTdCOEM5RDBFMUYyHBgMMjU0NzAwMDAwMDAwFQIAAA=="
+
+    @Test fun realIncomingCallFrameRings() = rig { r ->
+        // _handle_calls, event == "connect" with an offer: `at` is Meta's string
+        // timestamp, `name` null when the contacts block had no profile.
+        r.raw("""{"type": "incoming_call", "call_id": "$wacid", "from": "254712345678", "name": null, "at": "1790330413"}""")
+        assertEquals(CallPhase.Ringing, r.state.phase)
+        assertEquals(wacid, r.state.callId)
+        assertEquals("254712345678", r.state.from)
+        assertNull(r.state.name)
+    }
+
+    @Test fun realOutboundAnswerFrameAppliesTheCustomersSdp() = rig { r ->
+        r.api.connectId = wacid
+        val placed = async { r.calls.initiateCall("+254712345678", "Fr. Peter Kamau") }
+        r.settle()
+        assertTrue(placed.await().isSuccess)
+        // event == "connect" with sdp_type == "answer" → outbound_answer {call_id, sdp}.
+        r.raw("""{"type": "outbound_answer", "call_id": "$wacid", "sdp": "v=0\r\na=setup:passive\r\n"}""")
+        assertTrue(r.media.peer.ops.contains("setRemote(Answer,v=0\r\na=setup:passive\r\n)"))
+        // Another agent's outbound call is not ours.
+        r.raw("""{"type": "outbound_answer", "call_id": "wacid.other", "sdp": "v=0"}""")
+        assertEquals(1, r.media.peer.ops.count { it.startsWith("setRemote") })
+    }
+
+    @Test fun realCallEndedFrameEndsTheCall() = rig { r ->
+        r.raw("""{"type": "incoming_call", "call_id": "$wacid", "from": "254712345678", "name": "Fr. Peter Kamau", "at": "1790330413"}""")
+        // event == "terminate": status is Meta's (e.g. "COMPLETED"), duration an int or null.
+        r.raw("""{"type": "call_ended", "call_id": "$wacid", "status": "COMPLETED", "duration": 42}""")
+        assertEquals(CallPhase.Ended, r.state.phase)
+        assertFalse(r.ringer.ringing)
+    }
+
+    @Test fun unrelatedFramesOnTheSharedSocketAreIgnored() = rig { r ->
+        // websocket.py relays every ws:channel:* to every client.
+        r.raw("""{"type": "new_message", "conversation_id": "c1", "call_id": 5}""")
+        r.raw("""{"type": "incoming_call", "from": "254712345678"}""")   // no call_id
+        assertEquals(CallPhase.Idle, r.state.phase)
     }
 
 }
