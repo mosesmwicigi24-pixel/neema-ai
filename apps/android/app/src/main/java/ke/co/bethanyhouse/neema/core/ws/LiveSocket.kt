@@ -16,7 +16,6 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
@@ -32,9 +31,12 @@ import okhttp3.WebSocketListener
  * same way the web's `ws.on("event", …)` handlers do.
  */
 class LiveSocket(
-    private val client: OkHttpClient,
+    /** An OkHttpClient in the app; a fake in tests. */
+    private val client: WebSocket.Factory,
     private val baseUrl: String,
     private val scope: CoroutineScope,
+    private val reconnectDelayMs: Long = 2_000,
+    private val pingEveryMs: Long = 25_000,
 ) {
     private val _events = MutableSharedFlow<JsonObject>(extraBufferCapacity = 256)
     val events: SharedFlow<JsonObject> = _events.asSharedFlow()
@@ -48,7 +50,7 @@ class LiveSocket(
     private var reconnectJob: Job? = null
     @Volatile private var closed = true
 
-    private fun url(agentId: String): String {
+    internal fun url(agentId: String): String {
         val wsBase = baseUrl.trimEnd('/')
             .replaceFirst(Regex("^https://"), "wss://")
             .replaceFirst(Regex("^http://"), "ws://")
@@ -75,10 +77,16 @@ class LiveSocket(
     }
 
     /** Reconnect immediately (e.g. the app came back to the foreground). */
+    /**
+     * Reconnect immediately if the socket is down but wanted (the app came
+     * back to the foreground mid-backoff). A socket closed on purpose —
+     * signed out, or backgrounded without live mode — stays closed: the
+     * session/foreground watcher in NeemaApplication decides when to reopen.
+     */
+    @Synchronized
     fun nudge() {
-        val id = agentId ?: return
-        if (!closed && !_connected.value) { reconnectJob?.cancel(); ws?.cancel(); ws = null; open() }
-        else if (closed) connect(id)
+        if (agentId == null || closed || _connected.value) return
+        reconnectJob?.cancel(); ws?.cancel(); ws = null; open()
     }
 
     private fun open() {
@@ -90,7 +98,7 @@ class LiveSocket(
                 pingJob?.cancel()
                 pingJob = scope.launch {
                     while (isActive) {
-                        delay(25_000)
+                        delay(pingEveryMs)
                         webSocket.send("""{"type":"ping"}""")
                     }
                 }
@@ -104,7 +112,7 @@ class LiveSocket(
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) = dropped(webSocket)
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.w("LiveSocket", "socket failure: ${t.message}")
+                runCatching { Log.w("LiveSocket", "socket failure: ${t.message}") }
                 dropped(webSocket)
             }
         })
@@ -116,7 +124,7 @@ class LiveSocket(
         pingJob?.cancel()
         if (closed) return
         reconnectJob?.cancel()
-        reconnectJob = scope.launch { delay(2_000); if (!closed) open() }
+        reconnectJob = scope.launch { delay(reconnectDelayMs); if (!closed) open() }
     }
 }
 

@@ -1,36 +1,62 @@
 package ke.co.bethanyhouse.neema.app
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.*
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import ke.co.bethanyhouse.neema.NeemaApplication
 import ke.co.bethanyhouse.neema.core.auth.AuthException
+import ke.co.bethanyhouse.neema.core.ui.theme.WebIcons
 import kotlinx.coroutines.launch
+import java.time.Year
 
+// login/page.tsx palette
 private val Night = Color(0xFF070D1C)
+private val Panel = Color(0xFF0A1229)
+private val Line = Color(0xFF152451)
 private val Moss = Color(0xFF589B31)
+private val MossDark = Color(0xFF427425)
+private val Willow = Color(0xFF699A32)
+private val Parchment = Color(0xFFF3F9EC)
+private val Sprout = Color(0xFF9CCD65)
 
 /** apps/web/src/app/login/page.tsx */
 @Composable
@@ -43,143 +69,392 @@ fun LoginScreen(prefillEmail: String? = null, onSignedIn: () -> Unit) {
     )
 }
 
+/**
+ * The sign-in page. Phones get the web's mobile layout (small logo, form,
+ * footer note); a wide screen adds the web's branding panel on the left.
+ */
 @Composable
-internal fun LoginContent(initialEmail: String, login: suspend (String, String) -> Unit, onSignedIn: () -> Unit) {
+internal fun LoginContent(
+    initialEmail: String,
+    login: suspend (String, String) -> Unit,
+    onSignedIn: () -> Unit,
+    initialPassword: String = "",
+    initialError: String = "",
+    initialLoading: Boolean = false,
+    /** The footer year (tests pin it). */
+    year: Int = Year.now().value,
+) {
     var email by remember { mutableStateOf(initialEmail) }
-    var password by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf(initialPassword) }
     var show by remember { mutableStateOf(false) }
-    var loading by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf("") }
+    var loading by remember { mutableStateOf(initialLoading) }
+    var error by remember { mutableStateOf(initialError) }
     val scope = rememberCoroutineScope()
     val focus = LocalFocusManager.current
 
     fun submit() {
-        if (email.isBlank() || password.isBlank()) { error = "Please enter your email and password."; return }
+        if (loading) return
+        if (email.isBlank() || password.isEmpty()) { error = "Please enter your email and password."; return }
         focus.clearFocus()
         loading = true; error = ""
         scope.launch {
             runCatching { login(email.trim(), password) }
                 .onSuccess { onSignedIn() }
                 .onFailure { e ->
-                    error = if (e is AuthException) e.message ?: "" else "Something went wrong. Please try again."
+                    error = if (e is AuthException) e.message ?: "Invalid email or password. Please try again."
+                    else "Something went wrong. Please try again."
                 }
             loading = false
         }
     }
 
-    Box(
-        Modifier.fillMaxSize()
-            .background(Brush.verticalGradient(listOf(Color(0xFF0E2A18), Night, Night)))
-            .systemBarsPadding().imePadding(),
-    ) {
-        Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                NeemaLogo(40.dp)
-                Spacer(Modifier.width(10.dp))
-                Text("Neema AI", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
-            }
-            Spacer(Modifier.height(28.dp))
-            Text("Manage conversations,\norders & customers", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold, lineHeight = 32.sp)
-            Spacer(Modifier.height(10.dp))
-            listOf("💬  Live conversation monitoring", "📦  Order & catalog management", "📊  Customer insights & CRM").forEach {
-                Text(it, color = Color(0xFFB5DA8B), fontSize = 14.sp, modifier = Modifier.padding(vertical = 2.dp))
-            }
-            Spacer(Modifier.height(32.dp))
+    BoxWithConstraints(Modifier.fillMaxSize().background(Night)) {
+        val wide = maxWidth >= 840.dp
+        val panelWidth = if (maxWidth >= 1200.dp) 480.dp else 420.dp
+        Row(Modifier.fillMaxSize()) {
+            if (wide) BrandPanel(Modifier.width(panelWidth).fillMaxHeight(), year)
+            Box(
+                Modifier.weight(1f).fillMaxHeight().systemBarsPadding().imePadding()
+                    .verticalScroll(rememberScrollState()).padding(24.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(Modifier.widthIn(max = 384.dp).fillMaxWidth()) {
+                    if (!wide) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            MossLogo(36.dp)
+                            Column(Modifier.padding(start = 10.dp)) {
+                                Text("Neema", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                Text("ADMIN", color = Willow, fontSize = 10.sp, letterSpacing = 1.sp, modifier = Modifier.padding(top = 2.dp))
+                            }
+                        }
+                        Spacer(Modifier.height(32.dp))
+                    }
+                    Text("Sign in", color = Parchment, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(4.dp))
+                    Text("Enter your credentials to access the dashboard", color = Willow, fontSize = 14.sp)
+                    Spacer(Modifier.height(32.dp))
 
-            Surface(shape = RoundedCornerShape(20.dp), color = Color(0xFF0A1229), tonalElevation = 0.dp) {
-                Column(Modifier.padding(20.dp)) {
-                    Text("Sign in", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    Text("Enter your credentials to access the dashboard", color = Color(0xFF8AA89A), fontSize = 13.sp)
-                    Spacer(Modifier.height(18.dp))
-                    val fieldColors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White, unfocusedTextColor = Color.White,
-                        focusedBorderColor = Moss, unfocusedBorderColor = Color(0xFF1F367A),
-                        focusedLabelColor = Color(0xFF9CCD65), unfocusedLabelColor = Color(0xFF8AA89A),
-                        cursorColor = Moss,
+                    FieldLabel("Email address")
+                    NightField(
+                        value = email, onChange = { email = it; error = "" }, placeholder = "admin@bethanyhouse.com",
+                        keyboard = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next),
                     )
-                    OutlinedTextField(
-                        value = email, onValueChange = { email = it }, label = { Text("Email address") },
-                        singleLine = true, colors = fieldColors, modifier = Modifier.fillMaxWidth(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next),
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    OutlinedTextField(
-                        value = password, onValueChange = { password = it }, label = { Text("Password") },
-                        singleLine = true, colors = fieldColors, modifier = Modifier.fillMaxWidth(),
-                        visualTransformation = if (show) VisualTransformation.None else PasswordVisualTransformation(),
-                        trailingIcon = {
-                            IconButton(onClick = { show = !show }) {
-                                Icon(if (show) Icons.Default.VisibilityOff else Icons.Default.Visibility, "Show password", tint = Color(0xFF8AA89A))
+                    Spacer(Modifier.height(16.dp))
+                    FieldLabel("Password")
+                    NightField(
+                        value = password, onChange = { password = it; error = "" }, placeholder = "••••••••",
+                        keyboard = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+                        actions = KeyboardActions(onDone = { submit() }),
+                        visual = if (show) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailing = {
+                            Box(
+                                Modifier.size(36.dp).clip(CircleShape).clickable { show = !show },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    if (show) WebIcons.EyeOff else WebIcons.Eye,
+                                    if (show) "Hide password" else "Show password",
+                                    tint = Willow, modifier = Modifier.size(16.dp),
+                                )
                             }
                         },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
-                        keyboardActions = KeyboardActions(onDone = { submit() }),
                     )
+
                     if (error.isNotEmpty()) {
-                        Spacer(Modifier.height(10.dp))
-                        Text(error, color = Color(0xFFFCA5A5), fontSize = 12.sp)
+                        Spacer(Modifier.height(16.dp))
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                                .background(Color(0x26C0392B))
+                                .border(1.dp, Color(0x99991B1B), RoundedCornerShape(8.dp))
+                                .padding(12.dp),
+                        ) {
+                            Icon(WebIcons.AlertCircle, null, tint = Color(0xFFF87171), modifier = Modifier.padding(top = 1.dp).size(16.dp))
+                            Spacer(Modifier.width(10.dp))
+                            Text(error, color = Color(0xFFFCA5A5), fontSize = 12.sp, lineHeight = 17.sp)
+                        }
                     }
-                    Spacer(Modifier.height(18.dp))
-                    Button(
-                        onClick = ::submit, enabled = !loading,
-                        colors = ButtonDefaults.buttonColors(containerColor = Moss, contentColor = Color.White),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().height(50.dp),
+
+                    Spacer(Modifier.height(24.dp))
+                    Row(
+                        Modifier.fillMaxWidth().height(44.dp)
+                            .alpha(if (loading) 0.6f else 1f)
+                            .shadow(if (loading) 0.dp else 10.dp, RoundedCornerShape(12.dp), ambientColor = Moss, spotColor = Moss)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Moss)
+                            .clickable(enabled = !loading) { submit() },
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        if (loading) CircularProgressIndicator(Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
-                        else Text("Sign in", fontWeight = FontWeight.Bold)
+                        if (loading) {
+                            CircularProgressIndicator(Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp, trackColor = Color.White.copy(alpha = 0.4f))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Signing in…", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        } else {
+                            Text("Sign in", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        }
                     }
-                    Spacer(Modifier.height(14.dp))
-                    Text("Contact your administrator if you need access.", color = Color(0xFF8AA89A), fontSize = 12.sp)
+
+                    Spacer(Modifier.height(32.dp))
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(Line))
+                    Spacer(Modifier.height(24.dp))
+                    Text(
+                        "Access restricted to Bethany House staff.\nContact your administrator if you need access.",
+                        color = MossDark, fontSize = 12.sp, lineHeight = 17.sp, textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
             }
         }
     }
 }
 
+/** The web's `focus:ring` — a soft 3dp halo drawn outside the field, not taking layout space. */
+private fun Modifier.focusRing(focused: Boolean, color: Color): Modifier = if (!focused) this else drawBehind {
+    val w = 3.dp.toPx()
+    drawRoundRect(
+        color, topLeft = Offset(-w, -w), size = androidx.compose.ui.geometry.Size(size.width + 2 * w, size.height + 2 * w),
+        cornerRadius = androidx.compose.ui.geometry.CornerRadius(15.dp.toPx()),
+    )
+}
+
+/** The left branding panel shown on wide screens (lg:flex on the web). */
+@Composable
+private fun BrandPanel(modifier: Modifier, year: Int) {
+    Box(
+        modifier.background(Panel)
+            .drawBehind {
+                // Radial moss glow from the top-left, then the right-hand border.
+                drawRect(
+                    Brush.radialGradient(
+                        listOf(Color(0x26589B31), Color.Transparent),
+                        center = Offset.Zero, radius = size.maxDimension * 0.75f,
+                    ),
+                )
+                drawRect(Line, topLeft = Offset(size.width - 1.dp.toPx(), 0f), size = androidx.compose.ui.geometry.Size(1.dp.toPx(), size.height))
+            }
+            .systemBarsPadding()
+            .padding(40.dp),
+    ) {
+        Row(Modifier.align(Alignment.TopStart), verticalAlignment = Alignment.CenterVertically) {
+            MossLogo(40.dp, glow = true)
+            Column(Modifier.padding(start = 12.dp)) {
+                Text("Neema", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, lineHeight = 18.sp)
+                Text(
+                    "BETHANY HOUSE · ADMIN", color = Willow, fontSize = 10.sp, fontWeight = FontWeight.Medium,
+                    letterSpacing = 1.sp, modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+        }
+        Column(Modifier.align(Alignment.CenterStart)) {
+            Text("Manage conversations,", color = Parchment, fontSize = 24.sp, fontWeight = FontWeight.Bold, lineHeight = 31.sp)
+            Text("grow your business.", color = Sprout, fontSize = 24.sp, fontWeight = FontWeight.Bold, lineHeight = 31.sp)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "AI-powered WhatsApp assistant for Bethany House — handling orders, queries, and sales around the clock.",
+                color = Willow, fontSize = 14.sp, lineHeight = 22.sp,
+            )
+        }
+        Text(
+            "© $year Bethany House · Nairobi, Kenya", color = MossDark, fontSize = 12.sp,
+            modifier = Modifier.align(Alignment.BottomStart),
+        )
+    }
+}
+
+/** The moss chat-bubble mark of the login page. */
+@Composable
+private fun MossLogo(size: Dp, glow: Boolean = false) {
+    Box(
+        Modifier.size(size)
+            .shadow(if (glow) 12.dp else 6.dp, RoundedCornerShape(12.dp), ambientColor = Moss, spotColor = Moss)
+            .clip(RoundedCornerShape(12.dp)).background(Moss),
+        contentAlignment = Alignment.Center,
+    ) { Icon(WebIcons.Logo, null, tint = Color.White, modifier = Modifier.size(size * 0.56f)) }
+}
+
+@Composable
+private fun FieldLabel(text: String) {
+    Text(
+        text.uppercase(), color = Willow, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp,
+        modifier = Modifier.padding(bottom = 8.dp),
+    )
+}
+
+/** The web's 44dp night input: moss border and a soft ring on focus. */
+@Composable
+private fun NightField(
+    value: String,
+    onChange: (String) -> Unit,
+    placeholder: String,
+    keyboard: KeyboardOptions,
+    actions: KeyboardActions = KeyboardActions.Default,
+    visual: VisualTransformation = VisualTransformation.None,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    val source = remember { MutableInteractionSource() }
+    val focused by source.collectIsFocusedAsState()
+    BasicTextField(
+        value = value, onValueChange = onChange, singleLine = true,
+        textStyle = TextStyle(color = Parchment, fontSize = 14.sp),
+        cursorBrush = SolidColor(Moss), keyboardOptions = keyboard, keyboardActions = actions,
+        visualTransformation = visual, interactionSource = source,
+        modifier = Modifier.fillMaxWidth(),
+        decorationBox = { inner ->
+            Row(
+                Modifier.fillMaxWidth().height(44.dp)
+                    .focusRing(focused, Moss.copy(alpha = 0.2f))
+                    .clip(RoundedCornerShape(12.dp)).background(Panel)
+                    .border(1.dp, if (focused) Moss else Line, RoundedCornerShape(12.dp))
+                    .padding(start = 16.dp, end = if (trailing != null) 4.dp else 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.weight(1f)) {
+                    if (value.isEmpty()) Text(placeholder, color = MossDark, fontSize = 14.sp)
+                    inner()
+                }
+                trailing?.invoke()
+            }
+        },
+    )
+}
+
+// ── Session expired (components/ui/SessionExpiredModal.tsx) ────────────────
+
 /**
- * components/ui/SessionExpiredModal.tsx: re-authenticate over the live
- * dashboard instead of throwing the agent back to the login page.
+ * Re-authenticate over the live dashboard instead of throwing the agent back
+ * to the login page. Not dismissable: Continue or Sign out.
  */
 @Composable
 fun SessionExpiredDialog(email: String, onSuccess: () -> Unit, onSignOut: () -> Unit) {
     val container = NeemaApplication.instance.container
-    var password by remember { mutableStateOf("") }
-    var loading by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf("") }
-    val scope = rememberCoroutineScope()
-    AlertDialog(
+    Dialog(
         onDismissRequest = {},
-        title = { Text("Session expired") },
-        text = {
-            Column {
-                Text("Your session timed out. Enter your password to continue where you left off.", fontSize = 14.sp)
-                Spacer(Modifier.height(12.dp))
-                Text(email, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = password, onValueChange = { password = it }, label = { Text("Password") },
-                    singleLine = true, visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
-            }
-        },
-        confirmButton = {
-            TextButton(enabled = !loading && password.isNotBlank(), onClick = {
-                loading = true; error = ""
-                scope.launch {
-                    runCatching { container.auth.login(email, password) }
-                        .onSuccess { onSuccess() }
-                        .onFailure { error = (it as? AuthException)?.message ?: "Couldn't sign in — try again." }
+        properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false, usePlatformDefaultWidth = false),
+    ) {
+        SessionExpiredCard(email, login = { e, p -> container.auth.login(e, p) }, onSuccess = onSuccess, onSignOut = onSignOut)
+    }
+}
+
+/** The modal's card; its own composable so it renders in screenshot tests. */
+@Composable
+internal fun SessionExpiredCard(
+    email: String,
+    login: suspend (String, String) -> Unit,
+    onSuccess: () -> Unit,
+    onSignOut: () -> Unit,
+    initialPassword: String = "",
+    initialError: String = "",
+    initialLoading: Boolean = false,
+    autoFocus: Boolean = true,
+) {
+    var password by remember { mutableStateOf(initialPassword) }
+    var loading by remember { mutableStateOf(initialLoading) }
+    var error by remember { mutableStateOf(initialError) }
+    val scope = rememberCoroutineScope()
+    val focus = remember { FocusRequester() }
+    if (autoFocus) LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+
+    fun submit() {
+        if (password.isEmpty() || loading) return
+        loading = true; error = ""
+        scope.launch {
+            runCatching { login(email, password) }
+                .onSuccess { onSuccess() }
+                .onFailure {
+                    error = if (it is AuthException && it.message?.startsWith("Invalid") != false) "Incorrect password. Please try again."
+                    else if (it is AuthException) it.message!!
+                    else "Something went wrong. Please try again."
                     loading = false
                 }
-            }) { Text(if (loading) "Signing in…" else "Continue") }
-        },
-        dismissButton = { TextButton(onClick = onSignOut) { Text("Sign out") } },
-    )
+        }
+    }
+
+    val stone900 = Color(0xFF1C1917)
+    val stone500 = Color(0xFF78716C)
+    val stone200 = Color(0xFFE7E5E4)
+    Box(Modifier.fillMaxSize().background(Color(0x66000000)).imePadding(), contentAlignment = Alignment.Center) {
+        Column(
+            Modifier.padding(horizontal = 16.dp).widthIn(max = 384.dp).fillMaxWidth()
+                .shadow(24.dp, RoundedCornerShape(16.dp)).clip(RoundedCornerShape(16.dp)).background(Color.White),
+        ) {
+            Box(Modifier.fillMaxWidth().height(4.dp).background(Brush.horizontalGradient(listOf(Color(0xFF16A34A), Color(0xFF34D399)))))
+            Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 28.dp, vertical = 32.dp)) {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Box(
+                        Modifier.size(56.dp).clip(CircleShape).background(Color(0xFFFFFBEB)).border(1.dp, Color(0xFFFDE68A), CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(WebIcons.Warning, null, tint = Color(0xFFF59E0B), modifier = Modifier.size(28.dp)) }
+                }
+                Spacer(Modifier.height(20.dp))
+                Text("Session expired", color = stone900, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Please enter your password to continue where you left off.", color = stone500, fontSize = 14.sp,
+                    lineHeight = 20.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(24.dp))
+
+                Text("Signed in as", color = stone500, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    email, color = Color(0xFF57534E), fontSize = 14.sp, maxLines = 1,
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color(0xFFF5F5F4))
+                        .border(1.dp, stone200, RoundedCornerShape(12.dp)).padding(horizontal = 14.dp, vertical = 11.dp),
+                )
+                Spacer(Modifier.height(16.dp))
+                Text("Password", color = stone500, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.height(6.dp))
+                val source = remember { MutableInteractionSource() }
+                val focused by source.collectIsFocusedAsState()
+                BasicTextField(
+                    value = password, onValueChange = { password = it }, singleLine = true,
+                    textStyle = TextStyle(color = stone900, fontSize = 14.sp), cursorBrush = SolidColor(Color(0xFF22C55E)),
+                    visualTransformation = PasswordVisualTransformation(), interactionSource = source,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { submit() }),
+                    modifier = Modifier.fillMaxWidth().focusRequester(focus),
+                    decorationBox = { inner ->
+                        Box(
+                            Modifier.fillMaxWidth()
+                                .focusRing(focused, Color(0x6622C55E))
+                                .clip(RoundedCornerShape(12.dp)).background(Color.White)
+                                .border(1.dp, if (focused) Color(0xFF22C55E) else stone200, RoundedCornerShape(12.dp))
+                                .padding(horizontal = 14.dp, vertical = 11.dp),
+                        ) {
+                            if (password.isEmpty()) Text("••••••••", color = Color(0xFFD6D3D1), fontSize = 14.sp)
+                            inner()
+                        }
+                    },
+                )
+
+                if (error.isNotEmpty()) {
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        error, color = Color(0xFFDC2626), fontSize = 14.sp,
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color(0xFFFEF2F2))
+                            .border(1.dp, Color(0xFFFEE2E2), RoundedCornerShape(8.dp)).padding(horizontal = 14.dp, vertical = 10.dp),
+                    )
+                }
+
+                Spacer(Modifier.height(16.dp))
+                val enabled = !loading && password.isNotEmpty()
+                Row(
+                    Modifier.fillMaxWidth().height(42.dp).alpha(if (enabled) 1f else 0.6f)
+                        .clip(RoundedCornerShape(12.dp)).background(stone900).clickable(enabled = enabled) { submit() },
+                    horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (loading) {
+                        CircularProgressIndicator(Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp, trackColor = Color.White.copy(alpha = 0.25f))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Signing in…", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    } else Text("Continue", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Sign out", color = Color(0xFFA8A29E), fontSize = 14.sp, textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onSignOut).padding(vertical = 9.dp),
+                )
+            }
+        }
+    }
 }

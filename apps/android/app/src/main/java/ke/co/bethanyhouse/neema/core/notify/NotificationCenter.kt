@@ -43,6 +43,7 @@ class NotificationCenter(
 ) {
     private val prefs = override ?: context.getSharedPreferences("neema_notifications", Context.MODE_PRIVATE)
     private val listSer = ListSerializer(AppNotification.serializer())
+    private val seq = java.util.concurrent.atomic.AtomicLong()
 
     private val _items = MutableStateFlow(load())
     val items: StateFlow<List<AppNotification>> = _items.asStateFlow()
@@ -95,15 +96,34 @@ class NotificationCenter(
     }
 
     private fun fromFrame(e: JsonObject): AppNotification = AppNotification(
-        id = "${System.currentTimeMillis()}-${(0..9999).random()}",
+        // Unique even for a burst in one millisecond (the list keys on it).
+        id = "${System.currentTimeMillis()}-${seq.incrementAndGet()}-${(0..9999).random()}",
         type = e.str("type") ?: "system",
         title = e.str("title") ?: "Neema",
         body = e.str("body") ?: "",
         convKey = e.str("conversationId") ?: e.str("conv_id") ?: e.str("convId") ?: e.str("wa_id"),
-        at = System.currentTimeMillis(),
+        // The frame's own `ts` (AgentNotification.ts) when it carries one, else arrival time.
+        at = ke.co.bethanyhouse.neema.core.util.Fmt.millis(e.str("ts"))?.takeIf { it > 0 } ?: System.currentTimeMillis(),
     )
 
     fun markAllRead() = save(_items.value.map { it.copy(read = true) })
     fun markRead(id: String) = save(_items.value.map { if (it.id == id) it.copy(read = true) else it })
+    /** The x on one row. */
+    fun dismiss(id: String) = save(_items.value.filterNot { it.id == id })
     fun clear() = save(emptyList())
+
+    companion object {
+        /**
+         * The bell's five looks (Notifications.tsx META). The web keys them on
+         * intercept / new_message / order / transfer / system only; every type
+         * the backend actually sends is folded into the nearest one here.
+         */
+        fun kindOf(type: String): String = when (type) {
+            "intercept", "human_transfer", "media_escalation", "take_back", "availability_check" -> "intercept"
+            "new_message", "new_conversation", "draft_ready" -> "new_message"
+            "order", "order_update", "hub_event" -> "order"
+            "transfer" -> "transfer"
+            else -> "system"
+        }
+    }
 }

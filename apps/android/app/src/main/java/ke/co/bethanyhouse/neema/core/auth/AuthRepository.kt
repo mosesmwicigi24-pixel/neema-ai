@@ -1,6 +1,5 @@
 package ke.co.bethanyhouse.neema.core.auth
 
-import android.util.Base64
 import ke.co.bethanyhouse.neema.BuildConfig
 import ke.co.bethanyhouse.neema.core.net.NeemaJson
 import ke.co.bethanyhouse.neema.core.net.TokenProvider
@@ -38,17 +37,26 @@ class AuthException(message: String) : Exception(message)
  *     session payload already carries `accessToken`/`refreshToken`. This keeps
  *     the app working against a server that hasn't deployed (1) yet.
  */
-class AuthRepository(private val store: SessionStore) : TokenProvider {
-    private val base = BuildConfig.NEEMA_BASE_URL
+class AuthRepository(
+    private val store: SessionStore,
+    private val base: String = BuildConfig.NEEMA_BASE_URL,
+    /** Tests only: answers requests without the network. */
+    interceptor: okhttp3.Interceptor? = null,
+    /** Pause between refresh attempts (attempt × this), as lib/auth.ts doRefresh(). */
+    private val backoffMs: Long = 500,
+    /** Where the blocking calls run; tests pass Unconfined so a refresh settles in-line. */
+    private val io: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
+) : TokenProvider {
     private val http = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .callTimeout(30, TimeUnit.SECONDS)
         .followRedirects(false)
+        .apply { if (interceptor != null) addInterceptor(interceptor) }
         .build()
     private val json = "application/json".toMediaType()
     private val refreshLock = Mutex()
 
-    suspend fun login(email: String, password: String): Session = withContext(Dispatchers.IO) {
+    suspend fun login(email: String, password: String): Session = withContext(io) {
         val direct = runCatching { directLogin(email, password) }
         direct.getOrNull()?.let { return@withContext it.also(store::save) }
         val err = direct.exceptionOrNull()
@@ -177,7 +185,7 @@ class AuthRepository(private val store: SessionStore) : TokenProvider {
     }
 
     override suspend fun forceRefresh(): String? = refreshLock.withLock {
-        withContext(Dispatchers.IO) {
+        withContext(io) {
             val s = store.current ?: return@withContext null
             // Another caller may have refreshed while we waited for the lock.
             if (jwtExp(s.accessToken) - System.currentTimeMillis() / 1000 > 300 &&
@@ -190,8 +198,13 @@ class AuthRepository(private val store: SessionStore) : TokenProvider {
                         ?: s.nextAuthCookie?.let { nextAuthSession(it, s.email) }
                 }.getOrNull()
                     ?: runCatching { s.nextAuthCookie?.let { nextAuthSession(it, s.email) } }.getOrNull()
-                if (fresh != null) break
-                Thread.sleep(attempt * 500L)
+                // NextAuth may hand back the very token the API just refused
+                // (its session callback doesn't always refresh): that is no rescue.
+                if (fresh != null && fresh.accessToken == s.accessToken &&
+                    (s.accessToken == lastRejected || jwtExp(s.accessToken) <= System.currentTimeMillis() / 1000)
+                ) fresh = null
+                if (fresh != null || attempt == 3) break
+                if (backoffMs > 0) Thread.sleep(attempt * backoffMs)
             }
             if (fresh == null) { lastRejected = s.accessToken; return@withContext null }
             val merged = fresh.copy(
@@ -219,7 +232,8 @@ class AuthRepository(private val store: SessionStore) : TokenProvider {
 
         private fun claims(jwt: String): JsonObject? = runCatching {
             val part = jwt.split(".")[1]
-            val bytes = Base64.decode(part, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
+            // java.util (not android.util) so it also runs in plain JVM tests.
+            val bytes = java.util.Base64.getUrlDecoder().decode(part.trimEnd('='))
             NeemaJson.parseToJsonElement(String(bytes)).jsonObject
         }.getOrNull()
 

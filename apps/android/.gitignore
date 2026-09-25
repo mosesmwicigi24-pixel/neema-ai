@@ -8,6 +8,5 @@ local.properties
 captures/
 *.keystore
 !debug.keystore
-
-# Test runs: Paparazzi's context cacheDir (the app's snapshot cache), not the screenshot goldens
+# Paparazzi/layoutlib puts Context.cacheDir at the module root: SnapshotCache files from tests.
 app/snapshots/

@@ -39,7 +39,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         if (Build.VERSION.SDK_INT >= 33) askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
-        handleIntent(intent)
+        // A recreated activity (process restore) must not replay the launch intent.
+        if (savedInstanceState == null) handleIntent(intent)
 
         setContent {
             val dark by dash.dark.collectAsStateWithLifecycle()
@@ -82,14 +83,14 @@ class MainActivity : ComponentActivity() {
             NeemaApplication.instance.container.calls.handleIntent(intent)
         }
         val uri: Uri = intent.data ?: return
-        val open = uri.getQueryParameter("open")
-        val ref = uri.getQueryParameter("ref")
-        val view = ViewId.fromWeb(uri.getQueryParameter("view"))
-        val caller = uri.getQueryParameter("caller")
-        when {
-            open != null -> dash.openConversationFor(if (ref != null) "$open|$ref" else open)
-            view == ViewId.Calls && caller != null -> dash.focusCalls(caller)
-            view != null -> dash.navigate(view)
-        }
+        dash.applyDeepLink(
+            open = uri.getQueryParameter("open"),
+            ref = uri.getQueryParameter("ref"),
+            view = uri.getQueryParameter("view"),
+            caller = uri.getQueryParameter("caller"),
+        )
+        // Consumed once, like the web stripping the query string: a config
+        // change or relaunch from recents must not replay it.
+        intent.data = null
     }
 }

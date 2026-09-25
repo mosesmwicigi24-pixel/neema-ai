@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.SubcomposeAsyncImage
 import ke.co.bethanyhouse.neema.core.ui.theme.ChannelColors
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
+import ke.co.bethanyhouse.neema.core.ui.theme.WebIcons
 import ke.co.bethanyhouse.neema.core.util.Fmt
 
 /** Stable hue per name, for initials avatars. */
@@ -42,14 +43,44 @@ fun avatarColor(seed: String?): Color {
     return Color(palette[h % palette.size])
 }
 
+/**
+ * True when a "name" is really a phone number or a Meta id (an unnamed
+ * contact shown as "+254 712 345 678" / "Messenger ID 2589…"): its initials
+ * would read "+7" or "MI", so the avatar shows a person glyph instead.
+ */
+fun isPhoneLike(name: String?): Boolean {
+    val n = name?.trim().orEmpty()
+    if (n.isEmpty()) return false
+    if (n.startsWith("Messenger ID", ignoreCase = true)) return true
+    val digits = n.filterNot { it == ' ' || it == '+' || it == '-' || it == '(' || it == ')' || it == '.' }
+    return digits.isNotEmpty() && digits.all { it.isDigit() }
+}
+
+/**
+ * components/ui/Avatar.tsx: one neutral stone-green disc with dark-green
+ * initials (a Prussian-night twin in dark mode), the photo when there is one
+ * (falling back to the disc if it fails to load), and a person glyph for an
+ * unnamed contact whose "name" is only a phone number.
+ */
 @Composable
 fun Avatar(name: String?, url: String? = null, size: Dp = 40.dp, modifier: Modifier = Modifier) {
+    val dark = Neema.colors.isDark
+    val bg = if (dark) Color(0xFF0F1424) else Color(0xFFF5F6F3)
+    val fg = if (dark) Color(0xFFB5DA8B) else Color(0xFF3A5C28)
+    val ring = if (dark) Color(0xFF1F367A) else Color(0xFFDDE8D5)
     val initialsBox = @Composable {
         Box(
-            Modifier.size(size).clip(CircleShape).background(avatarColor(name)),
+            Modifier.size(size).clip(CircleShape).background(bg).border(1.dp, ring, CircleShape),
             contentAlignment = Alignment.Center,
         ) {
-            Text(Fmt.initials(name), color = Color.White, fontWeight = FontWeight.Bold, fontSize = (size.value * 0.36f).sp)
+            if (name.isNullOrBlank() || isPhoneLike(name)) {
+                Icon(WebIcons.Profile, contentDescription = null, tint = fg, modifier = Modifier.size(size * 0.5f))
+            } else {
+                Text(
+                    Fmt.initials(name), color = fg, fontWeight = FontWeight.Bold,
+                    fontSize = (size.value * 0.36f).sp, letterSpacing = (size.value * 0.36f * 0.02f).sp, maxLines = 1,
+                )
+            }
         }
     }
     Box(modifier.size(size)) {

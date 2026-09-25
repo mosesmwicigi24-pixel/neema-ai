@@ -23,8 +23,10 @@ data class Session(
     val nextAuthCookie: String? = null,
 )
 
-class SessionStore(context: Context, override: SharedPreferences? = null) {
+/** [context] may be null only when [override] preferences are given (JVM tests). */
+class SessionStore(context: Context?, override: SharedPreferences? = null) {
     private val prefs: SharedPreferences = override ?: runCatching {
+        context!!
         val key = MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
         EncryptedSharedPreferences.create(
             context, "neema_session", key,
@@ -34,7 +36,7 @@ class SessionStore(context: Context, override: SharedPreferences? = null) {
     }.getOrElse {
         // A keystore that can't be opened (restored backup on a new device)
         // must not brick the app: start clean.
-        context.deleteSharedPreferences("neema_session")
+        context!!.deleteSharedPreferences("neema_session")
         context.getSharedPreferences("neema_session_fallback", Context.MODE_PRIVATE)
     }
 

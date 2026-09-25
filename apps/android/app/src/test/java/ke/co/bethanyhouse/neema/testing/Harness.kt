@@ -1,7 +1,6 @@
 package ke.co.bethanyhouse.neema.testing
 
 import android.content.Context
-import android.util.Base64
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -20,9 +19,9 @@ import ke.co.bethanyhouse.neema.core.ui.theme.NeemaTheme
 import kotlinx.coroutines.Dispatchers
 
 /** A JWT the auth layer accepts as valid for a year (signature is never checked client-side). */
-fun fakeJwt(sub: String = Fixtures.ME_ID): String {
-    fun b64(s: String) = Base64.encodeToString(s.toByteArray(), Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
-    val exp = System.currentTimeMillis() / 1000 + 365L * 24 * 3600
+fun fakeJwt(sub: String = Fixtures.ME_ID, expiresInSec: Long = 365L * 24 * 3600): String {
+    fun b64(s: String) = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(s.toByteArray())
+    val exp = System.currentTimeMillis() / 1000 + expiresInSec
     return "${b64("""{"alg":"HS256","typ":"JWT"}""")}.${b64("""{"sub":"$sub","exp":$exp,"type":"access"}""")}.sig"
 }
 
@@ -35,6 +34,10 @@ fun testContainer(
     fake: FakeNeema = FakeNeema.withFixtures(),
     role: String = "admin",
     superuser: Boolean = true,
+    /** Where the socket / notification centre run; Unconfined makes them synchronous. */
+    appDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Default,
+    /** A fake socket (see [FakeSocketFactory]) so tests can push live frames. */
+    wsFactory: okhttp3.WebSocket.Factory? = null,
 ): AppContainer {
     val stores = HashMap<String, MemoryPrefs>()
     val c = AppContainer(
@@ -42,8 +45,11 @@ fun testContainer(
         ContainerConfig(
             baseUrl = "https://neema.test", interceptor = fake, io = Dispatchers.Unconfined,
             prefs = { name -> stores.getOrPut(name) { MemoryPrefs() } },
+            authBackoffMs = 0, appDispatcher = appDispatcher, wsFactory = wsFactory,
         ),
     )
+    // Each test starts cold: no stale-while-revalidate snapshot from an earlier test.
+    c.snapshots.clear()
     c.sessionStore.save(
         Session(
             accessToken = fakeJwt(), refreshToken = "refresh", agentId = Fixtures.ME_ID,
@@ -82,5 +88,8 @@ fun AppFrame(dark: Boolean = false, content: @Composable () -> Unit) {
     }
 }
 
-fun dashboard(context: Context, fake: FakeNeema = FakeNeema.withFixtures(), role: String = "admin", superuser: Boolean = true) =
-    DashboardViewModel(testContainer(context, fake, role, superuser))
+fun dashboard(
+    context: Context, fake: FakeNeema = FakeNeema.withFixtures(), role: String = "admin", superuser: Boolean = true,
+    appDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Default, wsFactory: okhttp3.WebSocket.Factory? = null,
+) =
+    DashboardViewModel(testContainer(context, fake, role, superuser, appDispatcher, wsFactory))
