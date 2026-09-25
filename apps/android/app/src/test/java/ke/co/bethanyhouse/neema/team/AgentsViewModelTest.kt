@@ -240,4 +240,28 @@ class AgentsViewModelTest : AreaTest() {
         vm.saveRole(null, RoleForm("Once"), onDone)
         assertEquals(1, inside)
     }
+
+    // ── Replies: POST /admin/agents answers with whatever object the server sends ──
+
+    @Test fun createAcceptsTheFullAgentRow() {
+        // admin.py create_agent returns the new agent (the TeamFixtures route answers that way).
+        vm.createAgent("Jane Doe", "jane@bethanyhouse.co.ke", "s3cretpass", "agent", onDone)
+        assertEquals(1, done)
+        assertEquals("Agent created", lastToast()?.message)
+        assertEquals(ToastType.Success, lastToast()?.type)
+    }
+
+    @Test fun createAcceptsABareOk() {
+        // Any JSON object is a success; nothing in the reply is read.
+        fake.on("POST", "/admin/agents", body = """{"ok":true}""")
+        vm.createAgent("Jane Doe", "jane@bethanyhouse.co.ke", "s3cretpass", "agent", onDone)
+        assertEquals(1, done)
+        assertEquals("Agent created", lastToast()?.message)
+    }
+
+    @Test fun createAcceptsAnEmptyObject() {
+        fake.on("POST", "/admin/agents", body = "{}")
+        vm.createAgent("Jane Doe", "jane@bethanyhouse.co.ke", "s3cretpass", "agent", onDone)
+        assertEquals(1, done)
+    }
 }

@@ -21,6 +21,11 @@ object Devices {
     val PHONE = DeviceConfig.PIXEL_6
     fun tallPhone(heightPx: Int) = DeviceConfig.PIXEL_6.copy(screenHeight = heightPx)
     val TABLET = DeviceConfig.PIXEL_C
+    /** PIXEL_C upright: 900dp wide, two card columns. */
+    val TABLET_PORTRAIT = DeviceConfig.PIXEL_C.copy(
+        screenWidth = DeviceConfig.PIXEL_C.screenHeight, screenHeight = DeviceConfig.PIXEL_C.screenWidth,
+        orientation = com.android.resources.ScreenOrientation.PORTRAIT,
+    )
     fun tallTablet(heightPx: Int) = DeviceConfig.PIXEL_C.copy(screenHeight = heightPx)
 }
 

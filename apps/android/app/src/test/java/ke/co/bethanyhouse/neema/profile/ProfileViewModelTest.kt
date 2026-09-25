@@ -101,4 +101,29 @@ class ProfileViewModelTest : AreaTest() {
         assertEquals(!before, prefs.backgroundLive.value)
         assertTrue(writes().isEmpty())
     }
+
+    // ── Replies: PATCH /admin/me answers with the agent object ──────────────
+
+    @Test fun saveAcceptsTheAgentRowReply() {
+        // admin.py update_me returns the agent (TeamFixtures answers with Fixtures.me).
+        vm.saveProfile("Moses", "moses@bethanyhouse.co.ke") { done++ }
+        assertEquals(1, done)
+        assertEquals("Profile updated", lastToast()?.message)
+    }
+
+    @Test fun saveAcceptsABareOk() {
+        fake.on("PATCH", "/admin/me", body = """{"ok":true}""")
+        vm.saveProfile("Moses", "moses@bethanyhouse.co.ke") { done++ }
+        vm.changePassword("longpassword", "longpassword") { done++ }
+        assertEquals(2, done)
+        assertEquals("Password changed successfully", lastToast()?.message)
+    }
+
+    @Test fun passwordFailureShowsTheServersReason() {
+        fail("PATCH", "/admin/me", 422, "Password too weak")
+        vm.changePassword("longpassword", "longpassword") { done++ }
+        assertEquals(0, done)
+        assertEquals("Password too weak", lastToast()?.message)
+        assertEquals(ToastType.Error, lastToast()?.type)
+    }
 }

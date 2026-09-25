@@ -135,22 +135,50 @@ fun SettingsScreen(dash: DashboardViewModel) {
 
 // ── Building blocks (SectionCard / Field / SmallInput) ─────────────────────────
 
+/** The web's SectionCard: white, rounded-xl, #cee6b2 border, p-5, title block mb-4. */
 @Composable
 private fun SectionCard(title: String, description: String? = null, content: @Composable ColumnScope.() -> Unit) {
-    Panel(Modifier.fillMaxWidth(), padding = PaddingValues(18.dp)) {
-        Text(title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Neema.colors.text)
+    val c = Neema.colors
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.bg2)
+            .border(1.dp, if (c.isDark) c.hairline else c.bg4, RoundedCornerShape(12.dp)).padding(20.dp),
+    ) {
+        Text(title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = c.text)
         if (description != null) {
-            Text(description, fontSize = 12.sp, color = Neema.colors.textDim, lineHeight = 17.sp, modifier = Modifier.padding(top = 4.dp))
+            Text(description, fontSize = 12.sp, color = c.textDim, lineHeight = 18.sp, modifier = Modifier.padding(top = 4.dp))
         }
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(16.dp))
         content()
     }
+}
+
+/** Tailwind stone-600, the web's field-label colour. */
+private val Stone600 = Color(0xFF57534E)
+
+/** The web's SmallInput by day: #f3f9ec fill, #b5da8b border. */
+@Composable
+private fun smallInputColors(): TextFieldColors {
+    val c = Neema.colors
+    return OutlinedTextFieldDefaults.colors(
+        unfocusedContainerColor = c.bg, focusedContainerColor = c.bg, errorContainerColor = c.bg, disabledContainerColor = c.bg,
+        unfocusedBorderColor = c.border, focusedBorderColor = c.gold, cursorColor = c.gold,
+    )
+}
+
+/** The web's textarea and select: white with a stone-200 hairline. */
+@Composable
+private fun plainFieldColors(): TextFieldColors {
+    val c = Neema.colors
+    return OutlinedTextFieldDefaults.colors(
+        unfocusedBorderColor = if (c.isDark) c.border else c.hairline, focusedBorderColor = c.gold, cursorColor = c.gold,
+        disabledBorderColor = if (c.isDark) c.border else c.hairline,
+    )
 }
 
 @Composable
 private fun Field(label: String, hint: String? = null, hintColor: Color? = null, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Column(modifier.padding(bottom = 12.dp)) {
-        Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Neema.colors.textMid)
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Neema.colors.let { if (it.isDark) it.textMid else Stone600 })
         Spacer(Modifier.height(5.dp))
         content()
         if (hint != null) Text(hint, fontSize = 11.sp, lineHeight = 15.sp, color = hintColor ?: Neema.colors.muted, modifier = Modifier.padding(top = 3.dp))
@@ -176,6 +204,7 @@ private fun SmallInput(
         isError = isError,
         shape = RoundedCornerShape(10.dp),
         textStyle = LocalTextStyle.current.copy(fontSize = 14.sp),
+        colors = smallInputColors(),
         modifier = modifier.fillMaxWidth(),
     )
 }
@@ -184,7 +213,7 @@ private fun SmallInput(
 private fun SaveButton(label: String, saving: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
     Button(
         onClick = onClick, enabled = enabled && !saving,
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(8.dp),
         colors = ButtonDefaults.buttonColors(containerColor = Neema.colors.gold, contentColor = Color.White),
     ) {
         if (saving) {
@@ -217,8 +246,9 @@ private fun StandingOrdersCard(vm: SettingsViewModel) {
                     fontSize = 13.sp, color = Neema.colors.muted,
                 )
             },
-            shape = RoundedCornerShape(10.dp),
+            shape = RoundedCornerShape(8.dp),
             textStyle = LocalTextStyle.current.copy(fontSize = 14.sp),
+            colors = plainFieldColors(),
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(6.dp))
@@ -245,7 +275,7 @@ private fun TranslationCard(vm: SettingsViewModel) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 val s = state
-                Text(if (s == null) "Loading…" else if (s.enabled) "On" else "Off", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = c.text)
+                Text(if (s == null) "Loading…" else if (s.enabled) "On" else "Off", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.text)
                 Text(
                     when {
                         s == null -> " "
@@ -735,7 +765,7 @@ private fun IntegrationsCard(vm: SettingsViewModel, twoCols: Boolean) {
                 val cfg = config[integ.key] ?: emptyMap()
                 Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).border(1.dp, if (c.isDark) c.hairline else c.bg3, RoundedCornerShape(12.dp))) {
                     Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(icon.bg), contentAlignment = Alignment.Center) {
+                        Box(Modifier.size(36.dp).clip(RoundedCornerShape(12.dp)).background(icon.bg), contentAlignment = Alignment.Center) {
                             if (icon.icon != null) Icon(icon.icon, null, tint = Color.White, modifier = Modifier.size(20.dp))
                             else Text(icon.text ?: "", color = Color.White, fontSize = 7.sp, fontWeight = FontWeight.Bold)
                         }
@@ -757,7 +787,10 @@ private fun IntegrationsCard(vm: SettingsViewModel, twoCols: Boolean) {
                             }
                             Spacer(Modifier.width(6.dp))
                         }
-                        if (integ.connected) SmallPillButton("Disconnect", c.red, c.redDim, c.red.copy(alpha = 0.3f)) { vm.toggleIntegration(integ.key) }
+                        if (integ.connected) SmallPillButton(
+                            "Disconnect", c.red,
+                            if (c.isDark) c.redDim else Color(0xFFFFF5F5), if (c.isDark) c.red.copy(alpha = 0.3f) else Color(0xFFFECACA),
+                        ) { vm.toggleIntegration(integ.key) }
                         else SmallPillButton("Connect", c.gold, c.goldDim, c.border) { vm.toggleIntegration(integ.key) }
                     }
                     if (isExpanded) {
@@ -801,22 +834,30 @@ private fun SmallPillButton(text: String, fg: Color, bg: Color, border: Color, o
 @Composable
 private fun DangerZoneCard(vm: SettingsViewModel) {
     val c = Neema.colors
+    val light = !c.isDark
+    val rowFill = if (light) Color(0xFFFEF2F2) else c.redDim
+    val rowEdge = if (light) Color(0xFFFEE2E2) else c.red.copy(alpha = 0.2f)
+    val labelColor = if (light) Color(0xFF991B1B) else c.red
+    val subColor = if (light) Color(0xFFEF4444) else c.red.copy(alpha = 0.75f)
+    val btnFill = if (light) Color(0xFFFEE2E2) else c.red.copy(alpha = 0.12f)
+    val btnText = if (light) Color(0xFFB91C1C) else c.red
+    val btnEdge = if (light) Color(0xFFFECACA) else c.red.copy(alpha = 0.3f)
     SectionCard("Danger Zone", "Irreversible actions. Proceed with caution.") {
         listOf(
             Triple("Clear conversation history", "Permanently delete messages older than 90 days", "Clear"),
             Triple("Reset AI memory", "Clear all customer facts and session history", "Reset"),
         ).forEach { (label, sub, action) ->
             Row(
-                Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(10.dp)).background(c.redDim)
-                    .border(1.dp, c.red.copy(alpha = 0.2f), RoundedCornerShape(10.dp)).padding(12.dp),
+                Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(8.dp)).background(rowFill)
+                    .border(1.dp, rowEdge, RoundedCornerShape(8.dp)).padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text(label, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = c.red)
-                    Text(sub, fontSize = 11.sp, color = c.red.copy(alpha = 0.75f))
+                    Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = labelColor)
+                    Text(sub, fontSize = 11.sp, color = subColor)
                 }
                 Spacer(Modifier.width(8.dp))
-                SmallPillButton(action, c.red, c.red.copy(alpha = 0.12f), c.red.copy(alpha = 0.3f), vm::dangerAction)
+                SmallPillButton(action, btnText, btnFill, btnEdge, vm::dangerAction)
             }
         }
     }

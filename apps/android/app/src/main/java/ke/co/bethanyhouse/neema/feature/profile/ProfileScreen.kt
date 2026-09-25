@@ -44,6 +44,7 @@ import ke.co.bethanyhouse.neema.core.ui.components.StatTile
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import ke.co.bethanyhouse.neema.core.util.Fmt
 import ke.co.bethanyhouse.neema.feature.agents.BtnVariant
+import ke.co.bethanyhouse.neema.feature.agents.InputStyle
 import ke.co.bethanyhouse.neema.feature.agents.LabeledInput
 import ke.co.bethanyhouse.neema.feature.agents.PermissionCatalog
 import ke.co.bethanyhouse.neema.feature.agents.TeamButton
@@ -51,6 +52,31 @@ import ke.co.bethanyhouse.neema.feature.agents.hexColor
 
 /** The web's #9ccd65 secondary text; on the dark theme that stand-in is unreadable, so the muted grey-green instead. */
 private val ke.co.bethanyhouse.neema.core.ui.theme.NeemaColors.faint: Color get() = if (isDark) muted else border2
+
+/** A permission you hold: the web's #2c4e18 on #f0f9ec. */
+private val HasPermText = Color(0xFF2C4E18)
+
+/**
+ * The role chip beside your name: `capitalize`d DB role; admin in purple
+ * (purple-100 / purple-700 / purple-200 border), anyone else in the pale
+ * greens (#e6f3d8 / #427425 / #cee6b2 border).
+ */
+@Composable
+private fun BaseRoleBadge(role: String) {
+    val c = Neema.colors
+    val admin = role == "admin"
+    val (fill, text, edge) = when {
+        admin && c.isDark -> Triple(Color(0x33A855F7), Color(0xFFD8B4FE), Color(0x66A855F7))
+        admin -> Triple(Color(0xFFF3E8FF), Color(0xFF7E22CE), Color(0xFFE9D5FF))
+        c.isDark -> Triple(c.goldDim, c.gold2, c.border)
+        else -> Triple(c.bg3, c.gold2, c.bg4)
+    }
+    Text(
+        role.replaceFirstChar { it.uppercase() }, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = text, maxLines = 1,
+        modifier = Modifier.clip(RoundedCornerShape(50)).background(fill).border(1.dp, edge, RoundedCornerShape(50))
+            .padding(horizontal = 8.dp, vertical = 2.dp),
+    )
+}
 
 /** Which parts of Profile start open — set only by screenshot tests, which cannot tap. */
 data class ProfilePreview(
@@ -119,24 +145,21 @@ fun ProfileScreen(dash: DashboardViewModel) {
                 }
 
                 // ── Profile card ────────────────────────────────────────────
-                Panel(Modifier.fillMaxWidth(), padding = PaddingValues(18.dp)) {
+                Panel(Modifier.fillMaxWidth(), padding = PaddingValues(20.dp)) {
                     Row(verticalAlignment = Alignment.Top) {
                         Avatar(agent.name, agent.avatarUrl, size = 56.dp)
-                        Spacer(Modifier.width(14.dp))
+                        Spacer(Modifier.width(16.dp))
                         Column(Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(agent.name, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = c.text, modifier = Modifier.weight(1f, fill = false))
                                 Spacer(Modifier.width(8.dp))
-                                Pill(
-                                    agent.role.replaceFirstChar { it.uppercase() },
-                                    if (agent.role == "admin") (if (c.isDark) Color(0xFFC084FC) else Color(0xFF7E22CE)) else c.gold2,
-                                )
+                                BaseRoleBadge(agent.role)
                             }
                             teamRow?.roleName?.let { rn ->
                                 Spacer(Modifier.height(4.dp))
                                 Pill(rn, hexColor(teamRow.roleColor), filled = true)
                             }
-                            Text(agent.email, fontSize = 13.sp, color = c.faint, modifier = Modifier.padding(top = 2.dp))
+                            Text(agent.email, fontSize = 14.sp, color = c.faint, modifier = Modifier.padding(top = 2.dp))
                             Text(
                                 buildString {
                                     append("Joined ${if (agent.createdAt != null) Fmt.date(agent.createdAt) else "—"}")
@@ -146,12 +169,12 @@ fun ProfileScreen(dash: DashboardViewModel) {
                             )
                         }
                         TeamButton(if (editMode) "Cancel" else "Edit", { editMode = !editMode }, small = true,
-                            variant = if (editMode) BtnVariant.Ghost else BtnVariant.Default)
+                            variant = if (editMode) BtnVariant.Outline else BtnVariant.Secondary)
                     }
                     if (editMode) {
-                        Spacer(Modifier.height(14.dp))
+                        Spacer(Modifier.height(20.dp))
                         HorizontalDivider(color = c.bg3)
-                        Spacer(Modifier.height(14.dp))
+                        Spacer(Modifier.height(16.dp))
                         EditProfileForm(
                             initialName = agent.name, initialEmail = agent.email, agentId = agent.id, saving = saving,
                             onSave = { n, e -> vm.saveProfile(n, e) { editMode = false } },
@@ -161,14 +184,15 @@ fun ProfileScreen(dash: DashboardViewModel) {
                 }
 
                 // ── Stats ───────────────────────────────────────────────────
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    StatTile("Active chats", agent.activeConvs.toString(), Modifier.weight(1f))
+                // One height for the three tiles, even when Status carries a "Seen …" line.
+                Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    StatTile("Active chats", agent.activeConvs.toString(), Modifier.weight(1f).fillMaxHeight())
                     StatTile(
-                        "Status", if (available) "Online" else "Away", Modifier.weight(1f),
+                        "Status", if (available) "Online" else "Away", Modifier.weight(1f).fillMaxHeight(),
                         accent = if (available) c.gold else c.muted,
                         hint = if (!available && agent.lastSeenAt != null) "Seen ${Fmt.timeAgo(agent.lastSeenAt)}" else null,
                     )
-                    StatTile("Permissions", "${permKeys.count { k -> PermissionCatalog.ALL.any { it.key == k } }}/${PermissionCatalog.ALL.size}", Modifier.weight(1f))
+                    StatTile("Permissions", "${permKeys.count { k -> PermissionCatalog.ALL.any { it.key == k } }}/${PermissionCatalog.ALL.size}", Modifier.weight(1f).fillMaxHeight())
                 }
 
                 // ── Availability ────────────────────────────────────────────
@@ -182,16 +206,17 @@ fun ProfileScreen(dash: DashboardViewModel) {
                 }
 
                 // ── Password ────────────────────────────────────────────────
-                Panel(Modifier.fillMaxWidth(), padding = PaddingValues(18.dp)) {
+                Panel(Modifier.fillMaxWidth(), padding = PaddingValues(20.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text("Password", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = c.text)
                             Text("Change your login password", fontSize = 12.sp, color = c.faint)
                         }
-                        TeamButton(if (changingPassword) "Cancel" else "Change", { changingPassword = !changingPassword }, small = true)
+                        TeamButton(if (changingPassword) "Cancel" else "Change", { changingPassword = !changingPassword }, small = true,
+                            variant = BtnVariant.Secondary)
                     }
                     if (changingPassword) {
-                        Spacer(Modifier.height(14.dp))
+                        Spacer(Modifier.height(16.dp))
                         PasswordForm(saving) { pw, confirm -> vm.changePassword(pw, confirm) { changingPassword = false } }
                     }
                 }
@@ -241,7 +266,7 @@ fun ProfileScreen(dash: DashboardViewModel) {
                                 ) {
                                     Box(Modifier.size(6.dp).clip(CircleShape).background(if (has) c.gold else Color(0xFFD6D3D1)))
                                     Spacer(Modifier.width(8.dp))
-                                    Text(p.label, fontSize = 12.sp, color = if (has) c.gold2 else c.faint)
+                                    Text(p.label, fontSize = 12.sp, color = if (has) (if (c.isDark) c.gold2 else HasPermText) else c.faint)
                                 }
                             }
                             if (pair.size == 1) Spacer(Modifier.weight(1f))
@@ -299,12 +324,12 @@ private fun EditProfileForm(
     // The web shows a Department field but never sends it (PATCH /me has no
     // such column); it is kept for parity and stays on this form only.
     var department by rememberSaveable(agentId) { mutableStateOf("") }
-    LabeledInput("Full Name", name, { name = it })
-    LabeledInput("Email", email, { email = it }, keyboardType = KeyboardType.Email)
-    LabeledInput("Department", department, { department = it }, placeholder = "Sales, Support…")
+    LabeledInput("Full Name", name, { name = it }, style = InputStyle.Form)
+    LabeledInput("Email", email, { email = it }, keyboardType = KeyboardType.Email, style = InputStyle.Form)
+    LabeledInput("Department", department, { department = it }, placeholder = "Sales, Support…", style = InputStyle.Form)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        TeamButton(if (saving) "Saving…" else "Save Changes", { onSave(name, email) }, variant = BtnVariant.Primary, enabled = !saving)
-        TeamButton("Cancel", onCancel, variant = BtnVariant.Ghost)
+        TeamButton(if (saving) "Saving…" else "Save Changes", { onSave(name, email) }, variant = BtnVariant.Amber, enabled = !saving)
+        TeamButton("Cancel", onCancel, variant = BtnVariant.Outline)
     }
 }
 
@@ -313,16 +338,16 @@ private fun PasswordForm(saving: Boolean, onSubmit: (String, String) -> Unit) {
     val typed = LocalProfilePreview.current.typed
     var pw by rememberSaveable { mutableStateOf(typed["password"] ?: "") }
     var confirm by rememberSaveable { mutableStateOf(typed["confirm"] ?: "") }
-    LabeledInput("New Password", pw, { pw = it }, placeholder = "Minimum 8 characters", password = true)
-    LabeledInput("Confirm Password", confirm, { confirm = it }, password = true)
-    TeamButton(if (saving) "Changing…" else "Change Password", { onSubmit(pw, confirm) }, variant = BtnVariant.Primary, enabled = !saving)
+    LabeledInput("New Password", pw, { pw = it }, placeholder = "Minimum 8 characters", password = true, style = InputStyle.Form)
+    LabeledInput("Confirm Password", confirm, { confirm = it }, password = true, style = InputStyle.Form)
+    TeamButton(if (saving) "Changing…" else "Change Password", { onSubmit(pw, confirm) }, variant = BtnVariant.Amber, enabled = !saving)
 }
 
 @Composable
 private fun ProfileCard(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Panel(Modifier.fillMaxWidth(), padding = PaddingValues(18.dp)) {
+    Panel(Modifier.fillMaxWidth(), padding = PaddingValues(20.dp)) {
         Text(title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Neema.colors.text)
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(16.dp))
         content()
     }
 }

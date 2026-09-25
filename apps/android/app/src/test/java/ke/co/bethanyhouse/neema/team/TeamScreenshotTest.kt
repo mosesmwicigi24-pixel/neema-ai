@@ -32,7 +32,10 @@ class TeamScreenshotTest : AreaShots() {
     @Test fun agentsDarkScrolled() = team(TeamPreview(scrollItem = 4), dark = true)
     @Test fun agentsTablet() = team(device = Devices.TABLET)
     @Test fun agentsTabletDark() = team(device = Devices.TABLET, dark = true)
-    @Test fun agentsEmpty() = team(f = fake().also { it.on("GET", "/admin/agents", body = "[]") })
+    /** Two columns (a tablet held upright): each row's cards share one height and their footers line up. */
+    @Test fun agentsTabletPortrait() = team(device = Devices.TABLET_PORTRAIT)
+    @Test fun agentsTabletPortraitDark() = team(device = Devices.TABLET_PORTRAIT, dark = true)
+    @Test fun agentsEmpty() =team(f = fake().also { it.on("GET", "/admin/agents", body = "[]") })
     @Test fun roles() = team(TeamPreview(tab = "roles"))
     @Test fun rolesScrolled() = team(TeamPreview(tab = "roles", scrollItem = 4))
     @Test fun rolesDark() = team(TeamPreview(tab = "roles"), dark = true)

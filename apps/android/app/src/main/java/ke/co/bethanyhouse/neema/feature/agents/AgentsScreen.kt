@@ -4,10 +4,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.layout.SubcomposeLayout
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -89,22 +91,24 @@ fun AgentsScreen(dash: DashboardViewModel) {
     val c = Neema.colors
 
     PullToRefreshBox(isRefreshing = refreshing, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize().background(c.bg)) {
-        LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 320.dp),
+      BoxWithConstraints(Modifier.fillMaxSize()) {
+        // The web's grid: one column on phones, two from sm, three from lg — here
+        // as many 320dp columns as fit, never more than three.
+        val columns = ((maxWidth - 32.dp + 12.dp) / (320.dp + 12.dp)).toInt().coerceIn(1, 3)
+        LazyColumn(
             contentPadding = PaddingValues(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.fillMaxSize(),
-            state = androidx.compose.foundation.lazy.grid.rememberLazyGridState(preview.scrollItem),
+            state = rememberLazyListState(preview.scrollItem),
         ) {
             // Header
-            item(span = { GridItemSpan(maxLineSpan) }) {
+            item(key = "header") {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Team", style = MaterialTheme.typography.headlineSmall, color = c.text)
                         Row {
-                            Text("${agents.size} agents · ", fontSize = 13.sp, color = c.textDim)
-                            Text("$onlineCount online", fontSize = 13.sp, color = c.gold)
+                            Text("${agents.size} agents · ", fontSize = 14.sp, color = c.textDim)
+                            Text("$onlineCount online", fontSize = 14.sp, color = c.gold)
                         }
                     }
                     if (tab == "agents") {
@@ -117,7 +121,7 @@ fun AgentsScreen(dash: DashboardViewModel) {
                 }
             }
             // Tabs
-            item(span = { GridItemSpan(maxLineSpan) }) {
+            item(key = "tabs") {
                 val tabs = if (canRoles) listOf("agents", "roles") else listOf("agents")
                 // The web's tabs: left-aligned labels, a 2dp underline on the active one, over a hairline.
                 Box(Modifier.fillMaxWidth()) {
@@ -145,35 +149,39 @@ fun AgentsScreen(dash: DashboardViewModel) {
 
             if (tab == "agents") {
                 if (agents.isEmpty()) {
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        Box(Modifier.fillMaxWidth().padding(vertical = 48.dp), contentAlignment = Alignment.Center) {
+                    item(key = "empty") {
+                        Box(Modifier.fillMaxWidth().padding(vertical = 64.dp), contentAlignment = Alignment.Center) {
                             Text("No agents yet.", fontSize = 14.sp, color = c.textDim)
                         }
                     }
                 }
-                items(agents, key = { it.id }) { agent ->
-                    AgentCard(
-                        agent = agent,
-                        available = availability[agent.id] ?: agent.isAvailable,
-                        customRole = roleById(agent.customRoleId),
-                        onToggle = { vm.toggleOnline(agent, availability[agent.id] ?: agent.isAvailable) },
-                        onRole = { assignId = agent.id },
-                        onEdit = { editId = agent.id },
-                        onPassword = { pwId = agent.id },
-                        onDelete = { delId = agent.id },
-                    )
+                // Cards in a row share its tallest card's height, as a CSS grid row does.
+                items(agents.chunked(columns), key = { row -> row.joinToString("|") { it.id } }) { row ->
+                    EqualHeightRow(columns = columns, spacing = 12.dp, count = row.size) { i ->
+                        val agent = row[i]
+                        AgentCard(
+                            agent = agent,
+                            available = availability[agent.id] ?: agent.isAvailable,
+                            customRole = roleById(agent.customRoleId),
+                            onToggle = { vm.toggleOnline(agent, availability[agent.id] ?: agent.isAvailable) },
+                            onRole = { assignId = agent.id },
+                            onEdit = { editId = agent.id },
+                            onPassword = { pwId = agent.id },
+                            onDelete = { delId = agent.id },
+                        )
+                    }
                 }
             } else {
                 if (rolesLoading && roles.isEmpty()) {
-                    item(span = { GridItemSpan(maxLineSpan) }) { Loading(Modifier.height(160.dp)) }
+                    item(key = "loading") { Loading(Modifier.height(160.dp)) }
                 } else {
                     if (roles.isEmpty()) {
-                        item(span = { GridItemSpan(maxLineSpan) }) {
+                        item(key = "noroles") {
                             EmptyState("No roles yet", "Create one with New Role.", icon = Icons.Outlined.VerifiedUser)
                         }
                     }
                     // Roles read as a list on the web (space-y-3), full width.
-                    items(roles, key = { it.id }, span = { GridItemSpan(maxLineSpan) }) { role ->
+                    items(roles, key = { it.id }) { role ->
                         RoleCard(
                             role = role,
                             agentCount = agents.count { it.customRoleId == role.id },
@@ -184,6 +192,7 @@ fun AgentsScreen(dash: DashboardViewModel) {
                 }
             }
         }
+      }
     }
 
     // ── Dialogs ───────────────────────────────────────────────────────────────
@@ -257,10 +266,40 @@ private val fainter: Color @Composable get() = Neema.colors.let { if (it.isDark)
 /** Card borders: #cee6b2 by day, the theme hairline by night. */
 private val cardBorder: Color @Composable get() = Neema.colors.let { if (it.isDark) it.hairline else it.bg4 }
 
-private fun buildBold(pre: String, bold: String, post: String) = androidx.compose.ui.text.buildAnnotatedString {
+private fun buildBold(
+    pre: String, bold: String, post: String,
+    color: Color = Color.Unspecified, weight: FontWeight = FontWeight.Bold,
+) = androidx.compose.ui.text.buildAnnotatedString {
     append(pre)
-    pushStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold)); append(bold); pop()
+    pushStyle(androidx.compose.ui.text.SpanStyle(fontWeight = weight, color = color)); append(bold); pop()
     append(post)
+}
+
+// ── Equal-height row ─────────────────────────────────────────────────────────
+
+/**
+ * [count] cells side by side in a [columns]-wide grid row, every cell as tall
+ * as the tallest — the CSS grid's stretch. Each cell is measured once at its
+ * natural height, then laid out at the row's height. (IntrinsicSize can't be
+ * used: the avatar may be a SubcomposeAsyncImage, which has no intrinsics.)
+ */
+@Composable
+internal fun EqualHeightRow(columns: Int, spacing: Dp, count: Int, cell: @Composable (Int) -> Unit) {
+    SubcomposeLayout(Modifier.fillMaxWidth()) { constraints ->
+        val gap = spacing.roundToPx()
+        val width = constraints.maxWidth
+        val cellW = ((width - gap * (columns - 1)) / columns).coerceAtLeast(0)
+        val loose = Constraints(minWidth = cellW, maxWidth = cellW)
+        val height = (0 until count).maxOfOrNull { i ->
+            subcompose("measure-$i") { cell(i) }.maxOfOrNull { it.measure(loose).height } ?: 0
+        } ?: 0
+        val placeables = (0 until count).map { i ->
+            subcompose("place-$i") { cell(i) }.map { it.measure(Constraints.fixed(cellW, height)) }
+        }
+        layout(width, height) {
+            placeables.forEachIndexed { i, ps -> ps.forEach { it.place(i * (cellW + gap), 0) } }
+        }
+    }
 }
 
 // ── Agent card ────────────────────────────────────────────────────────────────
@@ -284,13 +323,14 @@ private fun AgentCard(
     val rolePermCount = customRole?.permissions?.size ?: agent.rolePermissions?.size
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.bg2)
-            .border(1.dp, cardBorder, RoundedCornerShape(12.dp)).padding(14.dp),
+            .border(1.dp, cardBorder, RoundedCornerShape(12.dp)).padding(16.dp),
     ) {
         Row(verticalAlignment = Alignment.Top) {
             Box {
                 Avatar(agent.name, agent.avatarUrl, size = 44.dp)
+                // w-3 h-3 with a 2px white ring, nudged 2px past the avatar's corner.
                 Box(
-                    Modifier.align(Alignment.BottomEnd).size(13.dp).clip(CircleShape).background(c.bg2).padding(2.dp)
+                    Modifier.align(Alignment.BottomEnd).offset(2.dp, 2.dp).size(12.dp).clip(CircleShape).background(c.bg2).padding(2.dp)
                         .clip(CircleShape).background(if (available) Color(0xFF10B981) else Color(0xFFD6D3D1)),
                 )
             }
@@ -300,9 +340,13 @@ private fun AgentCard(
                     Text(agent.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = c.text,
                         maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.align(Alignment.CenterVertically))
                     if (roleName != null) {
-                        Pill(roleName, hexColor(roleColor), filled = true, modifier = Modifier.align(Alignment.CenterVertically))
+                        RoleBadge(roleName, hexColor(roleColor), Color.White, Modifier.align(Alignment.CenterVertically))
                     } else {
-                        Pill(agent.role.replaceFirstChar { it.uppercase() }, c.gold2, modifier = Modifier.align(Alignment.CenterVertically))
+                        // The base DB role, capitalised: #e6f3d8 fill, #427425 text.
+                        RoleBadge(
+                            agent.role.replaceFirstChar { it.uppercase() },
+                            if (c.isDark) c.goldDim else c.bg3, c.gold2, Modifier.align(Alignment.CenterVertically),
+                        )
                     }
                     if (agent.customPermissions != null) {
                         Pill("Custom permissions", c.blue, modifier = Modifier.align(Alignment.CenterVertically))
@@ -326,7 +370,9 @@ private fun AgentCard(
                 }
             }
         }
-        Spacer(Modifier.height(10.dp))
+        // In a stretched grid row the footer sits on the card's bottom edge, so a row's footers line up.
+        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(12.dp))
         HorizontalDivider(color = if (c.isDark) c.hairline else c.bg3)
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -347,14 +393,10 @@ private fun AgentCard(
 
 @Composable
 private fun IconBtn(icon: androidx.compose.ui.graphics.vector.ImageVector, desc: String, variant: BtnVariant, onClick: () -> Unit) {
-    val c = Neema.colors
-    val (bg, fg) = when (variant) {
-        BtnVariant.Danger -> c.redDim to c.red
-        else -> Color.Transparent to c.textDim
-    }
+    val (bg, fg, edge) = btnColors(variant)
     Box(
         Modifier.size(34.dp).clip(RoundedCornerShape(8.dp)).background(bg)
-            .border(1.dp, if (variant == BtnVariant.Danger) c.red.copy(alpha = 0.3f) else c.border, RoundedCornerShape(8.dp))
+            .border(1.dp, edge, RoundedCornerShape(8.dp))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) { Icon(icon, desc, tint = fg, modifier = Modifier.size(16.dp)) }
@@ -365,7 +407,7 @@ private fun IconBtn(icon: androidx.compose.ui.graphics.vector.ImageVector, desc:
 @Composable
 private fun RoleSquare(role: CustomRole, size: Int) {
     Box(
-        Modifier.size(size.dp).clip(RoundedCornerShape((size / 4).dp)).background(hexColor(role.color)),
+        Modifier.size(size.dp).clip(RoundedCornerShape(if (size >= 40) 12.dp else 8.dp)).background(hexColor(role.color)),
         contentAlignment = Alignment.Center,
     ) {
         Text(role.name.take(1).uppercase().ifEmpty { "?" }, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
@@ -378,11 +420,11 @@ private fun RoleCard(role: CustomRole, agentCount: Int, onEdit: () -> Unit, onDe
     val c = Neema.colors
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.bg2)
-            .border(1.dp, cardBorder, RoundedCornerShape(12.dp)).padding(14.dp),
+            .border(1.dp, cardBorder, RoundedCornerShape(12.dp)).padding(16.dp),
         verticalAlignment = Alignment.Top,
     ) {
         RoleSquare(role, 40)
-        Spacer(Modifier.width(14.dp))
+        Spacer(Modifier.width(16.dp))
         Column(Modifier.weight(1f)) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(role.name, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = c.text, modifier = Modifier.align(Alignment.CenterVertically))
@@ -428,12 +470,33 @@ private fun PermChip(label: String) {
     )
 }
 
+/**
+ * The role list's tag is an uppercase, tracked, bold pill; the assign
+ * dialog's ([compact]) is "Protected" as typed, semibold, on a 4dp-cornered chip.
+ */
 @Composable
-private fun ProtectedTag(modifier: Modifier = Modifier) {
+private fun ProtectedTag(modifier: Modifier = Modifier, compact: Boolean = false) {
     val c = Neema.colors
+    val fill = if (c.isDark) c.goldDim else c.bg3
+    if (compact) {
+        Text(
+            "Protected", fontSize = 9.sp, fontWeight = FontWeight.SemiBold, color = c.gold2,
+            modifier = modifier.clip(RoundedCornerShape(4.dp)).background(fill).padding(horizontal = 4.dp, vertical = 2.dp),
+        )
+    } else {
+        Text(
+            "PROTECTED", fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp, color = c.gold2,
+            modifier = modifier.clip(RoundedCornerShape(50)).background(fill).padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+    }
+}
+
+/** The agent card's role chip: 10px semibold on a full pill (custom role colour, or the base role's pale green). */
+@Composable
+private fun RoleBadge(text: String, fill: Color, content: Color, modifier: Modifier = Modifier) {
     Text(
-        "PROTECTED", fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp, color = c.gold2,
-        modifier = modifier.clip(RoundedCornerShape(50)).background(c.bg3).padding(horizontal = 6.dp, vertical = 2.dp),
+        text, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = content, maxLines = 1,
+        modifier = modifier.clip(RoundedCornerShape(50)).background(fill).padding(horizontal = 7.dp, vertical = 2.dp),
     )
 }
 
@@ -484,7 +547,7 @@ private fun AssignRoleDialog(
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(role.name, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = c.text)
-                        if (role.protected) { Spacer(Modifier.width(6.dp)); ProtectedTag() }
+                        if (role.protected) { Spacer(Modifier.width(8.dp)); ProtectedTag(compact = true) }
                     }
                     if (role.description.isNotBlank()) Text(role.description, fontSize = 11.sp, color = c.textDim)
                     Text("${role.permissions.size} permission${if (role.permissions.size != 1) "s" else ""}", fontSize = 11.sp, color = fainter)
@@ -540,6 +603,7 @@ private fun CreateAgentDialog(saving: Boolean, onDismiss: () -> Unit, onCreate: 
             "Base Role",
             listOf("agent" to "Agent", "admin" to "Admin", "readonly" to "Read Only"),
             roleId, { roleId = it },
+            container = Neema.colors.bg,
         )
         Text(
             "Assign a detailed custom role after creating the agent using the Role button.",
@@ -582,7 +646,7 @@ private fun ResetPasswordDialog(agent: Agent, saving: Boolean, onDismiss: () -> 
             TeamButton("Cancel", onDismiss)
         },
     ) {
-        Text(buildBold("Set a new password for ", agent.email, "."), fontSize = 12.sp, color = c.textDim)
+        Text(buildBold("Set a new password for ", agent.email, ".", c.text, FontWeight.SemiBold), fontSize = 12.sp, color = c.textDim)
         Spacer(Modifier.height(12.dp))
         LabeledInput("New Password", password, { password = it }, placeholder = "Min. 8 characters", password = true)
         LabeledInput(

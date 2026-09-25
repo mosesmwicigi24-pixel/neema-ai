@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import ke.co.bethanyhouse.neema.core.ui.theme.Brand
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 
 /**
@@ -39,8 +40,35 @@ data class TeamPreview(
 
 val LocalTeamPreview = staticCompositionLocalOf { TeamPreview() }
 
-/** SBtn variants from AgentsView.tsx. */
-enum class BtnVariant { Primary, Danger, Ghost, Default }
+/**
+ * SBtn variants from AgentsView.tsx (Primary / Danger / Ghost / Default), plus
+ * the shared Btn variants ProfileView.tsx uses: Amber (Btn "primary",
+ * bg-amber-500), Secondary (white, gray-700 text, gray-200 border) and
+ * Outline (transparent, gray-700 text, gray-300 border).
+ */
+enum class BtnVariant { Primary, Danger, Ghost, Default, Amber, Secondary, Outline }
+
+/** SBtn danger by day: #fff5f5 fill, #c0392b text, #fecaca border. */
+private val DangerFillLight = Color(0xFFFFF5F5)
+private val DangerBorderLight = Color(0xFFFECACA)
+/** Tailwind gray-300, the web's outline border. */
+private val Gray300 = Color(0xFFD1D5DB)
+
+/** (fill, content, border) for [variant] on the current theme. */
+@Composable
+fun btnColors(variant: BtnVariant): Triple<Color, Color, Color> {
+    val c = Neema.colors
+    return when (variant) {
+        BtnVariant.Primary -> Triple(c.gold, Color.White, c.gold2)
+        BtnVariant.Danger -> if (c.isDark) Triple(c.redDim, c.red, c.red.copy(alpha = 0.3f))
+            else Triple(DangerFillLight, c.red, DangerBorderLight)
+        BtnVariant.Ghost -> Triple(Color.Transparent, c.textDim, c.border)
+        BtnVariant.Default -> Triple(c.bg2, c.gold2, c.border)
+        BtnVariant.Amber -> Triple(Brand.Amber, Color.White, Brand.Amber)
+        BtnVariant.Secondary -> Triple(c.bg2, c.text, c.hairline)
+        BtnVariant.Outline -> Triple(Color.Transparent, c.text, if (c.isDark) c.border else Gray300)
+    }
+}
 
 @Composable
 fun TeamButton(
@@ -52,13 +80,7 @@ fun TeamButton(
     enabled: Boolean = true,
     leading: (@Composable () -> Unit)? = null,
 ) {
-    val c = Neema.colors
-    val (bg, fg, border) = when (variant) {
-        BtnVariant.Primary -> Triple(c.gold, Color.White, c.gold2)
-        BtnVariant.Danger -> Triple(c.redDim, c.red, c.red.copy(alpha = 0.3f))
-        BtnVariant.Ghost -> Triple(Color.Transparent, c.textDim, c.border)
-        BtnVariant.Default -> Triple(c.bg2, c.gold2, c.border)
-    }
+    val (bg, fg, border) = btnColors(variant)
     OutlinedButton(
         onClick = onClick,
         enabled = enabled,
@@ -77,7 +99,15 @@ fun TeamButton(
     }
 }
 
-/** SmallInput: a labelled single-line field. */
+/**
+ * Which web input a [LabeledInput] reproduces: [Team] is AgentsView's
+ * SmallInput (green label, #f3f9ec fill, #b5da8b border); [Form] is the
+ * shared InputField ProfileView uses (UPPERCASE tracked grey label, grey-50
+ * fill, grey-200 border).
+ */
+enum class InputStyle { Team, Form }
+
+/** SmallInput / InputField: a labelled single-line field. */
 @Composable
 fun LabeledInput(
     label: String?,
@@ -90,23 +120,38 @@ fun LabeledInput(
     isError: Boolean = false,
     supporting: String? = null,
     maxLength: Int? = null,
+    style: InputStyle = InputStyle.Team,
 ) {
-    Column(modifier.fillMaxWidth().padding(bottom = 10.dp)) {
+    val c = Neema.colors
+    val form = style == InputStyle.Form
+    Column(modifier.fillMaxWidth().padding(bottom = if (form) 12.dp else 10.dp)) {
         if (label != null) {
-            Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Neema.colors.textDim)
-            Spacer(Modifier.height(4.dp))
+            if (form) {
+                Text(label.uppercase(), fontSize = 12.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.6.sp, color = c.muted)
+            } else {
+                Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.textDim)
+            }
+            Spacer(Modifier.height(6.dp))
         }
+        val fill = if (form) c.surface else c.bg
+        val edge = if (form) c.hairline else c.border
         OutlinedTextField(
             value = value,
             onValueChange = { v -> onChange(if (maxLength != null) v.take(maxLength) else v) },
             singleLine = true,
-            placeholder = placeholder?.let { { Text(it, fontSize = 13.sp, color = Neema.colors.muted) } },
+            placeholder = placeholder?.let { { Text(it, fontSize = 14.sp, color = c.muted) } },
             visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
             keyboardOptions = KeyboardOptions(keyboardType = if (password) KeyboardType.Password else keyboardType),
             isError = isError,
             supportingText = supporting?.let { { Text(it, fontSize = 11.sp) } },
             shape = RoundedCornerShape(10.dp),
-            textStyle = LocalTextStyle.current.copy(fontSize = 14.sp),
+            textStyle = LocalTextStyle.current.copy(fontSize = 14.sp, color = c.text),
+            colors = OutlinedTextFieldDefaults.colors(
+                unfocusedContainerColor = fill, focusedContainerColor = fill, errorContainerColor = fill,
+                unfocusedBorderColor = edge,
+                focusedBorderColor = if (form) Brand.Amber else c.gold,
+                cursorColor = if (form) Brand.Amber else c.gold,
+            ),
             modifier = Modifier.fillMaxWidth(),
         )
     }
@@ -120,6 +165,8 @@ fun SelectField(
     selected: String,
     onSelect: (String) -> Unit,
     modifier: Modifier = Modifier,
+    /** The field's fill; null = the surface behind it. */
+    container: Color? = null,
 ) {
     var open by remember { mutableStateOf(false) }
     Column(modifier.fillMaxWidth()) {
@@ -133,7 +180,9 @@ fun SelectField(
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
                 shape = RoundedCornerShape(10.dp),
                 border = BorderStroke(1.dp, Neema.colors.border),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    containerColor = container ?: Color.Transparent, contentColor = Neema.colors.text,
+                ),
             ) {
                 Text(options.find { it.first == selected }?.second ?: selected, Modifier.weight(1f), fontSize = 14.sp)
                 Icon(Icons.Default.ArrowDropDown, null)
