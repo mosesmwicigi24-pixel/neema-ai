@@ -24,6 +24,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -86,17 +89,7 @@ fun OrdersScreen(dash: DashboardViewModel) {
     val canManage = dash.can(Perms.MANAGE_ORDERS)
     val c = Neema.colors
 
-    val filtered = remember(orders, filter, search) {
-        val q = search.lowercase()
-        orders.filter { o ->
-            if (filter != "all" && o.status != filter) return@filter false
-            if (q.isNotEmpty()) {
-                o.customerName.lowercase().contains(q) ||
-                    o.waId.contains(q) ||
-                    o.id.lowercase().contains(q)
-            } else true
-        }
-    }
+    val filtered = remember(orders, filter, search) { filterOrders(orders, filter, search) }
     val totalPages = maxOf(1, (filtered.size + PAGE_SIZE - 1) / PAGE_SIZE)
     val page = pageRaw.coerceIn(1, totalPages)
     val paginated = filtered.drop((page - 1) * PAGE_SIZE).take(PAGE_SIZE)
@@ -318,11 +311,14 @@ private fun OrderRow(dash: DashboardViewModel, order: Order, isUpdating: Boolean
                 Text(Fmt.formatPhone(order.waId), fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = c.textDim,
                     modifier = Modifier.align(Alignment.CenterVertically))
                 if (itemSummary.isNotEmpty()) {
-                    Text("·", fontSize = 12.sp, color = c.border, modifier = Modifier.align(Alignment.CenterVertically))
+                    // The separator travels with the summary, so a wrap never leaves it dangling.
                     Text(
-                        itemSummary + if (extraItems > 0) " +$extraItems more" else "",
+                        buildAnnotatedString {
+                            withStyle(SpanStyle(color = c.border)) { append("·  ") }
+                            append(itemSummary + if (extraItems > 0) " +$extraItems more" else "")
+                        },
                         fontSize = 12.sp, color = c.textMid, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.widthIn(max = 220.dp).align(Alignment.CenterVertically),
+                        modifier = Modifier.widthIn(max = 232.dp).align(Alignment.CenterVertically),
                     )
                 }
             }
@@ -342,7 +338,7 @@ private fun OrderRow(dash: DashboardViewModel, order: Order, isUpdating: Boolean
 
 /** Numbered pages, a window of at most five around the current one. */
 @Composable
-private fun Pager(page: Int, totalPages: Int, total: Int, onPage: (Int) -> Unit) {
+internal fun Pager(page: Int, totalPages: Int, total: Int, onPage: (Int) -> Unit) {
     val c = Neema.colors
     Row(Modifier.fillMaxWidth().padding(top = 16.dp, start = 4.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(
@@ -351,13 +347,7 @@ private fun Pager(page: Int, totalPages: Int, total: Int, onPage: (Int) -> Unit)
         )
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             PageButton("‹", selected = false, enabled = page > 1) { onPage(maxOf(1, page - 1)) }
-            for (i in 0 until minOf(totalPages, 5)) {
-                val pg = when {
-                    totalPages <= 5 -> i + 1
-                    page <= 3 -> i + 1
-                    page >= totalPages - 2 -> totalPages - 4 + i
-                    else -> page - 2 + i
-                }
+            for (pg in pageWindow(page, totalPages)) {
                 PageButton(pg.toString(), selected = page == pg, enabled = true) { onPage(pg) }
             }
             PageButton("›", selected = false, enabled = page < totalPages) { onPage(minOf(totalPages, page + 1)) }
@@ -387,7 +377,7 @@ private fun PageButton(label: String, selected: Boolean, enabled: Boolean, onCli
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun OrderDetail(
+internal fun OrderDetail(
     dash: DashboardViewModel,
     order: Order,
     canManage: Boolean,

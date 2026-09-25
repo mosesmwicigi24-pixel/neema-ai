@@ -8,7 +8,7 @@ import ke.co.bethanyhouse.neema.core.model.Order
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -68,10 +68,26 @@ class OrdersViewModel(private val dash: DashboardViewModel) : ViewModel() {
         }
     }
 
-    /** Ask the dashboard to refetch and wait (bounded) for the new list to land. */
+    /**
+     * Refetch and return once the round trip is over. `dash.refetchOrders()`
+     * is fire-and-forget and a StateFlow never re-emits an equal list, so
+     * waiting for an emission kept the spinner up for the whole timeout
+     * whenever nothing had changed — every quiet pull-to-refresh, and an
+     * empty shop's first load. So the fetch happens here, and the dashboard
+     * is asked to take the new list only when it actually moved.
+     */
     private suspend fun awaitRefetch() {
+        val fresh = try {
+            dash.api.orders.list()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return // the dashboard's poller keeps trying; the screen shows what it has
+        }
+        val before = dash.orders.value
+        if (fresh == before) return
         dash.refetchOrders()
-        withTimeoutOrNull(8_000) { dash.orders.drop(1).first() }
+        withTimeoutOrNull(8_000) { dash.orders.first { it != before } }
     }
 
     fun updateStatus(id: String, status: String) {

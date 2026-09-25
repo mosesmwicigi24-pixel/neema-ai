@@ -48,6 +48,22 @@ class DealsViewModel(private val dash: DashboardViewModel) : ViewModel() {
     private val _acting = MutableStateFlow<Set<String>>(emptySet())
     val acting: StateFlow<Set<String>> = _acting.asStateFlow()
 
+    /** The deal whose guidance is open for editing, and its draft (the web's `editing` / `guidanceDraft`). */
+    private val _editing = MutableStateFlow<String?>(null)
+    val editing: StateFlow<String?> = _editing.asStateFlow()
+    private val _guidanceDraft = MutableStateFlow("")
+    val guidanceDraft: StateFlow<String> = _guidanceDraft.asStateFlow()
+
+    /** The planned action open in the edit-and-send dialog. */
+    private val _draftFor = MutableStateFlow<PlannedAction?>(null)
+    val draftFor: StateFlow<PlannedAction?> = _draftFor.asStateFlow()
+
+    fun startGuidance(d: Deal) { _editing.value = d.id; _guidanceDraft.value = d.guidance.orEmpty() }
+    /** The web's `e.target.value.slice(0, 400)`. */
+    fun setGuidanceDraft(text: String) { _guidanceDraft.value = text.take(400) }
+    fun cancelGuidance() { _editing.value = null }
+    fun openDraft(a: PlannedAction?) { _draftFor.value = a }
+
     init {
         viewModelScope.launch {
             val fg = dash.foreground
@@ -91,8 +107,10 @@ class DealsViewModel(private val dash: DashboardViewModel) : ViewModel() {
         }
     }
 
-    fun saveGuidance(id: String, guidance: String) =
+    fun saveGuidance(id: String, guidance: String = _guidanceDraft.value) {
         patchDeal(id, buildJsonObject { put("guidance", guidance) }, "Guidance saved — Neema obeys it now")
+        _editing.value = null
+    }
 
     fun markWon(id: String) =
         patchDeal(id, buildJsonObject { put("status", "won"); put("stage", "won") }, "Marked won 🎉")

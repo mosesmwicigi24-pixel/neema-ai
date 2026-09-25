@@ -37,7 +37,9 @@ import ke.co.bethanyhouse.neema.core.ui.components.Avatar
 import ke.co.bethanyhouse.neema.core.ui.components.EmptyState
 import ke.co.bethanyhouse.neema.core.ui.components.Loading
 import ke.co.bethanyhouse.neema.core.ui.components.SearchField
-import ke.co.bethanyhouse.neema.core.ui.components.channelStyle
+import ke.co.bethanyhouse.neema.feature.orders.ChannelGlyphs
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import ke.co.bethanyhouse.neema.core.util.Fmt
 import java.util.Locale
@@ -60,16 +62,28 @@ private val CH_BG = mapOf(
     "sms" to Color(0xFF589B31),
 )
 
+/** Instagram's mark sits on its gradient (the web's `url(#igGrad)`, bottom-left → top-right). */
+private val IG_GRADIENT = Brush.linearGradient(
+    0f to Color(0xFFF09433), 0.25f to Color(0xFFE6683C), 0.5f to Color(0xFFDC2743),
+    0.75f to Color(0xFFCC2366), 1f to Color(0xFFBC1888),
+    start = Offset(0f, Float.POSITIVE_INFINITY), end = Offset(Float.POSITIVE_INFINITY, 0f),
+)
+
+/** ChannelIcon — the channel's white mark in a round badge of its colour. */
 @Composable
 private fun ChannelIcon(ch: String, size: Dp = 16.dp) {
     val key = ch.lowercase(Locale.ROOT)
+    val known = key in CH_BG || key == "instagram"
     Box(
-        Modifier.size(size).clip(CircleShape).background(CH_BG[key] ?: CH_BG.getValue("sms")),
+        Modifier.size(size).clip(CircleShape).then(
+            if (key == "instagram") Modifier.background(IG_GRADIENT)
+            else Modifier.background(CH_BG[key] ?: CH_BG.getValue("sms")),
+        ),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            channelStyle(key).label.take(1),
-            color = Color.White, fontSize = (size.value * 0.55f).sp, fontWeight = FontWeight.Bold,
+        Icon(
+            ChannelGlyphs.forLead(if (known) key else "sms"), contentDescription = key,
+            tint = Color.White, modifier = Modifier.size(size * 0.6f),
         )
     }
 }
@@ -104,18 +118,7 @@ fun LeadsScreen(dash: DashboardViewModel) {
     val canManage = dash.can(Perms.MANAGE_LEADS)
     val c = Neema.colors
 
-    val filtered = remember(leads, filterStage, search) {
-        val q = search.lowercase()
-        leads.filter { l ->
-            if (filterStage != "all" && !filterStage.equals(l.leadStage, ignoreCase = true)) return@filter false
-            if (q.isNotEmpty()) {
-                (l.name.orEmpty()).lowercase().contains(q) ||
-                    l.handle.contains(q) ||
-                    (l.email.orEmpty()).lowercase().contains(q) ||
-                    (l.location.orEmpty()).lowercase().contains(q)
-            } else true
-        }
-    }
+    val filtered = remember(leads, filterStage, search) { filterLeads(leads, filterStage, search) }
     val pipelineValue = leads.filter { it.leadStage.lowercase() !in setOf("lost", "won") }.sumOf { it.totalSpent }
     val wonValue = leads.filter { it.leadStage.equals("won", ignoreCase = true) }.sumOf { it.totalSpent }
 
@@ -205,9 +208,9 @@ fun LeadsScreen(dash: DashboardViewModel) {
                 lead = selected, stages = stages, canManage = canManage,
                 onClose = { vm.select(null) },
                 onOpenChat = { dash.openConversationFor(selected.handle) },
-                onSave = { stage, tags, notes ->
-                    if (stage != null || tags != null || notes != null) {
-                        vm.update(selected, stage = stage, tags = tags, notes = notes)
+                onSave = { edit ->
+                    if (!edit.isEmpty) {
+                        vm.update(selected, stage = edit.stage, tags = edit.tags, notes = edit.notes, notesBase = edit.notesBase)
                     }
                     vm.select(null)
                 },
@@ -264,7 +267,7 @@ private fun StageColumn(
         // Column header
         val shape = RoundedCornerShape(12.dp)
         Row(
-            Modifier.fillMaxWidth().clip(shape).background(stage.bgC()).border(1.dp, stage.borderC(), shape)
+            Modifier.fillMaxWidth().heightIn(min = 54.dp).clip(shape).background(stage.bgC()).border(1.dp, stage.borderC(), shape)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -391,16 +394,18 @@ private fun MoveButton(label: String, bg: Color, fg: Color, modifier: Modifier, 
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun LeadDetail(
+internal fun LeadDetail(
     lead: Lead,
     stages: List<LeadStage>,
     canManage: Boolean,
     onClose: () -> Unit,
     onOpenChat: () -> Unit,
-    /** Only the fields that changed are non-null — an untouched stage must not lock the AI out. */
-    onSave: (stage: String?, tags: List<String>?, notes: String?) -> Unit,
+    /** Only the fields that changed are set — an untouched stage must not lock the AI out. */
+    onSave: (LeadEdit) -> Unit,
 ) {
     val c = Neema.colors
+    // The lead as the sheet opened: what "changed" means, and the notes base for the server's merge.
+    val base = remember(lead.id) { lead }
     var stage by rememberSaveable(lead.id) { mutableStateOf(stages.firstOrNull { it.matches(lead.leadStage) }?.id ?: lead.leadStage) }
     var notes by rememberSaveable(lead.id) { mutableStateOf(lead.notes.orEmpty()) }
     var tags by rememberSaveable(lead.id) { mutableStateOf(lead.tags.joinToString(", ")) }
@@ -494,12 +499,7 @@ private fun LeadDetail(
             if (canManage) {
                 Button(
                     onClick = {
-                        val newTags = tags.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-                        onSave(
-                            stage.takeIf { !it.equals(lead.leadStage, ignoreCase = true) },
-                            newTags.takeIf { it != lead.tags },
-                            notes.takeIf { it != lead.notes.orEmpty() },
-                        )
+                        onSave(diffLead(base, stage, tags, notes))
                         onClose()
                     },
                     modifier = Modifier.weight(1f),

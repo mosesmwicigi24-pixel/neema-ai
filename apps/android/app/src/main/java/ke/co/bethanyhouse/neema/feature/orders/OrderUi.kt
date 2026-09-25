@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.Icon
 import ke.co.bethanyhouse.neema.core.model.Order
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import java.util.Locale
@@ -93,6 +94,30 @@ fun hubMeta(order: Order): StatusMeta? {
     }
 }
 
+/**
+ * OrdersView's `filtered`: the status filter, then a search over the name
+ * (`contact_name ?? wa_id`), the phone and the id.
+ */
+fun filterOrders(orders: List<Order>, filter: String, search: String): List<Order> {
+    val q = search.lowercase(Locale.ROOT)
+    return orders.filter { o ->
+        if (filter != "all" && o.status != filter) return@filter false
+        if (q.isNotEmpty()) {
+            o.customerName.lowercase(Locale.ROOT).contains(q) || o.waId.contains(q) || o.id.lowercase(Locale.ROOT).contains(q)
+        } else true
+    }
+}
+
+/** The pager's numbered buttons: at most five, windowed around [page]. */
+fun pageWindow(page: Int, totalPages: Int): List<Int> = (0 until minOf(totalPages, 5)).map { i ->
+    when {
+        totalPages <= 5 -> i + 1
+        page <= 3 -> i + 1
+        page >= totalPages - 2 -> totalPages - 4 + i
+        else -> page - 2 + i
+    }
+}
+
 /** The order's money: `o.total || o.subtotal`. */
 val Order.amount: Double get() = if (total != 0.0) total else subtotal
 
@@ -129,7 +154,7 @@ private val CH_BG = mapOf(
     "sms" to Color(0xFF589B31),
 )
 
-/** ChannelPill — a solid pill with the channel's name, white on brand colour. */
+/** ChannelPill — a solid pill with the channel's mark and name, white on brand colour. */
 @Composable
 fun OrderChannelPill(channel: String?) {
     val ch = (channel?.ifBlank { null } ?: "whatsapp").lowercase(Locale.ROOT)
@@ -138,8 +163,10 @@ fun OrderChannelPill(channel: String?) {
         Modifier.clip(RoundedCornerShape(50)).background(bg).padding(horizontal = 6.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(5.dp).clip(CircleShape).background(Color.White))
-        Spacer(Modifier.width(4.dp))
+        ChannelGlyphs.forOrder(ch)?.let {
+            Icon(it, contentDescription = null, tint = Color.White, modifier = Modifier.size(10.dp))
+            Spacer(Modifier.width(4.dp))
+        }
         Text(ch.replaceFirstChar { it.titlecase(Locale.ROOT) }, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Medium)
     }
 }
