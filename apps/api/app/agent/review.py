@@ -197,34 +197,54 @@ def _close(a: float, b: float) -> bool:
 
 
 def allowed_figures(seen: list, *, known: set[float] | frozenset[float] = frozenset(),
+                    facts: set[float] | frozenset[float] = frozenset(),
                     comment: str = "", answer: str = "") -> set[float]:
-    """Every figure the reply may honestly state: the rows' prices and
-    conversions, the known figures (tools, instructions, the conversation),
-    a quantity multiple of a row's price, a half, and a sum of two."""
+    """Every figure the reply may honestly state.
+
+    ANCHORS are the money this turn stands on: the rows' prices (and their
+    conversions), a quantity multiple of one, a half of one (a deposit), and
+    the FACTS — numbers a tool returned, figures already said in this
+    conversation. KNOWN figures are the owner's own instructions (shipping).
+    A sum counts only when it is two rows together, or an anchor plus a
+    small fee (a known or fact figure no bigger than a quarter of it):
+    "KES 22,000 + KES 350 delivery = KES 22,350". Never two loose figures
+    added — the first simulation let "KES 20,000" through as 13,000 + 7,000
+    and "$95" as 45 + 50."""
     base: set[float] = set()
     for p in seen or []:
         base |= _row_figures(p)
-    allowed: set[float] = set(base) | {round(k, 2) for k in (known or ())}
     qs = quantities(comment) + quantities(answer)
+    anchors: set[float] = set(base)
     for b in base:
-        allowed.add(round(b / 2, 2))
+        anchors.add(round(b / 2, 2))
         for q in qs:
-            allowed.add(round(b * q, 2))
-    # a price plus a delivery fee, two items together: the sum of two figures
-    parts = sorted(allowed)[:80]
-    for i, x in enumerate(parts):
-        for y in parts[i:]:
+            anchors.add(round(b * q, 2))
+            anchors.add(round(b * q / 2, 2))
+    anchors |= {round(f, 2) for f in (facts or ())}
+    allowed: set[float] = set(anchors) | {round(k, 2) for k in (known or ())}
+    # two rows together
+    rows_prices = sorted(base)[:60]
+    for i, x in enumerate(rows_prices):
+        for y in rows_prices[i + 1:]:
             allowed.add(round(x + y, 2))
+    # an anchor plus a fee
+    fees = [f for f in (set(known or ()) | set(facts or ())) if f > 0]
+    for x in list(anchors)[:200]:
+        for fee in fees:
+            if fee <= 0.25 * x:
+                allowed.add(round(x + fee, 2))
     return allowed
 
 
 def unverified_figures(answer: str, seen: list, comment: str = "",
-                       known_figures: set[float] | frozenset[float] = frozenset()) -> list[float]:
+                       known_figures: set[float] | frozenset[float] = frozenset(),
+                       facts: set[float] | frozenset[float] = frozenset()) -> list[float]:
     """The money figures in the reply that NOTHING explains."""
     figures = money_figures(answer)
     if not figures:
         return []
-    allowed = allowed_figures(seen, known=set(known_figures or ()), comment=comment, answer=answer)
+    allowed = allowed_figures(seen, known=set(known_figures or ()), facts=set(facts or ()),
+                              comment=comment, answer=answer)
     return [f for f in figures if not any(_close(f, a) for a in allowed)]
 
 
@@ -406,7 +426,8 @@ def rule_issues(comment: str, answer: str, seen: list,
     """The deterministic verdict on a draft. Empty = the rules pass it (the
     reviewer may still not)."""
     issues: list[str] = []
-    bad = unverified_figures(answer, seen, comment, known_figures)
+    facts = figures_in_results(tool_results) | transcript_figures(transcript)
+    bad = unverified_figures(answer, seen, comment, known_figures, facts=facts)
     if bad:
         looked = ", ".join(f"{p.get('name')} (KES {p.get('price')} / USD {p.get('price_usd')})"
                            for p in (seen or [])[:6]) or "no hub row was looked up"
@@ -577,9 +598,8 @@ async def review_reply(comment: str, answer: str, seen: list, *,
                        known_text: str = "") -> dict:
     """The gate's verdict on one draft: {"ok", "issues", "by"}. The rules
     first (a rule failure is final for this draft); then the reviewer."""
-    known = set(known_figures or ()) | figures_in_results(tool_results) | transcript_figures(transcript)
-    issues = rule_issues(comment, answer, seen, known, tool_results=tool_results,
-                         transcript=transcript, known_text=known_text)
+    issues = rule_issues(comment, answer, seen, set(known_figures or ()),
+                         tool_results=tool_results, transcript=transcript, known_text=known_text)
     if issues:
         return {"ok": False, "issues": issues, "by": "rules"}
     v = await reviewer_verdict(comment, answer, seen, post_product=post_product,

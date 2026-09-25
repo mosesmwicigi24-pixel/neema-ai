@@ -436,12 +436,22 @@ def test_a_figure_already_said_in_the_conversation_may_be_repeated():
                   {"role": "assistant", "content": "The Cassock is KES 13,000."}]
     assert rv.transcript_figures(transcript) == {15000.0, 13000.0}
     assert rv.unverified_figures("Within your KES 15,000 — the cassock at KES 13,000 fits.", [],
-                                 known_figures=rv.transcript_figures(transcript)) == []
+                                 facts=rv.transcript_figures(transcript)) == []
 
 
-def test_a_sum_of_two_known_figures_is_allowed():
-    assert rv.unverified_figures("KES 19,500 plus KES 350 delivery is KES 19,850.", [CATALOG[0]],
-                                 known_figures={19500.0, 350.0}) == []
+def test_a_sum_is_two_rows_together_or_a_price_plus_a_small_fee_never_two_loose_figures():
+    # a tool total plus the owner's delivery fee
+    assert rv.unverified_figures("KES 19,500 plus KES 350 delivery is KES 19,850.", [SILVER],
+                                 known_figures={350.0}, facts={19500.0}) == []
+    # two rows together
+    assert rv.unverified_figures("Both trays come to $400.", [SILVER, GOLDEN]) == []
+    # what the first simulation let through: 13,000 + 7,000 (a prompt figure plus a half),
+    # and 45 + 50 (two shipping figures) — no longer explained
+    assert rv.unverified_figures("The Golden Communion Tray is KES 20,000.", [GOLDEN, GOLD_BREAD],
+                                 known_figures={13000.0, 45.0, 50.0}) == [20000.0]
+    assert rv.unverified_figures("Our wooden chalice is $95.", [], known_figures={45.0, 50.0}) == [95.0]
+    # a fee is small: a "fee" bigger than a quarter of the price is not a fee
+    assert rv.unverified_figures("Total $400.", [SILVER], known_figures={220.0}) == [400.0]
 
 
 def test_one_currency_per_reply():
