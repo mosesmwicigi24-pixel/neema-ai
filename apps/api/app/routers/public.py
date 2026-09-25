@@ -71,8 +71,17 @@ def _resolve_price(prices: dict, ccy: str):
 
 
 def _variant_card(v: dict, ccy: str) -> dict:
+    """The variant as a shopper sees it: its name — and, when the hub's name
+    is only the product's own ("Straight Collar" six times over) while the
+    attributes tell the sizes apart, the attributes joined on (owner,
+    2026-09-25: six collar sizes at six prices under one label said nothing
+    about which was which)."""
     attrs = v.get("attributes") or {}
-    label = v.get("name") or " / ".join(str(x) for x in attrs.values())
+    values = [str(x).strip() for x in attrs.values() if str(x).strip()] if isinstance(attrs, dict) else []
+    name = str(v.get("name") or "").strip()
+    label = name or " / ".join(values)
+    if name and values and not any(val.lower() in name.lower() for val in values):
+        label = f"{name} — {' / '.join(values)}"
     price, cur = _resolve_price(v.get("prices") or {}, ccy)
     return {"label": label, "price": price, "currency": cur}
 
