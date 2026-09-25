@@ -2162,8 +2162,10 @@ async def _send_product_cards(args: dict, ctx: ToolContext) -> dict:
     # model shares them as a short text list with links.
     return {"ok": True, "sent_cards": 0,
             "products": [{"name": c["name"], "price": c["price_text"], "link": c["url"]} for c in cards],
-            "note": "Rich cards aren't available here — share these as a short list, each with "
-                    "its price and link so the customer can tap through."}
+            "note": "The rich card could not be delivered this time — describe each item in "
+                    "words (its price, what it comes with) with its link so the customer can "
+                    "tap through. NEVER say you can't send photos: you can, and the next "
+                    "attempt may well go through."}
 
 
 async def _pause_conversation(args: dict, ctx: ToolContext) -> dict:

@@ -530,14 +530,80 @@ def status_without_source(answer: str, tool_results: list | None, transcript: li
                    for role, t in transcript_text(transcript, limit=40))
 
 
-HARD_KINDS = ("figure", "item", "link", "status")
+HARD_KINDS = ("figure", "item", "link", "status", "photos")
+
+# "I can't send photos from here" is FALSE on every chat channel — the cards
+# tool sends them (owner, 2026-09-25: the photos went out and the very next
+# line said they could not). A public comment cannot carry a photo; there the
+# rule stands down.
+_NO_PHOTOS_RE = re.compile(
+    r"\b(?:can(?:no|')t|cannot|unable\s+to|not\s+able\s+to|no\s+way\s+to|couldn'?t)\s+"
+    r"(?:send|share|attach|show|upload|post)\s+(?:you\s+|any\s+|more\s+|the\s+)?"
+    r"(?:photos?|pictures?|pics?|images?|picha)\b|"
+    r"\b(?:photos?|pictures?|images?)\s+(?:can(?:no|')t|cannot)\s+be\s+(?:sent|shared)\b|"
+    r"\bsi(?:wezi|tuwezi)\s+kutuma\s+picha\b",
+    re.IGNORECASE)
+_PHOTOS_SENT_RE = re.compile(
+    r"\b(?:here\s+(?:are|is)\s+(?:the\s+|some\s+|a\s+)?(?:photos?|pictures?|pics?|images?)|"
+    r"(?:sent|shared|attached)\s+(?:you\s+)?(?:the\s+|some\s+)?(?:photos?|pictures?|pics?|images?)|"
+    r"(?:photos?|pictures?)\s+(?:above|below|attached)|hizi\s+ndizo\s+picha)\b",
+    re.IGNORECASE)
+
+
+def cards_sent(tool_results: list | None) -> int:
+    """How many product cards / photos the turn's tools delivered."""
+    n = 0
+    for e in tool_results or []:
+        if str((e or {}).get("tool") or "") != "send_product_cards":
+            continue
+        out = (e or {}).get("out") or {}
+        if isinstance(out, dict) and out.get("ok"):
+            n += int(out.get("sent_cards") or 0) + int(out.get("album_photos") or 0)
+    return n
+
+
+def actions_text(tool_results: list | None) -> str:
+    """What the turn's tools ALREADY DID — the rewrite refers to these as
+    done, and never claims it cannot do what was just done."""
+    lines = []
+    for e in tool_results or []:
+        name = str((e or {}).get("tool") or "")
+        out = (e or {}).get("out") or {}
+        if not isinstance(out, dict) or out.get("error"):
+            continue
+        inp = (e or {}).get("input") or {}
+        if name == "send_product_cards" and out.get("ok"):
+            n = int(out.get("sent_cards") or 0) + int(out.get("album_photos") or 0)
+            what = ", ".join(str(x) for x in (inp.get("products") or inp.get("names") or [])[:4]) \
+                or "the product"
+            lines.append(f"- {n} photo card(s) of {what} were SENT to them — say 'here are the "
+                         "photos'; never say you cannot send photos" if n else
+                         f"- no photo card of {what} could be sent this turn — describe it in "
+                         "words and offer the link; never say you cannot send photos")
+        elif name == "update_cart" and out.get("ok", True):
+            lines.append("- the cart was updated (its total is a fact above)")
+        elif name == "create_order":
+            lines.append("- the order was CREATED" + (f" — link: {out.get('order_url')}" if out.get("order_url") else ""))
+        elif name == "capture_contact":
+            lines.append("- their contact details were saved")
+        elif name == "handoff_to_human":
+            lines.append("- a colleague was alerted to this conversation")
+        elif name == "schedule_check_in":
+            lines.append("- a follow-up was scheduled")
+        elif name == "apply_offer":
+            lines.append("- the offer was applied (its figures are facts above)")
+        elif name == "raise_complaint":
+            lines.append("- the complaint was logged for the team")
+        elif name == "send_measurement_guide":
+            lines.append("- the measurement guide was sent to them")
+    return "\n".join(lines)
 
 
 def rule_findings(comment: str, answer: str, seen: list,
                   known_figures: set[float] | frozenset[float] = frozenset(), *,
                   tool_results: list | None = None, transcript: list | None = None,
                   known_text: str = "", fx: dict | None = None,
-                  currency: str = "USD") -> list[dict]:
+                  currency: str = "USD", mode: str = "dm") -> list[dict]:
     """The deterministic findings on a draft, each with its weight:
     {"kind", "text", "hard"}. HARD findings — a figure from nowhere, the
     wrong item priced, a link no tool gave, an order status with no source —
@@ -589,6 +655,19 @@ def rule_findings(comment: str, answer: str, seen: list,
         out.append({"kind": "status", "hard": True,
                     "text": "an order-status claim (shipped / on its way / delivered) with no "
                     "check_order_status behind it — check the order, never assume"})
+    if mode != "comment":
+        sent = cards_sent(tool_results)
+        if _NO_PHOTOS_RE.search(answer or ""):
+            out.append({"kind": "photos", "hard": bool(sent),
+                        "text": (f"it says it cannot send photos — but {sent} photo card(s) were "
+                                 "just SENT this turn: say 'here are the photos' and give the "
+                                 "item's details" if sent else
+                                 "it says it cannot send photos — it CAN, on this channel "
+                                 "(send_product_cards): never say so; describe the item and "
+                                 "its price, and the photos can follow")})
+        elif not sent and _PHOTOS_SENT_RE.search(answer or ""):
+            out.append({"kind": "photos", "hard": False,
+                        "text": "it says photos were sent, but no photo card went out this turn"})
     return out
 
 
@@ -601,6 +680,8 @@ def rule_issues(comment: str, answer: str, seen: list,
     return [f["text"] for f in rule_findings(comment, answer, seen, known_figures,
                                              tool_results=tool_results, transcript=transcript,
                                              known_text=known_text, fx=fx)]
+
+
 
 
 def _fmt(f: float) -> str:
@@ -755,7 +836,7 @@ async def review_reply(comment: str, answer: str, seen: list, *,
     one (owner, 2026-09-25)."""
     findings = rule_findings(comment, answer, seen, set(known_figures or ()),
                              tool_results=tool_results, transcript=transcript,
-                             known_text=known_text, fx=fx, currency=currency)
+                             known_text=known_text, fx=fx, currency=currency, mode=mode)
     hard = [f["text"] for f in findings if f["hard"]]
     soft = [f["text"] for f in findings if not f["hard"]]
     by = "rules" if findings else ""
@@ -797,17 +878,25 @@ def rewrite_block(issues: list[str], draft: str, seen: list, currency: str,
     with no tool (nothing is ordered or sent twice)."""
     why = "; ".join(i.strip() for i in (issues or []) if i.strip()) or "it did not pass verification"
     other = tools_text(tool_results, limit=8)
+    done = actions_text(tool_results)
     where = "posted under the comment" if mode == "comment" else "sent to the customer"
+    photos_rule = ("" if mode == "comment" else
+                   "You CAN send photos on this channel (send_product_cards did, or can): NEVER "
+                   "write 'I can't send photos from here' — say 'here are the photos' when they "
+                   "went out, else describe the item and its price and let the photos follow; ")
     return (
         f"[REVIEWER — your draft was HELD BACK before it was {where}. It failed "
         f"verification: {why}.\n\n"
         f"THE FACTS YOU MAY STATE (the hub's rows, in {currency}; nothing else is a price):\n"
         f"{rows_text(seen, currency)}\n"
         + (f"Other facts from this turn's tools:\n{other}\n" if other else "")
+        + (f"WHAT THIS TURN ALREADY DID (refer to these as done — they will not run again):\n{done}\n"
+           if done else "")
         + _fx_text(fx, comment)
         + f'\nYour held draft: "{" ".join((draft or "").split())[:900]}"\n\n'
-        "Write the corrected reply NOW — the reply only, nothing else, no tool. "
-        "Rules: the item is exactly what they asked for (their finish, their kind — "
+        "Write the corrected reply NOW — the reply only, nothing else. Do not call a tool "
+        "for this rewrite: everything listed above already happened, so speak of it as "
+        "done. Rules: the item is exactly what they asked for (their finish, their kind — "
         "if we do not have it, say so plainly and offer the nearest from the rows "
         "above with its price); every figure is one of the facts above, in ONE "
         "currency (plus the one they asked for by name, at today's rate above, if "
@@ -815,8 +904,8 @@ def rewrite_block(issues: list[str], draft: str, seen: list, currency: str,
         "(where we are is Nairobi, Kenya; a shop in their country — none, DHL "
         "delivers — ONLY if they asked); never re-ask a detail they already gave; "
         "never invent a pack size, a capacity, an order status, a delivery time or "
-        "an exchange rate; never promise to 'confirm' a figure with the team; keep "
-        "the warmth and the closing question; write in their language.]"
+        f"an exchange rate; never promise to 'confirm' a figure with the team; {photos_rule}"
+        "keep the warmth and the closing question; write in their language.]"
     )
 
 

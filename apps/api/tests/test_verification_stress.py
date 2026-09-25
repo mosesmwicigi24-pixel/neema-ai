@@ -225,6 +225,23 @@ S = [
      [_row("Pectoral Cross — Gold Finish", 4000, 40)], [], [], None, "hard"),
     ("gold-chalice", "gold chalice", "The Golden Chalice Cup with Paten Set is $650.", _seen("chalice"), [], [], None, "pass"),
     ("paren-message", "(2 pcs) how much", "Two Golden Communion Trays come to $440.", _seen("golden"), [], [], None, "pass"),
+    # ── photos: "I can't send photos from here" is false on every chat channel ──
+    ("photos-contradiction", "Just photos then I do a purchase",
+     "I can't send photos from here, but the Golden Communion Tray is KES 22,000 — it comes with its lid, holder, basin and 40 cups included.",
+     _seen("golden"), [{"tool": "send_product_cards", "input": {"products": ["Golden Communion Tray"]},
+                        "out": {"ok": True, "sent_cards": 1, "album_photos": 1}}], [], None, "hard"),
+    ("photos-sent-right", "Just photos then I do a purchase",
+     "Here are the photos of the Golden Communion Tray — KES 22,000, with its lid, holder, basin and 40 cups. How many would you like?",
+     _seen("golden"), [{"tool": "send_product_cards", "input": {"products": ["Golden Communion Tray"]},
+                        "out": {"ok": True, "sent_cards": 1, "album_photos": 1}}], [], None, "pass"),
+    ("photos-false-claim", "photos please", "I'm not able to send images here — the tray is KES 22,000.",
+     _seen("golden"), [], [], None, "soft"),
+    ("photos-claimed-not-sent", "photos please", "Here are the photos — KES 22,000.", _seen("golden"), [], [], None, "soft"),
+    ("photos-honest-words", "photos please", "The Golden Communion Tray is KES 22,000 — gold-plated, 40 cups; the photos are on our website.",
+     _seen("golden"), [], [], None, "pass"),
+    ("photos-swahili", "picha tafadhali", "Siwezi kutuma picha hapa, lakini tray ni KES 22,000.",
+     _seen("golden"), [{"tool": "send_product_cards", "input": {"products": ["Golden Communion Tray"]},
+                        "out": {"ok": True, "sent_cards": 1, "album_photos": 0}}], [], None, "hard"),
     # ── SOFT only (asks for a rewrite, never holds) ──────────────────────────
     ("two-ccy", "how much", "The Silver Communion Tray is $180 (KES 18,000).", _seen("silver"), [], [], None, "soft"),
     ("where-unanswered", "Do you have shops in South Africa?", "The Golden Communion Tray is $220. How many?",
@@ -408,6 +425,45 @@ def test_the_ok_ping_pong_still_ends_in_silence():
     assert asyncio.run(rt.closer_gate(r, "messenger", "P", "I'm saying ok")) is True   # then silence
     assert asyncio.run(rt.closer_gate(r, "messenger", "P", "how much is the tray?")) is False  # substance clears it
     assert asyncio.run(rt.closer_gate(r, "messenger", "P", "👍")) is True         # a thumbs-up: always silence
+
+
+def test_a_public_comment_may_say_it_cannot_attach_a_photo():
+    v = asyncio.run(rv.review_reply("photos?", "I can't attach photos here, but the tray is $220 — they're in your inbox.",
+                                    _seen("golden"), mode="comment"))
+    assert v["ok"]
+
+
+def test_the_rewrite_knows_what_the_turn_already_did():
+    log = [{"tool": "send_product_cards", "input": {"products": ["Golden Communion Tray"]},
+            "out": {"ok": True, "sent_cards": 1, "album_photos": 2}},
+           {"tool": "update_cart", "input": {}, "out": {"ok": True, "total": 22000}},
+           {"tool": "create_order", "input": {}, "out": {"order_url": "https://bethanyhouse.co.ke/o/1", "total": 22000}},
+           {"tool": "search_catalog", "input": {"query": "x"}, "out": {"results": []}}]
+    assert rv.cards_sent(log) == 3
+    done = rv.actions_text(log)
+    assert "- 3 photo card(s) of Golden Communion Tray were SENT to them — say 'here are the photos'" in done
+    assert "- the cart was updated" in done and "- the order was CREATED — link: https://bethanyhouse.co.ke/o/1" in done
+    block = rv.rewrite_block(["x"], "draft", _seen("golden"), "KES", log, mode="dm", comment="photos")
+    assert "WHAT THIS TURN ALREADY DID (refer to these as done — they will not run again):" in block
+    assert "You CAN send photos on this channel" in block and "no tool" not in block
+    assert "Do not call a tool for this rewrite: everything listed above already happened" in block
+    # a comment's rewrite carries no photo rule (a comment cannot attach one)
+    assert "You CAN send photos" not in rv.rewrite_block(["x"], "d", [], "USD", [], mode="comment")
+    # a card that could not be sent is named as such
+    none = rv.actions_text([{"tool": "send_product_cards", "input": {"products": ["Cope"]},
+                             "out": {"ok": True, "sent_cards": 0}}])
+    assert "no photo card of Cope could be sent this turn" in none and "never say you cannot send photos" in none
+
+
+def test_the_writer_is_told_it_can_send_photos():
+    from app.agent.prompt import build_system_prompt
+    p = " ".join(build_system_prompt(currency="KES").split())
+    assert "YOU CAN SEND PHOTOS on WhatsApp, Messenger, Instagram and the website" in p
+    assert "\"I can't send photos from here\" is false" in p
+    from app.agent import tools
+    src = inspect.getsource(tools._send_product_cards)
+    assert "NEVER say you can't send photos: you can" in src
+    assert "Rich cards aren't available here" not in src
 
 
 def test_every_channel_shares_one_policy():

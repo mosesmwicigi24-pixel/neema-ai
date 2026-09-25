@@ -329,7 +329,7 @@ def test_a_failing_reply_is_rewritten_once_with_the_reasons_and_the_facts(monkey
     block = call["messages"][-1]["content"]
     assert block.startswith("[REVIEWER — your draft was HELD BACK before it was sent to the customer")
     assert "they asked for gold" in block and "Golden Communion Tray — USD 220" in block
-    assert "THE FACTS YOU MAY STATE" in block and "no tool" in block
+    assert "THE FACTS YOU MAY STATE" in block and "Do not call a tool for this rewrite" in block
     assert "nothing they did not ask" in block
     # the second verdict was on the rewrite, with the fetched rows in hand
     assert calls[1][0] == fixed and [r["name"] for r in calls[1][1]][-1] == "Golden Communion Tray"

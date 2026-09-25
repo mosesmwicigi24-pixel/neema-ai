@@ -115,7 +115,20 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   not one; "your tracking number is…" without a tool is); a link we sent
   earlier in the conversation may be repeated; "where do I order?" is not
   a where-question; the website never shows an empty bubble (a held
-  acknowledgement becomes "🙏").
+  acknowledgement becomes "🙏"). PHOTOS (owner 2026-09-25, the same evening:
+  the cards went out and the next line said "I can't send photos from
+  here"): the verifier reads the turn's own actions — `review.cards_sent`
+  (send_product_cards results) — and a reply that says it cannot send
+  photos is a HARD finding when photos were just sent (a contradiction) and
+  soft otherwise; a reply that says "here are the photos" when none went
+  out is soft. The rewrite block now lists WHAT THIS TURN ALREADY DID
+  (`review.actions_text`: photos sent, cart updated, order created, contact
+  saved…) so the second draft speaks of them as done, and its wording no
+  longer says "no tool" (the first version's "no tool" read as "I can't
+  send photos"). The prompt says it plainly (YOU CAN SEND PHOTOS on
+  WhatsApp, Messenger, Instagram and the website), and the cards tool's
+  own note when a card could not be delivered never says photos are
+  impossible. A public comment, which cannot carry a photo, is exempt.
 - **The gate before posting** (owner 2026-09-25: "someone is asking for
   golden trays and you give silver… put a gate to review before posting…
   when someone asks for Holy Communion Cups without specifying chalice, give
