@@ -20,7 +20,7 @@ import kotlinx.serialization.json.putJsonArray
 import java.net.URLEncoder
 
 /** Operator-added pipeline stages (Settings-backed, global): fetched once per process, like the web's module cache. */
-private object StageCache {
+internal object StageCache {
     var stages: List<String>? = null
 }
 
@@ -33,7 +33,10 @@ enum class CustomerTab(val label: String) { Profile("profile"), Insights("insigh
  */
 class CustomerViewModel(
     private val dash: DashboardViewModel,
-    private val conversation: Conversation,
+    private var conversation: Conversation,
+    /** Places the WhatsApp voice call (the web's callCtx.initiateCall); swappable for tests. */
+    private val placeCall: suspend (to: String, name: String?) -> Result<Unit> =
+        { to, name -> dash.container.calls.initiateCall(to, name) },
 ) : ViewModel() {
     private val crm = CrmApi(dash.api.http)
 
@@ -55,6 +58,10 @@ class CustomerViewModel(
     val saving: StateFlow<Boolean> = _saving.asStateFlow()
 
     val tab = MutableStateFlow(CustomerTab.Profile)
+
+    /** The web's stageEditorOpen / editNotes: open sub-editors, kept here so they survive recomposition. */
+    val stageEditorOpen = MutableStateFlow(false)
+    val editNotes = MutableStateFlow(false)
 
     private val _customStages = MutableStateFlow(StageCache.stages ?: emptyList())
     val customStages: StateFlow<List<String>> = _customStages.asStateFlow()
@@ -83,6 +90,19 @@ class CustomerViewModel(
                     .onSuccess { StageCache.stages = it; _customStages.value = it }
                     .onFailure { StageCache.stages = emptyList() }
             }
+        }
+    }
+
+    /**
+     * The web re-runs loadProfile whenever the thread's row changes (a new
+     * message, a rename), so an AI-set stage or an appended call summary shows
+     * up without reopening the panel. Same here, quietly over the painted profile.
+     */
+    fun sync(conv: Conversation) {
+        val prev = conversation
+        conversation = conv
+        if (conv.id == prev.id && (conv.lastMessageAt != prev.lastMessageAt || conv.name != prev.name)) {
+            load(showSpinner = false)
         }
     }
 
@@ -160,9 +180,9 @@ class CustomerViewModel(
     fun saveField(field: String, v: String, local: (CustomerProfile) -> CustomerProfile) =
         patch(buildJsonObject { put(field, v) }, local)
 
-    /** `parseInt(v) || null` — an unparseable or zero age is sent as null (the server then leaves it). */
+    /** `parseInt(v) || null` — leading digits count ("35 yrs" → 35); unparseable or zero is sent as null (the server then leaves it). */
     fun saveAge(v: String) {
-        val age = v.trim().toIntOrNull()?.takeIf { it != 0 }
+        val age = Regex("^\\s*([+-]?\\d+)").find(v)?.groupValues?.get(1)?.toIntOrNull()?.takeIf { it != 0 }
         patch(buildJsonObject { if (age != null) put("age", age) else put("age", JsonNull) }, { it.copy(age = age) })
     }
 
@@ -368,7 +388,7 @@ class CustomerViewModel(
     fun call(digits: String) {
         val p = _profile.value ?: return
         viewModelScope.launch {
-            val r = dash.container.calls.initiateCall(digits, p.name)
+            val r = placeCall(digits, p.name)
             if (r.isSuccess) return@launch
             val err = r.exceptionOrNull()?.message.orEmpty()
             val lower = err.lowercase()

@@ -21,6 +21,9 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -78,7 +81,8 @@ fun ProfileTab(
             InfoRow("Source", "$icon ${meta?.first ?: src}", hint = "Where this lead first found us")
         }
         p.adRef?.let { ad ->
-            val what = ad.headline?.ifEmpty { null } ?: ad.adId?.let { "Ad $it" } ?: ad.sourceType ?: "ad"
+            val what = ad.headline?.ifEmpty { null } ?: ad.adId?.ifEmpty { null }?.let { "Ad $it" }
+                ?: ad.sourceType?.ifEmpty { null } ?: "ad"
             InfoRow("Came via", "📣 $what", hint = "First-touch ad attribution captured from the webhook")
         }
         EditableField("Name", p.name ?: "", { vm.saveName(it, onNameChange) }, "Full name", ctx.canEdit)
@@ -107,7 +111,7 @@ fun ProfileTab(
 private fun PipelineSection(vm: CustomerViewModel, ctx: PanelCtx) {
     val p = ctx.profile
     val c = Neema.colors
-    var editorOpen by remember { mutableStateOf(false) }
+    val editorOpen by vm.stageEditorOpen.collectAsState()
     var newStage by remember { mutableStateOf("") }
     val customs = ctx.customStages
     // Customs render between Proposal and Won, and count toward forward progress.
@@ -118,13 +122,13 @@ private fun PipelineSection(vm: CustomerViewModel, ctx: PanelCtx) {
         if (p.leadStageSource == "auto") {
             Row(Modifier.padding(bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "✦ AI", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF7C3AED),
+                    "✦ AI", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF7C3AED).themed(),
                     modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(Color(0xFF7C3AED).dim(0.08f))
                         .border(1.dp, Color(0xFFDDD6FE), RoundedCornerShape(4.dp)).padding(horizontal = 4.dp, vertical = 1.dp),
                 )
                 Text(
                     " set from the conversation — tap any stage to override.",
-                    fontSize = 10.sp, color = Color(0xFF7C3AED),
+                    fontSize = 10.sp, color = Color(0xFF7C3AED).themed(),
                 )
             }
         }
@@ -137,7 +141,10 @@ private fun PipelineSection(vm: CustomerViewModel, ctx: PanelCtx) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp),
                     modifier = Modifier.padding(bottom = 6.dp)) {
                     customs.forEach { s ->
-                        RemovableChip(s, Color(0xFF8A6D1F), Color(0xFFFDF8EC), Color(0xFFE3CF9B)) {
+                        RemovableChip(
+                            s, if (c.isDark) PIPE_GOLD else Color(0xFF8A6D1F), if (c.isDark) PIPE_GOLD.dim(0.15f) else Color(0xFFFDF8EC),
+                            if (c.isDark) PIPE_GOLD.dim(0.5f) else Color(0xFFE3CF9B),
+                        ) {
                             vm.saveCustomStages(customs.filter { it != s })
                         }
                     }
@@ -150,12 +157,12 @@ private fun PipelineSection(vm: CustomerViewModel, ctx: PanelCtx) {
                 SmallInput(newStage, { newStage = it.take(18) }, "Stage label (e.g. Sampling)…", Modifier.weight(1f),
                     fontSize = 11.sp, onDone = add)
                 TintButton("Add", PIPE_GOLD_SOLID, add, filled = true)
-                TextButton(onClick = { editorOpen = false }) { Text("Done", fontSize = 11.sp, color = c.muted) }
+                TextButton(onClick = { vm.stageEditorOpen.value = false }) { Text("Done", fontSize = 11.sp, color = c.muted) }
             }
         } else {
             Text(
                 "+ Add stage", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = PIPE_GOLD,
-                modifier = Modifier.clip(RoundedCornerShape(4.dp)).clickable { editorOpen = true }.padding(vertical = 4.dp, horizontal = 2.dp),
+                modifier = Modifier.clip(RoundedCornerShape(4.dp)).clickable { vm.stageEditorOpen.value = true }.padding(vertical = 4.dp, horizontal = 2.dp),
             )
         }
     }
@@ -196,7 +203,7 @@ private fun TagsSection(vm: CustomerViewModel, ctx: PanelCtx) {
             val add = { if (tagInput.isNotBlank()) { vm.addTag(tagInput); tagInput = "" } }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 SmallInput(tagInput, { tagInput = it }, "Add tag…", Modifier.weight(1f), onDone = add)
-                TintButton("+", c.text, add)
+                NeutralButton("+", add, Modifier.width(36.dp), height = 36.dp)
             }
         }
     }
@@ -206,22 +213,22 @@ private fun TagsSection(vm: CustomerViewModel, ctx: PanelCtx) {
 private fun NotesSection(vm: CustomerViewModel, ctx: PanelCtx) {
     val c = Neema.colors
     val notes = ctx.profile.notes ?: ""
-    var editing by remember { mutableStateOf(false) }
+    val editing by vm.editNotes.collectAsState()
     var draft by remember(notes) { mutableStateOf(notes) }
     CrmSection("Notes") {
         if (editing) {
             SmallInput(draft, { draft = it }, "Internal notes about this customer…", Modifier.fillMaxWidth(), singleLine = false, minLines = 4)
             Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = { vm.saveNotes(draft); editing = false }) {
+                TextButton(onClick = { vm.saveNotes(draft); vm.editNotes.value = false }) {
                     Text("Save", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF059669))
                 }
-                TextButton(onClick = { draft = notes; editing = false }) { Text("Cancel", fontSize = 11.sp, color = c.muted) }
+                TextButton(onClick = { draft = notes; vm.editNotes.value = false }) { Text("Cancel", fontSize = 11.sp, color = c.muted) }
             }
         } else {
             Box(
                 Modifier.fillMaxWidth().heightIn(min = 40.dp).clip(RoundedCornerShape(8.dp)).background(c.bg2)
                     .border(1.dp, c.hairline, RoundedCornerShape(8.dp))
-                    .then(if (ctx.canEdit) Modifier.clickable { editing = true } else Modifier)
+                    .then(if (ctx.canEdit) Modifier.clickable { vm.editNotes.value = true } else Modifier)
                     .padding(horizontal = 10.dp, vertical = 8.dp),
             ) {
                 if (notes.isNotEmpty()) Text(notes, fontSize = 12.sp, color = c.text)
@@ -241,6 +248,8 @@ private fun IdentitySection(vm: CustomerViewModel, ctx: PanelCtx, onOpenIdentity
     val sugs by vm.mergeSugs.collectAsState()
     var mergeQuery by remember { mutableStateOf("") }
     val slate = if (c.isDark) c.textMid else Color(0xFF1E293B)
+    // The web's filled slate (#1e293b) buttons; on dark, the palette's deep blue keeps white text legible.
+    val slateFill = if (c.isDark) c.border2 else Color(0xFF1E293B)
 
     CrmSection(
         "Cross-channel Identity",
@@ -365,18 +374,22 @@ private fun IdentitySection(vm: CustomerViewModel, ctx: PanelCtx, onOpenIdentity
                     sugs!!.isEmpty() -> Text("No likely duplicates found — you can still merge manually below.", fontSize = 10.sp,
                         fontStyle = FontStyle.Italic, color = c.muted, modifier = Modifier.padding(bottom = 8.dp))
                     else -> Column(Modifier.padding(bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        sugs!!.forEach { s -> MergeCandidate(s, slate) { vm.merge(s.mergeWith) { mergeQuery = "" } } }
+                        sugs!!.forEach { s -> MergeCandidate(s, slateFill) { vm.merge(s.mergeWith) { mergeQuery = "" } } }
                     }
                 }
                 Text(
-                    "Enter the phone / wa_id of the profile to merge into this one. Their orders and channels will be combined here.",
-                    fontSize = 10.sp, color = c.text, modifier = Modifier.padding(bottom = 10.dp),
+                    buildAnnotatedString {
+                        append("Enter the phone / wa_id of the profile to merge ")
+                        withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append("into this one") }
+                        append(". Their orders and channels will be combined here.")
+                    },
+                    fontSize = 10.sp, lineHeight = 15.sp, color = c.text, modifier = Modifier.padding(bottom = 10.dp),
                 )
                 SmallInput(mergeQuery, { mergeQuery = it }, "e.g. 254700123456", Modifier.fillMaxWidth().padding(bottom = 10.dp),
                     keyboardType = KeyboardType.Phone, onDone = { vm.merge(mergeQuery) { mergeQuery = "" } })
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    TintButton("⊕ Merge now", slate, { vm.merge(mergeQuery) { mergeQuery = "" } }, Modifier.weight(1f), filled = true)
-                    TintButton("Cancel", slate, { vm.toggleMerge(false); mergeQuery = "" })
+                    TintButton("⊕ Merge now", slateFill, { vm.merge(mergeQuery) { mergeQuery = "" } }, Modifier.weight(1f), filled = true)
+                    NeutralButton("Cancel", { vm.toggleMerge(false); mergeQuery = "" })
                 }
             }
         }
@@ -384,7 +397,7 @@ private fun IdentitySection(vm: CustomerViewModel, ctx: PanelCtx, onOpenIdentity
 }
 
 @Composable
-private fun MergeCandidate(s: MergeSuggestion, slate: Color, onMerge: () -> Unit) {
+private fun MergeCandidate(s: MergeSuggestion, fill: Color, onMerge: () -> Unit) {
     val c = Neema.colors
     val strong = s.strength == "strong"
     Row(
@@ -395,20 +408,25 @@ private fun MergeCandidate(s: MergeSuggestion, slate: Color, onMerge: () -> Unit
     ) {
         Column(Modifier.weight(1f)) {
             Text(
-                (s.name ?: s.phone ?: s.mergeWith) + (s.country?.let { " · $it" } ?: ""),
+                buildAnnotatedString {
+                    append(s.name?.ifEmpty { null } ?: s.phone?.ifEmpty { null } ?: s.mergeWith)
+                    s.country?.ifEmpty { null }?.let {
+                        withStyle(SpanStyle(fontWeight = FontWeight.Normal, color = c.muted)) { append(" · $it") }
+                    }
+                },
                 fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
             FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(2.dp),
                 modifier = Modifier.padding(top = 2.dp)) {
                 s.evidence.forEach { ev ->
-                    Text(ev, fontSize = 9.sp, color = if (strong) Color(0xFF427425) else c.textMid,
+                    Text(ev, fontSize = 9.sp, color = if (strong) (if (c.isDark) c.gold2 else Color(0xFF427425)) else c.textMid,
                         modifier = Modifier.clip(RoundedCornerShape(50))
-                            .background(if (strong) Color(0xFFE9F6DF) else c.bg3).padding(horizontal = 6.dp, vertical = 2.dp))
+                            .background(if (strong) (if (c.isDark) c.greenDim else Color(0xFFE9F6DF)) else c.bg3).padding(horizontal = 6.dp, vertical = 2.dp))
                 }
             }
         }
         Spacer(Modifier.width(8.dp))
-        TintButton("Merge", slate, onMerge, filled = true)
+        TintButton("Merge", fill, onMerge, filled = true)
     }
 }
 
@@ -445,7 +463,7 @@ fun InsightsTab(ctx: PanelCtx) {
             if (r.overdue) {
                 Text(
                     "⏰ Overdue — it's been longer than their usual gap. A good moment to check in.",
-                    fontSize = 11.sp, color = Color(0xFFB45309),
+                    fontSize = 11.sp, color = Color(0xFFB45309).themed(),
                     modifier = Modifier.padding(top = 4.dp).fillMaxWidth().clip(RoundedCornerShape(4.dp))
                         .background(Color(0xFFF59E0B).dim(0.1f)).border(1.dp, Color(0xFFFDE68A), RoundedCornerShape(4.dp))
                         .padding(horizontal = 8.dp, vertical = 6.dp),
@@ -535,12 +553,9 @@ fun ActivityTab(ctx: PanelCtx) {
                             .border(1.dp, c.hairline, RoundedCornerShape(8.dp)).padding(10.dp),
                     ) {
                         Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                            val sc = orderStatusColor(o.status)
+                            val sc = orderStatusColor(o.status).themed()
                             Text(o.status ?: "—", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = sc,
                                 modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(sc.dim(0.1f)).padding(horizontal = 6.dp, vertical = 2.dp))
-                            o.orderNumber?.takeIf { it.isNotEmpty() }?.let {
-                                Text(" $it", fontSize = 10.sp, color = c.muted, fontFamily = FontFamily.Monospace)
-                            }
                             Spacer(Modifier.weight(1f))
                             Text(Fmt.timeAgo(o.createdAt), fontSize = 10.sp, color = c.muted)
                         }

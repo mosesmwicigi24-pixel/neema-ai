@@ -24,6 +24,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -110,6 +111,10 @@ private val LOST_RED = Color(0xFFEF4444)
 val WA_GREEN = Color(0xFF25D366)
 
 fun Color.dim(a: Float = 0.12f) = copy(alpha = a)
+
+/** The web's Tailwind tints are tuned for white; on the Prussian-blue night they're lifted toward white to stay legible. */
+@Composable
+fun Color.themed(): Color = if (Neema.colors.isDark) androidx.compose.ui.graphics.lerp(this, Color.White, 0.45f) else this
 
 // ── Small building blocks ───────────────────────────────────────────────────
 
@@ -311,6 +316,19 @@ fun TintButton(
     }
 }
 
+/** The web's quiet outline button (#f8fafc fill, #b5da8b border, slate text): Advance Stage, add-tag "+". */
+@Composable
+fun NeutralButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, height: Dp = 32.dp, textColor: Color = Color.Unspecified) {
+    val c = Neema.colors
+    Box(
+        modifier.height(height).clip(RoundedCornerShape(8.dp)).background(c.surface)
+            .border(1.dp, c.border, RoundedCornerShape(8.dp)).clickable(onClick = onClick).padding(horizontal = 10.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = textColor.takeOrElse { c.text }, maxLines = 1)
+    }
+}
+
 /** A single-line input + action, with a result bubble underneath (Ask Neema / Answer via Neema). */
 @Composable
 fun NeemaBox(
@@ -357,8 +375,10 @@ private fun stepState(stage: String, active: String, forward: List<String>): Ste
 
 /**
  * New → Contacted → Qualified → Proposal → (custom…) → Won, with Lost as a
- * faded terminal branch. Tapping a node sets the stage. Scrolls sideways when
- * the operator has added enough custom stages to crowd a narrow pane.
+ * faded terminal branch — laid out like the web's: fixed 24dp nodes, flexible
+ * gold connectors between them, each label centred under its node. Tapping a
+ * node sets the stage. Only when a narrow pane can't give every node ~38dp
+ * (up to 4 custom stages) does it scroll sideways instead.
  */
 @Composable
 fun PipelineStepper(
@@ -369,25 +389,29 @@ fun PipelineStepper(
     onSelect: (String) -> Unit,
 ) {
     val c = Neema.colors
+    fun reached(s: StepState) = s == StepState.Done || s == StepState.Active
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val minSlot = 52.dp
-        val slot = maxOf(maxWidth / stages.size, minSlot)
-        val scroll = rememberScrollState()
-        Row(Modifier.then(if (slot * stages.size > maxWidth) Modifier.horizontalScroll(scroll) else Modifier)) {
+        val needed = 38.dp * stages.size + 16.dp
+        val fits = maxWidth >= needed
+        Row(
+            (if (fits) Modifier.fillMaxWidth() else Modifier.horizontalScroll(rememberScrollState()).width(needed))
+                .padding(start = 8.dp, end = 8.dp, bottom = 18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             stages.forEachIndexed { i, stage ->
                 val state = stepState(stage, active, forward)
                 val isLost = stage == "lost"
-                fun reached(s: StepState) = s == StepState.Done || s == StepState.Active
-                fun connColor(idx: Int): Color {
-                    val st = stages[idx]
-                    return if (st == "lost") PIPE_LOST else if (reached(stepState(st, active, forward))) PIPE_GOLD else PIPE_IDLE
+                if (i > 0) {
+                    // The segment into this node takes this node's colour, as on the web.
+                    val conn = if (isLost) PIPE_LOST else if (reached(state)) PIPE_GOLD else if (c.isDark) c.border2 else PIPE_IDLE
+                    Box(Modifier.weight(1f).height(2.dp).clip(RoundedCornerShape(50)).background(conn))
                 }
                 val (fill, border, icon) = when {
                     state == StepState.Active && isLost -> Triple(LOST_RED, LOST_RED, Color.White)
                     state == StepState.Active -> Triple(PIPE_GOLD_SOLID, PIPE_GOLD_SOLID, Color.White)
                     state == StepState.Done -> Triple(c.bg2, PIPE_GOLD, PIPE_GOLD)
                     isLost -> Triple(c.bg2, PIPE_LOST, PIPE_LOST_ICON)
-                    else -> Triple(c.bg2, PIPE_IDLE, Color.Transparent)
+                    else -> Triple(c.bg2, if (c.isDark) c.border2 else PIPE_IDLE, Color.Transparent)
                 }
                 val labelColor = when {
                     state == StepState.Active -> if (isLost) LOST_RED else PIPE_GOLD_SOLID
@@ -397,32 +421,29 @@ fun PipelineStepper(
                 }
                 val showCheck = reached(state) && !isLost
                 val showX = isLost && (state == StepState.Active || state == StepState.Future)
-                Column(
-                    Modifier.width(slot).clip(RoundedCornerShape(6.dp))
-                        .then(if (enabled) Modifier.clickable { onSelect(stage) } else Modifier)
-                        .padding(vertical = 2.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
+                Box(
+                    Modifier.size(24.dp).clip(CircleShape).background(fill).border(2.dp, border, CircleShape),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Box(Modifier.fillMaxWidth().height(24.dp), contentAlignment = Alignment.Center) {
-                        // Connector halves: into this node (its own colour), out to the next (the next node's colour).
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.weight(1f).height(2.dp).background(if (i > 0) connColor(i) else Color.Transparent))
-                            Spacer(Modifier.width(24.dp))
-                            Box(Modifier.weight(1f).height(2.dp).background(if (i < stages.size - 1) connColor(i + 1) else Color.Transparent))
-                        }
-                        Box(
-                            Modifier.size(24.dp).clip(CircleShape).background(fill).border(2.dp, border, CircleShape),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            if (showCheck) Icon(Icons.Default.Check, null, tint = icon, modifier = Modifier.size(14.dp))
-                            if (showX) Icon(Icons.Default.Close, null, tint = icon, modifier = Modifier.size(14.dp))
-                        }
-                    }
+                    if (showCheck) Icon(Icons.Default.Check, stageLabel(stage), tint = icon, modifier = Modifier.size(13.dp))
+                    if (showX) Icon(Icons.Default.Close, stageLabel(stage), tint = icon, modifier = Modifier.size(13.dp))
+                }
+                // The label hangs under the node and may be wider than it (whitespace-nowrap).
+                Box(Modifier.size(0.dp), contentAlignment = Alignment.TopCenter) {
                     Text(
-                        stageLabel(stage), fontSize = 9.sp, color = labelColor, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        stageLabel(stage), fontSize = 9.sp, color = labelColor, maxLines = 1, softWrap = false,
                         fontWeight = if (state == StepState.Active) FontWeight.Bold else FontWeight.SemiBold,
-                        modifier = Modifier.padding(top = 2.dp, start = 1.dp, end = 1.dp),
+                        modifier = Modifier.wrapContentSize(Alignment.TopCenter, unbounded = true).offset(x = (-12).dp, y = 15.dp),
                     )
+                }
+                // A finger-sized target over node + label, without changing the layout.
+                if (enabled) {
+                    Box(Modifier.size(0.dp), contentAlignment = Alignment.Center) {
+                        Box(
+                            Modifier.wrapContentSize(Alignment.Center, unbounded = true).offset(x = (-12).dp, y = 7.dp)
+                                .size(40.dp, 44.dp).clip(RoundedCornerShape(8.dp)).clickable { onSelect(stage) },
+                        )
+                    }
                 }
             }
         }
