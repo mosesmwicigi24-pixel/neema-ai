@@ -53,6 +53,51 @@ FAMILIES: tuple[dict, ...] = (
             r"cassock\s+belts?",
         ),
     },
+    {
+        # Owner, 2026-09-25: "gold trays with holes to place tot glasses" is
+        # a communion tray — the tray with the holes that hold the small
+        # cups. The finish word stays in front of it ("gold communion tray").
+        "hub": "communion tray",
+        "said": (
+            r"trays?\s+with\s+(?:the\s+)?holes(?:\s+(?:to|for|that|which)\s+"
+            r"(?:place|hold|carry|put|fit|holds|placing|holding)?\s*(?:the\s+)?"
+            r"(?:tot\s+|small\s+|little\s+|communion\s+)?(?:glasses|cups?))?",
+            r"trays?\s+(?:to|that|which)\s+(?:hold|place|carry)s?\s+(?:the\s+)?"
+            r"(?:tot\s+|small\s+|little\s+|communion\s+)?(?:glasses|cups?)",
+            r"trays?\s+(?:for|of)\s+(?:the\s+)?(?:tot\s+|small\s+|little\s+)?(?:glasses|cups?)",
+            r"(?:communion\s+)?cups?\s+trays?",
+            r"trei\s+(?:ya|za)\s+vikombe",     # Swahili: tray of cups
+        ),
+    },
+    {
+        # Owner, 2026-09-25: "when someone asks for Holy Communion Cups
+        # without specifying chalice, give the plastic, stainless and glass
+        # cups, not chalice cups." Tot glasses, wine cups, the small cups —
+        # all the hub's communion cups. (A misspaced "holycommunion" too.)
+        "hub": "communion cups",
+        "said": (
+            # (not a compound: a "communion cup filler" is the Refiller, a
+            # "communion cup tray" a tray — the tray family, above, ran first)
+            r"(?:holy\s*)?communion\s+(?:tot\s+|small\s+|little\s+)?(?:glasses|cups?)"
+            r"(?!\s+(?:re)?fillers?\b|\s+trays?\b|\s+holders?\b|\s+racks?\b|\s+sets?\b)",
+            r"(?:small|little|tiny)\s+cups?\s+(?:for|of)\s+(?:the\s+)?(?:holy\s+)?"
+            r"(?:communion|wine|lord'?s\s+supper|ushirika)",
+            r"tots?\s+glasses",
+            r"tots?\s+cups?",
+            r"wine\s+cups?",
+            r"vikombe\s+vya\s+ushirika",       # Swahili: communion cups
+        ),
+    },
+    {
+        # The owner's words for the metal cups: stainless, steel, metal —
+        # the hub's Silver Communion Cups (the same rule that makes a
+        # "stainless steel tray" the Silver Communion Tray).
+        "hub": "silver communion cups",
+        "said": (
+            r"(?:stainless(?:\s+steel)?|steel|metal(?:lic)?)\s+(?:communion\s+)?cups?",
+            r"silver\s+cups?",
+        ),
+    },
 )
 
 _COMPILED: tuple[tuple[re.Pattern, str], ...] = tuple(
@@ -109,6 +154,25 @@ RANGES: tuple[dict, ...] = (
         "exclude": r"chalice|paten|wafer|bread|wine|\bhosts?\b|^\s*(?:silver|plastic|pre-?packed)\s+communion\s+cups",
         # Words that pick ONE member, so the ordinary search answers instead.
         "specific": r"\b(?:silver|gold(?:en)?|aluminium|aluminum|wooden|wood|stack(?:ed|able)?|double|four|4)\b",
+        "stay": ("these are the trays and sets only; chalices, cups, wafers, bread "
+                 "and wine are other things — mention one only if THEY ask for it"),
+    },
+    {
+        # Owner, 2026-09-25: "Holy Communion Cups" without the word chalice
+        # are the SMALL cups the tray holds — plastic, silver (stainless),
+        # glass, pre-packed — cheapest first, and never a chalice.
+        "name": "communion cups",
+        "asked": (
+            r"(?:holy\s*)?communion\s+cups?",
+            r"cups?\s+(?:for|of)\s+(?:the\s+)?(?:holy\s+)?communion",
+            r"vikombe\s+vya\s+ushirika",
+        ),
+        "include": r"^\s*(?:silver|plastic|pre-?packed|glass)\s+(?:communion\s+)?cups\s*$",
+        "exclude": r"chalice|paten|tray|set|stack",
+        "specific": r"\b(?:silver|plastic|glass|pre-?packed|prepacked|sealed|stainless|steel|metal)\b",
+        "stay": ("these are the small communion cups only — the cups a tray holds; a "
+                 "chalice, a tray and a set are other things — mention one only if "
+                 "THEY ask for it (a chalice only when they SAY chalice)"),
     },
 )
 

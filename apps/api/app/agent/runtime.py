@@ -128,6 +128,24 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "right price. Finish and colour are part of identity — silver is not "
         "gold. Only if THEY name a different product do you price that one, and "
         "the post's product stays what it was.\n"
+        "- THE FINISH THEY ASKED FOR IS THE ITEM, AND THE KIND (owner, 2026-09-25: "
+        "'someone is asking for golden trays and you give silver'). Gold is not "
+        "silver, glass is not plastic: search_catalog the finish they named — "
+        "'gold trays with holes for the cups' is the Golden Communion Tray, never "
+        "the silver one, never a bread tray. 'Communion cups', 'holy communion "
+        "cups', 'tot glasses' are the SMALL cups the tray holds — Plastic, Silver "
+        "(stainless), Glass, Pre-Packed — offer those, cheapest first; a chalice "
+        "ONLY when they say chalice. If we do not have the exact item, say so and "
+        "offer the nearest with its hub price.\n"
+        "- ANSWER EVERY QUESTION IN THE COMMENT. 'Where is your location?' — Nairobi, "
+        "Kenya; 'do you have a shop in South Africa?' — no shop there, we deliver "
+        "there by DHL; then the item and its price. A comment with two questions "
+        "gets two answers in one short reply; one left unanswered is a failed reply.\n"
+        "- EVERY REPLY IS VERIFIED BEFORE IT POSTS (owner, 2026-09-25): a reviewer "
+        "checks that every figure is a price search_catalog returned this turn, that "
+        "the item is the one they asked for, and that every question was answered — "
+        "a draft that fails is held back and never posts. Quote only what the tool "
+        "returned; never a pack size, capacity, colour or delivery time from memory.\n"
         "- NEVER answer a question by sending them elsewhere — "
         "'DM us for the price' or 'message us and we'll sort you out' when you "
         "KNOW the answer is a lost sale and reads as a brush-off to everyone "
@@ -966,7 +984,8 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                    product_sink: list | None = None,
                    comment_reading: dict | None = None,
                    comment_post_id: str | None = None,
-                   thread_parent: dict | None = None) -> str:
+                   thread_parent: dict | None = None,
+                   review_notes: str | None = None) -> str:
     """Run one agent turn and return the reply text (does NOT send it).
 
     WhatsApp is the default and unchanged. For Messenger/Instagram, pass
@@ -1283,6 +1302,10 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         _rline = _reading_context(comment_reading)
         if _rline:
             lead_ctx.append(_rline)
+    # THE GATE BEFORE POSTING (owner, 2026-09-25): a second draft carries the
+    # reviewer's reasons for holding back the first.
+    if public_comment and review_notes:
+        lead_ctx.append(review_notes)
     if lead_ctx:
         content = "\n\n".join(lead_ctx)
         if post_img:
@@ -2388,7 +2411,7 @@ _SEVERITY_WORDS = {1: "mild", 2: "serious", 3: "grave"}
 
 
 def _human_note(kind: str, severity: int, comment: str = "", ask: str = "",
-                answered: str = "") -> str:
+                answered: str = "", issues: list | None = None) -> str:
     """The team's note — what this is, how heavy, what they said, what Neema
     did. The kind decides the ask of the colleague: a graded COMPLAINT to
     follow up and close (today, when serious; at once, when grave); a REQUEST
@@ -2431,13 +2454,21 @@ def _human_note(kind: str, severity: int, comment: str = "", ask: str = "",
             lines.append(f'• Their comment: "{said}"')
         if answered:
             lines.append(f'• Neema said: "{answered}"')
+    if issues:
+        # THE GATE BEFORE POSTING (owner, 2026-09-25): the draft was held back
+        # and the colleague answers with the reasons in hand.
+        lines.insert(0, "HELD BACK BY THE REVIEWER (public comment) — Neema's draft did not "
+                        "pass verification and was NOT posted; the customer was told a "
+                        "colleague will answer right there in the thread. Please answer "
+                        "them there, from the hub.")
+        lines.append("• Why it was held: " + "; ".join(str(i) for i in issues)[:600])
     return "\n".join(lines)
 
 
 async def _route_comment_to_human(channel: str, external_id: str,
                                   comment: str = "", *, kind: str = "complaint",
                                   severity: int = 1, ask: str = "", answered: str = "",
-                                  redis=None) -> None:
+                                  redis=None, issues: list | None = None) -> None:
     """Hand a commenter to the team — WITHOUT muting Neema — with the reading:
     what it is (a complaint, mixed, a request, a question) and how heavy.
 
@@ -2453,7 +2484,7 @@ async def _route_comment_to_human(channel: str, external_id: str,
     from app.database import AsyncSessionLocal
     from app.models.conversation import Conversation
     from app.models.intercept import Intercept, InterceptAction
-    note = _human_note(kind, severity, comment, ask=ask, answered=answered)
+    note = _human_note(kind, severity, comment, ask=ask, answered=answered, issues=issues)
     async with AsyncSessionLocal() as db:
         conv = (await db.execute(select(Conversation).where(
             Conversation.channel == channel,
@@ -3028,6 +3059,13 @@ def _names_product(text: str, product_name: str) -> bool:
         return False
     shared = core & _caption_tokens(text or "")
     if not shared:
+        return False
+    # "gold trays" does NOT name the Silver Communion Tray, and "communion
+    # cups" does not name a chalice (owner, 2026-09-25) — the shared word
+    # "tray" / "cup" used to be enough for the canned line to price the wrong
+    # one.
+    from app.agent.review import item_issues
+    if item_issues(text or "", {"name": product_name}):
         return False
     return len(shared) / len(core) >= 1 / 3 or any(len(t) >= 6 for t in shared)
 
@@ -3687,6 +3725,58 @@ async def _post_over_cap(redis, post_id: str) -> bool:
         return False
 
 
+# THE GATE BEFORE POSTING (owner, 2026-09-25): what the thread hears when a
+# draft failed verification twice — honest, warm, and a promise the team keeps
+# (the comment is routed to a colleague with the reviewer's reasons).
+_VERIFY_HOLD_POOL = [
+    "Thank you{name} 🙏 Let me confirm the exact item and price for you — one of our team will answer you right here shortly 💛",
+    "Good question{name} 🙏 I want to give you the exact item and the correct price, so one of our team will reply to you right here shortly 💛",
+]
+_SW_VERIFY_HOLD_POOL = [
+    "Asante{name} 🙏 Nataka kukuhakikishia bidhaa kamili na bei sahihi — mmoja wa timu yetu atakujibu hapa hivi karibuni 💛",
+]
+
+
+async def _noop_draft(*a, **k) -> str:
+    return ""
+
+
+async def _gate_public_answer(answer: str, *, comment_text: str, seen_products: list,
+                              post_product: str, currency: str, redis,
+                              regenerate) -> tuple[str, list[str]]:
+    """Every public reply is verified before it posts (owner, 2026-09-25).
+    The draft goes through review.review_reply (the rules, then the light-model
+    reviewer); a draft that fails is written ONCE more with the reviewer's
+    notes, and a second failure returns "" with the reasons — the caller
+    posts the holding line and hands the comment to a colleague."""
+    from app.agent import review as _rv
+    if not (answer or "").strip():
+        return answer, []
+    known = _rv.prompt_figures(currency)
+    verdict = await _rv.review_reply(comment_text, answer, seen_products,
+                                     post_product=post_product, currency=currency,
+                                     known_figures=known, redis=redis)
+    if verdict["ok"]:
+        return answer, []
+    issues = list(verdict["issues"])
+    _log.info("public draft held by the %s: %s", verdict["by"], "; ".join(issues)[:300])
+    try:
+        second = (await regenerate(_rv.review_notes(issues)) or "").strip()
+    except Exception as exc:
+        _log.warning("second draft failed: %s", exc)
+        second = ""
+    if not second:
+        return "", issues
+    verdict2 = await _rv.review_reply(comment_text, second, seen_products,
+                                      post_product=post_product, currency=currency,
+                                      known_figures=known, redis=redis)
+    if verdict2["ok"]:
+        return second, []
+    issues2 = list(verdict2["issues"])
+    _log.info("second public draft held by the %s: %s", verdict2["by"], "; ".join(issues2)[:300])
+    return "", issues + issues2
+
+
 async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set) -> None:
     from app.database import AsyncSessionLocal
     from app.services import n8n_bridge as svc
@@ -3869,19 +3959,38 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
             # bill. Light model by default; the main model for vision turns and
             # for comments carrying money or risk (see route_comment_model).
             _cmodel = settings.tier2_model if media else route_comment_model(prompt_text)
-            async with AsyncSessionLocal() as db:
-                # A reply inside a thread carries the comment it answers and
-                # what we said there (owner, 2026-09-23).
-                _parent = await _thread_parent(comment.get("parent_id") or "")
-                answer = (await run_turn(
-                    db, redis, wa_id=ext, user_text=prompt_text,
-                    llm=build_llm(model=_cmodel),
-                    media=media, channel=channel, external_id=ext,
-                    public_comment=True, product_sink=seen_products,
-                    comment_reading=reading, comment_post_id=post_id,
-                    thread_parent=_parent)).strip()
+            # A reply inside a thread carries the comment it answers and
+            # what we said there (owner, 2026-09-23).
+            _parent = await _thread_parent(comment.get("parent_id") or "")
+
+            async def _draft(notes: str | None = None) -> str:
+                async with AsyncSessionLocal() as db:
+                    return (await run_turn(
+                        db, redis, wa_id=ext, user_text=prompt_text,
+                        llm=build_llm(model=_cmodel),
+                        media=media, channel=channel, external_id=ext,
+                        public_comment=True, product_sink=seen_products,
+                        comment_reading=reading, comment_post_id=post_id,
+                        thread_parent=_parent, review_notes=notes)).strip()
+            answer = await _draft()
         except Exception as exc:
             _log.warning("public agent reply failed for %s: %s", cid, exc)
+
+    # THE GATE BEFORE POSTING (owner, 2026-09-25): the draft is verified —
+    # the item is the one they asked for, every figure is the hub's, every
+    # question answered — written once more if it fails, and never posted
+    # when it fails again.
+    held_issues: list[str] = []
+    if answer:
+        try:
+            async with AsyncSessionLocal() as _dbc:
+                _gate_ccy = (await _meta_market(_dbc, channel, ext))[0]
+        except Exception:
+            _gate_ccy = "USD"
+        answer, held_issues = await _gate_public_answer(
+            answer, comment_text=prompt_text, seen_products=seen_products,
+            post_product=str(_known_product.get("name") or ""), currency=_gate_ccy,
+            redis=redis, regenerate=(_draft if not skip_model else _noop_draft))
 
     # Resolve the product FIRST — the exact storefront link belongs in the DM.
     # The comment may never name the product ("where is the shop?") — the POST
@@ -3962,8 +4071,19 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # under a post we could not identify — never a price on a guess.
     ask_which = False
     if not answer:
+        from app.agent.review import item_issues as _item_issues
+        # The comment asks for a finish or a kind the post's product is not
+        # ("gold trays" under a silver-tray post, "communion cups" under a
+        # chalice) — the canned line must not sell the post's item as theirs
+        # (owner, 2026-09-25): hold, and a colleague answers.
+        _other = _item_issues(prompt_text, matched) if matched else []
+        if _other and not held_issues:
+            held_issues = _other
         asks_it = is_bare_price_ask(prompt_text) or _names_product(prompt_text, product_name)
-        if not _trusted or _caption_tokens(_known_product.get("name") or "") != _caption_tokens(product_name):
+        if held_issues:
+            product_name = ""
+            matched = {}
+        elif not _trusted or _caption_tokens(_known_product.get("name") or "") != _caption_tokens(product_name):
             ask_which = is_bare_price_ask(prompt_text)
             product_name = ""
             matched = {}
@@ -4019,6 +4139,10 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
                                         swahili=swahili, made_to_order=made_to_order,
                                         ask_which=ask_which, set_items=set_items,
                                         bundle=is_bundle, kind=kind, ask=ask)
+    if held_issues and not answer:
+        # THE GATE BEFORE POSTING (owner, 2026-09-25): no verified answer —
+        # the thread hears an honest holding line, never a guess.
+        public_text = _pick(_SW_VERIFY_HOLD_POOL if swahili else _VERIFY_HOLD_POOL, ext).replace("{name}", name_tag)
     public_text = plain_public_voice(public_text)
 
     posted = await _post_public(public_text)
@@ -4026,12 +4150,14 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # a person is told — the request, the question, or the comment we could
     # not read goes to the team to answer RIGHT THERE in the thread (owner,
     # 2026-09-22). A cheer needs no one; "which item?" is a real question back.
+    # A draft HELD by the reviewer goes to a colleague with the reasons.
     if not answer and intent != "goodwill" and not ask_which and not (product_name and price_text):
         try:
             await _route_comment_to_human(
                 channel, ext, comment_text,
                 kind=(kind if kind in ("request", "question") else "other"),
-                severity=0, ask=ask, answered=public_text, redis=redis)
+                severity=0, ask=ask, answered=public_text, redis=redis,
+                issues=held_issues or None)
         except Exception as exc:
             _log.warning("route-to-human failed for comment %s: %s", cid, exc)
 
@@ -4046,8 +4172,8 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     if posted:
         await _like_answered()
 
-    _log.info("comment %s engaged: agent=%s free_ask=%s dm=%s",
-              cid, not skip_model, free_ask, dm_sent)
+    _log.info("comment %s engaged: agent=%s free_ask=%s dm=%s held=%s",
+              cid, not skip_model, free_ask, dm_sent, bool(held_issues))
 
 
 def _public_price_text(kes, usd, currency: str = "USD") -> str:
