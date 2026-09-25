@@ -82,9 +82,13 @@ def test_a_figure_from_nowhere_fails_and_the_hubs_own_figures_pass():
     assert rv.unverified_figures("100 cups come to KES 1,000.", [PLASTIC], comment="I need 100 cups") == []
     assert rv.unverified_figures("KES 22,000, a 50% deposit is KES 11,000.", [GOLDEN]) == []
     assert rv.unverified_figures("KES 1,000 each", [{"name": "X", "price_usd": 10}]) == []   # 10 × the rate
-    # the owner's own stated figures (shipping) need no hub row
-    assert rv.unverified_figures("DHL to South Africa is USD 50.", [GOLDEN],
+    # the owner's own stated delivery fee needs no hub row — an example price in the
+    # prompt ("Eliad Oil at USD 50") is not a fact
+    assert 350.0 in rv.prompt_figures("USD") and 50.0 not in rv.prompt_figures("USD")
+    assert rv.unverified_figures("Delivery within Nairobi is KES 350.", [GOLDEN],
                                  known_figures=rv.prompt_figures("USD")) == []
+    assert rv.unverified_figures("DHL to South Africa is USD 50.", [GOLDEN],
+                                 known_figures=rv.prompt_figures("USD")) == [50.0]
 
 
 def test_the_rules_hold_a_figure_from_nowhere():

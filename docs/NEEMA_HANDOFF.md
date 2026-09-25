@@ -91,7 +91,31 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   never promises to "confirm the rate with the team" (the prompt's
   local-currency exception now says so). The reviewer no longer calls an
   ordinary promise ("a colleague will reach out") an invention. Health:
-  `review: {passed, rewritten, soft, held}`.
+  `review: {passed, rewritten, soft, held}`. STRESS-TESTED before it shipped
+  (owner: "stress test many scenarios… to the level of human intelligence"):
+  `tests/test_verification_stress.py` runs ~100 real-chat shapes through
+  the real rules and gate, hunting FALSE HOLDS (a good reply strangled) and
+  FALSE PASSES (a figure from nowhere let through). What it found and fixed:
+  a figure matches to the UNIT (`_close`: ±0.5, or 0.05%), not to half a
+  percent ("KES 22,100" for a KES 22,000 tray is wrong); a conversion starts
+  from the hub's own USD, never from KES at the house rate when the hub has
+  a USD price; ZMW at the house rate only for a Zambian turn; a KES figure
+  derived from USD only when the row has no KES; a fee rides only on a
+  price, a quantity multiple or a fact — never on a half or a conversion
+  ("R2,300" had been explained as a conversion plus a stray instruction
+  figure); the owner's instruction figures count only ABOUT DELIVERY (the
+  prompt's "Eliad Oil at USD 50" is an example, not a fact — today the
+  allow-list is exactly KES 350); the customer's own figure in THIS
+  message is a fact ("my budget is KES 15,000"); number words are
+  quantities ("two trays", "tatu", "a dozen"); "22k" is 22,000; every row
+  the reply names is read against the ask and the item finding stands only
+  when NONE fits ("the Golden at $220, or the Silver at $180 if you
+  prefer" passes) and is hard only when money is quoted; an order-status
+  claim must be about THEIR order ("we have delivered to Kampala before" is
+  not one; "your tracking number is…" without a tool is); a link we sent
+  earlier in the conversation may be repeated; "where do I order?" is not
+  a where-question; the website never shows an empty bubble (a held
+  acknowledgement becomes "🙏").
 - **The gate before posting** (owner 2026-09-25: "someone is asking for
   golden trays and you give silver… put a gate to review before posting…
   when someone asks for Holy Communion Cups without specifying chalice, give
