@@ -7,17 +7,14 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.Chat
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -25,9 +22,10 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ke.co.bethanyhouse.neema.core.notify.AppNotification
 import ke.co.bethanyhouse.neema.core.perm.Perms
-import ke.co.bethanyhouse.neema.core.ui.components.Avatar
-import ke.co.bethanyhouse.neema.core.ui.components.CountBadge
+import ke.co.bethanyhouse.neema.core.ui.components.ConfirmDialog
+import ke.co.bethanyhouse.neema.core.ui.theme.Brand
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
+import ke.co.bethanyhouse.neema.core.ui.theme.WebIcons
 import ke.co.bethanyhouse.neema.core.util.Fmt
 import ke.co.bethanyhouse.neema.feature.agents.AgentsScreen
 import ke.co.bethanyhouse.neema.feature.calls.CallStage
@@ -41,24 +39,14 @@ import ke.co.bethanyhouse.neema.feature.overview.OverviewScreen
 import ke.co.bethanyhouse.neema.feature.profile.ProfileScreen
 import ke.co.bethanyhouse.neema.feature.reports.ReportsScreen
 import ke.co.bethanyhouse.neema.feature.settings.SettingsScreen
+import kotlinx.coroutines.launch
 
-data class NavItem(val id: ViewId, val icon: ImageVector, val badge: Int = 0)
-
-private fun iconFor(v: ViewId): ImageVector = when (v) {
-    ViewId.Conversations -> Icons.AutoMirrored.Outlined.Chat
-    ViewId.Calls -> Icons.Outlined.Call
-    ViewId.Orders -> Icons.Outlined.Inventory2
-    ViewId.Reports -> Icons.Outlined.Description
-    ViewId.Deals -> Icons.Outlined.Bolt
-    ViewId.Leads -> Icons.Outlined.Flag
-    ViewId.Overview -> Icons.Outlined.BarChart
-    ViewId.Catalog -> Icons.Outlined.Menu
-    ViewId.Agents -> Icons.Outlined.Groups
-    ViewId.Settings -> Icons.Outlined.Settings
-    ViewId.Profile -> Icons.Outlined.Person
-}
-
-/** app/dashboard/page.tsx: nav, header, the current view, the call overlay, toasts. */
+/**
+ * app/dashboard/page.tsx. Tablets get the web's docked navy sidebar
+ * (collapsible to an icon rail). Phones get the same sidebar as a drawer
+ * (☰, swipe, or "More"), the web's mobile header, and a bottom bar with the
+ * four most-used views one tap away. The call card overlays the content.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardShell(dash: DashboardViewModel, widthClass: WindowWidthSizeClass) {
@@ -72,35 +60,41 @@ fun DashboardShell(dash: DashboardViewModel, widthClass: WindowWidthSizeClass) {
     val immersive by dash.immersive.collectAsStateWithLifecycle()
     val notifications by dash.container.notifications.items.collectAsStateWithLifecycle()
     val connected by dash.container.socket.connected.collectAsStateWithLifecycle()
-    @Suppress("UNUSED_VARIABLE") val permsKey = me to agents  // recompute nav when permissions arrive
 
-    val humanConvs = summary?.human ?: 0
-    val pendingOrders = orders.count { it.status == "pending" }
-
-    val items = buildList {
-        add(NavItem(ViewId.Conversations, iconFor(ViewId.Conversations), humanConvs))
-        add(NavItem(ViewId.Calls, iconFor(ViewId.Calls)))
-        add(NavItem(ViewId.Orders, iconFor(ViewId.Orders), pendingOrders))
-        if (dash.can(Perms.VIEW_REPORTS)) add(NavItem(ViewId.Reports, iconFor(ViewId.Reports)))
-        if (dash.can(Perms.VIEW_LEADS)) {
-            add(NavItem(ViewId.Deals, iconFor(ViewId.Deals)))
-            add(NavItem(ViewId.Leads, iconFor(ViewId.Leads)))
+    // Permissions resolve once /me and the team list land; re-derive the nav then.
+    val items = remember(me, agents, summary, orders) {
+        val humanConvs = summary?.human ?: 0
+        val pendingOrders = orders.count { it.status == "pending" }
+        buildList {
+            add(NavItem(ViewId.Conversations, iconFor(ViewId.Conversations), humanConvs))
+            add(NavItem(ViewId.Calls, iconFor(ViewId.Calls)))
+            add(NavItem(ViewId.Orders, iconFor(ViewId.Orders), pendingOrders))
+            if (dash.can(Perms.VIEW_REPORTS)) add(NavItem(ViewId.Reports, iconFor(ViewId.Reports)))
+            if (dash.can(Perms.VIEW_LEADS)) {
+                add(NavItem(ViewId.Deals, iconFor(ViewId.Deals)))
+                add(NavItem(ViewId.Leads, iconFor(ViewId.Leads)))
+            }
+            if (dash.can(Perms.VIEW_ANALYTICS)) add(NavItem(ViewId.Overview, iconFor(ViewId.Overview)))
+            if (dash.can(Perms.VIEW_CATALOG)) add(NavItem(ViewId.Catalog, iconFor(ViewId.Catalog)))
+            if (dash.can(Perms.MANAGE_AGENTS)) add(NavItem(ViewId.Agents, iconFor(ViewId.Agents)))
+            if (dash.can(Perms.MANAGE_SETTINGS)) add(NavItem(ViewId.Settings, iconFor(ViewId.Settings)))
+            add(NavItem(ViewId.Profile, iconFor(ViewId.Profile)))
         }
-        if (dash.can(Perms.VIEW_ANALYTICS)) add(NavItem(ViewId.Overview, iconFor(ViewId.Overview)))
-        if (dash.can(Perms.VIEW_CATALOG)) add(NavItem(ViewId.Catalog, iconFor(ViewId.Catalog)))
-        if (dash.can(Perms.MANAGE_AGENTS)) add(NavItem(ViewId.Agents, iconFor(ViewId.Agents)))
-        if (dash.can(Perms.MANAGE_SETTINGS)) add(NavItem(ViewId.Settings, iconFor(ViewId.Settings)))
-        add(NavItem(ViewId.Profile, iconFor(ViewId.Profile)))
     }
+    val canSettings = remember(me, agents) { dash.can(Perms.MANAGE_SETTINGS) }
 
     var showBell by remember { mutableStateOf(false) }
-    var showMore by remember { mutableStateOf(false) }
+    var confirmSignOut by remember { mutableStateOf(false) }
+    var collapsed by rememberSaveable { mutableStateOf(false) }
     val unreadBell = notifications.count { !it.read }
-
-    // Back from any view returns to the inbox before leaving the app.
-    BackHandler(enabled = view != ViewId.Conversations && !immersive) { dash.navigate(ViewId.Conversations) }
-
     val wide = widthClass != WindowWidthSizeClass.Compact
+    val drawer = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+
+    BackHandler(enabled = drawer.isOpen) { scope.launch { drawer.close() } }
+    // Back from any view returns to the inbox before leaving the app.
+    BackHandler(enabled = !drawer.isOpen && view != ViewId.Conversations && !immersive) { dash.navigate(ViewId.Conversations) }
+
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(Unit) {
         dash.toasts.collect { t ->
@@ -109,92 +103,37 @@ fun DashboardShell(dash: DashboardViewModel, widthClass: WindowWidthSizeClass) {
         }
     }
 
-    Row(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        if (wide && !immersive) {
-            NavigationRail(
-                containerColor = Neema.colors.bg2,
-                header = {
-                    Box(Modifier.padding(vertical = 8.dp).size(36.dp).clip(RoundedCornerShape(10.dp)).background(Neema.colors.gold), contentAlignment = Alignment.Center) {
-                        Text("N", color = Color.White, fontWeight = FontWeight.ExtraBold)
-                    }
-                },
-            ) {
-                LazyColumn(horizontalAlignment = Alignment.CenterHorizontally) {
-                    items(items, key = { it.id }) { item ->
-                        NavigationRailItem(
-                            selected = view == item.id,
-                            onClick = { dash.navigate(item.id) },
-                            icon = { BadgedBox(badge = { if (item.badge > 0) Badge { Text(badgeText(item.badge)) } }) { Icon(item.icon, item.id.label) } },
-                            label = { Text(item.id.label, fontSize = 11.sp) },
-                        )
-                    }
-                }
-            }
-        }
+    val sidebar = @Composable { isCollapsed: Boolean, onToggle: (() -> Unit)? ->
+        NeemaSidebar(
+            items = items, view = view,
+            onSelect = { dash.navigate(it); scope.launch { drawer.close() } },
+            collapsed = isCollapsed, onToggleCollapse = onToggle,
+            userName = me?.name ?: session?.name.orEmpty(),
+            userEmail = me?.email ?: session?.email.orEmpty(),
+            userRole = session?.role ?: me?.role.orEmpty(),
+            avatarUrl = me?.avatarUrl,
+            dark = dark, onToggleDark = { dash.setDark(!dark) },
+            canSettings = canSettings,
+            bellCount = unreadBell, onBell = { showBell = true },
+            onSignOut = { confirmSignOut = true },
+        )
+    }
+
+    val content = @Composable {
         Scaffold(
-            modifier = Modifier.weight(1f),
             snackbarHost = { SnackbarHost(snackbar) },
             topBar = {
-                if (!immersive) TopAppBar(
-                    title = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (!wide) {
-                                Box(Modifier.size(28.dp).clip(RoundedCornerShape(8.dp)).background(Neema.colors.gold), contentAlignment = Alignment.Center) {
-                                    Icon(Icons.AutoMirrored.Outlined.Chat, null, tint = Color.White, modifier = Modifier.size(16.dp))
-                                }
-                                Spacer(Modifier.width(8.dp))
-                                Text("Neema", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                Text("  ·  ", color = Neema.colors.muted)
-                            }
-                            Text(view.label, fontSize = 15.sp, color = if (wide) MaterialTheme.colorScheme.onSurface else Neema.colors.muted, fontWeight = FontWeight.SemiBold)
-                            if (!connected) {
-                                Spacer(Modifier.width(8.dp))
-                                Box(Modifier.size(8.dp).clip(RoundedCornerShape(50)).background(Color(0xFFD97706)))
-                            }
-                        }
-                    },
-                    actions = {
-                        IconButton(onClick = { showBell = true }) {
-                            BadgedBox(badge = { if (unreadBell > 0) Badge { Text(if (unreadBell > 9) "9+" else "$unreadBell") } }) {
-                                Icon(Icons.Outlined.Notifications, "Notifications")
-                            }
-                        }
-                        IconButton(onClick = { dash.setDark(!dark) }) {
-                            Icon(if (dark) Icons.Outlined.LightMode else Icons.Outlined.DarkMode, "Theme")
-                        }
-                        if (wide) {
-                            Box(Modifier.padding(end = 8.dp).clickable { dash.navigate(ViewId.Profile) }) {
-                                Avatar(me?.name ?: session?.name, me?.avatarUrl, size = 32.dp)
-                            }
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Neema.colors.bg2),
+                if (!wide && !immersive) MobileHeader(
+                    title = view.label, connected = connected, dark = dark, bell = unreadBell,
+                    onMenu = { scope.launch { drawer.open() } },
+                    onBell = { showBell = true }, onTheme = { dash.setDark(!dark) },
                 )
             },
             bottomBar = {
-                if (!wide && !immersive) {
-                    val primary = items.take(4)
-                    val overflow = items.drop(4)
-                    NavigationBar(containerColor = Neema.colors.bg2, tonalElevation = 0.dp) {
-                        primary.forEach { item ->
-                            NavigationBarItem(
-                                selected = view == item.id,
-                                onClick = { dash.navigate(item.id) },
-                                icon = { BadgedBox(badge = { if (item.badge > 0) Badge { Text(badgeText(item.badge)) } }) { Icon(item.icon, item.id.label) } },
-                                label = { Text(item.id.label, fontSize = 11.sp, maxLines = 1) },
-                            )
-                        }
-                        if (overflow.isNotEmpty()) {
-                            NavigationBarItem(
-                                selected = overflow.any { it.id == view },
-                                onClick = { showMore = true },
-                                icon = { Icon(Icons.Outlined.MoreHoriz, "More") },
-                                label = { Text(if (overflow.any { it.id == view }) view.label else "More", fontSize = 11.sp, maxLines = 1) },
-                            )
-                        }
-                    }
-                }
+                if (!wide && !immersive) MobileBottomNav(items.take(4), view, moreActive = items.drop(4).any { it.id == view },
+                    onSelect = dash::navigate, onMore = { scope.launch { drawer.open() } })
             },
+            containerColor = MaterialTheme.colorScheme.background,
             contentWindowInsets = if (immersive) WindowInsets(0) else ScaffoldDefaults.contentWindowInsets,
         ) { pad ->
             Box(Modifier.fillMaxSize().padding(pad)) {
@@ -211,26 +150,38 @@ fun DashboardShell(dash: DashboardViewModel, widthClass: WindowWidthSizeClass) {
                     ViewId.Settings -> SettingsScreen(dash)
                     ViewId.Profile -> ProfileScreen(dash)
                 }
+                if (wide && !connected) OfflineDot(Modifier.align(Alignment.TopEnd).padding(10.dp))
                 // An incoming/active call takes over the content area.
                 CallStage(dash)
             }
         }
     }
 
-    if (showMore) {
-        ModalBottomSheet(onDismissRequest = { showMore = false }) {
-            Column(Modifier.padding(bottom = 24.dp)) {
-                items.drop(4).forEach { item ->
-                    ListItem(
-                        headlineContent = { Text(item.id.label, fontWeight = if (item.id == view) FontWeight.Bold else FontWeight.Normal) },
-                        leadingContent = { Icon(item.icon, null, tint = if (item.id == view) Neema.colors.gold else LocalContentColor.current) },
-                        trailingContent = { CountBadge(item.badge) },
-                        modifier = Modifier.clickable { dash.navigate(item.id); showMore = false },
-                    )
-                }
-            }
+    if (wide) {
+        Row(Modifier.fillMaxSize().background(Brand.Navy)) {
+            if (!immersive) Box(Modifier.statusBarsPadding().navigationBarsPadding()) { sidebar(collapsed) { collapsed = !collapsed } }
+            Box(Modifier.weight(1f)) { content() }
         }
+    } else {
+        ModalNavigationDrawer(
+            drawerState = drawer,
+            gesturesEnabled = !immersive || drawer.isOpen,
+            drawerContent = {
+                ModalDrawerSheet(
+                    drawerContainerColor = Brand.Navy, drawerShape = RoundedCornerShape(topEnd = 18.dp, bottomEnd = 18.dp),
+                    modifier = Modifier.width(260.dp),
+                ) {
+                    Box(Modifier.statusBarsPadding().navigationBarsPadding()) { sidebar(false, null) }
+                }
+            },
+        ) { content() }
     }
+
+    if (confirmSignOut) ConfirmDialog(
+        title = "Sign out?", message = "You'll stop receiving alerts and calls on this phone until you sign in again.",
+        confirmLabel = "Sign out", destructive = true,
+        onConfirm = { dash.logout() }, onDismiss = { confirmSignOut = false },
+    )
 
     if (showBell) {
         NotificationsSheet(
@@ -239,6 +190,7 @@ fun DashboardShell(dash: DashboardViewModel, widthClass: WindowWidthSizeClass) {
             onOpen = { n ->
                 dash.container.notifications.markRead(n.id)
                 showBell = false
+                scope.launch { drawer.close() }
                 when {
                     n.convKey != null -> dash.openConversationFor(n.convKey)
                     n.type == "order_update" -> dash.navigate(ViewId.Orders)
@@ -246,6 +198,83 @@ fun DashboardShell(dash: DashboardViewModel, widthClass: WindowWidthSizeClass) {
             },
             onClear = { dash.container.notifications.clear() },
         )
+    }
+}
+
+@Composable
+private fun OfflineDot(modifier: Modifier = Modifier) {
+    Row(
+        modifier.clip(RoundedCornerShape(50)).background(Color(0xFFFEF3C7)).padding(horizontal = 8.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(6.dp).clip(RoundedCornerShape(50)).background(Color(0xFFD97706)))
+        Text("  Reconnecting…", fontSize = 10.sp, color = Color(0xFF92400E), fontWeight = FontWeight.SemiBold)
+    }
+}
+
+/** components/ui/MobileNav.tsx MobileHeader, plus ☰ for the sidebar drawer. */
+@Composable
+internal fun MobileHeader(
+    title: String, connected: Boolean, dark: Boolean, bell: Int,
+    onMenu: () -> Unit, onBell: () -> Unit, onTheme: () -> Unit,
+) {
+    val c = Neema.colors
+    Column(Modifier.background(c.bg2).statusBarsPadding()) {
+        Row(Modifier.fillMaxWidth().height(56.dp).padding(start = 4.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onMenu) { Icon(WebIcons.Menu, "Menu", tint = c.muted, modifier = Modifier.size(20.dp)) }
+            NeemaLogo(28.dp)
+            Text("Neema", fontWeight = FontWeight.SemiBold, fontSize = 15.sp, modifier = Modifier.padding(start = 10.dp), color = c.text)
+            Text("  ·  ", color = c.muted)
+            Text(title, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            if (!connected) OfflineDot(Modifier.padding(end = 4.dp))
+            Box(Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).clickable(onClick = onBell), contentAlignment = Alignment.Center) {
+                Icon(WebIcons.Bell, "Notifications", tint = c.muted, modifier = Modifier.size(18.dp))
+                if (bell > 0) Box(
+                    Modifier.align(Alignment.TopEnd).padding(top = 5.dp, end = 5.dp).defaultMinSize(16.dp, 16.dp)
+                        .clip(RoundedCornerShape(50)).background(Color(0xFFEF4444)).padding(horizontal = 3.dp),
+                    contentAlignment = Alignment.Center,
+                ) { Text(if (bell > 9) "9+" else "$bell", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.SemiBold) }
+            }
+            Box(Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).clickable(onClick = onTheme), contentAlignment = Alignment.Center) {
+                Icon(if (dark) WebIcons.Sun else WebIcons.Moon, "Theme", tint = c.muted, modifier = Modifier.size(18.dp))
+            }
+        }
+        HorizontalDivider(color = c.hairline)
+    }
+}
+
+/** components/ui/MobileNav.tsx MobileBottomNav: amber active label with a top indicator. */
+@Composable
+internal fun MobileBottomNav(
+    items: List<NavItem>, view: ViewId, moreActive: Boolean,
+    onSelect: (ViewId) -> Unit, onMore: () -> Unit,
+) {
+    val c = Neema.colors
+    Column(Modifier.background(c.bg2)) {
+        HorizontalDivider(color = c.hairline)
+        Row(Modifier.fillMaxWidth().navigationBarsPadding().height(60.dp)) {
+            items.forEach { item ->
+                BottomTab(item.icon, item.id.label, item.badge, item.id == view, Modifier.weight(1f)) { onSelect(item.id) }
+            }
+            BottomTab(WebIcons.More, "More", 0, moreActive, Modifier.weight(1f), onClick = onMore)
+        }
+    }
+}
+
+@Composable
+private fun BottomTab(
+    icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, badge: Int, active: Boolean,
+    modifier: Modifier, onClick: () -> Unit,
+) {
+    val tint = if (active) Brand.Amber else Color(0xFF9CA3AF)
+    Box(modifier.fillMaxHeight().clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+        if (active) Box(Modifier.align(Alignment.TopCenter).fillMaxWidth(0.5f).height(2.dp).clip(RoundedCornerShape(bottomStart = 2.dp, bottomEnd = 2.dp)).background(Brand.Amber))
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(icon, label, tint = tint, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.height(4.dp))
+            Text(label, fontSize = 10.sp, fontWeight = FontWeight.Medium, color = tint, maxLines = 1)
+        }
+        if (badge > 0) Box(Modifier.align(Alignment.TopCenter).padding(top = 5.dp, start = 34.dp)) { AmberBadge(badge, small = true) }
     }
 }
 

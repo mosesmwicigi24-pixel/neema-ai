@@ -39,7 +39,7 @@ val LightNeema = NeemaColors(
     bg = Color(0xFFF3F9EC), bg2 = Color(0xFFFFFFFF), bg3 = Color(0xFFE6F3D8), bg4 = Color(0xFFCEE6B2),
     border = Color(0xFFB5DA8B), border2 = Color(0xFF9CCD65),
     gold = Color(0xFF589B31), gold2 = Color(0xFF427425), goldDim = Color(0x1A589B31),
-    text = Color(0xFF16270C), textDim = Color(0xFF699A32), textMid = Color(0xFF4F7425),
+    text = Color(0xFF1C2917), textDim = Color(0xFF699A32), textMid = Color(0xFF4F7425),
     green = Color(0xFF589B31), greenDim = Color(0x1A589B31),
     red = Color(0xFFC0392B), redDim = Color(0x1AC0392B),
     blue = Color(0xFF2A48A2), blueDim = Color(0x1A2A48A2),
@@ -67,6 +67,22 @@ val LocalNeemaColors = staticCompositionLocalOf { LightNeema }
 
 object Neema {
     val colors: NeemaColors @Composable get() = LocalNeemaColors.current
+}
+
+/**
+ * The shell's fixed brand colours (components/ui/Sidebar.tsx): a navy sidebar
+ * with amber for the logo, the active item and badges — the same in light and
+ * dark, exactly as on the web.
+ */
+object Brand {
+    val Navy = Color(0xFF0E1729)
+    val NavyBorder = Color(0xFF1E2A44)
+    val NavyHover = Color(0xFF1B2740)
+    val Amber = Color(0xFFF59E0B)
+    val TextLight = Color(0xFFF8FAFC)
+    val TextMuted = Color(0xFF94A3B8)
+    val Online = Color(0xFF22C55E)
+    val Moss = Color(0xFF589B31)
 }
 
 /** Brand channel colours (lib/channels.tsx). */
@@ -99,6 +115,7 @@ fun NeemaTheme(dark: Boolean, content: @Composable () -> Unit) {
     val scheme = if (dark) darkColorScheme(
         primary = c.gold, onPrimary = Color(0xFF04220F), primaryContainer = c.goldDim, onPrimaryContainer = c.gold2,
         secondary = c.blue, onSecondary = Color.White,
+        tertiary = Brand.Amber, onTertiary = Color.White,
         background = c.bg, onBackground = c.text, surface = c.bg2, onSurface = c.text,
         surfaceVariant = c.bg4, onSurfaceVariant = c.textMid, surfaceContainer = c.bg2,
         surfaceContainerHigh = c.bg4, surfaceContainerLow = c.bg3, surfaceContainerHighest = c.border,
@@ -106,6 +123,7 @@ fun NeemaTheme(dark: Boolean, content: @Composable () -> Unit) {
     ) else lightColorScheme(
         primary = c.gold, onPrimary = Color.White, primaryContainer = c.bg3, onPrimaryContainer = c.gold2,
         secondary = c.blue, onSecondary = Color.White,
+        tertiary = Brand.Amber, onTertiary = Color.White,
         background = c.surface, onBackground = c.text, surface = c.bg2, onSurface = c.text,
         surfaceVariant = c.bg3, onSurfaceVariant = c.textMid, surfaceContainer = Color.White,
         surfaceContainerHigh = Color(0xFFF1F5EC), surfaceContainerLow = c.surface, surfaceContainerHighest = c.bg3,

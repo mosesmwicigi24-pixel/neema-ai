@@ -3,6 +3,8 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
+    // JVM screenshot tests of the UI (./gradlew :app:recordPaparazziDebug) — no device needed.
+    alias(libs.plugins.paparazzi)
 }
 
 android {

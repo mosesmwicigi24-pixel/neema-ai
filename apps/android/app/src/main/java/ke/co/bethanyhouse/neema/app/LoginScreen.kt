@@ -10,7 +10,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -37,7 +36,16 @@ private val Moss = Color(0xFF589B31)
 @Composable
 fun LoginScreen(prefillEmail: String? = null, onSignedIn: () -> Unit) {
     val container = NeemaApplication.instance.container
-    var email by remember { mutableStateOf(prefillEmail ?: container.sessionStore.lastEmail ?: "") }
+    LoginContent(
+        initialEmail = prefillEmail ?: container.sessionStore.lastEmail ?: "",
+        login = { e, p -> container.auth.login(e, p) },
+        onSignedIn = onSignedIn,
+    )
+}
+
+@Composable
+internal fun LoginContent(initialEmail: String, login: suspend (String, String) -> Unit, onSignedIn: () -> Unit) {
+    var email by remember { mutableStateOf(initialEmail) }
     var password by remember { mutableStateOf("") }
     var show by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(false) }
@@ -50,7 +58,7 @@ fun LoginScreen(prefillEmail: String? = null, onSignedIn: () -> Unit) {
         focus.clearFocus()
         loading = true; error = ""
         scope.launch {
-            runCatching { container.auth.login(email.trim(), password) }
+            runCatching { login(email.trim(), password) }
                 .onSuccess { onSignedIn() }
                 .onFailure { e ->
                     error = if (e is AuthException) e.message ?: "" else "Something went wrong. Please try again."
@@ -69,11 +77,9 @@ fun LoginScreen(prefillEmail: String? = null, onSignedIn: () -> Unit) {
             verticalArrangement = Arrangement.Center,
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(Moss), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Outlined.Forum, null, tint = Color.White)
-                }
+                NeemaLogo(40.dp)
                 Spacer(Modifier.width(10.dp))
-                Text("Neema", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
+                Text("Neema AI", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
             }
             Spacer(Modifier.height(28.dp))
             Text("Manage conversations,\norders & customers", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold, lineHeight = 32.sp)
