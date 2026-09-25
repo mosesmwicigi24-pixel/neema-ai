@@ -68,18 +68,20 @@ fun AgentsScreen(dash: DashboardViewModel) {
     LaunchedEffect(agents) { vm.reconcile(agents) }
 
     val canRoles = dash.can(Perms.MANAGE_ROLES)
-    var tabChoice by rememberSaveable { mutableStateOf("agents") }
+    val preview = LocalTeamPreview.current
+    fun opened(kind: String): String? = preview.dialog?.takeIf { it.startsWith("$kind:") }?.substringAfter(':')
+    var tabChoice by rememberSaveable { mutableStateOf(preview.tab ?: "agents") }
     val tab = if (canRoles) tabChoice else "agents"
 
     // Which dialog is open, by id, so it survives rotation and resets on leaving the screen.
-    var createOpen by rememberSaveable { mutableStateOf(false) }
-    var editId by rememberSaveable { mutableStateOf<String?>(null) }
-    var pwId by rememberSaveable { mutableStateOf<String?>(null) }
-    var delId by rememberSaveable { mutableStateOf<String?>(null) }
-    var assignId by rememberSaveable { mutableStateOf<String?>(null) }
+    var createOpen by rememberSaveable { mutableStateOf(preview.dialog == "create") }
+    var editId by rememberSaveable { mutableStateOf(opened("edit")) }
+    var pwId by rememberSaveable { mutableStateOf(opened("pw")) }
+    var delId by rememberSaveable { mutableStateOf(opened("del")) }
+    var assignId by rememberSaveable { mutableStateOf(opened("assign")) }
     /** "create", a role id, or null. */
-    var roleModal by rememberSaveable { mutableStateOf<String?>(null) }
-    var delRoleId by rememberSaveable { mutableStateOf<String?>(null) }
+    var roleModal by rememberSaveable { mutableStateOf(opened("role")) }
+    var delRoleId by rememberSaveable { mutableStateOf(opened("delrole")) }
 
     fun agentById(id: String?) = id?.let { i -> agents.find { it.id == i } }
     fun roleById(id: String?) = id?.let { i -> roles.find { it.id == i } }
@@ -93,6 +95,7 @@ fun AgentsScreen(dash: DashboardViewModel) {
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.fillMaxSize(),
+            state = androidx.compose.foundation.lazy.grid.rememberLazyGridState(preview.scrollItem),
         ) {
             // Header
             item(span = { GridItemSpan(maxLineSpan) }) {
@@ -116,17 +119,26 @@ fun AgentsScreen(dash: DashboardViewModel) {
             // Tabs
             item(span = { GridItemSpan(maxLineSpan) }) {
                 val tabs = if (canRoles) listOf("agents", "roles") else listOf("agents")
-                TabRow(
-                    selectedTabIndex = tabs.indexOf(tab).coerceAtLeast(0),
-                    containerColor = Color.Transparent,
-                    contentColor = c.gold2,
-                ) {
-                    tabs.forEach { t ->
-                        Tab(
-                            selected = tab == t, onClick = { tabChoice = t },
-                            selectedContentColor = c.gold2, unselectedContentColor = c.textDim,
-                            text = { Text(if (t == "agents") "Agents (${agents.size})" else "Roles (${roles.size})", fontWeight = FontWeight.SemiBold) },
-                        )
+                // The web's tabs: left-aligned labels, a 2dp underline on the active one, over a hairline.
+                Box(Modifier.fillMaxWidth()) {
+                    HorizontalDivider(Modifier.align(Alignment.BottomStart), color = c.bg4)
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        tabs.forEach { t ->
+                            val sel = tab == t
+                            Column(
+                                Modifier.clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
+                                    .clickable { tabChoice = t }.width(IntrinsicSize.Max),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Text(
+                                    if (t == "agents") "Agents (${agents.size})" else "Roles (${roles.size})",
+                                    fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                                    color = if (sel) c.gold2 else c.textDim,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                                )
+                                Box(Modifier.fillMaxWidth().height(2.dp).background(if (sel) c.gold else Color.Transparent))
+                            }
+                        }
                     }
                 }
             }
@@ -239,6 +251,12 @@ fun AgentsScreen(dash: DashboardViewModel) {
     }
 }
 
+/** The web's pale greens (#9ccd65, #b5da8b) — legible stand-ins on the dark theme. */
+private val faint: Color @Composable get() = Neema.colors.let { if (it.isDark) it.muted else it.border2 }
+private val fainter: Color @Composable get() = Neema.colors.let { if (it.isDark) it.muted.copy(alpha = 0.8f) else it.border }
+/** Card borders: #cee6b2 by day, the theme hairline by night. */
+private val cardBorder: Color @Composable get() = Neema.colors.let { if (it.isDark) it.hairline else it.bg4 }
+
 private fun buildBold(pre: String, bold: String, post: String) = androidx.compose.ui.text.buildAnnotatedString {
     append(pre)
     pushStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold)); append(bold); pop()
@@ -266,7 +284,7 @@ private fun AgentCard(
     val rolePermCount = customRole?.permissions?.size ?: agent.rolePermissions?.size
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.bg2)
-            .border(1.dp, c.bg4, RoundedCornerShape(12.dp)).padding(14.dp),
+            .border(1.dp, cardBorder, RoundedCornerShape(12.dp)).padding(14.dp),
     ) {
         Row(verticalAlignment = Alignment.Top) {
             Box {
@@ -293,7 +311,7 @@ private fun AgentCard(
                 Text(agent.email, fontSize = 12.sp, color = c.textDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
                     "${agent.activeConvs} active · Joined ${if (agent.createdAt != null) Fmt.date(agent.createdAt) else "—"}",
-                    fontSize = 12.sp, color = c.border2,
+                    fontSize = 12.sp, color = faint,
                 )
                 Text(
                     if (available) "Online now" else "Last seen ${Fmt.timeAgo(agent.lastSeenAt).let { if (it == "—") "never" else it }}",
@@ -303,20 +321,20 @@ private fun AgentCard(
                     Text(
                         if (agent.customPermissions != null) "${agent.customPermissions.size} permissions (custom for this agent)"
                         else "$rolePermCount permissions assigned",
-                        fontSize = 11.sp, color = c.border,
+                        fontSize = 11.sp, color = fainter,
                     )
                 }
             }
         }
         Spacer(Modifier.height(10.dp))
-        HorizontalDivider(color = c.bg3)
+        HorizontalDivider(color = if (c.isDark) c.hairline else c.bg3)
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Available", fontSize = 12.sp, color = c.textDim)
             Spacer(Modifier.width(8.dp))
             Switch(checked = available, onCheckedChange = { onToggle() }, modifier = Modifier.scale(0.8f))
             Spacer(Modifier.weight(1f))
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                 TeamButton("Role", onRole, small = true,
                     leading = { Icon(Icons.Outlined.VerifiedUser, null, Modifier.size(14.dp)) })
                 TeamButton("Edit", onEdit, small = true)
@@ -335,7 +353,7 @@ private fun IconBtn(icon: androidx.compose.ui.graphics.vector.ImageVector, desc:
         else -> Color.Transparent to c.textDim
     }
     Box(
-        Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)).background(bg)
+        Modifier.size(34.dp).clip(RoundedCornerShape(8.dp)).background(bg)
             .border(1.dp, if (variant == BtnVariant.Danger) c.red.copy(alpha = 0.3f) else c.border, RoundedCornerShape(8.dp))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -360,7 +378,7 @@ private fun RoleCard(role: CustomRole, agentCount: Int, onEdit: () -> Unit, onDe
     val c = Neema.colors
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.bg2)
-            .border(1.dp, c.bg4, RoundedCornerShape(12.dp)).padding(14.dp),
+            .border(1.dp, cardBorder, RoundedCornerShape(12.dp)).padding(14.dp),
         verticalAlignment = Alignment.Top,
     ) {
         RoleSquare(role, 40)
@@ -384,13 +402,13 @@ private fun RoleCard(role: CustomRole, agentCount: Int, onEdit: () -> Unit, onDe
                         modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(c.bg3).padding(horizontal = 6.dp, vertical = 2.dp))
                 }
                 if (role.permissions.isEmpty()) {
-                    Text("No permissions assigned", fontSize = 10.sp, fontStyle = FontStyle.Italic, color = c.border2)
+                    Text("No permissions assigned", fontSize = 10.sp, fontStyle = FontStyle.Italic, color = faint)
                 }
             }
         }
         if (!role.protected) {
             Spacer(Modifier.width(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                 TeamButton("Edit", onEdit, small = true)
                 IconBtn(Icons.Outlined.DeleteOutline, "Delete role", BtnVariant.Danger, onDelete)
             }
@@ -452,7 +470,7 @@ private fun AssignRoleDialog(
             Row(
                 Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(12.dp))
                     .background(if (sel) c.bg else c.bg2)
-                    .border(if (sel) 2.dp else 1.dp, if (sel) hexColor(role.color) else c.bg3, RoundedCornerShape(12.dp))
+                    .border(if (sel) 2.dp else 1.dp, if (sel) hexColor(role.color) else if (c.isDark) c.hairline else c.bg3, RoundedCornerShape(12.dp))
                     .clickable {
                         roleId = role.id
                         // A fresh override starts from the chosen role's set.
@@ -469,7 +487,7 @@ private fun AssignRoleDialog(
                         if (role.protected) { Spacer(Modifier.width(6.dp)); ProtectedTag() }
                     }
                     if (role.description.isNotBlank()) Text(role.description, fontSize = 11.sp, color = c.textDim)
-                    Text("${role.permissions.size} permission${if (role.permissions.size != 1) "s" else ""}", fontSize = 11.sp, color = c.border2)
+                    Text("${role.permissions.size} permission${if (role.permissions.size != 1) "s" else ""}", fontSize = 11.sp, color = fainter)
                 }
                 if (sel) Icon(Icons.Default.Check, "Selected", tint = c.gold, modifier = Modifier.size(18.dp))
             }
@@ -477,7 +495,7 @@ private fun AssignRoleDialog(
         if (roles.isEmpty()) Text("No roles yet — create one on the Roles tab.", fontSize = 12.sp, color = c.muted)
 
         Spacer(Modifier.height(6.dp))
-        HorizontalDivider(color = c.bg3)
+        HorizontalDivider(color = if (c.isDark) c.hairline else c.bg3)
         Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Custom permissions for this agent", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = c.text)
@@ -500,10 +518,11 @@ private fun AssignRoleDialog(
 
 @Composable
 private fun CreateAgentDialog(saving: Boolean, onDismiss: () -> Unit, onCreate: (String, String, String, String) -> Unit) {
-    var name by rememberSaveable { mutableStateOf("") }
-    var email by rememberSaveable { mutableStateOf("") }
-    var password by rememberSaveable { mutableStateOf("") }
-    var roleId by rememberSaveable { mutableStateOf("agent") }
+    val typed = LocalTeamPreview.current.typed
+    var name by rememberSaveable { mutableStateOf(typed["name"] ?: "") }
+    var email by rememberSaveable { mutableStateOf(typed["email"] ?: "") }
+    var password by rememberSaveable { mutableStateOf(typed["password"] ?: "") }
+    var roleId by rememberSaveable { mutableStateOf(typed["role"] ?: "agent") }
     FormDialog(
         title = "Add Agent",
         onDismiss = onDismiss,
@@ -524,7 +543,7 @@ private fun CreateAgentDialog(saving: Boolean, onDismiss: () -> Unit, onCreate: 
         )
         Text(
             "Assign a detailed custom role after creating the agent using the Role button.",
-            fontSize = 11.sp, color = Neema.colors.border2, modifier = Modifier.padding(top = 4.dp),
+            fontSize = 11.sp, color = faint, modifier = Modifier.padding(top = 4.dp),
         )
     }
 }
@@ -550,8 +569,9 @@ private fun EditAgentDialog(agent: Agent, saving: Boolean, onDismiss: () -> Unit
 @Composable
 private fun ResetPasswordDialog(agent: Agent, saving: Boolean, onDismiss: () -> Unit, onSave: (String, String) -> Unit) {
     val c = Neema.colors
-    var password by rememberSaveable(agent.id) { mutableStateOf("") }
-    var confirm by rememberSaveable(agent.id) { mutableStateOf("") }
+    val typed = LocalTeamPreview.current.typed
+    var password by rememberSaveable(agent.id) { mutableStateOf(typed["password"] ?: "") }
+    var confirm by rememberSaveable(agent.id) { mutableStateOf(typed["confirm"] ?: "") }
     val mismatch = confirm.isNotEmpty() && password != confirm
     FormDialog(
         title = "Reset Password — ${agent.name}",

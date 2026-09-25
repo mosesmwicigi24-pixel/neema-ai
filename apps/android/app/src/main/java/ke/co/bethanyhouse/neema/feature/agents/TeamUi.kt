@@ -23,6 +23,22 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 
+/**
+ * Where the Team screen opens: a tab, a dialog ("create", "edit:<id>",
+ * "pw:<id>", "del:<id>", "assign:<id>", "role:create", "role:<id>",
+ * "delrole:<id>") and what is already typed in it. Only screenshot tests set
+ * this — a JVM render cannot tap its way into a dialog.
+ */
+data class TeamPreview(
+    val tab: String? = null,
+    val dialog: String? = null,
+    val typed: Map<String, String> = emptyMap(),
+    /** First grid item shown, to render further down the list. */
+    val scrollItem: Int = 0,
+)
+
+val LocalTeamPreview = staticCompositionLocalOf { TeamPreview() }
+
 /** SBtn variants from AgentsView.tsx. */
 enum class BtnVariant { Primary, Danger, Ghost, Default }
 
@@ -46,7 +62,8 @@ fun TeamButton(
     OutlinedButton(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier.heightIn(min = if (small) 32.dp else 40.dp),
+        // Small buttons sit in a row with 34dp icon buttons (the card footers), so pin their height.
+        modifier = if (small) modifier.height(34.dp) else modifier.heightIn(min = 40.dp),
         shape = RoundedCornerShape(8.dp),
         border = BorderStroke(1.dp, border),
         colors = ButtonDefaults.outlinedButtonColors(
@@ -83,7 +100,7 @@ fun LabeledInput(
             value = value,
             onValueChange = { v -> onChange(if (maxLength != null) v.take(maxLength) else v) },
             singleLine = true,
-            placeholder = placeholder?.let { { Text(it, fontSize = 13.sp) } },
+            placeholder = placeholder?.let { { Text(it, fontSize = 13.sp, color = Neema.colors.muted) } },
             visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
             keyboardOptions = KeyboardOptions(keyboardType = if (password) KeyboardType.Password else keyboardType),
             isError = isError,
