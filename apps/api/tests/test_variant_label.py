@@ -202,3 +202,40 @@ def test_an_attribute_that_repeats_the_products_name_says_only_what_is_left():
     assert variant_label("Preaching Gown", {"name": "", "attributes": {"Type": "PREACHING GOWN"}}) == "Preaching Gown"
     # the size still rides along
     assert variant_label("Preaching Gown", {"name": "BLACK", "attributes": {"Colour": "BLACK PREACHING GOWN", "Size": "L"}}) == "Preaching Gown — BLACK / Size L"
+
+
+def test_an_attribute_every_variant_shares_tells_nothing_apart():
+    """Owner, 2026-09-25 ("remove size attributes"): the ordination gowns and
+    the plain cassocks carry Size XS on every colour — a size that is the
+    same on every variant is not what tells them apart, so it is not said."""
+    from app.core.variants import shared_attributes
+    gown = {"name": "Ordination Gown", "variants": [
+        {"name": "Black", "attributes": {"Colour": "Black", "Size": "XS"}},
+        {"name": "White", "attributes": {"Colour": "White", "Size": "XS"}},
+        {"name": "Navy", "attributes": {"Colour": "Navy", "Size": "xs"}}]}
+    assert shared_attributes(gown["variants"]) == {"Size"}
+    label_variants([gown])
+    assert [v["label"] for v in gown["variants"]] == ["Ordination Gown — Black", "Ordination Gown — White", "Ordination Gown — Navy"]
+    # sizes that differ still ride along
+    shirt = {"name": "Straight Collar Shirt", "variants": [
+        {"name": "Navy Straight Collar Shirt", "attributes": {"Colour": "Navy", "Size": "S"}},
+        {"name": "Navy Straight Collar Shirt", "attributes": {"Colour": "Navy", "Size": "M"}}]}
+    label_variants([shirt])
+    assert [v["label"] for v in shirt["variants"]] == ["Straight Collar Shirt — Navy / Size S", "Straight Collar Shirt — Navy / Size M"]
+    # one variant: its attributes are all it has
+    one = {"name": "Straight Collar", "variants": [{"name": "Straight Collar", "attributes": {"Size": "8 inch"}}]}
+    label_variants([one])
+    assert one["variants"][0]["label"] == "Straight Collar — 8 inch"
+    # the same on the ones that carry it, absent on another: still nothing apart
+    mixed = {"name": "Cassock", "variants": [
+        {"name": "Black", "attributes": {"Size": "XS"}},
+        {"name": "White", "attributes": {"Size": "XS"}},
+        {"name": "Navy", "attributes": {}}]}
+    label_variants([mixed])
+    assert [v["label"] for v in mixed["variants"]] == ["Cassock — Black", "Cassock — White", "Cassock — Navy"]
+    # a shared size never hides the one thing that tells two rows apart
+    bells = {"name": "BELL", "variants": [
+        {"name": "", "attributes": {"Size": "S", "Finish": "Brass"}},
+        {"name": "", "attributes": {"Size": "M", "Finish": "Brass"}}]}
+    label_variants([bells])
+    assert [v["label"] for v in bells["variants"]] == ["BELL — Size S", "BELL — Size M"]
