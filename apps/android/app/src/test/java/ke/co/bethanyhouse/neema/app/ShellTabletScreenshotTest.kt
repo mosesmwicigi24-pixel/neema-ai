@@ -43,6 +43,20 @@ class ShellTabletScreenshotTest {
     @Test fun tabletCollapsedDarkOffline() = shell(collapsed = true, dark = true, connected = false)
     @Test fun tabletAccountMenu() = shell(menu = true)
     @Test fun tabletAccountMenuDark() = shell(menu = true, dark = true)
+    /** Brian (legacy read-only): no Settings in the nav, but the account menu still offers it, as the web's does. */
+    @Test
+    fun tabletAccountMenuReadonly() {
+        val fake = ke.co.bethanyhouse.neema.testing.FakeNeema.withFixtures()
+        val brian = """{"id":"${ke.co.bethanyhouse.neema.testing.Fixtures.AGENT3_ID}","name":"Brian Otieno","email":"brian@bethanyhouse.co.ke","role":"readonly","is_available":false,"is_superuser":false}"""
+        fake.on("GET", "/admin/me", body = brian)
+        fake.on("GET", "/admin/agents", body = "[$brian]")
+        val dash = ShellShots.live(paparazzi.context, fake = fake, role = "readonly", superuser = false)
+        dash.navigate(ViewId.Orders)
+        paparazzi.snapshot {
+            AppFrame { DashboardShell(dash, WindowWidthSizeClass.Expanded, initialAccountMenu = true) }
+        }
+    }
+
     @Test fun tabletBell() = shell(bell = true)
     @Test fun tabletBellCollapsedDark() = shell(bell = true, collapsed = true, dark = true)
     @Test fun tabletToast() = shell(toast = Toast("Settings saved", ToastType.Success))
@@ -64,6 +78,20 @@ class ShellTabletScreenshotTest {
     @Test
     fun tabletLogin() = paparazzi.snapshot {
         AppFrame { LoginContent(initialEmail = "", login = { _, _ -> }, onSignedIn = {}, year = 2026) }
+    }
+
+    /** 900dp wide — under Tailwind's lg (1024): the phone layout, no branding panel. */
+    @Test
+    fun tabletPortraitLogin() {
+        paparazzi.unsafeUpdateConfig(
+            deviceConfig = DeviceConfig.PIXEL_C.copy(
+                screenWidth = 1800, screenHeight = 2560,
+                orientation = com.android.resources.ScreenOrientation.PORTRAIT,
+            ),
+        )
+        paparazzi.snapshot {
+            AppFrame { LoginContent(initialEmail = "", login = { _, _ -> }, onSignedIn = {}, year = 2026) }
+        }
     }
 
     @Test

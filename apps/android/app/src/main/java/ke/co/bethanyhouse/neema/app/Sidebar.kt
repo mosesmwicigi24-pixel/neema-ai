@@ -15,6 +15,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
@@ -75,12 +76,17 @@ fun iconFor(v: ViewId): ImageVector = when (v) {
     ViewId.Profile -> WebIcons.Profile
 }
 
-/** The amber chat-bubble mark (sidebar header, mobile header, login). */
+/**
+ * The amber chat-bubble mark. The sidebar's is 32dp with 10dp corners and an
+ * amber glow; the mobile header's (MobileNav.tsx) is 28dp, 8dp corners, flat.
+ */
 @Composable
-fun NeemaLogo(size: Dp = 32.dp) {
+fun NeemaLogo(size: Dp = 32.dp, corner: Dp = 10.dp, glow: Boolean = true) {
+    val shape = RoundedCornerShape(corner)
     Box(
-        Modifier.size(size).shadow(6.dp, RoundedCornerShape(size * 0.31f), ambientColor = Brand.Amber, spotColor = Brand.Amber)
-            .clip(RoundedCornerShape(size * 0.31f)).background(Brand.Amber),
+        Modifier.size(size)
+            .then(if (glow) Modifier.shadow(6.dp, shape, ambientColor = Brand.Amber, spotColor = Brand.Amber) else Modifier)
+            .clip(shape).background(Brand.Amber),
         contentAlignment = Alignment.Center,
     ) {
         Icon(WebIcons.Logo, null, tint = Color.White, modifier = Modifier.size(size * 0.5f))
@@ -91,7 +97,7 @@ fun NeemaLogo(size: Dp = 32.dp) {
  * components/ui/Sidebar.tsx: navy rail, "Neema AI · Admin Portal", the bell,
  * amber active pill with badges, and the account menu in the footer.
  * [collapsed] shows the 60dp icon rail; [onToggleCollapse] null hides the toggle
- * (the phone drawer is always expanded).
+ * (the phone drawer is always expanded). Sizes are the web's, in dp.
  */
 @Composable
 fun NeemaSidebar(
@@ -106,11 +112,12 @@ fun NeemaSidebar(
     avatarUrl: String?,
     dark: Boolean,
     onToggleDark: () -> Unit,
-    canSettings: Boolean,
     bellCount: Int,
     onBell: () -> Unit,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
+    /** The bell's popup is open: the button keeps its highlighted look. */
+    bellOpen: Boolean = false,
     /** 208dp docked (the web's width); the phone drawer passes its own. */
     expandedWidth: Dp = 208.dp,
     /** Screenshot tests: start with the account menu open. */
@@ -130,19 +137,21 @@ fun NeemaSidebar(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 NeemaLogo()
-                BellButton(bellCount, onBell)
+                BellButton(bellCount, bellOpen, compact = true, onClick = onBell)
             }
         } else {
             Row(
                 Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 NeemaLogo()
-                Column(Modifier.weight(1f).padding(start = 8.dp)) {
-                    Text("Neema AI", color = Brand.TextLight, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, lineHeight = 14.sp, maxLines = 1, softWrap = false)
-                    Text("ADMIN PORTAL", color = Brand.TextMuted, fontWeight = FontWeight.Medium, fontSize = 10.sp, letterSpacing = 0.7.sp, maxLines = 1, softWrap = false, modifier = Modifier.padding(top = 2.dp))
+                Column(Modifier.weight(1f).padding(start = 6.dp)) {
+                    Text("Neema AI", color = Brand.TextLight, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, lineHeight = 13.sp, maxLines = 1, softWrap = false)
+                    // Like the web's (no overflow: hidden), the tag may run into the bell's empty margin rather than be cut.
+                    Text("ADMIN PORTAL", color = Brand.TextMuted, fontWeight = FontWeight.Medium, fontSize = 10.sp, lineHeight = 14.sp, letterSpacing = 0.8.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Visible, modifier = Modifier.padding(top = 2.dp))
                 }
-                BellButton(bellCount, onBell)
+                BellButton(bellCount, bellOpen, compact = false, onClick = onBell)
                 if (onToggleCollapse != null) NavyIconButton(WebIcons.Collapse, "Collapse sidebar", onToggleCollapse)
             }
         }
@@ -151,14 +160,18 @@ fun NeemaSidebar(
         // ── Nav ───────────────────────────────────────────────────────────
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(8.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             if (collapsed && onToggleCollapse != null) {
-                Box(Modifier.fillMaxWidth().padding(bottom = 6.dp), contentAlignment = Alignment.Center) {
-                    NavyIconButton(WebIcons.Expand, "Expand sidebar", onToggleCollapse)
-                }
+                // The web's full-width 36dp "Expand sidebar" button above the items.
+                Box(
+                    Modifier.fillMaxWidth().padding(bottom = 6.dp).height(36.dp).clip(RoundedCornerShape(10.dp))
+                        .clickable(onClick = onToggleCollapse),
+                    contentAlignment = Alignment.Center,
+                ) { Icon(WebIcons.Expand, "Expand sidebar", tint = Brand.TextMuted, modifier = Modifier.size(14.dp)) }
             }
-            items.forEach { item -> SidebarItem(item, item.id == view, collapsed) { onSelect(item.id) } }
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                items.forEach { item -> SidebarItem(item, item.id == view, collapsed) { onSelect(item.id) } }
+            }
         }
 
         // ── Footer: account ───────────────────────────────────────────────
@@ -166,17 +179,18 @@ fun NeemaSidebar(
         Column(Modifier.padding(8.dp)) {
             val card = @Composable {
                 AccountCard(
-                    userName, userEmail, userRole, avatarUrl, dark, onToggleDark, canSettings,
+                    userName, userEmail, userRole, avatarUrl, dark, onToggleDark,
                     onProfile = { menuOpen = false; onSelect(ViewId.Profile) },
                     onSettings = { menuOpen = false; onSelect(ViewId.Settings) },
                     onSignOut = { menuOpen = false; onSignOut() },
                 )
             }
-            // Expanded: the popup opens above the footer row, as wide as it.
-            AnimatedVisibility(menuOpen && !collapsed) { card() }
-            // Collapsed rail: it opens to the right, bottom-aligned with the avatar.
+            // Expanded: the popup opens above the footer row, as wide as it, 8dp clear.
+            AnimatedVisibility(menuOpen && !collapsed) { Box(Modifier.padding(bottom = 8.dp)) { card() } }
+            // Collapsed rail: it opens to the right (8dp past the button), bottom-aligned with the avatar.
             if (menuOpen && collapsed) {
-                val dx = with(LocalDensity.current) { 60.dp.roundToPx() }
+                // Anchored to this padded column's content (x = 8dp): 8 + 52 = the web's 60dp.
+                val dx = with(LocalDensity.current) { 52.dp.roundToPx() }
                 Popup(
                     alignment = Alignment.BottomStart, offset = IntOffset(dx, 0),
                     onDismissRequest = { menuOpen = false },
@@ -188,7 +202,7 @@ fun NeemaSidebar(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
                     .background(if (menuOpen) Brand.NavyHover else Color.Transparent)
                     .clickable { menuOpen = !menuOpen }
-                    .padding(horizontal = if (collapsed) 0.dp else 8.dp, vertical = 6.dp),
+                    .padding(horizontal = if (collapsed) 0.dp else 8.dp, vertical = if (collapsed) 4.dp else 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = if (collapsed) Arrangement.Center else Arrangement.Start,
             ) {
@@ -197,14 +211,20 @@ fun NeemaSidebar(
                     CompositionLocalProvider(LocalNeemaColors provides LightNeema) {
                         Avatar(userName.ifBlank { "User" }, avatarUrl, size = 32.dp)
                     }
-                    Box(Modifier.align(Alignment.BottomEnd).size(10.dp).clip(CircleShape).background(Brand.Navy).padding(2.dp).clip(CircleShape).background(Brand.Online))
+                    // 9dp online dot with a 2dp navy ring.
+                    Box(Modifier.align(Alignment.BottomEnd).size(9.dp).clip(CircleShape).background(Brand.Navy).padding(2.dp).clip(CircleShape).background(Brand.Online))
                 }
                 if (!collapsed) {
                     Column(Modifier.weight(1f).padding(start = 10.dp)) {
-                        Text(userName.ifBlank { "—" }, color = Brand.TextLight, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(userRole.replaceFirstChar { it.uppercase() }.ifBlank { userEmail }, color = Brand.TextMuted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(userName.ifBlank { "—" }, color = Brand.TextLight, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        // text-transform: capitalize — each word's first letter.
+                        Text(
+                            userRole.ifBlank { userEmail }.ifBlank { "—" }.split(" ").joinToString(" ") { w -> w.replaceFirstChar { it.uppercase() } },
+                            color = Brand.TextMuted, fontSize = 10.sp, lineHeight = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 1.dp),
+                        )
                     }
-                    Icon(WebIcons.ChevronUp, null, tint = Brand.TextMuted, modifier = Modifier.size(16.dp).rotate(chevron))
+                    Icon(WebIcons.ChevronUp, null, tint = Brand.TextMuted, modifier = Modifier.padding(start = 10.dp).size(14.dp).rotate(chevron))
                 }
             }
         }
@@ -215,7 +235,7 @@ fun NeemaSidebar(
 private fun SidebarItem(item: NavItem, active: Boolean, collapsed: Boolean, onClick: () -> Unit) {
     val fg = if (active) Color.White else Brand.TextMuted
     Box(
-        Modifier.fillMaxWidth().height(44.dp).clip(RoundedCornerShape(12.dp))
+        Modifier.fillMaxWidth().height(40.dp).clip(RoundedCornerShape(12.dp))
             .background(if (active) Brand.Amber else Color.Transparent)
             .clickable(onClick = onClick),
     ) {
@@ -226,11 +246,11 @@ private fun SidebarItem(item: NavItem, active: Boolean, collapsed: Boolean, onCl
         ) {
             Icon(item.icon, item.id.label, tint = fg, modifier = Modifier.size(20.dp))
             if (!collapsed) {
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(10.dp))
                 Text(
-                    item.id.label, color = fg, fontSize = 14.sp,
+                    item.id.label, color = fg, fontSize = 13.sp,
                     fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
-                    modifier = Modifier.weight(1f), maxLines = 1,
+                    modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
                 if (item.badge > 0) AmberBadge(item.badge, onActive = active)
             }
@@ -241,17 +261,27 @@ private fun SidebarItem(item: NavItem, active: Boolean, collapsed: Boolean, onCl
     }
 }
 
+/**
+ * The nav count (Sidebar.tsx / MobileNav.tsx): the full number, as the web
+ * prints it. 18dp/10sp beside a label; 14dp/8sp on the collapsed rail;
+ * [bottomNav] is the phone bar's 14dp/9sp.
+ */
 @Composable
-fun AmberBadge(n: Int, onActive: Boolean = false, small: Boolean = false, onNavy: Boolean = false) {
+fun AmberBadge(n: Int, onActive: Boolean = false, small: Boolean = false, onNavy: Boolean = false, bottomNav: Boolean = false) {
+    val min = if (small || bottomNav) 14.dp else 18.dp
     Box(
-        Modifier.defaultMinSize(minWidth = if (small) 14.dp else 18.dp, minHeight = if (small) 14.dp else 18.dp)
+        Modifier.defaultMinSize(minWidth = min, minHeight = min)
             .clip(RoundedCornerShape(50))
             // On the amber pill an amber badge would vanish: navy when collapsed, translucent white when expanded.
             .background(if (onNavy) Brand.Navy else if (onActive) Color.White.copy(alpha = 0.3f) else Brand.Amber)
-            .padding(horizontal = 4.dp),
+            .padding(horizontal = if (bottomNav) 2.dp else if (small) 0.dp else 4.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(if (n > 99) "99+" else "$n", color = Color.White, fontSize = if (small) 8.sp else 10.sp, fontWeight = FontWeight.Bold)
+        Text(
+            "$n", color = Color.White, fontWeight = FontWeight.Bold,
+            fontSize = if (bottomNav) 9.sp else if (small) 8.sp else 10.sp,
+            lineHeight = if (bottomNav) 9.sp else if (small) 8.sp else 10.sp,
+        )
     }
 }
 
@@ -260,49 +290,63 @@ private fun NavyIconButton(icon: ImageVector, label: String, onClick: () -> Unit
     Box(
         Modifier.size(28.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { Icon(icon, label, tint = Brand.TextMuted, modifier = Modifier.size(16.dp)) }
+    ) { Icon(icon, label, tint = Brand.TextMuted, modifier = Modifier.size(14.dp)) }
 }
 
+/**
+ * Notifications.tsx's bell: 36dp (40dp on the collapsed rail), 12dp corners,
+ * a sage 16dp glyph that turns moss on a pale tile while the popup is open,
+ * and a red count with a white ring sitting just off the top-right corner.
+ */
 @Composable
-private fun BellButton(count: Int, onClick: () -> Unit) {
-    Box(
-        Modifier.size(34.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(WebIcons.Bell, "Notifications", tint = Brand.TextMuted, modifier = Modifier.size(18.dp))
+private fun BellButton(count: Int, open: Boolean, compact: Boolean, onClick: () -> Unit) {
+    Box(Modifier.size(if (compact) 40.dp else 36.dp)) {
+        Box(
+            Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp))
+                .background(if (open) Color(0xFFF0F4EC) else Color.Transparent)
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(WebIcons.Bell, "Notifications", tint = if (open) Color(0xFF427425) else Color(0xFF8A9E80), modifier = Modifier.size(16.dp))
+        }
         if (count > 0) {
             Box(
-                Modifier.align(Alignment.TopEnd).padding(top = 1.dp, end = 1.dp)
+                Modifier.align(Alignment.TopEnd).offset(x = 2.dp, y = (-2).dp)
                     .defaultMinSize(minWidth = 16.dp, minHeight = 16.dp).clip(RoundedCornerShape(50))
-                    .background(Color.White).padding(2.dp).clip(RoundedCornerShape(50))
-                    .background(Color(0xFFEF4444)).padding(horizontal = 2.dp),
+                    .background(Color(0xFFEF4444)).border(2.dp, Color.White, RoundedCornerShape(50))
+                    .padding(horizontal = 4.dp),
                 contentAlignment = Alignment.Center,
-            ) { Text(if (count > 9) "9+" else "$count", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold) }
+            ) { Text(if (count > 9) "9+" else "$count", color = Color.White, fontSize = 9.sp, lineHeight = 9.sp, fontWeight = FontWeight.Bold) }
         }
     }
 }
 
-/** The account popup (Sidebar.tsx AccountPopup), shown inline above the footer. */
+/**
+ * The account popup (Sidebar.tsx AccountPopup) — white in both themes, as on
+ * the web. Settings is always offered, as there: the page itself decides what
+ * someone without manage_settings may do.
+ */
 @Composable
 private fun AccountCard(
     name: String, email: String, role: String, avatarUrl: String?,
-    dark: Boolean, onToggleDark: () -> Unit, canSettings: Boolean,
+    dark: Boolean, onToggleDark: () -> Unit,
     onProfile: () -> Unit, onSettings: () -> Unit, onSignOut: () -> Unit,
 ) {
     val hairline = Color(0xFFEDF0EA)
+    val shape = RoundedCornerShape(14.dp)
     Column(
-        Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(14.dp)).background(Color.White)
-            .border(1.dp, Color(0xFFE8EBE3), RoundedCornerShape(14.dp)),
+        Modifier.fillMaxWidth().shadow(12.dp, shape).clip(shape).background(Color.White)
+            .border(1.dp, Color(0xFFE8EBE3), shape),
     ) {
-        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             CompositionLocalProvider(LocalNeemaColors provides LightNeema) {
                 Avatar(name.ifBlank { "User" }, avatarUrl, size = 40.dp)
             }
             Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                Text(name.ifBlank { "—" }, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1C2917), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(email.ifBlank { "—" }, fontSize = 11.sp, color = Color(0xFF8A9E80), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (role.isNotBlank()) Text(
-                    role.uppercase(), fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.7.sp, color = Brand.Moss,
+                Text(name.ifBlank { "—" }, fontSize = 13.sp, lineHeight = 17.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1C2917), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(email.ifBlank { "—" }, fontSize = 11.sp, lineHeight = 15.sp, color = Color(0xFF8A9E80), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+                Text(
+                    role.uppercase(), fontSize = 9.sp, lineHeight = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.72.sp, color = Brand.Moss,
                     modifier = Modifier.padding(top = 6.dp).clip(RoundedCornerShape(50)).background(Color(0xFFF0F9EC))
                         .border(1.dp, Color(0xFFC5E7B1), RoundedCornerShape(50)).padding(horizontal = 8.dp, vertical = 2.dp),
                 )
@@ -311,34 +355,47 @@ private fun AccountCard(
         HorizontalDivider(color = hairline)
         Column(Modifier.padding(6.dp)) {
             MenuRow(WebIcons.Profile, "View Profile", onClick = onProfile)
-            if (canSettings) MenuRow(WebIcons.Settings, "Settings", onClick = onSettings)
+            MenuRow(WebIcons.Settings, "Settings", onClick = onSettings)
         }
         HorizontalDivider(color = hairline)
         Row(
             Modifier.fillMaxWidth().clickable(onClick = onToggleDark).padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(if (dark) WebIcons.Sun else WebIcons.Moon, null, tint = Color(0xFFA0AEC0), modifier = Modifier.size(15.dp))
-            Text(if (dark) "Light mode" else "Dark mode", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Color(0xFF4A5568), modifier = Modifier.weight(1f).padding(start = 8.dp))
-            Switch(
-                checked = dark, onCheckedChange = { onToggleDark() },
-                colors = SwitchDefaults.colors(checkedTrackColor = Brand.Moss, uncheckedTrackColor = Color(0xFFDDE4D6), uncheckedBorderColor = Color.Transparent, uncheckedThumbColor = Color.White),
-                modifier = Modifier.height(24.dp),
-            )
+            Icon(if (dark) WebIcons.Sun else WebIcons.Moon, null, tint = Color(0xFFA0AEC0), modifier = Modifier.size(14.dp))
+            Text(if (dark) "Light mode" else "Dark mode", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Color(0xFF4A5568), modifier = Modifier.weight(1f).padding(start = 8.dp))
+            ThemePill(dark, onToggleDark)
         }
         HorizontalDivider(color = hairline)
         Column(Modifier.padding(6.dp)) { MenuRow(WebIcons.Logout, "Sign out", danger = true, onClick = onSignOut) }
     }
 }
 
+/** The popup's 32×18 toggle: moss when dark, sage otherwise, a 14dp white knob. */
+@Composable
+private fun ThemePill(on: Boolean, onToggle: () -> Unit) {
+    val knob by animateDpAsState(if (on) 14.dp else 2.dp, label = "knob")
+    Box(
+        Modifier.size(32.dp, 18.dp).clip(RoundedCornerShape(50))
+            .background(if (on) Color(0xFF589B31) else Color(0xFFDDE4D6))
+            .clickable(onClick = onToggle),
+    ) {
+        Box(
+            Modifier.padding(start = knob, top = 2.dp).size(14.dp)
+                .shadow(1.5.dp, CircleShape).clip(CircleShape).background(Color.White),
+        )
+    }
+}
+
 @Composable
 private fun MenuRow(icon: ImageVector, label: String, danger: Boolean = false, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 10.dp),
+        Modifier.fillMaxWidth().heightIn(min = 36.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val c = if (danger) Color(0xFFEF4444) else Color(0xFF4A5568)
-        Icon(icon, null, tint = if (danger) c else Color(0xFF718096), modifier = Modifier.size(15.dp))
-        Text(label, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = c, modifier = Modifier.padding(start = 10.dp))
+        Icon(icon, null, tint = if (danger) c else Color(0xFF718096), modifier = Modifier.size(14.dp).alpha(0.65f))
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = c, modifier = Modifier.padding(start = 10.dp))
     }
 }

@@ -43,7 +43,7 @@ private fun toastLook(type: ToastType, dark: Boolean): ToastLook = when (type) {
 
 /**
  * The web's single toast: a tinted pill with a round ✓ / ! / ✕ badge.
- * Phones show it above the bottom nav, full width less 16dp gutters; wider
+ * Phones show it 96dp up (above the bottom nav), full width less 16dp gutters; wider
  * screens pin it top-right (min 288dp, max 384dp). The caller clears it
  * after 3.5 s.
  */
@@ -61,16 +61,16 @@ fun ToastView(toast: Toast, mobile: Boolean, modifier: Modifier = Modifier) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(20.dp).clip(CircleShape).background(look.dot), contentAlignment = Alignment.Center) {
-            Text(look.icon, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Text(look.icon, color = Color.White, fontSize = 12.sp, lineHeight = 12.sp, fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.width(8.dp))
-        Text(toast.message, color = look.text, fontSize = 14.sp, fontWeight = FontWeight.Medium, lineHeight = 19.sp)
+        Text(toast.message, color = look.text, fontSize = 14.sp, fontWeight = FontWeight.Medium, lineHeight = 20.sp)
     }
 }
 
 // ── Notification centre (components/ui/Notifications.tsx) ───────────────────
 
-private data class NotifLook(val emoji: String, val bg: Color, val fg: Color = Color.Unspecified)
+private data class NotifLook(val emoji: String, val bg: Color)
 
 /** META in Notifications.tsx, keyed by [NotificationCenter.kindOf]. */
 private fun notifLook(type: String, dark: Boolean): NotifLook {
@@ -79,7 +79,8 @@ private fun notifLook(type: String, dark: Boolean): NotifLook {
         "intercept" -> NotifLook("⚡", if (dark) Color(0x33D97706) else Color(0xFFFEF9EC))
         "new_message" -> NotifLook("💬", if (dark) Color(0x332563EB) else Color(0xFFEFF6FF))
         "order" -> NotifLook("📦", if (dark) Color(0x3316A34A) else Color(0xFFF0FDF4))
-        "transfer" -> NotifLook("⇄", if (dark) Color(0x337C3AED) else Color(0xFFF5F3FF), if (dark) Color(0xFFA78BFA) else Color(0xFF7C3AED))
+        // META's colours are never applied on the web: ⇄ is plain page text.
+        "transfer" -> NotifLook("⇄", if (dark) Color(0x337C3AED) else Color(0xFFF5F3FF))
         else -> NotifLook("ℹ️", if (dark) Color(0x3364748B) else Color(0xFFF8FAFC))
     }
 }
@@ -96,7 +97,7 @@ private fun panelColors(dark: Boolean) = if (dark) PanelColors(
 ) else PanelColors(
     bg = Color.White, divider = Color(0xFFEDF0EA), rowDivider = Color(0xFFF5F7F2),
     title = Color(0xFF1C2917), readTitle = Color(0xFF6B7E64), body = Color(0xFF8A9E80),
-    faint = Color(0xFFB5C9A8), unreadBg = Color(0xFFFAFEF7), dismiss = Color(0xFFC9D2C1), emptyTile = Color(0xFFF5F7F2),
+    faint = Color(0xFFB5C9A8), unreadBg = Color(0xFFFAFEF7), dismiss = Color(0xFFDDE4D6), emptyTile = Color(0xFFF5F7F2),
 )
 
 /**
@@ -129,12 +130,13 @@ fun NotificationsPanel(
                 Spacer(Modifier.width(8.dp))
                 Text(
                     "$unread", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                    modifier = Modifier.clip(RoundedCornerShape(50)).background(Color(0xFFEF4444)).padding(horizontal = 6.dp, vertical = 1.dp),
+                    lineHeight = 12.sp,
+                    modifier = Modifier.clip(RoundedCornerShape(50)).background(Color(0xFFEF4444)).padding(horizontal = 6.dp, vertical = 2.dp),
                 )
             }
             Spacer(Modifier.weight(1f))
             if (unread > 0) Text(
-                "Mark all read", color = if (dark) Color(0xFF84C13E) else Color(0xFF589B31), fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                "Mark all read", color = if (dark) Color(0xFF84C13E) else Color(0xFF589B31), fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = onMarkAllRead).padding(horizontal = 6.dp, vertical = 4.dp),
             )
         }
@@ -145,7 +147,7 @@ fun NotificationsPanel(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Box(Modifier.size(48.dp).clip(RoundedCornerShape(16.dp)).background(c.emptyTile), contentAlignment = Alignment.Center) {
-                    Text("🔔", fontSize = 22.sp)
+                    Text("🔔", fontSize = 24.sp)
                 }
                 Spacer(Modifier.height(12.dp))
                 Text("All caught up", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = c.title)
@@ -166,12 +168,12 @@ fun NotificationsPanel(
                             Box(
                                 Modifier.padding(top = 2.dp).size(32.dp).clip(RoundedCornerShape(12.dp)).background(look.bg),
                                 contentAlignment = Alignment.Center,
-                            ) { Text(look.emoji, fontSize = 14.sp, color = look.fg, fontWeight = FontWeight.Bold) }
+                            ) { Text(look.emoji, fontSize = 14.sp, color = c.title) }
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
                                 Row(verticalAlignment = Alignment.Top) {
                                     Text(
-                                        n.title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, lineHeight = 17.sp,
+                                        n.title, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, lineHeight = 15.sp,
                                         color = if (!n.read) c.title else c.readTitle, modifier = Modifier.weight(1f),
                                     )
                                     Spacer(Modifier.width(8.dp))
@@ -181,7 +183,7 @@ fun NotificationsPanel(
                                     )
                                 }
                                 if (n.body.isNotBlank()) Text(
-                                    n.body, fontSize = 12.sp, lineHeight = 17.sp, color = c.body,
+                                    n.body, fontSize = 11.sp, lineHeight = 18.sp, color = c.body,
                                     maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp),
                                 )
                             }
@@ -196,15 +198,15 @@ fun NotificationsPanel(
             }
             HorizontalDivider(color = c.divider)
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
                     "${items.size} notification${if (items.size != 1) "s" else ""}",
-                    fontSize = 11.sp, color = c.faint, modifier = Modifier.weight(1f),
+                    fontSize = 10.sp, color = c.faint, modifier = Modifier.weight(1f),
                 )
                 Text(
-                    "Clear all", fontSize = 11.sp, color = c.faint,
+                    "Clear all", fontSize = 10.sp, color = c.faint,
                     modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = onClear).padding(horizontal = 6.dp, vertical = 6.dp),
                 )
             }
