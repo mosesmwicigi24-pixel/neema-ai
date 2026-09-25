@@ -251,6 +251,24 @@ class DashboardViewModelTest {
     }
 
     @Test
+    fun aNextAuthSessionsRoleComesFromAdminMe() {
+        // A NextAuth sign-in (route.ts) carries no role: the session starts as "agent".
+        val c = ke.co.bethanyhouse.neema.testing.testContainer(paparazzi.context, FakeNeema.withFixtures(), role = "agent", superuser = false)
+        c.sessionStore.save(c.sessionStore.current!!.copy(mode = "nextauth", refreshToken = null, name = "moses@bethanyhouse.co.ke"))
+        val dash = DashboardViewModel(c)
+        assertEquals("admin", dash.session.value!!.role)
+        assertTrue(dash.session.value!!.isSuperuser)
+        assertEquals("Moses Mwicigi", dash.session.value!!.name)
+    }
+
+    @Test
+    fun aDirectSessionKeepsTheRoleItsTokensCameWith() {
+        val dash = dashboard(paparazzi.context, FakeNeema.withFixtures(), role = "agent", superuser = false)
+        assertEquals("agent", dash.session.value!!.role)
+        assertFalse(dash.session.value!!.isSuperuser)
+    }
+
+    @Test
     fun aRescued401IsInvisible() {
         val fake = FakeNeema.withFixtures()
         var first = true

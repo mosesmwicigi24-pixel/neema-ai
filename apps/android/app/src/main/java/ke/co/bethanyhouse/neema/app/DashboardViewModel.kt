@@ -180,7 +180,13 @@ class DashboardViewModel(
                 .onSuccess {
                     _me.value = it
                     container.snapshots.write(scope, "me", Agent.serializer(), it)
-                    container.auth.updateProfile(it.name, it.email)
+                    // A NextAuth sign-in (route.ts) carries no role: /admin/me is where it
+                    // comes from. FastAPI's token response already carries the real one.
+                    val nextAuth = session.value?.mode == "nextauth"
+                    container.auth.updateProfile(
+                        it.name, it.email,
+                        role = it.role.takeIf { nextAuth }, isSuperuser = it.isSuperuser.takeIf { nextAuth },
+                    )
                 }
                 .onFailure { if (attempt < 3) { delay(attempt * 500L); refetchMe(attempt + 1) } }
         }

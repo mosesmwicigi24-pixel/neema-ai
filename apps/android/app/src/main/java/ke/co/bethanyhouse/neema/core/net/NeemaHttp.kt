@@ -7,7 +7,11 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.serializer
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
@@ -23,15 +27,25 @@ import java.util.concurrent.TimeUnit
 /** Thrown for any non-2xx answer; [status] is the HTTP code (0 = network). */
 class ApiException(val status: Int, val method: String, val path: String, val body: String) :
     IOException("$method $path → $status: $body") {
-    /** The server's `detail` string when it sent one (FastAPI convention). */
+    /**
+     * The server's `detail` when it sent one (FastAPI convention): a plain
+     * string from `HTTPException(detail=…)`, or — for a request pydantic
+     * rejected (422) — a list of `{loc, msg, type}` errors, read as their
+     * messages. Anything else (a proxy's HTML page, "Internal Server Error")
+     * is shown trimmed.
+     */
     val detail: String
         get() = runCatching {
-            NeemaJson.parseToJsonElement(body).let { el ->
-                (el as? kotlinx.serialization.json.JsonObject)?.get("detail")?.let { d ->
-                    (d as? kotlinx.serialization.json.JsonPrimitive)?.content ?: d.toString()
-                }
+            when (val d = (NeemaJson.parseToJsonElement(body) as? JsonObject)?.get("detail")) {
+                null, is JsonNull -> null
+                is JsonPrimitive -> d.content
+                is JsonArray -> d.mapNotNull { e ->
+                    ((e as? JsonObject)?.get("msg") as? JsonPrimitive)?.content ?: (e as? JsonPrimitive)?.content
+                }.joinToString("; ").ifEmpty { null }
+                is JsonObject -> (d["message"] as? JsonPrimitive)?.content
+                    ?: (d["error"] as? JsonPrimitive)?.content ?: d.toString()
             }
-        }.getOrNull() ?: body.take(200)
+        }.getOrNull() ?: body.trim().take(200)
 }
 
 val NeemaJson: Json = Json {
@@ -100,7 +114,10 @@ class NeemaHttp(
             val c = if (upload) uploadClient else client
             val used = tokens.validAccessToken()
             var res = execute(c, build(used), method, path)
-            if (res.code == 401) {
+            // FastAPI 0.115's HTTPBearer answers a request with NO token 403
+            // "Not authenticated", not 401. That only happens once the token ran
+            // out and could not be refreshed: the same dead session.
+            if (res.code == 401 || (res.code == 403 && used == null)) {
                 res.close()
                 tokens.onRejected(used)
                 // One rescue attempt: the token may have expired between the
@@ -148,8 +165,13 @@ class NeemaHttp(
 
     inline fun <reified T> decode(text: String): T {
         if (T::class == Unit::class) return Unit as T
-        val src = text.ifBlank { "null" }
-        return NeemaJson.decodeFromString(serializer<T>(), src)
+        if (text.isNotBlank()) return NeemaJson.decodeFromString(serializer<T>(), text)
+        // An empty 2xx (a 204, or a handler that returned None) is a success:
+        // read it as null, else as an empty object / list, never as a failure.
+        val ser = serializer<T>()
+        return runCatching { NeemaJson.decodeFromString(ser, "null") }
+            .recoverCatching { NeemaJson.decodeFromString(ser, "{}") }
+            .getOrElse { NeemaJson.decodeFromString(ser, "[]") }
     }
 }
 

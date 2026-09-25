@@ -2,8 +2,17 @@ package ke.co.bethanyhouse.neema.core.model
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.JsonTransformingSerializer
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 // Wire models: a 1:1 port of the interfaces in apps/web/src/lib/api.ts and
 // apps/web/src/types/index.ts. Every field the web reads is here; unknown
@@ -254,7 +263,7 @@ data class CatalogVariant(
     val name: String? = null,
     /** "<product> — <what tells it apart>" */
     val label: String? = null,
-    val attributes: Map<String, String> = emptyMap(),
+    @Serializable(with = VariantAttributesSerializer::class) val attributes: Map<String, String> = emptyMap(),
     @SerialName("price_kes") val priceKes: Double? = null,
     @SerialName("price_usd") val priceUsd: Double? = null,
 )
@@ -328,10 +337,63 @@ data class PriceAudit(
 data class OrderItem(
     val name: String = "",
     val qty: Double = 0.0,
+    /** Unit price. */
     val unit: Double = 0.0,
+    /** Line total. */
     val total: Double = 0.0,
     val sku: String? = null,
 )
+
+/**
+ * `order_events.items` is free-form JSONB, and two writers disagree on its
+ * shape. Orders Neema places itself (agent/tools.py confirm_order → the cart
+ * lines of agent/tools.py add_to_cart) store
+ * `{hub_product_id, name, sku, qty, unit_price, price_usd, prices, …}` — no
+ * `unit` and no `total`; the hub bridge (routers/hub_bridge.py, items:
+ * list[Any]) stores whatever it is sent, historically `{name, qty, unit,
+ * total}`. The web reads only `unit`/`total`, so every order Neema placed
+ * showed a blank price. Here each line is normalised before decoding: the
+ * unit price comes from `unit`, else `unit_price`, else `price`; the quantity
+ * from `qty`, else `quantity`; the total from `total`, else qty × unit.
+ * Anything that isn't an object is dropped rather than failing the list.
+ */
+object OrderItemsSerializer : JsonTransformingSerializer<List<OrderItem>>(ListSerializer(OrderItem.serializer())) {
+    private fun num(e: JsonElement?): Double? = (e as? JsonPrimitive)?.let { p ->
+        if (p is JsonNull) null else p.content.trim().toDoubleOrNull()
+    }
+
+    override fun transformDeserialize(element: JsonElement): JsonElement {
+        val rows = element as? JsonArray ?: return JsonArray(emptyList())
+        return JsonArray(rows.mapNotNull { row ->
+            val o = row as? JsonObject ?: return@mapNotNull null
+            val qty = num(o["qty"]) ?: num(o["quantity"]) ?: 0.0
+            val unit = num(o["unit"]) ?: num(o["unit_price"]) ?: num(o["price"]) ?: 0.0
+            val total = num(o["total"]) ?: (qty * unit)
+            buildJsonObject {
+                put("name", (o["name"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content ?: "")
+                put("qty", qty); put("unit", unit); put("total", total)
+                (o["sku"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content?.let { put("sku", it) }
+            }
+        })
+    }
+}
+
+/**
+ * Variant attributes come from the hub as `{"Size": "S", "Colour": "Gold"}`,
+ * but a PHP empty map arrives as `[]`, and a value can be a number or null.
+ * Read them as strings, dropping nulls; anything but an object is no attributes.
+ */
+object VariantAttributesSerializer : JsonTransformingSerializer<Map<String, String>>(
+    MapSerializer(String.serializer(), String.serializer()),
+) {
+    override fun transformDeserialize(element: JsonElement): JsonElement {
+        val o = element as? JsonObject ?: return JsonObject(emptyMap())
+        return JsonObject(o.mapNotNull { (k, v) ->
+            val p = v as? JsonPrimitive ?: return@mapNotNull null
+            if (p is JsonNull) null else k to JsonPrimitive(p.content)
+        }.toMap())
+    }
+}
 
 @Serializable
 data class Order(
@@ -339,7 +401,7 @@ data class Order(
     @SerialName("wa_id") val waId: String = "",
     @SerialName("session_id") val sessionId: String? = null,
     @SerialName("event_type") val eventType: String? = null,
-    val items: List<OrderItem> = emptyList(),
+    @Serializable(with = OrderItemsSerializer::class) val items: List<OrderItem> = emptyList(),
     val subtotal: Double = 0.0,
     val currency: String = "KES",
     /** Raw: "open" | "pending" | "confirmed" | "delivered" | "cancelled" */

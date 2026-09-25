@@ -12,9 +12,18 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import android.content.ContentResolver
+import android.net.Uri
+import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okio.BufferedSink
+import okio.source
+import java.io.File
+import java.io.IOException
+import java.io.InputStream
 import java.net.URLEncoder
 
 private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
@@ -23,8 +32,53 @@ private fun query(vararg pairs: Pair<String, String?>): String =
         .joinToString("&") { "${it.first}=${enc(it.second!!)}" }
         .let { if (it.isEmpty()) "" else "?$it" }
 
-/** A binary part for multipart uploads (file picker / recorder output). */
-class UploadFile(val bytes: ByteArray, val filename: String, val mimeType: String)
+/**
+ * A binary part for multipart uploads (file picker / recorder output).
+ *
+ * Either bytes already in memory (a re-encoded photo), or — through [of] —
+ * a file or content Uri that is STREAMED into the request as it is written,
+ * so a 150 MB video or an hour-long call recording never sits whole in
+ * memory. A streamed part re-opens its source on every write, so the one
+ * retry [NeemaHttp] makes after a token refresh sends it again intact.
+ */
+class UploadFile private constructor(
+    /** The in-memory content, or null for a streamed part. */
+    val bytes: ByteArray?,
+    val filename: String,
+    val mimeType: String,
+    /** Bytes that will be sent, or -1 when the source can't say in advance. */
+    val length: Long,
+    private val open: (() -> InputStream)?,
+) {
+    constructor(bytes: ByteArray, filename: String, mimeType: String) :
+        this(bytes, filename, mimeType, bytes.size.toLong(), null)
+
+    /** The multipart body for this part. */
+    fun requestBody(): RequestBody {
+        val type = mimeType.toMediaTypeOrNull()
+        bytes?.let { return it.toRequestBody(type) }
+        val source = open!!
+        return object : RequestBody() {
+            override fun contentType(): MediaType? = type
+            override fun contentLength(): Long = length
+            override fun writeTo(sink: BufferedSink) {
+                source().source().use { sink.writeAll(it) }
+            }
+        }
+    }
+
+    companion object {
+        /** Stream [file] from disk. */
+        fun of(file: File, filename: String = file.name, mimeType: String): UploadFile =
+            UploadFile(null, filename, mimeType, file.length(), { file.inputStream() })
+
+        /** Stream a picked document (`content://…`) through the content resolver. */
+        fun of(resolver: ContentResolver, uri: Uri, filename: String, mimeType: String, length: Long = -1): UploadFile =
+            UploadFile(null, filename, mimeType, if (length > 0) length else -1, {
+                resolver.openInputStream(uri) ?: throw IOException("Can't read the file")
+            })
+    }
+}
 
 /** The inbox's server-side filters. Mirrors GET /admin/conversations. */
 data class InboxQuery(
@@ -174,7 +228,7 @@ class NeemaApi(val http: NeemaHttp) {
         /** Upload a file from the device and send it to the customer. */
         suspend fun uploadMedia(convId: String, file: UploadFile, caption: String? = null): Message {
             val parts = MultipartBody.Builder().setType(MultipartBody.FORM)
-                .addFormDataPart("file", file.filename, file.bytes.toRequestBody(file.mimeType.toMediaTypeOrNull()))
+                .addFormDataPart("file", file.filename, file.requestBody())
                 .apply { if (!caption.isNullOrEmpty()) addFormDataPart("caption", caption) }
                 .build()
             return http.multipart("/admin/conversations/$convId/upload-media", parts)
@@ -250,10 +304,10 @@ class NeemaApi(val http: NeemaHttp) {
         suspend fun transcript(callId: String): CallTranscript = http.get("/admin/calls/${enc(callId)}/transcript")
         suspend fun transcribe(callId: String): TranscribeResponse =
             http.post("/admin/calls/${enc(callId)}/transcribe", JsonObject(emptyMap()))
-        /** Upload the recorded call audio (both sides mixed) on hangup. */
+        /** Upload the recorded call audio (both sides mixed) on hangup — pass [UploadFile.of] a File to stream it. */
         suspend fun uploadRecording(callId: String, file: UploadFile): RecordingResponse {
             val parts = MultipartBody.Builder().setType(MultipartBody.FORM)
-                .addFormDataPart("file", file.filename, file.bytes.toRequestBody(file.mimeType.toMediaTypeOrNull()))
+                .addFormDataPart("file", file.filename, file.requestBody())
                 .build()
             return http.multipart("/admin/calls/${enc(callId)}/recording", parts)
         }
