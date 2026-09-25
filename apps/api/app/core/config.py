@@ -275,6 +275,11 @@ class Settings(BaseSettings):
     # gate to WhatsApp, Chat, Messenger, Facebook"): the rules always; this
     # switch is the model reviewer for private chats. Off = rules only.
     reply_review: bool = True
+    # WE SELL CHURCH GOODS ONLY (owner, 2026-09-25): an ask for goods we do
+    # not sell is declined in one line and the thread is paused for these
+    # hours (agent/domain).
+    church_goods_guard: bool = True
+    offdomain_pause_hours: int = 12
     # ── Daily AI spend ceiling (services/ai_budget) — the cost-surprise breaker.
     # Metered per UTC day. Past the soft budget, main-model turns downgrade to
     # tier2_model_light; past the hard stop, agent turns refuse before buying a
