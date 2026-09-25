@@ -39,6 +39,10 @@ import ke.co.bethanyhouse.neema.feature.overview.OverviewScreen
 import ke.co.bethanyhouse.neema.feature.profile.ProfileScreen
 import ke.co.bethanyhouse.neema.feature.reports.ReportsScreen
 import ke.co.bethanyhouse.neema.feature.settings.SettingsScreen
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.unit.Dp
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -49,7 +53,16 @@ import kotlinx.coroutines.launch
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DashboardShell(dash: DashboardViewModel, widthClass: WindowWidthSizeClass) {
+fun DashboardShell(
+    dash: DashboardViewModel,
+    widthClass: WindowWidthSizeClass,
+    /** Screenshot tests: open the phone drawer / the bell on first frame. */
+    initialDrawerOpen: Boolean = false,
+    initialBellOpen: Boolean = false,
+    initialToast: Toast? = null,
+    initialAccountMenu: Boolean = false,
+    initialCollapsed: Boolean = false,
+) {
     val view by dash.view.collectAsStateWithLifecycle()
     val summary by dash.inboxSummary.collectAsStateWithLifecycle()
     val orders by dash.orders.collectAsStateWithLifecycle()
@@ -62,66 +75,68 @@ fun DashboardShell(dash: DashboardViewModel, widthClass: WindowWidthSizeClass) {
     val connected by dash.container.socket.connected.collectAsStateWithLifecycle()
 
     // Permissions resolve once /me and the team list land; re-derive the nav then.
-    val items = remember(me, agents, summary, orders) {
-        val humanConvs = summary?.human ?: 0
-        val pendingOrders = orders.count { it.status == "pending" }
-        buildList {
-            add(NavItem(ViewId.Conversations, iconFor(ViewId.Conversations), humanConvs))
-            add(NavItem(ViewId.Calls, iconFor(ViewId.Calls)))
-            add(NavItem(ViewId.Orders, iconFor(ViewId.Orders), pendingOrders))
-            if (dash.can(Perms.VIEW_REPORTS)) add(NavItem(ViewId.Reports, iconFor(ViewId.Reports)))
-            if (dash.can(Perms.VIEW_LEADS)) {
-                add(NavItem(ViewId.Deals, iconFor(ViewId.Deals)))
-                add(NavItem(ViewId.Leads, iconFor(ViewId.Leads)))
-            }
-            if (dash.can(Perms.VIEW_ANALYTICS)) add(NavItem(ViewId.Overview, iconFor(ViewId.Overview)))
-            if (dash.can(Perms.VIEW_CATALOG)) add(NavItem(ViewId.Catalog, iconFor(ViewId.Catalog)))
-            if (dash.can(Perms.MANAGE_AGENTS)) add(NavItem(ViewId.Agents, iconFor(ViewId.Agents)))
-            if (dash.can(Perms.MANAGE_SETTINGS)) add(NavItem(ViewId.Settings, iconFor(ViewId.Settings)))
-            add(NavItem(ViewId.Profile, iconFor(ViewId.Profile)))
-        }
-    }
-    val canSettings = remember(me, agents) { dash.can(Perms.MANAGE_SETTINGS) }
+    val items = remember(me, agents, summary, orders, session) { dash.navItems() }
+    val canSettings = remember(me, agents, session) { dash.can(Perms.MANAGE_SETTINGS) }
 
-    var showBell by remember { mutableStateOf(false) }
+    var showBell by remember { mutableStateOf(initialBellOpen) }
     var confirmSignOut by remember { mutableStateOf(false) }
-    var collapsed by rememberSaveable { mutableStateOf(false) }
+    var collapsed by rememberSaveable { mutableStateOf(initialCollapsed) }
     val unreadBell = notifications.count { !it.read }
     val wide = widthClass != WindowWidthSizeClass.Compact
-    val drawer = rememberDrawerState(DrawerValue.Closed)
+    val drawer = rememberDrawerState(if (initialDrawerOpen) DrawerValue.Open else DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
     BackHandler(enabled = drawer.isOpen) { scope.launch { drawer.close() } }
+    BackHandler(enabled = showBell && wide) { showBell = false }
     // Back from any view returns to the inbox before leaving the app.
     BackHandler(enabled = !drawer.isOpen && view != ViewId.Conversations && !immersive) { dash.navigate(ViewId.Conversations) }
 
-    val snackbar = remember { SnackbarHostState() }
-    LaunchedEffect(Unit) {
-        dash.toasts.collect { t ->
-            snackbar.currentSnackbarData?.dismiss()
-            snackbar.showSnackbar(t.message, duration = SnackbarDuration.Short)
+    // One toast at a time, replaced by the next, gone after 3.5 s (page.tsx showToast).
+    var toast by remember { mutableStateOf(initialToast) }
+    LaunchedEffect(Unit) { dash.toasts.collect { toast = it } }
+    LaunchedEffect(toast) { if (toast != null && initialToast == null) { delay(3_500); toast = null } }
+
+    val openNotification: (AppNotification) -> Unit = { n ->
+        dash.container.notifications.markRead(n.id)
+        // The web only marks the row read; where the alert names a customer
+        // (or an order) the app also takes the agent there.
+        val target = n.convKey != null || n.type == "order_update"
+        if (target) {
+            showBell = false
+            scope.launch { drawer.close() }
+            if (n.convKey != null) dash.openConversationFor(n.convKey) else dash.navigate(ViewId.Orders)
         }
     }
+    val panel = @Composable { modifier: Modifier, maxList: Dp ->
+        NotificationsPanel(
+            items = notifications,
+            onOpen = openNotification,
+            onMarkAllRead = { dash.container.notifications.markAllRead() },
+            onDismissItem = { dash.container.notifications.dismiss(it) },
+            onClear = { dash.container.notifications.clear() },
+            modifier = modifier, listMaxHeight = maxList,
+        )
+    }
 
-    val sidebar = @Composable { isCollapsed: Boolean, onToggle: (() -> Unit)? ->
+    val sidebar = @Composable { isCollapsed: Boolean, onToggle: (() -> Unit)?, width: Dp ->
         NeemaSidebar(
             items = items, view = view,
             onSelect = { dash.navigate(it); scope.launch { drawer.close() } },
             collapsed = isCollapsed, onToggleCollapse = onToggle,
-            userName = me?.name ?: session?.name.orEmpty(),
-            userEmail = me?.email ?: session?.email.orEmpty(),
+            userName = me?.name?.ifBlank { null } ?: session?.name.orEmpty(),
+            userEmail = me?.email?.ifBlank { null } ?: session?.email.orEmpty(),
             userRole = session?.role ?: me?.role.orEmpty(),
             avatarUrl = me?.avatarUrl,
             dark = dark, onToggleDark = { dash.setDark(!dark) },
             canSettings = canSettings,
-            bellCount = unreadBell, onBell = { showBell = true },
+            bellCount = unreadBell, onBell = { showBell = !showBell },
             onSignOut = { confirmSignOut = true },
+            expandedWidth = width, initialMenuOpen = initialAccountMenu,
         )
     }
 
     val content = @Composable {
         Scaffold(
-            snackbarHost = { SnackbarHost(snackbar) },
             topBar = {
                 if (!wide && !immersive) MobileHeader(
                     title = view.label, connected = connected, dark = dark, bell = unreadBell,
@@ -157,24 +172,47 @@ fun DashboardShell(dash: DashboardViewModel, widthClass: WindowWidthSizeClass) {
         }
     }
 
-    if (wide) {
-        Row(Modifier.fillMaxSize().background(Brand.Navy)) {
-            if (!immersive) Box(Modifier.statusBarsPadding().navigationBarsPadding()) { sidebar(collapsed) { collapsed = !collapsed } }
-            Box(Modifier.weight(1f)) { content() }
+    Box(Modifier.fillMaxSize()) {
+        if (wide) {
+            val railWidth = if (collapsed) 60.dp else 208.dp
+            Row(Modifier.fillMaxSize().background(Brand.Navy)) {
+                if (!immersive) Box(Modifier.statusBarsPadding().navigationBarsPadding()) { sidebar(collapsed, { collapsed = !collapsed }, 208.dp) }
+                Box(Modifier.weight(1f)) { content() }
+            }
+            // The web's bell popup: 316dp, beside the rail, closes on an outside tap.
+            if (showBell) {
+                Box(Modifier.fillMaxSize().clickable(interactionSource = null, indication = null) { showBell = false })
+                Box(
+                    Modifier.statusBarsPadding()
+                        .padding(start = if (collapsed) railWidth + 8.dp else 132.dp, top = if (collapsed) 50.dp else 62.dp)
+                        .width(316.dp)
+                        .shadow(16.dp, RoundedCornerShape(14.dp))
+                        .clip(RoundedCornerShape(14.dp))
+                        .border(1.dp, if (dark) Color(0xFF152451) else Color(0xFFE8EBE3), RoundedCornerShape(14.dp)),
+                ) { panel(Modifier, 360.dp) }
+            }
+        } else {
+            ModalNavigationDrawer(
+                drawerState = drawer,
+                gesturesEnabled = !immersive || drawer.isOpen,
+                drawerContent = {
+                    ModalDrawerSheet(
+                        drawerContainerColor = Brand.Navy, drawerShape = RoundedCornerShape(topEnd = 18.dp, bottomEnd = 18.dp),
+                        modifier = Modifier.width(272.dp),
+                    ) {
+                        Box(Modifier.statusBarsPadding().navigationBarsPadding()) { sidebar(false, null, 272.dp) }
+                    }
+                },
+            ) { content() }
         }
-    } else {
-        ModalNavigationDrawer(
-            drawerState = drawer,
-            gesturesEnabled = !immersive || drawer.isOpen,
-            drawerContent = {
-                ModalDrawerSheet(
-                    drawerContainerColor = Brand.Navy, drawerShape = RoundedCornerShape(topEnd = 18.dp, bottomEnd = 18.dp),
-                    modifier = Modifier.width(260.dp),
-                ) {
-                    Box(Modifier.statusBarsPadding().navigationBarsPadding()) { sidebar(false, null) }
-                }
-            },
-        ) { content() }
+
+        toast?.let { t ->
+            ToastView(
+                t, mobile = !wide,
+                modifier = if (wide) Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(top = 20.dp, end = 20.dp)
+                else Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = 84.dp),
+            )
+        }
     }
 
     if (confirmSignOut) ConfirmDialog(
@@ -183,21 +221,11 @@ fun DashboardShell(dash: DashboardViewModel, widthClass: WindowWidthSizeClass) {
         onConfirm = { dash.logout() }, onDismiss = { confirmSignOut = false },
     )
 
-    if (showBell) {
-        NotificationsSheet(
-            items = notifications,
-            onDismiss = { showBell = false; dash.container.notifications.markAllRead() },
-            onOpen = { n ->
-                dash.container.notifications.markRead(n.id)
-                showBell = false
-                scope.launch { drawer.close() }
-                when {
-                    n.convKey != null -> dash.openConversationFor(n.convKey)
-                    n.type == "order_update" -> dash.navigate(ViewId.Orders)
-                }
-            },
-            onClear = { dash.container.notifications.clear() },
-        )
+    if (showBell && !wide) {
+        ModalBottomSheet(
+            onDismissRequest = { showBell = false },
+            containerColor = if (dark) Color(0xFF0A1229) else Color.White,
+        ) { panel(Modifier.navigationBarsPadding(), 520.dp) }
     }
 }
 
@@ -278,55 +306,3 @@ private fun BottomTab(
     }
 }
 
-private fun badgeText(n: Int) = if (n > 99) "99+" else "$n"
-
-private fun notifMeta(type: String): Pair<String, Color> = when (type) {
-    "intercept", "human_transfer" -> "🙋" to Color(0xFF2A48A2)
-    "new_message", "new_conversation" -> "💬" to Color(0xFF589B31)
-    "order", "order_update" -> "📦" to Color(0xFFD97706)
-    "transfer" -> "🔀" to Color(0xFF3D528F)
-    "media_escalation" -> "📎" to Color(0xFFC0392B)
-    "daily_summary" -> "📊" to Color(0xFF0E7490)
-    else -> "🔔" to Color(0xFF8A9E80)
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun NotificationsSheet(
-    items: List<AppNotification>,
-    onDismiss: () -> Unit,
-    onOpen: (AppNotification) -> Unit,
-    onClear: () -> Unit,
-) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Notifications", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            if (items.isNotEmpty()) TextButton(onClick = onClear) { Text("Clear all") }
-        }
-        if (items.isEmpty()) {
-            Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) {
-                Text("You're all caught up", color = Neema.colors.muted)
-            }
-        } else LazyColumn(Modifier.heightIn(max = 520.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
-            items(items, key = { it.id }) { n ->
-                val (emoji, color) = notifMeta(n.type)
-                Row(
-                    Modifier.fillMaxWidth().clickable { onOpen(n) }
-                        .background(if (!n.read) color.copy(alpha = 0.06f) else Color.Transparent)
-                        .padding(horizontal = 20.dp, vertical = 10.dp),
-                ) {
-                    Box(Modifier.size(34.dp).clip(RoundedCornerShape(10.dp)).background(color.copy(alpha = 0.14f)), contentAlignment = Alignment.Center) {
-                        Text(emoji)
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(n.title, fontWeight = if (n.read) FontWeight.Medium else FontWeight.Bold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(n.body, fontSize = 13.sp, color = Neema.colors.muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text(Fmt.timeAgo(java.time.Instant.ofEpochMilli(n.at).toString()), fontSize = 11.sp, color = Neema.colors.muted)
-                    }
-                    if (!n.read) Box(Modifier.padding(top = 6.dp).size(8.dp).clip(RoundedCornerShape(50)).background(color))
-                }
-            }
-        }
-    }
-}

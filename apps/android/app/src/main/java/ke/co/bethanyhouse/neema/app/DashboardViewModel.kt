@@ -11,6 +11,7 @@ import ke.co.bethanyhouse.neema.core.model.InboxSummary
 import ke.co.bethanyhouse.neema.core.model.Order
 import ke.co.bethanyhouse.neema.core.perm.Perms
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -127,11 +128,12 @@ class DashboardViewModel(
             container.notifications.incoming.collect { n ->
                 toast("${n.title}: ${n.body}", ToastType.Info)
                 // Push events drive freshness; polls are just the fallback.
+                // A timer per event (the web's setTimeout), so a burst of
+                // alerts neither queues up nor delays the next toast.
                 when (n.type) {
-                    "new_conversation", "human_transfer", "intercept", "transfer", "media_escalation" -> {
-                        delay(800); _inboxRefresh.tryEmit(Unit)
-                    }
-                    "order_update" -> { delay(800); refetchOrders() }
+                    "new_conversation", "human_transfer", "intercept", "transfer", "media_escalation" ->
+                        launch { delay(800); _inboxRefresh.tryEmit(Unit) }
+                    "order_update" -> launch { delay(800); refetchOrders() }
                 }
             }
         }
@@ -156,13 +158,19 @@ class DashboardViewModel(
 
     private fun stopPolling() { pollers.forEach { it.cancel() }; pollers.clear() }
 
-    /** Poll while the app is in the foreground; refetch once on return. */
+    /**
+     * usePolling(): fetch now and every [everyMs] while the app is in the
+     * foreground; ticks pause in the background, and coming back to the
+     * foreground refetches at once (the web's visibilitychange handler).
+     */
     private fun poll(everyMs: Long, fetch: suspend () -> Unit): Job = viewModelScope.launch {
         val fg = container.foreground
         while (isActive) {
             runCatching { fetch() }
-            delay(everyMs)
-            if (!fg.value) fg.first { it }
+            // Wait out the interval — unless the app leaves and comes back
+            // meanwhile, which refetches at once.
+            val returned = withTimeoutOrNull(everyMs) { fg.first { !it }; fg.first { it } }
+            if (returned == null && !fg.value) fg.first { it }
         }
     }
 
@@ -226,6 +234,13 @@ class DashboardViewModel(
 
     fun can(perm: String): Boolean = perm in permissions()
 
+    /** The nav, gated exactly as page.tsx builds its desktopNavItems. */
+    fun navItems(): List<NavItem> = buildNavItems(
+        can = ::can,
+        humanConvs = inboxSummary.value?.human ?: 0,
+        pendingOrders = _orders.value.count { it.status == "pending" },
+    )
+
     val isAdmin: Boolean
         get() = session.value?.role == "admin" || currentAgent?.role == "admin" ||
             currentAgent?.isSuperuser == true || session.value?.isSuperuser == true || can(Perms.MANAGE_AGENTS)
@@ -234,6 +249,20 @@ class DashboardViewModel(
 
     fun openConversationFor(key: String) { openConvKey.value = key; _view.value = ViewId.Conversations }
     fun focusCalls(waId: String) { callsFocusKey.value = waId; _view.value = ViewId.Calls }
+
+    /**
+     * page.tsx's deep links: `?open=<wa_id>[&ref=<order>]` opens that chat;
+     * otherwise `?view=<name>` switches view, and `?view=calls&caller=<wa_id>`
+     * also focuses the call console on that customer. Unknown views are ignored.
+     */
+    fun applyDeepLink(open: String?, ref: String?, view: String?, caller: String?) {
+        val v = ViewId.fromWeb(view)
+        when {
+            !open.isNullOrBlank() -> openConversationFor(if (!ref.isNullOrBlank()) "$open|$ref" else open)
+            v == ViewId.Calls && !caller.isNullOrBlank() -> focusCalls(caller)
+            v != null -> navigate(v)
+        }
+    }
 
     fun toast(message: String, type: ToastType = ToastType.Success) { _toasts.tryEmit(Toast(message, type)) }
 
@@ -255,6 +284,8 @@ class DashboardViewModel(
         container.notifications.clear()
         _me.value = null; _agents.value = emptyList(); _orders.value = emptyList(); _catalog.value = emptyList()
         inboxSummary.value = null
+        openConvKey.value = null
+        callsFocusKey.value = null
         sessionExpired.value = false
         _view.value = ViewId.Conversations
     }

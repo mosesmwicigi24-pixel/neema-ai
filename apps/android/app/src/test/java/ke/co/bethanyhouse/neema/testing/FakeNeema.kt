@@ -16,9 +16,12 @@ import java.util.concurrent.CopyOnWriteArrayList
  * fixture shows up as an error state rather than hanging.
  */
 class FakeNeema : Interceptor {
-    data class Call(val method: String, val path: String, val query: String?, val body: String?)
+    data class Call(val method: String, val path: String, val query: String?, val body: String?, val headers: okhttp3.Headers = okhttp3.Headers.headersOf())
 
-    private class Route(val method: String, val pattern: Regex, val handler: (Request, String?) -> Pair<Int, String>)
+    /** A full answer: status, body and headers (Set-Cookie, Location…). */
+    data class Reply(val code: Int = 200, val body: String = "", val headers: Map<String, List<String>> = emptyMap())
+
+    private class Route(val method: String, val pattern: Regex, val handler: (Request, String?) -> Reply)
 
     private val routes = CopyOnWriteArrayList<Route>()
     val calls = CopyOnWriteArrayList<Call>()
@@ -28,8 +31,16 @@ class FakeNeema : Interceptor {
         on(method, path) { _, _ -> code to body }
 
     fun on(method: String, path: String, handler: (Request, String?) -> Pair<Int, String>) {
+        routes.add(0, Route(method, Regex("^$path$")) { r, b -> handler(r, b).let { (c, t) -> Reply(c, t) } })
+    }
+
+    /** Register a route that also answers with headers (cookies, redirects). */
+    fun reply(method: String, path: String, handler: (Request, String?) -> Reply) {
         routes.add(0, Route(method, Regex("^$path$"), handler))
     }
+
+    /** Every recorded call to [method] [path] (exact path). */
+    fun callsTo(method: String, path: String) = calls.filter { it.method == method && it.path == path }
 
     fun called(method: String, pathPrefix: String) = calls.any { it.method == method && it.path.startsWith(pathPrefix) }
 
@@ -37,12 +48,13 @@ class FakeNeema : Interceptor {
         val req = chain.request()
         val path = req.url.encodedPath.removePrefix("/api")
         val body = req.body?.let { b -> Buffer().also { b.writeTo(it) }.readUtf8() }
-        calls.add(Call(req.method, path, req.url.encodedQuery, body))
+        calls.add(Call(req.method, path, req.url.encodedQuery, body, req.headers))
         val route = routes.firstOrNull { it.method == req.method && it.pattern.matches(path) }
-        val (code, text) = route?.handler?.invoke(req, body) ?: (404 to """{"detail":"no fixture for ${req.method} $path"}""")
+        val reply = route?.handler?.invoke(req, body) ?: Reply(404, """{"detail":"no fixture for ${req.method} $path"}""")
         return Response.Builder()
-            .request(req).protocol(Protocol.HTTP_1_1).code(code).message("fake")
-            .body(text.toResponseBody("application/json".toMediaType()))
+            .request(req).protocol(Protocol.HTTP_1_1).code(reply.code).message("fake")
+            .apply { reply.headers.forEach { (k, vs) -> vs.forEach { addHeader(k, it) } } }
+            .body(reply.body.toResponseBody("application/json".toMediaType()))
             .build()
     }
 

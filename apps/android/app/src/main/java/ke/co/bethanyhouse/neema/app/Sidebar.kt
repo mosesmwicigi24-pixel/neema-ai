@@ -26,10 +26,40 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ke.co.bethanyhouse.neema.core.ui.components.Avatar
+import ke.co.bethanyhouse.neema.core.perm.Perms
 import ke.co.bethanyhouse.neema.core.ui.theme.Brand
+import ke.co.bethanyhouse.neema.core.ui.theme.LightNeema
+import ke.co.bethanyhouse.neema.core.ui.theme.LocalNeemaColors
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import ke.co.bethanyhouse.neema.core.ui.theme.WebIcons
 
 data class NavItem(val id: ViewId, val icon: ImageVector, val badge: Int = 0)
+
+/**
+ * app/dashboard/page.tsx's nav: Inbox (human-held badge), Calls and Orders
+ * (pending badge) for everyone; Reports behind view_reports; Deals + Leads
+ * behind view_leads; Analytics behind view_analytics; Catalog behind
+ * view_catalog; Team behind manage_agents; Settings behind manage_settings
+ * (desktopNavItems puts it just before Profile); Profile for everyone.
+ */
+fun buildNavItems(can: (String) -> Boolean, humanConvs: Int, pendingOrders: Int): List<NavItem> = buildList {
+    add(NavItem(ViewId.Conversations, iconFor(ViewId.Conversations), humanConvs))
+    add(NavItem(ViewId.Calls, iconFor(ViewId.Calls)))
+    add(NavItem(ViewId.Orders, iconFor(ViewId.Orders), pendingOrders))
+    if (can(Perms.VIEW_REPORTS)) add(NavItem(ViewId.Reports, iconFor(ViewId.Reports)))
+    if (can(Perms.VIEW_LEADS)) {
+        add(NavItem(ViewId.Deals, iconFor(ViewId.Deals)))
+        add(NavItem(ViewId.Leads, iconFor(ViewId.Leads)))
+    }
+    if (can(Perms.VIEW_ANALYTICS)) add(NavItem(ViewId.Overview, iconFor(ViewId.Overview)))
+    if (can(Perms.VIEW_CATALOG)) add(NavItem(ViewId.Catalog, iconFor(ViewId.Catalog)))
+    if (can(Perms.MANAGE_AGENTS)) add(NavItem(ViewId.Agents, iconFor(ViewId.Agents)))
+    if (can(Perms.MANAGE_SETTINGS)) add(NavItem(ViewId.Settings, iconFor(ViewId.Settings)))
+    add(NavItem(ViewId.Profile, iconFor(ViewId.Profile)))
+}
 
 fun iconFor(v: ViewId): ImageVector = when (v) {
     ViewId.Conversations -> WebIcons.Inbox
@@ -81,9 +111,13 @@ fun NeemaSidebar(
     onBell: () -> Unit,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
+    /** 208dp docked (the web's width); the phone drawer passes its own. */
+    expandedWidth: Dp = 208.dp,
+    /** Screenshot tests: start with the account menu open. */
+    initialMenuOpen: Boolean = false,
 ) {
-    val width by animateDpAsState(if (collapsed) 60.dp else 232.dp, label = "sidebar")
-    var menuOpen by remember { mutableStateOf(false) }
+    val width by animateDpAsState(if (collapsed) 60.dp else expandedWidth, label = "sidebar")
+    var menuOpen by remember { mutableStateOf(initialMenuOpen) }
 
     Column(
         modifier.width(width).fillMaxHeight().background(Brand.Navy),
@@ -100,13 +134,13 @@ fun NeemaSidebar(
             }
         } else {
             Row(
-                Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 12.dp),
+                Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 NeemaLogo()
-                Column(Modifier.weight(1f).padding(start = 10.dp)) {
-                    Text("Neema AI", color = Brand.TextLight, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, lineHeight = 15.sp)
-                    Text("ADMIN PORTAL", color = Brand.TextMuted, fontWeight = FontWeight.Medium, fontSize = 10.sp, letterSpacing = 0.8.sp)
+                Column(Modifier.weight(1f).padding(start = 8.dp)) {
+                    Text("Neema AI", color = Brand.TextLight, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, lineHeight = 14.sp, maxLines = 1, softWrap = false)
+                    Text("ADMIN PORTAL", color = Brand.TextMuted, fontWeight = FontWeight.Medium, fontSize = 10.sp, letterSpacing = 0.7.sp, maxLines = 1, softWrap = false, modifier = Modifier.padding(top = 2.dp))
                 }
                 BellButton(bellCount, onBell)
                 if (onToggleCollapse != null) NavyIconButton(WebIcons.Collapse, "Collapse sidebar", onToggleCollapse)
@@ -130,7 +164,7 @@ fun NeemaSidebar(
         // ── Footer: account ───────────────────────────────────────────────
         HorizontalDivider(color = Brand.NavyBorder)
         Column(Modifier.padding(8.dp)) {
-            AnimatedVisibility(menuOpen && !collapsed) {
+            val card = @Composable {
                 AccountCard(
                     userName, userEmail, userRole, avatarUrl, dark, onToggleDark, canSettings,
                     onProfile = { menuOpen = false; onSelect(ViewId.Profile) },
@@ -138,17 +172,31 @@ fun NeemaSidebar(
                     onSignOut = { menuOpen = false; onSignOut() },
                 )
             }
+            // Expanded: the popup opens above the footer row, as wide as it.
+            AnimatedVisibility(menuOpen && !collapsed) { card() }
+            // Collapsed rail: it opens to the right, bottom-aligned with the avatar.
+            if (menuOpen && collapsed) {
+                val dx = with(LocalDensity.current) { 60.dp.roundToPx() }
+                Popup(
+                    alignment = Alignment.BottomStart, offset = IntOffset(dx, 0),
+                    onDismissRequest = { menuOpen = false },
+                    properties = PopupProperties(focusable = true),
+                ) { Box(Modifier.width(252.dp)) { card() } }
+            }
             val chevron by animateFloatAsState(if (menuOpen) 180f else 0f, label = "chevron")
             Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
                     .background(if (menuOpen) Brand.NavyHover else Color.Transparent)
-                    .clickable { if (collapsed) onSelect(ViewId.Profile) else menuOpen = !menuOpen }
+                    .clickable { menuOpen = !menuOpen }
                     .padding(horizontal = if (collapsed) 0.dp else 8.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = if (collapsed) Arrangement.Center else Arrangement.Start,
             ) {
                 Box {
-                    Avatar(userName.ifBlank { "User" }, avatarUrl, size = 32.dp)
+                    // The web's light avatar sits on the navy rail in both themes.
+                    CompositionLocalProvider(LocalNeemaColors provides LightNeema) {
+                        Avatar(userName.ifBlank { "User" }, avatarUrl, size = 32.dp)
+                    }
                     Box(Modifier.align(Alignment.BottomEnd).size(10.dp).clip(CircleShape).background(Brand.Navy).padding(2.dp).clip(CircleShape).background(Brand.Online))
                 }
                 if (!collapsed) {
@@ -210,7 +258,7 @@ fun AmberBadge(n: Int, onActive: Boolean = false, small: Boolean = false, onNavy
 @Composable
 private fun NavyIconButton(icon: ImageVector, label: String, onClick: () -> Unit) {
     Box(
-        Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick),
+        Modifier.size(28.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) { Icon(icon, label, tint = Brand.TextMuted, modifier = Modifier.size(16.dp)) }
 }
@@ -224,9 +272,10 @@ private fun BellButton(count: Int, onClick: () -> Unit) {
         Icon(WebIcons.Bell, "Notifications", tint = Brand.TextMuted, modifier = Modifier.size(18.dp))
         if (count > 0) {
             Box(
-                Modifier.align(Alignment.TopEnd).padding(top = 3.dp, end = 3.dp)
-                    .defaultMinSize(minWidth = 15.dp, minHeight = 15.dp).clip(RoundedCornerShape(50))
-                    .background(Color(0xFFEF4444)).padding(horizontal = 3.dp),
+                Modifier.align(Alignment.TopEnd).padding(top = 1.dp, end = 1.dp)
+                    .defaultMinSize(minWidth = 16.dp, minHeight = 16.dp).clip(RoundedCornerShape(50))
+                    .background(Color.White).padding(2.dp).clip(RoundedCornerShape(50))
+                    .background(Color(0xFFEF4444)).padding(horizontal = 2.dp),
                 contentAlignment = Alignment.Center,
             ) { Text(if (count > 9) "9+" else "$count", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold) }
         }
@@ -246,7 +295,9 @@ private fun AccountCard(
             .border(1.dp, Color(0xFFE8EBE3), RoundedCornerShape(14.dp)),
     ) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Avatar(name.ifBlank { "User" }, avatarUrl, size = 38.dp)
+            CompositionLocalProvider(LocalNeemaColors provides LightNeema) {
+                Avatar(name.ifBlank { "User" }, avatarUrl, size = 40.dp)
+            }
             Column(Modifier.weight(1f).padding(start = 12.dp)) {
                 Text(name.ifBlank { "—" }, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1C2917), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(email.ifBlank { "—" }, fontSize = 11.sp, color = Color(0xFF8A9E80), maxLines = 1, overflow = TextOverflow.Ellipsis)
