@@ -15,13 +15,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.AttachMoney
-import androidx.compose.material.icons.outlined.Bolt
-import androidx.compose.material.icons.outlined.ChatBubbleOutline
-import androidx.compose.material.icons.outlined.Computer
-import androidx.compose.material.icons.outlined.Groups
-import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
@@ -59,6 +52,7 @@ import ke.co.bethanyhouse.neema.core.ui.components.Panel
 import ke.co.bethanyhouse.neema.core.ui.components.channelStyle
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import ke.co.bethanyhouse.neema.core.util.Fmt
+import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -66,17 +60,23 @@ import java.time.format.TextStyle
 import java.util.Locale
 
 /** The web's STAT_COLORS, by accent. */
-private val AccentGreen = Color(0xFF589B31)
-private val AccentEmerald = Color(0xFF427425)
-private val AccentBlue = Color(0xFF2A48A2)
-private val AccentOrange = Color(0xFFBCC13E)
-private val AccentViolet = Color(0xFF4D66B3)
+// By day exactly the web's hexes (#589b31 #427425 #2a48a2 #bcc13e #4d66b3);
+// by night the theme's lifted hues, so no accent sinks into the navy.
+private val AccentGreen @Composable get() = Neema.colors.gold
+private val AccentEmerald @Composable get() = Neema.colors.gold2
+private val AccentBlue @Composable get() = Neema.colors.blue
+private val AccentOrange @Composable get() = Neema.colors.amber
+private val AccentViolet @Composable get() = if (Neema.colors.isDark) Color(0xFF7085C2) else Color(0xFF4D66B3)
 
 /** Port of components/views/OverviewView.tsx — the Analytics screen. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun OverviewScreen(dash: DashboardViewModel) {
-    val vm: OverviewViewModel = viewModel { OverviewViewModel(dash) }
+fun OverviewScreen(
+    dash: DashboardViewModel,
+    vm: OverviewViewModel = viewModel { OverviewViewModel(dash) },
+    /** "Now" for the 7-day chart and the activity times (fixed in tests). */
+    clock: Clock = Clock.systemDefaultZone(),
+) {
     val apiStats by vm.stats.collectAsStateWithLifecycle()
     val statsLoading by vm.statsLoading.collectAsStateWithLifecycle()
     val attrib by vm.attrib.collectAsStateWithLifecycle()
@@ -95,7 +95,7 @@ fun OverviewScreen(dash: DashboardViewModel) {
     val activity = remember(orders, humanRows, conversations, agents) {
         activityFeed(orders, humanRows ?: conversations, agents)
     }
-    val bars = remember(orders) { sevenDayRevenue(orders) }
+    val bars = remember(orders, clock) { sevenDayRevenue(orders, LocalDate.now(clock), clock.zone) }
     val top = remember(orders) { topProducts(orders) }
     val cardsLoading = statsLoading && apiStats == null
 
@@ -121,12 +121,12 @@ fun OverviewScreen(dash: DashboardViewModel) {
 
                 // ── Stat grid ────────────────────────────────────────────
                 val cards = listOf<@Composable (Modifier) -> Unit>(
-                    { StatCard("Open Conversations", stats.openConvs.toString(), "${stats.humanConvs} with agents", Icons.Outlined.ChatBubbleOutline, AccentGreen, cardsLoading, it) },
-                    { StatCard("Active Agents", stats.activeAgents.toString(), "of ${stats.totalAgents} total", Icons.Outlined.Groups, AccentEmerald, cardsLoading, it) },
-                    { StatCard("Total Revenue", Fmt.currency(stats.revenue), "${stats.totalOrders} orders", Icons.Outlined.AttachMoney, AccentGreen, cardsLoading, it) },
-                    { StatCard("Pending Orders", stats.pendingOrders.toString(), "Awaiting confirmation", Icons.Outlined.Inventory2, AccentOrange, cardsLoading, it) },
-                    { StatCard("AI Conversations", stats.aiConvs.toString(), "Fully automated", Icons.Outlined.Computer, AccentBlue, cardsLoading, it) },
-                    { StatCard("Catalog Items", stats.totalItems.toString(), "${stats.inStockItems} in stock", Icons.Outlined.Inventory2, AccentViolet, cardsLoading, it) },
+                    { StatCard("Open Conversations", stats.openConvs.toString(), "${stats.humanConvs} with agents", OverviewIcons.Chat, AccentGreen, cardsLoading, it) },
+                    { StatCard("Active Agents", stats.activeAgents.toString(), "of ${stats.totalAgents} total", OverviewIcons.Team, AccentEmerald, cardsLoading, it) },
+                    { StatCard("Total Revenue", Fmt.currency(stats.revenue), "${stats.totalOrders} orders", OverviewIcons.Money, AccentGreen, cardsLoading, it) },
+                    { StatCard("Pending Orders", stats.pendingOrders.toString(), "Awaiting confirmation", OverviewIcons.Box, AccentOrange, cardsLoading, it) },
+                    { StatCard("AI Conversations", stats.aiConvs.toString(), "Fully automated", OverviewIcons.Robot, AccentBlue, cardsLoading, it) },
+                    { StatCard("Catalog Items", stats.totalItems.toString(), "${stats.inStockItems} in stock", OverviewIcons.Box, AccentViolet, cardsLoading, it) },
                 )
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     cards.chunked(if (wide) 3 else 2).forEach { row ->
@@ -148,7 +148,7 @@ fun OverviewScreen(dash: DashboardViewModel) {
 
                 // ── Bottom row ───────────────────────────────────────────
                 val byChannel: @Composable (Modifier) -> Unit = { ChannelPanel(channels, apiStats, conversations.size, it) }
-                val feed: @Composable (Modifier) -> Unit = { ActivityPanel(activity, it) }
+                val feed: @Composable (Modifier) -> Unit = { ActivityPanel(activity, clock.millis(), it) }
                 if (wide) Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     byChannel(Modifier.weight(2f).fillMaxHeight()); feed(Modifier.weight(3f).fillMaxHeight())
                 } else { byChannel(Modifier.fillMaxWidth()); feed(Modifier.fillMaxWidth()) }
@@ -163,7 +163,7 @@ fun OverviewScreen(dash: DashboardViewModel) {
 
 // ── Computation ─────────────────────────────────────────────────────────────
 
-class Headline(
+data class Headline(
     val openConvs: Int, val humanConvs: Int, val aiConvs: Int,
     val activeAgents: Int, val totalAgents: Int,
     val revenue: Double, val totalOrders: Int,
@@ -172,7 +172,7 @@ class Headline(
 )
 
 /** API stats when available, computed from what the app holds as a fallback. */
-private fun headline(s: Stats?, convs: List<Conversation>, agents: List<Agent>, orders: List<Order>, catalog: List<CatalogItem>) = Headline(
+internal fun headline(s: Stats?, convs: List<Conversation>, agents: List<Agent>, orders: List<Order>, catalog: List<CatalogItem>) = Headline(
     openConvs = s?.openConversations ?: convs.count { it.status == "open" },
     humanConvs = s?.humanConversations ?: convs.count { it.interceptMode == "human" },
     aiConvs = s?.aiConversations ?: convs.count { it.interceptMode == "ai" },
@@ -190,21 +190,23 @@ private fun headline(s: Stats?, convs: List<Conversation>, agents: List<Agent>, 
 
 data class ChannelRow(val ch: String, val count: Int, val open: Int)
 
-private fun channelRows(s: Stats?, convs: List<Conversation>): List<ChannelRow> =
+internal fun channelRows(s: Stats?, convs: List<Conversation>): List<ChannelRow> =
     if (s != null) s.channelBreakdown.filter { it.count > 0 }.map { ChannelRow(it.channel, it.count, it.open) }
     else ALL_CHANNELS.map { ch ->
         ChannelRow(ch, convs.count { it.channel == ch }, convs.count { it.channel == ch && it.status == "open" })
     }.filter { it.count > 0 }
 
-data class ActivityEntry(val id: String, val user: String, val action: String, val target: String?, val at: String, val icon: ImageVector)
+/** [icon] is the web's emoji: 📦 for an order, ⚡ for an intercept. */
+data class ActivityEntry(val id: String, val user: String, val action: String, val target: String?, val at: String, val icon: String)
 
-private fun activityFeed(orders: List<Order>, human: List<Conversation>, agents: List<Agent>): List<ActivityEntry> {
+internal fun activityFeed(orders: List<Order>, human: List<Conversation>, agents: List<Agent>): List<ActivityEntry> {
     val out = mutableListOf<ActivityEntry>()
     // Recent orders
     orders.sortedByDescending { Fmt.millis(it.createdAt) ?: 0 }.take(4).forEach { o ->
         out += ActivityEntry(
-            "order-${o.id}", Fmt.displayName(o.contactName, o.contactPhone), "placed an order",
-            Fmt.currency(o.total), o.createdAt, Icons.Outlined.Inventory2,
+            // mapOrder() makes contact_phone the wa_id: an unnamed buyer shows their number, never "Unknown".
+            "order-${o.id}", Fmt.displayName(o.contactName, o.contactPhone?.takeIf { it.isNotBlank() } ?: o.waId), "placed an order",
+            Fmt.currency(o.total), o.createdAt, "📦",
         )
     }
     // Recent human intercepts
@@ -213,7 +215,7 @@ private fun activityFeed(orders: List<Order>, human: List<Conversation>, agents:
             out += ActivityEntry(
                 "conv-${conv.id}", agents.find { it.id == conv.assignedAgentId }?.name ?: "An agent",
                 "intercepted conversation with", Fmt.displayName(conv.name, conv.waId),
-                conv.lastMessageAt!!, Icons.Outlined.Bolt,
+                conv.lastMessageAt!!, "⚡",
             )
         }
     return out.sortedByDescending { Fmt.millis(it.at) ?: 0 }.take(8)
@@ -222,9 +224,7 @@ private fun activityFeed(orders: List<Order>, human: List<Conversation>, agents:
 data class DayBar(val label: String, val value: Double, val isToday: Boolean)
 
 /** Revenue per day from real orders over the last 7 days (cancelled excluded). */
-private fun sevenDayRevenue(orders: List<Order>): List<DayBar> {
-    val zone = ZoneId.systemDefault()
-    val today = LocalDate.now(zone)
+internal fun sevenDayRevenue(orders: List<Order>, today: LocalDate = LocalDate.now(), zone: ZoneId = ZoneId.systemDefault()): List<DayBar> {
     val byDay = orders.filter { it.status != "cancelled" }
         .groupBy { o -> Fmt.millis(o.createdAt)?.let { Instant.ofEpochMilli(it).atZone(zone).toLocalDate() } }
     return (0 until 7).map { i ->
@@ -235,7 +235,7 @@ private fun sevenDayRevenue(orders: List<Order>): List<DayBar> {
 
 data class TopProduct(val name: String, val qty: Double, val revenue: Double)
 
-private fun topProducts(orders: List<Order>): List<TopProduct> {
+internal fun topProducts(orders: List<Order>): List<TopProduct> {
     val map = linkedMapOf<String, Pair<Double, Double>>()
     orders.filter { it.status != "cancelled" }.forEach { o ->
         o.items.forEach { item ->
@@ -251,6 +251,14 @@ private fun topProducts(orders: List<Order>): List<TopProduct> {
 private fun qtyText(q: Double): String = if (q == Math.floor(q)) q.toLong().toString() else q.toString()
 
 // ── Pieces ──────────────────────────────────────────────────────────────────
+
+/** The web's #2c4e18 (totals, today, top-product revenue); the bright moss by night. */
+@Composable
+private fun strong(): Color = if (Neema.colors.isDark) Neema.colors.gold2 else Color(0xFF2C4E18)
+
+/** The web's #b5da8b (rank numbers); a readable slate by night. */
+@Composable
+private fun faint(): Color = if (Neema.colors.isDark) Neema.colors.muted.copy(alpha = 0.75f) else Neema.colors.border
 
 @Composable
 private fun PanelTitle(text: String, modifier: Modifier = Modifier) {
@@ -373,13 +381,14 @@ private fun RevenueChart(bars: List<DayBar>, modifier: Modifier) {
     val c = Neema.colors
     var picked by remember(bars) { mutableStateOf<Int?>(null) }
     val max = (bars.maxOfOrNull { it.value } ?: 0.0).coerceAtLeast(1.0)
-    val todayColor = AccentEmerald
-    val restColor = c.bg4
+    // Web: today #427425, other days #cee6b2, hover green-400.
+    val todayColor = if (c.isDark) c.gold else AccentEmerald
+    val restColor = if (c.isDark) c.gold.copy(alpha = 0.22f) else c.bg4
     val pickedColor = Color(0xFF4ADE80)
     Panel(modifier, padding = PaddingValues(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             PanelTitle("7-Day Revenue (KES)", Modifier.weight(1f))
-            Text(Fmt.currency(bars.sumOf { it.value }), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2C4E18).takeIf { !c.isDark } ?: c.gold2)
+            Text(Fmt.currency(bars.sumOf { it.value }), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = strong())
         }
         Text(picked?.let { "${bars[it].label}: ${Fmt.currency(bars[it].value)}" } ?: " ", fontSize = 11.sp, color = c.textDim, modifier = Modifier.padding(top = 8.dp))
         Canvas(
@@ -407,7 +416,7 @@ private fun RevenueChart(bars: List<DayBar>, modifier: Modifier) {
             bars.forEach { d ->
                 Text(
                     d.label, fontSize = 10.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center,
-                    color = if (d.isToday) c.gold2 else c.muted, modifier = Modifier.weight(1f),
+                    color = if (d.isToday) strong() else c.muted, modifier = Modifier.weight(1f),
                 )
             }
         }
@@ -463,7 +472,7 @@ private fun ChannelPanel(rows: List<ChannelRow>, stats: Stats?, localCount: Int,
                     val cfg = channelStyle(r.ch)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.size(28.dp).clip(RoundedCornerShape(8.dp)).background(cfg.color), contentAlignment = Alignment.Center) {
-                            Text(cfg.label.take(1), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            OverviewIcons.channel(r.ch)?.let { Icon(it, cfg.label, tint = Color.White, modifier = Modifier.size(14.dp)) }
                         }
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
@@ -482,7 +491,7 @@ private fun ChannelPanel(rows: List<ChannelRow>, stats: Stats?, localCount: Int,
 }
 
 @Composable
-private fun ActivityPanel(feed: List<ActivityEntry>, modifier: Modifier) {
+private fun ActivityPanel(feed: List<ActivityEntry>, now: Long, modifier: Modifier) {
     val c = Neema.colors
     Panel(modifier, padding = PaddingValues(16.dp)) {
         PanelTitle("Recent Activity")
@@ -496,7 +505,7 @@ private fun ActivityPanel(feed: List<ActivityEntry>, modifier: Modifier) {
                     Box(
                         Modifier.size(28.dp).clip(RoundedCornerShape(8.dp)).background(c.bg).border(1.dp, c.bg3, RoundedCornerShape(8.dp)),
                         contentAlignment = Alignment.Center,
-                    ) { Icon(e.icon, null, tint = c.gold2, modifier = Modifier.size(15.dp)) }
+                    ) { Text(e.icon, fontSize = 13.sp) }
                     Spacer(Modifier.width(12.dp))
                     Text(
                         buildAnnotatedString {
@@ -504,10 +513,10 @@ private fun ActivityPanel(feed: List<ActivityEntry>, modifier: Modifier) {
                             append(" ${e.action}")
                             if (e.target != null) append(" · ${e.target}")
                         },
-                        fontSize = 12.sp, color = c.gold2, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                        fontSize = 12.sp, lineHeight = 16.sp, color = c.gold2, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                     )
                     Spacer(Modifier.width(8.dp))
-                    Text(Fmt.timeAgo(e.at), fontSize = 10.sp, color = c.muted)
+                    Text(Fmt.timeAgo(e.at, now), fontSize = 10.sp, color = c.muted)
                 }
             }
         }
@@ -524,13 +533,13 @@ private fun TopProductsPanel(top: List<TopProduct>) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             top.forEachIndexed { i, p ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("${i + 1}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = c.border, modifier = Modifier.width(16.dp))
+                    Text("${i + 1}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = faint(), modifier = Modifier.width(16.dp))
                     Spacer(Modifier.width(8.dp))
                     Column(Modifier.weight(1f)) {
                         Row {
                             Text(p.name, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                             Spacer(Modifier.width(8.dp))
-                            Text(Fmt.currency(p.revenue), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = c.gold2)
+                            Text(Fmt.currency(p.revenue), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = strong())
                         }
                         Spacer(Modifier.height(4.dp))
                         ThinBar((p.revenue / maxRev).toFloat(), c.gold)
