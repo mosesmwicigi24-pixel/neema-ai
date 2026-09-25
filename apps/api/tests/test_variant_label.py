@@ -84,3 +84,82 @@ def test_the_public_card_and_the_verifier_read_the_same_label():
     assert rv.variant_issues("the 10 inch", "The Straight Collar — 10 inch is $4.", p) == []
     bad = rv.variant_issues("the 10 inch", "The 10 inch collar is $3.50.", p)
     assert bad and bad[0]["hard"] and "10 inch variant is priced KES 400 / USD 4" in bad[0]["text"]
+
+
+def test_the_size_the_attributes_carry_joins_the_colour_the_name_carries():
+    """Live, 2026-09-25: the cassocks, dresses, shirts and sprinklers name
+    the colour and keep the size in the attributes — five 'Black Pleats'
+    rows read the same. Every attribute the name does not say rides along;
+    a bare code rides with its key."""
+    assert variant_label("Red Apostolic Cassock",
+                         {"name": "Red Apostolic Cassock + Black Pleats, Piping and Buttons",
+                          "attributes": {"Pleats": "Black", "Size": "M"}}) == "Red Apostolic Cassock — Black Pleats, Piping and Buttons / Size M"
+    assert variant_label("Straight Collar Shirt", {"name": "Navy Straight Collar Shirt",
+                                                   "attributes": {"Colour": "Navy", "Size": "L"}}) == "Straight Collar Shirt — Navy / Size L"
+    assert variant_label("Sprinkler (Aspergillum)", {"name": "Brass sprinkler",
+                                                     "attributes": {"Finish": "Brass", "Size": "Small"}}) == "Sprinkler (Aspergillum) — Brass sprinkler / Small"
+    assert variant_label("Ladies Princes Dress", {"name": "Red", "attributes": {"Colour": "Red", "Size": "Size 12"}}) == "Ladies Princes Dress — Red / Size 12"
+    assert variant_label("BELL", {"name": "", "attributes": {"Size": "S"}}) == "BELL — Size S"
+    assert variant_label("Straight Collar", {"name": "Straight Collar", "attributes": {"size": "8"}}) == "Straight Collar — Size 8"
+    # what the name already says is not said twice
+    assert variant_label("Thurible", {"name": "S / GOLD", "attributes": {"Size": "S", "Colour": "GOLD"}}) == "Thurible — S / GOLD"
+    assert variant_label("Cassock", {"name": "Black", "attributes": {"Colour": "black"}}) == "Cassock — Black"
+
+
+def test_the_hubs_plus_and_a_copy_of_the_product_name_even_misspelt_are_not_what_tells_it_apart():
+    # "+ Black Pleats…": the hub's plus is a join, not a word
+    assert variant_label("Red Apostolic Cassock", {"name": "+ Red Pleats, Piping and Buttons",
+                                                   "attributes": {"Size": "XL"}}) == "Red Apostolic Cassock — Red Pleats, Piping and Buttons / Size XL"
+    # "INCENSE BURNER/THURBLE" is the product's name with a typo: the size tells the two apart
+    assert variant_label("Incense Burner / Thurible", {"name": "INCENSE BURNER/THURBLE", "attributes": {"Size": "M"}}) == "Incense Burner / Thurible — Size M"
+    assert variant_label("Incense Burner / Thurible", {"name": "INCENSE BURNER/THURBLE", "attributes": {}}) == "Incense Burner / Thurible"
+    assert variant_label("Cassock", {"name": "Cassocks", "attributes": {"Colour": "Black"}}) == "Cassock — Black"
+    # a leading run of the product's words goes; a variant that merely starts
+    # with the product's first word keeps it
+    assert variant_label("Holy Communion Bread 1000 Pcs",
+                         {"name": "Holy Communion Bread -500PCS + 200, 500 and 1000"}) == "Holy Communion Bread 1000 Pcs — 500PCS + 200, 500 and 1000"
+    assert variant_label("Red Apostolic Cassock", {"name": "Red Pleats"}) == "Red Apostolic Cassock — Red Pleats"
+    assert variant_label("Chasuble", {"name": "Chasuble Set"}) == "Chasuble — Set"
+
+
+def test_the_public_card_shows_each_distinct_variant_once():
+    from app.routers.public import _card
+    p = {"slug": "red-apostolic-cassock", "name": "Red Apostolic Cassock", "category": "Clergy", "description": "",
+         "prices": {"KES": 21000, "USD": 170}, "image_url": "", "variants": [
+             {"name": "+ Black Pleats, Piping and Buttons", "attributes": {}, "prices": {"USD": 170}},
+             {"name": "+ Black Pleats, Piping and Buttons", "attributes": {}, "prices": {"USD": 170}},
+             {"name": "+ Black Pleats, Piping and Buttons", "attributes": {}, "prices": {"USD": 170}},
+             {"name": "+ White Pleats, Piping and Buttons", "attributes": {}, "prices": {"USD": 170}},
+             {"name": "+ White Pleats, Piping and Buttons", "attributes": {}, "prices": {"USD": 180}},
+         ]}
+    rows = [(v["label"], v["price"]) for v in _card(p, "USD")["variants"]]
+    assert rows == [("Red Apostolic Cassock — Black Pleats, Piping and Buttons", 170),
+                    ("Red Apostolic Cassock — White Pleats, Piping and Buttons", 170),
+                    ("Red Apostolic Cassock — White Pleats, Piping and Buttons", 180)]
+    # sized in the attributes, every size is its own line
+    for v, size in zip(p["variants"], ("S", "M", "L", "S", "M")):
+        v["attributes"] = {"Size": size}
+    assert len(_card(p, "USD")["variants"]) == 5
+
+
+def test_variants_that_read_the_same_at_different_prices_never_hold_a_reply():
+    """Until the hub tells them apart, three 'Brass sprinkler' rows at three
+    prices are a range to the verifier — soft, never a hard finding."""
+    from app.agent import review as rv
+    p = {"name": "Sprinkler (Aspergillum)", "price": 10000, "price_usd": 100, "variants": [
+        {"name": "Brass sprinkler", "attributes": {}, "price_kes": 7500, "price_usd": 80},
+        {"name": "Brass sprinkler", "attributes": {}, "price_kes": 9000, "price_usd": 90},
+        {"name": "Brass sprinkler", "attributes": {}, "price_kes": 14000, "price_usd": 140},
+        {"name": "Silver sprinkler", "attributes": {}, "price_kes": 7000, "price_usd": 70},
+    ]}
+    label_variants([p])
+    found = rv.variant_issues("brass one", "The brass sprinkler is $90.", p)
+    assert all(not f["hard"] for f in found)
+    assert rv.variant_issues("brass one", "The brass sprinkler is from $80 to $140 by size — which size?", p) == []
+    # told apart by size, the named one is checked at its own price
+    for v, size in zip(p["variants"], ("Small", "Medium", "Large", "Small")):
+        v["attributes"] = {"Size": size}
+    label_variants([p])
+    bad = rv.variant_issues("the small brass", "The small brass sprinkler is $90.", p)
+    assert bad and bad[0]["hard"] and "USD 80" in bad[0]["text"]
+    assert rv.variant_issues("the small brass", "The Sprinkler (Aspergillum) — Brass sprinkler / Small is $80.", p) == []
