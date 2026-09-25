@@ -13,7 +13,10 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material3.*
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,17 +47,22 @@ fun avatarColor(seed: String?): Color {
 }
 
 /**
- * True when a "name" is really a phone number or a Meta id (an unnamed
- * contact shown as "+254 712 345 678" / "Messenger ID 2589…"): its initials
- * would read "+7" or "MI", so the avatar shows a person glyph instead.
+ * True when a "name" is really a phone number, a Meta id or a website-chat
+ * visitor (an unnamed contact shown as "+254 712 345 678" / "Messenger ID
+ * 2589…" / "Website visitor", or the raw "web_3f9a…" id): its initials would
+ * read "+7", "MI" or "WV", so the avatar shows a person glyph instead.
  */
 fun isPhoneLike(name: String?): Boolean {
     val n = name?.trim().orEmpty()
     if (n.isEmpty()) return false
     if (n.startsWith("Messenger ID", ignoreCase = true)) return true
+    if (n.equals(WEBSITE_VISITOR, ignoreCase = true) || n.startsWith("web_")) return true
     val digits = n.filterNot { it == ' ' || it == '+' || it == '-' || it == '(' || it == ')' || it == '.' }
     return digits.isNotEmpty() && digits.all { it.isDigit() }
 }
+
+/** What Fmt.formatPhone calls a website-chat visitor (ids "web_…"). */
+private const val WEBSITE_VISITOR = "Website visitor"
 
 /**
  * components/ui/Avatar.tsx: one neutral stone-green disc with dark-green
@@ -233,21 +241,65 @@ fun StatTile(label: String, value: String, modifier: Modifier = Modifier, hint: 
     }
 }
 
+/**
+ * The web's search box (OrdersView / CatalogView / LeadsView): a white field
+ * with a willow `#b5da8b` hairline, 12dp corners, a pale magnifier inside
+ * on the left, moss-900 text and a moss border on focus. Dark mode swaps
+ * in the Prussian surface. [height] and [fontSize] default to Orders'
+ * 40dp/16sp; a screen passes its own where the web's differs. The ✕ that
+ * clears a typed query is the app's own addition.
+ */
 @Composable
 fun SearchField(
     value: String,
     onChange: (String) -> Unit,
     placeholder: String = "Search…",
     modifier: Modifier = Modifier,
+    height: Dp = 40.dp,
+    fontSize: androidx.compose.ui.unit.TextUnit = 16.sp,
+    /** Catalog's field uses `#cee6b2`; the others `#b5da8b`. */
+    borderColor: Color? = null,
 ) {
-    OutlinedTextField(
+    val c = Neema.colors
+    val source = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val focused by source.collectIsFocusedAsState()
+    val text = if (c.isDark) c.text else Color(0xFF16270C)
+    val line = when {
+        focused -> Color(0xFF589B31)
+        c.isDark -> c.border
+        else -> borderColor ?: Color(0xFFB5DA8B)
+    }
+    val shape = RoundedCornerShape(12.dp)
+    androidx.compose.foundation.text.BasicTextField(
         value = value, onValueChange = onChange, singleLine = true,
-        placeholder = { Text(placeholder) },
-        leadingIcon = { Icon(Icons.Default.Search, null) },
-        trailingIcon = if (value.isNotEmpty()) ({ IconButton(onClick = { onChange("") }) { Icon(Icons.Default.Close, "Clear") } }) else null,
-        shape = RoundedCornerShape(12.dp),
+        textStyle = androidx.compose.ui.text.TextStyle(color = text, fontSize = fontSize),
+        cursorBrush = androidx.compose.ui.graphics.SolidColor(Color(0xFF589B31)),
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        interactionSource = source,
         modifier = modifier.fillMaxWidth(),
+        decorationBox = { inner ->
+            Row(
+                Modifier.fillMaxWidth().height(height).clip(shape)
+                    .background(if (c.isDark) c.bg2 else Color.White)
+                    .border(if (focused) 2.dp else 1.dp, line, shape)
+                    .padding(start = 12.dp, end = if (value.isNotEmpty()) 2.dp else 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(WebIcons.Search, null, tint = if (c.isDark) c.muted else Color(0xFFD6D3D1), modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
+                Box(Modifier.weight(1f)) {
+                    if (value.isEmpty()) Text(
+                        placeholder, color = text.copy(alpha = 0.5f), fontSize = fontSize,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                    inner()
+                }
+                if (value.isNotEmpty()) Box(
+                    Modifier.size(36.dp).clip(CircleShape).clickable { onChange("") },
+                    contentAlignment = Alignment.Center,
+                ) { Icon(Icons.Default.Close, "Clear", tint = c.muted, modifier = Modifier.size(16.dp)) }
+            }
+        },
     )
 }
 

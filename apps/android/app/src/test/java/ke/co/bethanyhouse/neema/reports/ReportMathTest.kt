@@ -114,12 +114,12 @@ class ReportMathTest {
         assertEquals(
             """
             Date,Customer,Amount,Status
-            25 Sep 2026,Fr. Peter Kamau,8000,confirmed
-            24 Sep 2026,Rev. Mary Achieng,12500,pending
-            22 Sep 2026,Deacon James Mwangi,18000,delivered
-            21 Sep 2026,"Kariuki, Samuel",9600,cancelled
-            19 Sep 2026,+254 711 000 999,4800,pending
-            15 Sep 2026,Deacon James Mwangi,3500,delivered
+            25 Sept 2026,Fr. Peter Kamau,8000,confirmed
+            24 Sept 2026,Rev. Mary Achieng,12500,pending
+            22 Sept 2026,Deacon James Mwangi,18000,delivered
+            21 Sept 2026,"Kariuki, Samuel",9600,cancelled
+            19 Sept 2026,+254 711 000 999,4800,pending
+            15 Sept 2026,Deacon James Mwangi,3500,delivered
             """.trimIndent(),
             csv,
         )

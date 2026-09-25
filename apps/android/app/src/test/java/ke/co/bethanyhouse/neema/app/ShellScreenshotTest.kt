@@ -133,6 +133,7 @@ class ShellScreenshotTest {
                     "Fr. Peter Kamau" to null,
                     Fmt.displayName(null, "254712345678") to "unnamed WhatsApp contact",
                     Fmt.displayName(null, "25898765432101234") to "unnamed Messenger contact",
+                    Fmt.displayName(null, "web_3f9a1c") to "website chat visitor",
                     "Grace" to null,
                     "" to "no name at all",
                 ).forEach { (name, note) ->
@@ -152,6 +153,25 @@ class ShellScreenshotTest {
             }
         }
     }
+
+    // ── Search box (core SearchField) ──────────────────────────────────────
+
+    private fun searches(dark: Boolean) = paparazzi.snapshot {
+        AppFrame(dark) {
+            Column(
+                Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                ke.co.bethanyhouse.neema.core.ui.components.SearchField("", {}, "Search by name or phone…")
+                ke.co.bethanyhouse.neema.core.ui.components.SearchField("Achieng", {}, "Search by name or phone…")
+                ke.co.bethanyhouse.neema.core.ui.components.SearchField("", {}, "Search name, SKU or alias…", borderColor = Color(0xFFCEE6B2))
+                ke.co.bethanyhouse.neema.core.ui.components.SearchField("", {}, "Search leads…", Modifier.width(280.dp), height = 32.dp, fontSize = 14.sp)
+            }
+        }
+    }
+
+    @Test fun searchFields() = searches(false)
+    @Test fun searchFieldsDark() = searches(true)
 
     @Test fun avatars() = avatars(false)
     @Test fun avatarsDark() = avatars(true)

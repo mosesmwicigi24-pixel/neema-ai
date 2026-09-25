@@ -45,9 +45,26 @@ object Fmt {
 
     fun currency(n: Number?, currency: String = "KES"): String = "$currency ${number(n)}"
 
-    private val dateFmt = DateTimeFormatter.ofPattern("d MMM yyyy", Locale.ENGLISH)
+    /**
+     * The web formats dates with `toLocaleDateString("en-KE", { month: "short" })`,
+     * whose short months are Java's except September, which en-KE writes "Sept".
+     */
+    private val enKeMonths: Map<Long, String> = (1L..12L).associateWith { m ->
+        if (m == 9L) "Sept" else java.time.Month.of(m.toInt()).getDisplayName(java.time.format.TextStyle.SHORT, Locale.ENGLISH)
+    }
+
+    private fun dayMonthYear() = java.time.format.DateTimeFormatterBuilder()
+        .appendValue(java.time.temporal.ChronoField.DAY_OF_MONTH)
+        .appendLiteral(' ')
+        .appendText(java.time.temporal.ChronoField.MONTH_OF_YEAR, enKeMonths)
+        .appendLiteral(' ')
+        .appendValue(java.time.temporal.ChronoField.YEAR, 4)
+
+    /** lib/utils.ts fmtDate: "5 Sept 2026". */
+    private val dateFmt: DateTimeFormatter = dayMonthYear().toFormatter(Locale.ENGLISH)
     private val timeFmt = DateTimeFormatter.ofPattern("HH:mm", Locale.ENGLISH)
-    private val dateTimeFmt = DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm", Locale.ENGLISH)
+    private val dateTimeFmt: DateTimeFormatter = dayMonthYear().appendLiteral(", ")
+        .appendPattern("HH:mm").toFormatter(Locale.ENGLISH)
 
     private fun local(iso: String?) = millis(iso)?.let { Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()) }
 
