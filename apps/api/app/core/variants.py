@@ -74,7 +74,9 @@ def _minus_product(name: str, pname: str) -> str:
     return name
 
 
-def variant_label(product_name: str | None, v: dict | None) -> str:
+def variant_label(product_name: str | None, v: dict | None, skip: set[str] | frozenset = frozenset()) -> str:
+    """`skip`: attribute keys that tell nothing apart (`label_variants` passes
+    the ones every variant of the product shares — Size XS on each colour)."""
     v = v or {}
     pname = " ".join(str(product_name or "").split())
     attrs = v.get("attributes") or {}
@@ -95,6 +97,8 @@ def variant_label(product_name: str | None, v: dict | None) -> str:
     # apart only by {Size: 8 inch}). A bare code rides with its key: "Size M".
     bits: list[str] = []
     for key, val in attrs.items():
+        if key in skip:
+            continue
         val = " ".join(str(val or "").split())
         if val and pname:
             # an attribute that repeats the product's name ("BLACK PREACHING
@@ -113,9 +117,34 @@ def variant_label(product_name: str | None, v: dict | None) -> str:
     return f"{pname} — {tail}" if pname else tail
 
 
+def shared_attributes(variants: list[dict]) -> set[str]:
+    """The attribute keys whose value is the same on every variant that
+    carries them (two or more) — "Size: XS" on each of five colours is not
+    what tells a variant apart (owner, 2026-09-25: "remove size attributes").
+    A lone variant keeps everything it has."""
+    vs = [v for v in (variants or []) if isinstance(v, dict)]
+    if len(vs) < 2:
+        return set()
+    seen: dict[str, set[str]] = {}
+    count: dict[str, int] = {}
+    for v in vs:
+        attrs = v.get("attributes") or {}
+        if not isinstance(attrs, dict):
+            continue
+        for k, val in attrs.items():
+            val = " ".join(str(val or "").split()).lower()
+            if not val:
+                continue
+            seen.setdefault(k, set()).add(val)
+            count[k] = count.get(k, 0) + 1
+    return {k for k, vals in seen.items() if len(vals) == 1 and count[k] >= 2}
+
+
 def label_variants(items: list[dict]) -> None:
     """Stamp `label` on every variant of every product, in place."""
     for p in items or []:
-        for v in (p.get("variants") or []):
+        variants = p.get("variants") or []
+        skip = shared_attributes(variants)
+        for v in variants:
             if isinstance(v, dict):
-                v["label"] = variant_label(p.get("name"), v)
+                v["label"] = variant_label(p.get("name"), v, skip)
