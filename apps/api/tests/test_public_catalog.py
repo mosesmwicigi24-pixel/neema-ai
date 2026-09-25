@@ -61,3 +61,18 @@ def test_card_prices_product_and_variants_in_customer_currency():
 
     u = _card(p, "USD")
     assert u["currency"] == "USD" and u["price"] == 120 and u["price_from"] == 90
+
+
+def test_a_variant_named_only_after_its_product_shows_its_attributes():
+    """Owner, 2026-09-25: six collar sizes at six prices, every one labelled
+    'Straight Collar' — the size attribute now rides the label."""
+    from app.routers.public import _variant_card
+    v = {"name": "Straight Collar", "attributes": {"Size": "8 inch"}, "prices": {"KES": 350, "USD": 3.5}}
+    c = _variant_card(v, "USD")
+    assert c == {"label": "Straight Collar — 8 inch", "price": 3.5, "currency": "USD"}
+    # a name that already carries the attribute is left alone
+    assert _variant_card({"name": "S / GOLD", "attributes": {"Size": "S"}, "prices": {"USD": 90}}, "USD")["label"] == "S / GOLD"
+    # no attributes: the name as it is
+    assert _variant_card({"name": "Straight Collar", "attributes": {}, "prices": {"USD": 4}}, "USD")["label"] == "Straight Collar"
+    # no name: the attributes alone
+    assert _variant_card({"name": "", "attributes": {"Colour": "Navy"}, "prices": {"USD": 30}}, "USD")["label"] == "Navy"
