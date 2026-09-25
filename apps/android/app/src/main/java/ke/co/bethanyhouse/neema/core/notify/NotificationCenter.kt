@@ -66,13 +66,29 @@ class NotificationCenter(
                 val n = fromFrame(e)
                 save((listOf(n) + _items.value).take(60))
                 _incoming.tryEmit(n)
-                if (!foreground.value) {
+                if (!foreground.value && wantsSystemAlert(n.type)) {
                     Notifier.post(
                         context, (n.id.hashCode() and 0x7fffffff), Notifier.CH_ALERTS, n.title, n.body,
                         convKey = n.convKey, view = if (n.type == "order_update") "orders" else null,
                     )
                 }
             }
+        }
+    }
+
+    /**
+     * The Profile screen's notification switches (keys "notif_<name>" in the
+     * app prefs, defaults as there). They silence the phone notification only;
+     * the bell still records everything, as on the web.
+     */
+    private fun wantsSystemAlert(type: String): Boolean {
+        val p = context.getSharedPreferences("neema_prefs", Context.MODE_PRIVATE)
+        return when (type) {
+            "new_conversation" -> p.getBoolean("notif_new_conv", true)
+            "human_transfer", "transfer" -> p.getBoolean("notif_human_transfer", true)
+            "order_update" -> p.getBoolean("notif_order_updates", false)
+            "daily_summary" -> p.getBoolean("notif_daily_summary", true)
+            else -> true
         }
     }
 

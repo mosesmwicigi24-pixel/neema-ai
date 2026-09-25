@@ -194,9 +194,10 @@ class NeemaApi(val http: NeemaHttp) {
                 put("name", name); put("email", email); put("password", password)
                 if (role != null) put("role", role)
             })
-        suspend fun update(id: String, body: JsonObject): Agent = http.patch("/admin/agents/$id", body)
+        /** The server answers `{"ok": true}`, not the agent row. */
+        suspend fun update(id: String, body: JsonObject): OkResponse = http.patch("/admin/agents/$id", body)
         suspend fun delete(id: String): OkResponse = http.delete("/admin/agents/$id")
-        suspend fun setAvailable(id: String, available: Boolean): Agent =
+        suspend fun setAvailable(id: String, available: Boolean): OkResponse =
             http.patch("/admin/agents/$id", buildJsonObject { put("is_available", available) })
     }
 

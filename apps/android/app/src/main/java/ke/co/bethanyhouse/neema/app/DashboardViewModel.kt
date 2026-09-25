@@ -196,9 +196,20 @@ class DashboardViewModel : ViewModel() {
     fun refetchCatalog() { viewModelScope.launch { runCatching { refetchCatalogNow() } } }
     fun refreshInbox() { _inboxRefresh.tryEmit(Unit) }
 
-    /** The signed-in agent's row: /me first, else the team list matched by email (the web's lookup). */
+    /**
+     * The signed-in agent. The team-list row wins: /admin/me is the bare DB row
+     * without role_permissions / custom_permissions, so reading permissions from
+     * it alone would drop every custom role back to the legacy defaults.
+     */
     val currentAgent: Agent?
-        get() = _me.value ?: _agents.value.find { it.email.equals(session.value?.email, ignoreCase = true) }
+        get() {
+            val me = _me.value
+            val email = me?.email ?: session.value?.email
+            val id = me?.id ?: session.value?.agentId
+            return _agents.value.find { it.id == id }
+                ?: _agents.value.find { it.email.equals(email, ignoreCase = true) }
+                ?: me
+        }
 
     fun permissions(): List<String> {
         val a = currentAgent
