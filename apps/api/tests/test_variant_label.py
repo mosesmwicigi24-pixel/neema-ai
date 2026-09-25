@@ -163,3 +163,42 @@ def test_variants_that_read_the_same_at_different_prices_never_hold_a_reply():
     bad = rv.variant_issues("the small brass", "The small brass sprinkler is $90.", p)
     assert bad and bad[0]["hard"] and "USD 80" in bad[0]["text"]
     assert rv.variant_issues("the small brass", "The Sprinkler (Aspergillum) — Brass sprinkler / Small is $80.", p) == []
+
+
+def test_a_cached_catalogue_is_relabelled_by_the_rule_deployed_now(monkeypatch):
+    """Live, 2026-09-25: a label rule shipped and the public catalogue kept
+    showing the old labels for ten minutes — the cached copy carried the
+    labels stamped at load time. Cache and last-good copies are re-labelled
+    as they are read, so a deploy shows its rule at once."""
+    import json
+    old = [{"slug": "red-apostolic-cassock", "name": "Red Apostolic Cassock", "variants": [
+        {"name": "+ Black Pleats, Piping and Buttons", "attributes": {"Size": "M"},
+         "label": "Red Apostolic Cassock — + Black Pleats, Piping and Buttons", "prices": {"USD": 170}}]}]
+    blob = json.dumps(old)
+
+    class _Cache:
+        async def get(self, k): return blob if k == hc._CACHE_KEY else None
+        async def setex(self, k, ttl, v): ...
+
+    items = asyncio.run(hc.fetch_hub_catalog(_Cache()))
+    assert items[0]["variants"][0]["label"] == "Red Apostolic Cassock — Black Pleats, Piping and Buttons / Size M"
+
+    class _LastGood:
+        async def get(self, k): return blob if k == hc._LAST_GOOD_KEY else None
+        async def setex(self, k, ttl, v): ...
+
+    async def _boom(redis):
+        raise RuntimeError("hub 503")
+    monkeypatch.setattr(hc, "_load_hub_catalog", _boom)
+    items = asyncio.run(hc.fetch_hub_catalog(_LastGood()))
+    assert items[0]["variants"][0]["label"] == "Red Apostolic Cassock — Black Pleats, Piping and Buttons / Size M"
+
+
+def test_an_attribute_that_repeats_the_products_name_says_only_what_is_left():
+    """Live, 2026-09-25: the preaching gown's colour attribute is 'BLACK
+    PREACHING GOWN', so the label read 'BLACK / BLACK PREACHING GOWN'."""
+    assert variant_label("Preaching Gown", {"name": "BLACK", "attributes": {"Colour": "BLACK PREACHING GOWN"}}) == "Preaching Gown — BLACK"
+    assert variant_label("Preaching Gown", {"name": "", "attributes": {"Colour": "OFF WHITE PREACHING GOWN"}}) == "Preaching Gown — OFF WHITE"
+    assert variant_label("Preaching Gown", {"name": "", "attributes": {"Type": "PREACHING GOWN"}}) == "Preaching Gown"
+    # the size still rides along
+    assert variant_label("Preaching Gown", {"name": "BLACK", "attributes": {"Colour": "BLACK PREACHING GOWN", "Size": "L"}}) == "Preaching Gown — BLACK / Size L"

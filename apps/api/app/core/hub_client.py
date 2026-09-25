@@ -207,7 +207,7 @@ async def fetch_hub_catalog(redis) -> list[dict]:
         try:
             cached = await redis.get(_CACHE_KEY)
             if cached:
-                return json.loads(cached)
+                return _relabelled(json.loads(cached))
         except Exception:  # cache miss is non-fatal
             pass
 
@@ -218,8 +218,18 @@ async def fetch_hub_catalog(redis) -> list[dict]:
         if stale:
             _log.warning("hub catalogue unreachable (%s) — serving the last "
                          "known-good copy (%d products)", exc, len(stale))
-            return stale
+            return _relabelled(stale)
         raise
+
+
+def _relabelled(items: list[dict]) -> list[dict]:
+    """A cached copy carries the variant labels the rule stamped when it was
+    loaded (ten minutes, or seven days for the last-good mirror); the rule
+    that is deployed NOW is the one every seam must show, so a copy is
+    re-labelled as it is read (core/variants — a hundred products, no cost)."""
+    from app.core.variants import label_variants
+    label_variants(items)
+    return items
 
 
 async def _last_good(redis) -> list[dict] | None:
