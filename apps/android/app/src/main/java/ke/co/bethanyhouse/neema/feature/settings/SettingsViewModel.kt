@@ -16,7 +16,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonPrimitive
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneOffset
 
 // ── Local-only sections (the web keeps these in component state, no API) ─────
 
@@ -85,6 +87,18 @@ val INTEGRATIONS = listOf(
 val CANONICAL_BEFORE = listOf("New", "Contacted", "Qualified", "Proposal")
 const val PIPELINE_CUSTOM_MAX = 4
 const val PIPELINE_LABEL_MAX = 18
+/** crm.py PIPELINE_CANONICAL — the server silently drops a custom stage with one of these names. */
+val PIPELINE_CANONICAL = setOf("new", "contacted", "qualified", "proposal", "negotiation", "won", "lost")
+
+/** The Material date picker works in UTC midnight millis; offers store YYYY-MM-DD. */
+fun isoDateToUtcMillis(iso: String?): Long? =
+    iso?.let { runCatching { LocalDate.parse(it).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli() }.getOrNull() }
+
+fun utcMillisToIsoDate(ms: Long): String = Instant.ofEpochMilli(ms).atZone(ZoneOffset.UTC).toLocalDate().toString()
+
+/** The server's own checks on an offer (promotions.set_campaign): a name, 1..max percent, an end date. */
+fun offerIsValid(c: Campaign, maxPercent: Int): Boolean =
+    c.name.isNotBlank() && c.percent >= 1 && c.percent <= maxPercent && c.endsOn.isNotBlank()
 
 /**
  * SettingsView.tsx. Four cards are live (standing orders, translation, the
@@ -230,6 +244,11 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel() {
     /** [campaign] null ends the offer now. */
     fun saveOffer(campaign: Campaign?) {
         if (_savingOffer.value) return
+        val max = _offer.value?.maxPercent?.toInt()?.takeIf { it > 0 } ?: 70
+        if (campaign != null && !offerIsValid(campaign, max)) {
+            // What the server would answer with a 422 — said without the round trip.
+            return dash.toast("Couldn't save that offer (admin only, and it needs a name, a percentage and an end date)", ToastType.Error)
+        }
         viewModelScope.launch {
             _savingOffer.value = true
             try {
@@ -249,9 +268,12 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel() {
     // ── Pipeline stages ───────────────────────────────────────────────────────
 
     fun addStage(label: String): Boolean {
-        val l = label.trim().take(PIPELINE_LABEL_MAX)
+        val l = label.trim().take(PIPELINE_LABEL_MAX).trim()
         if (l.isEmpty()) return false
         val cur = _stages.value ?: emptyList()
+        if (l.lowercase() in PIPELINE_CANONICAL) {
+            dash.toast("“$l” is already a built-in stage", ToastType.Warning); return false
+        }
         if (cur.any { it.equals(l, ignoreCase = true) }) {
             dash.toast("“$l” is already a stage", ToastType.Warning); return false
         }

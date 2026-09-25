@@ -49,6 +49,21 @@ import ke.co.bethanyhouse.neema.feature.agents.PermissionCatalog
 import ke.co.bethanyhouse.neema.feature.agents.TeamButton
 import ke.co.bethanyhouse.neema.feature.agents.hexColor
 
+/** The web's #9ccd65 secondary text; on the dark theme that stand-in is unreadable, so the muted grey-green instead. */
+private val ke.co.bethanyhouse.neema.core.ui.theme.NeemaColors.faint: Color get() = if (isDark) muted else border2
+
+/** Which parts of Profile start open — set only by screenshot tests, which cannot tap. */
+data class ProfilePreview(
+    val editMode: Boolean = false,
+    val changingPassword: Boolean = false,
+    val confirmSignOut: Boolean = false,
+    val typed: Map<String, String> = emptyMap(),
+    /** Initial scroll offset in px, to render a lower part of the page. */
+    val scroll: Int = 0,
+)
+
+val LocalProfilePreview = staticCompositionLocalOf { ProfilePreview() }
+
 /**
  * Port of ProfileView.tsx plus the account menu from Sidebar.tsx (identity,
  * Settings link, theme, Sign out) and the Android-only device settings:
@@ -79,27 +94,28 @@ fun ProfileScreen(dash: DashboardViewModel) {
 
     if (agent == null) {
         Box(Modifier.fillMaxSize().background(c.bg), contentAlignment = Alignment.Center) {
-            Text("Loading profile…", fontSize = 14.sp, color = c.border2)
+            Text("Loading profile…", fontSize = 14.sp, color = c.faint)
         }
         return
     }
 
     val permKeys = Perms.of(teamRow ?: agent)
     val available = availableOverride ?: agent.isAvailable
-    var editMode by rememberSaveable { mutableStateOf(false) }
-    var changingPassword by rememberSaveable { mutableStateOf(false) }
-    var confirmSignOut by rememberSaveable { mutableStateOf(false) }
+    val preview = LocalProfilePreview.current
+    var editMode by rememberSaveable { mutableStateOf(preview.editMode) }
+    var changingPassword by rememberSaveable { mutableStateOf(preview.changingPassword) }
+    var confirmSignOut by rememberSaveable { mutableStateOf(preview.confirmSignOut) }
 
     PullToRefreshBox(isRefreshing = refreshing, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize().background(c.bg)) {
         Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState(preview.scroll)).padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             // The web caps this page at max-w-2xl; tablets keep that reading width.
             Column(Modifier.widthIn(max = 720.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Column {
                     Text("Profile", style = MaterialTheme.typography.headlineSmall, color = c.text)
-                    Text("Manage your account and preferences", fontSize = 13.sp, color = c.border2)
+                    Text("Manage your account and preferences", fontSize = 13.sp, color = c.faint)
                 }
 
                 // ── Profile card ────────────────────────────────────────────
@@ -113,20 +129,20 @@ fun ProfileScreen(dash: DashboardViewModel) {
                                 Spacer(Modifier.width(8.dp))
                                 Pill(
                                     agent.role.replaceFirstChar { it.uppercase() },
-                                    if (agent.role == "admin") Color(0xFF7E22CE) else c.gold2,
+                                    if (agent.role == "admin") (if (c.isDark) Color(0xFFC084FC) else Color(0xFF7E22CE)) else c.gold2,
                                 )
                             }
                             teamRow?.roleName?.let { rn ->
                                 Spacer(Modifier.height(4.dp))
                                 Pill(rn, hexColor(teamRow.roleColor), filled = true)
                             }
-                            Text(agent.email, fontSize = 13.sp, color = c.border2, modifier = Modifier.padding(top = 2.dp))
+                            Text(agent.email, fontSize = 13.sp, color = c.faint, modifier = Modifier.padding(top = 2.dp))
                             Text(
                                 buildString {
                                     append("Joined ${if (agent.createdAt != null) Fmt.date(agent.createdAt) else "—"}")
                                     if (agent.lastSeenAt != null) append(" · Last active ${Fmt.date(agent.lastSeenAt)}")
                                 },
-                                fontSize = 12.sp, color = c.border2, modifier = Modifier.padding(top = 4.dp),
+                                fontSize = 12.sp, color = c.faint, modifier = Modifier.padding(top = 4.dp),
                             )
                         }
                         TeamButton(if (editMode) "Cancel" else "Edit", { editMode = !editMode }, small = true,
@@ -170,7 +186,7 @@ fun ProfileScreen(dash: DashboardViewModel) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text("Password", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = c.text)
-                            Text("Change your login password", fontSize = 12.sp, color = c.border2)
+                            Text("Change your login password", fontSize = 12.sp, color = c.faint)
                         }
                         TeamButton(if (changingPassword) "Cancel" else "Change", { changingPassword = !changingPassword }, small = true)
                     }
@@ -225,7 +241,7 @@ fun ProfileScreen(dash: DashboardViewModel) {
                                 ) {
                                     Box(Modifier.size(6.dp).clip(CircleShape).background(if (has) c.gold else Color(0xFFD6D3D1)))
                                     Spacer(Modifier.width(8.dp))
-                                    Text(p.label, fontSize = 12.sp, color = if (has) c.gold2 else c.border2)
+                                    Text(p.label, fontSize = 12.sp, color = if (has) c.gold2 else c.faint)
                                 }
                             }
                             if (pair.size == 1) Spacer(Modifier.weight(1f))
@@ -294,8 +310,9 @@ private fun EditProfileForm(
 
 @Composable
 private fun PasswordForm(saving: Boolean, onSubmit: (String, String) -> Unit) {
-    var pw by rememberSaveable { mutableStateOf("") }
-    var confirm by rememberSaveable { mutableStateOf("") }
+    val typed = LocalProfilePreview.current.typed
+    var pw by rememberSaveable { mutableStateOf(typed["password"] ?: "") }
+    var confirm by rememberSaveable { mutableStateOf(typed["confirm"] ?: "") }
     LabeledInput("New Password", pw, { pw = it }, placeholder = "Minimum 8 characters", password = true)
     LabeledInput("Confirm Password", confirm, { confirm = it }, password = true)
     TeamButton(if (saving) "Changing…" else "Change Password", { onSubmit(pw, confirm) }, variant = BtnVariant.Primary, enabled = !saving)
@@ -316,7 +333,7 @@ private fun ToggleRow(label: String, desc: String, checked: Boolean, onToggle: (
     Row(Modifier.fillMaxWidth().clickable(onClick = onToggle), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(label, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = c.text)
-            Text(desc, fontSize = 12.sp, color = c.border2, lineHeight = 16.sp)
+            Text(desc, fontSize = 12.sp, color = c.faint, lineHeight = 16.sp)
         }
         Spacer(Modifier.width(12.dp))
         Switch(checked = checked, onCheckedChange = { onToggle() })
@@ -334,7 +351,7 @@ private fun LinkRow(icon: ImageVector, label: String, desc: String, chevron: Boo
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(label, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = c.text)
-            Text(desc, fontSize = 12.sp, color = c.border2)
+            Text(desc, fontSize = 12.sp, color = c.faint)
         }
         if (chevron) Icon(Icons.Outlined.ChevronRight, null, tint = c.muted)
     }

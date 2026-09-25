@@ -53,11 +53,24 @@ import ke.co.bethanyhouse.neema.core.ui.components.Pill
 import ke.co.bethanyhouse.neema.core.ui.components.SearchField
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import ke.co.bethanyhouse.neema.core.util.Fmt
-import java.time.Instant
 import java.time.LocalDate
-import java.time.ZoneOffset
 
 private val Amber700 = Color(0xFFB45309)
+
+/**
+ * What starts open on Settings — a date picker ("ends" / "starts"), the
+ * end-offer confirmation, the product picker. Only screenshot tests set it.
+ */
+data class SettingsPreview(
+    val datePicker: String? = null,
+    val confirmEnd: Boolean = false,
+    val skuPicker: Boolean = false,
+    val newStage: String = "",
+    /** Initial scroll offset in px, to render a lower part of the page. */
+    val scroll: Int = 0,
+)
+
+val LocalSettingsPreview = staticCompositionLocalOf { SettingsPreview() }
 
 /** Port of SettingsView.tsx — platform configuration. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -75,12 +88,13 @@ fun SettingsScreen(dash: DashboardViewModel) {
     val vm: SettingsViewModel = viewModel { SettingsViewModel(dash) }
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()
     val c = Neema.colors
+    val startScroll = LocalSettingsPreview.current.scroll
 
     PullToRefreshBox(isRefreshing = refreshing, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize().background(c.bg)) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             // The web's grid is one column on phones, two otherwise.
             val twoCols = maxWidth >= 720.dp
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState(startScroll)).padding(16.dp)) {
                 Text("Settings", style = MaterialTheme.typography.headlineSmall, color = c.text)
                 Text("Platform configuration and integrations", fontSize = 12.sp, color = c.textDim)
                 Spacer(Modifier.height(18.dp))
@@ -94,12 +108,16 @@ fun SettingsScreen(dash: DashboardViewModel) {
                     { AiCard(vm) },
                 )
                 if (twoCols) {
+                    // Two balanced columns: the tall offer form sits under standing orders on the
+                    // left; the four shorter cards stack on the right (alternating left the right
+                    // column half empty).
+                    val left = setOf(0, 2)
                     Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                            cards.filterIndexed { i, _ -> i % 2 == 0 }.forEach { it() }
+                            cards.filterIndexed { i, _ -> i in left }.forEach { it() }
                         }
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                            cards.filterIndexed { i, _ -> i % 2 == 1 }.forEach { it() }
+                            cards.filterIndexed { i, _ -> i !in left }.forEach { it() }
                         }
                     }
                 } else {
@@ -135,7 +153,7 @@ private fun Field(label: String, hint: String? = null, hintColor: Color? = null,
         Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Neema.colors.textMid)
         Spacer(Modifier.height(5.dp))
         content()
-        if (hint != null) Text(hint, fontSize = 11.sp, color = hintColor ?: Neema.colors.muted, modifier = Modifier.padding(top = 3.dp))
+        if (hint != null) Text(hint, fontSize = 11.sp, lineHeight = 15.sp, color = hintColor ?: Neema.colors.muted, modifier = Modifier.padding(top = 3.dp))
     }
 }
 
@@ -151,7 +169,7 @@ private fun SmallInput(
 ) {
     OutlinedTextField(
         value = value, onValueChange = onChange, singleLine = true,
-        placeholder = placeholder?.let { { Text(it, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
+        placeholder = placeholder?.let { { Text(it, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = Neema.colors.muted) } },
         keyboardOptions = KeyboardOptions(keyboardType = if (secret) KeyboardType.Password else keyboardType),
         visualTransformation = if (secret) androidx.compose.ui.text.input.PasswordVisualTransformation()
         else androidx.compose.ui.text.input.VisualTransformation.None,
@@ -196,7 +214,7 @@ private fun StandingOrdersCard(vm: SettingsViewModel) {
                 Text(
                     "e.g. \"Push copes this week — Easter is close. Quote 3-week lead times on made-to-order. " +
                         "Mention the new Ladies Princess Cassock to lady customers.\"",
-                    fontSize = 13.sp,
+                    fontSize = 13.sp, color = Neema.colors.muted,
                 )
             },
             shape = RoundedCornerShape(10.dp),
@@ -258,8 +276,9 @@ private fun OfferCard(vm: SettingsViewModel, dash: DashboardViewModel) {
     val saving by vm.savingOffer.collectAsStateWithLifecycle()
     val catalog by dash.catalog.collectAsStateWithLifecycle()
     val c = Neema.colors
-    var confirmEnd by rememberSaveable { mutableStateOf(false) }
-    var skuPicker by rememberSaveable { mutableStateOf(false) }
+    val preview = LocalSettingsPreview.current
+    var confirmEnd by rememberSaveable { mutableStateOf(preview.confirmEnd) }
+    var skuPicker by rememberSaveable { mutableStateOf(preview.skuPicker) }
 
     SectionCard(
         "Offer running now",
@@ -314,11 +333,11 @@ private fun OfferCard(vm: SettingsViewModel, dash: DashboardViewModel) {
                 )
             }
             Field("Last day", "Inclusive — it runs through this date.", modifier = Modifier.weight(1f)) {
-                DateButton(draft.endsOn.ifBlank { null }, "Pick a date") { d -> vm.editDraft { it.copy(endsOn = d ?: "") } }
+                DateButton("ends", draft.endsOn.ifBlank { null }, "Pick a date") { d -> vm.editDraft { it.copy(endsOn = d ?: "") } }
             }
         }
         Field("First day (optional)", "Leave empty to start straight away.") {
-            DateButton(draft.startsOn, "Starts now", clearable = true) { d -> vm.editDraft { it.copy(startsOn = d) } }
+            DateButton("starts", draft.startsOn, "Starts now", clearable = true) { d -> vm.editDraft { it.copy(startsOn = d) } }
         }
 
         Field("Applies to") {
@@ -345,6 +364,12 @@ private fun OfferCard(vm: SettingsViewModel, dash: DashboardViewModel) {
                         val name = productNameFor(catalog, sku)
                         InputChip(
                             selected = true, onClick = {},
+                            colors = InputChipDefaults.inputChipColors(
+                                selectedContainerColor = if (c.isDark) c.goldDim else c.bg3, selectedLabelColor = c.gold2, selectedTrailingIconColor = c.gold2,
+                            ),
+                            border = InputChipDefaults.inputChipBorder(
+                                enabled = true, selected = true, selectedBorderColor = c.border, borderColor = c.border,
+                            ),
                             label = { Text(if (name != null) "$sku · $name" else sku, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                             trailingIcon = {
                                 Icon(Icons.Default.Close, "Remove", Modifier.size(16.dp).clickable {
@@ -414,6 +439,14 @@ private fun CategoryPicker(known: List<String>, selected: List<String>, onChange
                 onClick = { onChange(if (on) selected.filterNot { it.equals(cat, true) } else selected + cat) },
                 label = { Text(cat, fontSize = 12.sp) },
                 leadingIcon = if (on) ({ Icon(Icons.Default.Check, null, Modifier.size(16.dp)) }) else null,
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = Neema.colors.let { if (it.isDark) it.goldDim else it.bg3 }, selectedLabelColor = Neema.colors.gold2,
+                    selectedLeadingIconColor = Neema.colors.gold,
+                ),
+                border = FilterChipDefaults.filterChipBorder(
+                    enabled = true, selected = on,
+                    borderColor = Neema.colors.border, selectedBorderColor = Neema.colors.border,
+                ),
             )
         }
     }
@@ -431,7 +464,7 @@ private fun AddTextRow(placeholder: String, onAdd: (String) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         OutlinedTextField(
             value = text, onValueChange = { text = it }, singleLine = true,
-            placeholder = { Text(placeholder, fontSize = 13.sp) },
+            placeholder = { Text(placeholder, fontSize = 13.sp, color = Neema.colors.muted) },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { submit() }),
             shape = RoundedCornerShape(10.dp),
@@ -501,8 +534,9 @@ private fun SkuPickerDialog(catalog: List<CatalogItem>, selected: List<String>, 
 /** A date field that opens the Material date picker; values are YYYY-MM-DD. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DateButton(value: String?, emptyLabel: String, clearable: Boolean = false, onPick: (String?) -> Unit) {
-    var open by rememberSaveable { mutableStateOf(false) }
+private fun DateButton(id: String, value: String?, emptyLabel: String, clearable: Boolean = false, onPick: (String?) -> Unit) {
+    val startOpen = LocalSettingsPreview.current.datePicker == id
+    var open by rememberSaveable { mutableStateOf(startOpen) }
     val c = Neema.colors
     Row(verticalAlignment = Alignment.CenterVertically) {
         OutlinedButton(
@@ -524,15 +558,12 @@ private fun DateButton(value: String?, emptyLabel: String, clearable: Boolean = 
         }
     }
     if (open) {
-        val initial = value?.let { runCatching { LocalDate.parse(it).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli() }.getOrNull() }
-        val state = rememberDatePickerState(initialSelectedDateMillis = initial)
+        val state = rememberDatePickerState(initialSelectedDateMillis = isoDateToUtcMillis(value))
         DatePickerDialog(
             onDismissRequest = { open = false },
             confirmButton = {
                 TextButton(onClick = {
-                    state.selectedDateMillis?.let { ms ->
-                        onPick(Instant.ofEpochMilli(ms).atZone(ZoneOffset.UTC).toLocalDate().toString())
-                    }
+                    state.selectedDateMillis?.let { ms -> onPick(utcMillisToIsoDate(ms)) }
                     open = false
                 }) { Text("OK") }
             },
@@ -549,7 +580,8 @@ private fun PipelineStagesCard(vm: SettingsViewModel) {
     val stages by vm.stages.collectAsStateWithLifecycle()
     val saving by vm.savingStages.collectAsStateWithLifecycle()
     val c = Neema.colors
-    var newStage by rememberSaveable { mutableStateOf("") }
+    val startStage = LocalSettingsPreview.current.newStage
+    var newStage by rememberSaveable { mutableStateOf(startStage) }
     SectionCard(
         "Pipeline stages",
         "Your own stage labels, shown between Proposal and Won in every lead pipeline. Up to $PIPELINE_CUSTOM_MAX; the built-in stages stay fixed.",
@@ -570,11 +602,11 @@ private fun PipelineStagesCard(vm: SettingsViewModel) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(bottom = 8.dp)) {
                 list.forEach { s ->
                     Row(
-                        Modifier.clip(RoundedCornerShape(6.dp)).background(Color(0xFFFDF8EC))
-                            .border(1.dp, Color(0xFFE3CF9B), RoundedCornerShape(6.dp)).padding(start = 8.dp),
+                        Modifier.clip(RoundedCornerShape(6.dp)).background(if (c.isDark) Color(0x26C89B3C) else Color(0xFFFDF8EC))
+                            .border(1.dp, if (c.isDark) Color(0x66C89B3C) else Color(0xFFE3CF9B), RoundedCornerShape(6.dp)).padding(start = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(s, fontSize = 12.sp, color = Color(0xFF8A6D1F))
+                        Text(s, fontSize = 12.sp, color = if (c.isDark) Color(0xFFE3CF9B) else Color(0xFF8A6D1F))
                         IconButton(onClick = { vm.removeStage(s) }, enabled = !saving, modifier = Modifier.size(28.dp)) {
                             Icon(Icons.Default.Close, "Remove $s", Modifier.size(14.dp), tint = c.muted)
                         }
@@ -586,7 +618,7 @@ private fun PipelineStagesCard(vm: SettingsViewModel) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
                     value = newStage, onValueChange = { newStage = it.take(PIPELINE_LABEL_MAX) }, singleLine = true,
-                    placeholder = { Text("Stage label (e.g. Sampling)…", fontSize = 13.sp) },
+                    placeholder = { Text("Stage label (e.g. Sampling)…", fontSize = 13.sp, color = c.muted) },
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { if (vm.addStage(newStage)) newStage = "" }),
                     shape = RoundedCornerShape(10.dp),
@@ -701,7 +733,7 @@ private fun IntegrationsCard(vm: SettingsViewModel, twoCols: Boolean) {
                 val isExpanded = expanded == integ.key
                 val icon = platformIcon(integ.key)
                 val cfg = config[integ.key] ?: emptyMap()
-                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).border(1.dp, c.bg3, RoundedCornerShape(12.dp))) {
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).border(1.dp, if (c.isDark) c.hairline else c.bg3, RoundedCornerShape(12.dp))) {
                     Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(icon.bg), contentAlignment = Alignment.Center) {
                             if (icon.icon != null) Icon(icon.icon, null, tint = Color.White, modifier = Modifier.size(20.dp))
@@ -709,7 +741,7 @@ private fun IntegrationsCard(vm: SettingsViewModel, twoCols: Boolean) {
                         }
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(integ.name, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(integ.name, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = c.text, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 16.sp)
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Box(Modifier.size(6.dp).clip(CircleShape).background(if (integ.connected) c.gold else Color(0xFFD6D3D1)))
                                 Spacer(Modifier.width(5.dp))
