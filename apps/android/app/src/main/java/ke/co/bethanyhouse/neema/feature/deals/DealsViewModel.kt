@@ -102,7 +102,7 @@ class DealsViewModel(private val dash: DashboardViewModel) : ViewModel() {
                 dash.toast(msg)
                 load()
             } catch (e: Exception) {
-                dash.toast("Update failed — ${dash.errorText(e)}", ToastType.Error)
+                dash.toast("Update failed", ToastType.Error)
             }
         }
     }
@@ -132,7 +132,7 @@ class DealsViewModel(private val dash: DashboardViewModel) : ViewModel() {
                 dash.toast(if (verb == "approve") "Sent ✓" else "Vetoed")
                 load()
             } catch (e: Exception) {
-                dash.toast("$verb failed — ${dash.errorText(e)}", ToastType.Error)
+                dash.toast("$verb failed", ToastType.Error)
             } finally {
                 _acting.value = _acting.value - id
             }

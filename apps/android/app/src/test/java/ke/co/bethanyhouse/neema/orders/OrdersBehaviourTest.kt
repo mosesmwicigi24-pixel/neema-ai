@@ -86,7 +86,7 @@ class OrdersBehaviourTest {
         assertNull(vm.updating.value)
         val t = toasts.all.last()
         assertEquals(ToastType.Error, t.type)
-        assertTrue(t.message, t.message.startsWith("Failed to update order"))
+        assertEquals("the web's exact copy", "Failed to update order", t.message)
     }
 
     @Test fun allowedTransitionsMatchTheWeb() {
@@ -169,5 +169,32 @@ class OrdersBehaviourTest {
         assertTrue(dash.orders.value.isEmpty())
         val vm = OrdersViewModel(dash)
         assertFalse("an empty list must read 'No orders found', not spin", vm.initialLoading.value)
+    }
+
+    @Test fun refreshThatChangesTheListStillCostsOneRequest() {
+        val (dash, vm) = vm()
+        fake.on("GET", "/admin/orders", body = SalesFixtures.ordersJson(SalesFixtures.orders.take(1)))
+        val before = fake.calls.count { it.path == "/admin/orders" }
+        vm.refresh()
+        // dash.refreshOrders() is the one fetch — no second request to hand the list over.
+        assertEquals(before + 1, fake.calls.count { it.path == "/admin/orders" })
+        assertEquals(listOf("o1"), dash.orders.value.map { it.id })
+        assertFalse(vm.refreshing.value)
+    }
+
+    @Test fun failedRefreshStopsTheSpinnerAndKeepsTheList() {
+        val (dash, vm) = vm()
+        val shown = dash.orders.value
+        fake.on("GET", "/admin/orders", code = 503, body = """{"detail":"down"}""")
+        vm.refresh()
+        assertFalse(vm.refreshing.value)
+        assertEquals(shown, dash.orders.value)
+    }
+
+    @Test fun failedFirstLoadStillEndsTheLoadingState() {
+        fake.on("GET", "/admin/orders", code = 500, body = """{"detail":"boom"}""")
+        val container = testContainer(paparazzi.context, fake).also { it.snapshots.clear() }
+        val vm = OrdersViewModel(DashboardViewModel(container))
+        assertFalse(vm.initialLoading.value)
     }
 }

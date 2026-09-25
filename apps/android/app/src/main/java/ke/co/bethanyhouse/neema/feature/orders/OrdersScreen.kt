@@ -19,7 +19,15 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.unit.Dp
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalUriHandler
@@ -43,7 +51,6 @@ import ke.co.bethanyhouse.neema.core.perm.Perms
 import ke.co.bethanyhouse.neema.core.ui.components.Avatar
 import ke.co.bethanyhouse.neema.core.ui.components.EmptyState
 import ke.co.bethanyhouse.neema.core.ui.components.Loading
-import ke.co.bethanyhouse.neema.core.ui.components.SearchField
 import ke.co.bethanyhouse.neema.core.ui.components.channelStyle
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import ke.co.bethanyhouse.neema.core.util.Fmt
@@ -107,14 +114,15 @@ fun OrdersScreen(dash: DashboardViewModel) {
             ) {
                 // ── Header ─────────────────────────────────────────────────
                 item(key = "header") {
-                    Row(Modifier.fillMaxWidth().padding(bottom = 20.dp), verticalAlignment = Alignment.Top) {
+                    Row(Modifier.fillMaxWidth().padding(bottom = 24.dp), verticalAlignment = Alignment.Top) {
                         Column(Modifier.weight(1f)) {
-                            Text("Orders", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = c.text)
-                            Row {
+                            Text("Orders", fontSize = 20.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp, color = c.text)
+                            Row(Modifier.padding(top = 2.dp)) {
                                 Text("${orders.size} total", fontSize = 14.sp, color = c.textDim)
                                 val pending = statusCounts["pending"] ?: 0
                                 if (pending > 0) {
-                                    Text(" · $pending pending", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = c.amber)
+                                    Text("· $pending pending", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = c.amber,
+                                        modifier = Modifier.padding(start = 6.dp))
                                 }
                             }
                         }
@@ -124,7 +132,7 @@ fun OrdersScreen(dash: DashboardViewModel) {
                                 .padding(horizontal = 16.dp, vertical = 10.dp),
                             horizontalAlignment = Alignment.End,
                         ) {
-                            Text("Total Revenue", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = c.textDim)
+                            Text("Total Revenue", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = c.textDim, modifier = Modifier.padding(bottom = 2.dp))
                             Text(money(totalRevenue), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = c.gold2)
                         }
                     }
@@ -133,16 +141,16 @@ fun OrdersScreen(dash: DashboardViewModel) {
                 // ── Status summary cards (tap = filter) ────────────────────
                 item(key = "cards") {
                     val cols = if (wide) 4 else 2
-                    Column(Modifier.padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(Modifier.padding(bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         ORDER_STATUSES.chunked(cols).forEach { rowStatuses ->
-                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 rowStatuses.forEach { s ->
                                     val meta = statusMeta(s)
                                     val rev = orders.filter { it.status == s }.sumOf { it.amount }
                                     StatusCard(
                                         meta = meta, count = statusCounts[s] ?: 0, revenue = rev,
                                         active = filter == s, onClick = { vm.toggleFilter(s) },
-                                        modifier = Modifier.weight(1f),
+                                        modifier = Modifier.weight(1f).fillMaxHeight(),
                                     )
                                 }
                             }
@@ -152,16 +160,18 @@ fun OrdersScreen(dash: DashboardViewModel) {
 
                 // ── Search + active filter ─────────────────────────────────
                 item(key = "search") {
-                    Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        SearchField(search, vm::setSearch, placeholder = "Search by name or phone…", modifier = Modifier.weight(1f))
+                    Row(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        CompactSearchField(search, vm::setSearch, placeholder = "Search by name or phone…", modifier = Modifier.weight(1f))
                         if (filter != "all") {
                             Spacer(Modifier.width(8.dp))
-                            Button(
-                                onClick = { vm.setFilter("all") },
-                                colors = ButtonDefaults.buttonColors(containerColor = c.gold2, contentColor = Color.White),
-                                shape = RoundedCornerShape(12.dp),
-                                contentPadding = PaddingValues(horizontal = 12.dp),
-                            ) { Text("${STATUS_META[filter]?.label ?: filter} ✕", fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
+                            Box(
+                                Modifier.height(36.dp).clip(RoundedCornerShape(12.dp)).background(c.gold2)
+                                    .clickable { vm.setFilter("all") }.padding(horizontal = 12.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text("${STATUS_META[filter]?.label ?: filter} ✕", fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                                    color = if (c.isDark) c.bg else Color.White)
+                            }
                         }
                     }
                 }
@@ -173,11 +183,11 @@ fun OrdersScreen(dash: DashboardViewModel) {
                     item(key = "empty") {
                         Column(
                             Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.bg2)
-                                .border(1.dp, c.bg4, RoundedCornerShape(12.dp)).padding(vertical = 56.dp),
+                                .border(1.dp, c.bg4, RoundedCornerShape(12.dp)).padding(vertical = 64.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
                             Text("📦", fontSize = 30.sp)
-                            Spacer(Modifier.height(10.dp))
+                            Spacer(Modifier.height(12.dp))
                             Text("No orders found", fontSize = 14.sp, color = c.textDim)
                         }
                     }
@@ -185,13 +195,11 @@ fun OrdersScreen(dash: DashboardViewModel) {
                     items(paginated, key = { it.id }) { order ->
                         val first = order.id == paginated.first().id
                         val last = order.id == paginated.last().id
-                        val shape = RoundedCornerShape(
-                            topStart = if (first) 12.dp else 0.dp, topEnd = if (first) 12.dp else 0.dp,
-                            bottomStart = if (last) 12.dp else 0.dp, bottomEnd = if (last) 12.dp else 0.dp,
-                        )
-                        Column(Modifier.fillMaxWidth().clip(shape).background(c.bg2)) {
+                        // One bordered card around the whole list, drawn a slice per row
+                        // so it stays whole as the rows scroll.
+                        Column(Modifier.fillMaxWidth().listSegment(first, last, border = c.bg4, fill = c.bg2)) {
                             OrderRow(dash, order, isUpdating = updating == order.id, onClick = { vm.select(order) })
-                            if (!last) HorizontalDivider(color = c.bg3)
+                            if (!last) HorizontalDivider(color = if (c.isDark) c.bg3 else Color(0xFFF0F9EC))
                         }
                     }
                 }
@@ -218,11 +226,13 @@ fun OrdersScreen(dash: DashboardViewModel) {
             onDismissRequest = { vm.select(null) },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
             containerColor = c.bg2,
+            dragHandle = { WebDragHandle() },
         ) {
             OrderDetail(
                 dash = dash, order = selected, canManage = canManage,
                 busy = updating == selected.id,
                 onStatus = { next -> vm.updateStatus(selected.id, next) },
+                onClose = { vm.select(null) },
             )
         }
     }
@@ -273,7 +283,7 @@ private fun OrderRow(dash: DashboardViewModel, order: Order, isUpdating: Boolean
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             // Row 1: name + channel + status
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = c.text, maxLines = 1,
                     overflow = TextOverflow.Ellipsis, modifier = Modifier.align(Alignment.CenterVertically))
                 if (order.channel.isNotBlank()) Box(Modifier.align(Alignment.CenterVertically)) { OrderChannelPill(order.channel) }
@@ -286,16 +296,16 @@ private fun OrderRow(dash: DashboardViewModel, order: Order, isUpdating: Boolean
                 Text(
                     order.hubOrderNumber?.takeIf { it.isNotBlank() } ?: "not in hub",
                     modifier = Modifier.align(Alignment.CenterVertically).clip(RoundedCornerShape(4.dp))
-                        .background(c.bg3).padding(horizontal = 4.dp, vertical = 1.dp),
+                        .background(c.bg3).padding(horizontal = 4.dp, vertical = 2.dp),
                     fontSize = 10.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = c.gold2,
                 )
                 if (hubHref != null) {
                     Text(
                         "Open in hub ↗",
                         modifier = Modifier.align(Alignment.CenterVertically).clip(RoundedCornerShape(4.dp))
-                            .border(1.dp, c.border, RoundedCornerShape(4.dp))
+                            .border(1.dp, if (c.isDark) c.border else Color(0xFFCFE3BD), RoundedCornerShape(4.dp))
                             .clickable { runCatching { uri.openUri(hubHref) } }
-                            .padding(horizontal = 6.dp, vertical = 1.dp),
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
                         fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = c.gold2,
                     )
                 }
@@ -314,10 +324,10 @@ private fun OrderRow(dash: DashboardViewModel, order: Order, isUpdating: Boolean
                     // The separator travels with the summary, so a wrap never leaves it dangling.
                     Text(
                         buildAnnotatedString {
-                            withStyle(SpanStyle(color = c.border)) { append("·  ") }
+                            withStyle(SpanStyle(color = if (c.isDark) c.border else Color(0xFFE7E5E4))) { append("·  ") }
                             append(itemSummary + if (extraItems > 0) " +$extraItems more" else "")
                         },
-                        fontSize = 12.sp, color = c.textMid, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        fontSize = 12.sp, color = if (c.isDark) c.textMid else Color(0xFF78716C), maxLines = 1, overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.widthIn(max = 232.dp).align(Alignment.CenterVertically),
                     )
                 }
@@ -325,7 +335,7 @@ private fun OrderRow(dash: DashboardViewModel, order: Order, isUpdating: Boolean
             // Row 3: time
             Text(Fmt.timeAgo(order.createdAt), fontSize = 10.sp, color = c.textDim, modifier = Modifier.padding(top = 2.dp))
         }
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(12.dp))
         Column(horizontalAlignment = Alignment.End) {
             Text(money(order.amount), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = c.text)
             Text(order.currency.ifBlank { "KES" }, fontSize = 10.sp, color = c.textDim, modifier = Modifier.padding(top = 2.dp))
@@ -359,17 +369,15 @@ internal fun Pager(page: Int, totalPages: Int, total: Int, onPage: (Int) -> Unit
 private fun PageButton(label: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val c = Neema.colors
     val shape = RoundedCornerShape(8.dp)
+    // disabled:opacity-30 fades the whole button, border and fill included.
     Box(
-        Modifier.size(30.dp).clip(shape)
+        Modifier.size(28.dp).alpha(if (enabled) 1f else 0.3f).clip(shape)
             .background(if (selected) c.gold else c.bg2)
             .border(1.dp, if (selected) c.gold else c.border, shape)
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
-            color = (if (selected) Color.White else c.gold2).copy(alpha = if (enabled) 1f else 0.3f),
-        )
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = if (selected) Color.White else c.gold2)
     }
 }
 
@@ -383,6 +391,7 @@ internal fun OrderDetail(
     canManage: Boolean,
     busy: Boolean,
     onStatus: (String) -> Unit,
+    onClose: () -> Unit = {},
 ) {
     val c = Neema.colors
     val uri = LocalUriHandler.current
@@ -394,11 +403,11 @@ internal fun OrderDetail(
     val hub = hubMeta(order)
     val soft = RoundedCornerShape(12.dp)
 
-    Column(
-        Modifier.fillMaxWidth().verticalScrollable().padding(horizontal = 20.dp).padding(bottom = 28.dp),
-    ) {
-        Text("Order — $name", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = c.text)
-        Spacer(Modifier.height(14.dp))
+    // The web Modal: a title bar (text-base semibold, a ✕ on the right, a
+    // hairline under it), then the body with px-5 pt-4 pb-6.
+    Column(Modifier.fillMaxWidth().verticalScrollable()) {
+        ModalTitleBar("Order — $name", onClose)
+    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(top = 16.dp, bottom = 24.dp)) {
 
         // Customer
         Row(
@@ -411,9 +420,10 @@ internal fun OrderDetail(
                 Text(name, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = c.text)
                 Text(Fmt.formatPhone(order.waId), fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = c.textDim)
             }
-            Badge(meta.label, meta.tone, fontSize = 12)
+            Spacer(Modifier.width(12.dp))
+            Badge(meta.label, meta.tone, fontSize = 12, radius = 8.dp, hPad = 8.dp, vPad = 4.dp)
         }
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(16.dp))
 
         // Meta grid
         val cells = listOf(
@@ -427,7 +437,7 @@ internal fun OrderDetail(
                 pair.forEach { (label, value) -> MetaCell(label, value, Modifier.weight(1f)) }
             }
         }
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(8.dp))
 
         // Hub linkage
         SectionLabel("Hub")
@@ -475,7 +485,7 @@ internal fun OrderDetail(
                 }
             }
         }
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(16.dp))
 
         // Items
         SectionLabel("Items")
@@ -504,25 +514,27 @@ internal fun OrderDetail(
                     }
                 }
             }
-            HorizontalDivider(color = c.bg4, modifier = Modifier.padding(top = 4.dp))
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            // pt-2.5 mt-2 over a #cee6b2 rule
+            HorizontalDivider(color = c.bg4)
+            Row(Modifier.fillMaxWidth().padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Total", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = c.text, modifier = Modifier.weight(1f))
                 Text(money(order.amount), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = c.gold2)
             }
         }
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(16.dp))
 
-        // Note (the reply Neema sent with the order)
+        // Note (the reply Neema sent with the order): amber-600 label, amber-800 text.
         if (!order.replyText.isNullOrBlank()) {
             Column(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(toneBg(Tones.Amber))
                     .border(1.dp, toneBorder(Tones.Amber), RoundedCornerShape(8.dp)).padding(10.dp),
             ) {
-                Text("📝 NOTE", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = toneText(Tones.Amber))
+                Text("📝 NOTE", fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.25.sp,
+                    color = if (c.isDark) Tones.Amber.dot else Color(0xFFD97706))
                 Spacer(Modifier.height(4.dp))
-                Text(order.replyText, fontSize = 12.sp, color = toneText(Tones.Amber))
+                Text(order.replyText, fontSize = 12.sp, color = if (c.isDark) Color(0xFFFDE68A) else Color(0xFF92400E))
             }
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(16.dp))
         }
 
         // Customer thread shortcut
@@ -536,21 +548,11 @@ internal fun OrderDetail(
             if (canManage) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     actions.forEach { next ->
-                        val danger = next == "cancelled"
-                        Button(
-                            onClick = { onStatus(next) },
-                            enabled = !busy,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (danger) c.red else c.gold,
-                                contentColor = Color.White,
-                            ),
-                        ) {
-                            if (busy) {
-                                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = Color.White)
-                                Spacer(Modifier.width(6.dp))
-                            }
-                            Text("Mark as ${statusMeta(next).label}")
-                        }
+                        WebBtn(
+                            "Mark as ${statusMeta(next).label}",
+                            variant = if (next == "cancelled") BtnVariant.Danger else BtnVariant.Primary,
+                            enabled = !busy, busy = busy, onClick = { onStatus(next) },
+                        )
                     }
                 }
             } else {
@@ -561,12 +563,69 @@ internal fun OrderDetail(
             }
         }
     }
+    }
+}
+
+/** The web Modal's header: `text-base font-semibold` title, a ✕ button, a hairline beneath. */
+@Composable
+internal fun ModalTitleBar(title: String, onClose: () -> Unit) {
+    val c = Neema.colors
+    Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = c.text, modifier = Modifier.weight(1f))
+        Box(
+            Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = onClose),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF9CA3AF), modifier = Modifier.size(16.dp))
+        }
+    }
+    HorizontalDivider(color = if (c.isDark) c.hairline else Color(0xFFF3F4F6))
+}
+
+/** components/ui/Btn variants the order and lead views use. */
+enum class BtnVariant { Primary, Danger, Outline }
+
+/**
+ * The web `Btn` at its default `md` size: h-9, px-4, text-sm medium,
+ * rounded-lg; primary amber-500, danger red-50 / red-600 / red-200, outline
+ * gray-300 / gray-700. Disabled fades the whole button to 40%.
+ */
+@Composable
+fun WebBtn(
+    label: String,
+    variant: BtnVariant,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    busy: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val dark = Neema.colors.isDark
+    val (bg, fg, border) = when (variant) {
+        BtnVariant.Primary -> Triple(Color(0xFFF59E0B), Color.White, Color(0xFFF59E0B))
+        BtnVariant.Danger -> if (dark) Triple(Color(0x4D450A0A), Color(0xFFF87171), Color(0xFF991B1B))
+            else Triple(Color(0xFFFEF2F2), Color(0xFFDC2626), Color(0xFFFECACA))
+        BtnVariant.Outline -> if (dark) Triple(Color.Transparent, Color(0xFFE5E7EB), Color(0xFF4B5563))
+            else Triple(Color.Transparent, Color(0xFF374151), Color(0xFFD1D5DB))
+    }
+    val shape = RoundedCornerShape(8.dp)
+    Row(
+        modifier.height(36.dp).alpha(if (enabled) 1f else 0.4f).clip(shape).background(bg).border(1.dp, border, shape)
+            .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        if (busy) {
+            CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = fg)
+            Spacer(Modifier.width(6.dp))
+        }
+        Text(label, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = fg, maxLines = 1)
+    }
 }
 
 @Composable
 private fun SectionLabel(text: String) {
     Text(
-        text.uppercase(), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp,
+        text.uppercase(), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp,
         color = Neema.colors.textDim, modifier = Modifier.padding(bottom = 8.dp),
     )
 }
@@ -578,8 +637,45 @@ private fun MetaCell(label: String, value: String, modifier: Modifier) {
         modifier.clip(RoundedCornerShape(8.dp)).background(c.bg).border(BorderStroke(1.dp, c.bg3), RoundedCornerShape(8.dp))
             .padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
-        Text(label.uppercase(), fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.5.sp, color = c.textDim)
+        Text(label.uppercase(), fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.25.sp, color = c.textDim)
         Text(value, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.text, modifier = Modifier.padding(top = 2.dp))
+    }
+}
+
+/** The web Modal's mobile drag handle: a 40×4 gray-200 bar, 12dp from the top, 16dp above the title. */
+@Composable
+internal fun WebDragHandle() {
+    Box(
+        Modifier.padding(top = 12.dp, bottom = 16.dp).size(width = 40.dp, height = 4.dp).clip(RoundedCornerShape(50))
+            .background(if (Neema.colors.isDark) Color(0xFF374151) else Color(0xFFE5E7EB)),
+    )
+}
+
+/**
+ * One slice of a bordered, rounded card that a lazy list draws row by row:
+ * the first slice carries the rounded top, the last the rounded bottom, and
+ * every slice its share of the left and right edges — so the web's single
+ * `rounded-xl border` box around the list survives scrolling.
+ */
+internal fun Modifier.listSegment(first: Boolean, last: Boolean, border: Color, fill: Color, radius: Dp = 12.dp): Modifier {
+    val shape = RoundedCornerShape(
+        topStart = if (first) radius else 0.dp, topEnd = if (first) radius else 0.dp,
+        bottomStart = if (last) radius else 0.dp, bottomEnd = if (last) radius else 0.dp,
+    )
+    return this.clip(shape).background(fill).drawWithContent {
+        drawContent()
+        val stroke = 1.dp.toPx()
+        val r = radius.toPx()
+        // Past a slice's open ends the rounded rect runs out of bounds, so only straight edges show.
+        val top = if (first) 0f else -2 * r
+        val bottom = if (last) size.height else size.height + 2 * r
+        drawRoundRect(
+            color = border,
+            topLeft = Offset(stroke / 2, top + stroke / 2),
+            size = Size(size.width - stroke, bottom - top - stroke),
+            cornerRadius = CornerRadius(r - stroke / 2),
+            style = Stroke(stroke),
+        )
     }
 }
 
