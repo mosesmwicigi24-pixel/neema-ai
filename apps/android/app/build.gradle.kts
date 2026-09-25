@@ -37,6 +37,16 @@ android {
         compose = true
         buildConfig = true
     }
+    // WebRTC ships native code for four CPU families; one APK per family keeps
+    // each download ~4x smaller. A universal APK is built too, for sideloading.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+            isUniversalApk = true
+        }
+    }
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
