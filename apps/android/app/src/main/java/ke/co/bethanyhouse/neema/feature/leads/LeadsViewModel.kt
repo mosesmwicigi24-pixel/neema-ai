@@ -47,6 +47,51 @@ fun buildStages(customs: List<String>): List<LeadStage> {
     return BASE_STAGES.take(won) + defs + BASE_STAGES.drop(won)
 }
 
+/** LeadsView's `filteredLeads`: the stage filter, then name / handle / email / location. */
+fun filterLeads(leads: List<Lead>, filterStage: String, search: String): List<Lead> {
+    val q = search.lowercase()
+    return leads.filter { l ->
+        if (filterStage != "all" && !filterStage.equals(l.leadStage, ignoreCase = true)) return@filter false
+        if (q.isNotEmpty()) {
+            l.name.orEmpty().lowercase().contains(q) ||
+                l.handle.contains(q) ||
+                l.email.orEmpty().lowercase().contains(q) ||
+                l.location.orEmpty().lowercase().contains(q)
+        } else true
+    }
+}
+
+/** A detail-sheet save: only the fields that changed are set (null = untouched). */
+data class LeadEdit(
+    val stage: String? = null,
+    val tags: List<String>? = null,
+    val notes: String? = null,
+    /** The notes text the edit started from — the server's three-way merge base. */
+    val notesBase: String = "",
+) {
+    val isEmpty: Boolean get() = stage == null && tags == null && notes == null
+}
+
+/** The web's `tags.split(",").map(trim).filter(Boolean)`. */
+fun parseTags(text: String): List<String> = text.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+
+/**
+ * What changed between [base] (the lead as the sheet opened) and the sheet's
+ * fields. The web PATCHes all three every time, which re-locks an untouched
+ * AI-set stage as "manual" and clobbers notes appended meanwhile; only real
+ * changes are sent here, and notes carry their base for the server's merge.
+ */
+fun diffLead(base: Lead, stage: String, tagsText: String, notes: String): LeadEdit {
+    val tags = parseTags(tagsText)
+    val baseNotes = base.notes.orEmpty()
+    return LeadEdit(
+        stage = stage.takeIf { !it.equals(base.leadStage, ignoreCase = true) },
+        tags = tags.takeIf { it != base.tags },
+        notes = notes.takeIf { it != baseNotes },
+        notesBase = baseNotes,
+    )
+}
+
 /** LeadsView's state: the leads, the pipeline's columns, filter/search and the open lead. */
 class LeadsViewModel(private val dash: DashboardViewModel) : ViewModel() {
     private val api = LeadsApi(dash.api.http)
@@ -114,7 +159,13 @@ class LeadsViewModel(private val dash: DashboardViewModel) : ViewModel() {
      * (the rollback). A notes edit carries the text it started from, so notes
      * the server appended meanwhile (call summaries, merges) survive.
      */
-    fun update(lead: Lead, stage: String? = null, tags: List<String>? = null, notes: String? = null) {
+    fun update(
+        lead: Lead,
+        stage: String? = null,
+        tags: List<String>? = null,
+        notes: String? = null,
+        notesBase: String = lead.notes.orEmpty(),
+    ) {
         _leads.value = _leads.value.map { l ->
             if (l.id != lead.id) l else l.copy(
                 leadStage = stage ?: l.leadStage,
@@ -127,7 +178,7 @@ class LeadsViewModel(private val dash: DashboardViewModel) : ViewModel() {
             if (tags != null) putJsonArray("tags") { tags.forEach { add(JsonPrimitive(it)) } }
             if (notes != null) {
                 put("notes", notes)
-                put("notes_base", lead.notes.orEmpty())
+                put("notes_base", notesBase)
             }
         }
         viewModelScope.launch {

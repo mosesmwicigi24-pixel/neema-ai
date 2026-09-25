@@ -91,9 +91,9 @@ fun DealsScreen(dash: DashboardViewModel) {
     val c = Neema.colors
 
     val open = deals.orEmpty().filter { it.status == "open" }
-    var editing by rememberSaveable { mutableStateOf<String?>(null) }
-    var guidanceDraft by rememberSaveable { mutableStateOf("") }
-    var draftFor by remember { mutableStateOf<PlannedAction?>(null) }
+    val editing by vm.editing.collectAsStateWithLifecycle()
+    val guidanceDraft by vm.guidanceDraft.collectAsStateWithLifecycle()
+    val draftFor by vm.draftFor.collectAsStateWithLifecycle()
 
     val openThread: (Deal) -> Unit = { d ->
         val key = d.waId?.takeIf { it.isNotBlank() } ?: d.conversationId
@@ -138,7 +138,7 @@ fun DealsScreen(dash: DashboardViewModel) {
                                     ActionRow(
                                         a, busy = a.id in acting, canSend = canSend,
                                         onSend = { vm.act(a.id, "approve") },
-                                        onEdit = { draftFor = a },
+                                        onEdit = { vm.openDraft(a) },
                                         onVeto = { vm.act(a.id, "veto") },
                                         onOpen = a.conversationId?.let { id -> { dash.openConversationFor(id) } },
                                     )
@@ -163,10 +163,10 @@ fun DealsScreen(dash: DashboardViewModel) {
                             canManage = canManage,
                             editing = editing,
                             guidanceDraft = guidanceDraft,
-                            onGuidanceDraft = { guidanceDraft = it.take(400) },
-                            onEdit = { d -> editing = d.id; guidanceDraft = d.guidance.orEmpty() },
-                            onCancel = { editing = null },
-                            onSave = { d -> vm.saveGuidance(d.id, guidanceDraft); editing = null },
+                            onGuidanceDraft = vm::setGuidanceDraft,
+                            onEdit = vm::startGuidance,
+                            onCancel = vm::cancelGuidance,
+                            onSave = { d -> vm.saveGuidance(d.id) },
                             onWon = { vm.markWon(it.id) },
                             onLost = { vm.markLost(it.id) },
                             onOpen = openThread,
@@ -191,8 +191,8 @@ fun DealsScreen(dash: DashboardViewModel) {
     draftFor?.let { a ->
         DraftDialog(
             action = a,
-            onDismiss = { draftFor = null },
-            onSend = { text -> vm.act(a.id, "approve", text); draftFor = null },
+            onDismiss = { vm.openDraft(null) },
+            onSend = { text -> vm.act(a.id, "approve", text); vm.openDraft(null) },
         )
     }
 }
@@ -237,7 +237,7 @@ private fun ActionRow(
                 withStyle(SpanStyle(fontWeight = FontWeight.Medium, color = c.text)) {
                     append(if (needs) "⏳ Needs your approval" else "🕐 ${fmtDue(a.dueAt)}")
                 }
-                withStyle(SpanStyle(color = Color(0xFF64748B))) {
+                withStyle(SpanStyle(color = slate())) {
                     append(" · ")
                     append(if (a.kind == "customer_promise") "their timeline" else "her promise")
                 }
@@ -262,7 +262,7 @@ private fun ActionRow(
             if (canSend) {
                 SmallButton("Send", bg = Color(0xFF589B31), fg = Color.White, enabled = !busy, onClick = onSend)
                 SmallButton("Edit & send", bg = c.bg2, fg = c.gold2, border = c.border, enabled = !busy, onClick = onEdit)
-                SmallButton("Veto", bg = if (c.isDark) c.bg4 else Color(0xFFF5F5F4), fg = Color(0xFF64748B), enabled = !busy, onClick = onVeto)
+                SmallButton("Veto", bg = if (c.isDark) c.bg4 else Color(0xFFF5F5F4), fg = slate(), enabled = !busy, onClick = onVeto)
             }
             if (onOpen != null) {
                 SmallButton("Open chat", bg = Color.Transparent, fg = c.gold2, enabled = true, onClick = onOpen)
@@ -366,20 +366,20 @@ private fun DealCard(
                 modifier = Modifier.weight(1f).clickable(enabled = canOpen, onClick = onOpen),
             )
             Spacer(Modifier.width(8.dp))
-            Text(Fmt.timeAgo(d.updatedAt), fontSize = 10.sp, color = Color(0xFFB5C9A8))
+            Text(Fmt.timeAgo(d.updatedAt), fontSize = 10.sp, color = if (c.isDark) c.muted else Color(0xFFB5C9A8))
         }
         if (!d.title.isNullOrBlank()) {
             Text(d.title, fontSize = 11.sp, color = if (c.isDark) c.textMid else Color(0xFF475569),
                 maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
         }
         if (!d.blocking.isNullOrBlank()) {
-            Text("⛔ ${d.blocking}", fontSize = 10.sp, color = Color(0xFFB45309),
+            Text("⛔ ${d.blocking}", fontSize = 10.sp, color = if (c.isDark) Color(0xFFF59E0B) else Color(0xFFB45309),
                 maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
         }
         d.nextAction?.dueAt?.takeIf { it.isNotBlank() }?.let { due ->
             Text(
                 "→ ${if (d.nextAction.owner == "ai") "Neema" else "You"} · ${fmtDue(due)}",
-                fontSize = 10.sp, color = Color(0xFF589B31), modifier = Modifier.padding(top = 4.dp),
+                fontSize = 10.sp, color = if (c.isDark) c.green else Color(0xFF589B31), modifier = Modifier.padding(top = 4.dp),
             )
         }
         if (isEditing) {
@@ -393,7 +393,7 @@ private fun DealCard(
             )
             Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 SmallButton("Save", bg = Color(0xFF1E293B), fg = Color.White, enabled = true, fontSize = 10, onClick = onSave)
-                SmallButton("Cancel", bg = Color.Transparent, fg = Color(0xFF64748B), enabled = true, fontSize = 10, onClick = onCancel)
+                SmallButton("Cancel", bg = Color.Transparent, fg = slate(), enabled = true, fontSize = 10, onClick = onCancel)
             }
         } else {
             // The web shows the guidance as a hover title; on a phone it is printed.
@@ -405,11 +405,11 @@ private fun DealCard(
                 Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     SmallButton(
                         if (!d.guidance.isNullOrBlank()) "📌 Guidance" else "＋ Guidance",
-                        bg = if (c.isDark) c.bg4 else Color(0xFFFAFAF9), fg = Color(0xFF64748B), enabled = true, fontSize = 10, onClick = onEdit,
+                        bg = if (c.isDark) c.bg4 else Color(0xFFFAFAF9), fg = slate(), enabled = true, fontSize = 10, onClick = onEdit,
                     )
                     SmallButton("Won", bg = if (c.isDark) c.greenDim else Color(0xFFE9F6DF), fg = if (c.isDark) c.green else Color(0xFF427425),
                         enabled = true, fontSize = 10, onClick = onWon)
-                    SmallButton("Lost", bg = if (c.isDark) c.bg4 else Color(0xFFFAFAF9), fg = Color(0xFF94A3B8), enabled = true, fontSize = 10, onClick = onLost)
+                    SmallButton("Lost", bg = if (c.isDark) c.bg4 else Color(0xFFFAFAF9), fg = if (c.isDark) c.muted else Color(0xFF94A3B8), enabled = true, fontSize = 10, onClick = onLost)
                 }
             }
         }
@@ -417,25 +417,43 @@ private fun DealCard(
 }
 
 /** Approve with an edited draft. Empty text lets Neema compose from the reason. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DraftDialog(action: PlannedAction, onDismiss: () -> Unit, onSend: (String) -> Unit) {
-    var text by rememberSaveable(action.id) { mutableStateOf(action.draft.orEmpty()) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Edit before sending") },
-        text = {
-            Column {
-                if (!action.reason.isNullOrBlank()) {
-                    Text(action.reason, fontSize = 12.sp, color = Neema.colors.muted, modifier = Modifier.padding(bottom = 8.dp))
-                }
-                OutlinedTextField(
-                    value = text, onValueChange = { text = it },
-                    placeholder = { Text("Leave empty and Neema writes it from the reason") },
-                    minLines = 4, maxLines = 10, modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        },
-        confirmButton = { TextButton(onClick = { onSend(text) }) { Text("Send") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+    BasicAlertDialog(onDismissRequest = onDismiss) {
+        DraftDialogCard(action, onDismiss, onSend)
+    }
 }
+
+/** The edit-and-send dialog's card (internal so it can be rendered without a dialog window). */
+@Composable
+internal fun DraftDialogCard(action: PlannedAction, onDismiss: () -> Unit, onSend: (String) -> Unit) {
+    val c = Neema.colors
+    var text by rememberSaveable(action.id) { mutableStateOf(action.draft.orEmpty()) }
+    Surface(shape = RoundedCornerShape(24.dp), color = c.bg2, shadowElevation = 6.dp) {
+        Column(Modifier.padding(24.dp)) {
+            Text("Edit before sending", fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = c.text)
+            Spacer(Modifier.height(12.dp))
+            if (!action.reason.isNullOrBlank()) {
+                Text(action.reason, fontSize = 12.sp, color = c.muted, modifier = Modifier.padding(bottom = 8.dp))
+            }
+            OutlinedTextField(
+                value = text, onValueChange = { text = it },
+                placeholder = { Text("Leave empty and Neema writes it from the reason") },
+                minLines = 4, maxLines = 10, modifier = Modifier.fillMaxWidth(),
+            )
+            Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+                Spacer(Modifier.width(8.dp))
+                Button(
+                    onClick = { onSend(text) },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF589B31), contentColor = Color.White),
+                ) { Text(if (text.isBlank()) "Let Neema write & send" else "Send") }
+            }
+        }
+    }
+}
+
+/** The web's slate-500 secondary text; lifted in dark mode so it stays legible on navy. */
+@Composable
+private fun slate(): Color = if (Neema.colors.isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
