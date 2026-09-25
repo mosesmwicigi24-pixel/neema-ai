@@ -129,6 +129,26 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   WhatsApp, Messenger, Instagram and the website), and the cards tool's
   own note when a card could not be delivered never says photos are
   impossible. A public comment, which cannot carry a photo, is exempt.
+  VARIANTS PRICED APART (owner 2026-09-25: "The Straight Collar is $10, all
+  sizes the same price" — the 8-inch is $3.50, the 10-inch $4; the hub's six
+  collar variants all carried $10 under one label, a placeholder). The
+  search tool dedupes identical variants and adds a `variant_note`: prices
+  that differ → "ONE short line: 'from <cheapest> by size/colour — which?';
+  then the variant's own price; never one flat price"; one figure for every
+  variant → "ask which, quote once, NEVER say 'all sizes / colours are the
+  same price'". The verifier (`review.variant_issues`, kind "variants"):
+  the same-price claim is HARD when the variants differ and soft otherwise;
+  a variant named in the reply (or asked for) quoted at another variant's
+  price is HARD ("the 10 inch variant is priced KES 400 / USD 4 — not 10");
+  one flat price for a product priced apart, with no variant named and no
+  range said, is soft (the distinctive variant words — "10", "navy" — are
+  read with the money figures stripped, so the "10" in "$10" names no size;
+  a hyphen in "10-inch" is not a range). The canned comment line prices a
+  varied product "from" its cheapest variant (`runtime._variant_floor`).
+  The prompt carries the short shape and the ban. HUB-SIDE, STILL OPEN: the
+  Straight Collar's variants need their sizes as attributes and their own
+  prices (8" $3.50, 10" $4 …) — today they are six identical rows at $10,
+  so Neema can only say "from $10" until the hub is corrected.
 - **The gate before posting** (owner 2026-09-25: "someone is asking for
   golden trays and you give silver… put a gate to review before posting…
   when someone asks for Holy Communion Cups without specifying chalice, give

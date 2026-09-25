@@ -530,7 +530,7 @@ def status_without_source(answer: str, tool_results: list | None, transcript: li
                    for role, t in transcript_text(transcript, limit=40))
 
 
-HARD_KINDS = ("figure", "item", "link", "status", "photos")
+HARD_KINDS = ("figure", "item", "link", "status", "photos", "variants")
 
 # "I can't send photos from here" is FALSE on every chat channel — the cards
 # tool sends them (owner, 2026-09-25: the photos went out and the very next
@@ -599,6 +599,129 @@ def actions_text(tool_results: list | None) -> str:
     return "\n".join(lines)
 
 
+# "All sizes are the same price" — never said (owner, 2026-09-25: the collar's
+# sizes are priced apart, 8-inch $3.50, 10-inch $4; the hub's placeholder made
+# Neema say they were all $10). FALSE outright when the variants differ.
+_SAME_PRICE_RE = re.compile(
+    r"\b(?:all\s+(?:the\s+)?(?:sizes?|colou?rs?|variants?|options?|of\s+them)\s+(?:are|is|at|cost|come\s+at)?\s*"
+    r"(?:the\s+)?same\s+price|same\s+price\s+(?:for|across|in)\s+(?:all|every|any)\s+(?:sizes?|colou?rs?|variants?|options?)|"
+    r"regardless\s+of\s+(?:the\s+)?(?:size|colou?r)|(?:whatever|any)\s+(?:the\s+)?(?:size|colou?r)\s+(?:you|they)\s+(?:pick|choose|want)\b[^.]{0,30}same|"
+    r"bei\s+(?:ni\s+)?(?:moja|sawa)\s+kwa\s+(?:saizi|rangi)\s+zote)",
+    re.IGNORECASE)
+# A range is SAID ("from $3.50 by size", "KES 12,000 to 15,000", "$4–$6") — a
+# hyphen inside "10-inch" is not one.
+_RANGE_RE = re.compile(
+    r"\b(?:from|kuanzia|kutoka|between|up\s+to|starting\s+(?:at|from)|range|by\s+(?:size|colou?r))\b"
+    r"|\d\s*(?:to|[–-])\s*(?:US\$|\$|USD|KES|KSH)?\s?\d",
+    re.IGNORECASE)
+
+
+def variants_of(row: dict | None) -> list[tuple[str, float | None, float | None]]:
+    """(label, KES, USD) per DISTINCT variant of a hub row."""
+    out: list[tuple[str, float | None, float | None]] = []
+    seen: set = set()
+    for v in (row or {}).get("variants") or []:
+        attrs = v.get("attributes") or {}
+        label = " ".join(str(x) for x in attrs.values()) if isinstance(attrs, dict) and attrs else str(v.get("name") or "")
+        k, u = _num(v.get("price_kes") or v.get("price")), _num(v.get("price_usd"))
+        key = (label.lower(), k, u)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((label, k, u))
+    return out
+
+
+def variant_prices_differ(row: dict | None, currency: str = "USD") -> bool:
+    vs = variants_of(row)
+    col = 2 if (currency or "USD").upper() == "USD" else 1
+    prices = {v[col] for v in vs if v[col]}
+    if len(prices) <= 1:
+        col = 1 if col == 2 else 2
+        prices = {v[col] for v in vs if v[col]}
+    return len(prices) > 1
+
+
+def _label_tokens(label: str) -> set[str]:
+    return set(re.findall(r"[a-z0-9]+", (label or "").lower()))
+
+
+def _distinctive(row: dict | None) -> list[tuple[str, set[str], float | None, float | None]]:
+    """Each variant with the tokens that tell it from its siblings ("10" for
+    '10 inch' when every label says 'inch'; 'navy' for a colour)."""
+    vs = variants_of(row)
+    if not vs:
+        return []
+    common = set.intersection(*[_label_tokens(lab) for lab, _k, _u in vs]) if len(vs) > 1 else set()
+    out = []
+    for label, k, u in vs:
+        toks = _label_tokens(label) - common
+        out.append((label, toks or _label_tokens(label), k, u))
+    return out
+
+
+def _variant_words(row: dict | None) -> set[str]:
+    """The words that name a variant (sizes, colours) — '8', 'inch', 'navy'…"""
+    words: set[str] = set()
+    for label, _k, _u in variants_of(row):
+        words |= _label_tokens(label)
+    return words
+
+
+def _mentions(text: str, toks: set[str]) -> bool:
+    low = (text or "").lower()
+    return bool(toks) and all(re.search(r"(?<![a-z0-9])" + re.escape(t) + r"(?![a-z0-9])", low) for t in toks)
+
+
+def variant_issues(ask: str, answer: str, row: dict | None, currency: str = "USD") -> list[dict]:
+    """The variant findings for the row the reply sells: the "same price for
+    all" claim (hard when false), a named variant quoted at another
+    variant's price (hard), one flat price for a product whose variants are
+    priced apart (soft: say 'from … by size' or name the variant)."""
+    out: list[dict] = []
+    if not row or not variants_of(row):
+        return out
+    differ = variant_prices_differ(row, currency)
+    if _SAME_PRICE_RE.search(answer or ""):
+        out.append({"kind": "variants", "hard": differ,
+                    "text": ("it says all sizes / colours are the same price — they are NOT: "
+                             "this product's variants carry their own prices; quote the range "
+                             "or the variant they choose" if differ else
+                             "it says all sizes / colours are the same price — never say that: "
+                             "ask which size / colour they want and quote that one")})
+        return out
+    figures = money_figures(answer)
+    if not differ or not figures:
+        return out
+    dv = _distinctive(row)
+    # the money figures are stripped first: the "10" in "$10" names no size
+    bare_answer = _MONEY_RE.sub(" ", answer or "")
+    bare_ask = _MONEY_RE.sub(" ", ask or "")
+    in_answer = [v for v in dv if _mentions(bare_answer, v[1])]
+    in_ask = [v for v in dv if _mentions(bare_ask, v[1])]
+    target = in_answer[0] if len(in_answer) == 1 else (in_ask[0] if not in_answer and len(in_ask) == 1 else None)
+    if target is not None:
+        label, _t, k, u = target
+        own = {x for x in (k, u) if x}
+        if k:
+            own.add(round(k / float(settings.usd_kes_rate or 100), 2))
+        if u:
+            own.add(round(u * float(settings.usd_kes_rate or 100), 2))
+        if own and not any(_close(f, o) for f in figures for o in own):
+            said = ", ".join(_fmt(f) for f in figures)
+            out.append({"kind": "variants", "hard": True,
+                        "text": f"the {label} variant is priced " + " / ".join(
+                            x for x in ((f"KES {_fmt(k)}" if k else ""), (f"USD {_fmt(u)}" if u else "")) if x)
+                        + f" — not {said}"})
+        return out
+    if not _RANGE_RE.search(answer or ""):
+        out.append({"kind": "variants", "hard": False,
+                    "text": "one flat price for a product whose sizes / colours are priced "
+                            "apart — say 'from <the cheapest> by size' and ask which, or "
+                            "quote the variant they named"})
+    return out
+
+
 def rule_findings(comment: str, answer: str, seen: list,
                   known_figures: set[float] | frozenset[float] = frozenset(), *,
                   tool_results: list | None = None, transcript: list | None = None,
@@ -655,6 +778,9 @@ def rule_findings(comment: str, answer: str, seen: list,
         out.append({"kind": "status", "hard": True,
                     "text": "an order-status claim (shipped / on its way / delivered) with no "
                     "check_order_status behind it — check the order, never assume"})
+    sold = named_rows[0] if named_rows else None
+    if sold is not None:
+        out.extend(variant_issues(comment, answer, sold, currency))
     if mode != "comment":
         sent = cards_sent(tool_results)
         if _NO_PHOTOS_RE.search(answer or ""):
