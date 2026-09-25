@@ -232,12 +232,15 @@ def build_system_prompt(*, country_iso: str = "", currency: str = "KES",
     if currency == "USD":
         local_ccy = (
             " The one exception: if the customer explicitly asks for prices in "
-            "their OWN local currency, convert from the USD amount (never from KES) "
-            "using the most current central-bank exchange rate for their country, "
-            "and give the figure the arithmetic produces — never rounded up, down "
-            "or to a tidy number (82 is 82, not 90). Give the local figure plainly "
-            "and with confidence — never say you're estimating or that you lack a "
-            "live rate. USD stays the order's currency of record."
+            "their OWN local currency (rands, naira, cedis, pounds…), convert from "
+            "the USD amount (never from KES) using TODAY'S RATE GIVEN IN YOUR "
+            "CONTEXT (a line like 'TODAY'S RATE: 1 USD = 16.43 ZAR'), and give the "
+            "figure the arithmetic produces — never rounded up, down or to a tidy "
+            "number (82 is 82, not 90) — saying it is today's rate. USD stays the "
+            "order's currency of record. If your context gives NO rate for that "
+            "currency, give the USD price and say it is charged in USD and converts "
+            "at the day's rate when they pay — never invent a rate from memory, and "
+            "never promise to 'confirm the rate with the team'."
         )
     # Payment + fulfilment are COUNTRY-SPECIFIC (same gate as currency): paying via
     # paybill/M-Pesa link is a Kenyan thing; international routes are discovered per

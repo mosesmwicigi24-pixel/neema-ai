@@ -636,6 +636,9 @@ async def closer_gate(redis, channel: str, key: str, text: str) -> bool:
     "I'll get back to you" is scribed as the promise it is. Every FURTHER
     closer while the flag stands gets silence: the polite end of a chat is
     silence, not another blessing. Any substantive message clears the flag."""
+    if is_silent_ack(text):
+        _log.info("closer gate: a thumbs-up ends it for %s/%s", channel, key)
+        return True
     if redis is None:
         return False
     rkey = f"closer:{channel}:{key}"
@@ -663,10 +666,24 @@ async def mark_closer_answered(redis, channel: str, key: str, inbound_text: str)
 
 
 _ACK_RE = re.compile(
-    r"^(thanks?|thank\s*you|asante(\s*sana)?|thx|ty|amen|ok(ay)?|sawa|poa|got\s*it|"
-    r"👍+|🙏+|❤️*|😊+)[\s!.,🙏👍❤😊]*$",
+    r"^(?:(?:i'?m|i\s*am|am|just|i)\s*(?:saying|said|say)\s*)?"
+    r"(thanks?|thank\s*you|asante(\s*sana)?|thx|ty|amen|ok(?:ay|ey|k)?|kk|sawa(?:\s*sawa)?|poa|"
+    r"got\s*it|noted|alright|aight|cool|"
+    r"👍+|🙏+|❤️*|😊+|👌+|🙌+|✅+)"
+    r"(?:[\s,]+(?:ok(?:ay)?|sawa|poa|thanks?|asante|noted|👍|🙏))*[\s!.,🙏👍❤😊👌🙌✅💯]*$",
     re.IGNORECASE,
 )
+# A thumbs-up, a folded hands, a heart — satisfaction, the end of the exchange
+# (owner, 2026-09-25: "when a thumb up is done, which means satisfaction, you
+# should not continue"). Messenger's Like sticker arrives as "👍" (the
+# webhook), any other sticker as "[sticker]". Silence, always — not even the
+# one warm line a typed "thanks" gets.
+_SILENT_ACK_RE = re.compile(r"^[\s👍🙏❤️👌🙌✅💯🔥😊🥰😍🤝♥]+$")
+
+
+def is_silent_ack(text: str) -> bool:
+    t = (text or "").strip()
+    return bool(t) and (bool(_SILENT_ACK_RE.match(t)) or t in ("[sticker]", "[like]"))
 
 
 def route_model(user_text: str) -> str:
@@ -1065,15 +1082,38 @@ async def _flag_held_reply(db, channel: str, key: str, issues: list, draft: str)
         _log.info("held-reply flag not written for %s/%s: %s", channel, key, exc)
 
 
+_REVIEW_HOLD_DM_PRICE = ("Let me confirm the exact item and price for you 🙏 One of our team "
+                         "will confirm it right here shortly.")
+_SW_REVIEW_HOLD_DM_PRICE = ("Ngoja nihakikishe bidhaa kamili na bei sahihi 🙏 Mmoja wa timu yetu "
+                            "atakuthibitishia hapa hivi karibuni.")
+
+
 async def _gate_turn_reply(reply: str, *, user_text: str, transcript: list, tool_log: list,
                            ctx, currency: str, channel: str, public_comment: bool,
                            llm, sys_blocks, redis, db, key: str, post_product: str = "",
-                           swahili: bool = False) -> tuple[str, list[str], str]:
-    """Verify one reply; rewrite it once with the reasons and the facts; hold
-    it on a second failure. Returns (reply, held_issues, outcome) — outcome
-    "pass" / "rewritten" / "held". A held PUBLIC reply is "" (the comment
-    engine posts its holding line and hands the comment to a colleague); a
-    held PRIVATE reply is the holding line, and the conversation is flagged."""
+                           swahili: bool = False, fx: dict | None = None,
+                           closer: bool = False) -> tuple[str, list[str], str]:
+    """DOUBLE VERIFICATION (owner, 2026-09-25: "change from gating to double
+    verifying"). Every reply is read twice — by the rules and by the reviewer
+    — and the reply that goes out is the best VERIFIED draft:
+
+      1. the draft passes both → sent as written ("pass");
+      2. either finds something → ONE rewrite with the reasons and the facts
+         (the hub rows for what they asked, every tool result), read twice
+         again → sent when clean ("rewritten");
+      3. still not clean → the best draft with NO HARD finding is sent — the
+         rewrite if it is hard-clean, else the original — and the soft notes
+         (a side question, the reviewer's reading) are logged ("soft"): a
+         reply is corrected, never strangled;
+      4. only when BOTH drafts carry a HARD finding (a figure or item from
+         nowhere, a link no tool gave, an order status with no source) is
+         nothing sent ("held"): a public reply returns "" (the comment
+         engine's holding line + a colleague), a private reply gets one
+         holding line — never two in a row (the colleague is already flagged),
+         and never for an acknowledgement — and the conversation is flagged
+         with the reasons and the unsent draft.
+
+    Returns (reply, held_issues, outcome)."""
     from app.agent import review as _rv
     mode = "comment" if public_comment else "dm"
     known = _rv.prompt_figures(currency)
@@ -1084,19 +1124,20 @@ async def _gate_turn_reply(reply: str, *, user_text: str, transcript: list, tool
         return await _rv.review_reply(
             user_text, text, seen, post_product=post_product, currency=currency,
             known_figures=known, redis=redis, transcript=transcript, tool_results=tool_log,
-            mode=mode, known_text=known_text)
+            mode=mode, known_text=known_text, fx=fx)
 
     v1 = await _verdict(reply)
     if v1["ok"]:
         await _rv.record_verdict(redis, "pass", channel)
         return reply, [], "pass"
     issues = list(v1["issues"])
-    _log.info("%s reply held by the %s for %s: %s", mode, v1["by"], key, "; ".join(issues)[:300])
+    _log.info("%s draft read by the %s for %s: %s", mode, v1["by"], key, "; ".join(issues)[:300])
     # The facts for the rewrite: the rows for what they actually asked.
     if any("asked for" in i for i in issues) or not seen:
         await _facts_for_ask(ctx, user_text, tool_log)
-    block = _rv.rewrite_block(issues, reply, seen, currency, tool_log, mode=mode)
-    second = ""
+    block = _rv.rewrite_block(issues, reply, seen, currency, tool_log, mode=mode, fx=fx,
+                              comment=user_text)
+    second, v2 = "", None
     try:
         resp = await llm.complete(
             system=sys_blocks,
@@ -1111,14 +1152,39 @@ async def _gate_turn_reply(reply: str, *, user_text: str, transcript: list, tool
         if v2["ok"]:
             await _rv.record_verdict(redis, "rewritten", channel)
             return second, [], "rewritten"
-        issues = issues + list(v2["issues"])
-        _log.info("%s rewrite held by the %s for %s: %s", mode, v2["by"], key,
+        _log.info("%s rewrite read by the %s for %s: %s", mode, v2["by"], key,
                   "; ".join(v2["issues"])[:300])
+    # The best draft with no HARD finding goes out; its soft notes are logged.
+    candidates: list[tuple[float, str, dict]] = []
+    if second and v2 is not None and not v2["hard"]:
+        candidates.append((len(v2["soft"]), second, v2))
+    if not v1["hard"]:
+        candidates.append((len(v1["soft"]) + 0.5, reply, v1))      # the rewrite wins a tie
+    if candidates:
+        candidates.sort(key=lambda c: c[0])
+        _n, best, vb = candidates[0]
+        _log.info("%s reply sent with notes for %s: %s", mode, key, "; ".join(vb["soft"])[:300])
+        await _rv.record_verdict(redis, "soft", channel)
+        return best, [], "soft"
+    # Both drafts carry a hard finding: nothing unverified goes out.
+    hard = list(v1["hard"]) + (list(v2["hard"]) if v2 else [])
+    all_issues = issues + (list(v2["issues"]) if v2 else [])
     await _rv.record_verdict(redis, "held", channel)
     if public_comment:
-        return "", issues, "held"
-    await _flag_held_reply(db, channel, key, issues, second or reply)
-    return (_SW_REVIEW_HOLD_DM if swahili else _REVIEW_HOLD_DM), issues, "held"
+        return "", all_issues, "held"
+    if closer:
+        # They said "ok" / "thanks" — nothing was asked. Silence, never
+        # "let me confirm the details" (owner, 2026-09-25).
+        _log.info("held reply to an acknowledgement for %s: silence", key)
+        return "", all_issues, "held"
+    await _flag_held_reply(db, channel, key, all_issues, second or reply)
+    if await _rv.held_recently(redis, channel, key):
+        _log.info("held again for %s within hours: silence, the colleague is flagged", key)
+        return "", all_issues, "held"
+    money = any(("figure" in h) or ("asked for" in h) for h in hard)
+    if money:
+        return (_SW_REVIEW_HOLD_DM_PRICE if swahili else _REVIEW_HOLD_DM_PRICE), all_issues, "held"
+    return (_SW_REVIEW_HOLD_DM if swahili else _REVIEW_HOLD_DM), all_issues, "held"
 
 
 async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM,
@@ -1262,6 +1328,19 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     except Exception:
         pass
 
+    # Their OWN money, at today's rate (services/fx; owner, 2026-09-25): a
+    # "how much in rands?" gets a FACT to convert with — and the gate verifies
+    # the figure against the same rate. No rate → no conversion, said plainly.
+    _fx_rates: dict = {}
+    try:
+        from app.services import fx as _fx
+        _fx_code = _fx.currency_asked(user_text) if currency == "USD" else None
+        if _fx_code:
+            _fx_rates = await _fx.rates(redis)
+            tail += (_fx.context_line(_fx_code, _fx_rates[_fx_code]) if _fx_rates.get(_fx_code)
+                     else _fx.no_rate_line(_fx_code))
+    except Exception:
+        _fx_rates = {}
     # Cross-channel memory: what the SAME person said on their other linked
     # channels — the Facebook→WhatsApp bridge continues the real conversation.
     try:
@@ -1570,7 +1649,8 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                 reply, user_text=user_text, transcript=turn_messages, tool_log=tool_log,
                 ctx=ctx, currency=currency, channel=channel, public_comment=public_comment,
                 llm=llm, sys_blocks=sys_blocks, redis=redis, db=db, key=key,
-                post_product=_gate_post_product, swahili=looks_swahili(user_text or ""))
+                post_product=_gate_post_product, swahili=looks_swahili(user_text or ""),
+                fx=_fx_rates, closer=is_closer(user_text or ""))
         except Exception as exc:
             _log.warning("reply gate failed open for %s: %s", key, exc)
     if turn_facts is not None:
@@ -1784,6 +1864,9 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None)
         async with AsyncSessionLocal() as db:
             reply = await run_turn(db, redis, wa_id, text,
                                    build_llm(model=model), media=media)
+            if not (reply or "").strip():
+                _log.info("silence for %s: nothing to send (a closer, or a held acknowledgement)", wa_id)
+                return
             if await _is_echo(db, "whatsapp", wa_id, reply):
                 _log.info("echo guard: identical reply within minutes suppressed for %s", wa_id)
                 return
@@ -1929,6 +2012,10 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
                                    llm=build_llm(model=model),
                                    channel=channel, external_id=external_id,
                                    media=media)
+            if not (reply or "").strip():
+                _log.info("silence on %s for %s: nothing to send (a closer, or a held "
+                          "acknowledgement)", channel, external_id)
+                return True
             if await _is_echo(db, channel, external_id, reply):
                 _log.info("echo guard: identical reply within minutes suppressed for %s/%s",
                           channel, external_id)

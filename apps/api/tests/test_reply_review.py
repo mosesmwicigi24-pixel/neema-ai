@@ -137,13 +137,19 @@ def test_the_rules_catch_both_live_replies():
                           "Glass Cups $10. How many do you need?", [PLASTIC, GLASS]) == []
 
 
-def test_a_where_question_must_be_answered():
+def test_a_where_question_must_be_answered_but_a_mention_of_a_place_is_not_one():
     assert rv.where_unanswered("Where is your location", "The cups are $10.")
     assert rv.where_unanswered("Do you have shops in South Africa?", "The tray is $220. How many?")
+    assert rv.where_unanswered("where are you located?", "The tray is $220.")
     assert not rv.where_unanswered("Where is your location", "We are in Nairobi, Kenya 🙏")
     assert not rv.where_unanswered("Do you have shops in South Africa?", "No shop there yet — we deliver by DHL.")
     assert not rv.where_unanswered("How much?", "It is $220")
     assert not rv.where_unanswered("Mko wapi?", "Tuko Nairobi")
+    # a sentence that merely names a place is not a question about ours (live: "When am
+    # in Uganda" was read as one and its good reply was held)
+    assert not rv.where_unanswered("When am in Uganda", "Great — how many would you like?")
+    assert not rv.where_unanswered("I live in Kenya", "Lovely. Which colour?")
+    assert not rv.where_unanswered("My wansapp number", "Noted, thank you.")
 
 
 def test_two_rows_priced_at_once_name_no_single_item():
@@ -170,42 +176,50 @@ class _LLM:
         return types.SimpleNamespace(text=self.text)
 
 
-def test_review_reply_rules_first_then_the_reviewer(monkeypatch):
+def test_double_verification_reads_every_draft_twice_and_merges(monkeypatch):
     monkeypatch.setattr(settings, "comment_reply_review", True, raising=False)
     llm = _LLM("verdict=fail | issues=their question about South Africa is unanswered")
     monkeypatch.setattr(rt, "build_llm", lambda model=None: llm)
-    # a rule failure is final — the reviewer is not even asked
+    # the rules find the wrong item (HARD) and the reviewer a missing answer (SOFT): both are read
     v = asyncio.run(rv.review_reply(GOLD_ASK, GOLD_LIVE_REPLY, [SILVER]))
-    assert v["ok"] is False and v["by"] == "rules" and llm.calls == []
-    # the rules pass → the reviewer decides
+    assert v["ok"] is False and v["by"] == "rules+reviewer" and len(llm.calls) == 1
+    assert v["hard"] == ["they asked for gold; 'Silver Communion Tray' is silver — the finish they asked for is the item"]
+    assert v["soft"] == ["their question about South Africa is unanswered"]
+    assert v["issues"] == v["hard"] + v["soft"]
+    # the rules pass → the reviewer's word is soft
     draft = ("The Golden Communion Tray is $220 — gold-plated, holds 40 cups. No shop in South "
              "Africa yet; DHL delivers there from Nairobi. How many?")
     llm.text = "verdict=fail | issues=the reply says 40 cups but the row says nothing about capacity"
     v = asyncio.run(rv.review_reply(GOLD_ASK, draft, [GOLDEN], post_product="Silver Communion Tray"))
     assert v == {"ok": False, "issues": ["the reply says 40 cups but the row says nothing about capacity"],
+                 "hard": [], "soft": ["the reply says 40 cups but the row says nothing about capacity"],
                  "by": "reviewer"}
     sent = llm.calls[-1]
     assert "Golden Communion Tray — USD 220" in sent and GOLD_ASK in sent and draft in sent
     assert "The post is about: Silver Communion Tray" in sent
     assert "verdict=<pass|fail>" in sent and "communion CUPS" in sent
     llm.text = "verdict=pass | issues=-"
-    assert asyncio.run(rv.review_reply(GOLD_ASK, draft, [GOLDEN])) == {"ok": True, "issues": [], "by": "reviewer"}
+    assert asyncio.run(rv.review_reply(GOLD_ASK, draft, [GOLDEN])) == {
+        "ok": True, "issues": [], "hard": [], "soft": [], "by": "reviewer"}
 
 
 def test_the_reviewer_is_switchable_and_a_model_outage_leaves_the_rules_verdict(monkeypatch):
     draft = "The Golden Communion Tray is $220. No shop in South Africa; DHL delivers. How many?"
     monkeypatch.setattr(settings, "comment_reply_review", False, raising=False)
     monkeypatch.setattr(rt, "build_llm", lambda model=None: (_ for _ in ()).throw(AssertionError("no model")))
-    assert asyncio.run(rv.review_reply(GOLD_ASK, draft, [GOLDEN])) == {"ok": True, "issues": [], "by": "rules"}
+    assert asyncio.run(rv.review_reply(GOLD_ASK, draft, [GOLDEN])) == {
+        "ok": True, "issues": [], "hard": [], "soft": [], "by": "rules"}
     monkeypatch.setattr(settings, "comment_reply_review", True, raising=False)
 
     class _Down:
         async def complete(self, *a, **k):
             raise RuntimeError("model down")
     monkeypatch.setattr(rt, "build_llm", lambda model=None: _Down())
-    assert asyncio.run(rv.review_reply(GOLD_ASK, draft, [GOLDEN])) == {"ok": True, "issues": [], "by": "rules"}
-    # a rule failure still holds with the model down
-    assert asyncio.run(rv.review_reply(GOLD_ASK, "It is $175.", [GOLDEN]))["ok"] is False
+    assert asyncio.run(rv.review_reply(GOLD_ASK, draft, [GOLDEN])) == {
+        "ok": True, "issues": [], "hard": [], "soft": [], "by": "rules"}
+    # a rule failure still stands with the model down — and it is hard
+    v = asyncio.run(rv.review_reply("how much is the gold tray?", "It is $175.", [GOLDEN]))
+    assert v["ok"] is False and v["hard"] and not v["soft"]
 
 
 def test_the_switch_defaults_on():
@@ -283,10 +297,14 @@ def _gate(monkeypatch, reply, *, verdicts, llm_texts=(), public=False, seen=None
     return out, calls, flags, tally, llm, ctx
 
 
+def _v(hard=(), soft=(), by="rules"):
+    hard, soft = list(hard), list(soft)
+    return {"ok": not (hard or soft), "issues": hard + soft, "hard": hard, "soft": soft, "by": by}
+
+
 def test_a_passing_reply_is_sent_as_written(monkeypatch):
     out, calls, flags, tally, llm, _ = _gate(
-        monkeypatch, "The Golden Communion Tray is $220.", seen=[GOLDEN],
-        verdicts=[{"ok": True, "issues": [], "by": "reviewer"}])
+        monkeypatch, "The Golden Communion Tray is $220.", seen=[GOLDEN], verdicts=[_v()])
     assert out == ("The Golden Communion Tray is $220.", [], "pass")
     assert llm.calls == [] and flags == [] and tally == [("pass", "whatsapp")]
     assert calls[0][2]["mode"] == "dm" and calls[0][2]["post_product"] == "Silver Communion Tray"
@@ -296,8 +314,7 @@ def test_a_failing_reply_is_rewritten_once_with_the_reasons_and_the_facts(monkey
     fixed = "The Golden Communion Tray is $220 — no shop in South Africa; DHL delivers from Nairobi. How many?"
     out, calls, flags, tally, llm, ctx = _gate(
         monkeypatch, GOLD_LIVE_REPLY, seen=[SILVER], facts_rows=[GOLDEN],
-        verdicts=[{"ok": False, "issues": ["they asked for gold; 'Silver Communion Tray' is silver"], "by": "rules"},
-                  {"ok": True, "issues": [], "by": "reviewer"}],
+        verdicts=[_v(hard=["they asked for gold; 'Silver Communion Tray' is silver"]), _v()],
         llm_texts=[fixed])
     assert out == (fixed, [], "rewritten") and flags == [] and tally == [("rewritten", "whatsapp")]
     # the gate fetched the rows for what they asked, and the rewrite saw them
@@ -309,32 +326,88 @@ def test_a_failing_reply_is_rewritten_once_with_the_reasons_and_the_facts(monkey
     assert block.startswith("[REVIEWER — your draft was HELD BACK before it was sent to the customer")
     assert "they asked for gold" in block and "Golden Communion Tray — USD 220" in block
     assert "THE FACTS YOU MAY STATE" in block and "no tool" in block
+    assert "nothing they did not ask" in block
     # the second verdict was on the rewrite, with the fetched rows in hand
     assert calls[1][0] == fixed and [r["name"] for r in calls[1][1]][-1] == "Golden Communion Tray"
 
 
-def test_two_failures_hold_a_private_reply_and_flag_the_conversation(monkeypatch):
+def test_soft_findings_never_hold_the_best_hard_clean_draft_is_sent(monkeypatch):
+    """Owner, 2026-09-25: 'change from gating to double verifying'. A side
+    question left unanswered or the reviewer's reading asks for a rewrite;
+    if the rewrite is still not clean, the best draft with no hard finding
+    goes out — never a holding line."""
+    # the rewrite is hard-clean with one soft note → it goes out
+    out, calls, flags, tally, llm, _ = _gate(
+        monkeypatch, "We ship to Kampala from our Nairobi workshop. What's your phone number?",
+        user_text="When am in Uganda", seen=[],
+        verdicts=[_v(soft=["their question about how to get it is unanswered"], by="reviewer"),
+                  _v(soft=["still no delivery time"], by="reviewer")],
+        llm_texts=["We ship to Kampala from Nairobi by DHL — 3 to 5 days. Your phone number?"])
+    assert out == ("We ship to Kampala from Nairobi by DHL — 3 to 5 days. Your phone number?", [], "soft")
+    assert flags == [] and tally == [("soft", "whatsapp")]
+    # the rewrite carries a hard finding, the original only a soft one → the original goes out
+    out, *_ = _gate(
+        monkeypatch, "We ship to Kampala from our Nairobi workshop. What's your phone number?",
+        user_text="When am in Uganda", seen=[],
+        verdicts=[_v(soft=["a side question unanswered"], by="reviewer"),
+                  _v(hard=["unverified figure(s) 45"], soft=["x"])],
+        llm_texts=["Shipping is $45."])
+    assert out[0].startswith("We ship to Kampala") and out[2] == "soft"
+    # the rewrite never came: the original, hard-clean, goes out
+    out, *_ = _gate(monkeypatch, "Noted, thank you 🙏", user_text="My wansapp number", seen=[],
+                    verdicts=[_v(soft=["the reviewer rejected the draft"], by="reviewer")], llm_texts=[""])
+    assert out == ("Noted, thank you 🙏", [], "soft")
+
+
+def test_only_a_hard_finding_on_both_drafts_holds_a_private_reply(monkeypatch):
     out, calls, flags, tally, llm, _ = _gate(
         monkeypatch, GOLD_LIVE_REPLY, seen=[SILVER],
-        verdicts=[{"ok": False, "issues": ["silver for gold"], "by": "rules"},
-                  {"ok": False, "issues": ["South Africa unanswered"], "by": "reviewer"}],
+        verdicts=[_v(hard=["they asked for gold; 'Silver Communion Tray' is silver"]),
+                  _v(hard=["unverified figure(s) 95"])],
         llm_texts=["still wrong"])
-    assert out == (rt._REVIEW_HOLD_DM, ["silver for gold", "South Africa unanswered"], "held")
-    assert flags == [("whatsapp", "K1", ["silver for gold", "South Africa unanswered"], "still wrong")]
+    assert out == (rt._REVIEW_HOLD_DM_PRICE,
+                   ["they asked for gold; 'Silver Communion Tray' is silver", "unverified figure(s) 95"], "held")
+    assert flags == [("whatsapp", "K1", ["they asked for gold; 'Silver Communion Tray' is silver",
+                                         "unverified figure(s) 95"], "still wrong")]
     assert tally == [("held", "whatsapp")]
-    # in Swahili when they wrote Swahili
-    out, *_ = _gate(monkeypatch, GOLD_LIVE_REPLY, seen=[SILVER], swahili=True,
-                    verdicts=[{"ok": False, "issues": ["x"], "by": "rules"},
-                              {"ok": False, "issues": ["y"], "by": "rules"}],
-                    llm_texts=["bado"])
-    assert out[0] == rt._SW_REVIEW_HOLD_DM and out[2] == "held"
+    # a hard finding that is not about money gets the plain holding line; Swahili when they wrote Swahili
+    out, *_ = _gate(monkeypatch, "Your order has shipped!", user_text="where is my order", seen=[],
+                    verdicts=[_v(hard=["an order-status claim with no check_order_status behind it"]),
+                              _v(hard=["an order-status claim with no check_order_status behind it"])],
+                    llm_texts=["It is on its way!"])
+    assert out[0] == rt._REVIEW_HOLD_DM and out[2] == "held"
+    out, *_ = _gate(monkeypatch, "Ni $95.", user_text="bei gani ya kikombe", seen=[], swahili=True,
+                    verdicts=[_v(hard=["unverified figure(s) 95"]), _v(hard=["unverified figure(s) 95"])],
+                    llm_texts=["Ni $95."])
+    assert out[0] == rt._SW_REVIEW_HOLD_DM_PRICE and out[2] == "held"
 
 
-def test_two_failures_under_a_comment_return_nothing_for_the_engine_to_hold(monkeypatch):
+def test_never_two_holding_lines_in_a_row_and_never_one_for_an_acknowledgement(monkeypatch):
+    calls, flags, tally = _wire(monkeypatch, [_v(hard=["unverified figure(s) 95"]),
+                                              _v(hard=["unverified figure(s) 95"])])
+
+    async def held_before(redis, channel, key, hours=6):
+        return True
+    monkeypatch.setattr(rv, "held_recently", held_before)
+    out = asyncio.run(rt._gate_turn_reply(
+        "It is $95.", user_text="how much?", transcript=[], tool_log=[], ctx=_Ctx(), currency="USD",
+        channel="whatsapp", public_comment=False, llm=_TurnLLM(["It is $95."]), sys_blocks=["S"],
+        redis=None, db=None, key="K1"))
+    assert out == ("", ["unverified figure(s) 95", "unverified figure(s) 95"], "held")
+    assert len(flags) == 1                      # the colleague is flagged, the customer is not walled
+    # an acknowledgement is never answered with a holding line
+    _wire(monkeypatch, [_v(hard=["unverified figure(s) 95"]), _v(hard=["unverified figure(s) 95"])])
+    out = asyncio.run(rt._gate_turn_reply(
+        "Great — $95 then!", user_text="I'm saying ok", transcript=[], tool_log=[], ctx=_Ctx(),
+        currency="USD", channel="messenger", public_comment=False, llm=_TurnLLM(["Still $95"]),
+        sys_blocks=["S"], redis=None, db=None, key="K1", closer=True))
+    assert out[0] == "" and out[2] == "held"
+
+
+def test_two_hard_failures_under_a_comment_return_nothing_for_the_engine_to_hold(monkeypatch):
     out, calls, flags, tally, llm, _ = _gate(
         monkeypatch, GOLD_LIVE_REPLY, seen=[SILVER], public=True,
-        verdicts=[{"ok": False, "issues": ["silver for gold"], "by": "rules"},
-                  {"ok": False, "issues": ["still silver"], "by": "reviewer"}],
+        verdicts=[_v(hard=["silver for gold"]), _v(hard=["still silver"])],
         llm_texts=["still wrong"])
     assert out == ("", ["silver for gold", "still silver"], "held")
     assert flags == [] and tally == [("held", "facebook")]
@@ -342,17 +415,18 @@ def test_two_failures_under_a_comment_return_nothing_for_the_engine_to_hold(monk
     assert "posted under the comment" in llm.calls[0]["messages"][-1]["content"]
 
 
-def test_a_rewrite_that_never_comes_holds_with_the_first_reasons(monkeypatch):
+def test_a_rewrite_that_never_comes_holds_only_on_a_hard_finding(monkeypatch):
+    issue = "they asked for gold; 'Silver Communion Tray' is silver"
     out, calls, flags, tally, llm, _ = _gate(
         monkeypatch, GOLD_LIVE_REPLY, seen=[SILVER],
-        verdicts=[{"ok": False, "issues": ["silver for gold"], "by": "rules"}],
-        llm_texts=[""])
-    assert out == (rt._REVIEW_HOLD_DM, ["silver for gold"], "held")
+        verdicts=[_v(hard=[issue])], llm_texts=[""])
+    assert out == (rt._REVIEW_HOLD_DM_PRICE, [issue], "held")
     assert flags and flags[0][3] == GOLD_LIVE_REPLY       # the draft goes to the colleague
 
 
 def test_the_holding_lines_promise_the_thread_not_the_inbox():
-    for line in rt._VERIFY_HOLD_POOL + rt._SW_VERIFY_HOLD_POOL + [rt._REVIEW_HOLD_DM, rt._SW_REVIEW_HOLD_DM]:
+    for line in rt._VERIFY_HOLD_POOL + rt._SW_VERIFY_HOLD_POOL + [
+            rt._REVIEW_HOLD_DM, rt._SW_REVIEW_HOLD_DM, rt._REVIEW_HOLD_DM_PRICE, rt._SW_REVIEW_HOLD_DM_PRICE]:
         assert "🙏" in line
         low = line.lower()
         assert "dm" not in low and "message us" not in low and "inbox" not in low
@@ -381,6 +455,7 @@ def test_run_turn_gates_every_real_turn_and_reports_to_the_caller():
     assert 'tool_log.append({"tool": call.name, "input": call.input, "out": out})' in src
     assert "if reply and not read_only and not scribe_only and _gate_applies(user_text):" in src
     assert "reply, _held, _gate_outcome = await _gate_turn_reply(" in src
+    assert "fx=_fx_rates, closer=is_closer(user_text or \"\"))" in src
     assert 'turn_facts.update({"tools": tool_log, "held": list(_held), "review": _gate_outcome})' in src
     # the gate runs before the spend is measured and the reply returned
     assert src.index("await _gate_turn_reply(") < src.index("await ai_budget.add_spend(")
@@ -499,7 +574,8 @@ def test_the_reviewer_reads_the_conversation_and_the_tools_in_a_private_chat(mon
     log = [{"tool": "update_cart", "input": {}, "out": {"total": 13000}}]
     v = asyncio.run(rv.review_reply("Size L", "Which colour would you like?", [], transcript=transcript,
                                     tool_results=log, mode="dm"))
-    assert v == {"ok": False, "issues": ["re-asks the colour they gave"], "by": "reviewer"}
+    assert v == {"ok": False, "issues": ["re-asks the colour they gave"], "hard": [],
+                 "soft": ["re-asks the colour they gave"], "by": "reviewer"}
     sent = llm.calls[-1]
     assert "a reply in a private chat" in sent and "4. CONTRADICTS THE CONVERSATION" in sent
     assert "6. WRONG LANGUAGE" in sent and "Customer: I want the cassock in red" in sent
@@ -516,7 +592,7 @@ def test_the_private_chat_reviewer_has_its_own_switch(monkeypatch):
     monkeypatch.setattr(settings, "reply_review", False, raising=False)
     monkeypatch.setattr(rt, "build_llm", lambda model=None: (_ for _ in ()).throw(AssertionError("no model")))
     v = asyncio.run(rv.review_reply("hi", "Hello! How can I help?", [], mode="dm"))
-    assert v == {"ok": True, "issues": [], "by": "rules"}
+    assert v == {"ok": True, "issues": [], "hard": [], "soft": [], "by": "rules"}
     assert settings.reply_review is True or True
     assert "reply_review: bool = True" in inspect.getsource(type(settings))
 
@@ -537,11 +613,13 @@ class _Tally:
 
 def test_the_days_tally_reaches_the_health_endpoint():
     r = _Tally()
-    for outcome, ch in (("pass", "whatsapp"), ("pass", "facebook"), ("rewritten", "whatsapp"), ("held", "web")):
+    for outcome, ch in (("pass", "whatsapp"), ("pass", "facebook"), ("rewritten", "whatsapp"),
+                        ("held", "web"), ("soft", "whatsapp")):
         asyncio.run(rv.record_verdict(r, outcome, ch))
     asyncio.run(rv.record_verdict(r, "nonsense", "x"))
     t = asyncio.run(rv.read_verdicts(r))
-    assert t["pass"] == 2 and t["rewritten"] == 1 and t["held"] == 1 and t["pass:facebook"] == 1
+    assert t["pass"] == 2 and t["rewritten"] == 1 and t["held"] == 1 and t["soft"] == 1
+    assert t["pass:facebook"] == 1
     assert r.ttl == 3 * 24 * 3600
     assert asyncio.run(rv.read_verdicts(None)) == {}
     from app.routers import health as h

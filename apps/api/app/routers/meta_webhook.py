@@ -127,6 +127,26 @@ def _event_text(message: dict) -> str:
     return ""
 
 
+# Messenger's thumbs-up is a STICKER (the Like button), sent as an image
+# attachment with a sticker_id — three sizes of the same thumb. It is not a
+# photo of anything: it is "👍", the customer saying "ok, satisfied" (owner,
+# 2026-09-25: "when a thumb up is done, which means satisfaction, you should
+# not continue"). Any other sticker is a reaction too, never an item to price.
+_LIKE_STICKERS = {"369239263222822", "369239343222814", "369239383222810"}
+
+
+def _sticker(message: dict) -> str | None:
+    """"👍" for Messenger's Like sticker, "[sticker]" for any other sticker,
+    None when the message carries no sticker."""
+    for att in (message.get("attachments") or []):
+        payload = att.get("payload") or {}
+        sid = payload.get("sticker_id")
+        if sid is None:
+            continue
+        return "👍" if str(sid) in _LIKE_STICKERS else "[sticker]"
+    return None
+
+
 def _event_media(message: dict) -> tuple[str | None, str | None]:
     """Extract (media_type, media_url) from the first inbound attachment that
     carries a usable URL, else (None, None).
@@ -247,6 +267,11 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
 
             text = _event_text(message)
             media_type, media_url = _event_media(message)
+            # A sticker is a reaction, not a photo: the thumbs-up is "👍", and
+            # no image is loaded, described or priced from it.
+            sticker = _sticker(message)
+            if sticker:
+                text, media_type, media_url = sticker, None, None
             # No caption on a media message → give it a clean placeholder that
             # matches the resolved media_type (so "[fallback]" becomes "[image]").
             if media_type and (not text or text.startswith("[")):
@@ -344,7 +369,9 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
             # (the agent sees images natively; the caption rides along). Other
             # attachment types (video/audio/file) still need text to react to.
             # Only when the conversation is AI-mode (never talk over a human).
-            turn_text = (message.get("text") or "").strip()
+            # A sticker's turn text is the sticker ("👍"): the closer gate ends
+            # the exchange there — satisfaction needs no reply.
+            turn_text = (message.get("text") or "").strip() or (sticker or "")
             turn_media = ({"type": "image", "url": media_url, "caption": turn_text}
                           if media_url and media_type == "image" else None)
             if (turn_text or turn_media) and conv.intercept_mode == InterceptMode.ai:
