@@ -263,6 +263,10 @@ async def _load_hub_catalog(redis) -> list[dict]:
             async with sem:
                 p["variants"] = await _fetch_variants(client, base, p["hub_product_id"])
             _apply_variant_pricing(p)
+            # ONE name for a variant, everywhere (core/variants): the product's
+            # name plus what tells the variant apart — "Straight Collar — 8 inch".
+            from app.core.variants import label_variants
+            label_variants([p])
 
         if variable:
             await asyncio.gather(*[_load(p) for p in variable])
@@ -313,6 +317,13 @@ def _attr_norm(s) -> str:
     return " ".join(t.split())
 
 
+def _variant_name(p: dict, variant: dict) -> str:
+    """The ONE label every seam shows (core/variants), computed here when the
+    hub client has not stamped it."""
+    from app.core.variants import variant_label
+    return variant.get("label") or variant_label(p.get("name"), variant) or str(p.get("name") or "")
+
+
 def resolve_hub_line(item: dict, catalog: list[dict]) -> dict | None:
     """Match one confirmed cart line to a hub product.
 
@@ -341,7 +352,7 @@ def resolve_hub_line(item: dict, catalog: list[dict]) -> dict | None:
             "product_id": p.get("hub_product_id"),
             "quantity": qty,
             "unit_price": float(price or 0),
-            "name": (f"{p.get('name')} ({variant.get('name')})" if variant else p.get("name")),
+            "name": (_variant_name(p, variant) if variant else p.get("name")),
             "variant_sku": (variant or {}).get("sku"),
             "variant_id": (variant or {}).get("variant_id"),
             "unit_price_usd": (variant or {}).get("price_usd") if variant else p.get("price_usd"),
@@ -366,6 +377,15 @@ def resolve_hub_line(item: dict, catalog: list[dict]) -> dict | None:
                   for p in catalog for v in (p.get("variants") or []) if v.get("sku")}
     by_var_name = {_norm(f"{p.get('name')} {v.get('name')}"): (p, v)
                    for p in catalog for v in (p.get("variants") or []) if v.get("name")}
+    # …and by the ONE label every seam shows ("Straight Collar — 8 inch"),
+    # so the agent can pass exactly what it quoted (core/variants).
+    from app.core.variants import variant_label as _vlabel
+    for p in catalog:
+        for v in (p.get("variants") or []):
+            lab = v.get("label") or _vlabel(p.get("name"), v)
+            if lab:
+                by_var_name.setdefault(_norm(lab), (p, v))
+                by_var_name.setdefault(_norm(lab.replace("—", " ").replace("/", " ")), (p, v))
 
     if sku and sku in by_var_sku:
         p, v = by_var_sku[sku]

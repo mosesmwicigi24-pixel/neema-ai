@@ -56,7 +56,7 @@ def test_card_prices_product_and_variants_in_customer_currency():
     z = _card(p, "ZMW")
     assert z["currency"] == "ZMW" and z["price"] == 1680
     labels = {v["label"]: v for v in z["variants"]}
-    assert labels["S / GOLD"]["price"] == 1260 and labels["S / GOLD"]["currency"] == "ZMW"
+    assert labels["Thurible — S / GOLD"]["price"] == 1260 and labels["Thurible — S / GOLD"]["currency"] == "ZMW"
     assert z["price_from"] == 1260 and z["price_to"] == 2100
 
     u = _card(p, "USD")
@@ -68,11 +68,13 @@ def test_a_variant_named_only_after_its_product_shows_its_attributes():
     'Straight Collar' — the size attribute now rides the label."""
     from app.routers.public import _variant_card
     v = {"name": "Straight Collar", "attributes": {"Size": "8 inch"}, "prices": {"KES": 350, "USD": 3.5}}
-    c = _variant_card(v, "USD")
+    c = _variant_card(v, "USD", "Straight Collar")
     assert c == {"label": "Straight Collar — 8 inch", "price": 3.5, "currency": "USD"}
-    # a name that already carries the attribute is left alone
-    assert _variant_card({"name": "S / GOLD", "attributes": {"Size": "S"}, "prices": {"USD": 90}}, "USD")["label"] == "S / GOLD"
-    # no attributes: the name as it is
-    assert _variant_card({"name": "Straight Collar", "attributes": {}, "prices": {"USD": 4}}, "USD")["label"] == "Straight Collar"
-    # no name: the attributes alone
+    # the product's name leads every label (core/variants)
+    assert _variant_card({"name": "S / GOLD", "attributes": {"Size": "S"}, "prices": {"USD": 90}}, "USD", "Thurible")["label"] == "Thurible — S / GOLD"
+    # no attributes and a bare name: the product's name, never a made-up size
+    assert _variant_card({"name": "Straight Collar", "attributes": {}, "prices": {"USD": 4}}, "USD", "Straight Collar")["label"] == "Straight Collar"
+    # no product name: the attributes alone
     assert _variant_card({"name": "", "attributes": {"Colour": "Navy"}, "prices": {"USD": 30}}, "USD")["label"] == "Navy"
+    # a label the hub client already stamped wins
+    assert _variant_card({"label": "Straight Collar — 12 inch", "prices": {"USD": 6}}, "USD", "Straight Collar")["label"] == "Straight Collar — 12 inch"
