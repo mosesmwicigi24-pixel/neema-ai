@@ -104,7 +104,16 @@ def _card(p: dict, ccy: str = "USD") -> dict:
     }
     variants = p.get("variants") or []
     if variants:
-        vcards = [_variant_card(v, ccy, p.get("name") or "") for v in variants]
+        # each DISTINCT variant once: five hub rows that read the same and
+        # cost the same are one line to a customer
+        vcards, seen = [], set()
+        for v in variants:
+            vc = _variant_card(v, ccy, p.get("name") or "")
+            key = (str(vc.get("label") or "").lower(), vc.get("price"))
+            if key in seen:
+                continue
+            seen.add(key)
+            vcards.append(vc)
         card["variants"] = vcards
         amts = [vc["price"] for vc in vcards if isinstance(vc["price"], (int, float))]
         if amts and min(amts) != max(amts):

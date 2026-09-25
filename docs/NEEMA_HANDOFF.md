@@ -154,7 +154,17 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   Straight Collar Shirt" → "Straight Collar Shirt — Navy"; "S / GOLD" stays,
   it carries the colour), else the attributes ("Straight Collar" six times
   over → "Straight Collar — 8 Inches"), else the product's name (never a
-  made-up size). The hub client stamps `label` on every variant as it loads
+  made-up size). Then every attribute value the name does not already say
+  rides along, a bare code with its key — the live cassocks, dresses, shirts
+  and sprinklers name the colour and keep the size in the attributes, so
+  five "Black Pleats" rows read the same until the size joins: "Red
+  Apostolic Cassock — Black Pleats, Piping and Buttons / Size M". A
+  misspelt copy of the product's name ("INCENSE BURNER/THURBLE"), the hub's
+  "+" join and a leading run of the product's words are not what tells a
+  variant apart. The public card shows each distinct (label, price) once;
+  rows the hub still leaves identical at different prices are a range to
+  the verifier (soft), never a hard hold — the fix is in the hub: give those
+  rows a Size attribute. The hub client stamps `label` on every variant as it loads
   them (`label_variants`); the agent's search rows carry `label` first; the
   public catalogue card shows it; a cart line resolves by it ("Straight
   Collar — 10 inch", with or without the dash, or by SKU) and names the line
