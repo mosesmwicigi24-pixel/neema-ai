@@ -444,6 +444,9 @@ async def _timing(request, call_next):
 
 app.include_router(health.router,     prefix="/api",       tags=["Health"])
 app.include_router(auth.router,       prefix="/api/auth",  tags=["Auth"])
+# The same login/refresh for the Android app. On the public origin /api/auth/*
+# belongs to the web's NextAuth, so the app can't reach the routes above.
+app.include_router(auth.router,       prefix="/api/agent-auth", tags=["Auth (mobile)"])
 app.include_router(admin.router,      prefix="/api/admin", tags=["Admin"])
 app.include_router(crm.router,        prefix="/api/admin", tags=["CRM"])
 app.include_router(analytics.router,  prefix="/api/admin", tags=["Analytics"])
