@@ -3,14 +3,19 @@ package ke.co.bethanyhouse.neema.feature.conversations
 import android.content.ContentResolver
 import android.net.Uri
 import ke.co.bethanyhouse.neema.core.api.InboxQuery
+import ke.co.bethanyhouse.neema.core.model.ActivityEvent
 import ke.co.bethanyhouse.neema.core.model.Conversation
+import ke.co.bethanyhouse.neema.core.model.ConversationPage
 import ke.co.bethanyhouse.neema.core.net.NeemaHttp
 import ke.co.bethanyhouse.neema.core.net.NeemaJson
 import ke.co.bethanyhouse.neema.core.util.Fmt
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -74,12 +79,16 @@ data class ThreadMsg(
     @SerialName("media_caption") val mediaCaption: String? = null,
     @SerialName("mime_type") val mimeType: String? = null,
     val filename: String? = null,
-    /** Free-form JSONB on the server — read field by field so one odd value can't sink the thread. */
-    @SerialName("comment_context") val commentRaw: JsonObject? = null,
+    /**
+     * Free-form JSONB on the server (messages.comment_context) — kept as a raw
+     * element and read field by field, so one odd value (or a non-object
+     * blob) can't sink the thread.
+     */
+    @SerialName("comment_context") val commentRaw: JsonElement? = null,
     @SerialName("reply_to") val replyTo: QuotedRef? = null,
 ) {
     val commentContext: PostContext?
-        get() = commentRaw?.let {
+        get() = (commentRaw as? JsonObject)?.let {
             PostContext(
                 postId = it.s("post_id"), title = it.s("title"), permalink = it.s("permalink"), thumb = it.s("thumb"),
                 mediaType = it.s("media_type"), hasVideo = it.b("has_video"), replyTo = it.s("reply_to"),
@@ -189,6 +198,105 @@ internal fun mergeServer(existing: List<ThreadMsg>, incoming: List<ThreadMsg>): 
     return mergeThread(kept, incoming)
 }
 
+/**
+ * A live `new_message` frame → a thread bubble (ConversationsView's socket
+ * handler). What the server publishes varies by path: the AI reply
+ * (n8n_bridge) carries an `id`; the human reply / approve / media paths
+ * (services/conversation.py) carry no id, direction or created_at; the
+ * INBOUND paths (the WhatsApp webhook, meta_webhook, sms, public forms)
+ * carry `sender: "user"` but no `direction` at all. The web defaults a
+ * missing direction to "outbound", which paints the customer's own words as
+ * an outgoing bubble until the next poll — here it follows the sender.
+ * Agent-level notification frames (`event: "notification"`, e.g. the SMS
+ * bridge's `type: "new_message"` ping on agents:all) are not messages.
+ */
+internal fun wsMessageOf(e: JsonObject): ThreadMsg? {
+    if (e.s("event") == "notification") return null
+    val sender = e.s("sender") ?: "ai"
+    return ThreadMsg(
+        id = e.s("id") ?: "ws-${java.util.UUID.randomUUID()}",
+        type = "message",
+        direction = e.s("direction") ?: if (sender == "user") "inbound" else "outbound",
+        sender = sender,
+        text = e.s("text"),
+        createdAt = e.s("created_at") ?: nowIso(),
+        mediaType = e.s("mediaType"),
+        mediaId = e.s("mediaId"),
+        mediaUrl = e.s("mediaUrl"),
+        mediaCaption = e.s("mediaCaption"),
+        mimeType = e.s("mimeType"),
+        filename = e.s("filename"),
+        // Sent-in-their-language replies carry the human's English.
+        translation = e.s("translation"),
+        translatedFrom = e.s("translatedFrom"),
+        replyTo = (e["replyTo"] as? JsonObject)?.let { runCatching { NeemaJson.decodeFromJsonElement(QuotedRef.serializer(), it) }.getOrNull() },
+    )
+}
+
+/**
+ * Add a socket bubble unless the thread already shows it: the exact DB id;
+ * an audio/media echo within 15 s (the web's guard); our own reply echoing
+ * while its optimistic bubble is up; or — frames from the reply/approve/media
+ * paths carry no id — an OUTBOUND echo of a row the after-send refetch
+ * already brought in (same sender and text, within two minutes). A
+ * customer's repeated "ok" is never swallowed: inbound frames only dedupe by id.
+ */
+internal fun appendWs(existing: List<ThreadMsg>, msg: ThreadMsg): List<ThreadMsg> = when {
+    existing.any { it.id == msg.id } -> existing
+    msg.mediaUrl != null && existing.any { x ->
+        x.mediaUrl == msg.mediaUrl && x.direction == msg.direction && kotlin.math.abs(x.millis - msg.millis) < 15_000
+    } -> existing
+    msg.sender == "human_agent" && existing.any { x ->
+        x.id.startsWith("optimistic-") && !x.isNote && x.body.trim() == msg.body.trim()
+    } -> existing
+    msg.id.startsWith("ws-") && !msg.inbound && existing.any { x ->
+        !x.isLocal && !x.isSystem && !x.isNote && !x.inbound && x.sender == msg.sender &&
+            x.body.trim() == msg.body.trim() && kotlin.math.abs(x.millis - msg.millis) < 120_000
+    } -> existing
+    else -> existing + msg
+}
+
+/**
+ * What to tell the agent when one upload fails (admin.py upload_media):
+ * the server's own `detail` when it sent one ("Image too large — max 5 MB.",
+ * "Unsupported media type: …", "Couldn't convert this video for WhatsApp…"),
+ * never a proxy's HTML error page or a pydantic error list.
+ */
+internal fun uploadErrorOf(e: Throwable): String {
+    val api = e as? ke.co.bethanyhouse.neema.core.net.ApiException ?: return e.message?.ifBlank { null } ?: "failed"
+    val d = api.detail.trim()
+    val readable = d.isNotEmpty() && !d.startsWith("<") && !d.startsWith("[") && !d.startsWith("{")
+    return when {
+        readable && api.status != 0 -> d
+        api.status == 413 -> "too large to upload"
+        api.status == 415 -> "unsupported file type"
+        api.status == 422 -> "the server couldn't process this file"
+        api.status == 0 -> if (d.contains("timed out")) "upload timed out — check your connection and try again" else "network error — try again"
+        else -> "upload failed (${api.status})"
+    }
+}
+
+/** upload-media's ALLOWED_MIME (admin.py) — anything else is refused with a 415. */
+internal val UPLOAD_MIME = setOf(
+    "image/jpeg", "image/png", "image/webp", "image/gif",
+    "application/pdf", "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "video/mp4", "video/3gpp", "video/quicktime", "video/hevc", "video/x-m4v",
+    "audio/ogg", "audio/aac", "audio/mpeg",
+)
+
+/**
+ * Whether upload-media will take this file. The server trusts a `.mov` /
+ * `.hevc` / `.mp4` / `.m4v` extension when the type arrives as
+ * octet-stream (iPhone clips), so those pass too.
+ */
+internal fun uploadable(mime: String, name: String): Boolean =
+    mime in UPLOAD_MIME ||
+        ((mime.isEmpty() || mime == "application/octet-stream") &&
+            name.substringAfterLast('.', "").lowercase() in setOf("mov", "hevc", "mp4", "m4v"))
+
 /** buildSystemEventFromWs (lib/websocket.tsx): a live divider pill from `intercept_changed`. */
 internal fun systemEventFromWs(e: JsonObject): ThreadMsg? {
     val kind = e.s("eventKind") ?: return null
@@ -244,15 +352,65 @@ private class UriBody(
 class InboxApi(private val http: NeemaHttp) {
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
 
+    /**
+     * GET /admin/conversations/{id}/messages?limit=&before= (admin.py get_thread):
+     * a bare array, oldest first. Decoded item by item — one malformed row
+     * (a hand-edited JSONB blob, a future field shape) drops out instead of
+     * blanking the whole thread.
+     */
     suspend fun messages(id: String, before: String? = null, limit: Int = THREAD_PAGE): List<ThreadMsg> {
         val qs = buildString {
             append("?limit=").append(limit)
             if (before != null) append("&before=").append(enc(before))
         }
-        return NeemaJson.decodeFromString(
-            ListSerializer(ThreadMsg.serializer()),
-            http.raw("GET", "/admin/conversations/$id/messages$qs").ifBlank { "[]" },
+        val arr = when (val el = parse(http.raw("GET", "/admin/conversations/$id/messages$qs"))) {
+            is JsonArray -> el
+            is JsonNull -> JsonArray(emptyList())
+            // Not a thread at all: an error, never "No messages yet".
+            else -> throw IllegalStateException("Unreadable thread")
+        }
+        return arr.mapNotNull { item ->
+            runCatching { NeemaJson.decodeFromJsonElement(ThreadMsg.serializer(), item) }.getOrNull()
+        }
+    }
+
+    /**
+     * One inbox page (admin.py list_conversations with `limit`):
+     * {items, next_cursor}. An API older than this client answers the legacy
+     * bare array — taken as one final page, as the web does.
+     */
+    suspend fun page(q: InboxQuery, limit: Int, cursor: String? = null): ConversationPage {
+        val params = listOfNotNull(
+            "limit" to limit.toString(),
+            cursor?.let { "cursor" to it },
+            q.tab.takeIf { it != "all" }?.let { "tab" to it },
+            q.channel.takeIf { it != "all" }?.let { "channel" to it },
+            q.mode.takeIf { it != "all" }?.let { "mode" to it },
+            q.tag?.takeIf { it.isNotEmpty() }?.let { "tag" to it },
+            q.q.trim().ifEmpty { null }?.let { "q" to it },
+        ).joinToString("&") { (k, v) -> "$k=${enc(v)}" }
+        val el = parse(http.raw("GET", "/admin/conversations?$params"))
+        if (el is JsonArray) return ConversationPage(conversationsOf(el), null)
+        val obj = el as? JsonObject ?: throw IllegalStateException("Unreadable inbox page")
+        return ConversationPage(
+            items = conversationsOf(obj["items"] as? JsonArray),
+            nextCursor = obj.s("next_cursor"),
         )
+    }
+
+    /** GET /admin/conversations/{id} (admin.py get_conversation): one row, the list's shape. */
+    suspend fun get(id: String): Conversation =
+        conversationOf(parse(http.raw("GET", "/admin/conversations/$id")))
+            ?: throw IllegalStateException("Unreadable conversation $id")
+
+    /** GET /admin/conversations/{id}/activity (admin.py get_conversation_activity): {events: [...]}. */
+    suspend fun activity(id: String): List<ActivityEvent> {
+        val obj = parse(http.raw("GET", "/admin/conversations/$id/activity")) as? JsonObject ?: return emptyList()
+        return (obj["events"] as? JsonArray).orEmpty().mapIndexedNotNull { i, e ->
+            val o = e as? JsonObject ?: return@mapIndexedNotNull null
+            val label = o.s("label") ?: return@mapIndexedNotNull null
+            ActivityEvent(id = o.s("id") ?: "ev-$i", kind = o.s("kind") ?: "", label = label, detail = o.s("detail"), at = o.s("at"))
+        }
     }
 
     /**
@@ -320,3 +478,29 @@ internal fun inboxHandle(c: Conversation): String =
 /** A real dialable number (7–15 digits) — never a web visitor's hash or a Meta PSID. */
 internal fun phoneDigits(c: Conversation): String? =
     if (isWebVisitor(c.waId)) null else c.waId?.filter { it.isDigit() }?.takeIf { it.length in 7..15 }
+
+private fun parse(text: String): JsonElement =
+    if (text.isBlank()) JsonNull else runCatching { NeemaJson.parseToJsonElement(text) }.getOrDefault(JsonNull)
+
+private fun conversationsOf(arr: JsonArray?): List<Conversation> = arr.orEmpty().mapNotNull(::conversationOf)
+
+/**
+ * One inbox row (admin.py _conversation_rows), decoded defensively: `tags`
+ * is read straight off the customer's free-form JSONB state
+ * (`state.get("tags", [])`), so it can be null, a bare string or hold
+ * non-strings — the server's own summary query guards `jsonb_typeof = 'array'`
+ * for exactly that reason. Normalised to a list of strings so one odd
+ * customer can't blank the whole inbox; a row with no id is dropped.
+ */
+internal fun conversationOf(el: JsonElement): Conversation? {
+    val o = el as? JsonObject ?: return null
+    if (o.s("id") == null) return null
+    val tags = when (val t = o["tags"]) {
+        is JsonArray -> t.mapNotNull { p -> (p as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content?.takeIf { it.isNotBlank() } }
+        is JsonNull -> emptyList()
+        is JsonPrimitive -> listOf(t.content).filter { it.isNotBlank() }
+        else -> emptyList()
+    }
+    val fixed = JsonObject(o + ("tags" to JsonArray(tags.map(::JsonPrimitive))))
+    return runCatching { NeemaJson.decodeFromJsonElement(Conversation.serializer(), fixed) }.getOrNull()
+}

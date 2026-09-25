@@ -205,7 +205,33 @@ class ConversationsScreenshotTest {
 
     /** Inviting a web-chat visitor: the phone field starts EMPTY — never the hash's digits. */
     @Test fun dialog_invite_webVisitor() = screen().settle().apply { vm.select("c7") }.let { s ->
-        s.snap { InviteDialog(s.dash, s.vm, s.vm.activeConv()!!) {} }
+        s.snap { InviteDialog(s.dash, s.vm, s.vm.activeConv()!!, inviteTarget(s.vm.thread.value.reach, "c7")) {} }
+    }
+
+    /**
+     * Round 3: a Messenger thread exactly as the server sends it — a null
+     * wa_id (the PSID is the key), "+00:00" microsecond timestamps, a French
+     * customer with the gray English line under a dashed rule, a human reply
+     * quoting them, a note and a comment.
+     */
+    @Test fun thread_messenger_realContract() = screen {
+        on("GET", "/admin/conversations", body = InboxFixtures.Contract.page(InboxFixtures.Contract.peterWa, InboxFixtures.Contract.maryMsgr.replace("\"intercept_mode\":\"ai\"", "\"intercept_mode\":\"human\"").replace("\"assigned_agent_id\":null", "\"assigned_agent_id\":\"${Fixtures.ME_ID}\""), InboxFixtures.Contract.peterFb))
+        on("GET", "/admin/conversations/[^/]+/messages", body = InboxFixtures.Contract.thread())
+        on("GET", "/admin/conversations/[^/]+/window", body = InboxFixtures.windowHumanAgent())
+    }.settle().apply { vm.select("k2") }.snap()
+
+    @Test fun thread_messenger_realContract_dark() = screen {
+        on("GET", "/admin/conversations", body = InboxFixtures.Contract.page(InboxFixtures.Contract.peterWa, InboxFixtures.Contract.maryMsgr, InboxFixtures.Contract.peterFb))
+        on("GET", "/admin/conversations/[^/]+/messages", body = InboxFixtures.Contract.thread())
+    }.settle().apply { vm.select("k2") }.snap(dark = true)
+
+    /** The invite, from the thread menu, to the phone captured on a Messenger customer's profile. */
+    @Test fun dialog_invite_profilePhone() = screen().settle().apply { vm.select("c2") }.let { s ->
+        s.snap { InviteDialog(s.dash, s.vm, s.vm.activeConv()!!, "+250 788 123 456") {} }
+    }
+
+    @Test fun dialog_note_dark() = screen().settle().apply { vm.select("c1") }.snap(dark = true) {
+        NoteDialog("Repeat buyer — offer free delivery to Nyeri", {}, {}) {}
     }
 
     /** An admin on a paused thread: Resume (amber primary), Transfer, Note, Clear as the web's Btn variants. */
