@@ -1,5 +1,12 @@
 package ke.co.bethanyhouse.neema.feature.calls
 
+import android.Manifest
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -39,6 +46,7 @@ import androidx.compose.material.icons.filled.PhoneCallback
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -56,6 +64,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -74,24 +84,74 @@ private val LabelGrey = Color(0xFF8696A0)
 
 private fun mmss(s: Int) = "%02d:%02d".format(s / 60, s % 60)
 
-/** The call card over the content area (components/CallStage.tsx). Renders nothing when idle. */
+/**
+ * The call card over the content area (components/CallStage.tsx). Renders
+ * nothing when idle. Always composed while signed in, so it also hosts the
+ * microphone prompt a call raises ([CallManager.micRequest]) and lets a
+ * ringing / live call show over the lock screen.
+ */
 @Composable
 fun CallStage(dash: DashboardViewModel) {
     val calls = dash.container.calls
     val c by calls.state.collectAsStateWithLifecycle()
-    val pendingAnswer by calls.pendingAnswer.collectAsStateWithLifecycle()
-    val withMic = rememberMicPermission()
-
-    // "Answer" tapped on the notification before the mic was allowed: ask now.
-    LaunchedEffect(pendingAnswer) {
-        if (pendingAnswer) {
-            calls.consumePendingAnswer()
-            withMic { calls.answer() }
-        }
+    val micRequest by calls.micRequest.collectAsStateWithLifecycle()
+    val askMic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        calls.onMicResult(granted)
     }
+    // getUserMedia's prompt: a call is waiting for the microphone.
+    LaunchedEffect(micRequest) {
+        if (micRequest) runCatching { askMic.launch(Manifest.permission.RECORD_AUDIO) }.onFailure { calls.onMicResult(false) }
+    }
+    ShowOverLockScreen(c.phase != CallPhase.Idle)
 
     if (c.phase == CallPhase.Idle) return
+    CallCard(
+        c,
+        CallActions(
+            answer = calls::answer, decline = calls::hangup, callback = calls::callback,
+            toggleMute = calls::toggleMute, toggleSpeaker = calls::toggleSpeaker, hangup = calls::hangup,
+        ),
+    )
+}
 
+/** While a call rings or runs, the activity shows over the keyguard and wakes the screen. */
+@Composable
+private fun ShowOverLockScreen(active: Boolean) {
+    val ctx = LocalContext.current
+    DisposableEffect(active) {
+        val activity = ctx.findActivity()
+        if (active && activity != null && Build.VERSION.SDK_INT >= 27) {
+            activity.setShowWhenLocked(true)
+            activity.setTurnScreenOn(true)
+        }
+        onDispose {
+            if (active && activity != null && Build.VERSION.SDK_INT >= 27) {
+                activity.setShowWhenLocked(false)
+                activity.setTurnScreenOn(false)
+            }
+        }
+    }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
+
+/** What the card's buttons do. */
+class CallActions(
+    val answer: () -> Unit = {},
+    val decline: () -> Unit = {},
+    val callback: () -> Unit = {},
+    val toggleMute: () -> Unit = {},
+    val toggleSpeaker: () -> Unit = {},
+    val hangup: () -> Unit = {},
+)
+
+/** The card itself, for any [CallUiState] (idle included — callers skip it). */
+@Composable
+fun CallCard(c: CallUiState, actions: CallActions) {
     val who = c.name?.takeIf { it.isNotBlank() } ?: c.from?.takeIf { it.isNotEmpty() }?.let { "+$it" } ?: "Unknown"
     val initial = (who.replace("+", "").firstOrNull()?.toString() ?: "?").uppercase()
     val ringing = c.phase == CallPhase.Ringing
@@ -119,12 +179,11 @@ fun CallStage(dash: DashboardViewModel) {
                 .padding(24.dp)
                 .widthIn(max = 448.dp)
                 .fillMaxWidth()
-                .shadow(30.dp, RoundedCornerShape(32.dp))
                 .clip(RoundedCornerShape(32.dp))
                 .background(Color(0x990B141A))
                 .border(1.dp, Color(0x2E25D366), RoundedCornerShape(32.dp))
                 .verticalScroll(rememberScrollState())
-                .padding(start = 32.dp, end = 32.dp, top = 48.dp, bottom = 36.dp),
+                .padding(start = 40.dp, end = 40.dp, top = 56.dp, bottom = 40.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             // Avatar with the ringing pulse and the live dot.
@@ -169,11 +228,11 @@ fun CallStage(dash: DashboardViewModel) {
             }
             c.error?.let {
                 Spacer(Modifier.height(16.dp))
-                Text(it, color = Color(0xFFFCA5A5), fontSize = 14.sp)
+                Text(it, color = Color(0xFFFCA5A5), fontSize = 14.sp, textAlign = TextAlign.Center)
             }
             if (c.phase == CallPhase.Ended) {
                 Spacer(Modifier.height(16.dp))
-                Text(c.note ?: "Call ended", color = Color(0xFFA8C7B6), fontSize = 14.sp)
+                Text(c.note ?: "Call ended", color = Color(0xFFA8C7B6), fontSize = 14.sp, textAlign = TextAlign.Center)
             }
 
             Spacer(Modifier.height(40.dp))
@@ -183,30 +242,30 @@ fun CallStage(dash: DashboardViewModel) {
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.Bottom,
                 ) {
-                    CallButton(Red, "Decline", Icons.Filled.CallEnd, onClick = calls::hangup)
-                    CallButton(Amber, "Callback", Icons.Filled.PhoneCallback, size = ButtonSize.Small, onClick = calls::callback)
-                    CallButton(WaGreen, "Answer", Icons.Filled.Call, size = ButtonSize.Big) { withMic { calls.answer() } }
+                    CallButton(Red, "Decline", Icons.Filled.CallEnd, onClick = actions.decline)
+                    CallButton(Amber, "Callback", Icons.Filled.PhoneCallback, size = ButtonSize.Small, onClick = actions.callback)
+                    CallButton(WaGreen, "Answer", Icons.Filled.Call, size = ButtonSize.Big, onClick = actions.answer)
                 }
             }
             if (c.phase == CallPhase.Connecting || live) {
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically,
+                    verticalAlignment = Alignment.Bottom,
                 ) {
                     CallButton(
                         if (c.muted) LabelGrey else Color(0xFF1F2C33),
                         if (c.muted) "Unmute" else "Mute",
                         if (c.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
-                        onClick = calls::toggleMute,
+                        onClick = actions.toggleMute,
                     )
                     CallButton(
                         if (c.speaker) LabelGrey else Color(0xFF1F2C33),
                         if (c.speaker) "Speaker on" else "Speaker",
                         Icons.AutoMirrored.Filled.VolumeUp,
-                        onClick = calls::toggleSpeaker,
+                        onClick = actions.toggleSpeaker,
                     )
-                    CallButton(Red, "Hang up", Icons.Filled.CallEnd, size = ButtonSize.Big, onClick = calls::hangup)
+                    CallButton(Red, "Hang up", Icons.Filled.CallEnd, size = ButtonSize.Big, onClick = actions.hangup)
                 }
             }
         }

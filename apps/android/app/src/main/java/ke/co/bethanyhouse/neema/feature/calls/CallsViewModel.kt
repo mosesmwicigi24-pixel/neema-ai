@@ -143,7 +143,7 @@ class CallsViewModel(private val dash: DashboardViewModel) : ViewModel() {
         val cur = _transcript.value ?: return
         val id = cur.callId
         viewModelScope.launch {
-            _transcript.value = cur.copy(busy = true, err = null)
+            _transcript.value = (_transcript.value?.takeIf { it.callId == id } ?: cur).copy(busy = true, err = null)
             try {
                 api.calls.transcribe(id)
                 fetchTranscript(id)
@@ -154,28 +154,6 @@ class CallsViewModel(private val dash: DashboardViewModel) : ViewModel() {
             } finally {
                 _transcript.value = _transcript.value?.takeIf { it.callId == id }?.copy(busy = false)
             }
-        }
-    }
-
-    // ── Call back (the caller strip) ─────────────────────────────────────────
-    /**
-     * Places a WhatsApp call to this caller; with no call permission yet it
-     * asks the customer for it automatically, like the web's customer panel.
-     */
-    fun callBack(c: Call) {
-        val wa = c.waId ?: return
-        viewModelScope.launch {
-            val r = dash.container.calls.initiateCall(wa, c.name)
-            if (r.isSuccess) return@launch
-            val msg = r.exceptionOrNull()?.message ?: "Couldn't place the call"
-            if (msg.contains("permission", ignoreCase = true)) {
-                dash.container.calls.requestPermission(wa)
-                    .onSuccess {
-                        val first = c.name?.split(" ")?.firstOrNull()?.takeIf { it.isNotBlank() } ?: "them"
-                        dash.toast("Asked $first for permission to call — you can call once they tap Allow.")
-                    }
-                    .onFailure { dash.toast("Couldn't send the call request", ToastType.Error) }
-            } else dash.toast(msg, ToastType.Error)
         }
     }
 
