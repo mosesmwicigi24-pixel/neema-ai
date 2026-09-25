@@ -17,7 +17,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
@@ -85,11 +88,18 @@ fun MiniBar(data: List<BarPoint>, color: Color, format: (Double) -> String = { i
                 if (d.value <= 0) return@forEachIndexed
                 val ratio = (d.value / max).toFloat()
                 val h = (size.height * ratio).coerceAtLeast(3.dp.toPx())
-                drawRoundRect(
+                val r = minOf(4.dp.toPx(), h / 2, w / 2)
+                val x = i * slot + gap / 2
+                drawPath(
+                    Path().apply {
+                        addRoundRect(
+                            RoundRect(
+                                Rect(Offset(x, size.height - h), Size(w, h)),
+                                topLeft = CornerRadius(r), topRight = CornerRadius(r),
+                            ),
+                        )
+                    },
                     color = color.copy(alpha = 0.7f + ratio * 0.3f),
-                    topLeft = Offset(i * slot + gap / 2, size.height - h),
-                    size = Size(w, h),
-                    cornerRadius = CornerRadius(3.dp.toPx()),
                 )
             }
         }
@@ -141,7 +151,9 @@ fun ReportTable(
             Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 rows.forEach { row ->
                     Column(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(c.bg).padding(12.dp),
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(c.bg2)
+                            // White like the web's table rows, so the -50 badge tints still read.
+                            .border(1.dp, if (c.isDark) c.hairline else c.bg3, RoundedCornerShape(10.dp)).padding(12.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         ProvideTextStyle(TextStyle(fontWeight = FontWeight.Bold)) { row.firstOrNull()?.invoke() }

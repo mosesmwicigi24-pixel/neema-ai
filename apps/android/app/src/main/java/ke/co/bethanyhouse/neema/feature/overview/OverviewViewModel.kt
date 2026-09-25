@@ -69,14 +69,19 @@ class OverviewViewModel(private val dash: DashboardViewModel) : ViewModel() {
             .onFailure {
                 // A failed pull-to-refresh keeps the figures already on screen
                 // (like the web's 30 s poll); only a first load falls back.
-                if (_stats.value == null) {
-                    runCatching { dash.api.conversations.page(InboxQuery(), limit = 50) }
-                        .onSuccess { _fallbackConvs.value = it.items }
-                }
+                if (_stats.value == null) loadFallback()
             }
         _statsLoading.value = false
         runCatching { dash.api.attribution() }.onSuccess { _attrib.value = it }
         loadHuman()
+        // The web's feed reads `humanRows ?? conversations`: with no human tab,
+        // the intercepts come from the inbox's own rows.
+        if (_humanRows.value == null && _fallbackConvs.value.isEmpty()) loadFallback()
+    }
+
+    private suspend fun loadFallback() {
+        runCatching { dash.api.conversations.page(InboxQuery(), limit = 50) }
+            .onSuccess { _fallbackConvs.value = it.items }
     }
 
     private suspend fun loadHuman() {

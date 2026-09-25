@@ -113,6 +113,20 @@ class AreaViewModelTest {
         assertEquals(3, vm.humanRows.value?.size)
     }
 
+    /** The web's feed reads `humanRows ?? conversations`: no human tab → the inbox's first page. */
+    @Test fun overview_humanTabFailure_fallsBackToTheInboxFirstPage() {
+        val f = fake()
+        f.on("GET", "/admin/conversations") { r, _ ->
+            if (r.url.queryParameter("tab") == "human") 500 to "{}"
+            else 200 to """{"items":[${ReportsFixtures.conversations.joinToString(",")}],"next_cursor":null}"""
+        }
+        val vm = OverviewViewModel(dash(f))
+        assertNull(vm.humanRows.value)
+        assertNotNull(vm.stats.value)
+        assertEquals(9, vm.fallbackConvs.value.size)
+        assertEquals(listOf<String?>("limit=10&tab=human", "limit=50"), f.gets("/admin/conversations").map { it.query })
+    }
+
     @Test fun overview_attributionFailure_hidesThePanel() {
         val f = fake()
         f.on("GET", "/admin/attribution", code = 500, body = "{}")

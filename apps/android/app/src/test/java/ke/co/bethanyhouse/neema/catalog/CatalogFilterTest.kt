@@ -2,7 +2,9 @@ package ke.co.bethanyhouse.neema.catalog
 
 import ke.co.bethanyhouse.neema.core.model.CatalogItem
 import ke.co.bethanyhouse.neema.core.net.NeemaJson
+import androidx.compose.ui.unit.dp
 import ke.co.bethanyhouse.neema.feature.catalog.catalogCategories
+import ke.co.bethanyhouse.neema.feature.catalog.catalogColumns
 import ke.co.bethanyhouse.neema.feature.catalog.filterCatalog
 import ke.co.bethanyhouse.neema.feature.catalog.plainNum
 import ke.co.bethanyhouse.neema.feature.catalog.priceText
@@ -18,6 +20,16 @@ class CatalogFilterTest {
     private val catalog: List<CatalogItem> = NeemaJson.decodeFromString(ReportsFixtures.catalog)
 
     private fun names(filter: String = "all", q: String = "") = filterCatalog(catalog, filter, q).map { it.sku }
+
+    /** grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6. */
+    @Test fun columns_followTheWebBreakpoints() {
+        assertEquals(2, catalogColumns(380.dp))
+        assertEquals(2, catalogColumns(639.dp))
+        assertEquals(3, catalogColumns(640.dp))
+        assertEquals(4, catalogColumns(768.dp))
+        assertEquals(4, catalogColumns(1023.dp))
+        assertEquals(6, catalogColumns(1024.dp))
+    }
 
     @Test fun categories_distinctNonEmpty_inCatalogueOrder() {
         assertEquals(

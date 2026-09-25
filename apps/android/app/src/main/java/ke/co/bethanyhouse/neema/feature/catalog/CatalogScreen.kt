@@ -4,10 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ExpandMore
@@ -21,6 +19,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.SubcomposeLayout
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -28,11 +28,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import coil.compose.SubcomposeAsyncImage
+import coil.compose.AsyncImage
 import ke.co.bethanyhouse.neema.app.DashboardViewModel
 import ke.co.bethanyhouse.neema.core.model.CatalogItem
 import ke.co.bethanyhouse.neema.core.model.PriceAudit
@@ -99,6 +100,17 @@ internal fun plainNum(v: Double): String = if (v == Math.floor(v) && !v.isInfini
 internal fun usd(v: Double): String =
     "$" + if (v == Math.floor(v)) Fmt.number(v.toLong()) else "%,.2f".format(java.util.Locale.US, v)
 
+/**
+ * The web's grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6, read
+ * against the width the catalogue actually has.
+ */
+internal fun catalogColumns(width: Dp): Int = when {
+    width < 640.dp -> 2
+    width < 768.dp -> 3
+    width < 1024.dp -> 4
+    else -> 6
+}
+
 /** Price or "KES min – KES max" when the variants differ. */
 internal fun priceText(i: CatalogItem): String {
     val lo = i.priceMinKes; val hi = i.priceMaxKes
@@ -137,72 +149,85 @@ fun CatalogScreen(
     PullToRefreshBox(isRefreshing = refreshing, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize().background(c.bg)) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val wide = maxWidth >= 600.dp
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(if (wide) 170.dp else 150.dp),
-                contentPadding = PaddingValues(if (wide) 24.dp else 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxSize(),
-            ) {
+            val pad = if (wide) 24.dp else 16.dp
+            val cols = catalogColumns(maxWidth - pad * 2)
+            // The web's gap-4: 16 between cards, both ways.
+            val gap = 16.dp
+            LazyColumn(contentPadding = PaddingValues(pad), modifier = Modifier.fillMaxSize()) {
                 audit?.let { a ->
                     if (a.currencyGaps.isNotEmpty() || a.perPiece.isNotEmpty()) {
-                        item(span = { GridItemSpan(maxLineSpan) }, key = "audit") {
-                            PriceAuditBanner(a, auditOpen) { vm.auditOpen.value = !auditOpen }
+                        item(key = "audit") {
+                            Box(Modifier.padding(bottom = 16.dp)) {
+                                PriceAuditBanner(a, auditOpen) { vm.auditOpen.value = !auditOpen }
+                            }
                         }
                     }
                 }
                 // ── Header ───────────────────────────────────────────────
-                item(span = { GridItemSpan(maxLineSpan) }, key = "header") {
-                    Column {
-                            Text("Catalog", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = c.text)
-                            Text(
-                                buildAnnotatedString {
-                                    withStyle(SpanStyle(color = c.muted)) { append("${catalog.size} items") }
+                item(key = "header") {
+                    Column(Modifier.padding(bottom = 16.dp)) {
+                        Text("Catalog", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = c.text)
+                        Text(
+                            buildAnnotatedString {
+                                withStyle(SpanStyle(color = c.muted)) { append("${catalog.size} items") }
+                                withStyle(SpanStyle(color = Stone200)) { append("  ·  ") }
+                                withStyle(SpanStyle(color = Emerald600)) { append("$inStock in stock") }
+                                if (outStock > 0) {
                                     withStyle(SpanStyle(color = Stone200)) { append("  ·  ") }
-                                    withStyle(SpanStyle(color = Emerald600)) { append("$inStock in stock") }
-                                    if (outStock > 0) {
-                                        withStyle(SpanStyle(color = Stone200)) { append("  ·  ") }
-                                        withStyle(SpanStyle(color = Red500)) { append("$outStock out of stock") }
-                                    }
-                                },
-                                fontSize = 14.sp,
-                            )
+                                    withStyle(SpanStyle(color = Red500)) { append("$outStock out of stock") }
+                                }
+                            },
+                            fontSize = 14.sp, modifier = Modifier.padding(top = 2.dp),
+                        )
                     }
                 }
                 // ── Source banner ────────────────────────────────────────
-                item(span = { GridItemSpan(maxLineSpan) }, key = "source") {
+                item(key = "source") {
                     Row(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                        Modifier.padding(bottom = 20.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp))
                             .background(if (c.isDark) c.goldDim else Color(0xFFEAF5DD))
                             .border(1.dp, c.bg4, RoundedCornerShape(12.dp))
                             .padding(horizontal = 14.dp, vertical = 10.dp),
                     ) {
-                        Icon(Icons.Outlined.Info, null, tint = c.gold2, modifier = Modifier.size(16.dp).padding(top = 1.dp))
+                        Icon(Icons.Outlined.Info, null, tint = c.gold2, modifier = Modifier.padding(top = 2.dp).size(16.dp))
                         Spacer(Modifier.width(10.dp))
                         Text(
                             buildAnnotatedString {
                                 withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append("Live from the Bethany House hub.") }
                                 append(" Prices and stock are maintained in the hub and shared with the POS and website — this is exactly what Neema quotes to customers. To change a product, edit it in the hub.")
                             },
-                            fontSize = 12.sp, lineHeight = 18.sp, color = c.gold2,
+                            fontSize = 12.sp, lineHeight = 19.5.sp, color = c.gold2,
                         )
                     }
                 }
                 // ── Search + category ────────────────────────────────────
-                item(span = { GridItemSpan(maxLineSpan) }, key = "filters") {
-                    if (wide) Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        SearchField(search, { vm.search.value = it }, "Search name, SKU or alias…", Modifier.weight(1f))
-                        CategoryDropdown(categories, filter) { vm.filter.value = it }
-                    } else Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        SearchField(search, { vm.search.value = it }, "Search name, SKU or alias…")
-                        CategoryDropdown(categories, filter, Modifier.fillMaxWidth()) { vm.filter.value = it }
+                item(key = "filters") {
+                    Box(Modifier.padding(bottom = 20.dp)) {
+                        if (wide) Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            SearchField(search, { vm.search.value = it }, "Search name, SKU or alias…", Modifier.weight(1f))
+                            // A set width: the button's label fills it, and would otherwise squeeze the search to nothing.
+                            CategoryDropdown(categories, filter, Modifier.width(240.dp)) { vm.filter.value = it }
+                        } else Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SearchField(search, { vm.search.value = it }, "Search name, SKU or alias…")
+                            CategoryDropdown(categories, filter, Modifier.fillMaxWidth()) { vm.filter.value = it }
+                        }
                     }
                 }
                 // ── Grid ─────────────────────────────────────────────────
+                // Rows of equal height, like the web's CSS grid: every card in
+                // a row stretches to the tallest one in it.
                 // No keys: a hub row and a local row may share a SKU-derived id.
-                items(filtered) { item -> ProductCard(item = item, onOpen = { detail = item }) }
+                val rows = filtered.chunked(cols)
+                itemsIndexed(rows) { i, row ->
+                    EqualHeightRow(
+                        cols = cols, gap = gap,
+                        modifier = Modifier.padding(bottom = if (i < rows.lastIndex) gap else 0.dp),
+                    ) {
+                        row.forEach { item -> ProductCard(item = item, onOpen = { detail = item }) }
+                    }
+                }
                 if (filtered.isEmpty()) {
-                    item(span = { GridItemSpan(maxLineSpan) }, key = "empty") {
+                    item(key = "empty") {
                         Column(Modifier.fillMaxWidth().padding(vertical = 64.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             Text("📦", fontSize = 30.sp)
                             Spacer(Modifier.height(12.dp))
@@ -221,6 +246,26 @@ fun CatalogScreen(
     }
 }
 
+/**
+ * One grid row whose cells all take the height of the tallest, like a CSS grid
+ * row. Measured twice (natural heights, then that max as a fixed height), since
+ * intrinsic sizes under-report wrapping content such as the alias chips. A
+ * short last row keeps the full grid's column widths.
+ */
+@Composable
+internal fun EqualHeightRow(cols: Int, gap: Dp, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    SubcomposeLayout(modifier.fillMaxWidth()) { constraints ->
+        val gapPx = gap.roundToPx()
+        val cell = ((constraints.maxWidth - gapPx * (cols - 1)) / cols).coerceAtLeast(0)
+        val natural = subcompose("natural", content).map { it.measure(Constraints(minWidth = cell, maxWidth = cell)) }
+        val h = natural.maxOfOrNull { it.height } ?: 0
+        val placeables = subcompose("stretched", content).map { it.measure(Constraints.fixed(cell, h)) }
+        layout(constraints.maxWidth, h) {
+            placeables.forEachIndexed { i, p -> p.placeRelative(i * (cell + gapPx), 0) }
+        }
+    }
+}
+
 @Composable
 private fun CategoryDropdown(categories: List<String>, selected: String, modifier: Modifier = Modifier, onSelect: (String) -> Unit) {
     val c = Neema.colors
@@ -228,7 +273,7 @@ private fun CategoryDropdown(categories: List<String>, selected: String, modifie
     Box(modifier) {
         OutlinedButton(
             onClick = { open = true }, shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.then(modifier).heightIn(min = 52.dp).widthIn(min = 180.dp),
+            modifier = Modifier.then(modifier).heightIn(min = 52.dp).widthIn(min = 160.dp),
             contentPadding = PaddingValues(horizontal = 14.dp),
         ) {
             Text(
@@ -248,39 +293,49 @@ private fun CategoryDropdown(categories: List<String>, selected: String, modifie
     }
 }
 
-/** A product image that fills its square edge-to-edge; the category glyph when missing or broken. */
+/**
+ * A product image that fills its square edge-to-edge; the category glyph when
+ * missing or broken (and while it loads), which the image covers once it arrives.
+ */
 @Composable
 internal fun ProductThumb(item: CatalogItem, glyphSize: Int = 56) {
     // Prefer the FULL-res image — the hub's *_thumb.webp looks soft upscaled onto big cards.
     val src = item.imageUrl?.takeIf { it.isNotBlank() } ?: item.thumbnailUrl?.takeIf { it.isNotBlank() }
-    val fallback = @Composable {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(glyph(item.rawCategory), fontSize = glyphSize.sp, modifier = Modifier.padding(4.dp))
-        }
+    var shown by remember(src) { mutableStateOf(false) }
+    var failed by remember(src) { mutableStateOf(false) }
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        if (!shown) Text(glyph(item.rawCategory), fontSize = glyphSize.sp, modifier = Modifier.padding(4.dp))
+        if (src != null && !failed) AsyncImage(
+            model = src, contentDescription = item.name, contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+            onSuccess = { shown = true },
+            onError = { failed = true; shown = false },
+        )
     }
-    if (src == null) fallback()
-    else SubcomposeAsyncImage(
-        model = src, contentDescription = item.name, contentScale = ContentScale.Crop,
-        modifier = Modifier.fillMaxSize(), loading = { fallback() }, error = { fallback() },
-    )
 }
 
 @Composable
 internal fun StockBadge(item: CatalogItem) {
+    val dark = Neema.colors.isDark
     // The web prints the bare number ("1200 left"), no grouping.
-    val (text, color) = if (item.inStock) (item.availableQty?.let { "${plainNum(it)} left" } ?: "IN") to Emerald600 else "OUT" to Red500
+    val text = if (item.inStock) item.availableQty?.let { "${plainNum(it)} left" } ?: "IN" else "OUT"
+    // bg-emerald-50 text-emerald-600 border-emerald-200 / bg-red-50 text-red-500 border-red-200;
+    // by night the same hues as tints, so the badge doesn't glare on navy.
+    val fg = if (item.inStock) (if (dark) Color(0xFF34D399) else Emerald600) else (if (dark) Color(0xFFF87171) else Red500)
+    val bg = if (dark) fg.copy(alpha = 0.12f) else if (item.inStock) Color(0xFFECFDF5) else Color(0xFFFEF2F2)
+    val line = if (dark) fg.copy(alpha = 0.35f) else if (item.inStock) Color(0xFFA7F3D0) else Color(0xFFFECACA)
     Text(
-        text, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = color, maxLines = 1,
-        modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(color.copy(alpha = 0.08f))
-            .border(1.dp, color.copy(alpha = 0.3f), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
+        text, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = fg, maxLines = 1,
+        modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(bg)
+            .border(1.dp, line, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
     )
 }
 
 @Composable
-private fun ProductCard(item: CatalogItem, onOpen: () -> Unit) {
+private fun ProductCard(item: CatalogItem, onOpen: () -> Unit, modifier: Modifier = Modifier) {
     val c = Neema.colors
     Column(
-        Modifier.clip(RoundedCornerShape(12.dp)).background(c.bg2).border(1.dp, c.bg3, RoundedCornerShape(12.dp)).clickable(onClick = onOpen),
+        modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)).background(c.bg2).border(1.dp, c.bg3, RoundedCornerShape(12.dp)).clickable(onClick = onOpen),
     ) {
         Box(Modifier.fillMaxWidth().aspectRatio(1f).background(categoryBrush(item.rawCategory))) {
             ProductThumb(item)
@@ -291,12 +346,13 @@ private fun ProductCard(item: CatalogItem, onOpen: () -> Unit) {
                 Spacer(Modifier.width(4.dp))
                 StockBadge(item)
             }
-            if (!item.description.isNullOrBlank()) {
-                Text(item.description, fontSize = 12.sp, color = c.muted, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 15.sp, modifier = Modifier.padding(top = 4.dp))
+            val hasDescription = !item.description.isNullOrEmpty()
+            if (hasDescription) {
+                Text(item.description.orEmpty(), fontSize = 12.sp, color = c.muted, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 16.5.sp, modifier = Modifier.padding(top = 4.dp))
             }
-            Text(priceText(item), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = if (c.isDark) c.gold2 else Color(0xFF2C4E18), modifier = Modifier.padding(top = 6.dp))
+            Text(priceText(item), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = if (c.isDark) c.gold2 else Color(0xFF2C4E18), modifier = Modifier.padding(top = if (hasDescription) 8.dp else 4.dp))
             if (item.variants.isNotEmpty()) {
-                Text("${item.variants.size} variants", fontSize = 10.sp, color = c.textDim)
+                Text("${item.variants.size} variants", fontSize = 10.sp, color = c.textDim, modifier = Modifier.padding(top = 2.dp))
             }
             if (item.aliases.isNotEmpty()) {
                 @OptIn(ExperimentalLayoutApi::class)
@@ -357,10 +413,10 @@ private fun PriceAuditBanner(audit: PriceAudit, open: Boolean, onToggle: () -> U
             Spacer(Modifier.height(12.dp))
             if (gaps.isNotEmpty()) {
                 Row {
-                    Text("Product", fontSize = 11.sp, color = fg900.copy(alpha = 0.7f), modifier = Modifier.weight(2f))
-                    Text("KES", fontSize = 11.sp, color = fg900.copy(alpha = 0.7f), modifier = Modifier.weight(1f), textAlign = TextAlign.End)
-                    Text("USD in hub", fontSize = 11.sp, color = fg900.copy(alpha = 0.7f), modifier = Modifier.weight(1f), textAlign = TextAlign.End)
-                    Text("KES ÷ $rate", fontSize = 11.sp, color = fg900.copy(alpha = 0.7f), modifier = Modifier.weight(1f), textAlign = TextAlign.End)
+                    Text("Product", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = fg900.copy(alpha = 0.7f), modifier = Modifier.weight(2f))
+                    Text("KES", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = fg900.copy(alpha = 0.7f), modifier = Modifier.weight(1f), textAlign = TextAlign.End)
+                    Text("USD in hub", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = fg900.copy(alpha = 0.7f), modifier = Modifier.weight(1f), textAlign = TextAlign.End)
+                    Text("KES ÷ $rate", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = fg900.copy(alpha = 0.7f), modifier = Modifier.weight(1f), textAlign = TextAlign.End)
                 }
                 gaps.forEach { g ->
                     HorizontalDivider(color = Color(0xFFFDE68A), modifier = Modifier.padding(vertical = 4.dp))
@@ -368,24 +424,24 @@ private fun PriceAuditBanner(audit: PriceAudit, open: Boolean, onToggle: () -> U
                         Text(
                             buildAnnotatedString {
                                 withStyle(SpanStyle(color = fg950)) { append(g.name) }
-                                withStyle(SpanStyle(color = (if (dark) Color(0xFFFBBF24) else amber700).copy(alpha = 0.7f))) { append(" · ${g.category}") }
+                                withStyle(SpanStyle(color = (if (dark) Color(0xFFFBBF24) else amber700).copy(alpha = 0.7f))) { append(" · ${g.category ?: ""}") }
                             },
-                            fontSize = 11.sp, modifier = Modifier.weight(2f),
+                            fontSize = 12.sp, modifier = Modifier.weight(2f),
                         )
-                        Text(num(g.kes), fontSize = 11.sp, color = fg950, modifier = Modifier.weight(1f), textAlign = TextAlign.End)
+                        Text(num(g.kes), fontSize = 12.sp, color = fg950, modifier = Modifier.weight(1f), textAlign = TextAlign.End)
                         Text(
-                            usd(g.usd), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.End,
+                            usd(g.usd), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.End,
                             // red-700 / blue-700 by day; red-400 / blue-400 so they read on the night banner.
                             color = if (g.usd > g.usdExpected) (if (dark) Color(0xFFF87171) else Color(0xFFB91C1C))
                                 else (if (dark) Color(0xFF60A5FA) else Color(0xFF1D4ED8)),
                             modifier = Modifier.weight(1f),
                         )
-                        Text(usd(g.usdExpected), fontSize = 11.sp, color = fg950, modifier = Modifier.weight(1f), textAlign = TextAlign.End)
+                        Text(usd(g.usdExpected), fontSize = 12.sp, color = fg950, modifier = Modifier.weight(1f), textAlign = TextAlign.End)
                     }
                 }
             }
             if (pp.isNotEmpty()) {
-                Spacer(Modifier.height(12.dp))
+                if (gaps.isNotEmpty()) Spacer(Modifier.height(12.dp))
                 Text(
                     buildAnnotatedString {
                         withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append("Priced per piece, no pack size in the name:") }
