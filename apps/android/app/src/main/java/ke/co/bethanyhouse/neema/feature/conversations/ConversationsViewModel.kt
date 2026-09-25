@@ -57,6 +57,12 @@ data class InboxUi(
     val hasMore: Boolean = false,
     /** Page one has come from the SERVER this session (not just a snapshot). */
     val freshLoaded: Boolean = false,
+    /**
+     * The current filter's first page FAILED. The web says "Loading…" forever
+     * here; the app keeps that copy while a request is in flight and offers a
+     * quiet "Couldn't load — Retry" once one has failed.
+     */
+    val loadError: Boolean = false,
 )
 
 /** List chrome: search box text, filter panel, bulk selection. */
@@ -139,10 +145,16 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
     private val _dialogs = MutableStateFlow(DialogUi())
     val dialogs: StateFlow<DialogUi> = _dialogs.asStateFlow()
 
-    /** The people the list shows, grouped and sorted (filteredConvs → groupedConvs). */
+    /**
+     * The people the list shows, grouped and sorted (filteredConvs → groupedConvs).
+     * Grouping thousands of rows stays off the main thread — except when the
+     * container runs I/O synchronously (tests, previews), where it is computed
+     * in place so every frame is deterministic. The initial value is computed
+     * synchronously either way, so the list never flashes empty on open.
+     */
     val rows: StateFlow<List<RowGroup>> = combine(_inbox, dash.session) { s, sess -> buildRows(s, sess?.agentId) }
-        .flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+        .let { if (dash.container.config.io === Dispatchers.Unconfined) it else it.flowOn(Dispatchers.Default) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, buildRows(_inbox.value, dash.session.value?.agentId))
 
     // useInbox refs
     private var cursor: String? = null
@@ -227,7 +239,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         val seq = ++firstSeq
         val f = _inbox.value.filters
         val key = filterKeyOf(f)
-        _inbox.value.let { if (it.orderKey != key || it.orderIds.isEmpty()) _inbox.update { s -> s.copy(loading = true) } }
+        _inbox.value.let { if (it.orderKey != key || it.orderIds.isEmpty()) _inbox.update { s -> s.copy(loading = true, loadError = false) } }
 
         viewModelScope.launch {
             runCatching { api.conversations.summary() }.onSuccess { s ->
@@ -239,7 +251,8 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                 api.conversations.page(f, PAGE)
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
-                if (seq == firstSeq) _inbox.update { it.copy(loading = false) }
+                // Only the live filter's own failure counts; a superseded one says nothing.
+                if (seq == firstSeq) _inbox.update { it.copy(loading = false, loadError = key == filterKeyOf(it.filters)) }
                 return@launch
             }
             // Superseded by a newer refresh, or the filters moved on.
@@ -265,7 +278,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                 // Scrolled further this session: page one on top, the rest kept below.
                 _inbox.update { it.copy(orderKey = key, orderIds = fresh + o.orderIds.filter { id -> id !in top }) }
             }
-            _inbox.update { it.copy(freshLoaded = true, loading = false) }
+            _inbox.update { it.copy(freshLoaded = true, loading = false, loadError = false) }
             if (key == DEFAULT_KEY) {
                 val id = myId
                 withContext(Dispatchers.IO) { dash.container.snapshots.write(id, SNAP_KEY, ConversationPage.serializer(), res) }
@@ -314,7 +327,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         val key = filterKeyOf(next)
         if (_inbox.value.orderKey != key) {
             cursor = null; pages = 0; revealed = emptyList()
-            _inbox.update { it.copy(hasMore = false, orderKey = key, orderIds = emptyList()) }
+            _inbox.update { it.copy(hasMore = false, orderKey = key, orderIds = emptyList(), loadError = false) }
         }
         refresh()
     }
@@ -1131,8 +1144,13 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
 
     suspend fun invite(phone: String, name: String?): Boolean = runCatching { api.whatsappInvite(phone, name) }.isSuccess
 
-    /** Business-initiated WhatsApp call; no permission yet → ask for it automatically. */
+    /**
+     * Business-initiated WhatsApp call; no permission yet → ask for it automatically.
+     * Only ever a real number: a web-chat visitor's `web_<hash>` key (or a Meta
+     * PSID) is not dialable, whatever digits it happens to contain.
+     */
     fun call(waId: String, name: String?) {
+        if (isWebVisitor(waId) || waId.any { !it.isDigit() } || waId.length !in 7..15) return
         viewModelScope.launch {
             val r = dash.container.calls.initiateCall(waId, name)
             val err = r.exceptionOrNull() ?: return@launch

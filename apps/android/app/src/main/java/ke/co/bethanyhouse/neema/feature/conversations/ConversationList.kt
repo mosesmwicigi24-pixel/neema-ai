@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -90,13 +91,13 @@ internal fun ConversationList(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     if (listUi.selectMode) "${listUi.selected.size} selected" else "Chats",
-                    fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = c.text, modifier = Modifier.weight(1f),
+                    fontSize = 14.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.14).sp, color = c.text, modifier = Modifier.weight(1f),
                 )
                 if (listUi.selectMode) {
                     TextButton(onClick = vm::selectAllOrClear) {
-                        Text(if (listUi.selected.size == rows.size && rows.isNotEmpty()) "Clear" else "Select all", fontSize = 12.sp, color = if (c.isDark) Green else Color(0xFF427425))
+                        Text(if (listUi.selected.size == rows.size && rows.isNotEmpty()) "Clear" else "Select all", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = if (c.isDark) Green else Color(0xFF427425))
                     }
-                    TextButton(onClick = vm::exitSelect) { Text("Cancel", fontSize = 12.sp, color = c.muted) }
+                    TextButton(onClick = vm::exitSelect) { Text("Cancel", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = c.muted) }
                 } else {
                     if (humanCount > 0) Text(
                         "$humanCount live", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF856404),
@@ -120,17 +121,17 @@ internal fun ConversationList(
                     val accent = when (t) { "unread" -> Color(0xFF427425); "human" -> Color(0xFFB45309); "yours" -> Green; else -> Color(0xFF1C2917) }
                     val count = when (t) { "unread" -> unreadCount; "human" -> humanCount; "yours" -> yoursCount; else -> 0 }
                     Row(
-                        Modifier.weight(1f).height(30.dp).clip(RoundedCornerShape(8.dp))
+                        Modifier.weight(1f).height(28.dp).clip(RoundedCornerShape(8.dp))
                             .background(if (active) accent else if (c.isDark) c.bg3 else Color(0xFFF5F6F3))
                             .clickable { vm.setTab(t) },
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center,
                     ) {
-                        Text(t.replaceFirstChar { it.uppercase() }, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = if (active) Color.White else Color(0xFF6B7E64), maxLines = 1)
+                        Text(t.replaceFirstChar { it.uppercase() }, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = if (active) Color.White else Color(0xFF6B7E64), maxLines = 1)
                         if (count > 0) {
                             Spacer(Modifier.width(3.dp))
                             Text(
-                                if (count > 999) "999+" else "$count", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1,
-                                modifier = Modifier.clip(RoundedCornerShape(50)).background(if (active) Color.White.copy(alpha = 0.25f) else accent).padding(horizontal = 4.dp, vertical = 1.dp),
+                                if (count > 999) "999+" else "$count", fontSize = 10.sp, lineHeight = 10.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1,
+                                modifier = Modifier.clip(RoundedCornerShape(50)).background(if (active) Color.White.copy(alpha = 0.25f) else accent).padding(horizontal = 5.dp, vertical = 2.dp),
                             )
                         }
                     }
@@ -139,12 +140,12 @@ internal fun ConversationList(
             Spacer(Modifier.height(8.dp))
             // ── Search (the server searches names, phones and everything said) ──
             Row(
-                Modifier.fillMaxWidth().height(38.dp).clip(RoundedCornerShape(8.dp))
+                Modifier.fillMaxWidth().height(32.dp).clip(RoundedCornerShape(8.dp))
                     .background(if (c.isDark) c.bg3 else Color(0xFFF5F6F3)).border(1.dp, if (c.isDark) c.border else Color(0xFFEDF0EA), RoundedCornerShape(8.dp))
                     .padding(horizontal = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Filled.Search, null, tint = Color(0xFFB5C9A8), modifier = Modifier.size(16.dp))
+                Icon(Icons.Filled.Search, null, tint = Color(0xFFB5C9A8), modifier = Modifier.size(14.dp))
                 Spacer(Modifier.width(8.dp))
                 Box(Modifier.weight(1f)) {
                     if (listUi.search.isEmpty()) Text("Start typing to search", fontSize = 13.sp, color = Color(0xFFB5C9A8))
@@ -174,13 +175,13 @@ internal fun ConversationList(
                             ChannelIcons.of(id)?.let { Icon(it, null, tint = if (active) Color.White else accent, modifier = Modifier.size(14.dp)) }
                                 ?: Box(Modifier.size(10.dp).clip(CircleShape).background(if (active) Color.White else accent))
                             Spacer(Modifier.height(2.dp))
-                            Text(short, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = if (active) Color.White else accent)
+                            Text(short, fontSize = 8.sp, lineHeight = 8.sp, fontWeight = FontWeight.Bold, color = if (active) Color.White else accent)
                         }
-                        if (count > 0) Text(
-                            "$count", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = Color.White,
-                            modifier = Modifier.align(Alignment.TopEnd).offset(4.dp, (-4).dp).clip(RoundedCornerShape(50))
-                                .background(if (active) Color(0xFFEF4444) else accent).padding(horizontal = 4.dp),
-                        )
+                        if (count > 0) Box(
+                            Modifier.align(Alignment.TopEnd).offset(4.dp, (-4).dp).defaultMinSize(minWidth = 14.dp, minHeight = 14.dp)
+                                .clip(RoundedCornerShape(50)).background(if (active) Color(0xFFEF4444) else accent).padding(horizontal = 3.dp),
+                            contentAlignment = Alignment.Center,
+                        ) { Text("$count", fontSize = 8.sp, lineHeight = 8.sp, fontWeight = FontWeight.Bold, color = Color.White) }
                     }
                 }
             }
@@ -212,9 +213,23 @@ internal fun ConversationList(
             LazyColumn(state = state, modifier = Modifier.fillMaxSize()) {
                 if (rows.isEmpty()) item(key = "empty") {
                     Box(Modifier.fillMaxWidth().padding(vertical = 64.dp), contentAlignment = Alignment.Center) {
-                        // A filter's first page is on its way — "none found" would be a
-                        // claim the server has not made yet.
-                        Text(if (inbox.loading || !inbox.freshLoaded) "Loading…" else "No conversations found", fontSize = 14.sp, color = Color(0xFFB5C9A8))
+                        when {
+                            // A filter's first page is on its way — "none found" would be a
+                            // claim the server has not made yet.
+                            inbox.loading -> EmptyText("Loading…")
+                            // The web would say "Loading…" forever after a failure; say
+                            // what happened and offer the one useful thing.
+                            inbox.loadError -> Row(verticalAlignment = Alignment.CenterVertically) {
+                                EmptyText("Couldn't load — ")
+                                Text(
+                                    "Retry", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Green,
+                                    modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClickLabel = "Retry loading conversations", onClick = vm::refresh)
+                                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                                )
+                            }
+                            !inbox.freshLoaded -> EmptyText("Loading…")
+                            else -> EmptyText("No conversations found")
+                        }
                     }
                 }
                 items(rows, key = { it.key }) { g ->
@@ -236,7 +251,7 @@ internal fun ConversationList(
                 Column(Modifier.weight(1f)) {
                     Text(
                         if (listUi.selected.isEmpty()) "Tap chats to select" else "${listUi.selected.size} chat${if (listUi.selected.size == 1) "" else "s"} selected",
-                        fontSize = 12.sp, fontWeight = FontWeight.Medium, color = if (c.isDark) c.text else Color(0xFF3D5A30),
+                        fontSize = 11.sp, fontWeight = FontWeight.Medium, color = if (c.isDark) c.text else Color(0xFF3D5A30),
                     )
                     if (listUi.selected.isNotEmpty()) Text(
                         if (heldIds.isEmpty()) "none are human-held" else "${heldIds.size} to hand back to Neema",
@@ -245,13 +260,16 @@ internal fun ConversationList(
                 }
                 Button(
                     onClick = vm::releaseSelected, enabled = !listUi.bulkBusy && heldIds.isNotEmpty(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Green), shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp), modifier = Modifier.height(34.dp),
-                ) { Text(if (listUi.bulkBusy) "Releasing…" else "Release" + if (heldIds.isNotEmpty()) " ${heldIds.size}" else "", fontSize = 12.sp) }
+                    colors = ButtonDefaults.buttonColors(containerColor = Green, contentColor = Color.White, disabledContainerColor = Green.copy(alpha = 0.4f), disabledContentColor = Color.White), shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp), modifier = Modifier.height(32.dp),
+                ) { Text(if (listUi.bulkBusy) "Releasing…" else "Release" + if (heldIds.isNotEmpty()) " ${heldIds.size}" else "", fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
             }
         }
     }
 }
+
+@Composable
+private fun EmptyText(text: String) = Text(text, fontSize = 14.sp, color = Color(0xFFB5C9A8))
 
 private fun channelCount(summary: InboxSummary?, all: Collection<ke.co.bethanyhouse.neema.core.model.Conversation>, id: String): Int {
     // The chips sum unread MESSAGES; the Unread tab counts conversations.
@@ -300,9 +318,13 @@ private fun ConversationRow(g: RowGroup, activeId: String, me: String?, listUi: 
         Row(Modifier.weight(1f).padding(start = 13.dp, end = 16.dp, top = 12.dp, bottom = 12.dp), verticalAlignment = Alignment.Top) {
             if (listUi.selectMode) {
                 Box(
-                    Modifier.padding(top = 10.dp, end = 10.dp).alpha(if (heldHere || picked) 1f else 0.45f).size(18.dp).clip(RoundedCornerShape(5.dp))
+                    // As on the web: faded whenever nobody human holds the row — picked or not —
+                    // so the Release count never surprises; a little smaller until picked.
+                    Modifier.padding(top = 12.dp, end = 12.dp).alpha(if (heldHere) 1f else 0.45f).size(18.dp)
+                        .graphicsLayer { val s = if (picked) 1f else 0.92f; scaleX = s; scaleY = s }
+                        .clip(RoundedCornerShape(6.dp))
                         .background(if (picked) Green else Color.White)
-                        .border(1.dp, if (picked) Green else Color(0xFFCFDAC6), RoundedCornerShape(5.dp)),
+                        .border(1.dp, if (picked) Green else Color(0xFFCFDAC6), RoundedCornerShape(6.dp)),
                     contentAlignment = Alignment.Center,
                 ) {
                     // A row Neema already handles stays selectable but reads as a no-op.
@@ -325,9 +347,9 @@ private fun ConversationRow(g: RowGroup, activeId: String, me: String?, listUi: 
                     Text(name, fontSize = 14.sp, fontWeight = if (hasUnread) FontWeight.SemiBold else FontWeight.Medium, color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     // Repeat-buyer badge: completed (paid) orders.
                     if (orders > 0) Text(
-                        if (orders > 99) "99+" else "$orders", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.White,
-                        modifier = Modifier.padding(start = 6.dp).clip(RoundedCornerShape(50))
-                            .background(Brush.linearGradient(listOf(Color(0xFFF59E0B), Color(0xFFD97706)))).padding(horizontal = 5.dp, vertical = 1.dp),
+                        if (orders > 99) "99+" else "$orders", fontSize = 9.sp, lineHeight = 9.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center, fontWeight = FontWeight.Bold, color = Color.White,
+                        modifier = Modifier.padding(start = 6.dp).defaultMinSize(minWidth = 16.dp).clip(RoundedCornerShape(50))
+                            .background(Brush.linearGradient(listOf(Color(0xFFF59E0B), Color(0xFFD97706)))).padding(horizontal = 4.dp, vertical = 3.5.dp),
                     )
                     Text(
                         g.lastAt?.let { Fmt.timeAgo(it) } ?: "", fontSize = 10.sp,
@@ -336,7 +358,7 @@ private fun ConversationRow(g: RowGroup, activeId: String, me: String?, listUi: 
                     )
                 }
                 Spacer(Modifier.height(3.dp))
-                FlowRowCompat {
+                FlowRowCompat(spacing = 4.dp) {
                     // One chip per linked channel; tapping opens THAT channel's thread.
                     g.siblings.forEach { s ->
                         val st = channelStyle(s.channel)
@@ -348,7 +370,7 @@ private fun ConversationRow(g: RowGroup, activeId: String, me: String?, listUi: 
                                 modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(if (open) st.color else st.color.copy(alpha = 0.08f))
                                     .border(1.dp, if (open) st.color else st.color.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
                                     .then(if (multi && !listUi.selectMode) Modifier.clickable(onClickLabel = "Open ${s.channel}") { onOpen(s.id) } else Modifier)
-                                    .padding(horizontal = 5.dp, vertical = 1.dp),
+                                    .padding(horizontal = 6.dp, vertical = 1.dp),
                             )
                             if (multi && s.unread > 0 && !open) Box(Modifier.align(Alignment.TopEnd).offset(3.dp, (-3).dp).size(6.dp).clip(CircleShape).background(Green))
                         }
@@ -357,14 +379,14 @@ private fun ConversationRow(g: RowGroup, activeId: String, me: String?, listUi: 
                         val (sbg, sfg, sbd) = STAGE_CHIP[stage] ?: STAGE_CHIP.getValue("contacted")
                         Text(
                             stage.replaceFirstChar { it.uppercase() }, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = sfg,
-                            modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(sbg).border(1.dp, sbd, RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 1.dp),
+                            modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(sbg).border(1.dp, sbd, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 1.dp),
                         )
                     }
                     conv.countryIso?.takeIf { it.isNotBlank() }?.let { iso ->
                         Text(
                             Fmt.countryName(iso), fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFC2410C), maxLines = 1, overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.widthIn(max = 110.dp).clip(RoundedCornerShape(4.dp)).background(Color(0xFFFFEDD5))
-                                .border(1.dp, Color(0xFFFDBA74), RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 1.dp),
+                                .border(1.dp, Color(0xFFFDBA74), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 1.dp),
                         )
                     }
                     if (chipConv.interceptMode != "ai") {
@@ -379,8 +401,8 @@ private fun ConversationRow(g: RowGroup, activeId: String, me: String?, listUi: 
                         }
                     }
                     if (hasUnread) Text(
-                        if (g.unread > 99) "99+" else "${g.unread}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White,
-                        modifier = Modifier.clip(RoundedCornerShape(50)).background(Green).padding(horizontal = 6.dp, vertical = 1.dp),
+                        if (g.unread > 99) "99+" else "${g.unread}", fontSize = 10.sp, lineHeight = 10.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center, fontWeight = FontWeight.Bold, color = Color.White,
+                        modifier = Modifier.defaultMinSize(minWidth = 18.dp).clip(RoundedCornerShape(50)).background(Green).padding(horizontal = 4.dp, vertical = 4.dp),
                     )
                 }
                 Spacer(Modifier.height(3.dp))

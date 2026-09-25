@@ -9,6 +9,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -21,6 +22,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -75,9 +77,10 @@ internal fun Composer(
         if (!state.draftVisible && humanMode) {
             Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.End) {
                 OutlinedButton(
-                    onClick = vm::generateDraft, enabled = !state.generatingDraft, modifier = Modifier.height(30.dp),
+                    onClick = vm::generateDraft, enabled = !state.generatingDraft, modifier = Modifier.height(28.dp),
                     contentPadding = PaddingValues(horizontal = 12.dp), shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF2563EB)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, if (state.generatingDraft) Blue200.copy(alpha = 0.5f) else Blue200),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF2563EB), disabledContentColor = Color(0xFF2563EB).copy(alpha = 0.5f)),
                 ) {
                     if (state.generatingDraft) {
                         CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = Color(0xFF60A5FA))
@@ -145,20 +148,34 @@ internal fun Composer(
         Row(verticalAlignment = Alignment.Bottom) {
             AttachButton(vm)
             Spacer(Modifier.width(8.dp))
-            OutlinedTextField(
-                value = state.replyText, onValueChange = vm::setReplyText,
-                placeholder = {
-                    Text(if (window?.mode == "human_agent") "Type a reply — goes out under your name (human agent)…" else "Type a reply…", fontSize = 14.sp)
+            // The web's box: 44 tall, rounded-2xl, #f6f7f5 on a #e5e8e2 hairline, an
+            // amber ring on focus, stone-400 placeholder; grows to ~5 lines, then scrolls.
+            val focus = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+            val focused by focus.collectIsFocusedAsState()
+            val boxShape = RoundedCornerShape(16.dp)
+            androidx.compose.foundation.text.BasicTextField(
+                value = state.replyText, onValueChange = vm::setReplyText, interactionSource = focus,
+                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp, lineHeight = 19.sp, color = c.text),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(Amber),
+                maxLines = 6,
+                modifier = Modifier.weight(1f).heightIn(min = 44.dp, max = 132.dp)
+                    .clip(boxShape).background(if (c.isDark) c.bg3 else Color(0xFFF6F7F5))
+                    .border(if (focused) 2.dp else 1.dp, if (focused) Amber.copy(alpha = 0.7f) else if (c.isDark) c.border else Color(0xFFE5E8E2), boxShape),
+                decorationBox = { inner ->
+                    Box(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), contentAlignment = Alignment.CenterStart) {
+                        if (state.replyText.isEmpty()) Text(
+                            if (window?.mode == "human_agent") "Type a reply — goes out under your name (human agent)…" else "Type a reply…",
+                            fontSize = 14.sp, lineHeight = 19.sp, color = Color(0xFFA8A29E), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
+                        inner()
+                    }
                 },
-                minLines = 1, maxLines = 5, shape = RoundedCornerShape(20.dp),
-                modifier = Modifier.weight(1f),
-                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Amber.copy(alpha = 0.7f)),
             )
             Spacer(Modifier.width(8.dp))
             val closed = window?.mode == "closed"
             val enabled = state.replyText.isNotBlank() && !state.sending && !closed
             Box(
-                Modifier.size(48.dp).clip(RoundedCornerShape(16.dp)).background(if (enabled) Amber else Amber.copy(alpha = 0.5f))
+                Modifier.size(44.dp).clip(RoundedCornerShape(16.dp)).background(if (enabled) Amber else Amber.copy(alpha = 0.5f))
                     .clickable(enabled = enabled, onClickLabel = if (closed) (window?.reason ?: "Outside the messaging window") else "Send") { vm.sendReply() },
                 contentAlignment = Alignment.Center,
             ) {
@@ -197,9 +214,10 @@ private fun DraftPanel(vm: ConversationsViewModel, state: ComposerUi) {
             }
         }
         Row(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            SmallBtn("✓ Send", Color(0xFF589B31), Color.White, vm::approveDraft)
-            SmallBtn("Edit & send manually", Color.White, Color(0xFF4F7425), vm::draftToComposer)
-            SmallBtn("Dismiss", Color.Transparent, Color(0xFF78716C), vm::dismissDraft)
+            // <Btn small> primary (amber) / secondary / ghost, as on the web.
+            WebBtn("✓ Send", BtnVariant.Primary, vm::approveDraft)
+            WebBtn("Edit & send manually", BtnVariant.Secondary, vm::draftToComposer)
+            WebBtn("Dismiss", BtnVariant.Ghost, vm::dismissDraft)
         }
     }
 }
@@ -271,7 +289,7 @@ private fun AttachButton(vm: ConversationsViewModel) {
     val camPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> if (granted) launchCamera() }
     Box {
         Box(
-            Modifier.size(48.dp).clip(RoundedCornerShape(16.dp)).background(if (ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.isDark) ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.bg3 else Color(0xFFF1F3F5)).clickable { menu = true },
+            Modifier.size(44.dp).clip(RoundedCornerShape(16.dp)).background(if (ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.isDark) ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.bg3 else Color(0xFFF1F3F5)).clickable { menu = true },
             contentAlignment = Alignment.Center,
         ) { Icon(Icons.Filled.AttachFile, "Attach images or files (up to 5 MB each for images)", tint = Color(0xFF64748B), modifier = Modifier.size(18.dp)) }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -330,24 +348,34 @@ private fun MediaTray(vm: ConversationsViewModel, state: ComposerUi) {
                     ) { Icon(Icons.Filled.Close, "Remove", tint = Color.White, modifier = Modifier.size(12.dp)) }
                 }
                 Spacer(Modifier.width(10.dp))
-                OutlinedTextField(
+                // The web's compact caption input: white, #e8ebe3 hairline, text-xs.
+                val nc = ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors
+                androidx.compose.foundation.text.BasicTextField(
                     value = it.caption, onValueChange = { v -> vm.setMediaCaption(it.id, v) }, enabled = !state.uploading, singleLine = true,
-                    placeholder = { Text("Add a caption (optional)…", fontSize = 12.sp) },
-                    textStyle = LocalTextStyle.current.copy(fontSize = 12.sp), modifier = Modifier.weight(1f),
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp, color = nc.text),
+                    cursorBrush = androidx.compose.ui.graphics.SolidColor(Color(0xFF589B31)),
+                    modifier = Modifier.weight(1f).alpha(if (state.uploading) 0.5f else 1f).clip(RoundedCornerShape(8.dp))
+                        .background(if (nc.isDark) nc.bg3 else Color.White).border(1.dp, if (nc.isDark) nc.border else Color(0xFFE8EBE3), RoundedCornerShape(8.dp)),
+                    decorationBox = { inner ->
+                        Box(Modifier.padding(horizontal = 8.dp, vertical = 7.dp)) {
+                            if (it.caption.isEmpty()) Text("Add a caption (optional)…", fontSize = 12.sp, color = Color(0xFFA8A29E), maxLines = 1)
+                            inner()
+                        }
+                    },
                 )
             }
         }
         // Add-more tile
         Box(
-            Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)).border(1.dp, Color(0xFFC7CEC0), RoundedCornerShape(8.dp))
+            Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)).dashedBorder(Color(0xFFC7CEC0), 8.dp)
                 .clickable(enabled = !state.uploading) { more.launch(ACCEPT_TYPES) },
             contentAlignment = Alignment.Center,
         ) { Icon(Icons.Filled.Add, "Add more", tint = Color(0xFF8A9E80)) }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Button(
-                onClick = vm::sendMedia, enabled = !state.uploading, modifier = Modifier.height(32.dp),
+                onClick = vm::sendMedia, enabled = !state.uploading, modifier = Modifier.height(28.dp),
                 contentPadding = PaddingValues(horizontal = 12.dp), shape = RoundedCornerShape(8.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF589B31)),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF589B31), contentColor = Color.White, disabledContainerColor = Color(0xFF589B31).copy(alpha = 0.5f), disabledContentColor = Color.White),
             ) {
                 if (state.uploading) CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = Color.White)
                 else {
@@ -355,7 +383,7 @@ private fun MediaTray(vm: ConversationsViewModel, state: ComposerUi) {
                     Text(if (state.media.size > 1) "Send ${state.media.size}" else "Send", fontSize = 12.sp)
                 }
             }
-            OutlinedButton(onClick = vm::clearMedia, enabled = !state.uploading, modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 12.dp), shape = RoundedCornerShape(8.dp)) {
+            OutlinedButton(onClick = vm::clearMedia, enabled = !state.uploading, modifier = Modifier.height(28.dp), contentPadding = PaddingValues(horizontal = 12.dp), shape = RoundedCornerShape(8.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE8EBE3))) {
                 Text("Cancel", fontSize = 12.sp, color = Color(0xFF8A9E80))
             }
             Spacer(Modifier.weight(1f))

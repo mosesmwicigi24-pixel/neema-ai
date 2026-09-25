@@ -115,11 +115,15 @@ fun ConversationsScreen(dash: DashboardViewModel) {
         else ConversationList(vm, inbox, listUi, rows, thread.activeId, perms, Modifier.fillMaxSize())
     } else {
         Row(Modifier.fillMaxSize()) {
-            ConversationList(vm, inbox, listUi, rows, thread.activeId, perms, Modifier.width(if (widthDp >= 900) 380.dp else 320.dp).fillMaxHeight())
+            // The web's LIST_WIDTH, clamp(340px, 38vw, 436px) — except that a small
+            // tablet keeps 320 so the thread still has room to breathe.
+            val listWidth = if (widthDp < 840) 320f else (widthDp * 0.38f).coerceIn(340f, 436f)
+            ConversationList(vm, inbox, listUi, rows, thread.activeId, perms, Modifier.width(listWidth.dp).fillMaxHeight())
             VerticalDivider(color = if (Neema.colors.isDark) Neema.colors.border else Color(0xFFEDF0EA))
             threadPane(Modifier.weight(1f).fillMaxHeight())
+            // The web's ACTIVITY_WIDTH, clamp(196px, 16vw, 292px); the customer sidebar is w-80.
             if (roomy && active != null) {
-                ActivityPane(thread.activity, thread.activityOpen) { vm.setActivityOpen(it) }
+                ActivityPane(thread.activity, thread.activityOpen, (widthDp * 0.16f).coerceIn(196f, 292f).dp) { vm.setActivityOpen(it) }
                 if (customerOpen) {
                     VerticalDivider(color = if (Neema.colors.isDark) Neema.colors.border else Color(0xFFEDF0EA))
                     CustomerPanel(
@@ -127,7 +131,7 @@ fun ConversationsScreen(dash: DashboardViewModel) {
                         onClose = { customerOpen = false },
                         onOpenIdentity = vm::openIdentity,
                         onNameChange = vm::renameCustomer,
-                        modifier = Modifier.width(340.dp).fillMaxHeight(),
+                        modifier = Modifier.width(320.dp).fillMaxHeight(),
                     )
                 } else SideRail("Customer", flipArrow = true) { customerOpen = true }
             }
@@ -166,14 +170,14 @@ fun ConversationsScreen(dash: DashboardViewModel) {
         onDismissRequest = { vm.showClear(false) },
         title = { Text("Clear Chat History") },
         text = {
-            Text("This will permanently delete all messages in this conversation. The conversation record and customer profile will be kept. This cannot be undone.")
+            Text(
+                "This will permanently delete all messages in this conversation. The conversation record and customer profile will be kept. This cannot be undone.",
+                fontSize = 14.sp, color = if (Neema.colors.isDark) Neema.colors.textMid else Color(0xFF57534E), // text-sm text-stone-600
+            )
         },
-        confirmButton = {
-            TextButton(onClick = vm::clearHistory, enabled = !dialogs.clearing) {
-                Text(if (dialogs.clearing) "Clearing…" else "Yes, clear history", color = Neema.colors.red)
-            }
-        },
-        dismissButton = { TextButton(onClick = { vm.showClear(false) }) { Text("Cancel") } },
+        // <Btn variant="danger"> / <Btn variant="outline">, as on the web.
+        confirmButton = { WebBtn(if (dialogs.clearing) "Clearing…" else "Yes, clear history", BtnVariant.Danger, vm::clearHistory, enabled = !dialogs.clearing) },
+        dismissButton = { WebBtn("Cancel", BtnVariant.Outline, { vm.showClear(false) }) },
     )
     if (askDialog) AskNeemaDialog(vm) { askDialog = false }
     if (answerDialog) AnswerViaNeemaDialog(vm) { answerDialog = false }
@@ -233,9 +237,9 @@ private fun ThreadPane(
         if (mode == "human" && conv.assignedAgentId == null && perms.canHandle) add(HeaderAction("Pick up", "🙋", "intercept", primary = true) { vm.intercept(conv.id) })
         // Owner-restricted: only the intercepting agent or admin can release.
         if (mode == "human" && (isOwner || perms.isAdminOrSuper))
-            add(HeaderAction("Release", "↩", "release", primary = none { it.primary }) { vm.release(conv.id) })
+            add(HeaderAction("Release", "↩", "release", pin = none { it.pin }) { vm.release(conv.id) })
         if (mode != "paused" && canAct) add(HeaderAction("Pause", "⏸", "pause") { vm.pause(conv.id) })
-        if (mode == "paused" && canAct) add(HeaderAction("Resume", "▶", "release", primary = none { it.primary }) { vm.release(conv.id) })
+        if (mode == "paused" && canAct) add(HeaderAction("Resume", "▶", "release", primary = true, pin = none { it.pin }) { vm.release(conv.id) })
         if (canAct) add(HeaderAction(if (wide) "" else "Transfer", "⇄") { vm.showTransfer(true) })
         if (perms.canHandle) add(HeaderAction(if (wide) "" else "Add note", "📝") { vm.showNote(true) })
         // Clear history — admin/superuser only (the server refuses anyone else).
@@ -339,9 +343,9 @@ private fun SideRail(label: String, count: Int = 0, flipArrow: Boolean = false, 
 
 /** Activity Log — collapsible side pane (wide). */
 @Composable
-private fun ActivityPane(events: List<ActivityEvent>, open: Boolean, setOpen: (Boolean) -> Unit) {
+private fun ActivityPane(events: List<ActivityEvent>, open: Boolean, width: androidx.compose.ui.unit.Dp, setOpen: (Boolean) -> Unit) {
     if (!open) { SideRail("Activity", events.size) { setOpen(true) }; return }
-    Column(Modifier.width(260.dp).fillMaxHeight().background(Neema.colors.bg2)) {
+    Column(Modifier.width(width).fillMaxHeight().background(Neema.colors.bg2)) {
         Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("ACTIVITY LOG", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp, color = Color(0xFFB5C9A8), modifier = Modifier.weight(1f))
             IconButton(onClick = { setOpen(false) }, modifier = Modifier.size(28.dp)) {
@@ -454,8 +458,9 @@ internal fun NoteDialog(text: String, onText: (String) -> Unit, onSave: () -> Un
                 placeholder = { Text("Internal note (not sent to customer)…") }, modifier = Modifier.fillMaxWidth(),
             )
         },
-        confirmButton = { Button(onClick = onSave, enabled = text.isNotBlank()) { Text("Save Note") } },
-        dismissButton = { OutlinedButton(onClick = onDismiss) { Text("Cancel") } },
+        // <Btn variant="primary"> (amber) / <Btn variant="outline">, as on the web.
+        confirmButton = { WebBtn("Save Note", BtnVariant.Primary, onSave, enabled = text.isNotBlank()) },
+        dismissButton = { WebBtn("Cancel", BtnVariant.Outline, onDismiss) },
     )
 }
 
