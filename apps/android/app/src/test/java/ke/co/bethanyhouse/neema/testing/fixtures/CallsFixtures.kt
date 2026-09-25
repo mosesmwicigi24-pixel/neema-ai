@@ -27,6 +27,19 @@ object CallsFixtures {
        "agent_name":null,"started_at":"${ago(60 * 72)}","transcript_status":"none","has_recording":false}
     ]"""
 
+    /** A long day: 14 rows, an emoji in a name, a no-name caller, every outcome — the card runs well past the screen. */
+    val longLog get() = (0 until 14).joinToString(",", "[", "]") { i ->
+        val names = listOf("Mama 🌸 Njeri", "Sr. Agnes Wairimu", null, "Bro. Kevin Ouma", "Canon Joseph Kiprono", "Mrs. Faith Chebet", "Dr. Samuel Mutua")
+        val statuses = listOf("answered", "missed", "declined", "callback", "ended", "ringing", "answered")
+        val n = names[i % names.size]
+        val st = statuses[i % statuses.size]
+        val wa = if (n == null) "null" else "\"2547${(10_000_000 + i * 7_919)}\""
+        val dur = if (st == "answered" || st == "ended") "${45 + i * 37}" else "null"
+        """{"id":"L$i","call_id":"wacid.L$i","wa_id":$wa,"name":${q(n)},"direction":"inbound","status":"$st",
+          "duration":$dur,"agent_name":${q(if (i % 3 == 0) "Moses" else null)},"started_at":"${ago(20L + i * 95)}",
+          "transcript_status":"none","has_recording":${i % 4 == 0}}"""
+    }
+
     fun transcript(callId: String, status: String, summary: String? = null, transcript: String? = null,
                    language: String? = null, hasRecording: Boolean = true) =
         """{"call_id":"$callId","status":"$status","transcript":${q(transcript)},"summary":${q(summary)},

@@ -1,7 +1,6 @@
 package ke.co.bethanyhouse.neema.calls
 
 import app.cash.paparazzi.Paparazzi
-import ke.co.bethanyhouse.neema.core.api.UploadFile
 import ke.co.bethanyhouse.neema.core.net.ApiException
 import ke.co.bethanyhouse.neema.feature.calls.CallManager
 import ke.co.bethanyhouse.neema.feature.calls.NeemaCallApi
@@ -43,7 +42,8 @@ class CallApiContractTest {
         api.callback("wacid.1")
         assertEquals("wacid.out9", api.connect("254712345678", "v=0 our-offer", "Fr. Peter Kamau"))
         api.requestPermission("254712345678")
-        api.uploadRecording("wacid.1", UploadFile(ByteArray(3000), "wacid.1.m4a", "audio/mp4"))
+        val rec = java.io.File.createTempFile("rec", ".m4a").apply { writeBytes(ByteArray(3000) { 7 }); deleteOnExit() }
+        api.uploadRecording("wacid.1", rec, "wacid.1.m4a", "audio/mp4")
 
         fun body(m: String, p: String) = fake.calls.last { it.method == m && it.path == p }.body.orEmpty()
         assertEquals("""{"sdp":"v=0 answer"}""", body("POST", "/admin/calls/wacid.1/answer"))
@@ -53,6 +53,7 @@ class CallApiContractTest {
         assertEquals("""{"to":"254712345678"}""", body("POST", "/admin/calls/request-permission"))
         val upload = body("POST", "/admin/calls/wacid.1/recording")
         assertTrue(upload.contains("name=\"file\"") && upload.contains("filename=\"wacid.1.m4a\""))
+        assertTrue("streamed body carries the file", upload.contains("Content-Type: audio/mp4") && upload.length > 3000)
     }
 
     @Test fun connectWithoutPermissionMapsToTheWebCopy() = runBlocking {

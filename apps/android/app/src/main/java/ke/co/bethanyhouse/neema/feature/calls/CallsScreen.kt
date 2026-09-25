@@ -21,17 +21,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Chat
-import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.filled.NotificationsActive
-import androidx.compose.material.icons.filled.CallReceived
 import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PhoneCallback
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -44,6 +40,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -51,17 +48,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LifecycleResumeEffect
@@ -103,7 +104,38 @@ private val OUTCOME = mapOf(
 )
 
 private val AV = listOf(0xFF3B6EA5, 0xFFA5417D, 0xFFB5892F, 0xFF3C8C5A, 0xFF8A4FC4, 0xFFB24A4A)
-private fun avatarColor(s: String) = Color(AV[(s.ifEmpty { "?" }).sumOf { it.code } % AV.size])
+
+/**
+ * The web's `avatarColor`: `[...s].reduce((a, c) => a + c.charCodeAt(0))` —
+ * one term per code point, taking its FIRST UTF-16 unit (so an emoji adds its
+ * high surrogate once, not both halves).
+ */
+internal fun avatarIndex(s: String): Int {
+    val src = s.ifEmpty { "?" }
+    var sum = 0
+    var i = 0
+    while (i < src.length) {
+        sum += src[i].code
+        i += Character.charCount(src.codePointAt(i))
+    }
+    return sum % AV.size
+}
+private fun avatarColor(s: String) = Color(AV[avatarIndex(s)])
+
+/** The row's `who`: name, else +wa_id, else "Unknown" (a blank name falls through too). */
+internal fun rowWho(c: Call): String =
+    c.name?.takeIf { it.isNotBlank() } ?: c.waId?.takeIf { it.isNotEmpty() }?.let { "+$it" } ?: "Unknown"
+
+/**
+ * The row's initials: who minus its first "+", first letter of the first two
+ * words, upper-cased. A word starting with an emoji keeps the whole emoji (the
+ * web's w[0] takes half a surrogate pair and draws a broken glyph).
+ */
+internal fun initialsOf(who: String): String =
+    who.replaceFirst("+", "").split(Regex("\\s+")).filter { it.isNotEmpty() }
+        .map { firstGlyph(it) }.take(2).joinToString("").uppercase()
+
+internal fun firstGlyph(s: String): String = if (s.isEmpty()) "" else s.substring(0, Character.charCount(s.codePointAt(0)))
 
 private fun fmtDur(s: Int?): String = if (s == null || s == 0) "" else "${s / 60}:${(s % 60).toString().padStart(2, '0')}"
 
@@ -149,12 +181,13 @@ fun CallsScreen(
 
     BoxWithConstraints(Modifier.fillMaxSize().background(Neema.colors.surface)) {
         val wide = maxWidth >= 840.dp
+        val sidePad = if (maxWidth >= 640.dp) 24.dp else 16.dp   // px-4 sm:px-6
         // Phone: the caller panel replaces the log; back returns to it.
         BackHandler(enabled = sel != null && !wide) { vm.select(null) }
 
         PullToRefreshBox(isRefreshing = refreshing, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize()) {
             Row(
-                Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                Modifier.fillMaxSize().padding(horizontal = sidePad),
                 horizontalArrangement = Arrangement.spacedBy(24.dp, Alignment.CenterHorizontally),
             ) {
                 if (wide || sel == null) {
@@ -190,76 +223,79 @@ private fun CallLog(
     readiness: CallReadiness,
     onOpenConversation: (String) -> Unit,
 ) {
-    LazyColumn(modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 24.dp)) {
-        item {
-            Column(
-                Modifier
-                    .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = if (shown.isNullOrEmpty()) 16.dp else 0.dp, bottomEnd = if (shown.isNullOrEmpty()) 16.dp else 0.dp))
-                    .drawBehind {
-                        drawRect(Brush.radialGradient(
-                            0f to Color(0xFF123626), 0.6f to Ink, 1f to Ink,
-                            center = Offset(size.width / 2f, 0f), radius = (size.width * 1.2f).coerceAtLeast(1f),
-                        ))
-                    },
-            ) {
-                // Header: title, total, and the missed badge (a filter toggle).
-                Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 16.dp), verticalAlignment = Alignment.Top) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Calls", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Medium)
-                        Spacer(Modifier.height(2.dp))
-                        Text("WhatsApp voice calls · $total total", color = Muted, fontSize = 13.sp)
-                    }
-                    if (missed > 0) {
-                        Text(
-                            "$missed missed" + if (missedOnly) " ✕" else "",
-                            color = Color(0xFFFF8A8D), fontSize = 12.sp, fontWeight = FontWeight.Medium,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(50))
-                                .background(if (missedOnly) Color(0x59F2555A) else Color(0x29F2555A))
-                                .border(1.dp, if (missedOnly) Color(0x99F2555A) else Color.Transparent, RoundedCornerShape(50))
-                                .clickable { vm.missedOnly.value = !missedOnly }
-                                .padding(horizontal = 11.dp, vertical = 5.dp),
-                        )
-                    }
+    // One card, as the web draws it: the log is at most 200 rows (the API's
+    // cap; the web asks for the default 50), so a plain scrolling column keeps
+    // the card's gradient, outline and shadow whole instead of slicing them
+    // across lazy items.
+    val cardShape = RoundedCornerShape(16.dp)
+    Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(vertical = 24.dp)) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                // box-shadow: 0 20px 50px rgba(0,0,0,0.25)
+                .shadow(20.dp, cardShape, ambientColor = Color.Black.copy(alpha = 0.25f), spotColor = Color.Black.copy(alpha = 0.25f))
+                .clip(cardShape)
+                .drawBehind {
+                    // radial-gradient(120% 60% at 50% 0%, #123626 0%, #0b1410 60%)
+                    drawTopEllipseGradient(1.2f, 0.6f, 0f to Color(0xFF123626), 0.6f to Ink, 1f to Ink)
                 }
-                if (!readiness.ready) ReadinessBanner(readiness)
-                when {
-                    shown == null -> Text(
-                        "Loading…", color = Muted, fontSize = 14.sp, textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 40.dp),
+                // border: 1px solid rgba(37,211,102,0.14)
+                .border(1.dp, Color(0x2425D366), cardShape),
+        ) {
+            // Header: title, total, and the missed badge (a filter toggle).
+            Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 16.dp), verticalAlignment = Alignment.Top) {
+                Column(Modifier.weight(1f)) {
+                    Text("Calls", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.height(2.dp))
+                    Text("WhatsApp voice calls · $total total", color = Muted, fontSize = 13.sp)
+                }
+                if (missed > 0) {
+                    Text(
+                        "$missed missed" + if (missedOnly) " ✕" else "",
+                        color = Color(0xFFFF8A8D), fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(if (missedOnly) Color(0x59F2555A) else Color(0x29F2555A))
+                            .border(1.dp, if (missedOnly) Color(0x99F2555A) else Color.Transparent, RoundedCornerShape(50))
+                            .clickable(onClickLabel = if (missedOnly) "Show all calls" else "Show only missed calls") {
+                                vm.missedOnly.value = !missedOnly
+                            }
+                            .padding(horizontal = 11.dp, vertical = 5.dp),
                     )
-                    shown.isEmpty() -> Column(
-                        Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 56.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Text("No calls yet", color = Soft, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            "Incoming WhatsApp voice calls appear here. Keep the dashboard open — a call takes over the screen when it rings.",
-                            color = Muted, fontSize = 13.sp, textAlign = TextAlign.Center,
-                        )
-                    }
                 }
             }
-        }
-        val rows = shown.orEmpty()
-        items(rows, key = { it.id.ifEmpty { it.callId } }) { c ->
-            val last = c === rows.last()
-            Column(
-                Modifier
-                    .clip(if (last) RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp) else RoundedCornerShape(0.dp))
-                    .background(Ink),
-            ) {
-                Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0x0DFFFFFF)))
-                CallRow(
-                    c = c, selected = selectedId == c.id,
-                    open = openTranscript?.callId == c.callId,
-                    onSelect = { if (!c.waId.isNullOrEmpty()) vm.select(c) },
-                    onToggleTranscript = { vm.toggleTranscript(c.callId) },
-                    onOpenConversation = onOpenConversation,
-                    ago = vm.ago(c.startedAt),
+            if (!readiness.ready) ReadinessBanner(readiness)
+            when {
+                shown == null -> Text(
+                    "Loading…", color = Muted, fontSize = 14.sp, textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 40.dp),
                 )
-                if (openTranscript?.callId == c.callId) TranscriptPanel(openTranscript, vm)
+                shown.isEmpty() -> Column(
+                    Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 56.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text("No calls yet", color = Soft, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Incoming WhatsApp voice calls appear here. Keep the dashboard open — a call takes over the screen when it rings.",
+                        color = Muted, fontSize = 13.sp, textAlign = TextAlign.Center,
+                    )
+                }
+                else -> shown.forEach { c ->
+                    key(c.id.ifEmpty { c.callId }) {
+                        // borderTop: 1px solid rgba(255,255,255,0.05)
+                        Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0x0DFFFFFF)))
+                        CallRow(
+                            c = c, selected = selectedId == c.id,
+                            open = openTranscript?.callId == c.callId,
+                            onSelect = { if (!c.waId.isNullOrEmpty()) vm.select(c) },
+                            onToggleTranscript = { vm.toggleTranscript(c.callId) },
+                            onOpenConversation = onOpenConversation,
+                            ago = vm.ago(c.startedAt),
+                        )
+                        if (openTranscript?.callId == c.callId) TranscriptPanel(openTranscript, vm)
+                    }
+                }
             }
         }
     }
@@ -276,9 +312,8 @@ private fun CallRow(
     ago: String,
 ) {
     val o = OUTCOME[c.status] ?: OUTCOME.getValue("ended")
-    val who = c.name?.takeIf { it.isNotBlank() } ?: c.waId?.takeIf { it.isNotEmpty() }?.let { "+$it" } ?: "Unknown"
-    val initials = who.replace("+", "").split(Regex("\\s+")).filter { it.isNotEmpty() }
-        .map { it.first() }.take(2).joinToString("").uppercase()
+    val who = rowWho(c)
+    val initials = initialsOf(who)
     val hasNote = !c.summary.isNullOrEmpty()
     Row(
         Modifier
@@ -294,24 +329,22 @@ private fun CallRow(
         }
         Column(Modifier.weight(1f)) {
             Text(who, color = TextC, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 1.dp)) {
-                Icon(
-                    if (o.dir == Dir.Back) Icons.Filled.PhoneCallback else Icons.Filled.CallReceived,
-                    null, tint = o.color, modifier = Modifier.size(13.dp),
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(o.label, color = o.color, fontSize = 12.sp)
-                val dur = fmtDur(c.duration)
-                if (dur.isNotEmpty()) Text(" · $dur", color = Muted, fontSize = 12.sp)
-                c.agentName?.takeIf { it.isNotBlank() }?.let {
-                    Text(" · ${it.split(" ").first()}", color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
+            // flex items-center gap-1.5
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.padding(top = 1.dp),
+            ) {
+                Icon(if (o.dir == Dir.Back) CallIcons.DirBack else CallIcons.DirIn, null, tint = o.color, modifier = Modifier.size(13.dp))
+                // One run of text so a tight row trims the end ("· Mo…") rather
+                // than dropping a whole part; an en space is the web's 6px gap at 12px.
+                Text(statusLine(o, c), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         Text(ago, color = Dim, fontSize = 11.sp)
         if (c.hasRecording) {
             RoundIcon(
-                icon = Icons.AutoMirrored.Filled.Notes,
+                icon = CallIcons.Transcript, iconSize = 15.dp,
                 label = if (hasNote) "Call summary & transcript" else "Call recording — transcribe & summarise",
                 bg = when { open -> Color(0x3825D366); hasNote -> Color(0x1F25D366); else -> Color(0x0FFFFFFF) },
                 tint = if (open || hasNote) Green else Sage,
@@ -321,7 +354,7 @@ private fun CallRow(
         }
         if (!c.waId.isNullOrEmpty()) {
             RoundIcon(
-                icon = Icons.AutoMirrored.Filled.Chat,
+                icon = CallIcons.Chat, iconSize = 16.dp,
                 label = "Open the conversation in Neema",
                 bg = Color(0x2925D366), tint = Green, border = Color(0x4D25D366),
                 onClick = { onOpenConversation(c.waId!!) },
@@ -330,12 +363,21 @@ private fun CallRow(
     }
 }
 
+/** "Answered · 3:04 · Moses": the outcome in its colour, duration and the agent's first name muted. */
+private fun statusLine(o: Outcome, c: Call) = buildAnnotatedString {
+    withStyle(SpanStyle(color = o.color)) { append(o.label) }
+    withStyle(SpanStyle(color = Muted)) {
+        fmtDur(c.duration).takeIf { it.isNotEmpty() }?.let { append("\u2002· $it") }
+        c.agentName?.takeIf { it.isNotEmpty() }?.let { append("\u2002· ${it.split(" ").first()}") }
+    }
+}
+
 @Composable
-private fun RoundIcon(icon: ImageVector, label: String, bg: Color, tint: Color, border: Color, onClick: () -> Unit) {
+private fun RoundIcon(icon: ImageVector, iconSize: Dp, label: String, bg: Color, tint: Color, border: Color, onClick: () -> Unit) {
     Box(
         Modifier.size(34.dp).clip(CircleShape).background(bg).border(1.dp, border, CircleShape).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { Icon(icon, label, tint = tint, modifier = Modifier.size(16.dp)) }
+    ) { Icon(icon, label, tint = tint, modifier = Modifier.size(iconSize)) }
 }
 
 /**
@@ -379,7 +421,8 @@ private fun TranscriptPanel(t: TranscriptUi, vm: CallsViewModel) {
             Text(
                 if (t.busy) "Starting…" else "Transcribe & summarise",
                 color = Ink, fontSize = 12.sp, fontWeight = FontWeight.Medium,
-                modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Green.copy(alpha = if (t.busy) 0.6f else 1f))
+                // opacity: busy ? 0.6 : 1 — the whole button, label included.
+                modifier = Modifier.alpha(if (t.busy) 0.6f else 1f).clip(RoundedCornerShape(8.dp)).background(Green)
                     .clickable(enabled = !t.busy) { vm.runTranscribe() }
                     .padding(horizontal = 14.dp, vertical = 7.dp),
             )

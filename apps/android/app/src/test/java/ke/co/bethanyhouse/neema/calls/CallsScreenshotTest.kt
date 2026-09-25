@@ -107,6 +107,22 @@ class CallsScreenshotTest {
     @Test fun callerPane() = console { vm -> vm.select(peterCall) }
     @Test fun callerPaneDark() = console(dark = true) { vm -> vm.select(peterCall) }
 
+    @Test fun logLong() = console(fake = fake().also { it.on("GET", "/admin/calls", body = CallsFixtures.longLog) })
+    @Test fun logLongDark() = console(dark = true, fake = fake().also { it.on("GET", "/admin/calls", body = CallsFixtures.longLog) })
+
+    @Test fun cardRingingSmallPhone() {
+        paparazzi.unsafeUpdateConfig(deviceConfig = DeviceConfig.NEXUS_5)
+        card(peter.copy(phase = CallPhase.Ringing))
+    }
+    @Test fun cardInCallSmallPhone() {
+        paparazzi.unsafeUpdateConfig(deviceConfig = DeviceConfig.NEXUS_5)
+        card(peter.copy(phase = CallPhase.InCall, seconds = 187))
+    }
+    @Test fun tabletCardInCall() {
+        paparazzi.unsafeUpdateConfig(deviceConfig = DeviceConfig.PIXEL_C)
+        card(peter.copy(phase = CallPhase.InCall, seconds = 187))
+    }
+
     @Test fun tabletLog() = console(device = DeviceConfig.PIXEL_C)
     @Test fun tabletCallerPane() = console(device = DeviceConfig.PIXEL_C) { vm ->
         vm.select(peterCall); vm.toggleTranscript("wacid.1")

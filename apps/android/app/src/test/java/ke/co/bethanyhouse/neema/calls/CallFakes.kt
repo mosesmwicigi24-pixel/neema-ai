@@ -1,6 +1,5 @@
 package ke.co.bethanyhouse.neema.calls
 
-import ke.co.bethanyhouse.neema.core.api.UploadFile
 import ke.co.bethanyhouse.neema.core.model.Call
 import ke.co.bethanyhouse.neema.core.model.CallOffer
 import ke.co.bethanyhouse.neema.core.model.IceConfig
@@ -30,7 +29,8 @@ class FakeCallApi : CallApi {
     /** When set, connect() waits for it (to hang up mid-placement). */
     var connectGate: CompletableDeferred<Unit>? = null
     var permissionError: Exception? = null
-    val uploads = mutableListOf<Pair<String, UploadFile>>()
+    /** callId to (filename, mime type, bytes read from the streamed file). */
+    val uploads = mutableListOf<Pair<String, Triple<String, String, Int>>>()
     var lastAnswerSdp: String? = null
     var lastConnect: Triple<String, String, String?>? = null
 
@@ -50,7 +50,9 @@ class FakeCallApi : CallApi {
         return connectId
     }
     override suspend fun requestPermission(to: String) { log += "request-permission $to"; permissionError?.let { throw it } }
-    override suspend fun uploadRecording(callId: String, file: UploadFile) { log += "recording $callId"; uploads += callId to file }
+    override suspend fun uploadRecording(callId: String, file: File, filename: String, mimeType: String) {
+        log += "recording $callId"; uploads += callId to Triple(filename, mimeType, file.length().toInt())
+    }
 }
 
 /** A peer connection that does what it's told and remembers it. */
@@ -112,7 +114,11 @@ class FakeAudio : CallAudio {
     var inCall = false
     var enters = 0
     var speakerOn = false
+    /** The microphone foreground service is up (only ever after the mic was allowed). */
+    var micService = false
+    var micLives = 0
     override fun enter(speaker: Boolean) { if (!inCall) enters++; inCall = true; if (speaker) speakerOn = true }
-    override fun leave() { inCall = false; speakerOn = false }
+    override fun micLive() { micLives++; micService = true }
+    override fun leave() { inCall = false; speakerOn = false; micService = false }
     override fun setSpeaker(on: Boolean) { speakerOn = on }
 }
