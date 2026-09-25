@@ -7,7 +7,6 @@ import android.content.pm.PackageManager
 import android.util.Log
 import androidx.core.content.ContextCompat
 import ke.co.bethanyhouse.neema.core.api.NeemaApi
-import ke.co.bethanyhouse.neema.core.api.UploadFile
 import ke.co.bethanyhouse.neema.core.model.IceConfig
 import ke.co.bethanyhouse.neema.core.net.ApiException
 import ke.co.bethanyhouse.neema.core.notify.Notifier
@@ -353,7 +352,8 @@ class CallManager internal constructor(
             try {
                 if (callId == null || callId == "pending") return@launch
                 if (file.length() < MIN_RECORDING_BYTES) return@launch   // skip near-silent / empty recordings
-                api.uploadRecording(callId, UploadFile(file.readBytes(), "$callId.m4a", "audio/mp4"))
+                // Streamed from disk: an hour-long call never sits in memory.
+                api.uploadRecording(callId, file, "$callId.m4a", "audio/mp4")
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -430,6 +430,7 @@ class CallManager internal constructor(
                 if (!ensureMic()) throw MicBlocked()
                 if (peer !== p) return@launch
                 p.addMic(!_state.value.muted)
+                audio.micLive()
                 p.setRemote(SdpType.Offer, offer.sdp)
                 val answer = p.createAnswer()
                 p.setLocal(SdpType.Answer, answer)
@@ -486,6 +487,7 @@ class CallManager internal constructor(
             if (!ensureMic()) throw MicBlocked()
             if (peer !== p) return@withContext Result.success(Unit)
             p.addMic(!_state.value.muted)
+            audio.micLive()
             val offer = p.createOffer()
             p.setLocal(SdpType.Offer, offer)
             awaitGathering(p)

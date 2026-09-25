@@ -273,6 +273,45 @@ class CallManagerTest {
         assertNull(r.state.error)
     }
 
+    // ── The microphone foreground service (Android 14+ refuses it without the permission) ──
+    @Test fun micServiceStartsOnlyOnceTheMicIsAllowed() = rig { r ->
+        r.mic = false
+        r.ring()
+        r.calls.answer(); r.settle()
+        assertTrue("audio routed while connecting", r.audio.inCall)
+        assertFalse("no mic-type service while the prompt is up", r.audio.micService)
+        r.mic = true
+        r.calls.onMicResult(true); r.settle()
+        assertTrue(r.audio.micService)
+        assertEquals(1, r.audio.micLives)
+        r.media.peer.onEvent(PeerEvent.Connected); r.settle()
+        r.calls.hangup(); r.settle()
+        assertFalse("back to the plain live service after the call", r.audio.micService || r.audio.inCall)
+    }
+
+    @Test fun micRefusedNeverStartsTheMicService() = rig { r ->
+        r.mic = false
+        r.ring(); r.calls.answer(); r.settle()
+        r.calls.onMicResult(false); r.settle()
+        advanceTimeBy(1_801); runCurrent()
+        assertEquals(0, r.audio.micLives)
+        // Outbound, refused too.
+        advanceTimeBy(1_001); runCurrent()
+        val b = async { r.calls.initiateCall("254712345678") }
+        r.settle(); r.calls.onMicResult(false); r.settle()
+        assertEquals(CallManager.MIC_BLOCKED, b.await().exceptionOrNull()!!.message)
+        assertEquals(0, r.audio.micLives)
+        assertFalse(r.audio.micService)
+    }
+
+    @Test fun outboundStartsTheMicServiceWithTheMic() = rig { r ->
+        val a = async { r.calls.initiateCall("254712345678") }
+        r.settle()
+        assertTrue(a.await().isSuccess)
+        assertEquals(1, r.audio.micLives)
+        assertTrue(r.media.peer.hasMic)
+    }
+
     @Test fun answerWithMicRefusedSaysMicrophoneBlocked() = rig { r ->
         r.mic = false
         r.ring()
@@ -356,8 +395,9 @@ class CallManagerTest {
         assertTrue(rec.stopped)
         val (id, file) = r.api.uploads.single()
         assertEquals("wacid.1", id)
-        assertEquals("wacid.1.m4a", file.filename)
-        assertEquals("audio/mp4", file.mimeType)
+        assertEquals("wacid.1.m4a", file.first)
+        assertEquals("audio/mp4", file.second)
+        assertEquals("the whole recording, streamed from disk", 48_000, file.third)
         assertFalse("temp file removed", rec.file.exists())
     }
 

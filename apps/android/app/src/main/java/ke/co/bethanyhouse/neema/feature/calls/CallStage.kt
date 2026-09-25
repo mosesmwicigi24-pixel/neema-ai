@@ -7,8 +7,7 @@ import android.content.ContextWrapper
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.StartOffset
 import androidx.compose.animation.core.animateFloat
@@ -36,13 +35,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.VolumeUp
-import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.CallEnd
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.MicOff
-import androidx.compose.material.icons.filled.PhoneCallback
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -54,15 +46,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
@@ -81,6 +72,9 @@ private val PillBg = Color(0x2425D366)
 private val Red = Color(0xFFE24B4A)
 private val Amber = Color(0xFFEF9F27)
 private val LabelGrey = Color(0xFF8696A0)
+
+private val CssEaseOut = CubicBezierEasing(0f, 0f, 0.58f, 1f)
+private val CssEaseInOut = CubicBezierEasing(0.42f, 0f, 0.58f, 1f)
 
 private fun mmss(s: Int) = "%02d:%02d".format(s / 60, s % 60)
 
@@ -153,7 +147,8 @@ class CallActions(
 @Composable
 fun CallCard(c: CallUiState, actions: CallActions) {
     val who = c.name?.takeIf { it.isNotBlank() } ?: c.from?.takeIf { it.isNotEmpty() }?.let { "+$it" } ?: "Unknown"
-    val initial = (who.replace("+", "").firstOrNull()?.toString() ?: "?").uppercase()
+    // who.replace("+", "")[0] — JS replaces only the first "+".
+    val initial = firstGlyph(who.replaceFirst("+", "")).ifEmpty { "?" }.uppercase()
     val ringing = c.phase == CallPhase.Ringing
     val live = c.phase == CallPhase.InCall
 
@@ -162,13 +157,7 @@ fun CallCard(c: CallUiState, actions: CallActions) {
             .fillMaxSize()
             .drawBehind {
                 // radial-gradient(130% 100% at 50% 0%, #0e5c3a 0%, #06110b 60%)
-                drawRect(
-                    Brush.radialGradient(
-                        0f to Color(0xFF0E5C3A), 0.6f to Color(0xFF06110B), 1f to Color(0xFF06110B),
-                        center = Offset(size.width / 2f, 0f),
-                        radius = maxOf(size.height, size.width * 1.3f).coerceAtLeast(1f),
-                    ),
-                )
+                drawTopEllipseGradient(1.3f, 1f, 0f to Color(0xFF0E5C3A), 0.6f to Color(0xFF06110B), 1f to Color(0xFF06110B))
             }
             // The card owns the content area: swallow taps meant for the screen below.
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {},
@@ -204,10 +193,14 @@ fun CallCard(c: CallUiState, actions: CallActions) {
                 )
             }
             Spacer(Modifier.height(24.dp))
-            Text(who, color = CardText, fontSize = 26.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                who, color = CardText, fontSize = 26.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 8.dp),
+            )
             if (!c.from.isNullOrEmpty()) {
                 Spacer(Modifier.height(6.dp))
-                Text("+${c.from}", color = SubText, fontSize = 14.sp, letterSpacing = 2.sp)
+                // tracking-widest: 0.1em.
+                Text("+${c.from}", color = SubText, fontSize = 14.sp, letterSpacing = 1.4.sp)
             }
 
             if (ringing) {
@@ -220,7 +213,11 @@ fun CallCard(c: CallUiState, actions: CallActions) {
             }
             if (live) {
                 Spacer(Modifier.height(24.dp))
-                Text(mmss(c.seconds), color = CardText, fontSize = 44.sp, fontWeight = FontWeight.Light, letterSpacing = 5.sp)
+                // font-light tabular-nums, letter-spacing 0.12em.
+                Text(
+                    mmss(c.seconds), color = CardText, fontSize = 44.sp, fontWeight = FontWeight.Light,
+                    letterSpacing = 5.28.sp, style = TextStyle(fontFeatureSettings = "tnum"),
+                )
                 Spacer(Modifier.height(16.dp))
                 Waveform()
                 Spacer(Modifier.height(16.dp))
@@ -237,35 +234,38 @@ fun CallCard(c: CallUiState, actions: CallActions) {
 
             Spacer(Modifier.height(40.dp))
             if (ringing) {
+                // justify-center gap-12 items-end
                 Row(
                     Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    horizontalArrangement = CenteredGap(48.dp),
                     verticalAlignment = Alignment.Bottom,
                 ) {
-                    CallButton(Red, "Decline", Icons.Filled.CallEnd, onClick = actions.decline)
-                    CallButton(Amber, "Callback", Icons.Filled.PhoneCallback, size = ButtonSize.Small, onClick = actions.callback)
-                    CallButton(WaGreen, "Answer", Icons.Filled.Call, size = ButtonSize.Big, onClick = actions.answer)
+                    CallButton(Red, "Decline", CallIcons.PhoneOff, onClick = actions.decline)
+                    CallButton(Amber, "Callback", CallIcons.Callback, size = ButtonSize.Small, onClick = actions.callback)
+                    CallButton(WaGreen, "Answer", CallIcons.Phone, size = ButtonSize.Big, onClick = actions.answer)
                 }
             }
             if (c.phase == CallPhase.Connecting || live) {
+                // justify-center gap-14 items-center (web: Mute + Hang up; the
+                // speaker toggle is Android's — a phone has an earpiece).
                 Row(
                     Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = CenteredGap(56.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     CallButton(
                         if (c.muted) LabelGrey else Color(0xFF1F2C33),
                         if (c.muted) "Unmute" else "Mute",
-                        if (c.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
+                        if (c.muted) CallIcons.MicOff else CallIcons.Mic,
                         onClick = actions.toggleMute,
                     )
                     CallButton(
                         if (c.speaker) LabelGrey else Color(0xFF1F2C33),
                         if (c.speaker) "Speaker on" else "Speaker",
-                        Icons.AutoMirrored.Filled.VolumeUp,
+                        CallIcons.Speaker,
                         onClick = actions.toggleSpeaker,
                     )
-                    CallButton(Red, "Hang up", Icons.Filled.CallEnd, size = ButtonSize.Big, onClick = actions.hangup)
+                    CallButton(Red, "Hang up", CallIcons.PhoneOff, size = ButtonSize.Big, onClick = actions.hangup)
                 }
             }
         }
@@ -290,7 +290,8 @@ private fun PulseRing(maxScale: Float, startAlpha: Float) {
     val t = rememberInfiniteTransition(label = "ring")
     val p by t.animateFloat(
         0f, 1f,
-        infiniteRepeatable(tween(1700, easing = FastOutSlowInEasing), RepeatMode.Restart),
+        // cr1 / cr2: 1.7s ease-out infinite.
+        infiniteRepeatable(tween(1700, easing = CssEaseOut), RepeatMode.Restart),
         label = "ringP",
     )
     Box(
@@ -314,7 +315,8 @@ private fun Waveform() {
             val h by t.animateFloat(
                 5f, 26f,
                 infiniteRepeatable(
-                    tween(450, easing = LinearEasing), RepeatMode.Reverse,
+                    // cwf: 0.9s ease-in-out — each half is its own ease-in-out segment.
+                    tween(450, easing = CssEaseInOut), RepeatMode.Reverse,
                     initialStartOffset = StartOffset((i % 8) * 80),
                 ),
                 label = "bar$i",

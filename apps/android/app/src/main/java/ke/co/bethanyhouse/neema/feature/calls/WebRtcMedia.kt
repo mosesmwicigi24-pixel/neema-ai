@@ -1,12 +1,15 @@
 package ke.co.bethanyhouse.neema.feature.calls
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.os.Build
 import android.util.Log
+import androidx.core.content.ContextCompat
 import ke.co.bethanyhouse.neema.core.model.IceConfig
 import ke.co.bethanyhouse.neema.core.notify.LiveService
 import kotlinx.coroutines.CompletableDeferred
@@ -215,6 +218,8 @@ internal class AndroidCallAudio(
 ) : CallAudio {
     private val audio = context.getSystemService(AudioManager::class.java)
     private var inCall = false
+    /** The live service runs with the microphone type for this call. */
+    private var micService = false
     private var prevMode = AudioManager.MODE_NORMAL
     private var focus: AudioFocusRequest? = null
 
@@ -235,13 +240,25 @@ internal class AndroidCallAudio(
             focus = req
         }
         if (speaker) setSpeaker(true)
+        // The microphone-type service waits for micLive(): on Android 14+
+        // starting it before RECORD_AUDIO is granted throws, and the live
+        // service would stop with it.
+    }
+
+    override fun micLive() {
+        // Not tied to inCall: enter() runs from the phase collector and may land a beat later.
+        if (micService) return
+        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        if (!granted) return
+        micService = true
         // Keep capturing audio while the app is in the background.
         LiveService.startForCall(context)
     }
 
     override fun leave() {
-        if (!inCall) return
+        if (!inCall && !micService) return
         inCall = false
+        micService = false
         setSpeaker(false)
         runCatching { focus?.let { audio.abandonAudioFocusRequest(it) } }
         focus = null
