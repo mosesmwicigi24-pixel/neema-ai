@@ -98,5 +98,9 @@ class CatalogScreenshotTest {
     @Test fun sheetVariantsDark() = sheet(catalog.first { it.sku == "CS-BLK" }, dark = true)
     @Test fun sheetLongName() = sheet(catalog.first { it.sku == "CAS-PUR" })
     @Test fun sheetOutOfStock() = sheet(catalog.first { it.sku == "OIL-50" })
-    @Test fun sheetLocalItem() = sheet(catalog.first { it.sku == "TRAY-1" })
+    /** A row from the local table the API serves while the hub is down (catalog_items() fallback). */
+    @Test fun sheetLocalItem() = sheet(NeemaJson.decodeFromString<List<CatalogItem>>(ReportsFixtures.localCatalog).first { it.sku == "CS-BLK" })
+
+    /** Hub down, no cached copy: GET /admin/catalog answers the local, in-stock-only table. */
+    @Test fun hubDownLocalTable() = shot { it.on("GET", "/admin/catalog", body = ReportsFixtures.localCatalog) }
 }

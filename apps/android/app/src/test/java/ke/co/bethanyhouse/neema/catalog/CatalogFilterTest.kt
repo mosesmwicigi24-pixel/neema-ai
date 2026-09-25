@@ -33,7 +33,8 @@ class CatalogFilterTest {
 
     @Test fun categories_distinctNonEmpty_inCatalogueOrder() {
         assertEquals(
-            listOf("Clergy Apparel", "Clergy Vestments", "Anointing Oil", "Communion Wafers", "Prefilled Cups", "Communion Trays"),
+            // The tray's hub category is "" (hub_client._map_product: name_en or ""), so it offers no option.
+            listOf("Clergy Apparel", "Clergy Vestments", "Anointing Oil", "Communion Wafers", "Prefilled Cups"),
             catalogCategories(catalog),
         )
         // A local fallback row has category "" — no empty option; a null category reads "General".
@@ -58,7 +59,7 @@ class CatalogFilterTest {
     }
 
     @Test fun search_andCategory_combine() {
-        assertEquals(listOf("TRAY-1"), names("Communion Trays", "communion"))
+        assertEquals(listOf("WAF-500"), names("Communion Wafers", "communion"))
         assertEquals(emptyList<String>(), names("Clergy Apparel", "communion"))
     }
 
@@ -66,11 +67,15 @@ class CatalogFilterTest {
         assertEquals(emptyList<String>(), names(q = " clergy shirt "))
     }
 
+    /** Hub rows carry hub_product_id and no id; the local fallback (hub down) carries neither. */
     @Test fun hubRowsAreHub_localRowsAreNot() {
         assertTrue(catalog.first { it.sku == "CS-BLK" }.isHub)
-        assertFalse(catalog.first { it.sku == "TRAY-1" }.isHub)
         assertEquals("501", catalog.first { it.sku == "CS-BLK" }.id)
-        assertEquals("TRAY-1", catalog.first { it.sku == "TRAY-1" }.id)
+        val local: List<CatalogItem> = NeemaJson.decodeFromString(ReportsFixtures.localCatalog)
+        assertFalse(local.first { it.sku == "TRAY-1" }.isHub)
+        assertEquals("TRAY-1", local.first { it.sku == "TRAY-1" }.id)
+        // str(category or "") — an empty category stays empty (the web's `?? "General"` only catches null).
+        assertEquals("", local.first { it.sku == "TRAY-1" }.category)
     }
 
     @Test fun priceText_rangeWhenVariantsDiffer() {
