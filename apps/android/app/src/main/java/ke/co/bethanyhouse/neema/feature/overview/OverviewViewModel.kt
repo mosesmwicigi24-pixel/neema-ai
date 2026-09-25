@@ -67,12 +67,15 @@ class OverviewViewModel(private val dash: DashboardViewModel) : ViewModel() {
         runCatching { dash.api.stats.overview() }
             .onSuccess { _stats.value = it }
             .onFailure {
-                _stats.value = null
-                runCatching { dash.api.conversations.page(InboxQuery(), limit = 50) }
-                    .onSuccess { _fallbackConvs.value = it.items }
+                // A failed pull-to-refresh keeps the figures already on screen
+                // (like the web's 30 s poll); only a first load falls back.
+                if (_stats.value == null) {
+                    runCatching { dash.api.conversations.page(InboxQuery(), limit = 50) }
+                        .onSuccess { _fallbackConvs.value = it.items }
+                }
             }
         _statsLoading.value = false
-        _attrib.value = runCatching { dash.api.attribution() }.getOrNull()
+        runCatching { dash.api.attribution() }.onSuccess { _attrib.value = it }
         loadHuman()
     }
 

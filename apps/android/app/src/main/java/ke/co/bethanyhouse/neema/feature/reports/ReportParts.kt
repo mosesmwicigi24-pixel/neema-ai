@@ -2,6 +2,7 @@ package ke.co.bethanyhouse.neema.feature.reports
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -37,7 +38,8 @@ fun textCell(s: String): Cell = { Text(s, fontSize = 12.sp, color = MaterialThem
 fun StatBox(label: String, value: String, sub: String?, accent: Color, modifier: Modifier = Modifier) {
     val c = Neema.colors
     Row(
-        modifier.height(IntrinsicSize.Min).clip(RoundedCornerShape(12.dp)).background(c.bg2),
+        modifier.height(IntrinsicSize.Min).clip(RoundedCornerShape(12.dp)).background(c.bg2)
+            .border(1.dp, c.hairline, RoundedCornerShape(12.dp)),
     ) {
         Box(Modifier.width(4.dp).fillMaxHeight().background(accent))
         Column(Modifier.padding(14.dp)) {
@@ -140,13 +142,19 @@ fun ReportTable(
                 rows.forEach { row ->
                     Column(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(c.bg).padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         ProvideTextStyle(TextStyle(fontWeight = FontWeight.Bold)) { row.firstOrNull()?.invoke() }
-                        row.drop(1).forEachIndexed { j, cell ->
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(cols.getOrElse(j + 1) { "" }.uppercase(), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = c.muted, letterSpacing = 0.5.sp, modifier = Modifier.width(110.dp))
-                                Box(Modifier.weight(1f)) { cell() }
+                        // The other columns as a two-up grid of small label over value.
+                        row.drop(1).withIndex().chunked(2).forEach { pair ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                pair.forEach { (j, cell) ->
+                                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                        Text(cols.getOrElse(j + 1) { "" }.uppercase(), fontSize = 9.sp, fontWeight = FontWeight.Bold, color = c.muted, letterSpacing = 0.5.sp, maxLines = 1)
+                                        cell()
+                                    }
+                                }
+                                if (pair.size == 1) Spacer(Modifier.weight(1f))
                             }
                         }
                     }

@@ -8,13 +8,10 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
@@ -39,8 +36,6 @@ import coil.compose.SubcomposeAsyncImage
 import ke.co.bethanyhouse.neema.app.DashboardViewModel
 import ke.co.bethanyhouse.neema.core.model.CatalogItem
 import ke.co.bethanyhouse.neema.core.model.PriceAudit
-import ke.co.bethanyhouse.neema.core.perm.Perms
-import ke.co.bethanyhouse.neema.core.ui.components.ConfirmDialog
 import ke.co.bethanyhouse.neema.core.ui.components.SearchField
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import ke.co.bethanyhouse.neema.core.util.Fmt
@@ -86,11 +81,19 @@ internal fun categoryBrush(category: String?): Brush {
     return Brush.linearGradient(listOf(a.copy(alpha = alpha), b.copy(alpha = alpha)))
 }
 
+/** The web's #b5da8b for SKUs and ids; a readable slate by night (the dark border hue vanishes). */
+@Composable
+internal fun faint(): Color = if (Neema.colors.isDark) Neema.colors.muted.copy(alpha = 0.75f) else Neema.colors.border
+
 internal val Emerald600 = Color(0xFF059669)
+private val Stone200 = Color(0xFFE7E5E4)
 internal val Red500 = Color(0xFFEF4444)
 
-/** "1500" not "1500.0". */
+/** "1,500" not "1500.0" — the web's toLocaleString(). */
 internal fun num(v: Double): String = if (v == Math.floor(v) && !v.isInfinite()) Fmt.number(v.toLong()) else Fmt.number(v)
+
+/** "1500" / "129.5" — a number the web interpolates bare (`${x}`). */
+internal fun plainNum(v: Double): String = if (v == Math.floor(v) && !v.isInfinite()) v.toLong().toString() else v.toString()
 
 /** "$10" for whole dollars, "$9.50" otherwise (the audit's usd()). */
 internal fun usd(v: Double): String =
@@ -103,42 +106,33 @@ internal fun priceText(i: CatalogItem): String {
 }
 
 /**
- * Port of components/views/CatalogView.tsx. The web view is a read-only look
- * at the live hub catalogue; hub rows stay read-only here too. Rows that live
- * in Neema's own table (a hub outage fallback, or items added here) can be
- * added, edited, stocked and deleted by agents with `manage_catalog`.
+ * Port of components/views/CatalogView.tsx: a READ-ONLY look at the live hub
+ * catalogue — exactly what Neema quotes. Products, prices and stock are
+ * maintained in the hub, so nothing is edited here. Tapping a card opens the
+ * whole product (every variant's price), which the web's card only counts.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CatalogScreen(dash: DashboardViewModel) {
-    val vm: CatalogViewModel = viewModel { CatalogViewModel(dash) }
+fun CatalogScreen(
+    dash: DashboardViewModel,
+    vm: CatalogViewModel = viewModel { CatalogViewModel(dash) },
+    /** Open on a product's sheet (tests). */
+    initialDetail: CatalogItem? = null,
+) {
     val catalog by dash.catalog.collectAsStateWithLifecycle()
     val filter by vm.filter.collectAsStateWithLifecycle()
     val search by vm.search.collectAsStateWithLifecycle()
     val audit by vm.audit.collectAsStateWithLifecycle()
     val auditOpen by vm.auditOpen.collectAsStateWithLifecycle()
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()
-    val busy by vm.busy.collectAsStateWithLifecycle()
-    dash.me.collectAsStateWithLifecycle() // recompose when permissions arrive
-    val canManage = dash.can(Perms.MANAGE_CATALOG)
     val c = Neema.colors
 
-    val categories = remember(catalog) { catalog.map { it.category }.filter { it.isNotEmpty() }.distinct() }
-    val filtered = remember(catalog, filter, search) {
-        val q = search.lowercase()
-        catalog.filter { i ->
-            (filter == "all" || i.category == filter) &&
-                (q.isEmpty() || i.name.lowercase().contains(q) || i.sku.lowercase().contains(q) ||
-                    i.aliases.any { it.lowercase().contains(q) })
-        }
-    }
+    val categories = remember(catalog) { catalogCategories(catalog) }
+    val filtered = remember(catalog, filter, search) { filterCatalog(catalog, filter, search) }
     val inStock = catalog.count { it.inStock }
     val outStock = catalog.count { !it.inStock }
 
-    var detail by remember { mutableStateOf<CatalogItem?>(null) }
-    var editing by remember { mutableStateOf<CatalogItem?>(null) }
-    var creating by remember { mutableStateOf(false) }
-    var deleting by remember { mutableStateOf<CatalogItem?>(null) }
+    var detail by remember { mutableStateOf(initialDetail) }
 
     PullToRefreshBox(isRefreshing = refreshing, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize().background(c.bg)) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -159,32 +153,20 @@ fun CatalogScreen(dash: DashboardViewModel) {
                 }
                 // ── Header ───────────────────────────────────────────────
                 item(span = { GridItemSpan(maxLineSpan) }, key = "header") {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
+                    Column {
                             Text("Catalog", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = c.text)
                             Text(
                                 buildAnnotatedString {
                                     withStyle(SpanStyle(color = c.muted)) { append("${catalog.size} items") }
-                                    withStyle(SpanStyle(color = Color(0xFFD6D3D1))) { append("  ·  ") }
+                                    withStyle(SpanStyle(color = Stone200)) { append("  ·  ") }
                                     withStyle(SpanStyle(color = Emerald600)) { append("$inStock in stock") }
                                     if (outStock > 0) {
-                                        withStyle(SpanStyle(color = Color(0xFFD6D3D1))) { append("  ·  ") }
+                                        withStyle(SpanStyle(color = Stone200)) { append("  ·  ") }
                                         withStyle(SpanStyle(color = Red500)) { append("$outStock out of stock") }
                                     }
                                 },
                                 fontSize = 14.sp,
                             )
-                        }
-                        if (canManage) {
-                            Button(
-                                onClick = { creating = true }, enabled = !busy, shape = RoundedCornerShape(10.dp),
-                                contentPadding = PaddingValues(horizontal = 12.dp),
-                            ) {
-                                Icon(Icons.Outlined.Add, null, Modifier.size(16.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("Add item", fontSize = 13.sp)
-                            }
-                        }
                     }
                 }
                 // ── Source banner ────────────────────────────────────────
@@ -218,17 +200,7 @@ fun CatalogScreen(dash: DashboardViewModel) {
                 }
                 // ── Grid ─────────────────────────────────────────────────
                 // No keys: a hub row and a local row may share a SKU-derived id.
-                items(filtered) { item ->
-                    ProductCard(
-                        item = item,
-                        manageable = canManage && !item.isHub,
-                        busy = busy,
-                        onOpen = { detail = item },
-                        onEdit = { editing = item },
-                        onToggle = { vm.toggleStock(item) },
-                        onDelete = { deleting = item },
-                    )
-                }
+                items(filtered) { item -> ProductCard(item = item, onOpen = { detail = item }) }
                 if (filtered.isEmpty()) {
                     item(span = { GridItemSpan(maxLineSpan) }, key = "empty") {
                         Column(Modifier.fillMaxWidth().padding(vertical = 64.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -243,34 +215,9 @@ fun CatalogScreen(dash: DashboardViewModel) {
     }
 
     detail?.let { item ->
-        // Keep the sheet in step with refetches (stock toggles, edits).
+        // Keep the sheet in step with the polled catalogue.
         val live = catalog.find { it.id == item.id } ?: item
-        ProductSheet(
-            item = live,
-            manageable = canManage && !live.isHub,
-            busy = busy,
-            onDismiss = { detail = null },
-            onEdit = { editing = live },
-            onToggle = { vm.toggleStock(live) },
-            onDelete = { deleting = live },
-        )
-    }
-    if (creating) {
-        CatalogEditor(title = "Add catalog item", initial = CatalogDraft(category = filter.takeIf { it != "all" } ?: ""), categories = categories, busy = busy,
-            onDismiss = { creating = false }, onSave = { d -> vm.create(d) { creating = false } })
-    }
-    editing?.let { item ->
-        CatalogEditor(title = "Edit item", initial = CatalogDraft.of(item), categories = categories, busy = busy,
-            onDismiss = { editing = null }, onSave = { d -> vm.update(item, d) { editing = null } })
-    }
-    deleting?.let { item ->
-        ConfirmDialog(
-            title = "Delete item?",
-            message = "Remove “${item.name}” from the catalog? Neema will stop quoting it.",
-            confirmLabel = "Delete", destructive = true,
-            onConfirm = { vm.delete(item) { if (detail?.id == item.id) detail = null } },
-            onDismiss = { deleting = null },
-        )
+        ProductSheet(item = live, onDismiss = { detail = null })
     }
 }
 
@@ -286,11 +233,11 @@ private fun CategoryDropdown(categories: List<String>, selected: String, modifie
         ) {
             Text(
                 if (selected == "all") "All categories" else "${glyph(selected)} $selected",
-                color = c.text, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f, fill = false),
+                color = c.text, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f),
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.width(6.dp))
-            Icon(Icons.Outlined.ExpandMore, null, tint = c.border2)
+            Icon(Icons.Outlined.ExpandMore, null, tint = if (c.isDark) c.muted else c.border2)
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             DropdownMenuItem(text = { Text("All categories") }, onClick = { onSelect("all"); open = false })
@@ -320,7 +267,8 @@ internal fun ProductThumb(item: CatalogItem, glyphSize: Int = 56) {
 
 @Composable
 internal fun StockBadge(item: CatalogItem) {
-    val (text, color) = if (item.inStock) (item.availableQty?.let { "${num(it)} left" } ?: "IN") to Emerald600 else "OUT" to Red500
+    // The web prints the bare number ("1200 left"), no grouping.
+    val (text, color) = if (item.inStock) (item.availableQty?.let { "${plainNum(it)} left" } ?: "IN") to Emerald600 else "OUT" to Red500
     Text(
         text, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = color, maxLines = 1,
         modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(color.copy(alpha = 0.08f))
@@ -329,30 +277,13 @@ internal fun StockBadge(item: CatalogItem) {
 }
 
 @Composable
-private fun ProductCard(
-    item: CatalogItem, manageable: Boolean, busy: Boolean,
-    onOpen: () -> Unit, onEdit: () -> Unit, onToggle: () -> Unit, onDelete: () -> Unit,
-) {
+private fun ProductCard(item: CatalogItem, onOpen: () -> Unit) {
     val c = Neema.colors
     Column(
         Modifier.clip(RoundedCornerShape(12.dp)).background(c.bg2).border(1.dp, c.bg3, RoundedCornerShape(12.dp)).clickable(onClick = onOpen),
     ) {
         Box(Modifier.fillMaxWidth().aspectRatio(1f).background(categoryBrush(item.rawCategory))) {
             ProductThumb(item)
-            if (manageable) {
-                var menu by remember { mutableStateOf(false) }
-                Box(Modifier.align(Alignment.TopEnd).padding(4.dp)) {
-                    IconButton(
-                        onClick = { menu = true }, enabled = !busy,
-                        modifier = Modifier.size(32.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.85f)),
-                    ) { Icon(Icons.Outlined.MoreVert, "Manage", tint = Color(0xFF16270C), modifier = Modifier.size(18.dp)) }
-                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(text = { Text("Edit") }, onClick = { menu = false; onEdit() })
-                        DropdownMenuItem(text = { Text(if (item.inStock) "Mark out of stock" else "Mark in stock") }, onClick = { menu = false; onToggle() })
-                        DropdownMenuItem(text = { Text("Delete", color = c.red) }, onClick = { menu = false; onDelete() })
-                    }
-                }
-            }
         }
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.Top) {
@@ -374,8 +305,8 @@ private fun ProductCard(
                 }
             }
             Row(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                Text(item.sku, fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = c.border, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                item.hubProductId?.let { Text("#$it", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = c.border) }
+                Text(item.sku, fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = faint(), modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                item.hubProductId?.let { Text("#$it", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = faint()) }
             }
         }
     }
@@ -406,7 +337,7 @@ private fun PriceAuditBanner(audit: PriceAudit, open: Boolean, onToggle: () -> U
     val fg900 = if (dark) Color(0xFFFDE68A) else amber900
     val fg800 = if (dark) Color(0xFFFCD34D) else amber800
     val fg950 = if (dark) Color(0xFFFEF3C7) else amber950
-    val rate = num(audit.rate)
+    val rate = plainNum(audit.rate)
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
             .background(if (dark) Color(0x33F59E0B) else Color(0xFFFFFBEB))
@@ -437,14 +368,17 @@ private fun PriceAuditBanner(audit: PriceAudit, open: Boolean, onToggle: () -> U
                         Text(
                             buildAnnotatedString {
                                 withStyle(SpanStyle(color = fg950)) { append(g.name) }
-                                withStyle(SpanStyle(color = amber700.copy(alpha = 0.7f))) { append(" · ${g.category}") }
+                                withStyle(SpanStyle(color = (if (dark) Color(0xFFFBBF24) else amber700).copy(alpha = 0.7f))) { append(" · ${g.category}") }
                             },
                             fontSize = 11.sp, modifier = Modifier.weight(2f),
                         )
                         Text(num(g.kes), fontSize = 11.sp, color = fg950, modifier = Modifier.weight(1f), textAlign = TextAlign.End)
                         Text(
                             usd(g.usd), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.End,
-                            color = if (g.usd > g.usdExpected) Color(0xFFB91C1C) else Color(0xFF1D4ED8), modifier = Modifier.weight(1f),
+                            // red-700 / blue-700 by day; red-400 / blue-400 so they read on the night banner.
+                            color = if (g.usd > g.usdExpected) (if (dark) Color(0xFFF87171) else Color(0xFFB91C1C))
+                                else (if (dark) Color(0xFF60A5FA) else Color(0xFF1D4ED8)),
+                            modifier = Modifier.weight(1f),
                         )
                         Text(usd(g.usdExpected), fontSize = 11.sp, color = fg950, modifier = Modifier.weight(1f), textAlign = TextAlign.End)
                     }
@@ -456,7 +390,7 @@ private fun PriceAuditBanner(audit: PriceAudit, open: Boolean, onToggle: () -> U
                     buildAnnotatedString {
                         withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append("Priced per piece, no pack size in the name:") }
                         append(" ")
-                        append(pp.joinToString(", ") { "${it.name} (KES ${it.kes?.let(::num) ?: "?"})" })
+                        append(pp.joinToString(", ") { "${it.name} (KES ${it.kes?.let(::plainNum) ?: "?"})" })
                         append(". Neema says \"each\" and asks how many — she will not invent a pack price. Give these rows a pack quantity and a pack price in the hub.")
                     },
                     fontSize = 12.sp, color = fg900,
