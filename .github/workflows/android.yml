@@ -39,7 +39,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"  # Paparazzi needs a 21+ JVM; the app still targets Java 17 bytecode
 
       - uses: gradle/actions/setup-gradle@v4
 
