@@ -251,6 +251,156 @@ class AuthRepositoryTest {
         assertTrue(fake.calls.isEmpty())
     }
 
+    // ── Round 3: the contract of routers/auth.py and NextAuth v4 ─────────────
+
+    @Test
+    fun theOriginalFastApiMountIsTriedBeforeNextAuth() = runBlocking {
+        // nginx.conf sends every /api/ path to FastAPI, so /api/auth/login is FastAPI there.
+        val access = fakeJwt("a1", 3600)
+        fake.on("POST", "/agent-auth/login", code = 404, body = """{"detail":"Not Found"}""")
+        fake.on("POST", "/auth/login", body = tokens(access, role = "agent", superuser = false))
+
+        val s = auth.login("grace@bethanyhouse.co.ke", "pw")
+
+        assertEquals("direct", s.mode)
+        assertEquals(access, s.accessToken)
+        assertEquals("agent", s.role)
+        assertFalse(s.isSuperuser)
+        assertFalse(fake.called("GET", "/auth/csrf"))
+    }
+
+    @Test
+    fun aWrongPasswordOnTheOriginalMountIsFinalToo() = runBlocking {
+        fake.on("POST", "/agent-auth/login", code = 404, body = """{"detail":"Not Found"}""")
+        fake.on("POST", "/auth/login", code = 401, body = """{"detail":"Invalid credentials"}""")
+        try { auth.login("g@b.co", "nope"); fail() } catch (e: AuthException) { assertTrue(e.message!!.startsWith("Invalid")) }
+        assertFalse(fake.called("GET", "/auth/csrf"))
+    }
+
+    @Test
+    fun nextAuthsPlainTextAnswerToALoginPostFallsThrough() = runBlocking {
+        // v4 answers an unknown action with a 400 text body, not JSON.
+        fake.on("POST", "/agent-auth/login", code = 404, body = """{"detail":"Not Found"}""")
+        fake.on("POST", "/auth/login", code = 400, body = "Error: This action with HTTP POST is not supported by NextAuth.js")
+        installNextAuth(fakeJwt("a1", 3600))
+        assertEquals("nextauth", auth.login("moses@bethanyhouse.co.ke", "pw").mode)
+    }
+
+    @Test
+    fun aServerErrorIsNotReportedAsAWrongPassword() = runBlocking {
+        fake.on("POST", "/agent-auth/login", code = 500, body = """{"detail":"Internal Server Error"}""")
+        try { auth.login("moses@bethanyhouse.co.ke", "pw"); fail() } catch (e: AuthException) {
+            assertEquals("Sign-in is unavailable right now. Please try again shortly.", e.message)
+        }
+        assertFalse("NextAuth would only relay the same failure", fake.called("GET", "/auth/csrf"))
+    }
+
+    @Test
+    fun aTokenResponseWithoutATokenIsNotASession() = runBlocking {
+        fake.on("POST", "/agent-auth/login", body = """{"ok":true}""")
+        fake.on("POST", "/auth/login", body = """{"ok":true}""")
+        installNextAuth(fakeJwt("a1", 3600))
+        assertEquals("nextauth", auth.login("moses@bethanyhouse.co.ke", "pw").mode)
+    }
+
+    @Test
+    fun refreshFallsBackToTheOriginalMount() = runBlocking {
+        store.save(direct(fakeJwt("a1", 60)))
+        val fresh = fakeJwt("a1", 3600)
+        fake.on("POST", "/agent-auth/refresh", code = 404, body = """{"detail":"Not Found"}""")
+        fake.on("POST", "/auth/refresh", body = tokens(fresh, refresh = "r-9"))
+        assertEquals(fresh, auth.forceRefresh())
+        assertEquals("r-9", store.current!!.refreshToken)
+        assertTrue(fake.callsTo("POST", "/auth/refresh").single().body!!.contains("\"refresh_token\":\"r-1\""))
+    }
+
+    @Test
+    fun aDeletedAgentsRefreshIsARealAnswer() = runBlocking {
+        // refresh(): 404 "Agent not found" is the server speaking, not a missing route.
+        store.save(direct(fakeJwt("a1", 60)))
+        fake.on("POST", "/agent-auth/refresh", code = 404, body = """{"detail":"Agent not found"}""")
+        assertNull(auth.forceRefresh())
+        assertFalse(fake.called("POST", "/auth/refresh"))
+    }
+
+    @Test
+    fun aRefreshKeepsTheRoleTheServerNowReports() = runBlocking {
+        store.save(direct(fakeJwt("a1", 60)))
+        fake.on("POST", "/agent-auth/refresh", body = tokens(fakeJwt("a1", 3600), role = "readonly", superuser = false))
+        auth.forceRefresh()
+        assertEquals("readonly", store.current!!.role)
+        assertFalse(store.current!!.isSuperuser)
+    }
+
+    @Test
+    fun chunkedNextAuthSessionCookiesAreAllSent() = runBlocking {
+        val access = fakeJwt("a1", 3600)
+        fake.on("POST", "/agent-auth/login", code = 404, body = """{"detail":"Not Found"}""")
+        fake.reply("GET", "/auth/csrf") { _, _ ->
+            FakeNeema.Reply(200, """{"csrfToken":"c"}""", mapOf("Set-Cookie" to listOf("__Host-next-auth.csrf-token=c%7Ch; Path=/")))
+        }
+        fake.reply("POST", "/auth/callback/credentials") { _, _ ->
+            FakeNeema.Reply(302, "", mapOf(
+                "Location" to listOf("https://neema.test/dashboard"),
+                "Set-Cookie" to listOf(
+                    "__Secure-next-auth.session-token.0=PART-A; Path=/; HttpOnly; Secure",
+                    "__Secure-next-auth.session-token.1=PART-B; Path=/; HttpOnly; Secure",
+                    "__Secure-next-auth.callback-url=https%3A%2F%2Fneema.test; Path=/",
+                ),
+            ))
+        }
+        var seen = ""
+        fake.reply("GET", "/auth/session") { req, _ ->
+            seen = req.header("Cookie").orEmpty()
+            FakeNeema.Reply(200, """{"user":{"email":"moses@bethanyhouse.co.ke","id":"a1"},"expires":"2099-01-01T00:00:00.000Z","accessToken":"$access"}""",
+                // v4 re-issues the session: here it now fits one cookie, and the chunk is cleared.
+                mapOf("Set-Cookie" to listOf(
+                    "__Secure-next-auth.session-token=WHOLE; Path=/; HttpOnly; Secure",
+                    "__Secure-next-auth.session-token.0=; Max-Age=0; Path=/",
+                    "__Secure-next-auth.session-token.1=; Max-Age=0; Path=/",
+                )))
+        }
+
+        val s = auth.login("moses@bethanyhouse.co.ke", "pw")
+
+        assertEquals("__Secure-next-auth.session-token.0=PART-A; __Secure-next-auth.session-token.1=PART-B", seen)
+        assertEquals("__Secure-next-auth.session-token=WHOLE", s.nextAuthCookie)
+        assertEquals(access, s.accessToken)
+        assertEquals("route.ts sends no name: the email stands in", "moses@bethanyhouse.co.ke", s.name)
+    }
+
+    @Test
+    fun aStaleCsrfIsNotAWrongPassword() = runBlocking {
+        fake.on("POST", "/agent-auth/login", code = 404, body = """{"detail":"Not Found"}""")
+        installNextAuth(fakeJwt("a1", 3600))
+        fake.reply("POST", "/auth/callback/credentials") { _, _ -> FakeNeema.Reply(200, """{"url":"https://neema.test/api/auth/signin?csrf=true"}""") }
+        try { auth.login("moses@bethanyhouse.co.ke", "pw"); fail() } catch (e: AuthException) {
+            assertEquals("Sign-in is unavailable right now. Please try again shortly.", e.message)
+        }
+    }
+
+    @Test
+    fun aNextAuthRefreshKeepsTheRoleFromAdminMe() = runBlocking {
+        val fresh = fakeJwt("a1", 3600)
+        installNextAuth(fresh)
+        store.save(direct(fakeJwt("a1", 60)).copy(refreshToken = null, mode = "nextauth", nextAuthCookie = "__Secure-next-auth.session-token=SESS-1"))
+        auth.updateProfile("Moses Mwicigi", "moses@bethanyhouse.co.ke", role = "admin", isSuperuser = true)
+        assertEquals(fresh, auth.forceRefresh())
+        assertEquals("the session payload has no role; /admin/me's stays", "admin", store.current!!.role)
+        assertTrue(store.current!!.isSuperuser)
+    }
+
+    @Test
+    fun updateProfileTakesRoleAndSuperuserWhenGiven() {
+        store.save(direct().copy(role = "agent", isSuperuser = false, mode = "nextauth"))
+        auth.updateProfile("Moses M.", "m@b.co")
+        assertEquals("agent", store.current!!.role)
+        auth.updateProfile("Moses M.", "m@b.co", role = "admin", isSuperuser = true)
+        assertEquals("admin", store.current!!.role)
+        assertTrue(store.current!!.isSuperuser)
+        assertEquals("Moses M.", store.current!!.name)
+    }
+
     @Test
     fun jwtClaimsAreReadWithoutVerifying() {
         val t = fakeJwt("agent-9", 100)

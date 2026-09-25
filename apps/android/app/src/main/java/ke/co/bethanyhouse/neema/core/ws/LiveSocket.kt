@@ -23,12 +23,69 @@ import okhttp3.WebSocketListener
 
 /**
  * The dashboard's live feed: a plain FastAPI WebSocket at `/ws/{agent_id}`
- * that relays every `ws:channel:*` Redis broadcast (new messages, intercept
- * changes, notifications, incoming calls…). Port of `lib/websocket.tsx`:
- * reconnect 2s after any close, JSON `{"type":"ping"}` every 25s.
+ * (routers/websocket.py) that relays every `ws:channel:*` Redis broadcast to
+ * every connected client. Port of `lib/websocket.tsx`: reconnect 2s after any
+ * close, JSON `{"type":"ping"}` every 25s (the server answers
+ * `{"type":"pong"}`, dropped here; anything that isn't JSON makes the server
+ * close the socket, so only JSON is ever sent).
  *
- * Consumers collect [events] and filter on `type` / `event` themselves, the
- * same way the web's `ws.on("event", …)` handlers do.
+ * The socket is not filtered per agent or per conversation: every frame
+ * reaches every client, and consumers collect [events] and filter on `type` /
+ * `event` / `conversationId` themselves, as the web's `ws.on("event", …)`
+ * handlers do. Frames are not typed here on purpose — the backend adds keys
+ * freely — but this is the complete set it publishes today (grep
+ * `ws:channel` / `broadcast(` / `_broadcast(` under apps/api/app):
+ *
+ * ## Conversation frames — channel `ws:channel:{conversation_id}`
+ * Keys are camelCase. `conversationId` is always the conversation UUID.
+ *
+ * - `new_message` — a message landed in a thread. `{type, conversationId,
+ *   sender: "user"|"ai"|"human_agent", text, id?, waId?, channel?, direction?,
+ *   mediaType?, mediaId?, mediaUrl?, mediaCaption?, mimeType?, filename?,
+ *   replyTo?, translation?, translatedFrom?}`. Only the AI's own text reply
+ *   (n8n_bridge.outbound_gate) carries the DB `id`; every other sender omits
+ *   it, and most omit `direction` (read absent as "outbound" unless
+ *   `sender == "user"`). Senders: n8n_bridge (inbound WhatsApp, AI replies),
+ *   conversation.py (agent reply / AI message / agent media / transfer
+ *   notice), meta_webhook (Messenger / Instagram / Facebook inbound), sms.py,
+ *   public.py (website measurement form), agent/tools.py (product photo).
+ * - `message` — the OLDER shape some channels still use: `{type,
+ *   conversationId, text, direction: "inbound"|"outbound", waId?, channel?,
+ *   sender?, reply_to?}` (web_chat.py and manychat / tiktok inbound;
+ *   n8n_bridge outbound channel sends and comment replies). The web ignores
+ *   it; treat it as "this thread moved".
+ * - `intercept_changed` — the thread's mode changed. `{type, conversationId,
+ *   mode?: "ai"|"human"|"paused", assignedAgentId?: string|null,
+ *   assignedAgentName?, eventKind: "intercept"|"release"|"pause"|"transfer"|
+ *   "escalated"|"flag", eventAgentName?, eventReason?, eventNote?}`. `mode` is
+ *   missing on an AI escalation (conversation.record_escalation).
+ * - `ai_draft_ready` — a suggested reply for a human-held thread. `{type,
+ *   conversationId, draft, waId?}` (n8n_bridge, copilot, agent/runtime).
+ * - `translations` — the background translator finished. `{type,
+ *   conversationId, items: [{id, text, lang: string|null}]}` (translate.py).
+ * - `history_cleared` — `{type, conversationId, clearedBy}` (admin.py
+ *   clear_chat_history).
+ *
+ * ## Agent notifications — channel `ws:channel:agents:all`
+ * Always `{event: "notification", type, title, body}` plus a pointer to the
+ * thread that is spelled differently by each sender: `conversationId`,
+ * `conv_id`, `wa_id` or `waId`. `type` is one of:
+ * `new_conversation` (wa_native), `new_message` (sms.py — note the same name
+ * as the conversation frame, told apart by `event`), `human_transfer`
+ * (n8n_bridge media, + `mediaType`), `media_escalation` (wa_native),
+ * `intercept` (pick-up / AI escalation), `system` (released to AI),
+ * `draft_ready` (agent/runtime), `availability_check` (agent/tools),
+ * `take_back` (copilot), `planned_action` (actions.py), `standup`
+ * (actions.py), `hub_event` (hub_events.py), `selfcheck` (selfcheck.py).
+ * `order_update`, `transfer` and `daily_summary` are named by the web's
+ * AgentNotification type but no longer sent by anything.
+ *
+ * ## Calls — channel `ws:channel:calls` (whatsapp_webhook.py)
+ * Keys are snake_case.
+ * - `incoming_call` — `{type, call_id, from, name: string|null, at}` (`at` is
+ *   Meta's epoch-seconds timestamp, a string).
+ * - `outbound_answer` — `{type, call_id, sdp}`: the customer picked up our call.
+ * - `call_ended` — `{type, call_id, status, duration: number|null}`.
  */
 class LiveSocket(
     /** An OkHttpClient in the app; a fake in tests. */
