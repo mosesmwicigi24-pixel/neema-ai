@@ -40,6 +40,14 @@ class LiveService : Service() {
             else -> ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
         }
         runCatching { ServiceCompat.startForeground(this, NOTIF_ID, n, type) }
+            .recoverCatching {
+                // The microphone type throws on API 34+ without RECORD_AUDIO; keep the
+                // live connection alive with the plain type rather than dropping it.
+                if (type == 0 || !inCall) throw it
+                val plain = if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING
+                    else ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                ServiceCompat.startForeground(this, NOTIF_ID, n, plain)
+            }
             .onFailure { stopSelf() }
         return START_STICKY
     }
