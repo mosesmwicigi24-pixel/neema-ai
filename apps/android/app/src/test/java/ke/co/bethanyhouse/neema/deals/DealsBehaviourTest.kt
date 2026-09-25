@@ -90,7 +90,8 @@ class DealsBehaviourTest {
         vm.act("x1", "approve")
         val t = toasts.all.last()
         assertEquals(ToastType.Error, t.type)
-        assertEquals("approve failed", t.message)
+        // A 409 carries the server's reason (crm.py approve_action), and the queue reloads.
+        assertEquals("approve failed — Action is sent", t.message)
         assertTrue(vm.acting.value.isEmpty())
     }
 

@@ -1,132 +1,322 @@
 package ke.co.bethanyhouse.neema.testing.fixtures
 
 import ke.co.bethanyhouse.neema.testing.FakeNeema
-import ke.co.bethanyhouse.neema.testing.Fixtures.ago
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import java.time.Instant
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 
 /**
  * Orders, deals, planned actions and leads for the Orders / Deals / Leads
- * screens, shaped exactly like admin.py `list_orders` (bare OrderEvent rows)
- * and crm.py `list_deals` / `list_actions` / `list_leads`.
+ * screens, built from what the backend handlers actually put on the wire
+ * (round 3: API contract). Each builder cites its handler.
+ *
+ * Serialisation facts these fixtures reproduce:
+ *  - Timestamps come from `timestamptz` columns, so Python's `isoformat()`
+ *    prints `2026-03-14T09:30:00.123456+00:00` — an explicit offset, six
+ *    fractional digits, and no fraction at all when the microseconds are 0.
+ *  - A `Numeric(12,2)` column (`subtotal`, `hub_total`) reaches the client
+ *    through FastAPI's `jsonable_encoder`, whose `decimal_encoder` turns
+ *    `Decimal("9800.00")` into the float `9800.0`.
+ *  - `list_orders` returns bare ORM rows: EVERY column is present (null when
+ *    unset), and nothing that isn't a column (no `contact_name`).
  *
  * Anything printed as an absolute date uses a fixed instant so snapshots are
  * stable day to day; "5m ago" / "in 3h" labels are relative to now.
  */
 object SalesFixtures {
-    /** A fixed creation time for the order detail (its "Date" cell prints the day). */
-    const val FIXED_AT = "2026-03-14T09:30:00Z"
+    // ── wire helpers ────────────────────────────────────────────────────────
+
+    private val PY_MICROS = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSSSS").withZone(ZoneOffset.UTC)
+    private val PY_SECONDS = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss").withZone(ZoneOffset.UTC)
+
+    /** Python `datetime.isoformat()` of an aware UTC datetime (asyncpg hands back tz=UTC). */
+    fun pyIso(i: Instant): String =
+        (if (i.nano / 1000 == 0) PY_SECONDS.format(i) else PY_MICROS.format(i)) + "+00:00"
+
+    /** The same for a NAIVE datetime (`datetime.utcnow()`): no offset at all. */
+    fun pyNaive(i: Instant): String = if (i.nano / 1000 == 0) PY_SECONDS.format(i) else PY_MICROS.format(i)
+
+    /** [minutes] ago, as the server prints it (with microseconds). */
+    fun ago(minutes: Long): String = pyIso(Instant.now().minus(minutes, ChronoUnit.MINUTES).plusNanos(123_456_000))
 
     fun inHours(h: Long, extraMin: Long = 20): String =
-        Instant.now().plus(h * 60 + extraMin, ChronoUnit.MINUTES).toString()
+        pyIso(Instant.now().plus(h * 60 + extraMin, ChronoUnit.MINUTES).plusNanos(654_321_000))
 
+    /** A fixed creation time for the order detail (its "Date" cell prints the day); 0 µs → no fraction. */
+    const val FIXED_AT = "2026-03-14T09:30:00+00:00"
+
+    private fun el(v: Any?): JsonElement = when (v) {
+        null -> JsonNull
+        is JsonElement -> v
+        is String -> JsonPrimitive(v)
+        is Number -> JsonPrimitive(v)
+        is Boolean -> JsonPrimitive(v)
+        is Map<*, *> -> JsonObject(v.entries.associate { (k, x) -> k.toString() to el(x) })
+        is List<*> -> JsonArray(v.map(::el))
+        else -> error("unsupported $v")
+    }
+
+    fun obj(vararg pairs: Pair<String, Any?>): JsonObject = el(mapOf(*pairs)) as JsonObject
+
+    // ── Orders ──────────────────────────────────────────────────────────────
+
+    /**
+     * An n8n (Tier 1) cart line — n8n_bridge.py `upsert_order_event` stores
+     * `OrderEventDto.items` verbatim, in the `{name, qty, unit, total, sku}`
+     * shape the web's `ApiOrder` was written against.
+     */
+    fun legacyLine(name: String, qty: Int, unit: Int, sku: String? = null) =
+        obj("name" to name, "qty" to qty, "unit" to unit, "total" to qty * unit, "sku" to sku)
+
+    /**
+     * A Tier 2 cart line — agent/tools.py `_cart_update` rows, persisted as
+     * `OrderEvent.items` by `create_order`: `unit_price`, no `unit`, no `total`.
+     */
+    fun agentLine(name: String, qty: Int, unitPrice: Double, sku: String = "", productId: Int = 412) =
+        obj(
+            "hub_product_id" to productId, "name" to name, "sku" to sku, "qty" to qty,
+            "unit_price" to unitPrice, "price_usd" to unitPrice / 130.0,
+            "prices" to mapOf("KES" to unitPrice, "USD" to unitPrice / 130.0),
+            "in_stock" to true, "made_to_order" to false,
+        )
+
+    /**
+     * One row of GET /admin/orders — admin.py `list_orders` returns
+     * `select(OrderEvent)` rows through `jsonable_encoder`: every column of
+     * models/order_event.py, in the model's defaults unless set.
+     */
     fun order(
         id: String,
         waId: String,
-        name: String?,
         status: String,
-        subtotal: Int,
-        items: String = """[{"name":"Clergy Shirt — Black, 16 inch","qty":1,"unit":$subtotal,"total":$subtotal,"sku":"CS-BLK-16"}]""",
+        subtotal: Double,
+        items: List<JsonObject> = listOf(legacyLine("Clergy Shirt — Black, 16 inch", 1, subtotal.toInt(), "CS-BLK-16")),
         channel: String = "whatsapp",
         createdAt: String = ago(60),
-        hub: String = "",
+        eventType: String? = "confirmed",
+        currency: String = "KES",
+        paymentStatus: String = "unpaid",
+        fulfillmentStatus: String = "pending",
         replyText: String? = null,
-    ) = """{"id":"$id","wa_id":"$waId","session_id":null,"event_type":"order","items":$items,"subtotal":$subtotal,"currency":"KES",
-        "status":"$status","payment_status":"pending","fulfillment_status":"unfulfilled","reply_text":${replyText?.let { "\"$it\"" }},
-        "channel":"$channel","state":{},"created_at":"$createdAt","updated_at":"$createdAt","contact_name":${name?.let { "\"$it\"" }}$hub}"""
+        sessionId: String? = null,
+        hub: Map<String, Any?> = emptyMap(),
+    ): String {
+        val row = linkedMapOf<String, Any?>(
+            "id" to id, "wa_id" to waId, "person_id" to "5b0e6a52-3c1d-4f7e-9a44-${waId.takeLast(12).padStart(12, '0')}",
+            "session_id" to sessionId, "event_type" to eventType, "items" to items,
+            "subtotal" to subtotal, "currency" to currency, "status" to status,
+            "payment_status" to paymentStatus, "fulfillment_status" to fulfillmentStatus,
+            "reply_text" to replyText, "channel" to channel, "state" to emptyMap<String, Any?>(),
+            "created_at" to createdAt, "updated_at" to createdAt,
+            "hub_order_id" to null, "hub_order_number" to null, "hub_push_status" to null,
+            "hub_payment_url" to null, "hub_currency" to null, "hub_total" to null,
+            "hub_last_error" to null, "hub_pushed_at" to null, "hub_public_url" to null,
+            "hub_public_token" to null, "short_ref" to null, "hub_status" to null,
+            "hub_payment_status" to null, "hub_fulfillment_status" to null, "hub_status_at" to null,
+        )
+        row.putAll(hub)
+        return el(row).toString()
+    }
 
-    /** The order detail's subject: pushed to the hub, three items, a note. */
+    /** The hub columns agent/tools.py `create_order` sets on a pushed order. */
+    fun pushed(number: Int, total: Double, at: String = FIXED_AT, withToken: Boolean = true) = buildMap<String, Any?> {
+        put("hub_order_id", number); put("hub_order_number", "BH-$number"); put("hub_push_status", "pushed")
+        put("hub_currency", "KES"); put("hub_total", total); put("hub_pushed_at", at)
+        if (withToken) {
+            put("hub_public_token", "tok$number"); put("hub_public_url", "https://hub.bethanyhouse.co.ke/order/tok$number")
+            put("short_ref", "r$number")
+        }
+    }
+
+    /**
+     * What services/hub_events.py `_mirror_order_state` writes when the hub
+     * reports: `hub_status` / `hub_payment_status` / `hub_fulfillment_status`
+     * + `hub_status_at` (never our own `status`).
+     */
+    fun mirrored(status: String, payment: String? = null, fulfillment: String? = null, at: String = FIXED_AT) =
+        mapOf("hub_status" to status, "hub_payment_status" to payment, "hub_fulfillment_status" to fulfillment, "hub_status_at" to at)
+
+    /**
+     * The order detail's subject: an n8n order pushed to the hub by
+     * n8n_bridge.py `_maybe_push_order_to_hub` (legacy priced lines), then
+     * mirrored as processing/paid by the hub, with the reply Neema sent.
+     */
     val linkedOrder = order(
-        "2f6c1a90-0000-4000-8000-00000a1b2c3d", "254712345678", "Fr. Peter Kamau", "confirmed", 9800,
-        items = """[{"name":"Clergy Shirt — Black, 16 inch","qty":2,"unit":3500,"total":7000,"sku":"CS-BLK-16"},
-          {"name":"Roman Collar Tab","qty":4,"unit":250,"total":1000,"sku":"RC-TAB"},
-          {"name":"Delivery — Nyeri","qty":1,"unit":1800,"total":1800}]""",
-        createdAt = FIXED_AT,
-        hub = ""","hub_order_id":1042,"hub_order_number":"BH-1042","hub_push_status":"pushed","hub_status":"processing",
-          "hub_payment_status":"paid","hub_public_token":"tok1042","hub_public_url":"https://hub.bethanyhouse.co.ke/o/tok1042"""",
+        "254712345678_1773480600000", "254712345678", "confirmed", 9800.0,
+        items = listOf(
+            legacyLine("Clergy Shirt — Black, 16 inch", 2, 3500, "CS-BLK-16"),
+            legacyLine("Roman Collar Tab", 4, 250, "RC-TAB"),
+            legacyLine("Delivery — Nyeri", 1, 1800),
+        ),
+        createdAt = FIXED_AT, sessionId = "254712345678_1773480000",
+        hub = pushed(1042, 9800.0) + mirrored("processing", "paid", "unfulfilled"),
         replyText = "Asante Father! Your order BH-1042 is confirmed — we deliver to Nyeri on Friday.",
     )
 
-    /** A cart that never reached the hub: the push failed with the hub's reason. */
-    val failedOrder = order(
-        "7d1e0b22-0000-4000-8000-0000000f41ed", "254722000111", "Rev. Mary Achieng", "open", 12500,
-        items = """[{"name":"Cassock — Purple, L","qty":1,"unit":12500,"total":12500,"sku":"CAS-PUR-L"}]""",
-        channel = "messenger", createdAt = FIXED_AT,
-        hub = ""","hub_push_status":"failed","hub_last_error":"Variant CAS-PUR-L is out of stock in the hub (0 available)"""",
+    /**
+     * An order the agent placed (agent/tools.py `create_order`): status
+     * "pending", Tier 2 lines that carry `unit_price` only.
+     */
+    val agentOrder = order(
+        "254799111222_1773484200000", "254799111222", "pending", 145000.0,
+        items = listOf(
+            agentLine("Mitre — Gold embroidered", 1, 85000.0, "MIT-GLD"),
+            agentLine("Cope — Festal white", 1, 60000.0, "COP-WHT"),
+        ),
+        createdAt = FIXED_AT, hub = pushed(1050, 145000.0),
     )
 
-    /** The list's first page: every status, hub states, channels, a long item list. */
+    /** A cart the hub refused: n8n_bridge.py `_save(hub_push_status="failed", hub_last_error=str(exc)[:500])`. */
+    val failedOrder = order(
+        "254722000111_1773480600000", "254722000111", "open", 12500.0,
+        items = listOf(legacyLine("Cassock — Purple, L", 1, 12500, "CAS-PUR-L")),
+        createdAt = FIXED_AT,
+        hub = mapOf("hub_push_status" to "failed", "hub_last_error" to "Variant CAS-PUR-L is out of stock in the hub (0 available)"),
+    )
+
+    /** The list's first page: every status, hub states, channels, both line shapes, a cart snapshot. */
     val orders get() = listOf(
-        order("o1", "254712345678", "Fr. Peter Kamau", "confirmed", 8000,
-            items = """[{"name":"Clergy Shirt — Black, 16 inch","qty":2,"unit":3500,"total":7000,"sku":"CS-BLK-16"},
-              {"name":"Roman Collar Tab","qty":4,"unit":250,"total":1000},{"name":"Stole — Green","qty":1,"unit":0,"total":0}]""",
-            createdAt = ago(45),
-            hub = ""","hub_order_id":1042,"hub_order_number":"BH-1042","hub_push_status":"pushed","hub_status":"processing","hub_public_token":"tok1042""""),
-        order("o2", "254722000111", "Rev. Mary Achieng", "open", 12500, channel = "messenger", createdAt = ago(180),
-            items = """[{"name":"Cassock — Purple, L","qty":1,"unit":12500,"total":12500}]""",
-            hub = ""","hub_push_status":"failed","hub_last_error":"Variant out of stock in hub""""),
-        order("o3", "255754333222", "Deacon John Mushi", "delivered", 4800, createdAt = ago(60 * 30),
-            items = """[{"name":"Stole — Green","qty":1,"unit":4800,"total":4800}]""",
-            hub = ""","hub_order_id":1031,"hub_order_number":"BH-1031","hub_status":"completed""""),
-        order("o4", "254700999888", "Sr. Lucy Njeri", "cancelled", 18000, channel = "instagram", createdAt = ago(60 * 72),
-            items = """[{"name":"Alb — White, M","qty":3,"unit":6000,"total":18000}]"""),
-        order("o5", "254733444555", null, "pending", 3500, channel = "facebook", createdAt = ago(60 * 5)),
-        order("o6", "254799111222", "Bishop Samuel Kariuki of the Anglican Diocese of Mount Kenya West", "confirmed", 145000,
-            createdAt = ago(60 * 8), channel = "whatsapp",
-            items = """[{"name":"Mitre — Gold embroidered","qty":1,"unit":85000,"total":85000},{"name":"Cope — Festal white","qty":1,"unit":60000,"total":60000}]""",
-            hub = ""","hub_order_id":1050,"hub_order_number":"BH-1050","hub_status":"shipped""""),
+        order("o1", "254712345678", "confirmed", 8000.0,
+            items = listOf(legacyLine("Clergy Shirt — Black, 16 inch", 2, 3500, "CS-BLK-16"),
+                legacyLine("Roman Collar Tab", 4, 250), legacyLine("Stole — Green", 1, 0)),
+            createdAt = ago(45), hub = pushed(1042, 8000.0) + mirrored("processing")),
+        order("o2", "254722000111", "open", 12500.0, createdAt = ago(180),
+            items = listOf(legacyLine("Cassock — Purple, L", 1, 12500)),
+            hub = mapOf("hub_push_status" to "failed", "hub_last_error" to "Variant out of stock in hub")),
+        order("o3", "255754333222", "delivered", 4800.0, createdAt = ago(60 * 30),
+            items = listOf(legacyLine("Stole — Green", 1, 4800)),
+            hub = pushed(1031, 4800.0, withToken = false) + mirrored("completed", "paid", "fulfilled")),
+        order("o4", "254700999888", "cancelled", 18000.0, channel = "instagram", createdAt = ago(60 * 72),
+            items = listOf(agentLine("Alb — White, M", 3, 6000.0))),
+        // An n8n cart snapshot: no lines, status "open", event_type "cart".
+        order("o5", "254733444555", "open", 3500.0, channel = "whatsapp", createdAt = ago(60 * 5),
+            items = emptyList(), eventType = "cart"),
+        order("o6", "260977123456", "pending", 1450.0, currency = "ZMW",
+            createdAt = ago(60 * 8), channel = "messenger",
+            items = listOf(agentLine("Mitre — Gold embroidered", 1, 850.0), agentLine("Cope — Festal white", 1, 600.0)),
+            hub = pushed(1050, 1450.0) + mapOf("hub_currency" to "ZMW") + mirrored("shipped")),
     )
 
     /** 100 orders: seven pages of fifteen, so the pager windows. */
     val manyOrders get() = (1..100).map { i ->
         val st = listOf("open", "confirmed", "delivered", "cancelled")[i % 4]
-        order("m$i", "2547${(10000000 + i * 7919).toString().take(8)}", "Customer $i", st, 1000 * i, createdAt = ago(i * 37L))
+        order("m$i", "2547${(10000000 + i * 7919).toString().take(8)}", st, 1000.0 * i, createdAt = ago(i * 37L))
     }
 
     fun ordersJson(list: List<String>) = list.joinToString(",", "[", "]")
 
+    /**
+     * PATCH /admin/orders/{id} — admin.py `update_order` sets the allowed
+     * keys and returns the same ORM row. `updated_at`'s Python-side
+     * `onupdate=datetime.utcnow` is what the instance holds after the flush,
+     * so it comes back NAIVE (no offset), unlike every other timestamp.
+     */
+    fun patchedOrder(id: String, status: String): String =
+        order(id, "254700000000", status, 1000.0, createdAt = FIXED_AT,
+            hub = mapOf("updated_at" to pyNaive(Instant.now().plusNanos(250_000_000))))
+
+    // ── Deals & planned actions ─────────────────────────────────────────────
+
+    /**
+     * GET /admin/deals — crm.py `list_deals`: `{"deals": [...]}`. `items` is
+     * services/deals.py's `items_snapshot` (`{name, qty, price}`, where `price`
+     * is the cart line's `price` — absent on Tier 2 lines, so null);
+     * `next_action` is the scribe's dict (owner "ai") or null.
+     */
     val deals get() = """{"deals":[
-      {"id":"d1","conversation_id":"c1","customer":"Fr. Peter Kamau","wa_id":"254712345678","channel":"whatsapp","title":"2× Clergy Shirt (Black 16\")",
-       "items":[{"name":"Clergy Shirt","qty":2,"price":3500}],"stage":"proposal","blocking":"Needs delivery date confirmed",
-       "next_action":{"kind":"follow_up","owner":"ai","due_at":"${inHours(3)}","note":"Confirm Nyeri delivery"},"guidance":"Offer free delivery to Nyeri","status":"open","updated_at":"${ago(12)}"},
-      {"id":"d2","conversation_id":"c2","customer":"Rev. Mary Achieng","wa_id":"254722000111","channel":"messenger","title":"Purple cassock",
+      {"id":"d1","conversation_id":"c1","customer":"Fr. Peter Kamau","wa_id":"254712345678","channel":"whatsapp","title":"Clergy Shirt — Black, 16 inch",
+       "items":[{"name":"Clergy Shirt — Black, 16 inch","qty":2,"price":null}],"stage":"proposal","blocking":"Neema owes the customer: confirm the Nyeri delivery date",
+       "next_action":{"kind":"follow_up","owner":"ai","due_at":"${inHours(3)}","note":"confirm the Nyeri delivery date"},"guidance":"Offer free delivery to Nyeri","status":"open","updated_at":"${ago(12)}"},
+      {"id":"d2","conversation_id":"c2","customer":"Rev. Mary Achieng","wa_id":"254722000111","channel":"messenger","title":"Cassock — Purple, L",
        "items":[],"stage":"qualified","blocking":null,"next_action":null,"guidance":null,"status":"open","updated_at":"${ago(90)}"},
       {"id":"d3","conversation_id":"c6","customer":"Deacon James Mwangi","wa_id":"254733444555","channel":"whatsapp","title":"Made-to-measure alb for the ordination on the 12th — needs chest, sleeve and length",
-       "items":[],"stage":"new","blocking":"Waiting for measurements — he promised to send them tonight after choir practice","next_action":{"kind":"customer_promise","owner":"human","due_at":"${inHours(20)}"},"guidance":null,"status":"open","updated_at":"${ago(300)}"},
+       "items":[],"stage":"new","blocking":"Waiting on the customer (tonight) — he promised to send the measurements after choir practice","next_action":{"kind":"customer_promise","owner":"ai","due_at":"${inHours(20)}","note":"they said: tonight"},"guidance":null,"status":"open","updated_at":"${ago(300)}"},
       {"id":"d4","conversation_id":null,"customer":"Unknown","wa_id":null,"channel":null,"title":"Choir robes ×24",
-       "items":[],"stage":"negotiation","blocking":null,"next_action":{"kind":"follow_up","owner":"ai","due_at":"${ago(30)}"},"guidance":null,"status":"open","updated_at":"${ago(60 * 26)}"}
+       "items":[],"stage":"negotiation","blocking":null,"next_action":{"kind":"follow_up","owner":"ai","due_at":"${ago(30)}","note":"send the robe quote"},"guidance":null,"status":"open","updated_at":"${ago(60 * 26)}"}
     ]}"""
 
-    val wonDeals = """{"deals":[{"id":"w1","customer":"St. Mark's","stage":"won","status":"won"},{"id":"w2","customer":"Fr. Otieno","stage":"won","status":"won"}]}"""
+    /** GET /admin/deals?status=won — the same row shape. */
+    val wonDeals get() = """{"deals":[
+      {"id":"w1","conversation_id":"c7","customer":"St. Mark's","wa_id":"254700111222","channel":"whatsapp","title":"Choir robes","items":[],"stage":"won","blocking":null,"next_action":null,"guidance":null,"status":"won","updated_at":"${ago(600)}"},
+      {"id":"w2","conversation_id":null,"customer":"Unknown","wa_id":null,"channel":null,"title":null,"items":[],"stage":"won","blocking":null,"next_action":null,"guidance":null,"status":"won","updated_at":null}
+    ]}"""
 
+    /**
+     * GET /admin/actions — crm.py `list_actions`: `{"actions": [...]}`,
+     * `due_at` is never null (a NOT NULL column), `created_by` is the model
+     * default "ai".
+     */
     val actions get() = """{"actions":[
-      {"id":"x1","deal_id":"d1","conversation_id":"c1","due_at":null,"kind":"follow_up","reason":"Father asked about Friday delivery 2h ago and hasn't had an answer",
-       "draft":"Hello Father Peter 🙏 Just confirming — we can deliver both shirts to Nyeri by Friday. Shall I send the M-Pesa details?","status":"needs_approval","created_by":"neema"},
-      {"id":"x2","deal_id":"d3","conversation_id":"c6","due_at":"${inHours(5)}","kind":"customer_promise","reason":"He said he'd send measurements tonight",
-       "draft":null,"status":"planned","created_by":"neema"}
+      {"id":"x1","deal_id":"d1","conversation_id":"c1","due_at":"${ago(20)}","kind":"follow_up","reason":"Neema promised: confirm Friday delivery to Nyeri",
+       "draft":"Hello Father Peter 🙏 Just confirming — we can deliver both shirts to Nyeri by Friday. Shall I send the M-Pesa details?","status":"needs_approval","created_by":"ai"},
+      {"id":"x2","deal_id":"d3","conversation_id":"c6","due_at":"${inHours(5)}","kind":"customer_promise","reason":"Customer said they'd respond (tonight) — warm check-in if they haven't",
+       "draft":null,"status":"planned","created_by":"ai"}
     ]}"""
 
+    // ── Leads ───────────────────────────────────────────────────────────────
+
+    /** crm.py `_customer_tier`. */
+    private fun tier(orders: Int, spent: Double, daysSinceLast: Int?): Pair<String, String> {
+        val dsl = daysSinceLast ?: 0
+        val t = when {
+            orders == 0 -> "prospect"
+            orders >= 3 && dsl > 120 -> "at_risk"
+            spent >= 500_000 || orders >= 20 -> "vip"
+            orders >= 5 -> "loyal"
+            orders <= 1 -> "new"
+            else -> "regular"
+        }
+        return t to mapOf("prospect" to "Prospect", "new" to "New", "regular" to "Regular", "loyal" to "Loyal", "vip" to "VIP", "at_risk" to "At risk").getValue(t)
+    }
+
+    /**
+     * One row of GET /admin/leads — crm.py `list_leads` (a bare array):
+     * `lead_score` an int, `total_spent` the float sum of subtotals (the int
+     * `0` when there are no orders — Python's `sum([])`), `phone` null when
+     * the wa_id isn't a plausible phone, `buying_rhythm` from `_buying_rhythm`
+     * (nulls under two orders), `notes` = `state["crm_notes"]`.
+     */
     fun lead(
-        id: String, waId: String?, name: String?, stage: String, score: Int, spent: Int = 0, orders: Int = 0,
-        channels: String = """["whatsapp"]""", tags: String = "[]", seen: String? = ago(30), notes: String? = null,
-        email: String? = null, location: String? = null,
-    ) = """{"id":"$id","wa_id":${waId?.let { "\"$it\"" }},"name":${name?.let { "\"$it\"" }},"phone":${waId?.let { "\"$it\"" }},
-        "email":${email?.let { "\"$it\"" }},"location":${location?.let { "\"$it\"" }},"lead_stage":"$stage","lead_score":$score,
-        "tier":"regular","tier_label":"Regular","tags":$tags,"channels":$channels,"total_orders":$orders,"total_spent":$spent,
-        "buying_rhythm":{"days_since_last":12,"avg_interval_days":30,"cadence_label":"monthly","overdue":false},
-        "last_seen_at":${seen?.let { "\"$it\"" }},"notes":${notes?.let { "\"$it\"" }}}"""
+        id: String, waId: String, name: String?, stage: String, score: Int, spent: Double = 0.0, orders: Int = 0,
+        channels: List<String> = listOf("whatsapp"), tags: Any? = emptyList<String>(), seen: String? = ago(30),
+        notes: String? = null, email: String? = null, location: String? = null, phone: String? = waId,
+        daysSinceLast: Int? = if (orders > 0) 12 else null, avgInterval: Double? = if (orders >= 2) 30.5 else null,
+    ): String {
+        val (t, label) = tier(orders, spent, daysSinceLast)
+        return el(linkedMapOf(
+            "id" to id, "wa_id" to waId, "name" to name, "phone" to phone, "email" to email, "location" to location,
+            "lead_stage" to stage, "lead_score" to score, "tier" to t, "tier_label" to label,
+            "tags" to tags, "channels" to channels, "total_orders" to orders,
+            "total_spent" to (if (orders == 0) 0 else spent),
+            "buying_rhythm" to mapOf(
+                "days_since_last" to daysSinceLast, "avg_interval_days" to avgInterval,
+                "cadence_label" to avgInterval?.let { "about every ${Math.round(it / 7).coerceAtLeast(1)} weeks" },
+                "overdue" to false,
+            ),
+            "last_seen_at" to seen, "notes" to notes,
+        )).toString()
+    }
 
     val leads get() = listOf(
-        lead("u1", "254712345678", "Fr. Peter Kamau", "proposal", 86, spent = 24500, orders = 3,
-            channels = """["whatsapp","facebook"]""", tags = """["vip","clergy","repeat-buyer","nyeri"]""",
+        lead("u1", "254712345678", "Fr. Peter Kamau", "proposal", 86, spent = 24500.0, orders = 3,
+            channels = listOf("whatsapp", "facebook"), tags = listOf("vip", "clergy", "repeat-buyer", "nyeri"),
             notes = "Buys for the whole parish. Prefers delivery on Fridays.", email = "peter@acknyeri.org", location = "Nyeri"),
-        lead("u2", "254722000111", "Rev. Mary Achieng", "qualified", 55, spent = 0, channels = """["messenger"]""", seen = ago(9)),
-        lead("u3", "255754333222", null, "new", 12, channels = """["whatsapp"]""", seen = ago(34)),
-        lead("u4", "17840000000000001", "Sr. Lucy Njeri", "contacted", 38, channels = """["instagram"]""", tags = """["convent"]"""),
-        lead("u5", "254733444555", "Deacon James Mwangi", "negotiation", 71, spent = 18000, orders = 1,
-            channels = """["whatsapp","sms","email"]""", seen = ago(60 * 5)),
-        lead("u6", "254700111222", "St. Mark's Cathedral Choir", "measuring", 64, spent = 52000, orders = 2),
-        lead("u7", "254799111222", "Bishop Samuel Kariuki", "won", 97, spent = 145000, orders = 6, tags = """["vip"]"""),
+        lead("u2", "254722000111", "Rev. Mary Achieng", "qualified", 55, channels = listOf("messenger"), seen = ago(9)),
+        lead("u3", "255754333222", null, "new", 12, seen = ago(34)),
+        // An Instagram handle: not a plausible phone, so `phone` is null.
+        lead("u4", "17840000000000001", "Sr. Lucy Njeri", "contacted", 38, channels = listOf("instagram"),
+            tags = listOf("convent"), phone = null),
+        lead("u5", "254733444555", "Deacon James Mwangi", "negotiation", 71, spent = 18000.0, orders = 1,
+            channels = listOf("whatsapp", "sms", "email"), seen = ago(60 * 5)),
+        // A custom stage: stored as the operator typed it, read back lower-cased by normalise_stage.
+        lead("u6", "254700111222", "St. Mark's Cathedral Choir", "measuring", 64, spent = 52000.0, orders = 2),
+        lead("u7", "254799111222", "Bishop Samuel Kariuki", "won", 97, spent = 145000.0, orders = 6, tags = listOf("vip")),
         lead("u8", "254700999888", "Mr. Otieno", "lost", 20, seen = null),
     )
 
@@ -134,19 +324,31 @@ object SalesFixtures {
 
     /** Registers every route these screens call, over [FakeNeema.withFixtures]'s base set. */
     fun install(f: FakeNeema, orderList: List<String> = orders) {
+        // admin.py list_orders
         f.on("GET", "/admin/orders", body = ordersJson(orderList))
-        // admin.py update_order answers with the updated OrderEvent row.
+        // admin.py update_order — the updated OrderEvent row (naive updated_at).
         f.on("PATCH", "/admin/orders/[^/]+") { r, body ->
             val id = r.url.pathSegments.last()
             val status = Regex("\"status\":\"([a-z]+)\"").find(body.orEmpty())?.groupValues?.get(1) ?: "open"
-            200 to order(id, "254700000000", "Customer", status, 1000)
+            200 to patchedOrder(id, status)
         }
+        // crm.py list_deals / update_deal
         f.on("GET", "/admin/deals") { r, _ ->
             200 to (if (r.url.queryParameter("status") == "won") wonDeals else deals)
         }
+        f.on("PATCH", "/admin/deals/[^/]+", body = """{"ok":true}""")
+        // crm.py list_actions / approve_action / veto_action
         f.on("GET", "/admin/actions", body = actions)
+        f.on("POST", "/admin/actions/[^/]+/approve") { _, body ->
+            val draft = Regex("\"draft\":\"((?:[^\"\\\\]|\\\\.)*)\"").find(body.orEmpty())?.groupValues?.get(1) ?: "Hello 🙏"
+            200 to """{"ok":true,"sent":"$draft"}"""
+        }
+        f.on("POST", "/admin/actions/[^/]+/veto", body = """{"ok":true}""")
+        // crm.py list_leads / update_lead
         f.on("GET", "/admin/leads", body = leadsJson())
-        f.on("GET", "/admin/settings/pipeline-stages", body = """{"stages":["measuring"]}""")
+        f.on("PATCH", "/admin/leads/[^/]+", body = """{"ok":true}""")
+        // crm.py get_pipeline_stages — labels as the operator typed them.
+        f.on("GET", "/admin/settings/pipeline-stages", body = """{"stages":["Measuring"]}""")
     }
 
     /** A signed-in agent whose role grants [perms] only (read-only variants). */

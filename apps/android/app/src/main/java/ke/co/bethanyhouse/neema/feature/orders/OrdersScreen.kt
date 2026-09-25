@@ -57,13 +57,17 @@ import ke.co.bethanyhouse.neema.core.util.Fmt
 
 private const val PAGE_SIZE = 15
 
-/** `fmtCurrency` — always "KES 1,234", as the web prints it. */
-private fun money(n: Double?): String = Fmt.currency(n ?: 0.0)
+/**
+ * `fmtCurrency`: "KES 1,234". An order's own figures carry its own currency
+ * (admin.py `update_order`/`list_orders` rows have `currency` = the hub's
+ * `currency_code`, so a Zambian order is ZMW) — the web prints every order as
+ * KES, which misstates a USD/ZMW order; the revenue sums stay KES as on the web.
+ */
+private fun money(n: Double?, currency: String = "KES"): String = Fmt.currency(n ?: 0.0, currency.ifBlank { "KES" })
 
 /** 2.0 → "2", 1.5 → "1.5". */
 private fun qtyText(q: Double): String = if (q == Math.floor(q)) q.toLong().toString() else q.toString()
 
-private val OrderItem.effectiveQty: Double get() = if (qty > 0) qty else 1.0
 
 /**
  * Port of components/views/OrdersView.tsx: revenue header, status cards that
@@ -337,7 +341,7 @@ private fun OrderRow(dash: DashboardViewModel, order: Order, isUpdating: Boolean
         }
         Spacer(Modifier.width(12.dp))
         Column(horizontalAlignment = Alignment.End) {
-            Text(money(order.amount), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = c.text)
+            Text(money(order.amount, order.currency), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = c.text)
             Text(order.currency.ifBlank { "KES" }, fontSize = 10.sp, color = c.textDim, modifier = Modifier.padding(top = 2.dp))
             if (isUpdating) {
                 CircularProgressIndicator(Modifier.padding(top = 4.dp).size(16.dp), strokeWidth = 2.dp, color = c.gold2)
@@ -508,8 +512,14 @@ internal fun OrderDetail(
                         }
                         Spacer(Modifier.width(8.dp))
                         Column(horizontalAlignment = Alignment.End) {
-                            Text(money(item.unit * item.effectiveQty), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.text)
-                            Text("${money(item.unit)} × ${qtyText(item.effectiveQty)}", fontSize = 10.sp, color = c.textDim)
+                            // A line whose price this build can't read shows its
+                            // quantity alone, never a made-up "KES 0".
+                            if (item.priceKnown) {
+                                Text(money(item.lineTotal, order.currency), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.text)
+                                Text("${money(item.effectiveUnit, order.currency)} × ${qtyText(item.effectiveQty)}", fontSize = 10.sp, color = c.textDim)
+                            } else {
+                                Text("× ${qtyText(item.effectiveQty)}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.text)
+                            }
                         }
                     }
                 }
@@ -518,7 +528,7 @@ internal fun OrderDetail(
             HorizontalDivider(color = c.bg4)
             Row(Modifier.fillMaxWidth().padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Total", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = c.text, modifier = Modifier.weight(1f))
-                Text(money(order.amount), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = c.gold2)
+                Text(money(order.amount, order.currency), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = c.gold2)
             }
         }
         Spacer(Modifier.height(16.dp))
