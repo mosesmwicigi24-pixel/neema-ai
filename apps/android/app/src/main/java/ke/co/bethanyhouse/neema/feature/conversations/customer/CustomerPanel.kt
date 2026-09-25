@@ -13,7 +13,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
-import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
@@ -35,9 +34,7 @@ import coil.compose.AsyncImage
 import ke.co.bethanyhouse.neema.app.DashboardViewModel
 import ke.co.bethanyhouse.neema.core.model.Conversation
 import ke.co.bethanyhouse.neema.core.model.Order
-import ke.co.bethanyhouse.neema.core.perm.Perms
 import ke.co.bethanyhouse.neema.core.ui.components.Avatar
-import ke.co.bethanyhouse.neema.core.ui.components.EmptyState
 import ke.co.bethanyhouse.neema.core.ui.components.Loading
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import ke.co.bethanyhouse.neema.core.util.Fmt
@@ -72,26 +69,19 @@ fun CustomerPanel(
     // Re-read permissions when /me lands (can() reads plain values).
     val me by dash.me.collectAsState()
     val agents by dash.agents.collectAsState()
-    val perms = remember(me, agents) { dash.permissions() }
-    val canView = Perms.VIEW_CRM in perms
+    // Web parity (owner's call): CustomerSidebar is open to every signed-in
+    // agent and the CRM routes only check login. Only the stage editor stays
+    // admin-only, which the server enforces too.
     val isAdmin = remember(me, agents) { dash.isAdmin }
 
     Column(modifier.fillMaxSize().background(c.bg2)) {
         if (!hideHeader) PanelHeader(onClose)
-        if (!canView) {
-            EmptyState(
-                title = "No access to customer profiles",
-                subtitle = "Ask an admin for the “View CRM profile” permission.",
-                icon = Icons.Outlined.Lock,
-            )
-            return@Column
-        }
         val vm: CustomerViewModel = viewModel(key = "customer:${conversation.id}") { CustomerViewModel(dash, conversation) }
         PanelBody(
             vm = vm, dash = dash, conversation = conversation,
-            canEdit = Perms.EDIT_CRM in perms,
-            canReply = Perms.REPLY_CONVERSATIONS in perms,
-            canProduce = Perms.MANAGE_ORDERS in perms,
+            canEdit = true,
+            canReply = true,
+            canProduce = true,
             isAdmin = isAdmin,
             onOpenIdentity = onOpenIdentity,
             onNameChange = onNameChange,
