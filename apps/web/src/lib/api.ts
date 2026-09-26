@@ -284,6 +284,8 @@ export interface ApiThreadItem {
     // System-event-specific
     event_kind?: SystemEventKind | null;
     event_reason?: string | null;
+    // event_kind "call": the full call row (outcome, summary, insights)
+    call?: ApiCall | null;
 }
 
 /** Map a raw thread item from the API to the shared Message type. */
@@ -300,6 +302,7 @@ function mapThreadItem(raw: ApiThreadItem): Message {
         // System event fields — undefined for regular messages
         event_kind:    raw.event_kind ?? undefined,
         event_reason:  raw.event_reason ?? undefined,
+        call:          raw.call ?? undefined,
         // Media
         media_type:    (raw.media_type as Message["media_type"]) ?? null,
         media_id:      raw.media_id ?? null,
@@ -706,19 +709,43 @@ export const whatsappApi = {
         post<{ ok: boolean; wa_id: string }>("/admin/whatsapp-invite", { phone, name }),
 };
 
+/** What the transcriber drew out of a call (null until it has run). */
+export interface CallInsights {
+    intent?: string | null;
+    products?: string[];
+    objections?: string[];
+    commitments?: string[];
+    next_action?: string | null;
+    follow_up_message?: string | null;
+    sentiment?: string | null;
+}
+
+/** One call row — the shape GET /admin/calls, GET /admin/calls/{id}, the
+ *  `call_update` event and the thread's call pills all share (call_log.serialize). */
 export interface ApiCall {
     id: string;
     call_id: string;
     wa_id: string | null;
     name: string | null;
-    direction: string;
-    status: string;            // ringing | answered | ended | missed | declined
+    person_id?: string | null;
+    conversation_id?: string | null;
+    channel?: string;          // always "whatsapp" — the only channel with a calling API
+    direction: string;         // inbound | outbound
+    // ringing | answered | completed | missed | declined | callback | no_answer
+    // | cancelled | failed  (legacy "ended" is mapped to completed server-side)
+    status: string;
     duration: number | null;
+    agent_id?: string | null;
     agent_name: string | null;
     started_at: string | null;
+    answered_at?: string | null;
+    ended_at?: string | null;
     summary?: string | null;
+    insights?: CallInsights | null;
     transcript_status?: string | null;  // none | recorded | pending | processing | done | failed
     has_recording?: boolean;
+    follow_up_open?: boolean;
+    follow_up_done_at?: string | null;
 }
 
 export interface CallTranscriptResp {
@@ -726,31 +753,100 @@ export interface CallTranscriptResp {
     status: string;
     transcript: string | null;
     summary: string | null;
+    insights?: CallInsights | null;
     language: string | null;
     has_recording: boolean;
     recording_url: string | null;
 }
 
+export interface CallIceConfig {
+    ice_servers: RTCIceServer[];
+    record?: boolean;          // server kill switch for the browser recording
+    transcribe?: boolean;      // Whisper is on (on-demand transcription works)
+    auto_transcribe?: boolean; // …and runs by itself after every upload
+}
+
+/** Whether a customer allowed business calls (WhatsApp needs it before we ring them). */
+export interface CallPermission {
+    wa_id?: string;
+    status: "granted" | "denied" | "requested" | "unknown";
+    expires_at: string | null;
+    permanent: boolean;
+}
+
+// ── Reading a failed request ─────────────────────────────────────────────────
+// req() throws `Error("POST /path → 409: {"detail": "…"}")`. The call flow
+// branches on the status (409 permission / answered elsewhere, 410 over, 502
+// Meta's reason) and shows the server's detail as the agent-facing words.
+
+/** The HTTP status of a failed req(), or null when the request never got an answer. */
+export function apiErrorStatus(e: unknown): number | null {
+    const m = String((e as Error)?.message ?? e ?? "").match(/→ (\d{3}):/);
+    return m ? Number(m[1]) : null;
+}
+
+/** The server's `detail` text of a failed req(), when it sent one. */
+export function apiErrorDetail(e: unknown): string | null {
+    const msg = String((e as Error)?.message ?? e ?? "");
+    const i = msg.search(/→ \d{3}: /);
+    if (i < 0) return null;
+    const body = msg.slice(msg.indexOf(": ", i) + 2);
+    try {
+        const d = JSON.parse(body)?.detail;
+        return typeof d === "string" ? d : null;
+    } catch {
+        // A proxy's HTML error page is not words an agent should read.
+        const t = body.trim();
+        return t && !t.startsWith("<") && t.length < 300 ? t : null;
+    }
+}
+
+/** True when a request failed for want of a connection (offline, reset, timed out). */
+export function isNetworkError(e: unknown): boolean {
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return true;
+    if (apiErrorStatus(e) !== null) return false;
+    const msg = String((e as Error)?.message ?? "");
+    return e instanceof TypeError || /timed out|Failed to fetch|NetworkError|network/i.test(msg);
+}
+
+const callPath = (callId: string) => `/admin/calls/${encodeURIComponent(callId)}`;
+
 // WhatsApp voice calling — the dashboard softphone's backend.
 export const callsApi = {
-    list: () => get<ApiCall[]>("/admin/calls"),
-    iceConfig: () => get<{ ice_servers: RTCIceServer[]; record?: boolean }>("/admin/calls/ice-config"),
+    /** Recent calls, newest first. `wa_id` narrows to one customer;
+     *  `view: "follow_up"` to the missed / callback calls nobody returned yet. */
+    list: (params: { wa_id?: string; view?: "follow_up"; limit?: number } = {}) => {
+        const qs = new URLSearchParams();
+        if (params.wa_id) qs.set("wa_id", params.wa_id.replace(/^\+/, ""));
+        if (params.view) qs.set("view", params.view);
+        if (params.limit) qs.set("limit", String(params.limit));
+        const q = qs.toString();
+        return get<ApiCall[]>(`/admin/calls${q ? `?${q}` : ""}`);
+    },
+    /** One call's current row — how a screen that lost its connection learns the truth. */
+    get: (callId: string) => get<ApiCall>(callPath(callId)),
+    iceConfig: () => get<CallIceConfig>("/admin/calls/ice-config"),
+    permission: (waId: string) =>
+        get<CallPermission>(`/admin/calls/permission?wa_id=${encodeURIComponent(waId.replace(/^\+/, ""))}`),
     offer: (callId: string) =>
-        get<{ call_id: string; sdp: string; from: string }>(`/admin/calls/${encodeURIComponent(callId)}/offer`),
+        get<{ call_id: string; sdp: string; from: string }>(`${callPath(callId)}/offer`),
     answer: (callId: string, sdp: string) =>
-        post<{ ok: boolean }>(`/admin/calls/${encodeURIComponent(callId)}/answer`, { sdp }),
+        post<{ ok: boolean }>(`${callPath(callId)}/answer`, { sdp }),
+    /** Hang up, decline or cancel — the server decides which from where the call is. */
     terminate: (callId: string) =>
-        post<{ ok: boolean }>(`/admin/calls/${encodeURIComponent(callId)}/terminate`, {}),
+        post<{ ok: boolean; outcome?: string | null }>(`${callPath(callId)}/terminate`, {}),
     callback: (callId: string) =>
-        post<{ ok: boolean }>(`/admin/calls/${encodeURIComponent(callId)}/callback`, {}),
+        post<{ ok: boolean }>(`${callPath(callId)}/callback`, {}),
+    followUpDone: (callId: string) =>
+        post<{ ok: boolean }>(`${callPath(callId)}/follow-up-done`, {}),
     connect: (to: string, sdp: string, name?: string) =>
         post<{ ok: boolean; call_id: string }>("/admin/calls/connect", { to, sdp, name }),
     requestPermission: (to: string) =>
-        post<{ ok: boolean }>("/admin/calls/request-permission", { to }),
+        post<{ ok: boolean; permission?: CallPermission }>("/admin/calls/request-permission", { to }),
     transcript: (callId: string) =>
-        get<CallTranscriptResp>(`/admin/calls/${encodeURIComponent(callId)}/transcript`),
+        get<CallTranscriptResp>(`${callPath(callId)}/transcript`),
     transcribe: (callId: string) =>
-        post<{ ok: boolean; status: string }>(`/admin/calls/${encodeURIComponent(callId)}/transcribe`, {}),
+        post<{ ok: boolean; status: string }>(`${callPath(callId)}/transcribe`, {}),
     /** Upload the recorded call audio (both sides mixed) on hangup. Multipart —
      *  bypasses the JSON req() helper, mirroring conversationsApi.uploadMedia. */
     uploadRecording: async (callId: string, blob: Blob): Promise<{ ok: boolean; will_transcribe?: boolean }> => {

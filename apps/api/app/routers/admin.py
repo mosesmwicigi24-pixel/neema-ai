@@ -2696,6 +2696,34 @@ async def get_call(
     return r
 
 
+async def _refuse_if_colleagues_call(request: Request, call_id: str, agent: Agent) -> None:
+    """A decline / call-back tapped a moment after a colleague answered must not
+    cut off their live conversation: WhatsApp's terminate ends the call for
+    everyone. The colleague's answer is the answer lock (set before Meta is
+    even asked) or the row already answered by someone else."""
+    from app.database import AsyncSessionLocal
+    redis = _redis(request)
+    holder = None
+    if redis is not None:
+        raw = await redis.get(f"wa:call:answered:{call_id}")
+        if raw:
+            v = raw.decode() if isinstance(raw, bytes) else str(raw)
+            if v.split("|", 1)[0] != str(agent.id):
+                holder = _answered_by(v) or "a colleague"
+    async with AsyncSessionLocal() as db:
+        c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
+        if c is not None and c.status == "answered" and c.agent_id and c.agent_id != agent.id:
+            holder = holder or await _agent_display(db, c.agent_id) or "a colleague"
+        elif c is not None and c.status not in ("ringing", "answered"):
+            holder = None      # over anyway: terminating it is harmless
+    if holder:
+        raise HTTPException(status_code=409, detail=f"call already answered by {holder}")
+
+
+async def _agent_display(db: AsyncSession, agent_id) -> str | None:
+    return (await db.execute(select(Agent.name).where(Agent.id == agent_id))).scalar_one_or_none()
+
+
 @router.post("/calls/{call_id}/terminate")
 async def calls_terminate(
     call_id: str,
@@ -2710,6 +2738,7 @@ async def calls_terminate(
     completed."""
     from app.services import wa_calling, call_log
     from app.database import AsyncSessionLocal
+    await _refuse_if_colleagues_call(request, call_id, agent)
     try:
         await wa_calling.terminate(call_id)
     except Exception as exc:
@@ -2743,6 +2772,7 @@ async def calls_callback(
     """Decline now, but flag the customer for a call-back — ends the ringing call
     and marks it `callback` so it surfaces in the Calls view as a follow-up."""
     from app.services import wa_calling, call_log
+    await _refuse_if_colleagues_call(request, call_id, agent)
     try:
         await wa_calling.terminate(call_id)
     except Exception:

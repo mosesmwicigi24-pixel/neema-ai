@@ -26,6 +26,70 @@ import type {
     SharedViewProps,
 } from "@/types";
 import { useSession } from "next-auth/react";
+import { callStatus, CALL_ICON_PATH } from "@/lib/callStatus";
+
+// ── CallPill ──────────────────────────────────────────────────────────────────
+// A WhatsApp call where it happened in the thread (docs/CALLING_UX.md §7): a
+// centred pill — direction / missed icon, the label ("Incoming call · 4:12",
+// "Missed call"), who took it, when. When the call was transcribed, a card
+// under it: the summary, the next action, and the suggested follow-up with
+// "Use as reply" (puts it in the composer — never sends it).
+function CallPill({ msg, onUseReply }: { msg: Message; onUseReply?: (text: string) => void }) {
+    const call = msg.call;
+    const st = callStatus(call ?? { status: "", direction: msg.direction });
+    const ins = call?.insights ?? null;
+    const summary = call?.summary || msg.event_reason || null;
+    const followUp = ins?.follow_up_message?.trim() || null;
+    const showCard = !!(summary || ins?.next_action || followUp);
+    const agent = msg.agent_name && !["missed", "no_answer", "cancelled", "failed"].includes(call?.status ?? "")
+        ? msg.agent_name.split(" ")[0] : null;
+    return (
+        <div className="flex flex-col items-center gap-1.5 my-2.5">
+            <div className="flex items-center gap-2 w-full">
+                <div className="flex-1 h-px bg-stone-200" />
+                <div className="flex flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5 px-3 py-1 rounded-full border bg-white max-w-[88%]"
+                    style={{ borderColor: "#e2e8e0" }}>
+                    <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke={st.light} strokeWidth={2.4}
+                        strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="flex-shrink-0">
+                        <path d={CALL_ICON_PATH[st.icon]} />
+                    </svg>
+                    <span className="text-[11px] font-semibold" style={{ color: st.icon === "missed" ? st.light : "#1c2917" }}>
+                        {msg.text || "Call"}
+                    </span>
+                    {agent && <span className="text-[10px]" style={{ color: "#64748b" }}>· {agent}</span>}
+                    {msg.created_at && <span className="text-[10px]" style={{ color: "#94a3b8" }}>· {timeAgo(msg.created_at)}</span>}
+                </div>
+                <div className="flex-1 h-px bg-stone-200" />
+            </div>
+            {showCard && (
+                <div className="w-full max-w-[88%] sm:max-w-md rounded-xl border bg-white px-3 py-2.5"
+                    style={{ borderColor: "#d7ecd9" }}>
+                    <div className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "#128C4B" }}>
+                        Call summary
+                    </div>
+                    {summary && <p className="text-xs leading-relaxed whitespace-pre-wrap" style={{ color: "#1c2917" }}>{summary}</p>}
+                    {ins?.next_action && (
+                        <p className="text-xs leading-relaxed mt-1.5" style={{ color: "#1c2917" }}>
+                            <span className="font-semibold">Next: </span>{ins.next_action}
+                        </p>
+                    )}
+                    {followUp && (
+                        <div className="mt-2 rounded-lg px-2.5 py-2" style={{ backgroundColor: "#f3f8f1" }}>
+                            <p className="text-xs leading-relaxed whitespace-pre-wrap" style={{ color: "#334155" }}>{followUp}</p>
+                            {onUseReply && (
+                                <button type="button" onClick={() => onUseReply(followUp)}
+                                    className="mt-1.5 h-9 px-3 rounded-lg text-xs font-semibold text-white active:scale-95"
+                                    style={{ backgroundColor: "#128C4B" }}>
+                                    Use as reply
+                                </button>
+                            )}
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
 
 // ── AudioBubble ───────────────────────────────────────────────────────────────
 // Renders an audio player with a collapsible transcription toggle.
@@ -809,6 +873,25 @@ export function ConversationsView({
     const [clearConfirm, setClearConfirm] = useState(false);
     const [clearing, setClearing] = useState(false);
     const [mobileCrmOpen, setMobileCrmOpen] = useState(false);
+    // The reply box, so "Use as reply" (a call's follow-up) and the customer
+    // panel ("Ask for their WhatsApp number") can put text in it — never send it.
+    const composerRef = useRef<HTMLTextAreaElement>(null);
+    const putInComposer = useCallback((text: string) => {
+        setReplyText(text);
+        setMobileCrmOpen(false);
+        requestAnimationFrame(() => {
+            const t = composerRef.current;
+            if (!t) return;
+            t.focus();
+            t.style.height = "auto";
+            t.style.height = Math.min(t.scrollHeight, 132) + "px";
+            t.setSelectionRange(text.length, text.length);
+        });
+    }, []);
+    // Calls land in the thread as pills: refresh the first page (merged, so
+    // older pages survive) when this customer's call changes — debounced, as
+    // one call sends several events.
+    const callRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     // Tracks unread count at the moment a thread is opened — used to place the "N new" divider
     const [unreadSnapshot, setUnreadSnapshot] = useState<
         Record<string, number>
@@ -1299,6 +1382,21 @@ export function ConversationsView({
                     );
                     return { ...m, [activeConvId]: [...filtered, sysEvt] };
                 });
+            }
+        }
+        if (
+            (event.type === "call_update" || event.type === "call_ended" || event.type === "incoming_call") &&
+            activeConvId
+        ) {
+            const wa = (event.type === "call_update" ? event.call?.wa_id
+                : event.type === "incoming_call" ? event.from : null) ?? null;
+            const mine = !!wa && !!activeConv && String(wa).replace(/^\+/, "") === activeConv.wa_id;
+            const known = !!event.call_id && (messages[activeConvId] ?? []).some(
+                (m) => m.call?.call_id === event.call_id);
+            if (mine || known) {
+                const convId = activeConvId;
+                if (callRefreshTimer.current) clearTimeout(callRefreshTimer.current);
+                callRefreshTimer.current = setTimeout(() => loadMessages(convId, true), 700);
             }
         }
         if (
@@ -3210,6 +3308,24 @@ export function ConversationsView({
                                             );
                                         }
 
+                                        // ── WhatsApp call ────────────────────
+                                        if (kind === "call") {
+                                            return (
+                                                <React.Fragment key={msg.id}>
+                                                    {showDivider && (
+                                                        <div className="flex items-center gap-2 my-1">
+                                                            <div className="flex-1 h-px bg-[#427425]/30" />
+                                                            <span className="text-[10px] font-semibold text-[#427425] bg-[#e6f3d8] px-2 py-0.5 rounded-full whitespace-nowrap">
+                                                                {snap} new {snap === 1 ? "message" : "messages"}
+                                                            </span>
+                                                            <div className="flex-1 h-px bg-[#427425]/30" />
+                                                        </div>
+                                                    )}
+                                                    <CallPill msg={msg} onUseReply={putInComposer} />
+                                                </React.Fragment>
+                                            );
+                                        }
+
                                         // ── Release / Transfer / other ───────
                                         // Simple centred pill for mode changes
                                         // that don't need extra elaboration.
@@ -3975,6 +4091,7 @@ export function ConversationsView({
                                             </svg>
                                         </button>
                                         <textarea
+                                            ref={composerRef}
                                             value={replyText}
                                             onChange={(e) => {
                                                 setReplyText(e.target.value);
@@ -4301,6 +4418,7 @@ export function ConversationsView({
                         onToast={onToast}
                         onClose={() => setCrmOpen(false)}
                         onOpenIdentity={openIdentityConversation}
+                        onPrefillReply={putInComposer}
                         onNameChange={(wa_id, newName) => {
                             setConversations((prev) =>
                                 prev.map((c) =>
@@ -4573,6 +4691,7 @@ export function ConversationsView({
                                     onToast={onToast}
                                     onClose={() => setMobileCrmOpen(false)}
                                     onOpenIdentity={openIdentityConversation}
+                                    onPrefillReply={putInComposer}
                                     className="w-full flex flex-col overflow-hidden"
                                     hideHeader
                                     onNameChange={(wa_id, newName) => {

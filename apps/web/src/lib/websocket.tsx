@@ -193,6 +193,7 @@ export function buildSystemEventFromWs(wsEvent: any): Message | null {
                            ? `Paused by ${wsEvent.eventAgentName} — replies held`
                            : "Paused — replies held",
         approve_draft: "AI draft approved",
+        call:          "Call",
     };
 
     return {

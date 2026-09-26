@@ -383,3 +383,17 @@ def test_an_outbound_call_our_side_could_not_connect_is_failed(env, world):
     r = env.client.post(f"/api/admin/calls/{cid}/terminate", json={"reason": "failed"}, headers=_as(world["ann"]))
     assert r.json()["outcome"] == "failed"
     assert _get(env, cid, world["ann"])["status"] == "failed"
+
+
+def test_a_decline_a_moment_after_a_colleague_answered_never_cuts_them_off(env, world):
+    _ring(env, "wacid.9")
+    assert env.client.post("/api/admin/calls/wacid.9/answer", json={"sdp": "v=0"},
+                           headers=_as(world["ann"])).status_code == 200
+    for route in ("terminate", "callback"):
+        r = env.client.post(f"/api/admin/calls/wacid.9/{route}", json={}, headers=_as(world["ben"]))
+        assert r.status_code == 409 and "Ann Wanjiru" in r.json()["detail"]
+    assert ("terminate", "wacid.9") not in env.meta.sent
+    assert _get(env, "wacid.9", world["ann"])["status"] == "answered"
+    # Ann herself can still hang up.
+    assert env.client.post("/api/admin/calls/wacid.9/terminate", json={},
+                           headers=_as(world["ann"])).json()["outcome"] == "completed"
