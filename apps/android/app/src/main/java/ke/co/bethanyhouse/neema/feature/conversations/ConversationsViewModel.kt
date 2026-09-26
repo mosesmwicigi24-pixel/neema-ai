@@ -976,6 +976,13 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
      * and owner, so the thread's banner and controls follow at once. A frame
      * for a conversation not loaded yet leaves it to the refetch.
      */
+    /** Two frames in the same millisecond must still sort by arrival: stamps only ever increase. */
+    private var lastLiveStamp = 0L
+    private fun liveStamp(): String {
+        lastLiveStamp = maxOf(AppClock.now(), lastLiveStamp + 1)
+        return java.time.Instant.ofEpochMilli(lastLiveStamp).toString()
+    }
+
     private fun patchLive(convId: String, type: String?, e: JsonObject) {
         val cur = _inbox.value.cache[convId] ?: return
         val next = when (type) {
@@ -983,7 +990,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                 val msg = wsMessageOf(e) ?: return
                 val text = msg.body.trim()
                 cur.copy(
-                    lastMessageAt = nowIso(),
+                    lastMessageAt = liveStamp(),
                     lastMessagePreview = if (text.isNotEmpty()) text.take(100) else cur.lastMessagePreview,
                     unread = if (msg.inbound) cur.unread + 1 else 0,
                 )

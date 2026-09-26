@@ -71,7 +71,9 @@ internal fun friendlyError(
     e: Throwable,
     fallback: String = "Something went wrong — please try again.",
     notFound: String = "That no longer exists — someone else may have removed it.",
-): String = when (e) {
+): String = if (e is ApiException && e.malformed) {
+    GARBLED_TEXT // the core flags a 2xx it couldn't parse (captive portal, cut-off body)
+} else when (e) {
     is ApiException -> when (e.status) {
         0 -> when {
             e.isTimeout() -> TIMEOUT_TEXT
