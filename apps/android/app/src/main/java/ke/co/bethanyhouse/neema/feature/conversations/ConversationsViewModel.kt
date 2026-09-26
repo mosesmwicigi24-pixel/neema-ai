@@ -249,8 +249,19 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
     private var draftJob: Job? = null
     private var windowJob: Job? = null
     private var activityJob: Job? = null
-    /** The newest page-one request: a newer refresh cancels it (the answer would be ignored anyway). */
+    /**
+     * The page-one request in flight. A refresh for the SAME filters joins it and
+     * asks for one more run after it ([refreshAgain]) — never cancels it: on a busy
+     * day a frame lands every second and the live page takes seconds, so cancelling
+     * meant no page ever arrived and the list sat on yesterday's copy. Only a change
+     * of filters cancels (that answer would be for the wrong list).
+     */
     private var pageJob: Job? = null
+    private var pageKey: String? = null
+    private var pageSeq = 0
+    private var refreshAgain = false
+    /** The newest refresh whose badges were shown: an older, slower answer never overwrites them. */
+    private var summaryShown = 0
     /** One messaging-window re-check per burst of new messages. */
     private var windowSoonJob: Job? = null
     /** Each thread's load in flight: a poll or catch-up never stacks a second one on it. */
@@ -385,25 +396,29 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
 
         viewModelScope.launch {
             runCatching { api.conversations.summary() }.onSuccess { s ->
-                if (seq == firstSeq) { _inbox.update { it.copy(summary = s) }; dash.inboxSummary.value = s }
+                if (seq > summaryShown) { summaryShown = seq; _inbox.update { it.copy(summary = s) }; dash.inboxSummary.value = s }
             } // on failure the badges keep their last value
         }
+        if (pageJob?.isActive == true && pageKey == key) { refreshAgain = true; return }
         pageJob?.cancel()
-        pageJob = viewModelScope.launch {
+        refreshAgain = false
+        pageKey = key
+        val pseq = ++pageSeq
+        val job = viewModelScope.launch {
             val res = try {
                 inboxApi.page(f, PAGE)
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 // Only the live filter's own failure counts; a superseded one says nothing.
                 // The rows already on screen stay; the list says why it couldn't refresh.
-                if (seq == firstSeq) _inbox.update {
+                if (pseq == pageSeq) _inbox.update {
                     val live = key == filterKeyOf(it.filters)
                     it.copy(loading = false, loadError = live, errorText = if (live) listErrorText(e) else it.errorText)
                 }
                 return@launch
             }
             // Superseded by a newer refresh, or the filters moved on.
-            if (seq != firstSeq || key != filterKeyOf(_inbox.value.filters)) return@launch
+            if (pseq != pageSeq || key != filterKeyOf(_inbox.value.filters)) return@launch
             upsert(res.items)
             val fresh = res.items.map { it.id }
             val top = fresh.toSet()
@@ -437,7 +452,15 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
             // The open thread stays fresh even when it is not on page one.
             val w = watched
             if (w != null && w !in top) {
-                runCatching { inboxApi.get(w) }.onSuccess { one -> if (seq == firstSeq) upsert(listOf(one)) }
+                runCatching { inboxApi.get(w) }.onSuccess { one -> if (pseq == pageSeq) upsert(listOf(one)) }
+            }
+        }
+        pageJob = job
+        // Finished (answered or failed, not cancelled) with refreshes asked for meanwhile: one more.
+        job.invokeOnCompletion { cause ->
+            if (cause == null && pageJob === job && refreshAgain) {
+                refreshAgain = false
+                viewModelScope.launch { refresh() }
             }
         }
     }
