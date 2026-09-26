@@ -322,13 +322,18 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "giving shipping details, or as the one clause 'we ship worldwide by "
         "DHL' in a first quote to someone nobody has placed — and then it "
         "reassures: Nairobi workshop, worldwide DHL delivery.\n"
-        "- CAMPAIGN / GIVEAWAY POSTS (owner, 2026-09-26): a post that gives an item "
-        "away, runs a draw or a competition is hosted, not sold. Every comment is an "
-        "entry or a cheer: welcome them by name and title, confirm what they told you "
-        "(name, role, size, town) and save it, state the rule in one line exactly as "
-        "the caption gives it, never price or sell the giveaway item, and pick up any "
-        "item they say they plan to buy with one warm line and an invitation to "
-        "message us. Never a complaint line or an apology at an entry.\n"
+        "- CAMPAIGN / GIFTING POSTS (owner, 2026-09-26): a post that gifts an item to "
+        "one selected person, runs a draw or a competition is HOSTED, not sold — the "
+        "reading context gives you the campaign's facts. A gifting campaign is not a "
+        "competition or a vote: no 'win', 'winner', 'lucky', 'vote', 'entry', 'all the "
+        "best' — say 'selected', 'the recipient', 'gifting'. Welcome them by name and "
+        "title, confirm what they told you (name, role, church, town, size) and save "
+        "it, say the rule in one line exactly as the caption gives it, invite them to "
+        "do what the caption asks, and never state a date, a count, a criterion or a "
+        "mechanism the caption does not. A wish to buy — the price, a pair of their "
+        "own, more than one, another item — is served from the hub in the same reply, "
+        "with the gift stated as separate. Never a complaint line, an apology or "
+        "'something went wrong' at someone joining in.\n"
         "- WHEN THE POST IS NOT A PRODUCT — a journey, a milestone, an "
         "announcement, a celebration, a greeting, a thank-you (the caption tells "
         "you) — you are the HOST, not the shopkeeper. There is no product to "
@@ -1632,44 +1637,34 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             line += f' "{pctx["title"]}"'
         if source_post.get("comment"):
             line += f'; their comment there was: "{source_post["comment"]}"'
-        # A CAMPAIGN POST (owner, 2026-09-26): the item in it is given away by
-        # the caption's rule — never identified for a price, never sold from
-        # this post, and the frame is never read for a product.
         _campaign_cap = post_caption(pctx)
         _campaign_post = bool(_campaign_cap) and is_campaign_post(_campaign_cap)
-        if _campaign_post:
+        # History wisdom: a caption-less video post identified once stays
+        # identified — later replies price the SAME product, never a re-guess.
+        # On the very first contact, the deterministic ladder (caption
+        # slug/alias, image fingerprint vs our own catalogue photos) resolves
+        # and records it before the model ever has to read the frame.
+        try:
+            _known = await _post_identity(redis, channel,
+                                          {**pctx, "post_id": source_post.get("post_id") or ""})
+        except Exception:
             _known = {}
-            line = ('(Context — this customer reached us from our Facebook/Instagram post '
-                    f'"{_campaign_cap[:700]}"')
-            if source_post.get("comment"):
-                line += f'; their comment there was: "{source_post["comment"]}"'
-            line += (". THIS POST IS A CAMPAIGN / GIVEAWAY: the item in it is given away by "
-                     "the caption's rule, not sold from this post. Never price it, never take "
-                     "an order for it here, and never state a date, a count or a winner the "
-                     "caption does not. You are the HOST. If they ask to BUY it, or another "
-                     "item, find that item with search_catalog and serve them warmly.)")
+        _gate_post_product = str((_known or {}).get("name") or "")
+        # What the post SELLS, when it is more than one row: a hub set row
+        # (its contents from the hub's description), a combination the
+        # caption presents as one outfit, or a caption that merely LISTS
+        # several items (owner, 2026-09-21: the price of a set is its total).
+        _catalog: list = []
+        try:
+            from app.services import n8n_bridge as _svc_cat
+            _catalog = await _svc_cat.catalog_items(db, redis)
+        except Exception:
+            _catalog = []
+        if _campaign_post:
+            # A CAMPAIGN POST (owner, 2026-09-26): the host's facts ride with
+            # the post, and its item is priced only for a pair of their own.
+            line = _campaign_turn_context(_campaign_cap, source_post.get("comment") or "", _known)
         else:
-            # History wisdom: a caption-less video post identified once stays
-            # identified — later replies price the SAME product, never a re-guess.
-            # On the very first contact, the deterministic ladder (caption
-            # slug/alias, image fingerprint vs our own catalogue photos) resolves
-            # and records it before the model ever has to read the frame.
-            try:
-                _known = await _post_identity(redis, channel,
-                                              {**pctx, "post_id": source_post.get("post_id") or ""})
-            except Exception:
-                _known = {}
-            _gate_post_product = str((_known or {}).get("name") or "")
-            # What the post SELLS, when it is more than one row: a hub set row
-            # (its contents from the hub's description), a combination the
-            # caption presents as one outfit, or a caption that merely LISTS
-            # several items (owner, 2026-09-21: the price of a set is its total).
-            _catalog: list = []
-            try:
-                from app.services import n8n_bridge as _svc_cat
-                _catalog = await _svc_cat.catalog_items(db, redis)
-            except Exception:
-                _catalog = []
             if _known.get("name"):
                 from app.services.post_catalog import identity_trusted as _trusted_id
                 if _trusted_id(_known):
@@ -2947,8 +2942,18 @@ _CAMPAIGN_RE = re.compile(
     r"(?:for\s+free|free\s+of\s+charge|at\s+no\s+cost)|"
     r"only\s+(?:cost|charge|fee|payment)\s+(?:is|will\s+be|being)\s+(?:for\s+)?(?:the\s+)?"
     r"(?:shipping|delivery|postage|courier|transport)|"
-    r"only\s+pay\s+(?:for\s+)?(?:the\s+)?(?:shipping|delivery|postage|courier|transport)|"
-    r"pay\s+(?:for\s+)?(?:the\s+)?(?:shipping|delivery|postage|courier|transport)\s+only|"
+    r"only\s+pays?\s+(?:for\s+)?(?:the\s+)?(?:shipping|delivery|postage|courier|transport)|"
+    r"pays?\s+(?:for\s+)?(?:the\s+)?(?:shipping|delivery|postage|courier|transport)\s+only|"
+    r"pays?\s+only\s+(?:for\s+)?(?:the\s+)?(?:shipping|delivery|postage|courier|transport)|"
+    # the owner's framing (2026-09-26): "one selected recipient receives the
+    # shoe completely free; the recipient only pays the shipping"
+    r"selected\s+(?:recipient|pastor|reverend|bishop|minister|clergy|servant|man\s+of\s+god|woman\s+of\s+god)|"
+    r"(?:will|shall)\s+be\s+(?:selected|chosen|gifted|blessed\s+with)|"
+    r"we\s+(?:will|shall|are\s+going\s+to)\s+(?:select|choose|gift|bless)\s+(?:one|a)\b|"
+    r"gift(?:ed|ing)?\s+(?:to\s+)?one\s+(?:lucky\s+)?(?:pastor|reverend|bishop|minister|servant|recipient|man|woman|person)|"
+    r"recipients?|mobili[sz]ation|"
+    r"(?<!delivery )(?<!shipping )(?:completely|totally|entirely)\s+free(?!\s+(?:delivery|shipping))|"
+    r"free\s+pair\b|"
     r"one\s+(?:lucky\s+)?(?:person|pastor|reverend|bishop|priest|minister|servant|winner|"
     r"commenter|entrant|participant|of\s+you|of\s+them|man\s+of\s+god|woman\s+of\s+god)"
     r"\s+(?:will|shall|is\s+going\s+to|gets?|to)\b|"
@@ -2993,6 +2998,60 @@ def is_campaign_post(caption: str | None) -> bool:
     return bool(_CAMPAIGN_SOFT_RE.search(cap)) and not _SELLS_RE.search(cap)
 
 
+# A campaign that RUNS A DRAW by its own caption (a raffle, a competition, a
+# vote) may be spoken of in those words; everything else is a GIFTING
+# campaign (owner, 2026-09-26: "not a voting or competition campaign — one
+# selected recipient receives the shoe completely free"), and the host never
+# says win, winner, lucky, vote, entry, "all the best".
+_DRAW_RE = re.compile(
+    r"\b(raffle|lucky\s+draw|competition|contest|vot(?:e|es|ing)|stand\s+a\s+chance|"
+    r"entr(?:y|ies)|to\s+enter|bahati\s+nasibu|droo|shindano|kura)\b",
+    re.IGNORECASE)
+
+
+def campaign_is_draw(caption: str | None) -> bool:
+    return bool(_DRAW_RE.search(" ".join(str(caption or "").split())))
+
+
+def _campaign_turn_context(caption: str, comment: str, known: dict | None) -> str:
+    """run_turn's source-post line for a campaign post (owner, 2026-09-26): the
+    facts the host states, the post's item named so a pair of their own can be
+    priced from the hub — never as the gift — and the host's way of answering."""
+    cap = " ".join(str(caption or "").split())[:700]
+    line = f'(Context — this customer reached us from our Facebook/Instagram post "{cap}"'
+    if comment:
+        line += f'; their comment there was: "{comment}"'
+    line += ". " + _campaign_facts(caption)
+    name = str((known or {}).get("name") or "").strip()
+    if name:
+        line += (f" The item in this post is our {name} — search_catalog it and price it "
+                 "only when they want one of their own; never as the gift.")
+    line += (" You are the HOST here as in the thread: confirm and save what they tell "
+             "you (capture_contact; a size with save_measurements), say the rule in one "
+             "line as the caption gives it, and serve any wish to buy — this item, or "
+             "another — from the hub, saying plainly the gift is separate. Never an "
+             "apology, never \"something went wrong\", never a generic hold.)")
+    return line
+
+
+def _campaign_facts(caption: str | None) -> str:
+    """The campaign's facts as the host states them — the owner's framing
+    (2026-09-26) unless the caption itself runs a draw."""
+    if campaign_is_draw(caption):
+        return ("THIS POST RUNS A CAMPAIGN — a draw or a competition by its own caption: "
+                "use only the caption's words for how it works, and never a date, a count, "
+                "a criterion or a winner it does not state.")
+    return ("THIS POST IS A GIFTING CAMPAIGN — not a competition, a raffle or a vote: one "
+            "selected recipient (the caption says who) receives the item completely free, "
+            "paying only the shipping or delivery (unless the caption says otherwise). "
+            "Never say win, winner, prize, lucky, "
+            "vote, contest, entry, 'good luck' or 'all the best' — say 'selected', 'the "
+            "recipient', 'gifting'. Never a date, a count, a criterion or a mechanism the "
+            "caption does not state; asked when or how the recipient is chosen and the "
+            "caption is silent, say our team makes the selection and will reach the "
+            "recipient — no date.")
+
+
 def post_caption(pctx: dict | None) -> str:
     """The post's words, WHOLE: the full caption when the context carries it
     (`fetch_post_context`, 2026-09-26), else the 200-char title."""
@@ -3005,8 +3064,16 @@ def post_caption(pctx: dict | None) -> str:
 # 2026-09-26: the campaign is mobilisation, not a pitch).
 _CAMPAIGN_BUY_RE = re.compile(
     r"\b(buy|buying|purchase|purchasing|order|ordering|price|prices|cost|how\s+much|"
-    r"nunua|kununua|ninunue|bei|agiza|pesa\s+ngapi)\b",
+    r"(?:two|three|four|five|\d+)\s+pairs?|pairs\b|"
+    r"can\s+i\s+(?:buy|get|order|have)\s+(?:one|a\s+pair|it|them|mine|two)|"
+    r"(?:is|are)\s+(?:it|they|this|these|the\s+shoes?)\s+available|in\s+stock|"
+    r"do\s+you\s+have\s+(?:it|them|size|my\s+size|a\s+size)|available\s+in\s+(?:size|my)|"
+    r"nunua|kununua|ninunue|bei|agiza|kuagiza|pesa\s+ngapi|inapatikana|naweza\s+kupata)\b",
     re.IGNORECASE)
+# "Is this real?" / "hope it's not a scam" under a campaign is a person
+# checking before they join in — a question for the host, never a grievance.
+_LEGIT_Q_RE = re.compile(
+    r"\b(scam|fake|real|genuine|legit(?:imate)?|true|kweli|ukweli|uongo|feki)\b", re.IGNORECASE)
 
 
 def _host_reading(reading: dict, text: str) -> dict:
@@ -3022,11 +3089,18 @@ def _host_reading(reading: dict, text: str) -> dict:
     if r.get("intent") == "spam":
         return r
     keep_kind = r.get("kind") in ("question", "request")
+    asks = t.endswith("?") or bool(re.match(r"(?i)^(is|are|hope|hoping|ni|je)\b", t))
     if r.get("intent") == "negative" or r.get("kind") in ("complaint", "mixed"):
+        if asks and _LEGIT_Q_RE.search(t) and not _GRIEVANCE_CUE_RE.search(_LEGIT_Q_RE.sub(" ", t)):
+            # "Is this real or a scam?" — checking before joining in.
+            r.update(intent="high", kind="question", severity=0,
+                     ask=r.get("ask") or "whether the campaign is genuine")
+            return r
         if looks_negative(t) or _GRIEVANCE_CUE_RE.search(t):
             return r
         r["intent"], r["severity"] = "high", 0
         r["kind"] = r["kind"] if keep_kind else "other"
+        r["hint"] = "displeasure"
         return r
     if r.get("intent") in ("low", "goodwill") and re.search(r"[A-Za-z0-9]", t):
         r["intent"] = "high"
@@ -3035,17 +3109,26 @@ def _host_reading(reading: dict, text: str) -> dict:
 
 
 def _campaign_context(caption: str) -> str:
+    """The host's brief under a campaign post (owner, 2026-09-26): the facts,
+    how to answer, and how a sale is served without misrepresenting the gift."""
     cap = " ".join(str(caption or "").split())[:700]
-    return ("(THIS POST IS A CAMPAIGN / GIVEAWAY — its caption: \"" + cap + "\". You are the "
-            "HOST of the campaign, not a shopkeeper. Welcome them by name and title; "
-            "confirm what they told you — their name, their role, their size, their town — "
-            "and SAVE it in this turn (capture_contact; a shoe or garment size with "
-            "save_measurements); say the campaign's rule in ONE line exactly as the caption "
-            "gives it — never a date, a count, a winner or a rule the caption does not "
-            "state; the giveaway item is never priced and never sold. If they mention an "
-            "item they plan to buy, pick it up warmly in one line and invite them to "
-            "message us for it. Never a complaint line, never an apology, never \"something "
-            "went wrong\": an entry is a person joining in.)")
+    return ("(THIS POST IS A CAMPAIGN — its caption: \"" + cap + "\". You are its HOST, "
+            "speaking for Bethany House — not a shopkeeper at a stall. " + _campaign_facts(caption) + " "
+            "HOW TO ANSWER: welcome them by name and title; confirm what they told you — "
+            "name, role, church, town, size — and SAVE it this turn (capture_contact; a shoe "
+            "or garment size with save_measurements); say the rule in ONE line exactly as "
+            "the caption gives it; if they have not yet given what the caption asks for, "
+            "invite them to, warmly; be specific to their words, confident, one question at "
+            "most; never a complaint line, never an apology, never \"something went wrong\", "
+            "never \"hold on\". "
+            "A SALE, WITHOUT MISREPRESENTING THE GIFT — the gift is separate from buying: when "
+            "they ask the price, want a pair now or in their size, are not clergy, want more "
+            "than one, or mention another item they plan to buy (a cassock, a collar), serve "
+            "them as a buyer in the same reply — search_catalog it, give the hub's price, and "
+            "invite them to message us to order — saying plainly the gift is separate ('this "
+            "pair is our gift to one selected minister; if you'd like your own now, it is [the "
+            "hub's price] — message us and we'll sort your size'). Never push a purchase on "
+            "someone simply joining in: one soft line at most, and only where it fits.)")
 
 
 def _reading_context(reading: dict | None) -> str:
@@ -3056,8 +3139,12 @@ def _reading_context(reading: dict | None) -> str:
     kind = str(r.get("kind") or "other")
     ask = str(r.get("ask") or "").strip()
     if r.get("campaign"):
-        rest = _reading_context({k: v for k, v in r.items() if k != "campaign"})
-        return _campaign_context(str(r["campaign"])) + (("\n\n" + rest) if rest else "")
+        rest = _reading_context({k: v for k, v in r.items() if k not in ("campaign", "hint")})
+        out = _campaign_context(str(r["campaign"]))
+        if r.get("hint") == "displeasure":
+            out += ("\n\n(The reader sensed some displeasure in the words — if it is there, "
+                    "meet it kindly and directly first, then continue as the host.)")
+        return out + (("\n\n" + rest) if rest else "")
     if kind == "request":
         return ("(Reading: this comment is a REQUEST — they want: "
                 f"{ask or 'to be shown what we have'}. Answer it with what we have for it "
@@ -3556,13 +3643,22 @@ _SW_GOODWILL_POOL = [
 # failed): the host's thank-you — never the giveaway item's price, never a
 # pitch, never "which item?" (owner, 2026-09-26).
 _CAMPAIGN_ACK_POOL = [
-    "Thank you for joining in{name} 🙏 We've received your comment — all the best! 💛",
-    "Bless you{name}! 🙏 Your comment is received, and we're so glad you joined in 💛",
-    "Thank you{name} 🙏 We've seen your comment — thank you for joining in, and all the best! 💛",
+    "Thank you for joining in{name} 🙏 We've received your comment, and we're so glad you're part of this 💛",
+    "Bless you{name}! 🙏 Your comment is received — thank you for being part of this 💛",
+    "Thank you{name} 🙏 We've seen your comment, and we're glad you joined in 💛",
 ]
 _SW_CAMPAIGN_ACK_POOL = [
-    "Asante kwa kujiunga nasi{name} 🙏 Tumepokea ujumbe wako — kila la heri! 💛",
-    "Mungu akubariki{name}! 🙏 Tumeona ujumbe wako, na tunafurahi umejiunga nasi 💛",
+    "Asante kwa kujiunga nasi{name} 🙏 Tumepokea ujumbe wako, na tunafurahi uko nasi 💛",
+    "Mungu akubariki{name}! 🙏 Tumeona ujumbe wako — asante kwa kuwa sehemu ya hili 💛",
+]
+# A buying ask under a campaign post with no model answer, on a trusted
+# identity: the gift stated as separate, then the hub's price and the door.
+_CAMPAIGN_SELL_POOL = [
+    "Thank you{name} 🙏 {product} in this post is our gift to one selected recipient. If you'd like your own now, it is {price}: message us with your size and we'll sort it out 💛",
+    "Bless you{name}! 🙏 {product} here goes as a gift to one selected recipient. If you'd like your own right away, it is {price} — message us with your size and we'll take it from there 💛",
+]
+_SW_CAMPAIGN_SELL_POOL = [
+    "Asante{name} 🙏 {product} katika chapisho hili ni zawadi yetu kwa mtu mmoja atakayechaguliwa. Ukitaka yako sasa, ni {price}: tutumie ujumbe na size yako na tutakuhudumia 💛",
 ]
 
 
@@ -3738,8 +3834,16 @@ def _comment_public_reply(answer: str, dm_sent: bool, name_tag: str, seed: str,
         return answer
     if campaign:
         # A CAMPAIGN POST (owner, 2026-09-26): with no model answer the thread
-        # hears the host's thank-you — never the giveaway item's price, never
-        # "which item?". A question or a request still promises a person.
+        # hears the host's thank-you — never "which item?", never a pitch. A
+        # BUYING ask on a trusted identity is served with the gift stated as
+        # separate and the hub's price; a question or a request still promises
+        # a person.
+        if product_known and price_text and product_name:
+            _pn = product_name.strip()
+            subject = _pn if swahili else f"the {_pn}"
+            return (_pick(_SW_CAMPAIGN_SELL_POOL if swahili else _CAMPAIGN_SELL_POOL, seed)
+                    .replace("{name}", name_tag).replace("{product}", subject)
+                    .replace("{price}", price_text))
         if kind == "request":
             return (_pick(_SW_REQUEST_ACK_POOL if swahili else _REQUEST_ACK_POOL, seed)
                     .replace("{name}", name_tag).replace("{ask}", (ask or "").strip() or "what you asked for"))
@@ -4358,10 +4462,6 @@ async def _resolve_post_product(redis, channel: str, ext: str,
     caption's lead words — so the public CTA still lands on the exact
     storefront product page, never the bare wa.me fallback. Appends the
     matched hub rows into `sink` (the same seen_products list)."""
-    if is_campaign_post(post_caption(post_ctx)):
-        # A CAMPAIGN POST (owner, 2026-09-26) sells nothing: no identity to
-        # resolve for a canned line, no storefront link to hand out.
-        return
     known = await _post_identity(redis, channel, post_ctx)
     title = (post_ctx.get("title") or "").strip()
     from app.database import AsyncSessionLocal
@@ -4707,7 +4807,11 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
             elif plan["style"] == "which":
                 text = _pick(_SW_LIVE_WHICH_POOL if swahili else _LIVE_WHICH_POOL, ext).replace("{name}", name_tag)
             elif plan["style"] == "light":
-                text = _pick(_SW_THANKS_POOL if swahili else _THANKS_POOL, ext).replace("{name}", name_tag)
+                pool = _SW_THANKS_POOL if swahili else _THANKS_POOL
+                if campaign:
+                    # A bare emoji or "amen" under a campaign: the host's thanks.
+                    pool = _SW_CAMPAIGN_ACK_POOL if swahili else _CAMPAIGN_ACK_POOL
+                text = _pick(pool, ext).replace("{name}", name_tag)
             else:
                 # A grievance: the private message FIRST for a serious or
                 # grave one (so the details come privately), then the public
@@ -4874,6 +4978,16 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # post: Facebook suppresses the reach of link-carrying posts and comments,
     # so the private reply is the ONLY place the storefront link may travel.
     dm_sent = False
+    # An entry's inbox stays closed (owner, 2026-09-26: mobilisation, not a
+    # pitch) — the link travels only to one who spoke of buying, and only when
+    # it is the item the ANSWER sold them by its hub name (or they asked its
+    # price outright). The bishop who loves the shoe but plans a cassock is
+    # never handed "Order here" for the shoe.
+    if campaign and not plan["dm"]:
+        product_link = ""
+    elif campaign and product_link and not (
+            is_bare_price_ask(prompt_text) or _names_product(answer, matched.get("name") or "")):
+        product_link = ""
     # Goodwill opens no DM — unless the post sells a product, where the link is
     # the most useful thing we can hand them.
     if answer and (plan["dm"] or product_link):
@@ -4919,6 +5033,8 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
         if _other and not held_issues:
             held_issues = _other
         asks_it = is_bare_price_ask(prompt_text) or _names_product(prompt_text, product_name)
+        if campaign and _CAMPAIGN_BUY_RE.search(prompt_text):
+            asks_it = True                  # "I want two pairs", "is it available in 44?"
         if held_issues:
             product_name = ""
             matched = {}
@@ -4929,11 +5045,14 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
         elif not asks_it:
             matched = {k: v for k, v in matched.items()
                        if k not in ("price", "price_kes", "price_usd")}
-    if campaign:
-        # THE GIVEAWAY ITEM IS NEVER PRICED OR SOLD BY A CANNED LINE (owner,
-        # 2026-09-26), and "which item?" is never asked under a post that
-        # names its own.
-        product_name, matched, ask_which = "", {}, False
+        if campaign:
+            # THE GIFT IS NEVER CONFUSED WITH A PURCHASE (owner, 2026-09-26):
+            # the canned line prices the pair only for a buying ask on a
+            # trusted identity (and then says the gift is separate); every
+            # other entry hears the host's thank-you — never "which item?".
+            ask_which = False
+            if not (_trusted and asks_it and product_name and not held_issues):
+                product_name, matched = "", {}
     # The no-model line names the item AS SEEN when our records describe it —
     # a SET keeps the hub's name: "This is our Cassock Set" (owner's shape).
     if product_name and _known_product.get("seen") \
@@ -4994,6 +5113,10 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
         # THE GATE BEFORE POSTING (owner, 2026-09-25): no verified answer —
         # the thread hears an honest holding line, never a guess.
         public_text = _pick(_SW_VERIFY_HOLD_POOL if swahili else _VERIFY_HOLD_POOL, ext).replace("{name}", name_tag)
+        if campaign and not _CAMPAIGN_BUY_RE.search(comment_text):
+            # An entry whose draft was held: the host's thanks, and a colleague
+            # (below) — never "the exact item and price" at an entry.
+            public_text = _pick(_SW_CAMPAIGN_ACK_POOL if swahili else _CAMPAIGN_ACK_POOL, ext).replace("{name}", name_tag)
     public_text = plain_public_voice(public_text)
 
     posted = await _post_public(public_text)
@@ -5005,7 +5128,7 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     if not answer and intent != "goodwill" and not ask_which and not (product_name and price_text):
         # Under a CAMPAIGN post an entry over the cap needs no colleague — the
         # host's thank-you is the answer; a question or a request still does.
-        if not campaign or kind in ("request", "question"):
+        if not campaign or held_issues or kind in ("request", "question"):
             try:
                 await _route_comment_to_human(
                     channel, ext, comment_text,
