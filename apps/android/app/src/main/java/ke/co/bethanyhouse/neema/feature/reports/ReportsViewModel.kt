@@ -84,6 +84,17 @@ class ReportsViewModel(private val dash: DashboardViewModel) : ViewModel() {
     /** The download in flight: a pull-to-refresh joins it rather than starting a second full list. */
     private var fetchJob: Job? = null
 
+    /**
+     * ReportsView fetches the full list on mount — once per visit, never on a
+     * timer (it is ~13 MB). This ViewModel outlives the screen, so each return
+     * to it re-reads the list once (joining a download already in flight), the
+     * report keeping its figures until the new list lands. No poll, and no
+     * reload on returning to the app: the web doesn't either.
+     */
+    val life = ScreenLife(
+        viewModelScope, dash.foreground, catchUpOnForeground = false, catchUp = { load().join() },
+    )
+
     init { load() }
 
     private suspend fun fetch() {

@@ -5,6 +5,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import ke.co.bethanyhouse.neema.app.DashboardViewModel
 import ke.co.bethanyhouse.neema.app.ToastType
+import ke.co.bethanyhouse.neema.feature.reports.ScreenLife
+import ke.co.bethanyhouse.neema.feature.reports.quietly
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -115,11 +117,26 @@ class LeadsViewModel(private val dash: DashboardViewModel) : ViewModel() {
     private val _selectedId = MutableStateFlow<String?>(null)
     val selectedId: StateFlow<String?> = _selectedId.asStateFlow()
 
+    /**
+     * LeadsView loads its stages and leads on mount, so every visit reads them
+     * fresh; this ViewModel outlives the screen, so each return to it — and
+     * each return to the app, as Neema moves leads along the pipeline while the
+     * phone is in a pocket — re-reads both quietly (no spinner; a failure keeps
+     * the board). An open lead's sheet keeps what the operator typed: it edits
+     * against the lead as it was when opened.
+     */
+    val life = ScreenLife(viewModelScope, dash.foreground, catchUp = ::reread)
+
     init {
         viewModelScope.launch {
             runCatching { dash.api.settings.getPipelineStages() }.onSuccess { _stages.value = buildStages(it) }
         }
         load()
+    }
+
+    private suspend fun reread() {
+        runCatching { dash.api.settings.getPipelineStages() }.onSuccess { _stages.value = buildStages(it) }
+        quietly { _leads.value = api.list() }
     }
 
     fun load() {

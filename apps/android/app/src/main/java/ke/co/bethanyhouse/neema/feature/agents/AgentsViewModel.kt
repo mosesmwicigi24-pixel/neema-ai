@@ -9,6 +9,9 @@ import ke.co.bethanyhouse.neema.app.ToastType
 import ke.co.bethanyhouse.neema.core.model.Agent
 import ke.co.bethanyhouse.neema.core.model.CustomRole
 import ke.co.bethanyhouse.neema.core.net.ApiException
+import ke.co.bethanyhouse.neema.feature.reports.ScreenLife
+import ke.co.bethanyhouse.neema.feature.reports.quietly
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -56,6 +59,23 @@ class AgentsViewModel(private val dash: DashboardViewModel) : ViewModel() {
     private val _availability = MutableStateFlow<Map<String, Boolean>>(emptyMap())
     val availability: StateFlow<Map<String, Boolean>> = _availability.asStateFlow()
 
+    /**
+     * The team (availability, last seen, active chats) is the dashboard's
+     * 3-minute poll, which pauses in the background and refetches on return
+     * (usePolling); nothing on the socket announces presence. AgentsView reads
+     * its roles on mount. Each return to this screen re-reads both, so the
+     * list is never older than the moment it was opened.
+     */
+    val life = ScreenLife(
+        viewModelScope, dash.foreground, catchUpOnForeground = false,
+        catchUp = {
+            coroutineScope {
+                launch { quietly { dash.refreshAgents() } }
+                launch { quietly { _roles.value = dash.api.roles.list() } }
+            }
+        },
+    )
+
     init { viewModelScope.launch { fetchRoles() } }
 
     private suspend fun fetchRoles() {
@@ -65,11 +85,14 @@ class AgentsViewModel(private val dash: DashboardViewModel) : ViewModel() {
         finally { _rolesLoading.value = false }
     }
 
+    /** Pull-to-refresh: the spinner lasts until the team and the roles have both landed. */
     fun refresh() {
         viewModelScope.launch {
             _refreshing.value = true
-            dash.refetchAgents()
-            fetchRoles()
+            coroutineScope {
+                launch { quietly { dash.refreshAgents() } }
+                launch { fetchRoles() }
+            }
             _refreshing.value = false
         }
     }

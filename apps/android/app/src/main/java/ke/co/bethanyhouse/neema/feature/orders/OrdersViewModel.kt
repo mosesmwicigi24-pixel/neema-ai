@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import ke.co.bethanyhouse.neema.app.DashboardViewModel
 import ke.co.bethanyhouse.neema.app.ToastType
 import ke.co.bethanyhouse.neema.core.model.Order
+import ke.co.bethanyhouse.neema.feature.reports.ScreenLife
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -39,6 +40,18 @@ class OrdersViewModel(private val dash: DashboardViewModel) : ViewModel() {
      */
     private val _initialLoading = MutableStateFlow(dash.orders.value.isEmpty())
     val initialLoading: StateFlow<Boolean> = _initialLoading.asStateFlow()
+
+    /**
+     * The list is the dashboard's 90 s poll, which already pauses in the
+     * background and refetches on return (usePolling). On top of that, while
+     * this screen is on display: coming back to it re-reads the orders, and so
+     * does the live socket reconnecting — an `order_update` sent while it was
+     * down is lost, and the pending badge must not wait 90 s to catch up.
+     */
+    val life = ScreenLife(
+        viewModelScope, dash.foreground, dash.container.socket.connected,
+        catchUpOnForeground = false, catchUp = { dash.refreshOrders() },
+    )
 
     init {
         if (dash.orders.value.isEmpty()) {

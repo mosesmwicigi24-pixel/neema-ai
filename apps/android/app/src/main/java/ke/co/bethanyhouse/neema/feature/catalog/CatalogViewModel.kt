@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import ke.co.bethanyhouse.neema.app.DashboardViewModel
 import ke.co.bethanyhouse.neema.core.model.CatalogItem
 import ke.co.bethanyhouse.neema.core.model.PriceAudit
+import ke.co.bethanyhouse.neema.feature.reports.ScreenLife
 import ke.co.bethanyhouse.neema.feature.reports.quietly
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,6 +47,22 @@ class CatalogViewModel(private val dash: DashboardViewModel) : ViewModel() {
 
     private val _refreshing = MutableStateFlow(false)
     val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
+
+    /**
+     * The catalogue itself is the dashboard's 5-minute poll (paused in the
+     * background, refetched on return). The price audit is CatalogView's
+     * mount-time read: each return to this screen reads it again, as a
+     * remount of the web view does, and the catalogue with it.
+     */
+    val life = ScreenLife(
+        viewModelScope, dash.foreground, catchUpOnForeground = false,
+        catchUp = {
+            coroutineScope {
+                launch { loadAudit() }
+                launch { quietly { dash.refreshCatalog() } }
+            }
+        },
+    )
 
     init { viewModelScope.launch { loadAudit() } }
 

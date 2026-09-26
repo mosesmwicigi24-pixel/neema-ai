@@ -8,13 +8,12 @@ import ke.co.bethanyhouse.neema.app.ToastType
 import ke.co.bethanyhouse.neema.core.model.Deal
 import ke.co.bethanyhouse.neema.core.model.PlannedAction
 import ke.co.bethanyhouse.neema.core.net.ApiException
+import ke.co.bethanyhouse.neema.feature.reports.Coalescer
+import ke.co.bethanyhouse.neema.feature.reports.ScreenLife
 import kotlinx.coroutines.async
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -22,10 +21,16 @@ import kotlinx.serialization.json.put
 
 /**
  * DealsView's state: the open deals (the board), how many are won, and
- * Neema's initiative queue. Refreshes every minute while the app is in the
- * foreground, like the web's visibility-gated interval.
+ * Neema's initiative queue. Refreshes every minute while on display, like
+ * the web's visibility-gated interval (see [life]).
  */
 class DealsViewModel(private val dash: DashboardViewModel) : ViewModel() {
+    companion object {
+        /** DealsView's interval. */
+        const val POLL_MS = 60_000L
+        /** Notifications that change the board or the queue. */
+        val RELOAD_ON = setOf("planned_action", "hub_event")
+    }
 
     /** null = still loading (the web's `deals === null`). */
     private val _deals = MutableStateFlow<List<Deal>?>(null)
@@ -65,13 +70,30 @@ class DealsViewModel(private val dash: DashboardViewModel) : ViewModel() {
     fun cancelGuidance() { _editing.value = null }
     fun openDraft(a: PlannedAction?) { _draftFor.value = a }
 
+    /**
+     * DealsView loads on mount and every 60 s while the tab is visible. Here:
+     * only while this screen is on display and the app in front, reloading on
+     * every return to it and after the live socket reconnects.
+     */
+    val life = ScreenLife(
+        viewModelScope, dash.foreground, dash.container.socket.connected,
+        pollMs = POLL_MS, poll = ::load, catchUp = ::load,
+    )
+
+    /**
+     * Neema moving a follow-up into the approval queue (actions.py `_notify`,
+     * type `planned_action`) and a hub event (which can close a deal as won)
+     * arrive as notifications. The web toasts them and lets its 60 s poll pick
+     * the change up; here the board reloads at once (800 ms, coalesced) while
+     * it is on display — off-screen, the next visit reloads anyway.
+     */
+    private val onEvent = Coalescer(viewModelScope, ScreenLife.EVENT_WINDOW_MS, ::load)
+
     init {
+        viewModelScope.launch { load() }
         viewModelScope.launch {
-            val fg = dash.foreground
-            while (isActive) {
-                load()
-                delay(60_000)
-                if (!fg.value) fg.first { it }
+            dash.container.notifications.incoming.collect { n ->
+                if (n.type in RELOAD_ON && life.active) onEvent.kick()
             }
         }
     }

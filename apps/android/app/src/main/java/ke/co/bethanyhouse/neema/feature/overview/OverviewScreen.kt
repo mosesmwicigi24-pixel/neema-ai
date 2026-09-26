@@ -83,6 +83,7 @@ fun OverviewScreen(
     /** "Now" for the 7-day chart and the activity times (fixed in tests). */
     clock: Clock = Clock.systemDefaultZone(),
 ) {
+    ke.co.bethanyhouse.neema.feature.reports.TrackShown(vm.life)
     val apiStats by vm.stats.collectAsStateWithLifecycle()
     val statsLoading by vm.statsLoading.collectAsStateWithLifecycle()
     val attrib by vm.attrib.collectAsStateWithLifecycle()

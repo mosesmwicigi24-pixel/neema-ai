@@ -44,6 +44,7 @@ import ke.co.bethanyhouse.neema.core.ui.components.EmptyState
 import ke.co.bethanyhouse.neema.core.ui.components.Loading
 import ke.co.bethanyhouse.neema.core.ui.components.Pill
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
+import ke.co.bethanyhouse.neema.core.util.AppClock
 import ke.co.bethanyhouse.neema.core.util.Fmt
 
 /** Port of AgentsView.tsx — the Team screen: agents, custom roles, and the dialogs that edit both. */
@@ -61,6 +62,12 @@ fun AgentsScreen(dash: DashboardViewModel) {
     }
 
     val vm: AgentsViewModel = viewModel { AgentsViewModel(dash) }
+    ke.co.bethanyhouse.neema.feature.reports.TrackShown(vm.life)
+    // "Last seen 4m ago" keeps counting between polls instead of freezing at first paint.
+    var now by remember { mutableLongStateOf(AppClock.now()) }
+    LaunchedEffect(Unit) {
+        while (true) { kotlinx.coroutines.delay(60_000); now = AppClock.now() }
+    }
     val agents by dash.agents.collectAsStateWithLifecycle()
     val roles by vm.roles.collectAsStateWithLifecycle()
     val rolesLoading by vm.rolesLoading.collectAsStateWithLifecycle()
@@ -163,6 +170,7 @@ fun AgentsScreen(dash: DashboardViewModel) {
                             agent = agent,
                             available = availability[agent.id] ?: agent.isAvailable,
                             customRole = roleById(agent.customRoleId),
+                            now = now,
                             onToggle = { vm.toggleOnline(agent, availability[agent.id] ?: agent.isAvailable) },
                             onRole = { assignId = agent.id },
                             onEdit = { editId = agent.id },
@@ -310,6 +318,7 @@ private fun AgentCard(
     agent: Agent,
     available: Boolean,
     customRole: CustomRole?,
+    now: Long,
     onToggle: () -> Unit,
     onRole: () -> Unit,
     onEdit: () -> Unit,
@@ -358,7 +367,7 @@ private fun AgentCard(
                     fontSize = 12.sp, color = faint,
                 )
                 Text(
-                    if (available) "Online now" else "Last seen ${Fmt.timeAgo(agent.lastSeenAt).let { if (it == "—") "never" else it }}",
+                    if (available) "Online now" else "Last seen ${Fmt.timeAgo(agent.lastSeenAt, now).let { if (it == "—") "never" else it }}",
                     fontSize = 11.sp, color = if (available) c.gold else c.muted,
                 )
                 if (roleName != null && rolePermCount != null) {

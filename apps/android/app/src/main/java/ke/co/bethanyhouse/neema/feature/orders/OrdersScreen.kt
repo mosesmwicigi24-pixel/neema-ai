@@ -89,6 +89,7 @@ fun OrdersScreen(dash: DashboardViewModel) {
     }
 
     val vm: OrdersViewModel = viewModel { OrdersViewModel(dash) }
+    ke.co.bethanyhouse.neema.feature.reports.TrackShown(vm.life)
     val orders by dash.orders.collectAsStateWithLifecycle()
     val filter by vm.filter.collectAsStateWithLifecycle()
     val search by vm.search.collectAsStateWithLifecycle()
@@ -322,8 +323,10 @@ private fun OrderRow(dash: DashboardViewModel, order: Order, isUpdating: Boolean
                         },
                     )
                 }
-                Text(Fmt.formatPhone(order.waId), fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = c.textDim,
-                    modifier = Modifier.align(Alignment.CenterVertically))
+                phoneLine(order, name)?.let { phone ->
+                    Text(phone, fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = c.textDim,
+                        modifier = Modifier.align(Alignment.CenterVertically))
+                }
                 if (itemSummary.isNotEmpty()) {
                     // The separator travels with the summary, so a wrap never leaves it dangling.
                     Text(
@@ -422,7 +425,7 @@ internal fun OrderDetail(
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(name, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = c.text)
-                Text(Fmt.formatPhone(order.waId), fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = c.textDim)
+                phoneLine(order, name)?.let { Text(it, fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = c.textDim) }
             }
             Spacer(Modifier.width(12.dp))
             Badge(meta.label, meta.tone, fontSize = 12, radius = 8.dp, hPad = 8.dp, vPad = 4.dp)

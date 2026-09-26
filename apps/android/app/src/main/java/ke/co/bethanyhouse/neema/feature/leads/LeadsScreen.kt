@@ -111,6 +111,7 @@ fun LeadsScreen(dash: DashboardViewModel) {
         return
     }
     val vm: LeadsViewModel = viewModel { LeadsViewModel(dash) }
+    ke.co.bethanyhouse.neema.feature.reports.TrackShown(vm.life)
     val leads by vm.leads.collectAsStateWithLifecycle()
     val loading by vm.loading.collectAsStateWithLifecycle()
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()

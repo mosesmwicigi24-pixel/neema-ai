@@ -57,8 +57,9 @@ class ProfileViewModel(private val dash: DashboardViewModel) : ViewModel() {
         viewModelScope.launch {
             _refreshing.value = true
             dash.refetchMe()
-            dash.refetchAgents()
-            kotlinx.coroutines.delay(600)
+            // The spinner lasts until the team row (where the profile's name,
+            // role and permissions are read from) has actually landed.
+            ke.co.bethanyhouse.neema.feature.reports.quietly { dash.refreshAgents() }
             _refreshing.value = false
         }
     }

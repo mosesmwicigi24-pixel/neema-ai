@@ -9,12 +9,14 @@ import ke.co.bethanyhouse.neema.core.model.Attribution
 import ke.co.bethanyhouse.neema.core.model.Conversation
 import ke.co.bethanyhouse.neema.core.model.Stats
 import ke.co.bethanyhouse.neema.feature.reports.quietly
+import ke.co.bethanyhouse.neema.core.ws.str
+import ke.co.bethanyhouse.neema.feature.reports.Coalescer
+import ke.co.bethanyhouse.neema.feature.reports.ScreenLife
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -25,6 +27,15 @@ import kotlinx.coroutines.launch
  * intercepts every 30 s while visible.
  */
 class OverviewViewModel(private val dash: DashboardViewModel) : ViewModel() {
+    companion object {
+        /** OverviewView's interval. */
+        const val POLL_MS = 30_000L
+        /** Notifications after which a headline figure has moved. */
+        val RELOAD_ON = setOf(
+            "order_update", "new_conversation", "human_transfer", "media_escalation",
+            "intercept", "transfer", "system", "take_back", "hub_event",
+        )
+    }
 
     private val _stats = MutableStateFlow<Stats?>(null)
     val stats: StateFlow<Stats?> = _stats.asStateFlow()
@@ -50,17 +61,58 @@ class OverviewViewModel(private val dash: DashboardViewModel) : ViewModel() {
     private val _refreshing = MutableStateFlow(false)
     val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
 
+    /**
+     * OverviewView loads on mount and re-reads stats and intercepts every 30 s
+     * while the tab is visible. Here: only while this screen is on display and
+     * the app in front; every return to it (or to the app) and every socket
+     * reconnect reloads all three quietly — no spinner, figures kept on failure.
+     */
+    val life = ScreenLife(
+        viewModelScope, dash.foreground, dash.container.socket.connected,
+        pollMs = POLL_MS, poll = ::loadLive, catchUp = ::catchUp,
+    )
+
+    /** A live event moved a headline figure: re-read stats and intercepts (800 ms, coalesced). */
+    private val onEvent = Coalescer(viewModelScope, ScreenLife.EVENT_WINDOW_MS, ::loadLive)
+
     init {
         viewModelScope.launch { loadAll() }
+        // Notifications that change the open / human / AI / order counts: the
+        // web refetches only its orders list on `order_update` and leaves the
+        // figures to the 30 s poll; here they follow at once while on display
+        // (off-screen, the next visit reloads anyway).
         viewModelScope.launch {
-            val fg = dash.foreground
-            while (isActive) {
-                delay(30_000)
-                // Like the web's visibilityState check: no polling in the background.
-                if (!fg.value) continue
-                runCatching { dash.api.stats.overview() }.onSuccess { _stats.value = it }
-                loadHuman()
+            dash.container.notifications.incoming.collect { n ->
+                if (n.type in RELOAD_ON && life.active) onEvent.kick()
             }
+        }
+        // A thread changing hands (intercept / release / transfer) moves the
+        // human and AI counts and the "Human intercepts" feed.
+        viewModelScope.launch {
+            dash.container.socket.events.collect { e ->
+                if (e.str("type") == "intercept_changed" && life.active) onEvent.kick()
+            }
+        }
+        // The dashboard's orders poll found a change (the pending badge moved):
+        // keep the order figures in step with it.
+        viewModelScope.launch {
+            dash.orders.drop(1).collect { if (life.active) onEvent.kick() }
+        }
+    }
+
+    /** The poll's pair: server stats and the human-held threads. */
+    private suspend fun loadLive() {
+        coroutineScope {
+            launch { quietly { _stats.value = dash.api.stats.overview() } }
+            launch { loadHuman() }
+        }
+    }
+
+    /** A return to the screen: the mount-time three, without the first-load spinner. */
+    private suspend fun catchUp() {
+        coroutineScope {
+            launch { loadLive() }
+            launch { quietly { _attrib.value = dash.api.attribution() } }
         }
     }
 

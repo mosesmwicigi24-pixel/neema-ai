@@ -134,6 +134,7 @@ fun CatalogScreen(
     /** Open on a product's sheet (tests). */
     initialDetail: CatalogItem? = null,
 ) {
+    ke.co.bethanyhouse.neema.feature.reports.TrackShown(vm.life)
     val catalog by dash.catalog.collectAsStateWithLifecycle()
     val filter by vm.filter.collectAsStateWithLifecycle()
     val search by vm.search.collectAsStateWithLifecycle()

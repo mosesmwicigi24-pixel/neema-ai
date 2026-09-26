@@ -106,7 +106,16 @@ fun hubMeta(order: Order): StatusMeta? {
 }
 
 /**
- * OrdersView's `filtered`: the status filter, then a search over the name
+ * The phone line under an order's name, or null when it would only repeat
+ * the name. The API sends no `contact_name` (admin.py `list_orders`), so the
+ * name shown is the formatted phone itself and the web prints it twice; the
+ * line appears only when a real name sits above it.
+ */
+fun phoneLine(order: Order, displayedName: String): String? =
+    ke.co.bethanyhouse.neema.core.util.Fmt.formatPhone(order.waId).takeIf { it.isNotEmpty() && it != displayedName }
+
+/**
+ * OrdersView's `filtered`:the status filter, then a search over the name
  * (`contact_name ?? wa_id`), the phone and the id.
  */
 fun filterOrders(orders: List<Order>, filter: String, search: String): List<Order> {

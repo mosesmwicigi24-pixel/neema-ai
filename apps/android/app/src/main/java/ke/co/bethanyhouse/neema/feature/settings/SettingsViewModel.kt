@@ -10,7 +10,9 @@ import ke.co.bethanyhouse.neema.core.model.Campaign
 import ke.co.bethanyhouse.neema.core.model.OfferSetting
 import ke.co.bethanyhouse.neema.core.model.TranslationSetting
 import ke.co.bethanyhouse.neema.core.net.ApiException
+import ke.co.bethanyhouse.neema.feature.reports.ScreenLife
 import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -174,7 +176,28 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel() {
     private val _refreshing = MutableStateFlow(false)
     val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
 
+    /**
+     * SettingsView reads its four live cards on mount. This ViewModel outlives
+     * the screen, so each return to it re-reads them — except a card with
+     * unsaved typing: the web's remount throws a half-written standing order
+     * or offer away, here it is kept (pull-to-refresh still reloads all).
+     */
+    val life = ScreenLife(viewModelScope, dash.foreground, catchUpOnForeground = false, catchUp = ::reread)
+
+    /** What the directives box / offer draft held when last loaded or saved: equal means nothing unsaved. */
+    private var directivesBase: String? = null
+    private var draftBase: Campaign? = null
+
     init { viewModelScope.launch { loadAll() } }
+
+    private suspend fun reread() {
+        coroutineScope {
+            if (_directives.value == directivesBase) launch { loadDirectives() }
+            launch { runCatching { _translation.value = api.getTranslation() } }
+            if (_draft.value == draftBase) launch { loadOffer() }
+            launch { runCatching { _stages.value = api.getPipelineStages() } }
+        }
+    }
 
     private suspend fun loadAll() {
         // Each card loads on its own; one failing must not blank the others.
@@ -203,6 +226,7 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel() {
         } catch (_: Exception) {
             // The web still unlocks the box so an admin can write fresh orders.
         }
+        directivesBase = _directives.value
         _directivesLoaded.value = true
     }
 
@@ -215,6 +239,7 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel() {
             try {
                 val r = api.putDirectives(_directives.value)
                 (r["directives"] as? JsonPrimitive)?.content?.let { _directives.value = it }
+                directivesBase = _directives.value
                 dash.toast("Standing orders saved — Neema follows them within ~5 minutes")
             } catch (e: Exception) {
                 // The API never refuses the text itself (it trims and cuts to max_chars); a
@@ -256,6 +281,7 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel() {
         } catch (_: Exception) {
             // Leave it loading rather than show a wrong state.
         }
+        draftBase = _draft.value
     }
 
     /** "For 1 month" is the common case, so a new offer ends a month from today. */
@@ -278,6 +304,7 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel() {
                 val r = api.putOffer(campaign)
                 _offer.update { it?.copy(campaign = r.campaign, running = r.running, says = r.says) }
                 _draft.value = r.campaign ?: blankCampaign()
+                draftBase = _draft.value
                 val saved = r.campaign
                 dash.toast(
                     when {

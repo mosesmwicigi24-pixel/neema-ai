@@ -88,6 +88,7 @@ fun SettingsScreen(dash: DashboardViewModel) {
         return
     }
     val vm: SettingsViewModel = viewModel { SettingsViewModel(dash) }
+    ke.co.bethanyhouse.neema.feature.reports.TrackShown(vm.life)
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()
     val c = Neema.colors
     val startScroll = LocalSettingsPreview.current.scroll

@@ -82,6 +82,7 @@ fun DealsScreen(dash: DashboardViewModel) {
         return
     }
     val vm: DealsViewModel = viewModel { DealsViewModel(dash) }
+    ke.co.bethanyhouse.neema.feature.reports.TrackShown(vm.life)
     val deals by vm.deals.collectAsStateWithLifecycle()
     val wonCount by vm.wonCount.collectAsStateWithLifecycle()
     val actions by vm.actions.collectAsStateWithLifecycle()

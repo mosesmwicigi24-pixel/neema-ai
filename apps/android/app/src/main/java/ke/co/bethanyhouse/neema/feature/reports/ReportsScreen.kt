@@ -87,6 +87,7 @@ fun ReportsScreen(
     /** "Now" for the date range and the per-day charts (fixed in tests). */
     clock: Clock = Clock.systemDefaultZone(),
 ) {
+    TrackShown(vm.life)
     val allConvs by vm.allConvs.collectAsStateWithLifecycle()
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()
     val agents by dash.agents.collectAsStateWithLifecycle()
