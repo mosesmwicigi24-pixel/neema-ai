@@ -18,7 +18,7 @@ import kotlinx.coroutines.launch
  * list ([DashboardViewModel.orders]); this holds the filter, search, page, the
  * open order, which row is mid-update and why the last read failed.
  */
-class OrdersViewModel(private val dash: DashboardViewModel) : ViewModel() {
+class OrdersViewModel(private val dash: DashboardViewModel) : ViewModel(), SavesUi {
 
     /** "all" or one of [ORDER_STATUSES]. */
     val filter = MutableStateFlow("all")
@@ -99,6 +99,23 @@ class OrdersViewModel(private val dash: DashboardViewModel) : ViewModel() {
     fun setPage(p: Int) { page.value = p }
 
     fun select(order: Order?) { _selectedId.value = order?.id }
+
+    /** Whether the list has been read at least once (so an open order missing from it is really gone). */
+    val loaded: Boolean get() = dash.orders.value.isNotEmpty() || (!_initialLoading.value && _loadError.value == null)
+
+    // ── Process death: the filter, search, page and the open order come back ──
+    override var uiAttached = false
+
+    override fun saveUi(): Map<String, Any?> = mapOf(
+        "filter" to filter.value, "search" to search.value, "page" to page.value, "selected" to _selectedId.value,
+    )
+
+    override fun restoreUi(saved: Map<String, Any?>) {
+        saved.str("filter")?.let { if (it == "all" || it in ORDER_STATUSES) filter.value = it }
+        saved.str("search")?.let { search.value = it }
+        (saved["page"] as? Int)?.let { page.value = it.coerceAtLeast(1) }
+        _selectedId.value = saved.str("selected")
+    }
 
     fun refresh() {
         if (_refreshing.value) return

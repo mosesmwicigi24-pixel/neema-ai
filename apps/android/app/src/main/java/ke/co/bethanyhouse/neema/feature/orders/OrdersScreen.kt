@@ -1,6 +1,7 @@
 package ke.co.bethanyhouse.neema.feature.orders
 
 import androidx.compose.ui.semantics.Role
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.remember
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.BorderStroke
@@ -87,6 +88,7 @@ fun OrdersScreen(dash: DashboardViewModel) {
     // and routers/admin.py `list_orders` / `update_order` only require a
     // signed-in agent. A refusal the server does send is said in the toast.
     val vm: OrdersViewModel = viewModel { OrdersViewModel(dash) }
+    RestoreUi(vm)
     ke.co.bethanyhouse.neema.feature.reports.TrackShown(vm.life)
     val orders by dash.orders.collectAsStateWithLifecycle()
     val filter by vm.filter.collectAsStateWithLifecycle()
@@ -99,6 +101,8 @@ fun OrdersScreen(dash: DashboardViewModel) {
     val loadError by vm.loadError.collectAsStateWithLifecycle()
     val unknown = orders.isEmpty() && (initialLoading || loadError != null)
     val c = Neema.colors
+    // Read at least once: only then is an open order missing from the list really gone.
+    val loaded = orders.isNotEmpty() || (!initialLoading && loadError == null)
 
     // Derived once per change of the list / filter / search, never per frame:
     // a thousand orders are one pass each, not one per status card per recomposition.
@@ -111,6 +115,7 @@ fun OrdersScreen(dash: DashboardViewModel) {
     val statusCounts = stats.counts
     val totalRevenue = stats.revenue
 
+    MinuteTicker {
     BoxWithConstraints(Modifier.fillMaxSize().background(c.bg)) {
         val wide = maxWidth >= 600.dp
         // A wide tablet shows the order beside the list instead of in a sheet over it.
@@ -119,6 +124,11 @@ fun OrdersScreen(dash: DashboardViewModel) {
         val compactRows = textRoom(if (twoPane) maxWidth - PANE_WIDTH else maxWidth) < 480.dp
         val cols = statusColumns(maxWidth, if (wide) 24.dp else 16.dp, LocalDensity.current.fontScale)
         val selected = remember(orders, selectedId) { selectedId?.let { id -> orders.find { it.id == id } } }
+        // Back closes the topmost thing first: the order pane beside the list,
+        // then the search, and only then leaves the view (the phone's sheet
+        // is its own window and takes back itself).
+        BackHandler(enabled = search.isNotEmpty() && !(twoPane && selected != null)) { vm.setSearch("") }
+        BackHandler(enabled = twoPane && selected != null) { vm.select(null) }
         Row(Modifier.fillMaxSize()) {
         PullToRefreshBox(isRefreshing = refreshing, onRefresh = vm::refresh, modifier = Modifier.weight(1f).fillMaxHeight()) {
             LazyColumn(
@@ -261,8 +271,9 @@ fun OrdersScreen(dash: DashboardViewModel) {
         }
 
     // ── Order detail ───────────────────────────────────────────────────────
-    if (selectedId != null && selected == null) {
-        // The row vanished under a refetch — nothing left to show.
+    if (selectedId != null && selected == null && loaded) {
+        // The row vanished under a refetch — nothing left to show. (Not before
+        // the first read: an order restored after process death waits for it.)
         LaunchedEffect(selectedId) { vm.select(null) }
     }
     if (selected != null && !twoPane) {
@@ -281,6 +292,7 @@ fun OrdersScreen(dash: DashboardViewModel) {
         }
     }
     }
+}
 }
 
 /** How wide the order pane is beside the list on a wide tablet. */
@@ -464,7 +476,7 @@ private fun OrderRow(
                     }
                 }
                 // Row 4: time
-                Text(Fmt.timeAgo(order.createdAt), fontSize = 10.sp, color = c.textDim, modifier = Modifier.padding(top = 2.dp))
+                Text(liveAgo(order.createdAt), fontSize = 10.sp, color = c.textDim, modifier = Modifier.padding(top = 2.dp))
             }
         } else {
             Column(Modifier.weight(1f)) {
@@ -488,7 +500,7 @@ private fun OrderRow(
                     summary(Modifier.widthIn(max = 232.dp).align(Alignment.CenterVertically))
                 }
                 // Row 3: time
-                Text(Fmt.timeAgo(order.createdAt), fontSize = 10.sp, color = c.textDim, modifier = Modifier.padding(top = 2.dp))
+                Text(liveAgo(order.createdAt), fontSize = 10.sp, color = c.textDim, modifier = Modifier.padding(top = 2.dp))
             }
             Spacer(Modifier.width(12.dp))
             Column(horizontalAlignment = Alignment.End) {

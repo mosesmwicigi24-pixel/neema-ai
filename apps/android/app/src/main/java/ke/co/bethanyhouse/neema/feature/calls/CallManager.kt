@@ -182,6 +182,9 @@ class CallManager internal constructor(
     private val _state = MutableStateFlow(CallUiState())
     val state: StateFlow<CallUiState> = _state.asStateFlow()
 
+    /** Tests: when the live call started, on the injected clock (null when none is live). */
+    internal val liveSinceForTest: Long? get() = liveSince
+
     private val _micRequest = MutableStateFlow(false)
     /** True while a call is waiting for the agent to allow the microphone. */
     val micRequest: StateFlow<Boolean> = _micRequest.asStateFlow()
@@ -197,6 +200,13 @@ class CallManager internal constructor(
     private var recording: CallRecording? = null
     private var recCallId: String? = null
     private var timerJob: Job? = null
+    /**
+     * When the call went live, on [now]'s clock. The timer is worked out from
+     * it on every tick — never counted up — so a main thread held back by a
+     * screen-off doze, a busy frame or the app in the background can't make
+     * the call look shorter than it is.
+     */
+    private var liveSince: Long? = null
     private var resetJob: Job? = null
     private var ringTimeoutJob: Job? = null
     /** Running while a "disconnected" peer has its chance to recover. */
@@ -218,6 +228,8 @@ class CallManager internal constructor(
         started = true
         // A ringing notification left behind by a process that died mid-ring.
         ringer.cancelIncoming()
+        // Raw audio a process killed mid-call left behind (no call is live yet).
+        bg.launch { runCatching { media.sweepLeftovers() } }
 
         // Primary path: the live WebSocket event (instant).
         ui.launch { events.collect(::onFrame) }
@@ -281,9 +293,17 @@ class CallManager internal constructor(
                 if (p == CallPhase.InCall) {
                     startRecording()   // begins once (guarded); remote audio is flowing by now
                     timerJob?.cancel()
-                    timerJob = ui.launch { while (isActive) { delay(1_000); update { it.copy(seconds = it.seconds + 1) } } }
+                    val since = liveSince ?: (now() - _state.value.seconds * 1_000L).also { liveSince = it }
+                    timerJob = ui.launch {
+                        while (isActive) {
+                            // Wake on the next whole second of the call, then read the clock.
+                            delay(1_000L - (now() - since).mod(1_000L))
+                            tickTimer()
+                        }
+                    }
                 } else {
                     timerJob?.cancel(); timerJob = null
+                    if (p == CallPhase.Idle || p == CallPhase.Connecting || p == CallPhase.Ringing) liveSince = null
                 }
                 if (p == CallPhase.Connecting || p == CallPhase.InCall) audio.enter(_state.value.speaker)
                 else if (p == CallPhase.Idle || p == CallPhase.Ended) audio.leave()
@@ -293,10 +313,19 @@ class CallManager internal constructor(
         // Back on screen, the card is the alert — drop the notification.
         ui.launch {
             foreground.collect { fg ->
+                // Back on screen mid-call: the timer reads the true length at once.
+                if (fg && phase == CallPhase.InCall) tickTimer()
                 if (phase != CallPhase.Ringing) return@collect
                 if (fg) ringer.cancelIncoming() else postIncoming()
             }
         }
+    }
+
+    /** The live call's length from [liveSince] (the only way [CallUiState.seconds] moves). */
+    private fun tickTimer() {
+        val since = liveSince ?: return
+        val secs = ((now() - since) / 1_000L).toInt().coerceAtLeast(0)
+        if (secs != _state.value.seconds) update { it.copy(seconds = secs) }
     }
 
     /** The poll cadence: 2.5s while ringing, 12s otherwise (restarted when ringing starts / stops). */
@@ -545,6 +574,31 @@ class CallManager internal constructor(
         cleanup()
         finish()
         if (id != null && id != "pending") terminateSoon(id).join()
+    }
+
+    /**
+     * Sign-out: ends the call on this phone and waits — at most [timeoutMs] —
+     * for the server to hear it, so the terminate still goes out under the
+     * session that is about to be cleared (fired and forgotten, it raced the
+     * sign-out and was refused with a 401, leaving the customer on the line).
+     *
+     * A call that is only ringing is let go on this phone without declining
+     * it: a colleague may still answer. The card goes straight to idle — the
+     * next agent to sign in sees nothing of this call.
+     */
+    suspend fun endForSignOut(timeoutMs: Long = SIGN_OUT_TERMINATE_MS) = withContext(main) {
+        val s = _state.value
+        resetJob?.cancel(); resetJob = null
+        if (s.phase == CallPhase.Idle) return@withContext
+        val id = s.callId
+        val terminate = s.phase != CallPhase.Ringing && s.phase != CallPhase.Ended && id != null && id != "pending"
+        cleanup()
+        id?.let { markEnded(it) }
+        activeId = null
+        update { CallUiState() }
+        if (terminate) withTimeoutOrNull(timeoutMs) {
+            try { api.terminate(id!!) } catch (e: CancellationException) { throw e } catch (_: Exception) {}
+        }
     }
 
     /**
@@ -865,6 +919,8 @@ class CallManager internal constructor(
         /** Waits between the terminate / callback retries. */
         val TERMINATE_RETRY_MS = longArrayOf(2_000L, 5_000L)
         const val PLACED_LOOKUP_GAP_MS = 3_000L
+        /** How long sign-out waits for a live call's terminate before clearing the session anyway. */
+        const val SIGN_OUT_TERMINATE_MS = 3_000L
         /** The server's clock vs this phone's, when matching the row an outbound call created. */
         const val CLOCK_SKEW_MS = 120_000L
 

@@ -9,6 +9,10 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.saveable.rememberSaveable
+import ke.co.bethanyhouse.neema.feature.orders.MinuteTicker
+import ke.co.bethanyhouse.neema.feature.orders.RestoreUi
+import ke.co.bethanyhouse.neema.feature.orders.liveAgo
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -174,6 +178,7 @@ fun CallsScreen(
     readinessOverride: CallReadiness? = null,
 ) {
     val vm: CallsViewModel = viewModel { CallsViewModel(dash) }
+    RestoreUi(vm)
     val calls by vm.calls.collectAsStateWithLifecycle()
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()
     val loadError by vm.loadError.collectAsStateWithLifecycle()
@@ -198,6 +203,11 @@ fun CallsScreen(
         onPauseOrDispose {}
     }
 
+    // Held here, not in the log: on a phone the caller panel replaces the log,
+    // and back from it must land where the agent was scrolled, not at the top.
+    val logState = rememberLazyListState()
+
+    MinuteTicker {
     BoxWithConstraints(Modifier.fillMaxSize().background(Neema.colors.surface)) {
         val wide = maxWidth >= 840.dp
         val sidePad = if (maxWidth >= 640.dp) 24.dp else 16.dp   // px-4 sm:px-6
@@ -215,7 +225,7 @@ fun CallsScreen(
                 if (wide || sel == null) {
                     CallLog(
                         modifier = Modifier.widthIn(max = 560.dp).weight(1f, fill = false).fillMaxWidth(),
-                        vm = vm, shown = shown, total = list?.size ?: 0, missed = missed, missedOnly = missedOnly,
+                        vm = vm, state = logState, shown = shown, total = list?.size ?: 0, missed = missed, missedOnly = missedOnly,
                         selectedId = sel?.id, openTranscript = transcript,
                         readiness = readiness, loadError = loadError, refreshing = refreshing, compact = compact,
                         onOpenConversation = { dash.openConversationFor(it) },
@@ -230,12 +240,14 @@ fun CallsScreen(
             }
         }
     }
+    }
 }
 
 @Composable
 private fun CallLog(
     modifier: Modifier,
     vm: CallsViewModel,
+    state: androidx.compose.foundation.lazy.LazyListState,
     shown: List<Call>?,
     total: Int,
     missed: Int,
@@ -252,7 +264,6 @@ private fun CallLog(
     // list: a log of a thousand calls composes only the rows on screen. The
     // card is drawn once behind the list, spanning its first item to its last.
     val cardShape = RoundedCornerShape(16.dp)
-    val state = rememberLazyListState()
     val keys = remember(shown) { rowKeys(shown.orEmpty()) }
     val inset = if (compact) 16.dp else 24.dp
     Box(modifier.fillMaxSize()) {
@@ -350,7 +361,7 @@ private fun CallLog(
                             onSelect = { if (!c.waId.isNullOrEmpty()) vm.select(c) },
                             onToggleTranscript = { vm.toggleTranscript(c.callId) },
                             onOpenConversation = onOpenConversation,
-                            ago = vm.ago(c.startedAt),
+                            ago = liveAgo(c.startedAt),
                             compact = compact,
                         )
                         if (openTranscript?.callId == c.callId) TranscriptPanel(openTranscript, vm, compact)
@@ -636,8 +647,9 @@ private fun RecordingPlayer(url: String) {
     var playing by remember { mutableStateOf(false) }
     var buffering by remember { mutableStateOf(false) }
     var failed by remember { mutableStateOf(false) }
-    var pos by remember { mutableLongStateOf(0L) }
-    var dur by remember { mutableLongStateOf(0L) }
+    // Where playback was: a rotation (which releases the player) resumes there on the next Play.
+    var pos by rememberSaveable(url) { mutableLongStateOf(0L) }
+    var dur by rememberSaveable(url) { mutableLongStateOf(0L) }
     var scrub by remember { mutableFloatStateOf(-1f) }
     val p = player
     DisposableEffect(p) {
@@ -669,7 +681,7 @@ private fun RecordingPlayer(url: String) {
         label = if (dur > 0) "${fmtMs(pos)} / ${fmtMs(dur)}" else fmtMs(pos),
         onToggle = {
             val cur = player ?: runCatching {
-                ExoPlayer.Builder(ctx).build().apply { setMediaItem(MediaItem.fromUri(url)); prepare() }
+                ExoPlayer.Builder(ctx).build().apply { setMediaItem(MediaItem.fromUri(url)); if (pos > 0) seekTo(pos); prepare() }
             }.getOrElse { failed = true; null }.also { player = it }
             if (cur != null) { if (playing) cur.pause() else cur.play() }
         },
@@ -745,7 +757,7 @@ private fun CallerPanel(
                     color = TextC, fontSize = 12.sp, fontWeight = FontWeight.Medium,
                 )
                 if (callerMissed > 0) Text(" · $callerMissed missed", color = CallInk.MissedText, fontSize = 12.sp)
-                callerCalls.firstOrNull()?.startedAt?.let { Text(" · last ${vm.ago(it)}", color = Sage, fontSize = 12.sp, maxLines = 1) }
+                callerCalls.firstOrNull()?.startedAt?.let { Text(" · last ${liveAgo(it)}", color = Sage, fontSize = 12.sp, maxLines = 1) }
             }
             StripButton("Open chat →") { dash.openConversationFor(wa) }
         }
