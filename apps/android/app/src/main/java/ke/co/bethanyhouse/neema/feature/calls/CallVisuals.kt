@@ -60,17 +60,28 @@ internal object CallIcons {
  * top edge whose radii are fractions of the box's width and height. Compose's
  * radial brush is circular, so the circle is drawn squashed vertically.
  */
-internal fun DrawScope.drawTopEllipseGradient(rxFraction: Float, ryFraction: Float, vararg stops: Pair<Float, Color>) {
+internal fun DrawScope.drawTopEllipseGradient(
+    rxFraction: Float,
+    ryFraction: Float,
+    vararg stops: Pair<Float, Color>,
+    /** Where the box's top edge is, relative to this drawing (above it when the box is scrolled). */
+    top: Float = 0f,
+    /** The whole box's height (it may run far past what is drawn here). */
+    height: Float = size.height,
+) {
     val rx = size.width * rxFraction
-    val ry = size.height * ryFraction
+    val ry = height * ryFraction
     if (rx <= 0f || ry <= 0f) return
     val sy = ry / rx
-    val center = Offset(size.width / 2f, 0f)
+    val center = Offset(size.width / 2f, top)
+    // Cover exactly [0, size.height] once squashed about the centre.
+    val from = top + (0f - top) / sy
+    val to = top + (size.height - top) / sy
     withTransform({ scale(1f, sy, pivot = center) }) {
         drawRect(
             Brush.radialGradient(*stops, center = center, radius = rx),
-            topLeft = Offset.Zero,
-            size = Size(size.width, size.height / sy),
+            topLeft = Offset(0f, from),
+            size = Size(size.width, to - from),
         )
     }
 }

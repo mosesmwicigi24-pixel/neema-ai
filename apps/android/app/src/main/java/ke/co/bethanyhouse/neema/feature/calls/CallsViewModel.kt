@@ -11,6 +11,8 @@ import ke.co.bethanyhouse.neema.core.net.ApiException
 import ke.co.bethanyhouse.neema.core.util.Fmt
 import ke.co.bethanyhouse.neema.core.ws.str
 import ke.co.bethanyhouse.neema.feature.orders.recheckAccess
+import ke.co.bethanyhouse.neema.feature.orders.SingleFlight
+import ke.co.bethanyhouse.neema.feature.reports.ScreenLife
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -41,6 +43,14 @@ data class TranscriptUi(
  * (lazily fetched, polled every 5s while a transcription job runs).
  */
 class CallsViewModel(private val dash: DashboardViewModel) : ViewModel() {
+    companion object {
+        /** The web's fallback interval (the socket frames are the real path). */
+        const val POLL_MS = 60_000L
+        /** CallsView's `setTimeout(load, 500)` after a call frame. */
+        const val FRAME_RELOAD_MS = 500L
+        const val TRANSCRIPT_POLL_MS = 5_000L
+    }
+
     private val api = dash.api
 
     private val _calls = MutableStateFlow<List<Call>?>(null)
@@ -70,77 +80,71 @@ class CallsViewModel(private val dash: DashboardViewModel) : ViewModel() {
 
     /** The reload a burst of call frames coalesces into (the web schedules one per frame). */
     private var frameReload: Job? = null
-    /** Bumped per load: only the newest request's answer lands, so a slow older one can't roll the log back. */
-    private var loadSeq = 0
-    /** The request whose log is on screen. */
-    private var shownSeq = 0
+
+    /**
+     * The log's reads, one on the wire at a time: the 60s tick, a burst of
+     * call frames, a reconnect, a return to the app, a pull and a Retry share
+     * round trips on a slow network instead of stacking (a read asked for
+     * while one is in flight is the next one, so it still sees what prompted it).
+     */
+    private val reads = SingleFlight(viewModelScope) {
+        val r = runCatching { api.calls.list() }
+        land(r)
+        r.isSuccess
+    }
+
+    /**
+     * CallsView's lifecycle. The web's view unmounts when you leave it, which
+     * stops its 60s interval and its socket handler; this ViewModel outlives
+     * the screen, so it does the same through [ScreenLife]: the fallback tick
+     * runs only while the log is on display and the app in front, and coming
+     * back to it (or to the app), or the socket reconnecting, reloads at once.
+     */
+    val life = ScreenLife(
+        viewModelScope, dash.foreground, dash.container.socket.connected,
+        pollMs = POLL_MS, catchUpWindowMs = 0L,
+        poll = { reads.run() }, catchUp = { reads.run() },
+    )
 
     init {
         load()
-        // The WS handler below reloads on call events; this is only the
-        // missed-event fallback, so a slow cadence is enough.
+        // Call frames reload the log 500ms later (a burst is one reload) while
+        // it is on display; off-screen, the next visit catches up anyway.
         viewModelScope.launch {
-            val fg = dash.foreground
-            while (isActive) {
-                delay(60_000)
-                // Backgrounded: no ticks. Coming back reloads (below), then the clock restarts.
-                if (!fg.value) { fg.first { it }; continue }
-                load()
-            }
-        }
-        val socket = dash.container.socket
-        viewModelScope.launch {
-            socket.events.collect { e ->
+            dash.container.socket.events.collect { e ->
                 val t = e.str("type")
-                if ((t == "incoming_call" || t == "call_ended") && frameReload?.isActive != true) {
-                    frameReload = launch { delay(500); load() }
+                if ((t == "incoming_call" || t == "call_ended") && life.active && frameReload?.isActive != true) {
+                    frameReload = launch { delay(FRAME_RELOAD_MS); reads.run() }
                 }
             }
         }
-        // Frames sent while the socket was down are lost: catch up the moment
-        // it reconnects, and when the app comes back on screen (the web waits
-        // for its next 60s tick).
-        viewModelScope.launch {
-            var was = socket.connected.value
-            socket.connected.collect { c -> if (c && !was) load(); was = c }
-        }
-        viewModelScope.launch {
-            var was = dash.foreground.value
-            dash.foreground.collect { fg -> if (fg && !was) load(); was = fg }
-        }
     }
 
-    fun load() {
-        val seq = ++loadSeq
-        viewModelScope.launch { land(seq, runCatching { api.calls.list() }) }
-    }
+    fun load() { viewModelScope.launch { reads.run() } }
 
     /** Pull-to-refresh / Retry: the spinner shows until the answer (or the failure) is in. */
     fun refresh() {
         if (_refreshing.value) return
         _refreshing.value = true
-        val seq = ++loadSeq
         viewModelScope.launch {
-            try { land(seq, runCatching { api.calls.list() }) } finally { _refreshing.value = false }
+            try { reads.run() } finally { _refreshing.value = false }
         }
     }
 
     /**
-     * One answer lands. A log newer than the one shown replaces it (an older
-     * one arriving late can't roll it back). A failure is reported only if it
-     * was the newest request, and never clears the rows already on screen; a
-     * first load that fails leaves an empty log with the reason and a Retry.
+     * One answer lands (reads never overlap, so it is the newest). A failure
+     * never clears the rows already on screen; a first load that fails leaves
+     * an empty log with the reason and a Retry.
      */
-    private fun land(seq: Int, r: Result<List<Call>>) {
+    private fun land(r: Result<List<Call>>) {
         r.exceptionOrNull()?.let { if (it is kotlinx.coroutines.CancellationException) throw it }
         r.onSuccess {
-            if (seq > shownSeq) { shownSeq = seq; _calls.value = it }
-            if (seq == loadSeq) _loadError.value = null
+            _calls.value = it
+            _loadError.value = null
         }.onFailure { e ->
             // The server never refuses the log by role today (admin.py `list_calls`
             // only needs a signed-in agent); if it ever does, re-read who we are.
             if ((e as? ApiException)?.status == 403) dash.recheckAccess()
-            if (seq != loadSeq) return
             if (_calls.value == null) _calls.value = emptyList()
             _loadError.value = callsErrorText(e)
         }
@@ -180,14 +184,15 @@ class CallsViewModel(private val dash: DashboardViewModel) : ViewModel() {
         loadTranscript(callId)
         transcriptPoll = viewModelScope.launch {
             // A transcription job takes ~1-2 min — 5s resolution is plenty, and
-            // a backgrounded app shouldn't keep polling for it.
-            val fg = dash.foreground
+            // neither a backgrounded app nor another screen keeps polling for it.
+            // Each fetch finishes before the next wait starts: on a slow network
+            // the polls never stack.
             while (isActive) {
-                delay(5_000)
+                delay(TRANSCRIPT_POLL_MS)
                 val cur = _transcript.value ?: break
                 if (cur.callId != callId) break
                 val st = cur.data?.status
-                if ((st == "pending" || st == "processing") && fg.value) loadTranscript(callId)
+                if ((st == "pending" || st == "processing") && life.active) fetchTranscript(callId)
             }
         }
     }

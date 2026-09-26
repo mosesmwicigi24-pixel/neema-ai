@@ -66,15 +66,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ke.co.bethanyhouse.neema.app.DashboardViewModel
+import ke.co.bethanyhouse.neema.core.ui.theme.ChannelColors
+import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 
-private val WaGreen = Color(0xFF25D366)
-private val CardText = Color(0xFFE9EDEF)
-private val SubText = Color(0xFF8AA89A)
-private val PillText = Color(0xFFA8E6C4)
-private val PillBg = Color(0x2425D366)
-private val Red = Color(0xFFE24B4A)
-private val Amber = Color(0xFFEF9F27)
-private val LabelGrey = Color(0xFF8696A0)
+// CallStage.tsx's inline palette: see [CallInk].
+private val WaGreen = ChannelColors.WhatsApp
+private val CardText = CallInk.Text
+private val SubText = CallInk.StageSubText
+private val PillText = CallInk.StagePillText
+private val PillBg = ChannelColors.WhatsApp.copy(alpha = 0.14f)
+private val Red = CallInk.StageRed
+private val Amber = CallInk.StageAmber
+private val LabelGrey = CallInk.StageLabel
 
 private val CssEaseOut = CubicBezierEasing(0f, 0f, 0.58f, 1f)
 private val CssEaseInOut = CubicBezierEasing(0.42f, 0f, 0.58f, 1f)
@@ -160,7 +163,7 @@ fun CallCard(c: CallUiState, actions: CallActions) {
             .fillMaxSize()
             .drawBehind {
                 // radial-gradient(130% 100% at 50% 0%, #0e5c3a 0%, #06110b 60%)
-                drawTopEllipseGradient(1.3f, 1f, 0f to Color(0xFF0E5C3A), 0.6f to Color(0xFF06110B), 1f to Color(0xFF06110B))
+                drawTopEllipseGradient(1.3f, 1f, 0f to CallInk.StageGlow, 0.6f to CallInk.StageInk, 1f to CallInk.StageInk)
             }
             // The card owns the content area: swallow taps meant for the screen below.
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {},
@@ -179,8 +182,8 @@ fun CallCard(c: CallUiState, actions: CallActions) {
                 .widthIn(max = 448.dp)
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(32.dp))
-                .background(Color(0x990B141A))
-                .border(1.dp, Color(0x2E25D366), RoundedCornerShape(32.dp))
+                .background(CallInk.StageGlass.copy(alpha = 0.6f))
+                .border(1.dp, ChannelColors.WhatsApp.copy(alpha = 0.18f), RoundedCornerShape(32.dp))
                 .padding(
                     start = if (narrow) 20.dp else 40.dp, end = if (narrow) 20.dp else 40.dp,
                     top = if (short) 32.dp else 56.dp, bottom = if (short) 24.dp else 40.dp,
@@ -203,11 +206,11 @@ fun CallCard(c: CallUiState, actions: CallActions) {
                     contentAlignment = Alignment.Center,
                 ) {
                     // The initial fills the circle at any font scale (it is a picture, not text to read).
-                    Text(initial, color = Color(0xFF04220F), fontSize = initialSize, fontWeight = FontWeight.SemiBold)
+                    Text(initial, color = CallInk.StageInitial, fontSize = initialSize, fontWeight = FontWeight.SemiBold)
                 }
                 if (live) Box(
                     Modifier.align(Alignment.BottomEnd).padding(8.dp).size(26.dp).clip(CircleShape)
-                        .background(Color(0xFF06110B)).padding(5.dp).clip(CircleShape)
+                        .background(CallInk.StageInk).padding(5.dp).clip(CircleShape)
                         .background(if (c.reconnecting) Amber else WaGreen),
                 )
             }
@@ -228,7 +231,7 @@ fun CallCard(c: CallUiState, actions: CallActions) {
             }
             if (c.phase == CallPhase.Connecting) {
                 Spacer(Modifier.height(24.dp))
-                Text("Connecting…", color = Color(0xFFCFE9D9), fontSize = 14.sp)
+                Text("Connecting…", color = CallInk.Soft, fontSize = 14.sp)
             }
             if (live) {
                 Spacer(Modifier.height(if (short) 16.dp else 24.dp))
@@ -242,7 +245,7 @@ fun CallCard(c: CallUiState, actions: CallActions) {
                     // The network blipped: no bouncing bars while no audio flows.
                     Box(Modifier.height(30.dp))
                     Spacer(Modifier.height(16.dp))
-                    StatusPill("Reconnecting…", dot = Amber, bg = Color(0x24EF9F27), textColor = Color(0xFFF5C451))
+                    StatusPill("Reconnecting…", dot = Amber, bg = Amber.copy(alpha = 0.14f), textColor = CallInk.Gold)
                 } else {
                     Waveform()
                     Spacer(Modifier.height(16.dp))
@@ -251,15 +254,15 @@ fun CallCard(c: CallUiState, actions: CallActions) {
             }
             c.error?.let {
                 Spacer(Modifier.height(16.dp))
-                Text(it, color = Color(0xFFFCA5A5), fontSize = 14.sp, textAlign = TextAlign.Center)
+                Text(it, color = Palette.Red300, fontSize = 14.sp, textAlign = TextAlign.Center)
             }
             if (c.busy) {
                 Spacer(Modifier.height(16.dp))
-                Text("Saving the callback…", color = Color(0xFFCFE9D9), fontSize = 14.sp, textAlign = TextAlign.Center)
+                Text("Saving the callback…", color = CallInk.Soft, fontSize = 14.sp, textAlign = TextAlign.Center)
             }
             if (c.phase == CallPhase.Ended) {
                 Spacer(Modifier.height(16.dp))
-                Text(c.note ?: "Call ended", color = Color(0xFFA8C7B6), fontSize = 14.sp, textAlign = TextAlign.Center)
+                Text(c.note ?: "Call ended", color = CallInk.StageEnded, fontSize = 14.sp, textAlign = TextAlign.Center)
             }
         }
 
@@ -287,13 +290,13 @@ fun CallCard(c: CallUiState, actions: CallActions) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     CallButton(
-                        if (c.muted) LabelGrey else Color(0xFF1F2C33),
+                        if (c.muted) LabelGrey else CallInk.StageControl,
                         if (c.muted) "Unmute" else "Mute",
                         if (c.muted) CallIcons.MicOff else CallIcons.Mic,
                         onClick = actions.toggleMute,
                     )
                     CallButton(
-                        if (c.speaker) LabelGrey else Color(0xFF1F2C33),
+                        if (c.speaker) LabelGrey else CallInk.StageControl,
                         if (c.speaker) "Speaker on" else "Speaker",
                         CallIcons.Speaker,
                         onClick = actions.toggleSpeaker,
@@ -339,24 +342,42 @@ private fun PulseRing(maxScale: Float, startAlpha: Float, size: Dp = 132.dp) {
     )
 }
 
-/** 15 bars bouncing between 5 and 26dp (the cwf keyframes). */
+/**
+ * 15 bars bouncing between 5 and 26dp (the cwf keyframes). The heights are
+ * read while drawing, not composing: a live call redraws one small canvas per
+ * frame instead of recomposing and re-measuring fifteen boxes 60 times a second.
+ */
 @Composable
 private fun Waveform() {
     val t = rememberInfiniteTransition(label = "wave")
-    Row(Modifier.height(30.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-        repeat(15) { i ->
-            val h by t.animateFloat(
-                5f, 26f,
-                infiniteRepeatable(
-                    // cwf: 0.9s ease-in-out — each half is its own ease-in-out segment.
-                    tween(450, easing = CssEaseInOut), RepeatMode.Reverse,
-                    initialStartOffset = StartOffset((i % 8) * 80),
-                ),
-                label = "bar$i",
-            )
-            Box(Modifier.width(3.dp).height(h.dp).clip(RoundedCornerShape(2.dp)).background(WaGreen))
-        }
+    val heights = List(15) { i ->
+        t.animateFloat(
+            5f, 26f,
+            infiniteRepeatable(
+                // cwf: 0.9s ease-in-out — each half is its own ease-in-out segment.
+                tween(450, easing = CssEaseInOut), RepeatMode.Reverse,
+                initialStartOffset = StartOffset((i % 8) * 80),
+            ),
+            label = "bar$i",
+        )
     }
+    // 15 × 3dp bars, 4dp apart, centred in a 30dp band.
+    Box(
+        Modifier.size(width = (15 * 3 + 14 * 4).dp, height = 30.dp).drawBehind {
+            val w = 3.dp.toPx()
+            val gap = 4.dp.toPx()
+            val r = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())
+            heights.forEachIndexed { i, h ->
+                val hp = h.value.dp.toPx()
+                drawRoundRect(
+                    WaGreen,
+                    topLeft = androidx.compose.ui.geometry.Offset(i * (w + gap), (size.height - hp) / 2f),
+                    size = androidx.compose.ui.geometry.Size(w, hp),
+                    cornerRadius = r,
+                )
+            }
+        },
+    )
 }
 
 /** Every call control is at least 56dp across (Callback was the web's 54px). */

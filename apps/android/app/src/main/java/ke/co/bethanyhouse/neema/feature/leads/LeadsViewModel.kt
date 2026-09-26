@@ -9,6 +9,11 @@ import ke.co.bethanyhouse.neema.feature.reports.ScreenLife
 import ke.co.bethanyhouse.neema.feature.orders.FailKind
 import ke.co.bethanyhouse.neema.feature.orders.lowerFirst
 import ke.co.bethanyhouse.neema.feature.orders.salesFailure
+import ke.co.bethanyhouse.neema.feature.orders.SalesInk
+import ke.co.bethanyhouse.neema.feature.orders.SingleFlight
+import ke.co.bethanyhouse.neema.core.ui.theme.Palette
+import kotlinx.coroutines.CancellationException
+import java.util.Locale
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -33,19 +38,19 @@ data class LeadStage(
 
 /** The canonical columns (LeadsView STAGES). */
 val BASE_STAGES = listOf(
-    LeadStage("new", "New", Color(0xFF57534E), Color(0xFFFAFAF9), Color(0xFFE7E5E4), Color(0xFFA8A29E)),
-    LeadStage("contacted", "Contacted", Color(0xFF1D4ED8), Color(0xFFEFF6FF), Color(0xFFBFDBFE), Color(0xFF3B82F6)),
-    LeadStage("qualified", "Qualified", Color(0xFF6D28D9), Color(0xFFF5F3FF), Color(0xFFDDD6FE), Color(0xFF8B5CF6)),
-    LeadStage("proposal", "Proposal", Color(0xFFB45309), Color(0xFFFFFBEB), Color(0xFFFDE68A), Color(0xFFF59E0B)),
-    LeadStage("negotiation", "Negotiating", Color(0xFFC2410C), Color(0xFFFFF7ED), Color(0xFFFED7AA), Color(0xFFF97316)),
-    LeadStage("won", "Won", Color(0xFF047857), Color(0xFFECFDF5), Color(0xFFA7F3D0), Color(0xFF10B981)),
-    LeadStage("lost", "Lost", Color(0xFFDC2626), Color(0xFFFEF2F2), Color(0xFFFECACA), Color(0xFFF87171)),
+    LeadStage("new", "New", Palette.Stone600, Palette.Stone50, Palette.Stone200, Palette.Stone400),
+    LeadStage("contacted", "Contacted", Palette.Blue700, Palette.Blue50, Palette.Blue200, Palette.Blue500),
+    LeadStage("qualified", "Qualified", SalesInk.Violet700, Palette.Violet50, Palette.Violet200, SalesInk.Violet500),
+    LeadStage("proposal", "Proposal", Palette.Amber700, Palette.Amber50, Palette.Amber200, Palette.Amber500),
+    LeadStage("negotiation", "Negotiating", SalesInk.Orange700, SalesInk.Orange50, SalesInk.Orange200, SalesInk.Orange500),
+    LeadStage("won", "Won", Palette.Emerald700, Palette.Emerald50, Palette.Emerald200, Palette.Emerald500),
+    LeadStage("lost", "Lost", Palette.Red600, Palette.Red50, Palette.Red200, Palette.Red400),
 )
 
 /** Canonical columns plus the operator-added stages, which sit between Negotiating and Won. */
 fun buildStages(customs: List<String>): List<LeadStage> {
     val defs = customs.filter { it.isNotBlank() }.map {
-        LeadStage(it, it, Color(0xFFA16207), Color(0xFFFEFCE8), Color(0xFFFEF08A), Color(0xFFEAB308))
+        LeadStage(it, it, SalesInk.Yellow700, SalesInk.Yellow50, SalesInk.Yellow200, SalesInk.Yellow500)
     }
     val won = BASE_STAGES.indexOfFirst { it.id == "won" }
     return BASE_STAGES.take(won) + defs + BASE_STAGES.drop(won)
@@ -118,6 +123,64 @@ internal fun editLanded(edit: LeadEdit, stored: Lead): Boolean {
     return true
 }
 
+/**
+ * A fresh read of the board, except the leads in [keepLocal] (changed here
+ * after the read began, or mid-save): they keep the row on screen — or stay
+ * gone, when this phone saw them deleted. One pass, whatever the board's size.
+ */
+internal fun overlayLocal(server: List<Lead>, onScreen: List<Lead>, keepLocal: Set<String>): List<Lead> {
+    if (keepLocal.isEmpty()) return server
+    val local = HashMap<String, Lead>(keepLocal.size * 2)
+    for (l in onScreen) if (l.id in keepLocal) local[l.id] = l
+    return server.mapNotNull { l -> if (l.id in keepLocal) local[l.id] else l }
+}
+
+/** The kanban as the screen draws it: every figure from one pass over the leads. */
+@androidx.compose.runtime.Immutable
+data class LeadBoard(
+    /** Leads per stage id, unfiltered (the stage pills' counts). */
+    val counts: Map<String, Int>,
+    /** The filtered leads per stage id, in the server's (score) order. */
+    val columns: Map<String, List<Lead>>,
+    /** `total_spent` over each column's filtered leads (the column header's money). */
+    val columnValue: Map<String, Double>,
+    /** The header's "Pipeline": everything neither won nor lost. */
+    val pipelineValue: Double,
+    /** The header's "Won". */
+    val wonValue: Double,
+)
+
+private fun stageKey(s: String?): String = s.orEmpty().trim().lowercase(Locale.ROOT)
+
+/**
+ * LeadsView's per-render work — `leads.filter(stage)` once per column and once
+ * per pill, the pipeline and won sums — done once per change of the board:
+ * O(leads + stages) instead of O(leads × stages) on every recomposition.
+ * A lead matches a column as [LeadStage.matches] does (trimmed, any case).
+ */
+fun buildBoard(leads: List<Lead>, filtered: List<Lead>, stages: List<LeadStage>): LeadBoard {
+    val count = HashMap<String, Int>()
+    var pipeline = 0.0
+    var won = 0.0
+    for (l in leads) {
+        val k = stageKey(l.leadStage)
+        count[k] = (count[k] ?: 0) + 1
+        val raw = l.leadStage.lowercase()
+        if (raw != "lost" && raw != "won") pipeline += l.totalSpent
+        if (l.leadStage.equals("won", ignoreCase = true)) won += l.totalSpent
+    }
+    val byStage = HashMap<String, MutableList<Lead>>()
+    for (l in filtered) byStage.getOrPut(stageKey(l.leadStage)) { ArrayList() }.add(l)
+    val columns = stages.associate { s -> s.id to (byStage[stageKey(s.id)] ?: emptyList<Lead>()) }
+    return LeadBoard(
+        counts = stages.associate { s -> s.id to (count[stageKey(s.id)] ?: 0) },
+        columns = columns,
+        columnValue = columns.mapValues { (_, col) -> col.sumOf { it.totalSpent } },
+        pipelineValue = pipeline,
+        wonValue = won,
+    )
+}
+
 /** LeadsView's state: the leads, the pipeline's columns, filter/search and the open lead. */
 class LeadsViewModel(private val dash: DashboardViewModel) : ViewModel() {
     private val api = LeadsApi(dash.api.http)
@@ -157,6 +220,21 @@ class LeadsViewModel(private val dash: DashboardViewModel) : ViewModel() {
     /** Why the open sheet's save failed — shown in the sheet, over the fields as typed. */
     private val _sheetError = MutableStateFlow<String?>(null)
     val sheetError: StateFlow<String?> = _sheetError.asStateFlow()
+
+    /** Local changes by lead id, stamped with [gen]: a read that began before one must not undo it. */
+    private val touchedAt = HashMap<String, Long>()
+    private var gen = 0L
+    /** Leads with an optimistic move on the wire: every read keeps their local row until it settles. */
+    private val moving = HashSet<String>()
+    /** Leads whose next read must be the server's row (a save being settled). */
+    private val truth = HashSet<String>()
+
+    /**
+     * The board's reads, one on the wire at a time: a visit, a return to the
+     * app, a pull and the re-reads after saves share round trips instead of
+     * stacking up on a slow network (a read asked for mid-flight is the next one).
+     */
+    private val reads = SingleFlight(viewModelScope) { fetchNow() }
 
     /**
      * LeadsView loads its stages and leads on mount, so every visit reads them
@@ -198,25 +276,43 @@ class LeadsViewModel(private val dash: DashboardViewModel) : ViewModel() {
         }
     }
 
-    /** Reads overlap (a visit, a pull, a reconcile after a save): only the newest lands. */
-    private var fetchSeq = 0
-
     /**
      * Read the board. A failure keeps what is on screen and says why; true
      * when the board now shows the server's truth.
+     *
+     * [truthFor]: a lead whose save is being settled — its row is taken from
+     * the server even though a local change to it is pending, so the answer
+     * says whether the save landed.
      */
-    private suspend fun fetch(): Boolean {
-        val seq = ++fetchSeq
+    private suspend fun fetch(truthFor: String? = null): Boolean {
+        truthFor?.let { truth += it }
+        return reads.run()
+    }
+
+    private suspend fun fetchNow(): Boolean {
+        val startGen = gen
+        val trusted = HashSet(truth).also { truth.clear() }
         return try {
             val list = api.list()
-            if (seq == fetchSeq) { _leads.value = list; _loadError.value = null }
+            _leads.value = overlayLocal(list, _leads.value, protectedSince(startGen) - trusted)
+            touchedAt.values.removeAll { it <= startGen }
+            _loadError.value = null
             true
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            val f = dash.salesFailure(e)
-            if (seq == fetchSeq) _loadError.value = f.message()
+            _loadError.value = dash.salesFailure(e).message()
             false
         }
     }
+
+    /** Leads changed here after a read began, or with a move still on the wire: that read predates them. */
+    private fun protectedSince(startGen: Long): Set<String> =
+        if (touchedAt.isEmpty() && moving.isEmpty()) emptySet()
+        else touchedAt.filterValues { it > startGen }.keys + moving
+
+    /** Marks [id] as changed here, now. */
+    private fun touch(id: String) { touchedAt[id] = ++gen }
 
     fun select(id: String?) {
         if (id != _selectedId.value) _sheetError.value = null
@@ -226,6 +322,7 @@ class LeadsViewModel(private val dash: DashboardViewModel) : ViewModel() {
     fun moveTo(lead: Lead, stage: String) = update(lead, stage = stage)
 
     private fun apply(id: String, edit: LeadEdit) {
+        touch(id)
         _leads.value = _leads.value.map { l ->
             if (l.id != id) l else l.copy(
                 leadStage = edit.stage ?: l.leadStage,
@@ -262,6 +359,7 @@ class LeadsViewModel(private val dash: DashboardViewModel) : ViewModel() {
         val edit = LeadEdit(stage, tags, notes, notesBase)
         val before = _leads.value.find { it.id == lead.id } ?: lead
         _saving.value = _saving.value + lead.id
+        moving += lead.id
         apply(lead.id, edit)
         viewModelScope.launch {
             try {
@@ -271,10 +369,11 @@ class LeadsViewModel(private val dash: DashboardViewModel) : ViewModel() {
                 // saved notes are the operator's paragraphs PLUS any the server
                 // appended since, and the reply is only {"ok": true}. Re-read
                 // quietly so the board shows what was actually stored.
-                if (notes != null) fetch()
+                if (notes != null) fetch(truthFor = lead.id)
             } catch (e: Exception) {
                 val f = dash.salesFailure(e)
                 val rollback = {
+                    touch(lead.id)
                     _leads.value = _leads.value.map { l ->
                         if (l.id != lead.id) l else l.copy(
                             leadStage = if (stage != null) before.leadStage else l.leadStage,
@@ -286,7 +385,7 @@ class LeadsViewModel(private val dash: DashboardViewModel) : ViewModel() {
                 when {
                     f.kind == FailKind.NotFound -> gone(lead.id)
                     f.mayHaveHappened -> {
-                        if (fetch()) {
+                        if (fetch(truthFor = lead.id)) {
                             val now = _leads.value.find { it.id == lead.id }
                             when {
                                 now == null -> dash.toast("This lead no longer exists — someone may have deleted or merged it", ToastType.Error)
@@ -302,10 +401,11 @@ class LeadsViewModel(private val dash: DashboardViewModel) : ViewModel() {
                     else -> {
                         rollback()
                         dash.toast("Failed to update lead — ${f.message().lowerFirst()}", ToastType.Error)
-                        if (f.kind == FailKind.Conflict) fetch()
+                        if (f.kind == FailKind.Conflict) fetch(truthFor = lead.id)
                     }
                 }
             } finally {
+                moving -= lead.id
                 _saving.value = _saving.value - lead.id
             }
         }
@@ -331,7 +431,7 @@ class LeadsViewModel(private val dash: DashboardViewModel) : ViewModel() {
                 when {
                     f.kind == FailKind.NotFound -> gone(lead.id)
                     f.mayHaveHappened -> {
-                        val read = fetch()
+                        val read = fetch(truthFor = lead.id)
                         val now = _leads.value.find { it.id == lead.id }
                         when {
                             read && now == null -> gone(lead.id)
@@ -366,6 +466,7 @@ class LeadsViewModel(private val dash: DashboardViewModel) : ViewModel() {
 
     /** 404: someone deleted (or merged) this lead. It leaves the board, and its sheet closes. */
     private fun gone(id: String) {
+        touch(id)
         _leads.value = _leads.value.filterNot { it.id == id }
         if (_selectedId.value == id) { _selectedId.value = null; _sheetError.value = null }
         dash.toast("This lead no longer exists — someone may have deleted or merged it", ToastType.Error)

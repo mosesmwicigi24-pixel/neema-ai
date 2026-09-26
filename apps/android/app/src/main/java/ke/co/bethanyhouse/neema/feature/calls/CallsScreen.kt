@@ -23,6 +23,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.layout.layout
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
@@ -80,21 +85,23 @@ import ke.co.bethanyhouse.neema.BuildConfig
 import ke.co.bethanyhouse.neema.app.DashboardViewModel
 import ke.co.bethanyhouse.neema.core.model.Call
 import ke.co.bethanyhouse.neema.core.model.Conversation
+import ke.co.bethanyhouse.neema.core.ui.theme.ChannelColors
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
+import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 import ke.co.bethanyhouse.neema.feature.conversations.customer.CustomerPanel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
-// The console's palette (CallsView.tsx inline styles).
-private val Green = Color(0xFF2AD17F)
-private val RedC = Color(0xFFF2555A)
-private val AmberC = Color(0xFFF5A623)
-private val Muted = Color(0xFF7F9B8B)
-private val Dim = Color(0xFF6B8577)
-private val TextC = Color(0xFFE9EDEF)
-private val Soft = Color(0xFFCFE9D9)
-private val Sage = Color(0xFF9FB3A8)
-private val Ink = Color(0xFF0B1410)
+// The console's palette (CallsView.tsx inline styles): see [CallInk].
+private val Green = CallInk.Green
+private val RedC = CallInk.Red
+private val AmberC = CallInk.Amber
+private val Muted = CallInk.Muted
+private val Dim = CallInk.Dim
+private val TextC = CallInk.Text
+private val Soft = CallInk.Soft
+private val Sage = CallInk.Sage
+private val Ink = CallInk.Ink
 
 private enum class Dir { In, Back }
 private data class Outcome(val label: String, val color: Color, val dir: Dir)
@@ -108,7 +115,6 @@ private val OUTCOME = mapOf(
     "ringing" to Outcome("Ringing…", Green, Dir.In),
 )
 
-private val AV = listOf(0xFF3B6EA5, 0xFFA5417D, 0xFFB5892F, 0xFF3C8C5A, 0xFF8A4FC4, 0xFFB24A4A)
 
 /**
  * The web's `avatarColor`: `[...s].reduce((a, c) => a + c.charCodeAt(0))` —
@@ -123,9 +129,9 @@ internal fun avatarIndex(s: String): Int {
         sum += src[i].code
         i += Character.charCount(src.codePointAt(i))
     }
-    return sum % AV.size
+    return sum % CallInk.Avatars.size
 }
-private fun avatarColor(s: String) = Color(AV[avatarIndex(s)])
+private fun avatarColor(s: String) = CallInk.Avatars[avatarIndex(s)]
 
 /** The row's `who`: name, else +wa_id, else "Unknown" (a blank name falls through too). */
 internal fun rowWho(c: Call): String =
@@ -173,9 +179,11 @@ fun CallsScreen(
 
     LaunchedEffect(focusKey, calls) { focusKey?.let { if (calls != null) vm.consumeFocus(it) } }
 
+    ke.co.bethanyhouse.neema.feature.reports.TrackShown(vm.life)
     val list = calls
-    val missed = list.orEmpty().count { it.status == "missed" }
-    val shown = if (missedOnly) list?.filter { it.status == "missed" } else list
+    // Once per change of the log, not per recomposition (a tick of a recording's scrubber).
+    val missed = remember(list) { list.orEmpty().count { it.status == "missed" } }
+    val shown = remember(list, missedOnly) { if (missedOnly) list?.filter { it.status == "missed" } else list }
     val sel = selected?.takeIf { !it.waId.isNullOrEmpty() }
     val ctx = LocalContext.current
     var readiness by remember { mutableStateOf(readinessOverride ?: CallReadiness.of(ctx)) }
@@ -235,83 +243,101 @@ private fun CallLog(
     compact: Boolean = false,
     onOpenConversation: (String) -> Unit,
 ) {
-    // One card, as the web draws it: the log is at most 200 rows (the API's
-    // cap; the web asks for the default 50), so a plain scrolling column keeps
-    // the card's gradient, outline and shadow whole instead of slicing them
-    // across lazy items.
+    // One card, as the web draws it (gradient, outline, shadow), over a lazy
+    // list: a log of a thousand calls composes only the rows on screen. The
+    // card is drawn once behind the list, spanning its first item to its last.
     val cardShape = RoundedCornerShape(16.dp)
-    Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(vertical = 24.dp)) {
-        Column(
+    val state = rememberLazyListState()
+    val keys = remember(shown) { rowKeys(shown.orEmpty()) }
+    val inset = if (compact) 16.dp else 24.dp
+    Box(modifier.fillMaxSize()) {
+        Box(
             Modifier
                 .fillMaxWidth()
+                .cardSpan(state)
                 // box-shadow: 0 20px 50px rgba(0,0,0,0.25)
                 .shadow(20.dp, cardShape, ambientColor = Color.Black.copy(alpha = 0.25f), spotColor = Color.Black.copy(alpha = 0.25f))
                 .clip(cardShape)
                 .drawBehind {
-                    // radial-gradient(120% 60% at 50% 0%, #123626 0%, #0b1410 60%)
-                    drawTopEllipseGradient(1.2f, 0.6f, 0f to Color(0xFF123626), 0.6f to Ink, 1f to Ink)
+                    // radial-gradient(120% 60% at 50% 0%, #123626 0%, #0b1410 60%) — over the whole card,
+                    // wherever its top has scrolled to.
+                    val span = state.cardExtent() ?: return@drawBehind
+                    drawTopEllipseGradient(
+                        1.2f, 0.6f, 0f to CallInk.Glow, 0.6f to Ink, 1f to Ink,
+                        top = span.top - span.clampedTop(size.height), height = span.height,
+                    )
                 }
                 // border: 1px solid rgba(37,211,102,0.14)
-                .border(1.dp, Color(0x2425D366), cardShape),
-        ) {
+                .border(1.dp, ChannelColors.WhatsApp.copy(alpha = 0.14f), cardShape),
+        )
+        LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(vertical = 24.dp)) {
             // Header: title, total, and the missed badge (a filter toggle).
-            val inset = if (compact) 16.dp else 24.dp
-            Row(Modifier.fillMaxWidth().padding(start = inset, end = inset, top = 24.dp, bottom = 16.dp), verticalAlignment = Alignment.Top) {
-                Column(Modifier.weight(1f)) {
-                    Text("Calls", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Medium)
-                    Spacer(Modifier.height(2.dp))
-                    Text("WhatsApp voice calls · $total total", color = Muted, fontSize = 13.sp)
-                }
-                if (missed > 0) {
-                    Text(
-                        "$missed missed" + if (missedOnly) " ✕" else "",
-                        color = Color(0xFFFF8A8D), fontSize = 12.sp, fontWeight = FontWeight.Medium, style = TextStyle(fontFeatureSettings = "tnum"),
-                        modifier = Modifier
-                            .offset(y = (-10).dp)
-                            .minimumInteractiveComponentSize()
-                            .clip(RoundedCornerShape(50))
-                            .background(if (missedOnly) Color(0x59F2555A) else Color(0x29F2555A))
-                            .border(1.dp, if (missedOnly) Color(0x99F2555A) else Color.Transparent, RoundedCornerShape(50))
-                            .clickable(onClickLabel = if (missedOnly) "Show all calls" else "Show only missed calls") {
-                                vm.missedOnly.value = !missedOnly
-                            }
-                            .padding(horizontal = 11.dp, vertical = 5.dp),
-                    )
+            item(key = "header", contentType = "header") {
+                Row(Modifier.fillMaxWidth().padding(start = inset, end = inset, top = 24.dp, bottom = 16.dp), verticalAlignment = Alignment.Top) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Calls", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.height(2.dp))
+                        Text("WhatsApp voice calls · $total total", color = Muted, fontSize = 13.sp)
+                    }
+                    if (missed > 0) {
+                        Text(
+                            "$missed missed" + if (missedOnly) " ✕" else "",
+                            color = CallInk.MissedText, fontSize = 12.sp, fontWeight = FontWeight.Medium, style = TextStyle(fontFeatureSettings = "tnum"),
+                            modifier = Modifier
+                                .offset(y = (-10).dp)
+                                .minimumInteractiveComponentSize()
+                                .clip(RoundedCornerShape(50))
+                                .background(RedC.copy(alpha = if (missedOnly) 0.35f else 0.16f))
+                                .border(1.dp, if (missedOnly) RedC.copy(alpha = 0.6f) else Color.Transparent, RoundedCornerShape(50))
+                                .clickable(onClickLabel = if (missedOnly) "Show all calls" else "Show only missed calls") {
+                                    vm.missedOnly.value = !missedOnly
+                                }
+                                .padding(horizontal = 11.dp, vertical = 5.dp),
+                        )
+                    }
                 }
             }
-            if (!readiness.ready) ReadinessBanner(readiness, compact, inset)
+            if (!readiness.ready) item(key = "readiness", contentType = "banner") { ReadinessBanner(readiness, compact, inset) }
             // The log couldn't be refreshed: what we had stays, with the reason and a way to try again.
-            if (loadError != null && !shown.isNullOrEmpty()) LoadErrorBanner(loadError, refreshing, vm::refresh, inset)
+            if (loadError != null && !shown.isNullOrEmpty()) {
+                item(key = "load-error", contentType = "banner") { LoadErrorBanner(loadError, refreshing, vm::refresh, inset) }
+            }
             when {
-                shown == null -> Text(
-                    "Loading…", color = Muted, fontSize = 14.sp, textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 40.dp),
-                )
-                shown.isEmpty() && loadError != null -> Column(
-                    Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 48.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Text("Couldn't load calls", color = Soft, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                    Spacer(Modifier.height(6.dp))
-                    Text(loadError, color = Muted, fontSize = 13.sp, textAlign = TextAlign.Center)
-                    Spacer(Modifier.height(16.dp))
-                    RetryButton(refreshing, vm::refresh)
-                }
-                shown.isEmpty() -> Column(
-                    Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 56.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Text("No calls yet", color = Soft, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                    Spacer(Modifier.height(6.dp))
+                shown == null -> item(key = "loading", contentType = "state") {
                     Text(
-                        "Incoming WhatsApp voice calls appear here. Keep the dashboard open — a call takes over the screen when it rings.",
-                        color = Muted, fontSize = 13.sp, textAlign = TextAlign.Center,
+                        "Loading…", color = Muted, fontSize = 14.sp, textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 40.dp),
                     )
                 }
-                else -> shown.forEach { c ->
-                    key(c.id.ifEmpty { c.callId }) {
+                shown.isEmpty() && loadError != null -> item(key = "error", contentType = "state") {
+                    Column(
+                        Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 48.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text("Couldn't load calls", color = Soft, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.height(6.dp))
+                        Text(loadError, color = Muted, fontSize = 13.sp, textAlign = TextAlign.Center)
+                        Spacer(Modifier.height(16.dp))
+                        RetryButton(refreshing, vm::refresh)
+                    }
+                }
+                shown.isEmpty() -> item(key = "empty", contentType = "state") {
+                    Column(
+                        Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 56.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text("No calls yet", color = Soft, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "Incoming WhatsApp voice calls appear here. Keep the dashboard open — a call takes over the screen when it rings.",
+                            color = Muted, fontSize = 13.sp, textAlign = TextAlign.Center,
+                        )
+                    }
+                }
+                else -> itemsIndexed(shown, key = { i, _ -> keys[i] }, contentType = { _, _ -> "call" }) { _, c ->
+                    Column {
                         // borderTop: 1px solid rgba(255,255,255,0.05)
-                        Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0x0DFFFFFF)))
+                        Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.05f)))
                         CallRow(
                             c = c, selected = selectedId == c.id,
                             open = openTranscript?.callId == c.callId,
@@ -328,6 +354,62 @@ private fun CallLog(
         }
     }
 }
+
+/**
+ * A stable, unique key per row: the row id (else the Meta call id), with a
+ * suffix for a repeat — a lazy list refuses duplicate keys, and a log that
+ * holds the same call twice must still draw.
+ */
+internal fun rowKeys(rows: List<Call>): List<String> {
+    val seen = HashMap<String, Int>(rows.size * 2)
+    return rows.map { c ->
+        val base = c.id.ifEmpty { c.callId }
+        val n = seen.merge(base, 1, Int::plus)!!
+        if (n == 1) base else "$base#$n"
+    }
+}
+
+/** Where the log's card is, in the list's viewport (px): from its first item's top to its last item's bottom. */
+internal class CardExtent(val top: Float, val bottom: Float) {
+    val height: Float get() = bottom - top
+    /** The top of the part that is drawn: the card is cut [MARGIN_PX] beyond the viewport so no edge shows. */
+    fun clampedTop(viewport: Float): Float = maxOf(top, -MARGIN_PX)
+    fun clampedBottom(viewport: Float): Float = minOf(bottom, viewport + MARGIN_PX)
+
+    companion object { const val MARGIN_PX = 400f }
+}
+
+/**
+ * The card's extent from the list's layout: exact for the items on screen,
+ * and for the rest the average height of those on screen — the gradient only
+ * needs the card's size roughly once it runs far past the viewport.
+ */
+internal fun androidx.compose.foundation.lazy.LazyListState.cardExtent(): CardExtent? {
+    val info = layoutInfo
+    val items = info.visibleItemsInfo
+    if (items.isEmpty() || info.totalItemsCount == 0) return null
+    val first = items.first()
+    val last = items.last()
+    val avg = items.sumOf { it.size }.toFloat() / items.size
+    val top = first.offset - first.index * avg
+    val bottom = (last.offset + last.size) + (info.totalItemsCount - 1 - last.index) * avg
+    return CardExtent(top, bottom)
+}
+
+/** Sizes and places this box over the card's visible extent (read at layout time: a scroll relayouts, never recomposes). */
+private fun Modifier.cardSpan(state: androidx.compose.foundation.lazy.LazyListState): Modifier =
+    this.layout { measurable, constraints ->
+        val viewport = constraints.maxHeight.toFloat()
+        val span = state.cardExtent()
+        if (span == null) {
+            val p = measurable.measure(androidx.compose.ui.unit.Constraints.fixed(constraints.maxWidth, 0))
+            return@layout layout(constraints.maxWidth, constraints.maxHeight) { p.place(0, 0) }
+        }
+        val top = span.clampedTop(viewport)
+        val h = (span.clampedBottom(viewport) - top).coerceAtLeast(0f)
+        val p = measurable.measure(androidx.compose.ui.unit.Constraints.fixed(constraints.maxWidth, kotlin.math.round(h).toInt()))
+        layout(constraints.maxWidth, constraints.maxHeight) { p.place(0, kotlin.math.round(top).toInt()) }
+    }
 
 @Composable
 private fun CallRow(
@@ -347,7 +429,7 @@ private fun CallRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .background(if (selected) Color(0x1425D366) else Color.Transparent)
+            .background(if (selected) ChannelColors.WhatsApp.copy(alpha = 0.08f) else Color.Transparent)
             .then(if (!c.waId.isNullOrEmpty()) Modifier.clickable(onClick = onSelect) else Modifier)
             .padding(start = if (compact) 16.dp else 24.dp, end = if (compact) 8.dp else 20.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -380,9 +462,9 @@ private fun CallRow(
                 RoundIcon(
                     icon = CallIcons.Transcript, iconSize = 15.dp,
                     label = if (hasNote) "Call summary & transcript" else "Call recording — transcribe & summarise",
-                    bg = when { open -> Color(0x3825D366); hasNote -> Color(0x1F25D366); else -> Color(0x0FFFFFFF) },
+                    bg = when { open -> ChannelColors.WhatsApp.copy(alpha = 0.22f); hasNote -> ChannelColors.WhatsApp.copy(alpha = 0.12f); else -> Color.White.copy(alpha = 0.06f) },
                     tint = if (open || hasNote) Green else Sage,
-                    border = Color(0x1AFFFFFF),
+                    border = Color.White.copy(alpha = 0.1f),
                     onClick = onToggleTranscript,
                 )
             }
@@ -390,7 +472,7 @@ private fun CallRow(
                 RoundIcon(
                     icon = CallIcons.Chat, iconSize = 16.dp,
                     label = "Open the conversation in Neema",
-                    bg = Color(0x2925D366), tint = Green, border = Color(0x4D25D366),
+                    bg = ChannelColors.WhatsApp.copy(alpha = 0.16f), tint = Green, border = ChannelColors.WhatsApp.copy(alpha = 0.3f),
                     onClick = { onOpenConversation(c.waId!!) },
                 )
             }
@@ -444,7 +526,7 @@ private fun TranscriptPanel(t: TranscriptUi, vm: CallsViewModel, compact: Boolea
         data.summary?.takeIf { it.isNotEmpty() }?.let { s ->
             Column(
                 Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(10.dp))
-                    .background(Color(0x0F25D366)).border(1.dp, Color(0x2625D366), RoundedCornerShape(10.dp))
+                    .background(ChannelColors.WhatsApp.copy(alpha = 0.06f)).border(1.dp, ChannelColors.WhatsApp.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
                     .padding(horizontal = 12.dp, vertical = 10.dp),
             ) {
                 Text("CALL SUMMARY", color = Green, fontSize = 11.sp, letterSpacing = 0.6.sp)
@@ -461,7 +543,7 @@ private fun TranscriptPanel(t: TranscriptUi, vm: CallsViewModel, compact: Boolea
             if (t.showFull) Text(data.transcript!!, color = Sage, fontSize = 12.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 6.dp))
         }
         if (st == "pending" || st == "processing") {
-            Text("Transcribing… this runs on our server, usually ~1–2 min.", color = Color(0xFFF5C451), fontSize = 12.sp)
+            Text("Transcribing… this runs on our server, usually ~1–2 min.", color = CallInk.Gold, fontSize = 12.sp)
         }
         if (st == "recorded") {
             Text(
@@ -501,8 +583,8 @@ private fun LoadErrorBanner(message: String, refreshing: Boolean, onRetry: () ->
             .padding(start = inset, end = inset, bottom = 12.dp)
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(Color(0x1AF2555A))
-            .border(1.dp, Color(0x40F2555A), RoundedCornerShape(12.dp))
+            .background(RedC.copy(alpha = 0.1f))
+            .border(1.dp, RedC.copy(alpha = 0.25f), RoundedCornerShape(12.dp))
             .padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -519,8 +601,8 @@ private fun LoadErrorBanner(message: String, refreshing: Boolean, onRetry: () ->
 @Composable
 private fun RetryButton(busy: Boolean, onClick: () -> Unit) {
     Box(
-        Modifier.minimumInteractiveComponentSize().clip(RoundedCornerShape(50)).background(Color(0x2925D366))
-            .border(1.dp, Color(0x4D25D366), RoundedCornerShape(50))
+        Modifier.minimumInteractiveComponentSize().clip(RoundedCornerShape(50)).background(ChannelColors.WhatsApp.copy(alpha = 0.16f))
+            .border(1.dp, ChannelColors.WhatsApp.copy(alpha = 0.3f), RoundedCornerShape(50))
             .clickable(enabled = !busy, onClickLabel = "Retry", onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center,
@@ -594,7 +676,7 @@ private fun PlayerBar(
     onScrubDone: () -> Unit,
 ) {
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Color(0x0FFFFFFF)).padding(horizontal = 8.dp, vertical = 4.dp),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Color.White.copy(alpha = 0.06f)).padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
@@ -608,7 +690,7 @@ private fun PlayerBar(
             value = progress,
             onValueChange = onScrub,
             onValueChangeFinished = onScrubDone,
-            colors = SliderDefaults.colors(thumbColor = Green, activeTrackColor = Green, inactiveTrackColor = Color(0x33FFFFFF)),
+            colors = SliderDefaults.colors(thumbColor = Green, activeTrackColor = Green, inactiveTrackColor = Color.White.copy(alpha = 0.2f)),
             modifier = Modifier.weight(1f).padding(horizontal = 8.dp).heightIn(max = 32.dp),
         )
         Text(label, color = Muted, fontSize = 11.sp, style = TextStyle(fontFeatureSettings = "tnum"), maxLines = 1)
@@ -627,8 +709,8 @@ private fun CallerPanel(
     modifier: Modifier,
 ) {
     val wa = sel.waId!!
-    val callerCalls = calls.filter { it.waId == wa }
-    val callerMissed = callerCalls.count { it.status == "missed" }
+    val callerCalls = remember(calls, wa) { calls.filter { it.waId == wa } }
+    val callerMissed = remember(callerCalls) { callerCalls.count { it.status == "missed" } }
     // A synthetic conversation handle is enough — the panel fetches the real CRM profile by wa_id itself.
     val conv = remember(sel.callId, wa, sel.name) {
         Conversation(
@@ -639,7 +721,7 @@ private fun CallerPanel(
     Column(modifier.fillMaxSize().padding(vertical = 24.dp)) {
         Row(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Ink)
-                .border(1.dp, Color(0x2425D366), RoundedCornerShape(16.dp))
+                .border(1.dp, ChannelColors.WhatsApp.copy(alpha = 0.14f), RoundedCornerShape(16.dp))
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -648,7 +730,7 @@ private fun CallerPanel(
                     "${callerCalls.size} call${if (callerCalls.size == 1) "" else "s"}",
                     color = TextC, fontSize = 12.sp, fontWeight = FontWeight.Medium,
                 )
-                if (callerMissed > 0) Text(" · $callerMissed missed", color = Color(0xFFFF8A8D), fontSize = 12.sp)
+                if (callerMissed > 0) Text(" · $callerMissed missed", color = CallInk.MissedText, fontSize = 12.sp)
                 callerCalls.firstOrNull()?.startedAt?.let { Text(" · last ${vm.ago(it)}", color = Sage, fontSize = 12.sp, maxLines = 1) }
             }
             StripButton("Open chat →") { dash.openConversationFor(wa) }
@@ -656,7 +738,7 @@ private fun CallerPanel(
         Spacer(Modifier.height(12.dp))
         Box(
             Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(16.dp))
-                .border(1.dp, if (Neema.colors.isDark) Neema.colors.border else Color(0xFFE7E5E4), RoundedCornerShape(16.dp))
+                .border(1.dp, if (Neema.colors.isDark) Neema.colors.border else Palette.Stone200, RoundedCornerShape(16.dp))
                 .background(Neema.colors.bg2),
         ) {
             CustomerPanel(
@@ -674,8 +756,8 @@ private fun CallerPanel(
 @Composable
 private fun StripButton(text: String, onClick: () -> Unit) {
     Row(
-        Modifier.minimumInteractiveComponentSize().clip(RoundedCornerShape(50)).background(Color(0x2425D366))
-            .border(1.dp, Color(0x4D25D366), RoundedCornerShape(50))
+        Modifier.minimumInteractiveComponentSize().clip(RoundedCornerShape(50)).background(ChannelColors.WhatsApp.copy(alpha = 0.14f))
+            .border(1.dp, ChannelColors.WhatsApp.copy(alpha = 0.3f), RoundedCornerShape(50))
             .clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -717,20 +799,20 @@ private fun ReadinessBanner(r: CallReadiness, compact: Boolean = false, inset: D
             .padding(start = inset, end = inset, bottom = 16.dp)
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(Color(0x1AF5A623))
-            .border(1.dp, Color(0x4DF5A623), RoundedCornerShape(12.dp))
+            .background(AmberC.copy(alpha = 0.1f))
+            .border(1.dp, AmberC.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            Icons.Filled.NotificationsActive, null, tint = Color(0xFFF5C451),
+            Icons.Filled.NotificationsActive, null, tint = CallInk.Gold,
             modifier = Modifier.size(18.dp).then(if (compact) Modifier.align(Alignment.Top).padding(top = 1.dp) else Modifier),
         )
         Spacer(Modifier.width(12.dp))
         val action: @Composable () -> Unit = {
             Text(
                 button, color = Ink, fontSize = 12.sp, fontWeight = FontWeight.Medium,
-                modifier = Modifier.minimumInteractiveComponentSize().clip(RoundedCornerShape(50)).background(Color(0xFFF5A623))
+                modifier = Modifier.minimumInteractiveComponentSize().clip(RoundedCornerShape(50)).background(AmberC)
                     .clickable { open() }.padding(horizontal = 14.dp, vertical = 7.dp),
             )
         }

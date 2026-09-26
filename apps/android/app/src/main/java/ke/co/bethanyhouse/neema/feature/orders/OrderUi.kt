@@ -23,7 +23,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.Icon
 import ke.co.bethanyhouse.neema.core.model.Order
 import ke.co.bethanyhouse.neema.core.model.OrderItem
+import ke.co.bethanyhouse.neema.core.ui.theme.ChannelColors
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
+import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -45,12 +47,12 @@ import java.util.Locale
 data class Tone(val text: Color, val bg: Color, val border: Color, val dot: Color)
 
 object Tones {
-    val Amber = Tone(Color(0xFFB45309), Color(0xFFFFFBEB), Color(0xFFFDE68A), Color(0xFFFBBF24))
-    val Blue = Tone(Color(0xFF1D4ED8), Color(0xFFEFF6FF), Color(0xFFBFDBFE), Color(0xFF60A5FA))
-    val Emerald = Tone(Color(0xFF047857), Color(0xFFECFDF5), Color(0xFFA7F3D0), Color(0xFF34D399))
-    val Red = Tone(Color(0xFFB91C1C), Color(0xFFFEF2F2), Color(0xFFFECACA), Color(0xFFF87171))
-    val Sky = Tone(Color(0xFF0369A1), Color(0xFFF0F9FF), Color(0xFFBAE6FD), Color(0xFF38BDF8))
-    val Green = Tone(Color(0xFF15803D), Color(0xFFF0FDF4), Color(0xFFBBF7D0), Color(0xFF4ADE80))
+    val Amber = Tone(Palette.Amber700, Palette.Amber50, Palette.Amber200, Palette.Amber400)
+    val Blue = Tone(Palette.Blue700, Palette.Blue50, Palette.Blue200, Palette.Blue400)
+    val Emerald = Tone(Palette.Emerald700, Palette.Emerald50, Palette.Emerald200, Palette.Emerald400)
+    val Red = Tone(Palette.Red700, Palette.Red50, Palette.Red200, Palette.Red400)
+    val Sky = Tone(SalesInk.Sky700, SalesInk.Sky50, SalesInk.Sky200, SalesInk.Sky400)
+    val Green = Tone(SalesInk.Green700, Palette.Green50, SalesInk.Green200, SalesInk.Green400)
 }
 
 /** Our own triage statuses, in the web's order (OrderStatus). */
@@ -127,6 +129,61 @@ fun filterOrders(orders: List<Order>, filter: String, search: String): List<Orde
         if (q.isNotEmpty()) {
             o.customerName.lowercase(Locale.ROOT).contains(q) || o.waId.contains(q) || o.id.lowercase(Locale.ROOT).contains(q)
         } else true
+    }
+}
+
+/** One page of [list] (1-based), without copying the rest of it. */
+fun <T> pageOf(list: List<T>, page: Int, size: Int): List<T> {
+    val from = ((page - 1) * size).coerceIn(0, list.size)
+    return list.subList(from, minOf(from + size, list.size)).toList()
+}
+
+/** The header's and the status cards' figures, from one pass over the orders. */
+@androidx.compose.runtime.Immutable
+data class OrderStats(
+    /** Orders per status (every one of [ORDER_STATUSES], zero included). */
+    val counts: Map<String, Int>,
+    /** Money per status (`o.total || o.subtotal`), for the card under each count. */
+    val revenueBy: Map<String, Double>,
+    /** "Total Revenue": everything but the cancelled. */
+    val revenue: Double,
+)
+
+/**
+ * OrdersView's `statusCounts`, per-status revenue and `totalRevenue` in a
+ * single pass — the web filters the whole list once per status card on every
+ * render, which a thousand orders make felt.
+ */
+fun orderStats(orders: List<Order>): OrderStats {
+    val counts = HashMap<String, Int>()
+    val money = HashMap<String, Double>()
+    var revenue = 0.0
+    for (o in orders) {
+        counts[o.status] = (counts[o.status] ?: 0) + 1
+        val a = o.amount
+        money[o.status] = (money[o.status] ?: 0.0) + a
+        if (o.status != "cancelled") revenue += a
+    }
+    return OrderStats(
+        counts = ORDER_STATUSES.associateWith { counts[it] ?: 0 },
+        revenueBy = ORDER_STATUSES.associateWith { money[it] ?: 0.0 },
+        revenue = revenue,
+    )
+}
+
+/**
+ * How many status cards sit side by side: the web's four (`md:grid-cols-4`)
+ * from 600dp, but only while each card still holds its label and a revenue
+ * figure like "KES 1,284,750" whole at the user's font size — at 200% text on
+ * an upright tablet four cards broke "Confirmed" across two lines, so it goes
+ * two-up there. One column when even two can't fit the words.
+ */
+fun statusColumns(width: Dp, gutter: Dp, fontScale: Float): Int {
+    val four = (width - gutter * 2 - 36.dp) / 4
+    return when {
+        width >= 600.dp && four >= 90.dp * fontScale + 28.dp -> 4
+        width / fontScale < 240.dp -> 1
+        else -> 2
     }
 }
 
@@ -217,21 +274,21 @@ fun Badge(
     )
 }
 
-/** CH_BG — the orders list's flat channel colours. */
-private val CH_BG = mapOf(
-    "whatsapp" to Color(0xFF25D366),
-    "messenger" to Color(0xFF0099FF),
-    "instagram" to Color(0xFFE1306C),
-    "facebook" to Color(0xFF1877F2),
-    "email" to Color(0xFF4D66B3),
-    "sms" to Color(0xFF589B31),
+/** CH_BG — the orders (and leads) list's flat channel colours. */
+internal val CH_BG = mapOf(
+    "whatsapp" to ChannelColors.WhatsApp,
+    "messenger" to SalesInk.Messenger,
+    "instagram" to ChannelColors.Instagram,
+    "facebook" to ChannelColors.Facebook,
+    "email" to Palette.Indigo500,
+    "sms" to Palette.Moss600,
 )
 
 /** ChannelPill — a solid pill with the channel's mark and name, white on brand colour. */
 @Composable
 fun OrderChannelPill(channel: String?) {
     val ch = (channel?.ifBlank { null } ?: "whatsapp").lowercase(Locale.ROOT)
-    val bg = CH_BG[ch] ?: Color(0xFF699A32)
+    val bg = CH_BG[ch] ?: Palette.Willow600
     Row(
         Modifier.clip(RoundedCornerShape(50)).background(bg).padding(horizontal = 6.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -261,7 +318,7 @@ fun CompactSearchField(
     iconSize: Dp = 16.dp,
     iconStart: Dp = 12.dp,
     textStart: Dp = 36.dp,
-    iconTint: Color = Color(0xFFD6D3D1),
+    iconTint: Color = Palette.Stone300,
 ) {
     val c = Neema.colors
     val shape = RoundedCornerShape(radius)

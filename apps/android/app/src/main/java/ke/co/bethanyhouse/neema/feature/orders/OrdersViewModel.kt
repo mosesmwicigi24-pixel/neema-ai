@@ -52,6 +52,24 @@ class OrdersViewModel(private val dash: DashboardViewModel) : ViewModel() {
     val loadError: StateFlow<String?> = _loadError.asStateFlow()
 
     /**
+     * This screen's reads of the list, one on the wire at a time: a pull, a
+     * Retry, a catch-up on return and the settle after a status change that
+     * pile up on a slow network share one round trip instead of stacking.
+     */
+    private val reads = SingleFlight(viewModelScope) {
+        try {
+            dash.refreshOrders()
+            _loadError.value = null
+            true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            _loadError.value = dash.salesFailure(e).message()
+            false
+        }
+    }
+
+    /**
      * The list is the dashboard's 90 s poll, which already pauses in the
      * background and refetches on return (usePolling). On top of that, while
      * this screen is on display: coming back to it re-reads the orders, and so
@@ -106,16 +124,7 @@ class OrdersViewModel(private val dash: DashboardViewModel) : ViewModel() {
      * ([DashboardViewModel.refreshOrders] suspends until the list has landed).
      * A failure keeps the list as it was and says why; true when it worked.
      */
-    private suspend fun awaitRefetch(): Boolean = try {
-        dash.refreshOrders()
-        _loadError.value = null
-        true
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        _loadError.value = dash.salesFailure(e).message()
-        false
-    }
+    private suspend fun awaitRefetch(): Boolean = reads.run()
 
     /**
      * PATCH the order's status. The web toasts "Failed to update order" on any

@@ -19,11 +19,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
+import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 
 /**
  * A refresh failed while data is on screen: the data stays, and this thin
@@ -34,11 +34,11 @@ import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 fun StaleBanner(reason: String, onRetry: () -> Unit, modifier: Modifier = Modifier) {
     val c = Neema.colors
     val shape = RoundedCornerShape(10.dp)
-    val fg = if (c.isDark) Color(0xFFFCD34D) else Color(0xFF92400E)
+    val fg = if (c.isDark) Palette.Amber300 else Palette.Amber800
     Row(
         modifier.fillMaxWidth().clip(shape)
-            .background(if (c.isDark) c.amberDim else Color(0xFFFFFBEB))
-            .border(1.dp, if (c.isDark) c.amber.copy(alpha = 0.35f) else Color(0xFFFDE68A), shape)
+            .background(if (c.isDark) c.amberDim else Palette.Amber50)
+            .border(1.dp, if (c.isDark) c.amber.copy(alpha = 0.35f) else Palette.Amber200, shape)
             .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -65,12 +65,12 @@ fun StaleBanner(reason: String, onRetry: () -> Unit, modifier: Modifier = Modifi
 fun InlineError(message: String, modifier: Modifier = Modifier, pending: Boolean = false) {
     val c = Neema.colors
     val fg = when {
-        pending -> if (c.isDark) Color(0xFFFCD34D) else Color(0xFF92400E)
-        else -> if (c.isDark) Color(0xFFFCA5A5) else Color(0xFFB91C1C)
+        pending -> if (c.isDark) Palette.Amber300 else Palette.Amber800
+        else -> if (c.isDark) Palette.Red300 else Palette.Red700
     }
     val bg = when {
-        pending -> if (c.isDark) c.amberDim else Color(0xFFFFFBEB)
-        else -> if (c.isDark) c.redDim else Color(0xFFFEF2F2)
+        pending -> if (c.isDark) c.amberDim else Palette.Amber50
+        else -> if (c.isDark) c.redDim else Palette.Red50
     }
     Text(
         message,

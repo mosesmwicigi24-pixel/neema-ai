@@ -47,6 +47,9 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
+import ke.co.bethanyhouse.neema.core.ui.theme.Palette
+import ke.co.bethanyhouse.neema.feature.orders.CH_BG
+import ke.co.bethanyhouse.neema.feature.orders.SalesInk
 import ke.co.bethanyhouse.neema.core.util.Fmt
 import java.util.Locale
 
@@ -58,20 +61,9 @@ private fun money(n: Double): String = Fmt.currency(n).unbroken()
 @Composable private fun LeadStage.borderC(): Color = if (Neema.colors.isDark) dot.copy(alpha = 0.35f) else border
 @Composable private fun LeadStage.textC(): Color = if (Neema.colors.isDark) dot else text
 
-/** The Leads page's flat channel colours (CH_SVG); unknown channels fall back to SMS. */
-private val CH_BG = mapOf(
-    "whatsapp" to Color(0xFF25D366),
-    "messenger" to Color(0xFF0099FF),
-    "instagram" to Color(0xFFE1306C),
-    "facebook" to Color(0xFF1877F2),
-    "email" to Color(0xFF4D66B3),
-    "sms" to Color(0xFF589B31),
-)
-
 /** Instagram's mark sits on its gradient (the web's `url(#igGrad)`, bottom-left → top-right). */
 private val IG_GRADIENT = Brush.linearGradient(
-    0f to Color(0xFFF09433), 0.25f to Color(0xFFE6683C), 0.5f to Color(0xFFDC2743),
-    0.75f to Color(0xFFCC2366), 1f to Color(0xFFBC1888),
+    *SalesInk.InstagramGradient,
     start = Offset(0f, Float.POSITIVE_INFINITY), end = Offset(Float.POSITIVE_INFINITY, 0f),
 )
 
@@ -122,9 +114,12 @@ fun LeadsScreen(dash: DashboardViewModel) {
     val sheetError by vm.sheetError.collectAsStateWithLifecycle()
     val c = Neema.colors
 
+    // Everything the board shows, derived once per change (not per frame, not per column):
+    // 500 leads across seven columns is one pass, not seven filters and seven counts per recomposition.
     val filtered = remember(leads, filterStage, search) { filterLeads(leads, filterStage, search) }
-    val pipelineValue = leads.filter { it.leadStage.lowercase() !in setOf("lost", "won") }.sumOf { it.totalSpent }
-    val wonValue = leads.filter { it.leadStage.equals("won", ignoreCase = true) }.sumOf { it.totalSpent }
+    val board = remember(leads, filtered, stages) { buildBoard(leads, filtered, stages) }
+    val pipelineValue = board.pipelineValue
+    val wonValue = board.wonValue
     // Never loaded: no counts or totals — zeros would be a claim.
     val unknown = leads.isEmpty() && (loading || loadError != null)
 
@@ -164,13 +159,13 @@ fun LeadsScreen(dash: DashboardViewModel) {
                     contentPadding = PaddingValues(horizontal = 24.dp, vertical = 2.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    item(key = "all") {
+                    item(key = "all", contentType = "pill") {
                         StagePill(label = if (unknown) "All" else "All (${leads.size})", selected = filterStage == "all", stage = null) {
                             vm.filterStage.value = "all"
                         }
                     }
-                    items(stages, key = { it.id }) { s ->
-                        val count = leads.count { s.matches(it.leadStage) }
+                    items(stages, key = { it.id }, contentType = { "pill" }) { s ->
+                        val count = board.counts[s.id] ?: 0
                         StagePill(label = if (unknown) s.label else "${s.label} ($count)", selected = filterStage.equals(s.id, ignoreCase = true), stage = s) {
                             vm.filterStage.value = s.id
                         }
@@ -190,7 +185,7 @@ fun LeadsScreen(dash: DashboardViewModel) {
                 if (loading) {
                     // w-6 h-6 border-2, moss
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp, color = Color(0xFF589B31))
+                        CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp, color = Palette.Moss600)
                     }
                 } else if (err != null && leads.isEmpty()) {
                     // Never read: seven empty columns would claim there are no leads.
@@ -212,10 +207,10 @@ fun LeadsScreen(dash: DashboardViewModel) {
                         contentPadding = PaddingValues(16.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        items(stages, key = { it.id }) { stage ->
-                            val stageLeads = filtered.filter { stage.matches(it.leadStage) }
+                        items(stages, key = { it.id }, contentType = { "column" }) { stage ->
                             StageColumn(
-                                stage = stage, stageLeads = stageLeads, stages = stages, width = colWidth,
+                                stage = stage, stageLeads = board.columns[stage.id].orEmpty(),
+                                stageValue = board.columnValue[stage.id] ?: 0.0, stages = stages, width = colWidth,
                                 saving = saving,
                                 onSelect = { vm.select(it.id) },
                                 onMove = { lead, to -> vm.moveTo(lead, to) },
@@ -228,7 +223,7 @@ fun LeadsScreen(dash: DashboardViewModel) {
     }
 
     // ── Lead detail ────────────────────────────────────────────────────────
-    val selected = selectedId?.let { id -> leads.find { it.id == id } }
+    val selected = remember(leads, selectedId) { selectedId?.let { id -> leads.find { it.id == id } } }
     if (selected != null) {
         ModalBottomSheet(
             onDismissRequest = { vm.select(null) },
@@ -262,13 +257,13 @@ private fun StagePill(label: String, selected: Boolean, stage: LeadStage?, onCli
         selected && stage != null -> stage.borderC()
         selected -> c.text
         c.isDark -> c.hairline
-        else -> Color(0xFFE7E5E4)
+        else -> Palette.Stone200
     }
     val fg = when {
         selected && stage != null -> stage.textC()
         stage == null -> c.text
         c.isDark -> c.textMid
-        else -> Color(0xFF78716C)
+        else -> Palette.Stone500
     }
     Row(
         // 28dp to the eye (h-7), 48dp to the finger; grows with large text.
@@ -288,6 +283,7 @@ private fun StagePill(label: String, selected: Boolean, stage: LeadStage?, onCli
 private fun StageColumn(
     stage: LeadStage,
     stageLeads: List<Lead>,
+    stageValue: Double,
     stages: List<LeadStage>,
     width: Dp,
     saving: Set<String>,
@@ -295,7 +291,6 @@ private fun StageColumn(
     onMove: (Lead, String) -> Unit,
 ) {
     val c = Neema.colors
-    val stageValue = stageLeads.sumOf { it.totalSpent }
     Column(Modifier.width(width).fillMaxHeight()) {
         // Column header
         val shape = RoundedCornerShape(12.dp)
@@ -319,7 +314,7 @@ private fun StageColumn(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp))
         } else {
             LazyColumn(Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(stageLeads, key = { it.id }) { lead ->
+                items(stageLeads, key = { it.id }, contentType = { "lead" }) { lead ->
                     LeadCard(lead, stages, busy = lead.id in saving, onSelect = { onSelect(lead) }, onMove = { onMove(lead, it) })
                 }
             }
@@ -351,7 +346,7 @@ private fun LeadCard(
                     Text(lead.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = c.text,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                 } else {
-                    Text("Unknown", fontSize = 12.sp, fontStyle = FontStyle.Italic, color = if (c.isDark) c.muted else Color(0xFFA8A29E))
+                    Text("Unknown", fontSize = 12.sp, fontStyle = FontStyle.Italic, color = if (c.isDark) c.muted else Palette.Stone400)
                 }
                 Text(Fmt.formatPhone(lead.handle), fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = c.textDim,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -363,9 +358,9 @@ private fun LeadCard(
         // Score bar
         Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(50)).background(c.bg3)) {
             val barColor = when {
-                lead.leadScore >= 70 -> Color(0xFF10B981)
-                lead.leadScore >= 40 -> Color(0xFFF59E0B)
-                else -> Color(0xFFD6D3D1)
+                lead.leadScore >= 70 -> Palette.Emerald500
+                lead.leadScore >= 40 -> Palette.Amber500
+                else -> Palette.Stone300
             }
             Box(Modifier.fillMaxWidth(lead.leadScore / 100f).fillMaxHeight().clip(RoundedCornerShape(50)).background(barColor))
         }
@@ -400,7 +395,7 @@ private fun LeadCard(
             HorizontalDivider(color = c.bg3, modifier = Modifier.padding(top = 8.dp))
             Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (prev != null) {
-                    MoveButton("← ${prev.label}", bg = if (c.isDark) c.bg else Color(0xFFF0F9EC), fg = c.textDim, Modifier.weight(1f), enabled = !busy) { onMove(prev.id) }
+                    MoveButton("← ${prev.label}", bg = if (c.isDark) c.bg else Palette.Moss50, fg = c.textDim, Modifier.weight(1f), enabled = !busy) { onMove(prev.id) }
                 }
                 if (next != null) {
                     MoveButton("${next.label} →", bg = c.bg3, fg = c.gold2, Modifier.weight(1f), enabled = !busy) { onMove(next.id) }
@@ -475,7 +470,7 @@ internal fun LeadDetail(
             }
             // A plain ✕ as on the web, in a 48dp touch target that TalkBack names.
             IconButton(onClick = onClose, modifier = Modifier.offset(x = 12.dp, y = (-8).dp)) {
-                Icon(Icons.Filled.Close, contentDescription = "Close", tint = if (c.isDark) c.muted else Color(0xFFA8A29E), modifier = Modifier.size(20.dp))
+                Icon(Icons.Filled.Close, contentDescription = "Close", tint = if (c.isDark) c.muted else Palette.Stone400, modifier = Modifier.size(20.dp))
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -490,11 +485,11 @@ internal fun LeadDetail(
                     // 48dp to the finger; the chips keep the web's px-2.5 py-1.5 look.
                     modifier = Modifier.minimumInteractiveComponentSize().clip(shape)
                         .background(if (on) s.bgC() else c.bg2)
-                        .border(1.dp, if (on) s.borderC() else if (c.isDark) c.hairline else Color(0xFFE7E5E4), shape)
+                        .border(1.dp, if (on) s.borderC() else if (c.isDark) c.hairline else Palette.Stone200, shape)
                         .clickable(enabled = !saving) { stage = s.id }
                         .padding(horizontal = 10.dp, vertical = 6.dp),
                     fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
-                    color = if (on) s.textC() else if (c.isDark) c.muted else Color(0xFFA8A29E),
+                    color = if (on) s.textC() else if (c.isDark) c.muted else Palette.Stone400,
                 )
             }
         }
@@ -551,7 +546,7 @@ internal fun LeadDetail(
         Spacer(Modifier.height(12.dp))
     }
     // ── Pinned footer: the save error and the buttons ──────────────────────
-    HorizontalDivider(color = if (c.isDark) c.hairline else Color(0xFFF3F4F6))
+    HorizontalDivider(color = if (c.isDark) c.hairline else Palette.Gray100)
     Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 20.dp)) {
         if (error != null) {
             InlineError(error, Modifier.padding(bottom = 4.dp))
@@ -582,5 +577,5 @@ private fun LeadsSearch(value: String, onChange: (String) -> Unit, modifier: Mod
     CompactSearchField(
         value, onChange, placeholder = "Search leads…", modifier = modifier,
         height = 32.dp, radius = 8.dp, fontSize = 14, iconSize = 14.dp, iconStart = 10.dp, textStart = 32.dp,
-        iconTint = Color(0xFFA8A29E),
+        iconTint = Palette.Stone400,
     )

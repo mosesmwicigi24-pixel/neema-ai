@@ -16,6 +16,7 @@ import ke.co.bethanyhouse.neema.core.util.AppPrefs
 import ke.co.bethanyhouse.neema.core.util.Fmt
 import ke.co.bethanyhouse.neema.core.ws.LiveSocket
 import ke.co.bethanyhouse.neema.core.ws.str
+import ke.co.bethanyhouse.neema.feature.orders.SingleFlight
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
@@ -264,7 +265,7 @@ class CallManager internal constructor(
                     ringTimeoutJob = ui.launch {
                         delay(RING_TIMEOUT_MS)
                         if (phase == CallPhase.Ringing && _state.value.callId == id) {
-                            cleanup(); id?.let { endedAt[it] = now() }; activeId = null
+                            cleanup(); id?.let { markEnded(it) }; activeId = null
                             update { CallUiState() }
                         }
                     }
@@ -330,13 +331,21 @@ class CallManager internal constructor(
                 if (cur.callId == id) { if (cur.phase != CallPhase.Ended) finish() }
                 // A call we never showed (or not yet: frames can arrive out of
                 // order): it is over, so a late incoming_call must not ring it.
-                else if (!endedAt.containsKey(id)) endedAt[id] = now()
+                else if (!endedAt.containsKey(id)) markEnded(id)
             }
         }
     }
 
-    /** One pass of the poll fallback. */
-    internal suspend fun pollOnce() {
+    /**
+     * One pass of the poll fallback. Passes never overlap: the tick, a
+     * reconnect, a return to the app and the end of a call asking at once on
+     * a slow network share one GET (see [SingleFlight]).
+     */
+    internal suspend fun pollOnce() = polls.run()
+
+    private val polls = SingleFlight(ui) { pollNow() }
+
+    private suspend fun pollNow() {
         if (!signedInFn()) return
         val calls = try { api.list() } catch (e: CancellationException) { throw e } catch (e: Exception) { return }
         val t = now()
@@ -367,6 +376,26 @@ class CallManager internal constructor(
     /** A row the poll fallback rings for: inbound, still ringing, started under 90s ago. */
     private fun Call.isFreshInboundRing(t: Long) =
         status == "ringing" && direction != "outbound" && Fmt.millis(startedAt)?.let { t - it < 90_000 } == true
+
+    /**
+     * Remembers that [callId] is over. Bounded: a long shift sees a
+     * `call_ended` frame for every call any agent takes, so beyond
+     * [ENDED_MAX] the entries past any use (the re-ring cooldown and the
+     * outbound-row lookup both look back minutes, not hours) are dropped,
+     * then the oldest.
+     */
+    private fun markEnded(callId: String) {
+        val t = now()
+        endedAt[callId] = t
+        if (endedAt.size <= ENDED_MAX) return
+        endedAt.values.removeAll { t - it > ENDED_KEEP_MS }
+        if (endedAt.size > ENDED_MAX) {
+            endedAt.entries.sortedBy { it.value }.take(endedAt.size - ENDED_MAX).map { it.key }.forEach { endedAt.remove(it) }
+        }
+    }
+
+    /** How many ended calls are remembered (tests: it stays bounded under a burst). */
+    internal val endedCount: Int get() = endedAt.size
 
     private fun coolingDown(callId: String, t: Long) = endedAt[callId]?.let { t - it < RERING_COOLDOWN_MS } == true
 
@@ -399,7 +428,7 @@ class CallManager internal constructor(
                 // A call this process no longer tracks: still tell the server.
                 s.phase == CallPhase.Idle && id != null -> ui.launch {
                     ringer.cancelIncoming()
-                    endedAt[id] = now()
+                    markEnded(id)
                     terminateSoon(id)
                 }
             }
@@ -489,7 +518,7 @@ class CallManager internal constructor(
 
     private fun finish(noteText: String? = null) {
         cleanup()
-        activeId?.let { endedAt[it] = now() }
+        activeId?.let { markEnded(it) }
         activeId = null
         update { it.copy(phase = CallPhase.Ended, note = noteText ?: it.note, reconnecting = false, busy = false) }
         resetJob?.cancel()
@@ -808,6 +837,10 @@ class CallManager internal constructor(
         const val GATHER_TIMEOUT_MS = 2_500L
         const val MIC_PROMPT_TIMEOUT_MS = 60_000L
         const val MIN_RECORDING_BYTES = 2_000L
+        /** Ended calls remembered before old ones are dropped ([markEnded]). */
+        const val ENDED_MAX = 256
+        /** An ended call older than this is past every use of [endedAt]. */
+        const val ENDED_KEEP_MS = 10 * 60_000L
         /** routers/admin.py list_calls marks a call still "ringing" after 2 minutes as missed. */
         const val RING_TIMEOUT_MS = 120_000L
 

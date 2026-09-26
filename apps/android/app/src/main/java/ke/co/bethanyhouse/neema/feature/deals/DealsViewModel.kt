@@ -9,6 +9,7 @@ import ke.co.bethanyhouse.neema.core.model.OkResponse
 import ke.co.bethanyhouse.neema.core.model.PlannedAction
 import ke.co.bethanyhouse.neema.feature.orders.FailKind
 import ke.co.bethanyhouse.neema.feature.orders.SalesFailure
+import ke.co.bethanyhouse.neema.feature.orders.SingleFlight
 import ke.co.bethanyhouse.neema.feature.orders.lowerFirst
 import ke.co.bethanyhouse.neema.feature.orders.salesFailure
 import ke.co.bethanyhouse.neema.feature.reports.Coalescer
@@ -126,6 +127,33 @@ class DealsViewModel(private val dash: DashboardViewModel) : ViewModel() {
     fun setDraftText(text: String) { _draftText.value = text }
 
     /**
+     * Queue items sent or vetoed here, by the [gen] at which they left: a load
+     * that was already on the wire when one left must not bring it back (a
+     * sent follow-up reappearing with a live Send button).
+     */
+    private val left = HashMap<String, Long>()
+    private var gen = 0L
+
+    private val loads = SingleFlight(viewModelScope) {
+        val startGen = gen
+        val deals = viewModelScope.async { runCatching { dash.api.deals.list("open") } }
+        val won = viewModelScope.async { runCatching { dash.api.deals.list("won").size } }
+        val actions = viewModelScope.async { runCatching { dash.api.actions.list() } }
+        val d = deals.await(); val w = won.await(); val a = actions.await()
+        (d.exceptionOrNull() ?: w.exceptionOrNull() ?: a.exceptionOrNull())?.let { if (it is CancellationException) throw it }
+        d.onSuccess { _deals.value = it }
+        w.onSuccess { _wonCount.value = it }
+        a.onSuccess { list ->
+            _actions.value = if (left.isEmpty()) list else list.filterNot { (left[it.id] ?: -1L) > startGen }
+            // What left before this read began is in the server's answer now.
+            left.values.removeAll { it <= startGen }
+        }
+        val failed = d.exceptionOrNull() ?: a.exceptionOrNull() ?: w.exceptionOrNull()
+        _loadError.value = failed?.let { dash.salesFailure(it).message() }
+        failed == null
+    }
+
+    /**
      * DealsView loads on mount and every 60 s while the tab is visible. Here:
      * only while this screen is on display and the app in front, reloading on
      * every return to it and after the live socket reconnects.
@@ -153,28 +181,18 @@ class DealsViewModel(private val dash: DashboardViewModel) : ViewModel() {
         }
     }
 
-    /** Loads overlap (poll, event, reload after an action): only the newest one lands. */
-    private var loadSeq = 0
-
     /**
      * Read the board, the won count and the queue together. Each part that
      * fails keeps what was on screen; true only when all of it was read.
+     *
+     * Loads never overlap: the poll, a burst of `planned_action` events, a
+     * return to the screen and the reload after each send or veto share one
+     * round trip ([SingleFlight]) — a load asked for while one is on the wire
+     * waits for it and then reads once more, so it still sees the change that
+     * prompted it. On a slow network the queue's live updates can't stack up
+     * three requests per reason.
      */
-    private suspend fun load(): Boolean {
-        val seq = ++loadSeq
-        val deals = viewModelScope.async { runCatching { dash.api.deals.list("open") } }
-        val won = viewModelScope.async { runCatching { dash.api.deals.list("won").size } }
-        val actions = viewModelScope.async { runCatching { dash.api.actions.list() } }
-        val d = deals.await(); val w = won.await(); val a = actions.await()
-        (d.exceptionOrNull() ?: w.exceptionOrNull() ?: a.exceptionOrNull())?.let { if (it is CancellationException) throw it }
-        if (seq != loadSeq) return d.isSuccess && a.isSuccess
-        d.onSuccess { _deals.value = it }
-        w.onSuccess { _wonCount.value = it }
-        a.onSuccess { _actions.value = it }
-        val failed = d.exceptionOrNull() ?: a.exceptionOrNull() ?: w.exceptionOrNull()
-        _loadError.value = failed?.let { dash.salesFailure(it).message() }
-        return failed == null
-    }
+    private suspend fun load(): Boolean = loads.run()
 
     fun reload() { viewModelScope.launch { load() } }
 
@@ -318,6 +336,7 @@ class DealsViewModel(private val dash: DashboardViewModel) : ViewModel() {
 
     private fun resolved(id: String, verb: String) {
         closeDraft(id, clearText = true)
+        left[id] = ++gen
         _actions.value = _actions.value?.filterNot { it.id == id }
         dash.toast(if (verb == "approve") "Sent ✓" else "Vetoed")
     }

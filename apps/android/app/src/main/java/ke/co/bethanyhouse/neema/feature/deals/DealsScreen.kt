@@ -38,16 +38,32 @@ import ke.co.bethanyhouse.neema.feature.orders.InlineError
 import ke.co.bethanyhouse.neema.feature.orders.StaleBanner
 import ke.co.bethanyhouse.neema.core.ui.components.Loading
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
+import ke.co.bethanyhouse.neema.core.ui.theme.Palette
+import ke.co.bethanyhouse.neema.feature.orders.SalesInk
+import ke.co.bethanyhouse.neema.feature.orders.listSegment
+import androidx.compose.foundation.lazy.itemsIndexed
 import ke.co.bethanyhouse.neema.core.util.Fmt
 
 private data class Stage(val id: String, val label: String, val color: Color)
 
 /** The board's columns. A deal in any other stage is shown under New. */
 private val STAGES = listOf(
-    Stage("new", "New", Color(0xFF94A3B8)),
-    Stage("qualified", "Qualified", Color(0xFF589B31)),
-    Stage("proposal", "Proposal", Color(0xFFF59E0B)),
+    Stage("new", "New", Palette.Slate400),
+    Stage("qualified", "Qualified", Palette.Moss600),
+    Stage("proposal", "Proposal", Palette.Amber500),
 )
+
+/**
+ * The open deals by board column ("new" / "qualified" / "proposal"), in their
+ * order, in one pass: a deal in any other stage lands under New. Every column
+ * is present, empty or not.
+ */
+internal fun groupByStage(open: List<Deal>): Map<String, List<Deal>> {
+    val ids = STAGES.map { it.id }
+    val out = ids.associateWith { ArrayList<Deal>() }
+    for (d in open) out.getValue(d.stage?.takeIf { it in ids } ?: "new").add(d)
+    return out
+}
 
 /** "due now" / "in 12m" / "in 5h" / "in 3d". */
 internal fun fmtDue(iso: String?, now: Long = AppClock.now()): String {
@@ -87,7 +103,9 @@ fun DealsScreen(dash: DashboardViewModel) {
     val guidanceError by vm.guidanceError.collectAsStateWithLifecycle()
     val c = Neema.colors
 
-    val open = deals.orEmpty().filter { it.status == "open" }
+    // Derived once per load, not on every recomposition (a tick of the queue's spinner, a keystroke in the guidance).
+    val open = remember(deals) { deals.orEmpty().filter { it.status == "open" } }
+    val columns = remember(open) { groupByStage(open).let { g -> STAGES.map { it to g.getValue(it.id) } } }
     val editing by vm.editing.collectAsStateWithLifecycle()
     val guidanceDraft by vm.guidanceDraft.collectAsStateWithLifecycle()
     val draftFor by vm.draftFor.collectAsStateWithLifecycle()
@@ -98,20 +116,21 @@ fun DealsScreen(dash: DashboardViewModel) {
     }
 
     // The page is the web's own #f6f7f2, a shade off the shell's parchment.
-    BoxWithConstraints(Modifier.fillMaxSize().background(if (c.isDark) c.surface else Color(0xFFF6F7F2))) {
+    BoxWithConstraints(Modifier.fillMaxSize().background(if (c.isDark) c.surface else SalesInk.DealsPage)) {
         // Three stage columns (and the queue's buttons beside its text) need a
         // real tablet width: at ~600dp they squeezed a card's buttons to nothing.
         val wide = maxWidth >= 840.dp
         val gutter = if (maxWidth >= 600.dp) 24.dp else 16.dp
         PullToRefreshBox(isRefreshing = refreshing, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize()) {
+            // No imePadding here: the shell pads the whole content area above the keyboard.
+            // Every block carries its own 16dp gap beneath it (the web's space-y-4), so a
+            // card drawn a slice per item (the queue, a phone's stage columns) stays whole.
             LazyColumn(
-                // imePadding: the guidance editor in a card stays above the keyboard.
-                Modifier.fillMaxSize().widthIn(max = 1100.dp).align(Alignment.TopCenter).imePadding(),
+                Modifier.fillMaxSize().widthIn(max = 1100.dp).align(Alignment.TopCenter),
                 contentPadding = PaddingValues(horizontal = gutter, vertical = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                item(key = "header") {
-                    Column {
+                item(key = "header", contentType = "header") {
+                    Column(Modifier.padding(bottom = 16.dp)) {
                         Text("Deals", fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = c.text)
                         Text(
                             // Never loaded: no counts — "0 open · 0 won" would be a claim.
@@ -125,19 +144,21 @@ fun DealsScreen(dash: DashboardViewModel) {
                 // A refresh failed with something on screen: it stays, and this says why.
                 val err = loadError
                 if (err != null && (deals != null || actions != null)) {
-                    item(key = "stale") { StaleBanner(err, onRetry = vm::refresh) }
+                    item(key = "stale", contentType = "stale") { StaleBanner(err, onRetry = vm::refresh, modifier = Modifier.padding(bottom = 16.dp)) }
                 }
 
                 // ── Initiative queue ───────────────────────────────────────
-                item(key = "queue") {
-                    // mb-5: 4dp more than the list's 16dp rhythm.
-                    Card16(Modifier.padding(bottom = 4.dp)) {
+                // One bordered card, drawn a slice per item: a queue of 200
+                // follow-ups composes only the rows on screen.
+                val pending = actions
+                val rows = pending.orEmpty()
+                item(key = "queue", contentType = "queue-head") {
+                    QueueSlice(first = true, last = rows.isEmpty()) {
                         Text(
                             "PLANNED ACTIONS — NEEMA'S NEXT MOVES",
                             fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.275.sp, color = c.muted,
                         )
                         Spacer(Modifier.height(8.dp))
-                        val pending = actions
                         when {
                             // The reason is in the banner / error state just below.
                             pending == null && err != null -> Text("Couldn't load the queue.", fontSize = 12.sp, color = stone400())
@@ -146,58 +167,61 @@ fun DealsScreen(dash: DashboardViewModel) {
                                 "Nothing queued. Promises made in chat (hers or the customer's) land here automatically.",
                                 fontSize = 12.sp, color = stone400(),
                             )
-                            else -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                pending.forEach { a ->
-                                    ActionRow(
-                                        a, busy = a.id in acting, checking = a.id in checking, wide = wide,
-                                        onSend = { vm.act(a.id, "approve") },
-                                        onEdit = { vm.openDraft(a) },
-                                        onVeto = { vm.act(a.id, "veto") },
-                                        onOpen = a.conversationId?.let { id -> { dash.openConversationFor(id) } },
-                                    )
-                                }
-                            }
                         }
+                    }
+                }
+                itemsIndexed(rows, key = { _, a -> "action-${a.id}" }, contentType = { _, _ -> "action" }) { i, a ->
+                    QueueSlice(first = false, last = i == rows.lastIndex) {
+                        ActionRow(
+                            a, busy = a.id in acting, checking = a.id in checking, wide = wide,
+                            onSend = { vm.act(a.id, "approve") },
+                            onEdit = { vm.openDraft(a) },
+                            onVeto = { vm.act(a.id, "veto") },
+                            onOpen = a.conversationId?.let { id -> { dash.openConversationFor(id) } },
+                        )
                     }
                 }
 
                 // ── The board ──────────────────────────────────────────────
                 if (deals == null && err != null) {
                     // Nothing was ever read: an empty board would claim there are no deals.
-                    item(key = "error") { ErrorState(err, onRetry = vm::reload) }
+                    item(key = "error", contentType = "error") { ErrorState(err, onRetry = vm::reload) }
                 } else if (deals == null) {
-                    item(key = "loading") { Box(Modifier.fillMaxWidth().height(160.dp)) { Loading() } }
+                    item(key = "loading", contentType = "loading") { Box(Modifier.fillMaxWidth().height(160.dp)) { Loading() } }
                 } else {
-                    val columns = STAGES.map { stage ->
-                        stage to open.filter { d ->
-                            d.stage == stage.id || (stage.id == "new" && STAGES.none { it.id == d.stage })
-                        }
-                    }
-                    val column: @Composable (Stage, List<Deal>, Modifier) -> Unit = { stage, col, mod ->
-                        StageColumn(
-                            stage, col, mod,
-                            patching = patching,
-                            guidanceError = guidanceError,
-                            editing = editing,
-                            guidanceDraft = guidanceDraft,
-                            onGuidanceDraft = vm::setGuidanceDraft,
-                            onEdit = vm::startGuidance,
-                            onCancel = vm::cancelGuidance,
-                            onSave = { d -> vm.saveGuidance(d.id) },
-                            onWon = { vm.markWon(it.id) },
-                            onLost = { vm.markLost(it.id) },
-                            onOpen = openThread,
+                    val cardFor: @Composable (Deal) -> Unit = { d ->
+                        DealCard(
+                            d, busy = d.id in patching, isEditing = editing == d.id,
+                            guidanceError = guidanceError.takeIf { editing == d.id },
+                            guidanceDraft = guidanceDraft, onGuidanceDraft = vm::setGuidanceDraft,
+                            onEdit = { vm.startGuidance(d) }, onCancel = vm::cancelGuidance, onSave = { vm.saveGuidance(d.id) },
+                            onWon = { vm.markWon(d.id) }, onLost = { vm.markLost(d.id) }, onOpen = { openThread(d) },
                         )
                     }
                     if (wide) {
-                        item(key = "board") {
-                            Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.Top) {
-                                columns.forEach { (stage, col) -> column(stage, col, Modifier.weight(1f)) }
+                        item(key = "board", contentType = "board") {
+                            Row(Modifier.padding(bottom = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.Top) {
+                                columns.forEach { (stage, col) -> StageColumn(stage, col, Modifier.weight(1f), cardFor) }
                             }
                         }
                     } else {
+                        // A phone stacks the columns; each is a card drawn a slice per deal.
                         columns.forEach { (stage, col) ->
-                            item(key = "col-${stage.id}") { column(stage, col, Modifier.fillMaxWidth()) }
+                            if (col.isEmpty()) {
+                                item(key = "col-${stage.id}", contentType = "col-empty") {
+                                    StageColumn(stage, col, Modifier.fillMaxWidth().padding(bottom = 16.dp), cardFor)
+                                }
+                            } else {
+                                item(key = "col-${stage.id}", contentType = "col-head") {
+                                    ColumnSlice(first = true, last = false) { StageHeader(stage, col.size) }
+                                }
+                                itemsIndexed(col, key = { _, d -> "deal-${stage.id}-${d.id}" }, contentType = { _, _ -> "deal" }) { i, d ->
+                                    val last = i == col.lastIndex
+                                    ColumnSlice(first = false, last = last) {
+                                        Box(Modifier.padding(bottom = if (last) 0.dp else 8.dp)) { cardFor(d) }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -219,12 +243,30 @@ fun DealsScreen(dash: DashboardViewModel) {
     }
 }
 
+/**
+ * One slice of the queue's card (`rounded-2xl border border-stone-200 p-4`,
+ * mb-5): the first carries the rounded top and the padding above, the last
+ * the rounded bottom, the padding below and the card's margin; rows sit 8dp apart.
+ */
 @Composable
-private fun Card16(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+private fun QueueSlice(first: Boolean, last: Boolean, content: @Composable ColumnScope.() -> Unit) {
     val c = Neema.colors
     Column(
-        modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.bg2)
-            .border(1.dp, stone200(), RoundedCornerShape(16.dp)).padding(16.dp),
+        Modifier.padding(bottom = if (last) 20.dp else 0.dp).fillMaxWidth()
+            .listSegment(first, last, border = stone200(), fill = c.bg2, radius = 16.dp)
+            .padding(start = 16.dp, end = 16.dp, top = if (first) 16.dp else 0.dp, bottom = if (last) 16.dp else 8.dp),
+        content = content,
+    )
+}
+
+/** One slice of a phone's stage column card (`rounded-2xl border p-3`, 16dp beneath). */
+@Composable
+private fun ColumnSlice(first: Boolean, last: Boolean, content: @Composable ColumnScope.() -> Unit) {
+    val c = Neema.colors
+    Column(
+        Modifier.padding(bottom = if (last) 16.dp else 0.dp).fillMaxWidth()
+            .listSegment(first, last, border = stone200(), fill = c.bg2, radius = 16.dp)
+            .padding(start = 12.dp, end = 12.dp, top = if (first) 12.dp else 0.dp, bottom = if (last) 12.dp else 0.dp),
         content = content,
     )
 }
@@ -245,13 +287,13 @@ private fun ActionRow(
     val needs = a.status == "needs_approval"
     val bg = when {
         c.isDark -> if (needs) c.amberDim else c.bg3
-        needs -> Color(0xFFFDF6E9)
-        else -> Color(0xFFF8FAF6)
+        needs -> SalesInk.NeedsBg
+        else -> SalesInk.QueuedBg
     }
     val border = when {
         c.isDark -> if (needs) c.amber.copy(alpha = 0.4f) else c.border
-        needs -> Color(0xFFF0DDB0)
-        else -> Color(0xFFE8EDE4)
+        needs -> SalesInk.NeedsBorder
+        else -> SalesInk.QueuedBorder
     }
     val shape = RoundedCornerShape(12.dp)
     val body: @Composable ColumnScope.() -> Unit = {
@@ -268,7 +310,7 @@ private fun ActionRow(
             fontSize = 12.sp,
         )
         if (!a.reason.isNullOrBlank()) {
-            Text(a.reason, fontSize = 12.sp, color = if (c.isDark) c.textMid else Color(0xFF475569),
+            Text(a.reason, fontSize = 12.sp, color = if (c.isDark) c.textMid else SalesInk.Slate600,
                 maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
         }
         if (!a.draft.isNullOrBlank()) {
@@ -276,16 +318,16 @@ private fun ActionRow(
                 "“${a.draft}”",
                 fontSize = 11.sp, color = c.text, maxLines = 3, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(top = 4.dp).fillMaxWidth().clip(RoundedCornerShape(8.dp))
-                    .background(c.bg2).border(1.dp, if (c.isDark) c.hairline else Color(0xFFF5F5F4), RoundedCornerShape(8.dp))
+                    .background(c.bg2).border(1.dp, if (c.isDark) c.hairline else Palette.Stone100, RoundedCornerShape(8.dp))
                     .padding(horizontal = 8.dp, vertical = 6.dp),
             )
         }
     }
     val buttons: @Composable () -> Unit = { Column {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            SmallButton("Send", bg = Color(0xFF589B31), fg = Color.White, enabled = !busy, onClick = onSend)
+            SmallButton("Send", bg = Palette.Moss600, fg = Color.White, enabled = !busy, onClick = onSend)
             SmallButton("Edit & send", bg = c.bg2, fg = c.gold2, border = c.border, enabled = !busy, onClick = onEdit)
-            SmallButton("Veto", bg = if (c.isDark) c.bg4 else Color(0xFFF5F5F4), fg = slate(), enabled = !busy, onClick = onVeto)
+            SmallButton("Veto", bg = if (c.isDark) c.bg4 else Palette.Stone100, fg = slate(), enabled = !busy, onClick = onVeto)
             if (onOpen != null) {
                 SmallButton("Open chat", bg = Color.Transparent, fg = c.gold2, enabled = true, onClick = onOpen)
             }
@@ -347,50 +389,34 @@ private fun SmallButton(
 }
 
 @Composable
-private fun StageColumn(
-    stage: Stage,
-    col: List<Deal>,
-    modifier: Modifier,
-    patching: Set<String>,
-    guidanceError: String?,
-    editing: String?,
-    guidanceDraft: String,
-    onGuidanceDraft: (String) -> Unit,
-    onEdit: (Deal) -> Unit,
-    onCancel: () -> Unit,
-    onSave: (Deal) -> Unit,
-    onWon: (Deal) -> Unit,
-    onLost: (Deal) -> Unit,
-    onOpen: (Deal) -> Unit,
-) {
+private fun StageColumn(stage: Stage, col: List<Deal>, modifier: Modifier, card: @Composable (Deal) -> Unit) {
     val c = Neema.colors
     Column(
         // min-h-[120px] counts the padding, as a border-box does.
         modifier.heightIn(min = 120.dp).clip(RoundedCornerShape(16.dp)).background(c.bg2)
             .border(1.dp, stone200(), RoundedCornerShape(16.dp)).padding(12.dp),
     ) {
-        Row(Modifier.padding(horizontal = 4.dp).padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(8.dp).clip(CircleShape).background(stage.color))
-            Spacer(Modifier.width(8.dp))
-            Text(stage.label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.text)
-            Spacer(Modifier.width(8.dp))
-            Text(col.size.toString(), fontSize = 10.sp, color = c.muted)
-        }
+        StageHeader(stage, col.size)
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            col.forEach { d ->
-                DealCard(
-                    d, busy = d.id in patching, isEditing = editing == d.id,
-                    guidanceError = guidanceError.takeIf { editing == d.id },
-                    guidanceDraft = guidanceDraft, onGuidanceDraft = onGuidanceDraft,
-                    onEdit = { onEdit(d) }, onCancel = onCancel, onSave = { onSave(d) },
-                    onWon = { onWon(d) }, onLost = { onLost(d) }, onOpen = { onOpen(d) },
-                )
-            }
+            col.forEach { d -> key(d.id) { card(d) } }
             if (col.isEmpty()) {
-                Text("—", fontSize = 11.sp, color = if (c.isDark) c.border else Color(0xFFD6D3D1), textAlign = TextAlign.Center,
+                Text("—", fontSize = 11.sp, color = if (c.isDark) c.border else Palette.Stone300, textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp))
             }
         }
+    }
+}
+
+/** A stage column's title row: its dot, name and count. */
+@Composable
+private fun StageHeader(stage: Stage, count: Int) {
+    val c = Neema.colors
+    Row(Modifier.padding(horizontal = 4.dp).padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(8.dp).clip(CircleShape).background(stage.color))
+        Spacer(Modifier.width(8.dp))
+        Text(stage.label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.text)
+        Spacer(Modifier.width(8.dp))
+        Text(count.toString(), fontSize = 10.sp, color = c.muted)
     }
 }
 
@@ -413,7 +439,7 @@ private fun DealCard(
     val c = Neema.colors
     val shape = RoundedCornerShape(12.dp)
     val canOpen = !d.waId.isNullOrBlank() || !d.conversationId.isNullOrBlank()
-    Column(Modifier.fillMaxWidth().clip(shape).border(1.dp, if (c.isDark) c.hairline else Color(0xFFF5F5F4), shape).padding(12.dp)) {
+    Column(Modifier.fillMaxWidth().clip(shape).border(1.dp, if (c.isDark) c.hairline else Palette.Stone100, shape).padding(12.dp)) {
         Row(verticalAlignment = Alignment.Top) {
             Text(
                 d.customer.ifBlank { "Unknown" },
@@ -423,20 +449,20 @@ private fun DealCard(
                 modifier = Modifier.weight(1f).clickable(enabled = canOpen, onClick = onOpen),
             )
             Spacer(Modifier.width(8.dp))
-            Text(Fmt.timeAgo(d.updatedAt), fontSize = 10.sp, color = if (c.isDark) c.muted else Color(0xFFB5C9A8))
+            Text(Fmt.timeAgo(d.updatedAt), fontSize = 10.sp, color = if (c.isDark) c.muted else Palette.Sage300)
         }
         if (!d.title.isNullOrBlank()) {
-            Text(d.title, fontSize = 11.sp, color = if (c.isDark) c.textMid else Color(0xFF475569),
+            Text(d.title, fontSize = 11.sp, color = if (c.isDark) c.textMid else SalesInk.Slate600,
                 maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
         }
         if (!d.blocking.isNullOrBlank()) {
-            Text("⛔ ${d.blocking}", fontSize = 10.sp, color = if (c.isDark) Color(0xFFF59E0B) else Color(0xFFB45309),
+            Text("⛔ ${d.blocking}", fontSize = 10.sp, color = if (c.isDark) Palette.Amber500 else Palette.Amber700,
                 maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
         }
         d.nextAction?.dueAt?.takeIf { it.isNotBlank() }?.let { due ->
             Text(
                 "→ ${if (d.nextAction.owner == "ai") "Neema" else "You"} · ${fmtDue(due)}",
-                fontSize = 10.sp, color = if (c.isDark) c.green else Color(0xFF589B31), modifier = Modifier.padding(top = 4.dp),
+                fontSize = 10.sp, color = if (c.isDark) c.green else Palette.Moss600, modifier = Modifier.padding(top = 4.dp),
             )
         }
         if (isEditing) {
@@ -450,7 +476,7 @@ private fun DealCard(
             )
             if (guidanceError != null) InlineError(guidanceError, Modifier.padding(top = 4.dp))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                SmallButton(if (busy) "Saving…" else "Save", bg = Color(0xFF1E293B), fg = Color.White, enabled = !busy, fontSize = 10, hPad = 10.dp, vPad = 4.dp, onClick = onSave)
+                SmallButton(if (busy) "Saving…" else "Save", bg = SalesInk.Slate800, fg = Color.White, enabled = !busy, fontSize = 10, hPad = 10.dp, vPad = 4.dp, onClick = onSave)
                 SmallButton("Cancel", bg = Color.Transparent, fg = slate(), enabled = true, fontSize = 10, hPad = 8.dp, vPad = 4.dp,
                     weight = FontWeight.Normal, onClick = onCancel)
             }
@@ -464,12 +490,12 @@ private fun DealCard(
             FlowRow(Modifier.padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 SmallButton(
                     if (!d.guidance.isNullOrBlank()) "📌 Guidance" else "＋ Guidance",
-                    bg = if (c.isDark) c.bg4 else Color(0xFFFAFAF9), fg = slate(), enabled = !busy, fontSize = 10,
+                    bg = if (c.isDark) c.bg4 else Palette.Stone50, fg = slate(), enabled = !busy, fontSize = 10,
                     hPad = 8.dp, vPad = 4.dp, weight = FontWeight.Normal, onClick = onEdit,
                 )
-                SmallButton("Won", bg = if (c.isDark) c.greenDim else Color(0xFFE9F6DF), fg = if (c.isDark) c.green else Color(0xFF427425),
+                SmallButton("Won", bg = if (c.isDark) c.greenDim else SalesInk.WonBg, fg = if (c.isDark) c.green else Palette.Moss700,
                     enabled = !busy, fontSize = 10, hPad = 8.dp, vPad = 4.dp, weight = FontWeight.Normal, onClick = onWon)
-                SmallButton("Lost", bg = if (c.isDark) c.bg4 else Color(0xFFFAFAF9), fg = if (c.isDark) c.muted else Color(0xFF94A3B8), enabled = !busy, fontSize = 10,
+                SmallButton("Lost", bg = if (c.isDark) c.bg4 else Palette.Stone50, fg = if (c.isDark) c.muted else Palette.Slate400, enabled = !busy, fontSize = 10,
                     hPad = 8.dp, vPad = 4.dp, weight = FontWeight.Normal, onClick = onLost)
             }
         }
@@ -521,8 +547,8 @@ internal fun DraftDialogCard(
                 Button(
                     onClick = onSend, enabled = !busy,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF589B31), contentColor = Color.White,
-                        disabledContainerColor = Color(0xFF589B31).copy(alpha = 0.5f), disabledContentColor = Color.White,
+                        containerColor = Palette.Moss600, contentColor = Color.White,
+                        disabledContainerColor = Palette.Moss600.copy(alpha = 0.5f), disabledContentColor = Color.White,
                     ),
                 ) {
                     if (busy) {
@@ -545,12 +571,12 @@ internal fun DraftDialogCard(
 
 /** The web's slate-500 secondary text; lifted in dark mode so it stays legible on navy. */
 @Composable
-private fun slate(): Color = if (Neema.colors.isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+private fun slate(): Color = if (Neema.colors.isDark) Palette.Slate400 else Palette.Slate500
 
 /** Tailwind stone-200, the web's card border; the theme hairline in dark mode. */
 @Composable
-private fun stone200(): Color = if (Neema.colors.isDark) Neema.colors.hairline else Color(0xFFE7E5E4)
+private fun stone200(): Color = if (Neema.colors.isDark) Neema.colors.hairline else Palette.Stone200
 
 /** Tailwind stone-400, the queue's quiet text; the theme's muted in dark mode. */
 @Composable
-private fun stone400(): Color = if (Neema.colors.isDark) Neema.colors.muted else Color(0xFFA8A29E)
+private fun stone400(): Color = if (Neema.colors.isDark) Neema.colors.muted else Palette.Stone400

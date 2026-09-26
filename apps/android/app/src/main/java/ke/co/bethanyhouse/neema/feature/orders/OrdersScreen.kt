@@ -54,6 +54,7 @@ import ke.co.bethanyhouse.neema.core.ui.components.Avatar
 import ke.co.bethanyhouse.neema.core.ui.components.Loading
 import ke.co.bethanyhouse.neema.core.ui.components.channelStyle
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
+import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 import ke.co.bethanyhouse.neema.core.util.Fmt
 
 private const val PAGE_SIZE = 15
@@ -96,13 +97,16 @@ fun OrdersScreen(dash: DashboardViewModel) {
     val unknown = orders.isEmpty() && (initialLoading || loadError != null)
     val c = Neema.colors
 
+    // Derived once per change of the list / filter / search, never per frame:
+    // a thousand orders are one pass each, not one per status card per recomposition.
     val filtered = remember(orders, filter, search) { filterOrders(orders, filter, search) }
     val totalPages = maxOf(1, (filtered.size + PAGE_SIZE - 1) / PAGE_SIZE)
     val page = pageRaw.coerceIn(1, totalPages)
-    val paginated = filtered.drop((page - 1) * PAGE_SIZE).take(PAGE_SIZE)
+    val paginated = remember(filtered, page) { pageOf(filtered, page, PAGE_SIZE) }
 
-    val statusCounts = remember(orders) { ORDER_STATUSES.associateWith { s -> orders.count { it.status == s } } }
-    val totalRevenue = remember(orders) { orders.filter { it.status != "cancelled" }.sumOf { it.amount } }
+    val stats = remember(orders) { orderStats(orders) }
+    val statusCounts = stats.counts
+    val totalRevenue = stats.revenue
 
     BoxWithConstraints(Modifier.fillMaxSize().background(c.bg)) {
         val wide = maxWidth >= 600.dp
@@ -110,12 +114,8 @@ fun OrdersScreen(dash: DashboardViewModel) {
         val twoPane = maxWidth >= 1000.dp
         // Phones (and big text): the row's amount moves up beside the name.
         val compactRows = textRoom(if (twoPane) maxWidth - PANE_WIDTH else maxWidth) < 480.dp
-        val cols = when {
-            wide -> 4
-            textRoom(maxWidth) < 240.dp -> 1
-            else -> 2
-        }
-        val selected = selectedId?.let { id -> orders.find { it.id == id } }
+        val cols = statusColumns(maxWidth, if (wide) 24.dp else 16.dp, LocalDensity.current.fontScale)
+        val selected = remember(orders, selectedId) { selectedId?.let { id -> orders.find { it.id == id } } }
         Row(Modifier.fillMaxSize()) {
         PullToRefreshBox(isRefreshing = refreshing, onRefresh = vm::refresh, modifier = Modifier.weight(1f).fillMaxHeight()) {
             LazyColumn(
@@ -124,7 +124,7 @@ fun OrdersScreen(dash: DashboardViewModel) {
                 verticalArrangement = Arrangement.spacedBy(0.dp),
             ) {
                 // ── Header ─────────────────────────────────────────────────
-                item(key = "header") {
+                item(key = "header", contentType = "header") {
                     SideOrStacked(
                         Modifier.fillMaxWidth().padding(bottom = 24.dp),
                         start = {
@@ -151,13 +151,13 @@ fun OrdersScreen(dash: DashboardViewModel) {
                 }
 
                 // ── Status summary cards (tap = filter) ────────────────────
-                item(key = "cards") {
+                item(key = "cards", contentType = "cards") {
                     Column(Modifier.padding(bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         ORDER_STATUSES.chunked(cols).forEach { rowStatuses ->
                             Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 rowStatuses.forEach { s ->
                                     val meta = statusMeta(s)
-                                    val rev = orders.filter { it.status == s }.sumOf { it.amount }
+                                    val rev = stats.revenueBy[s] ?: 0.0
                                     StatusCard(
                                         meta = meta, count = statusCounts[s] ?: 0, revenue = rev, known = !unknown,
                                         active = filter == s, onClick = { vm.toggleFilter(s) },
@@ -170,7 +170,7 @@ fun OrdersScreen(dash: DashboardViewModel) {
                 }
 
                 // ── Search + active filter ─────────────────────────────────
-                item(key = "search") {
+                item(key = "search", contentType = "search") {
                     Row(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                         CompactSearchField(search, vm::setSearch, placeholder = "Search by name or phone…", modifier = Modifier.weight(1f))
                         if (filter != "all") {
@@ -210,7 +210,7 @@ fun OrdersScreen(dash: DashboardViewModel) {
                         }
                     }
                 } else {
-                    items(paginated, key = { it.id }) { order ->
+                    items(paginated, key = { it.id }, contentType = { "order" }) { order ->
                         val first = order.id == paginated.first().id
                         val last = order.id == paginated.last().id
                         // One bordered card around the whole list, drawn a slice per row
@@ -221,7 +221,7 @@ fun OrdersScreen(dash: DashboardViewModel) {
                                 highlighted = twoPane && selected?.id == order.id,
                                 onClick = { vm.select(order) },
                             )
-                            if (!last) HorizontalDivider(color = if (c.isDark) c.bg3 else Color(0xFFF0F9EC))
+                            if (!last) HorizontalDivider(color = if (c.isDark) c.bg3 else Palette.Moss50)
                         }
                     }
                 }
@@ -349,8 +349,8 @@ private fun OrderRow(
     val meta = hubMeta(order) ?: statusMeta(order.status)
     val hubHref = hubOrderHref(order)
     val name = Fmt.displayName(order.contactName, order.waId)
-    val itemSummary = order.items.take(2).joinToString(", ") { i ->
-        i.name + if (i.effectiveQty > 1) " ×${qtyText(i.effectiveQty)}" else ""
+    val itemSummary = remember(order.items) {
+        order.items.take(2).joinToString(", ") { i -> i.name + if (i.effectiveQty > 1) " ×${qtyText(i.effectiveQty)}" else "" }
     }
     val extraItems = order.items.size - 2
 
@@ -367,7 +367,7 @@ private fun OrderRow(
             Text(
                 "Open in hub ↗",
                 modifier = m.clip(RoundedCornerShape(4.dp))
-                    .border(1.dp, if (c.isDark) c.border else Color(0xFFCFE3BD), RoundedCornerShape(4.dp))
+                    .border(1.dp, if (c.isDark) c.border else SalesInk.HubLinkBorder, RoundedCornerShape(4.dp))
                     .clickable { runCatching { uri.openUri(hubHref) } }
                     .padding(horizontal = 6.dp, vertical = 2.dp),
                 fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = c.gold2,
@@ -390,10 +390,10 @@ private fun OrderRow(
             // The separator travels with the summary, so a wrap never leaves it dangling.
             Text(
                 buildAnnotatedString {
-                    withStyle(SpanStyle(color = if (c.isDark) c.border else Color(0xFFE7E5E4))) { append("·  ") }
+                    withStyle(SpanStyle(color = if (c.isDark) c.border else Palette.Stone200)) { append("·  ") }
                     append(itemSummary + if (extraItems > 0) " +$extraItems more" else "")
                 },
-                fontSize = 12.sp, color = if (c.isDark) c.textMid else Color(0xFF78716C), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                fontSize = 12.sp, color = if (c.isDark) c.textMid else Palette.Stone500, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = m,
             )
         }
@@ -408,7 +408,7 @@ private fun OrderRow(
 
     Row(
         Modifier.fillMaxWidth()
-            .background(if (highlighted) (if (c.isDark) c.bg3 else Color(0xFFF7FBF2)) else Color.Transparent)
+            .background(if (highlighted) (if (c.isDark) c.bg3 else SalesInk.PaneHighlight) else Color.Transparent)
             .clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = if (compact) Alignment.Top else Alignment.CenterVertically,
     ) {
@@ -724,9 +724,9 @@ internal fun OrderDetail(
                     .border(1.dp, toneBorder(Tones.Amber), RoundedCornerShape(8.dp)).padding(10.dp),
             ) {
                 Text("📝 NOTE", fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.25.sp,
-                    color = if (c.isDark) Tones.Amber.dot else Color(0xFFD97706))
+                    color = if (c.isDark) Tones.Amber.dot else Palette.Amber600)
                 Spacer(Modifier.height(4.dp))
-                Text(order.replyText, fontSize = 12.sp, color = if (c.isDark) Color(0xFFFDE68A) else Color(0xFF92400E))
+                Text(order.replyText, fontSize = 12.sp, color = if (c.isDark) Palette.Amber200 else Palette.Amber800)
             }
             Spacer(Modifier.height(16.dp))
         }
@@ -765,10 +765,10 @@ internal fun ModalTitleBar(title: String, onClose: () -> Unit) {
             Modifier.size(48.dp).clip(CircleShape).clickable(onClick = onClose),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Default.Close, contentDescription = "Close", tint = if (c.isDark) c.muted else Color(0xFF9CA3AF), modifier = Modifier.size(16.dp))
+            Icon(Icons.Default.Close, contentDescription = "Close", tint = if (c.isDark) c.muted else Palette.Gray400, modifier = Modifier.size(16.dp))
         }
     }
-    HorizontalDivider(color = if (c.isDark) c.hairline else Color(0xFFF3F4F6))
+    HorizontalDivider(color = if (c.isDark) c.hairline else Palette.Gray100)
 }
 
 /** components/ui/Btn variants the order and lead views use. */
@@ -790,11 +790,11 @@ fun WebBtn(
 ) {
     val dark = Neema.colors.isDark
     val (bg, fg, border) = when (variant) {
-        BtnVariant.Primary -> Triple(Color(0xFFF59E0B), Color.White, Color(0xFFF59E0B))
-        BtnVariant.Danger -> if (dark) Triple(Color(0x4D450A0A), Color(0xFFF87171), Color(0xFF991B1B))
-            else Triple(Color(0xFFFEF2F2), Color(0xFFDC2626), Color(0xFFFECACA))
-        BtnVariant.Outline -> if (dark) Triple(Color.Transparent, Color(0xFFE5E7EB), Color(0xFF4B5563))
-            else Triple(Color.Transparent, Color(0xFF374151), Color(0xFFD1D5DB))
+        BtnVariant.Primary -> Triple(Palette.Amber500, Color.White, Palette.Amber500)
+        BtnVariant.Danger -> if (dark) Triple(SalesInk.Red950.copy(alpha = 0.3f), Palette.Red400, Palette.Red800)
+            else Triple(Palette.Red50, Palette.Red600, Palette.Red200)
+        BtnVariant.Outline -> if (dark) Triple(Color.Transparent, Palette.Gray200, Palette.Gray600)
+            else Triple(Color.Transparent, Palette.Gray700, Palette.Gray300)
     }
     val shape = RoundedCornerShape(8.dp)
     Row(
@@ -837,7 +837,7 @@ private fun MetaCell(label: String, value: String, modifier: Modifier) {
 internal fun WebDragHandle() {
     Box(
         Modifier.padding(top = 12.dp, bottom = 16.dp).size(width = 40.dp, height = 4.dp).clip(RoundedCornerShape(50))
-            .background(if (Neema.colors.isDark) Color(0xFF374151) else Color(0xFFE5E7EB)),
+            .background(if (Neema.colors.isDark) Palette.Gray700 else Palette.Gray200),
     )
 }
 
