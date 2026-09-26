@@ -111,6 +111,8 @@ val LocalProfilePreview = staticCompositionLocalOf { ProfilePreview() }
 @Composable
 fun ProfileScreen(dash: DashboardViewModel) {
     val vm: ProfileViewModel = viewModel { ProfileViewModel(dash) }
+    // The typed name/email/department come back after Android restarts the app.
+    ke.co.bethanyhouse.neema.feature.reports.KeepUiState(vm)
     val me by dash.me.collectAsStateWithLifecycle()
     val agents by dash.agents.collectAsStateWithLifecycle()
     val session by dash.session.collectAsStateWithLifecycle()
@@ -146,9 +148,21 @@ fun ProfileScreen(dash: DashboardViewModel) {
     val permKeys = Perms.of(teamRow ?: agent)
     val available = availableOverride ?: agent.isAvailable
     val preview = LocalProfilePreview.current
-    var editMode by rememberSaveable { mutableStateOf(preview.editMode) }
-    var changingPassword by rememberSaveable { mutableStateOf(preview.changingPassword) }
-    var confirmSignOut by rememberSaveable { mutableStateOf(preview.confirmSignOut) }
+    var editMode by rememberSaveable(key = ke.co.bethanyhouse.neema.feature.reports.keptKey("profile.edit")) { mutableStateOf(preview.editMode) }
+    var changingPassword by rememberSaveable(key = ke.co.bethanyhouse.neema.feature.reports.keptKey("profile.password")) { mutableStateOf(preview.changingPassword) }
+    var confirmSignOut by rememberSaveable(key = ke.co.bethanyhouse.neema.feature.reports.keptKey("profile.signOut")) { mutableStateOf(preview.confirmSignOut) }
+    remember(agent.id) {
+        vm.fillForm(agent)
+        // Screenshot tests start with the forms filled in.
+        preview.typed["name"]?.let { vm.name = it }
+        preview.typed["password"]?.let { vm.password = it }
+        preview.typed["confirm"]?.let { vm.confirm = it }
+    }
+    // A save that succeeded folds its form away here — also when the phone
+    // turned while it was on the wire.
+    LaunchedEffect(vm) {
+        vm.closed.collect { f -> if (f == "edit") editMode = false else if (f == "password") changingPassword = false }
+    }
 
     PullToRefreshBox(isRefreshing = refreshing, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize().background(c.bg)) {
       BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -156,7 +170,7 @@ fun ProfileScreen(dash: DashboardViewModel) {
         val compact = isCramped(minOf(maxWidth, 720.dp) - 32.dp, 300.dp)
         val stackTiles = isCramped(minOf(maxWidth, 720.dp) - 32.dp, 260.dp)
         Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState(preview.scroll)).padding(16.dp),
+            Modifier.fillMaxSize().verticalScroll(ke.co.bethanyhouse.neema.feature.reports.rememberKeptScrollState("profile.page", preview.scroll)).padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             // The web caps this page at max-w-2xl; tablets keep that reading width.
@@ -216,8 +230,8 @@ fun ProfileScreen(dash: DashboardViewModel) {
                         HorizontalDivider(color = c.bg3)
                         Spacer(Modifier.height(16.dp))
                         EditProfileForm(
-                            initialName = agent.name, initialEmail = agent.email, agentId = agent.id, saving = saving,
-                            onSave = { n, e -> vm.saveProfile(n, e) { editMode = false } },
+                            vm, saving = saving,
+                            onSave = { n, e -> vm.saveProfile(n, e) { vm.close("edit") } },
                             onCancel = { editMode = false },
                         )
                     }
@@ -268,7 +282,7 @@ fun ProfileScreen(dash: DashboardViewModel) {
                     }
                     if (changingPassword) {
                         Spacer(Modifier.height(16.dp))
-                        PasswordForm(saving) { pw, confirm -> vm.changePassword(pw, confirm) { changingPassword = false } }
+                        PasswordForm(vm, saving) { pw, confirm -> vm.changePassword(pw, confirm) { vm.close("password") } }
                     }
                 }
 
@@ -365,18 +379,16 @@ fun ProfileScreen(dash: DashboardViewModel) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun EditProfileForm(
-    initialName: String,
-    initialEmail: String,
-    agentId: String,
+    vm: ProfileViewModel,
     saving: Boolean,
     onSave: (String, String) -> Unit,
     onCancel: () -> Unit,
 ) {
-    var name by rememberSaveable(agentId) { mutableStateOf(initialName) }
-    var email by rememberSaveable(agentId) { mutableStateOf(initialEmail) }
+    var name by vm::name
+    var email by vm::email
     // The web shows a Department field but never sends it (PATCH /me has no
     // such column); it is kept for parity and stays on this form only.
-    var department by rememberSaveable(agentId) { mutableStateOf("") }
+    var department by vm::department
     LabeledInput("Full Name", name, { name = it }, style = InputStyle.Form)
     LabeledInput("Email", email, { email = it }, keyboardType = KeyboardType.Email, style = InputStyle.Form)
     LabeledInput("Department", department, { department = it }, placeholder = "Sales, Support…", style = InputStyle.Form,
@@ -388,10 +400,9 @@ private fun EditProfileForm(
 }
 
 @Composable
-private fun PasswordForm(saving: Boolean, onSubmit: (String, String) -> Unit) {
-    val typed = LocalProfilePreview.current.typed
-    var pw by rememberSaveable { mutableStateOf(typed["password"] ?: "") }
-    var confirm by rememberSaveable { mutableStateOf(typed["confirm"] ?: "") }
+private fun PasswordForm(vm: ProfileViewModel, saving: Boolean, onSubmit: (String, String) -> Unit) {
+    var pw by vm::password
+    var confirm by vm::confirm
     LabeledInput("New Password", pw, { pw = it }, placeholder = "Minimum 8 characters", password = true, style = InputStyle.Form)
     LabeledInput("Confirm Password", confirm, { confirm = it }, password = true, style = InputStyle.Form, imeAction = ImeAction.Done)
     TeamButton(if (saving) "Changing…" else "Change Password", { onSubmit(pw, confirm) }, variant = BtnVariant.Amber, enabled = !saving)

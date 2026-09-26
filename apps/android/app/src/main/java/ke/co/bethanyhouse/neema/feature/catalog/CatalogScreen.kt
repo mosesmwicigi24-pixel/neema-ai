@@ -149,6 +149,7 @@ fun CatalogScreen(
     /** Open on a product's sheet (tests). */
     initialDetail: CatalogItem? = null,
 ) {
+    ke.co.bethanyhouse.neema.feature.reports.KeepUiState(vm)
     ke.co.bethanyhouse.neema.feature.reports.TrackShown(vm.life)
     val catalog by dash.catalog.collectAsStateWithLifecycle()
     val filter by vm.filter.collectAsStateWithLifecycle()
@@ -166,7 +167,11 @@ fun CatalogScreen(
     val inStock = view.inStock
     val outStock = view.outStock
 
-    var detail by remember { mutableStateOf(initialDetail) }
+    // The open product, by id: it stays open across a rotation and comes back
+    // after Android restarts the app (once the catalogue it names is on hand).
+    var detailId by androidx.compose.runtime.saveable.rememberSaveable(key = ke.co.bethanyhouse.neema.feature.reports.keptKey("catalog.product")) { mutableStateOf(initialDetail?.id) }
+    /** The product as it was when tapped: the sheet keeps showing it if a poll drops it from the list. */
+    var opened by remember { mutableStateOf(initialDetail) }
 
     PullToRefreshBox(isRefreshing = refreshing, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize().background(c.bg)) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -176,7 +181,7 @@ fun CatalogScreen(
             // The web's gap-4: 16 between cards, both ways.
             val gap = 16.dp
             val grid = remember(filtered, cols) { gridRows(filtered, cols) }
-            LazyColumn(contentPadding = PaddingValues(pad), modifier = Modifier.fillMaxSize()) {
+            LazyColumn(state = ke.co.bethanyhouse.neema.feature.reports.rememberKeptListState("catalog.list"), contentPadding = PaddingValues(pad), modifier = Modifier.fillMaxSize()) {
                 audit?.let { a ->
                     if (a.currencyGaps.isNotEmpty() || a.perPiece.isNotEmpty()) {
                         item(key = "audit") {
@@ -248,7 +253,7 @@ fun CatalogScreen(
                         cols = cols, gap = gap,
                         modifier = Modifier.padding(bottom = if (i < grid.rows.lastIndex) gap else 0.dp),
                     ) {
-                        row.forEach { item -> ProductCard(item = item, onOpen = { detail = item }, imageAspect = if (cols == 1) 4f / 3f else 1f) }
+                        row.forEach { item -> ProductCard(item = item, onOpen = { opened = item; detailId = item.id }, imageAspect = if (cols == 1) 4f / 3f else 1f) }
                     }
                 }
                 if (catalog.isEmpty() && catalogError != null) {
@@ -272,10 +277,10 @@ fun CatalogScreen(
         }
     }
 
-    detail?.let { item ->
+    detailId?.let { id ->
         // Keep the sheet in step with the polled catalogue.
-        val live = catalog.find { it.id == item.id } ?: item
-        ProductSheet(item = live, onDismiss = { detail = null })
+        val live = catalog.find { it.id == id } ?: opened?.takeIf { it.id == id }
+        if (live != null) ProductSheet(item = live, onDismiss = { detailId = null })
     }
 }
 

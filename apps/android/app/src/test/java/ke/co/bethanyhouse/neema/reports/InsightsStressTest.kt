@@ -236,12 +236,13 @@ class InsightsStressTest {
         val vm = ReportsViewModel(dash, ReportsFixtures.clock).apply { range.value = ReportRange.D90 }
         val dir = File(System.getProperty("java.io.tmpdir"), "neema-stress-${System.nanoTime()}")
         try {
-            val got = mutableListOf<Pair<File, ReportRange>>()
-            vm.exportCsv(dir) { f, r -> got += f to r }
-            assertEquals(1, got.size)
-            assertEquals(ReportRange.D90, got[0].second)
-            assertEquals(vm.report.value!!.orders.size + 1, got[0].first.readLines().size)
+            vm.exportCsv(dir)
+            val ready = vm.readyExport.value!!
+            assertEquals(ReportRange.D90, ready.range)
+            assertEquals(vm.report.value!!.orders.size + 1, ready.file.readLines().size)
             assertFalse("the button is free again", vm.exporting.value)
+            vm.exportShown(ready)
+            assertEquals(null, vm.readyExport.value)
         } finally { dir.deleteRecursively() }
     }
 

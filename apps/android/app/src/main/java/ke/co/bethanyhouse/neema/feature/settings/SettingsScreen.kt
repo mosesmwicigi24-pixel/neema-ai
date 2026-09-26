@@ -94,6 +94,8 @@ fun SettingsScreen(dash: DashboardViewModel) {
     // the web's "(admin only)" words (crm.py checks role admin / superuser,
     // not manage_settings).
     val vm: SettingsViewModel = viewModel { SettingsViewModel(dash) }
+    // Unsaved standing orders, offer and local fields come back after Android restarts the app.
+    ke.co.bethanyhouse.neema.feature.reports.KeepUiState(vm)
     ke.co.bethanyhouse.neema.feature.reports.TrackShown(vm.life)
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()
     val c = Neema.colors
@@ -103,7 +105,7 @@ fun SettingsScreen(dash: DashboardViewModel) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             // The web's grid is one column on phones, two otherwise.
             val twoCols = maxWidth >= 720.dp
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState(startScroll)).padding(16.dp)) {
+            Column(Modifier.fillMaxSize().verticalScroll(ke.co.bethanyhouse.neema.feature.reports.rememberKeptScrollState("settings.page", startScroll)).padding(16.dp)) {
                 Text("Settings", style = MaterialTheme.typography.headlineSmall, color = c.text)
                 Text("Platform configuration and integrations", fontSize = 12.sp, color = c.textDim)
                 Spacer(Modifier.height(18.dp))
@@ -344,8 +346,8 @@ private fun OfferCard(vm: SettingsViewModel, dash: DashboardViewModel) {
     val catalog by dash.catalog.collectAsStateWithLifecycle()
     val c = Neema.colors
     val preview = LocalSettingsPreview.current
-    var confirmEnd by rememberSaveable { mutableStateOf(preview.confirmEnd) }
-    var skuPicker by rememberSaveable { mutableStateOf(preview.skuPicker) }
+    var confirmEnd by rememberSaveable(key = ke.co.bethanyhouse.neema.feature.reports.keptKey("settings.endOffer")) { mutableStateOf(preview.confirmEnd) }
+    var skuPicker by rememberSaveable(key = ke.co.bethanyhouse.neema.feature.reports.keptKey("settings.skuPicker")) { mutableStateOf(preview.skuPicker) }
 
     SectionCard(
         "Offer running now",
@@ -554,8 +556,8 @@ private fun AddTextRow(placeholder: String, onAdd: (String) -> Unit) {
 @Composable
 private fun SkuPickerDialog(catalog: List<CatalogItem>, selected: List<String>, onDismiss: () -> Unit, onDone: (List<String>) -> Unit) {
     val c = Neema.colors
-    var query by rememberSaveable { mutableStateOf("") }
-    var picked by rememberSaveable { mutableStateOf(selected) }
+    var query by rememberSaveable(key = ke.co.bethanyhouse.neema.feature.reports.keptKey("settings.skuPicker.query")) { mutableStateOf("") }
+    var picked by rememberSaveable(key = ke.co.bethanyhouse.neema.feature.reports.keptKey("settings.skuPicker.picked")) { mutableStateOf(selected) }
     // One row per sellable SKU: the product itself, then each variant that has its own.
     val rows = remember(catalog) {
         catalog.flatMap { item ->
@@ -610,7 +612,7 @@ private fun SkuPickerDialog(catalog: List<CatalogItem>, selected: List<String>, 
 @Composable
 private fun DateButton(id: String, value: String?, emptyLabel: String, clearable: Boolean = false, onPick: (String?) -> Unit) {
     val startOpen = LocalSettingsPreview.current.datePicker == id
-    var open by rememberSaveable { mutableStateOf(startOpen) }
+    var open by rememberSaveable(key = ke.co.bethanyhouse.neema.feature.reports.keptKey("settings.date.$id")) { mutableStateOf(startOpen) }
     val c = Neema.colors
     Row(verticalAlignment = Alignment.CenterVertically) {
         OutlinedButton(
@@ -655,7 +657,9 @@ private fun PipelineStagesCard(vm: SettingsViewModel) {
     val saving by vm.savingStages.collectAsStateWithLifecycle()
     val c = Neema.colors
     val startStage = LocalSettingsPreview.current.newStage
-    var newStage by rememberSaveable { mutableStateOf(startStage) }
+    remember(vm) { if (startStage.isNotEmpty()) vm.newStage.value = startStage }
+    // Held by the ViewModel: it outlives a rotation, and a save still on the wire when the phone turns still clears it.
+    val newStage by vm.newStage.collectAsStateWithLifecycle()
     SectionCard(
         "Pipeline stages",
         "Your own stage labels, shown between Proposal and Won in every lead pipeline. Up to $PIPELINE_CUSTOM_MAX; the built-in stages stay fixed.",
@@ -666,7 +670,7 @@ private fun PipelineStagesCard(vm: SettingsViewModel) {
             return@SectionCard
         }
         // The typed label is cleared only once the server has kept it; a failed save leaves it to retry.
-        fun add() { val sent = newStage; vm.addStage(sent) { if (newStage == sent) newStage = "" } }
+        fun add() { val sent = newStage; vm.addStage(sent) { if (vm.newStage.value == sent) vm.newStage.value = "" } }
         // The order a lead moves through, customs in place.
         Text(
             (CANONICAL_BEFORE + list + listOf("Won")).joinToString(" → ") + " / Lost",
@@ -694,7 +698,7 @@ private fun PipelineStagesCard(vm: SettingsViewModel) {
         if (list.size < PIPELINE_CUSTOM_MAX) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
-                    value = newStage, onValueChange = { newStage = it.take(PIPELINE_LABEL_MAX) }, singleLine = true,
+                    value = newStage, onValueChange = { vm.newStage.value = it.take(PIPELINE_LABEL_MAX) }, singleLine = true,
                     placeholder = { Text("Stage label (e.g. Sampling)…", fontSize = 13.sp, color = c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { add() }),
@@ -804,7 +808,7 @@ private fun platformIcon(key: String): PlatformIcon = when (key) {
 private fun IntegrationsCard(vm: SettingsViewModel, twoCols: Boolean) {
     val integrations by vm.integrations.collectAsStateWithLifecycle()
     val config by vm.integConfig.collectAsStateWithLifecycle()
-    var expanded by rememberSaveable { mutableStateOf<String?>(null) }
+    var expanded by rememberSaveable(key = ke.co.bethanyhouse.neema.feature.reports.keptKey("settings.integration")) { mutableStateOf<String?>(null) }
     val c = Neema.colors
     SectionCard("Integrations", "Connected platforms and services") {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {

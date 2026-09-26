@@ -66,12 +66,12 @@ fun AgentsScreen(dash: DashboardViewModel) {
     // decides every write: admin.py's agent routes check only sign-in, and
     // roles.py refuses only protected roles.
     val vm: AgentsViewModel = viewModel { AgentsViewModel(dash) }
+    // The dialogs' typed input (passwords excepted) comes back after Android restarts the app.
+    ke.co.bethanyhouse.neema.feature.reports.KeepUiState(vm)
     ke.co.bethanyhouse.neema.feature.reports.TrackShown(vm.life)
-    // "Last seen 4m ago" keeps counting between polls instead of freezing at first paint.
-    var now by remember { mutableLongStateOf(AppClock.now()) }
-    LaunchedEffect(Unit) {
-        while (true) { kotlinx.coroutines.delay(60_000); now = AppClock.now() }
-    }
+    // "Last seen 4m ago" keeps counting between polls instead of freezing at
+    // first paint, and is fresh the moment the app comes back to the front.
+    val now = ke.co.bethanyhouse.neema.feature.reports.rememberNow()
     val agents by dash.agents.collectAsStateWithLifecycle()
     val roles by vm.roles.collectAsStateWithLifecycle()
     val rolesLoading by vm.rolesLoading.collectAsStateWithLifecycle()
@@ -85,17 +85,53 @@ fun AgentsScreen(dash: DashboardViewModel) {
     val preview = LocalTeamPreview.current
     fun opened(kind: String): String? = preview.dialog?.takeIf { it.startsWith("$kind:") }?.substringAfter(':')
     // Both tabs for everyone here: the web never tests manage_roles.
-    var tab by rememberSaveable { mutableStateOf(preview.tab ?: "agents") }
+    var tab by rememberSaveable(key = ke.co.bethanyhouse.neema.feature.reports.keptKey("team.tab")) { mutableStateOf(preview.tab ?: "agents") }
 
     // Which dialog is open, by id, so it survives rotation and resets on leaving the screen.
-    var createOpen by rememberSaveable { mutableStateOf(preview.dialog == "create") }
-    var editId by rememberSaveable { mutableStateOf(opened("edit")) }
-    var pwId by rememberSaveable { mutableStateOf(opened("pw")) }
-    var delId by rememberSaveable { mutableStateOf(opened("del")) }
-    var assignId by rememberSaveable { mutableStateOf(opened("assign")) }
+    var createOpen by rememberSaveable(key = ke.co.bethanyhouse.neema.feature.reports.keptKey("team.create")) { mutableStateOf(preview.dialog == "create") }
+    var editId by rememberSaveable(key = ke.co.bethanyhouse.neema.feature.reports.keptKey("team.edit")) { mutableStateOf(opened("edit")) }
+    var pwId by rememberSaveable(key = ke.co.bethanyhouse.neema.feature.reports.keptKey("team.password")) { mutableStateOf(opened("pw")) }
+    var delId by rememberSaveable(key = ke.co.bethanyhouse.neema.feature.reports.keptKey("team.remove")) { mutableStateOf(opened("del")) }
+    var assignId by rememberSaveable(key = ke.co.bethanyhouse.neema.feature.reports.keptKey("team.assign")) { mutableStateOf(opened("assign")) }
     /** "create", a role id, or null. */
-    var roleModal by rememberSaveable { mutableStateOf(opened("role")) }
-    var delRoleId by rememberSaveable { mutableStateOf(opened("delrole")) }
+    var roleModal by rememberSaveable(key = ke.co.bethanyhouse.neema.feature.reports.keptKey("team.role")) { mutableStateOf(opened("role")) }
+    var delRoleId by rememberSaveable(key = ke.co.bethanyhouse.neema.feature.reports.keptKey("team.deleteRole")) { mutableStateOf(opened("delrole")) }
+    val forms = vm.forms
+    // Screenshot tests open a dialog directly: its form starts where a tap would start it.
+    remember(vm) {
+        val d = preview.dialog ?: return@remember
+        val kind = d.substringBefore(':'); val id = d.substringAfter(':', "")
+        val typed = preview.typed
+        when (kind) {
+            "create" -> {
+                typed["name"]?.let { forms.createName = it }; typed["email"]?.let { forms.createEmail = it }
+                typed["password"]?.let { forms.createPassword = it }; typed["role"]?.let { forms.createRole = it }
+            }
+            "edit" -> dash.agents.value.find { it.id == id }?.let(forms::openEdit)
+            "pw" -> { forms.openPassword(); typed["password"]?.let { forms.password = it }; typed["confirm"]?.let { forms.confirm = it } }
+            "assign" -> dash.agents.value.find { it.id == id }?.let { forms.openAssign(it, vm.roles.value) }
+            "role" -> {
+                forms.openRole(vm.roles.value.find { it.id == id })
+                typed["name"]?.let { forms.roleName = it }; typed["description"]?.let { forms.roleDescription = it }
+                typed["perms"]?.let { p -> forms.rolePerms = p.split(',').filter { it.isNotBlank() } }
+            }
+        }
+    }
+    // A save that succeeded closes its dialog here — also when the phone
+    // turned while it was on the wire (the screen that started it is gone).
+    LaunchedEffect(vm) {
+        vm.closed.collect { d ->
+            when (d) {
+                "create" -> createOpen = false
+                "edit" -> editId = null
+                "pw" -> pwId = null
+                "del" -> delId = null
+                "assign" -> assignId = null
+                "role" -> roleModal = null
+                "delrole" -> delRoleId = null
+            }
+        }
+    }
 
     // Indexed once per list, not searched per card: a 200-agent, 50-role team.
     val agentIndex = remember(agents) { HashMap<String, Agent>(agents.size * 2).also { m -> agents.forEach { m.putIfAbsent(it.id, it) } } }
@@ -117,7 +153,7 @@ fun AgentsScreen(dash: DashboardViewModel) {
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.fillMaxSize(),
-            state = rememberLazyListState(preview.scrollItem),
+            state = ke.co.bethanyhouse.neema.feature.reports.rememberKeptListState("team.list", preview.scrollItem),
         ) {
             // Header
             item(key = "header") {
@@ -141,7 +177,7 @@ fun AgentsScreen(dash: DashboardViewModel) {
                         TeamButton("Add Agent", { createOpen = true }, Modifier.align(Alignment.CenterVertically), variant = BtnVariant.Primary,
                             leading = { Icon(Icons.Default.Add, null, Modifier.size(16.dp)) })
                     } else {
-                        TeamButton("New Role", { roleModal = "create" }, Modifier.align(Alignment.CenterVertically), variant = BtnVariant.Primary,
+                        TeamButton("New Role", { forms.openRole(null); roleModal = "create" }, Modifier.align(Alignment.CenterVertically), variant = BtnVariant.Primary,
                             leading = { Icon(Icons.Default.Add, null, Modifier.size(16.dp)) })
                     }
                 }
@@ -200,9 +236,9 @@ fun AgentsScreen(dash: DashboardViewModel) {
                             customRole = roleById(agent.customRoleId),
                             now = now,
                             onToggle = { vm.toggleOnline(agent, availability[agent.id] ?: agent.isAvailable) },
-                            onRole = { assignId = agent.id },
-                            onEdit = { editId = agent.id },
-                            onPassword = { pwId = agent.id },
+                            onRole = { forms.openAssign(agent, roles); assignId = agent.id },
+                            onEdit = { forms.openEdit(agent); editId = agent.id },
+                            onPassword = { forms.openPassword(); pwId = agent.id },
                             onDelete = { if (vm.requestRemove(agent)) delId = agent.id },
                         )
                     }
@@ -228,7 +264,7 @@ fun AgentsScreen(dash: DashboardViewModel) {
                         RoleCard(
                             role = role,
                             agentCount = agentsPerRole[role.id] ?: 0,
-                            onEdit = { roleModal = role.id },
+                            onEdit = { forms.openRole(role); roleModal = role.id },
                             onDelete = { delRoleId = role.id },
                         )
                     }
@@ -241,23 +277,23 @@ fun AgentsScreen(dash: DashboardViewModel) {
     // ── Dialogs ───────────────────────────────────────────────────────────────
 
     agentById(assignId)?.let { a ->
-        AssignRoleDialog(a, roles, saving, onDismiss = { assignId = null }) { roleId, perms ->
-            vm.saveAssign(a, roleId, perms) { assignId = null }
+        AssignRoleDialog(a, roles, forms, saving, onDismiss = { assignId = null }) { roleId, perms ->
+            vm.saveAssign(a, roleId, perms) { vm.close("assign") }
         }
     }
     if (createOpen) {
-        CreateAgentDialog(saving, onDismiss = { createOpen = false }) { name, email, pw, role ->
-            vm.createAgent(name, email, pw, role) { createOpen = false }
+        CreateAgentDialog(forms, saving, onDismiss = { createOpen = false }) { name, email, pw, role ->
+            vm.createAgent(name, email, pw, role) { vm.close("create") }
         }
     }
     agentById(editId)?.let { a ->
-        EditAgentDialog(a, saving, onDismiss = { editId = null }) { name, email ->
-            vm.saveEdit(a, name, email) { editId = null }
+        EditAgentDialog(a, forms, saving, onDismiss = { editId = null }) { name, email ->
+            vm.saveEdit(a, name, email) { vm.close("edit") }
         }
     }
     agentById(pwId)?.let { a ->
-        ResetPasswordDialog(a, saving, onDismiss = { pwId = null }) { pw, confirm ->
-            vm.savePassword(a, pw, confirm) { pwId = null }
+        ResetPasswordDialog(a, forms, saving, onDismiss = { pwId = null }) { pw, confirm ->
+            vm.savePassword(a, pw, confirm) { vm.close("pw") }
         }
     }
     agentById(delId)?.let { a ->
@@ -265,7 +301,7 @@ fun AgentsScreen(dash: DashboardViewModel) {
             title = "Remove Agent",
             onDismiss = { delId = null },
             buttons = {
-                TeamButton(if (saving) "Removing…" else "Remove Agent", { vm.deleteAgent(a) { delId = null } },
+                TeamButton(if (saving) "Removing…" else "Remove Agent", { vm.deleteAgent(a) { vm.close("del") } },
                     variant = BtnVariant.Danger, enabled = !saving)
                 TeamButton("Cancel", { delId = null })
             },
@@ -278,8 +314,8 @@ fun AgentsScreen(dash: DashboardViewModel) {
     roleModal?.let { key ->
         val editing = if (key == "create") null else roleById(key)
         if (key == "create" || editing != null) {
-            RoleEditorDialog(editing, saving, onDismiss = { roleModal = null }) { form ->
-                vm.saveRole(editing, form) { roleModal = null }
+            RoleEditorDialog(editing, forms, saving, onDismiss = { roleModal = null }) { form ->
+                vm.saveRole(editing, form) { vm.close("role") }
             }
         }
     }
@@ -288,7 +324,7 @@ fun AgentsScreen(dash: DashboardViewModel) {
             title = "Delete Role",
             onDismiss = { delRoleId = null },
             buttons = {
-                TeamButton(if (saving) "Deleting…" else "Delete Role", { vm.deleteRole(r) { delRoleId = null } },
+                TeamButton(if (saving) "Deleting…" else "Delete Role", { vm.deleteRole(r) { vm.close("delrole") } },
                     variant = BtnVariant.Danger, enabled = !saving)
                 TeamButton("Cancel", { delRoleId = null })
             },
@@ -575,17 +611,16 @@ private fun RoleBadge(text: String, fill: Color, content: Color, modifier: Modif
 private fun AssignRoleDialog(
     agent: Agent,
     roles: List<CustomRole>,
+    forms: TeamForms,
     saving: Boolean,
     onDismiss: () -> Unit,
     onSave: (roleId: String, customPermissions: List<String>?) -> Unit,
 ) {
     val c = Neema.colors
-    var roleId by rememberSaveable(agent.id) { mutableStateOf(agent.customRoleId ?: "") }
+    var roleId by forms::assignRole
     // Per-agent override (agents.custom_permissions): off = exactly the role's permissions.
-    var override by rememberSaveable(agent.id) { mutableStateOf(agent.customPermissions != null) }
-    var perms by rememberSaveable(agent.id) {
-        mutableStateOf(agent.customPermissions ?: roles.find { it.id == agent.customRoleId }?.permissions ?: emptyList())
-    }
+    var override by forms::assignOverride
+    var perms by forms::assignPerms
     FormDialog(
         title = "Assign Role — ${agent.name}",
         onDismiss = onDismiss,
@@ -664,12 +699,11 @@ private fun AssignRoleDialog(
 // ── Create / edit / password ─────────────────────────────────────────────────
 
 @Composable
-private fun CreateAgentDialog(saving: Boolean, onDismiss: () -> Unit, onCreate: (String, String, String, String) -> Unit) {
-    val typed = LocalTeamPreview.current.typed
-    var name by rememberSaveable { mutableStateOf(typed["name"] ?: "") }
-    var email by rememberSaveable { mutableStateOf(typed["email"] ?: "") }
-    var password by rememberSaveable { mutableStateOf(typed["password"] ?: "") }
-    var roleId by rememberSaveable { mutableStateOf(typed["role"] ?: "agent") }
+private fun CreateAgentDialog(forms: TeamForms, saving: Boolean, onDismiss: () -> Unit, onCreate: (String, String, String, String) -> Unit) {
+    var name by forms::createName
+    var email by forms::createEmail
+    var password by forms::createPassword
+    var roleId by forms::createRole
     FormDialog(
         title = "Add Agent",
         onDismiss = onDismiss,
@@ -698,9 +732,9 @@ private fun CreateAgentDialog(saving: Boolean, onDismiss: () -> Unit, onCreate: 
 }
 
 @Composable
-private fun EditAgentDialog(agent: Agent, saving: Boolean, onDismiss: () -> Unit, onSave: (String, String) -> Unit) {
-    var name by rememberSaveable(agent.id) { mutableStateOf(agent.name) }
-    var email by rememberSaveable(agent.id) { mutableStateOf(agent.email) }
+private fun EditAgentDialog(agent: Agent, forms: TeamForms, saving: Boolean, onDismiss: () -> Unit, onSave: (String, String) -> Unit) {
+    var name by forms::editName
+    var email by forms::editEmail
     FormDialog(
         title = "Edit — ${agent.name}",
         onDismiss = onDismiss,
@@ -716,11 +750,10 @@ private fun EditAgentDialog(agent: Agent, saving: Boolean, onDismiss: () -> Unit
 }
 
 @Composable
-private fun ResetPasswordDialog(agent: Agent, saving: Boolean, onDismiss: () -> Unit, onSave: (String, String) -> Unit) {
+private fun ResetPasswordDialog(agent: Agent, forms: TeamForms, saving: Boolean, onDismiss: () -> Unit, onSave: (String, String) -> Unit) {
     val c = Neema.colors
-    val typed = LocalTeamPreview.current.typed
-    var password by rememberSaveable(agent.id) { mutableStateOf(typed["password"] ?: "") }
-    var confirm by rememberSaveable(agent.id) { mutableStateOf(typed["confirm"] ?: "") }
+    var password by forms::password
+    var confirm by forms::confirm
     val mismatch = confirm.isNotEmpty() && password != confirm
     FormDialog(
         title = "Reset Password — ${agent.name}",
@@ -745,16 +778,15 @@ private fun ResetPasswordDialog(agent: Agent, saving: Boolean, onDismiss: () -> 
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun RoleEditorDialog(editing: CustomRole?, saving: Boolean, onDismiss: () -> Unit, onSave: (RoleForm) -> Unit) {
+private fun RoleEditorDialog(editing: CustomRole?, forms: TeamForms, saving: Boolean, onDismiss: () -> Unit, onSave: (RoleForm) -> Unit) {
     val c = Neema.colors
-    val key = editing?.id ?: "create"
-    var name by rememberSaveable(key) { mutableStateOf(editing?.name ?: "") }
-    var description by rememberSaveable(key) { mutableStateOf(editing?.description ?: "") }
-    var color by rememberSaveable(key) { mutableStateOf(editing?.color ?: ROLE_COLORS[0]) }
-    var perms by rememberSaveable(key) { mutableStateOf(editing?.permissions ?: emptyList()) }
+    var name by forms::roleName
+    var description by forms::roleDescription
+    var color by forms::roleColor
+    var perms by forms::rolePerms
     // One id per opened editor: a retry after a timeout updates the role the
     // first attempt may have created instead of adding a second one.
-    val draftId = rememberSaveable(key) { "role_${AppClock.now()}" }
+    val draftId = forms.roleDraftId
     FormDialog(
         title = if (editing == null) "New Role" else "Edit Role — ${editing.name}",
         onDismiss = onDismiss,

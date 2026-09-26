@@ -22,6 +22,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonPrimitive
@@ -78,8 +79,27 @@ internal const val UNCERTAIN_SAVE =
  *   row disappears) and the toast says who is gone.
  * - A cancelled write (signing out mid-save) says nothing at all.
  */
-class AgentsViewModel(private val dash: DashboardViewModel) : ViewModel() {
+class AgentsViewModel(private val dash: DashboardViewModel) : ViewModel(), ke.co.bethanyhouse.neema.feature.reports.KeepsUiState {
     private val team = TeamApi(dash.api.http)
+
+    /** The dialogs' typed input (see [TeamForms]): outlives a rotation and a restart, passwords excepted. */
+    val forms = TeamForms()
+
+    private val _closed = kotlinx.coroutines.channels.Channel<String>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+    /**
+     * Dialogs to close because their save succeeded ("create", "edit", "pw",
+     * "del", "assign", "role", "delrole"). A save outlives the screen that
+     * started it — the phone may turn while it is on the wire — so its
+     * success is announced here and the screen on display then closes the
+     * dialog, rather than a callback into a screen that is gone.
+     */
+    val closed: kotlinx.coroutines.flow.Flow<String> = _closed.receiveAsFlow()
+
+    /** Close [dialog] on whichever screen is showing (see [closed]). */
+    fun close(dialog: String) { _closed.trySend(dialog) }
+
+    override fun saveUi(): String = forms.save()
+    override fun restoreUi(saved: String) = forms.restore(saved)
 
     private val _roles = MutableStateFlow<List<CustomRole>>(emptyList())
     val roles: StateFlow<List<CustomRole>> = _roles.asStateFlow()
@@ -270,6 +290,8 @@ class AgentsViewModel(private val dash: DashboardViewModel) : ViewModel() {
             write = { dash.api.agents.create(name.trim(), email.trim(), password, toDbRole(roleId)) },
             done = {
                 dash.refetchAgents()
+                // The web clears createForm only once an agent is made.
+                forms.resetCreate()
                 onDone()
                 dash.toast("Agent created")
             },
@@ -307,6 +329,7 @@ class AgentsViewModel(private val dash: DashboardViewModel) : ViewModel() {
             onGone = agentGone(agent, onDone),
             write = { team.updateAgent(agent.id, buildJsonObject { put("password", password) }) },
             done = {
+                forms.openPassword()
                 onDone()
                 dash.toast("Password updated")
             },
