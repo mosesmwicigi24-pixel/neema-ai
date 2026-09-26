@@ -1,15 +1,11 @@
 package ke.co.bethanyhouse.neema.feature.calls
 
 import ke.co.bethanyhouse.neema.core.api.NeemaApi
+import ke.co.bethanyhouse.neema.core.api.UploadFile
 import ke.co.bethanyhouse.neema.core.model.Call
 import ke.co.bethanyhouse.neema.core.model.CallOffer
 import ke.co.bethanyhouse.neema.core.model.IceConfig
-import ke.co.bethanyhouse.neema.core.model.RecordingResponse
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.MultipartBody
-import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
-import java.net.URLEncoder
 
 /*
  * The seams around the softphone's logic. [CallManager] holds every rule the
@@ -30,8 +26,8 @@ interface CallApi {
     /** Returns the new call's id. */
     suspend fun connect(to: String, sdp: String, name: String?): String
     suspend fun requestPermission(to: String)
-    /** POST /admin/calls/{id}/recording — streamed from [file], never read into memory whole. */
-    suspend fun uploadRecording(callId: String, file: File, filename: String, mimeType: String)
+    /** POST /admin/calls/{id}/recording — pass [UploadFile.of] a File so it streams from disk. */
+    suspend fun uploadRecording(callId: String, file: UploadFile)
 }
 
 /** [CallApi] over the real HTTP client. */
@@ -44,14 +40,7 @@ class NeemaCallApi(private val api: NeemaApi) : CallApi {
     override suspend fun callback(callId: String) { api.calls.callback(callId) }
     override suspend fun connect(to: String, sdp: String, name: String?) = api.calls.connect(to, sdp, name).callId
     override suspend fun requestPermission(to: String) { api.calls.requestPermission(to) }
-    override suspend fun uploadRecording(callId: String, file: File, filename: String, mimeType: String) {
-        // NeemaApi.calls.uploadRecording takes the bytes; an hour-long call is
-        // ~15 MB, so stream the file into the multipart body instead.
-        val parts = MultipartBody.Builder().setType(MultipartBody.FORM)
-            .addFormDataPart("file", filename, file.asRequestBody(mimeType.toMediaType()))
-            .build()
-        api.http.multipart<RecordingResponse>("/admin/calls/${URLEncoder.encode(callId, "UTF-8")}/recording", parts)
-    }
+    override suspend fun uploadRecording(callId: String, file: UploadFile) { api.calls.uploadRecording(callId, file) }
 }
 
 /** What a peer connection reports back (RTCPeerConnection's state-change handlers). */

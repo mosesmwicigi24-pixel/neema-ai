@@ -3,6 +3,7 @@ package ke.co.bethanyhouse.neema.calls
 import ke.co.bethanyhouse.neema.core.util.AppClock
 
 import app.cash.paparazzi.Paparazzi
+import ke.co.bethanyhouse.neema.core.api.UploadFile
 import ke.co.bethanyhouse.neema.core.model.Call
 import ke.co.bethanyhouse.neema.core.model.CallOffer
 import ke.co.bethanyhouse.neema.core.model.CallTranscript
@@ -63,7 +64,7 @@ class CallApiContractTest {
         api.connect("254712345678", "v=0 our-offer", "Fr. Peter Kamau")
         api.requestPermission("254712345678")
         val rec = java.io.File.createTempFile("rec", ".m4a").apply { writeBytes(ByteArray(3000) { 7 }); deleteOnExit() }
-        api.uploadRecording(C1, rec, "$C1.m4a", "audio/mp4")
+        api.uploadRecording(C1, UploadFile.of(rec, "$C1.m4a", "audio/mp4"))
 
         // The wacid's `==` is percent-encoded, exactly as encodeURIComponent does.
         val enc = C1.replace("=", "%3D")
@@ -218,7 +219,7 @@ class CallApiContractTest {
         val rec = java.io.File.createTempFile("rec", ".m4a").apply { writeBytes(ByteArray(3000)); deleteOnExit() }
         for ((code, detail) in listOf(403 to "Call recording is disabled.", 413 to "Recording too large — max 60 MB.", 400 to "Empty recording.")) {
             fake.on("POST", CallsFixtures.route(C1, "recording"), code = code, body = """{"detail":"$detail"}""")
-            val e = runCatching { api.uploadRecording(C1, rec, "$C1.m4a", "audio/mp4") }.exceptionOrNull()
+            val e = runCatching { api.uploadRecording(C1, UploadFile.of(rec, "$C1.m4a", "audio/mp4")) }.exceptionOrNull()
             assertTrue(e is ApiException && e.status == code && e.detail == detail)
         }
     }

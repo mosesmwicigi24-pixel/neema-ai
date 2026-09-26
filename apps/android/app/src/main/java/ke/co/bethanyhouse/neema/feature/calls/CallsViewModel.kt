@@ -31,7 +31,9 @@ data class TranscriptUi(
 
 /**
  * State for the Calls console (components/views/CallsView.tsx): the call log
- * (polled every 60s as a fallback, reloaded 500ms after any call WS event),
+ * (polled every 60s as a fallback, reloaded 500ms after call WS events —
+ * a burst coalesces into one reload — and at once when the socket
+ * reconnects or the app returns to the foreground),
  * the missed-only filter, the selected caller, and the open transcript panel
  * (lazily fetched, polled every 5s while a transcription job runs).
  */
@@ -55,6 +57,11 @@ class CallsViewModel(private val dash: DashboardViewModel) : ViewModel() {
     val transcript: StateFlow<TranscriptUi?> = _transcript.asStateFlow()
     private var transcriptPoll: Job? = null
 
+    /** The reload a burst of call frames coalesces into (the web schedules one per frame). */
+    private var frameReload: Job? = null
+    /** Bumped per load: only the newest request's answer lands, so a slow older one can't roll the log back. */
+    private var loadSeq = 0
+
     init {
         load()
         // The WS handler below reloads on call events; this is only the
@@ -63,29 +70,48 @@ class CallsViewModel(private val dash: DashboardViewModel) : ViewModel() {
             val fg = dash.foreground
             while (isActive) {
                 delay(60_000)
-                if (!fg.value) fg.first { it }
+                // Backgrounded: no ticks. Coming back reloads (below), then the clock restarts.
+                if (!fg.value) { fg.first { it }; continue }
                 load()
             }
         }
+        val socket = dash.container.socket
         viewModelScope.launch {
-            dash.container.socket.events.collect { e ->
+            socket.events.collect { e ->
                 val t = e.str("type")
-                if (t == "incoming_call" || t == "call_ended") launch { delay(500); load() }
+                if ((t == "incoming_call" || t == "call_ended") && frameReload?.isActive != true) {
+                    frameReload = launch { delay(500); load() }
+                }
             }
+        }
+        // Frames sent while the socket was down are lost: catch up the moment
+        // it reconnects, and when the app comes back on screen (the web waits
+        // for its next 60s tick).
+        viewModelScope.launch {
+            var was = socket.connected.value
+            socket.connected.collect { c -> if (c && !was) load(); was = c }
+        }
+        viewModelScope.launch {
+            var was = dash.foreground.value
+            dash.foreground.collect { fg -> if (fg && !was) load(); was = fg }
         }
     }
 
     fun load() {
+        val seq = ++loadSeq
         viewModelScope.launch {
-            _calls.value = runCatching { api.calls.list() }.getOrElse { if (_calls.value == null) emptyList() else _calls.value }
+            val r = runCatching { api.calls.list() }
+            if (seq != loadSeq) return@launch
+            _calls.value = r.getOrElse { if (_calls.value == null) emptyList() else _calls.value }
         }
     }
 
     fun refresh() {
         viewModelScope.launch {
             _refreshing.value = true
+            val seq = ++loadSeq
             runCatching { api.calls.list() }
-                .onSuccess { _calls.value = it }
+                .onSuccess { if (seq == loadSeq) _calls.value = it }
                 .onFailure { dash.toast(dash.errorText(it), ToastType.Error) }
             _refreshing.value = false
         }

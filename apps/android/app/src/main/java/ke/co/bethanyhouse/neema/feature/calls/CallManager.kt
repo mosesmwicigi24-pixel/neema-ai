@@ -7,6 +7,8 @@ import android.content.pm.PackageManager
 import android.util.Log
 import androidx.core.content.ContextCompat
 import ke.co.bethanyhouse.neema.core.api.NeemaApi
+import ke.co.bethanyhouse.neema.core.api.UploadFile
+import ke.co.bethanyhouse.neema.core.model.Call
 import ke.co.bethanyhouse.neema.core.model.IceConfig
 import ke.co.bethanyhouse.neema.core.net.ApiException
 import ke.co.bethanyhouse.neema.core.notify.Notifier
@@ -27,6 +29,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
@@ -86,11 +89,30 @@ data class CallUiState(
  *    up first) says so and does NOT terminate: the web's hangup() there cut
  *    off the colleague's live call;
  *  - the poll keeps running in the background (the web skips hidden tabs)
- *    so a call still rings the phone through the notification.
+ *    so a call still rings the phone through the notification;
+ *  - the poll only rings for INBOUND rows: a colleague's outbound call is a
+ *    "ringing" row too (calls_connect), and the web rang every other agent's
+ *    softphone for it (answering then failed — there is no offer to fetch);
+ *  - missed frames are caught up at once instead of on the next 12s tick:
+ *    the call log is polled as soon as the socket (re)connects — which is
+ *    also how a process restarted by LiveService finds a call that is
+ *    ringing right now — and when the app comes back to the foreground;
+ *  - a call that rang in while another was live (the web ignores it, as
+ *    here) is looked for again the moment this one is over, not up to 12s
+ *    later, so the waiting customer rings through straight away;
+ *  - a `call_ended` for a call this phone never showed starts its cooldown,
+ *    so an `incoming_call` delivered late (out of order) or a lagging
+ *    "ringing" row can't ring a call that is already over;
+ *  - the poll cadence changes as soon as ringing starts (see [start]), so
+ *    a call answered on a colleague's phone stops this one within 2.5s;
+ *  - ringing stops after [RING_TIMEOUT_MS] even if every end signal was lost
+ *    (the server treats a call still ringing after 2 minutes as missed).
  */
 class CallManager internal constructor(
     private val api: CallApi,
     private val events: Flow<JsonObject>,
+    /** The live socket's state: every (re)connect polls at once for frames missed while it was down. */
+    private val connected: StateFlow<Boolean>,
     scope: CoroutineScope,
     /** True while the app is on screen (the incoming-call notification only fires when not). */
     private val foreground: StateFlow<Boolean>,
@@ -114,6 +136,7 @@ class CallManager internal constructor(
     ) : this(
         api = NeemaCallApi(api),
         events = socket.events,
+        connected = socket.connected,
         scope = scope,
         foreground = foreground,
         signedInFn = signedInFn,
@@ -150,6 +173,9 @@ class CallManager internal constructor(
     private var recCallId: String? = null
     private var timerJob: Job? = null
     private var resetJob: Job? = null
+    private var ringTimeoutJob: Job? = null
+    /** An incoming call was ignored because another call was on screen: look again once it's over. */
+    private var missedWhileBusy = false
     private var started = false
 
     private val phase: CallPhase get() = _state.value.phase
@@ -169,13 +195,32 @@ class CallManager internal constructor(
         // Primary path: the live WebSocket event (instant).
         ui.launch { events.collect(::onFrame) }
 
+        // Catch-up: frames sent while the socket was down are lost. Poll the
+        // moment it (re)connects — after a network drop, after the process was
+        // restarted by LiveService, after the app returns from a socket-less
+        // background — and when the app comes back on screen.
+        ui.launch {
+            var was = connected.value
+            connected.collect { c -> if (c && !was) pollOnce(); was = c }
+        }
+        ui.launch {
+            var was = foreground.value
+            foreground.collect { fg -> if (fg && !was) pollOnce(); was = fg }
+        }
+
         // Fallback path: poll the call log for a fresh "ringing" call, so the card
         // appears even if the WS event was missed. 2.5s only while RINGING (hang-up
-        // detection needs it); 12s otherwise.
+        // detection needs it); 12s otherwise. The cadence switches the moment the
+        // phone starts or stops ringing (the web keeps a 12s wait already running,
+        // so a colleague's answer — which sends no frame — could leave this phone
+        // ringing for up to 12s).
         ui.launch {
-            while (isActive) {
-                delay(pollDelay())
-                pollOnce()
+            state.map { it.phase == CallPhase.Ringing }.distinctUntilChanged().collectLatest { ringing ->
+                val every = if (ringing) RING_POLL_MS else IDLE_POLL_MS
+                while (isActive) {
+                    delay(every)
+                    pollOnce()
+                }
             }
         }
 
@@ -183,12 +228,26 @@ class CallManager internal constructor(
         // live; in-call audio routing + mic foreground service while a call runs.
         ui.launch {
             state.map { it.phase }.distinctUntilChanged().collect { p ->
+                ringTimeoutJob?.cancel(); ringTimeoutJob = null
                 if (p == CallPhase.Ringing) {
                     ringer.startRinging()
                     if (!foreground.value) postIncoming()
+                    val id = _state.value.callId
+                    ringTimeoutJob = ui.launch {
+                        delay(RING_TIMEOUT_MS)
+                        if (phase == CallPhase.Ringing && _state.value.callId == id) {
+                            cleanup(); id?.let { endedAt[it] = now() }; activeId = null
+                            update { CallUiState() }
+                        }
+                    }
                 } else {
                     ringer.stopRinging()
                     ringer.cancelIncoming()
+                }
+                // A caller who rang in during the last call may still be waiting.
+                if (p == CallPhase.Idle && missedWhileBusy) {
+                    missedWhileBusy = false
+                    ui.launch { pollOnce() }
                 }
                 if (p == CallPhase.InCall) {
                     startRecording()   // begins once (guarded); remote audio is flowing by now
@@ -211,7 +270,7 @@ class CallManager internal constructor(
         }
     }
 
-    /** The poll cadence: 2.5s while ringing, 12s otherwise. */
+    /** The poll cadence: 2.5s while ringing, 12s otherwise (restarted when ringing starts / stops). */
     internal fun pollDelay(): Long = if (phase == CallPhase.Ringing) RING_POLL_MS else IDLE_POLL_MS
 
     private fun postIncoming() {
@@ -226,6 +285,7 @@ class CallManager internal constructor(
             "incoming_call" -> {
                 logD("WS event: $evt")
                 val id = evt.str("call_id") ?: return
+                if (phase != CallPhase.Idle && id != _state.value.callId) missedWhileBusy = true
                 startRinging(id, evt.str("from") ?: "", evt.str("name"))
             }
             "outbound_answer" -> if (evt.str("call_id") == activeId && activeId != null) {
@@ -237,8 +297,12 @@ class CallManager internal constructor(
             }
             "call_ended" -> {
                 logD("WS event: $evt")
+                val id = evt.str("call_id") ?: return
                 val cur = _state.value
-                if (cur.callId != null && cur.callId == evt.str("call_id") && cur.phase != CallPhase.Ended) finish()
+                if (cur.callId == id) { if (cur.phase != CallPhase.Ended) finish() }
+                // A call we never showed (or not yet: frames can arrive out of
+                // order): it is over, so a late incoming_call must not ring it.
+                else if (!endedAt.containsKey(id)) endedAt[id] = now()
             }
         }
     }
@@ -251,21 +315,31 @@ class CallManager internal constructor(
         if (phase == CallPhase.Ringing) {
             // The caller hung up (row no longer "ringing") — tear the card down.
             val cur = calls.find { it.callId == activeId }
+            if (calls.any { it.isFreshInboundRing(t) && it.callId != activeId }) missedWhileBusy = true
             if (cur != null && cur.status != "ringing") {
+                // Answered on another phone, or the caller gave up.
                 cleanup(); activeId = null
                 update { CallUiState() }
             }
             return
         }
-        if (phase != CallPhase.Idle) return
-        val ringing = calls.find { c ->
-            c.status == "ringing" && Fmt.millis(c.startedAt)?.let { t - it < 90_000 } == true
+        if (phase != CallPhase.Idle) {
+            // Busy with another call: remember that someone is waiting.
+            if (calls.any { it.isFreshInboundRing(t) && it.callId != _state.value.callId }) missedWhileBusy = true
+            return
         }
+        val ringing = calls.find { it.isFreshInboundRing(t) && !coolingDown(it.callId, t) }
         if (ringing != null) {
             logD("poll fallback caught ringing call: ${ringing.callId}")
             startRinging(ringing.callId, ringing.waId ?: "", ringing.name)
         }
     }
+
+    /** A row the poll fallback rings for: inbound, still ringing, started under 90s ago. */
+    private fun Call.isFreshInboundRing(t: Long) =
+        status == "ringing" && direction != "outbound" && Fmt.millis(startedAt)?.let { t - it < 90_000 } == true
+
+    private fun coolingDown(callId: String, t: Long) = endedAt[callId]?.let { t - it < RERING_COOLDOWN_MS } == true
 
     private fun who(s: CallUiState) =
         s.name?.takeIf { it.isNotBlank() } ?: s.from?.takeIf { it.isNotEmpty() }?.let { "+$it" } ?: "Unknown"
@@ -309,8 +383,7 @@ class CallManager internal constructor(
     // after a decline / failed answer, while allowing a genuine retry after ~12s.
     private fun startRinging(callId: String, from: String, name: String?) {
         if (phase != CallPhase.Idle) return
-        val ended = endedAt[callId]
-        if (ended != null && now() - ended < RERING_COOLDOWN_MS) return
+        if (coolingDown(callId, now())) return
         activeId = callId
         update { it.copy(callId = callId, from = from, name = name, phase = CallPhase.Ringing) }
     }
@@ -356,7 +429,7 @@ class CallManager internal constructor(
                 if (callId == null || callId == "pending") return@launch
                 if (file.length() < MIN_RECORDING_BYTES) return@launch   // skip near-silent / empty recordings
                 // Streamed from disk: an hour-long call never sits in memory.
-                api.uploadRecording(callId, file, "$callId.m4a", "audio/mp4")
+                api.uploadRecording(callId, UploadFile.of(file, "$callId.m4a", "audio/mp4"))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -581,6 +654,8 @@ class CallManager internal constructor(
         const val GATHER_TIMEOUT_MS = 2_500L
         const val MIC_PROMPT_TIMEOUT_MS = 60_000L
         const val MIN_RECORDING_BYTES = 2_000L
+        /** routers/admin.py list_calls marks a call still "ringing" after 2 minutes as missed. */
+        const val RING_TIMEOUT_MS = 120_000L
 
         const val TAKEN_ELSEWHERE = "Another agent already answered this call"
 
