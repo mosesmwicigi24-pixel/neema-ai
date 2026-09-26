@@ -48,7 +48,10 @@ import org.junit.Test
 class AreaPermissionMatrixTest {
     @get:Rule val paparazzi = Paparazzi(deviceConfig = DeviceConfig.PIXEL_6)
 
-    @Before fun setUp() = Dispatchers.setMain(UnconfinedTestDispatcher())
+    private val scheduler = kotlinx.coroutines.test.TestCoroutineScheduler()
+    @Before fun setUp() = Dispatchers.setMain(UnconfinedTestDispatcher(scheduler))
+    /** Core batches a burst of 403s into one access re-read after a short window. */
+    private fun settle() { scheduler.advanceTimeBy(1_000); scheduler.runCurrent() }
     @After fun tearDown() = Dispatchers.resetMain()
 
     private fun fake(p: Persona) = FakeNeema.withFixtures().also {
@@ -161,6 +164,7 @@ class AreaPermissionMatrixTest {
         val agentsBefore = f.gets("/admin/agents").size
         val meBefore = f.gets("/admin/me").size
         val vm = ReportsViewModel(d)
+        settle()
         assertNull(vm.allConvs.value)
         assertEquals("Admin only", vm.loadError.value)
         assertEquals(agentsBefore + 1, f.gets("/admin/agents").size)
@@ -185,6 +189,7 @@ class AreaPermissionMatrixTest {
         f.on("GET", "/admin/attribution", code = 403, body = """{"detail":"Admin only"}""")
         val before = f.gets("/admin/agents").size
         val vm = OverviewViewModel(d)
+        settle()
         assertNull("attribution stays hidden, as on the web", vm.attrib.value)
         assertNotNull(vm.stats.value)
         assertEquals(before + 1, f.gets("/admin/agents").size)
@@ -205,6 +210,7 @@ class AreaPermissionMatrixTest {
         f.on("GET", "/admin/catalog/audit", code = 403, body = """{"detail":"Forbidden"}""")
         val before = f.gets("/admin/me").size
         val vm = CatalogViewModel(d)
+        settle()
         assertNull(vm.audit.value)
         assertEquals(before + 1, f.gets("/admin/me").size)
     }

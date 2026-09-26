@@ -130,11 +130,10 @@ internal fun String.masking(secret: String): String =
  * on the server today (they only need a signed-in agent), so this is a
  * safety net for a future guard or a proxy rule.
  *
- * TODO(core): switch to `dash.onForbidden()` once core adds it.
+ * Core's [DashboardViewModel.onForbidden] coalesces and rate-limits the
+ * re-read (NeemaHttp also fires it for every signed-in 403), so a 30 s poll
+ * meeting a persistent 403 cannot re-read me/agents every tick.
  */
 internal fun DashboardViewModel.recheckAccessOn(e: Throwable?) {
-    if (e?.httpStatus() == 403) {
-        refetchMe()
-        refetchAgents()
-    }
+    if (e?.httpStatus() == 403) onForbidden()
 }
