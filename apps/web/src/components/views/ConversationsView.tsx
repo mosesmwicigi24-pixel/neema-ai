@@ -9,10 +9,11 @@ import { Btn } from "@/components/ui/Btn";
 import { Modal } from "@/components/ui/Modal";
 import { TextareaField, InputField } from "@/components/ui/FormFields";
 import { Toggle } from "@/components/ui/Layout";
-import { timeAgo, formatPhone, displayName, countryName } from "@/lib/utils";
+import { timeAgo, formatPhone, displayName, countryName, dayLabel, dayKey, clockTime } from "@/lib/utils";
 import { formatWa } from "@/lib/waText";
 import { CHANNEL_CONFIG, ALL_CHANNELS } from "@/lib/channels";
-import { conversationsApi, mapConversation, profileApi, type ApiActivityEvent } from "@/lib/api";
+import { conversationsApi, mapConversation, profileApi, whatsappApi, type ApiActivityEvent } from "@/lib/api";
+import { useCallPresence } from "@/lib/callContext";
 import type { Inbox } from "@/hooks/useInbox";
 import { useConversationEvents, buildSystemEventFromWs } from "@/lib/websocket";
 import { CustomerSidebar } from "@/components/ui/CustomerSidebar";
@@ -24,6 +25,7 @@ import type {
     Order,
     Channel,
     SharedViewProps,
+    OpenChatRequest,
 } from "@/types";
 import { useSession } from "next-auth/react";
 import { callStatus, CALL_ICON_PATH } from "@/lib/callStatus";
@@ -34,59 +36,180 @@ import { callStatus, CALL_ICON_PATH } from "@/lib/callStatus";
 // "Missed call"), who took it, when. When the call was transcribed, a card
 // under it: the summary, the next action, and the suggested follow-up with
 // "Use as reply" (puts it in the composer — never sends it).
-function CallPill({ msg, onUseReply }: { msg: Message; onUseReply?: (text: string) => void }) {
+function CallPill({ msg, onUseReply, composerReady = true }: { msg: Message; onUseReply?: (text: string) => void; composerReady?: boolean }) {
     const call = msg.call;
     const st = callStatus(call ?? { status: "", direction: msg.direction });
     const ins = call?.insights ?? null;
-    const summary = call?.summary || msg.event_reason || null;
+    const summary = (call?.summary || msg.event_reason || "").trim() || null;
     const followUp = ins?.follow_up_message?.trim() || null;
-    const showCard = !!(summary || ins?.next_action || followUp);
+    // Products / objections / commitments: one compact line each, only when there.
+    const facts = ([
+        ["Products", ins?.products],
+        ["Objections", ins?.objections],
+        ["Commitments", ins?.commitments],
+    ] as const).filter(([, v]) => Array.isArray(v) && v.length > 0) as [string, string[]][];
+    const showCard = !!(summary || ins?.next_action || followUp || facts.length);
+    const [more, setMore] = useState(false);
+    const [used, setUsed] = useState(false);
+    // Who took it — not for calls nobody answered.
     const agent = msg.agent_name && !["missed", "no_answer", "cancelled", "failed"].includes(call?.status ?? "")
         ? msg.agent_name.split(" ")[0] : null;
+    const at = call?.started_at || msg.created_at;
+    const label = msg.text || st.word;
+    const long = !!summary && summary.length > 220;
     return (
         <div className="flex flex-col items-center gap-1.5 my-2.5">
             <div className="flex items-center gap-2 w-full">
                 <div className="flex-1 h-px bg-stone-200" />
                 <div className="flex flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5 px-3 py-1 rounded-full border bg-white max-w-[88%]"
-                    style={{ borderColor: "#e2e8e0" }}>
-                    <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke={st.light} strokeWidth={2.4}
-                        strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="flex-shrink-0">
-                        <path d={CALL_ICON_PATH[st.icon]} />
-                    </svg>
-                    <span className="text-[11px] font-semibold" style={{ color: st.icon === "missed" ? st.light : "#1c2917" }}>
-                        {msg.text || "Call"}
+                    style={{ borderColor: st.live ? "#b7e4c7" : "#e2e8e0" }}
+                    title={at ? new Date(at).toLocaleString() : undefined}>
+                    {st.live
+                        ? <span className="w-2 h-2 rounded-full flex-shrink-0 animate-pulse motion-reduce:animate-none" style={{ backgroundColor: "#25D366" }} aria-hidden="true" />
+                        : (
+                            <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke={st.light} strokeWidth={2.4}
+                                strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="flex-shrink-0">
+                                <path d={CALL_ICON_PATH[st.icon]} />
+                            </svg>
+                        )}
+                    <span className="text-[11px] font-semibold" style={{ color: st.icon === "missed" || st.word === "Missed" ? st.light : "#1c2917" }}>
+                        <span className="sr-only">WhatsApp call: </span>{label}
                     </span>
-                    {agent && <span className="text-[10px]" style={{ color: "#64748b" }}>· {agent}</span>}
-                    {msg.created_at && <span className="text-[10px]" style={{ color: "#94a3b8" }}>· {timeAgo(msg.created_at)}</span>}
+                    {agent && <span className="text-[10px]" style={{ color: "#57534e" }}>· {agent}</span>}
+                    {at && <span className="text-[10px] tabular-nums" style={{ color: "#78716c" }}>· {clockTime(at)}</span>}
                 </div>
                 <div className="flex-1 h-px bg-stone-200" />
             </div>
             {showCard && (
-                <div className="w-full max-w-[88%] sm:max-w-md rounded-xl border bg-white px-3 py-2.5"
+                <section aria-label="Call summary" className="w-full max-w-[88%] sm:max-w-md rounded-xl border bg-white px-3 py-2.5"
                     style={{ borderColor: "#d7ecd9" }}>
                     <div className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "#128C4B" }}>
                         Call summary
                     </div>
-                    {summary && <p className="text-xs leading-relaxed whitespace-pre-wrap" style={{ color: "#1c2917" }}>{summary}</p>}
+                    {summary && (
+                        <>
+                            <p className={`text-xs leading-relaxed whitespace-pre-wrap ${long && !more ? "line-clamp-3" : ""}`} style={{ color: "#1c2917" }}>{summary}</p>
+                            {long && (
+                                <button type="button" onClick={() => setMore((v) => !v)} aria-expanded={more}
+                                    className="text-[11px] font-semibold mt-0.5 min-h-6" style={{ color: "#128C4B" }}>
+                                    {more ? "Show less" : "Show more"}
+                                </button>
+                            )}
+                        </>
+                    )}
                     {ins?.next_action && (
                         <p className="text-xs leading-relaxed mt-1.5" style={{ color: "#1c2917" }}>
                             <span className="font-semibold">Next: </span>{ins.next_action}
                         </p>
                     )}
+                    {facts.length > 0 && (
+                        <dl className="mt-1.5 space-y-0.5 text-[11px] leading-snug">
+                            {facts.map(([k, v]) => (
+                                <div key={k} className="flex gap-1.5">
+                                    <dt className="font-semibold flex-shrink-0" style={{ color: "#57534e" }}>{k}:</dt>
+                                    <dd className="min-w-0" style={{ color: "#334155" }}>{v.join(" · ")}</dd>
+                                </div>
+                            ))}
+                        </dl>
+                    )}
                     {followUp && (
                         <div className="mt-2 rounded-lg px-2.5 py-2" style={{ backgroundColor: "#f3f8f1" }}>
-                            <p className="text-xs leading-relaxed whitespace-pre-wrap" style={{ color: "#334155" }}>{followUp}</p>
+                            <div className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#57534e" }}>Suggested reply</div>
+                            <p className="text-xs leading-relaxed whitespace-pre-wrap mt-0.5" style={{ color: "#334155" }}>{followUp}</p>
                             {onUseReply && (
-                                <button type="button" onClick={() => onUseReply(followUp)}
-                                    className="mt-1.5 h-9 px-3 rounded-lg text-xs font-semibold text-white active:scale-95"
-                                    style={{ backgroundColor: "#128C4B" }}>
-                                    Use as reply
-                                </button>
+                                <div className="mt-1.5 flex items-center gap-2">
+                                    <button type="button" onClick={() => { onUseReply(followUp); setUsed(true); }}
+                                        className="h-9 px-3 rounded-lg text-xs font-semibold text-white active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#128C4B]"
+                                        style={{ backgroundColor: "#128C4B" }}>
+                                        Use as reply
+                                    </button>
+                                    <span className="text-[11px]" style={{ color: "#57534e" }} aria-live="polite">
+                                        {!composerReady ? (used ? "Saved — pick up the chat to send it" : "Pick up the chat to send it — nothing is sent")
+                                            : used ? "In the reply box — edit, then send" : "Goes in the reply box — not sent"}
+                                    </span>
+                                </div>
                             )}
                         </div>
                     )}
-                </div>
+                </section>
             )}
+        </div>
+    );
+}
+
+// ── NoChatPane ────────────────────────────────────────────────────────────────
+// "Open chat" / "Message" for a caller who has only ever CALLED: there is no
+// WhatsApp conversation yet (nobody has messaged either way), so rather than a
+// dead click the thread pane says so and offers what WhatsApp allows — call
+// them back, or open the chat with the approved template. A suggested
+// follow-up from the call is kept here to copy once the chat exists.
+function NoChatPane({ waId, name, prefill, onBack, onToast }: {
+    waId: string; name: string | null; prefill: string | null;
+    onBack: () => void; onToast: (msg: string, type?: "success" | "error" | "warning") => void;
+}) {
+    const presence = useCallPresence();
+    const [sending, setSending] = useState(false);
+    const [sent, setSent] = useState(false);
+    const who = (name || "").trim() || formatPhone(waId) || `+${waId}`;
+    const first = (name || "").trim().split(/\s+/)[0] || who;
+    const busy = !!presence?.busy;
+    const onThisCall = busy && presence?.waId === waId;
+    const callBack = async () => {
+        if (!presence) return onToast("Calling unavailable", "error");
+        const r = await presence.initiateCall(waId, name);
+        if (!r.ok) onToast(r.error || "Couldn't place the call", "error");
+    };
+    const sendTemplate = async () => {
+        setSending(true);
+        try {
+            await whatsappApi.invite(waId, name || "");
+            setSent(true);
+            onToast(`Template sent — ${first}'s chat opens when it lands`);
+        } catch {
+            onToast("Couldn't send the template — try again", "error");
+        } finally { setSending(false); }
+    };
+    return (
+        <div className="flex-1 flex items-center justify-center px-5 py-8 overflow-y-auto" style={{ backgroundColor: "#f5f7f2" }}>
+            <div role="status" className="w-full max-w-sm rounded-2xl border bg-white px-5 py-5 text-center" style={{ borderColor: "#e2e8e0" }}>
+                <div className="mx-auto w-11 h-11 rounded-full flex items-center justify-center" style={{ backgroundColor: "#e7f6ec", color: "#128C4B" }}>
+                    <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d={CALL_ICON_PATH.live} />
+                    </svg>
+                </div>
+                <h2 className="mt-3 text-sm font-semibold" style={{ color: "#1c2917" }}>No chat with {who} yet</h2>
+                <p className="mt-1 text-xs leading-relaxed" style={{ color: "#57534e" }}>
+                    {first} has called but never messaged, so there&apos;s no WhatsApp conversation to open.
+                    WhatsApp lets a business start one only with an approved template.
+                </p>
+                {prefill && (
+                    <div className="mt-3 rounded-lg px-3 py-2 text-left" style={{ backgroundColor: "#f3f8f1" }}>
+                        <div className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#128C4B" }}>Suggested follow-up</div>
+                        <p className="mt-0.5 text-xs leading-relaxed whitespace-pre-wrap" style={{ color: "#334155" }}>{prefill}</p>
+                        <button type="button" className="mt-1 h-9 text-xs font-semibold underline" style={{ color: "#128C4B" }}
+                            onClick={() => navigator.clipboard?.writeText(prefill).then(
+                                () => onToast("Copied — paste it once the chat opens"),
+                                () => onToast("Couldn't copy", "error"))}>
+                            Copy
+                        </button>
+                    </div>
+                )}
+                <div className="mt-4 flex flex-col gap-2">
+                    <button type="button" onClick={callBack} disabled={busy}
+                        className="h-11 rounded-lg text-xs font-semibold text-white inline-flex items-center justify-center gap-1.5 disabled:opacity-60"
+                        style={{ backgroundColor: "#008069" }}>
+                        {onThisCall ? "On a call with them" : busy ? "On another call" : `Call ${first} back`}
+                    </button>
+                    <button type="button" onClick={sendTemplate} disabled={sending || sent}
+                        className="h-11 rounded-lg text-xs font-semibold disabled:opacity-60"
+                        style={{ backgroundColor: "#eef2e8", color: "#3d5a30", border: "1px solid #cee6b2" }}>
+                        {sent ? "Template sent" : sending ? "Sending…" : "Send WhatsApp template"}
+                    </button>
+                    <button type="button" onClick={onBack} className="h-11 rounded-lg text-xs font-semibold" style={{ color: "#57534e" }}>
+                        Back to conversations
+                    </button>
+                </div>
+            </div>
         </div>
     );
 }
@@ -685,6 +808,9 @@ type MobilePanel = "list" | "thread";
 // messages, fetch the next PAGE only when the reader scrolls past them — the
 // app stays light instead of painting a long customer's history in one go.
 const THREAD_PAGE = 50;
+// A stable "no messages yet" — a fresh [] per render re-ran every memo and
+// effect keyed on the thread.
+const NO_MESSAGES: Message[] = [];
 
 // Union two thread slices by id, newest state winning, ordered by time — so a
 // poll refresh (newest page) never throws away older pages already loaded,
@@ -736,8 +862,9 @@ interface ConversationsViewProps extends SharedViewProps {
     agents: Agent[];
     orders?: Order[];
     refetchConversations?: () => void;
-    // A wa_id/external_id another view (Calls) asked us to open in-app.
-    openConvKey?: string | null;
+    // A customer another view (Calls, the call card, Deals, a hub link) asked
+    // us to open in-app — by thread id when known, else wa_id/external_id.
+    openConvKey?: OpenChatRequest | null;
     onConsumeOpenConvKey?: () => void;
     // True once the conversations list is fresh from the server (not a cached
     // snapshot) — gates the "no conversation yet" verdict on deep links.
@@ -876,18 +1003,38 @@ export function ConversationsView({
     // The reply box, so "Use as reply" (a call's follow-up) and the customer
     // panel ("Ask for their WhatsApp number") can put text in it — never send it.
     const composerRef = useRef<HTMLTextAreaElement>(null);
+    // The reply box only shows once this agent holds the chat — until then a
+    // suggestion waits in the draft (it appears the moment they pick it up).
+    const canComposeRef = useRef(false);
     const putInComposer = useCallback((text: string) => {
-        setReplyText(text);
+        if (!canComposeRef.current) {
+            onToast("The reply is ready — pick up the chat to edit and send it", "warning");
+        }
+        // Never throw away what the agent already typed: the suggestion goes
+        // under it (and a second tap on the same suggestion is a no-op).
+        setReplyText((cur) => {
+            const had = cur.trim();
+            if (!had) return text;
+            if (cur.includes(text)) return cur;
+            return `${cur.trimEnd()}\n\n${text}`;
+        });
         setMobileCrmOpen(false);
         requestAnimationFrame(() => {
             const t = composerRef.current;
             if (!t) return;
-            t.focus();
+            t.focus({ preventScroll: true });
             t.style.height = "auto";
             t.style.height = Math.min(t.scrollHeight, 132) + "px";
-            t.setSelectionRange(text.length, text.length);
+            t.setSelectionRange(t.value.length, t.value.length);
+            t.scrollTop = t.scrollHeight;
+            // The taller reply box shrinks the thread: keep a reader who was
+            // at the newest message there.
+            if (nearBottomRef.current) messagesEndRef.current?.scrollIntoView({ block: "end" });
         });
-    }, []);
+    }, [onToast]);
+    // "Open chat" for a caller who has never messaged: there is no thread to
+    // open, so the pane says so plainly and offers what the agent can do.
+    const [noChat, setNoChat] = useState<{ waId: string; name: string | null; prefill: string | null } | null>(null);
     // Calls land in the thread as pills: refresh the first page (merged, so
     // older pages survive) when this customer's call changes — debounced, as
     // one call sends several events.
@@ -966,6 +1113,8 @@ export function ConversationsView({
     // hold still — yanking the reader to the bottom mid-scroll is the exact
     // heaviness this pagination removes.
     const holdAutoScroll = useRef(false);
+    // Whether the reader is at (or within a line of) the newest message.
+    const nearBottomRef = useRef(true);
 
     const loadMessages = useCallback(
         async (convId: string, silent = false) => {
@@ -1045,7 +1194,7 @@ export function ConversationsView({
     }, [conversations.length > 0, activeConvId]);
 
     const activeConv = conversations.find((c) => c.id === activeConvId);
-    const activeMessages: Message[] = messages[activeConvId] ?? [];
+    const activeMessages: Message[] = messages[activeConvId] ?? NO_MESSAGES;
     // Memoized: this sort ran inline in the thread JSX on EVERY render of the
     // view (each keystroke, poll, ws event), allocating Dates per comparison.
     const sortedActiveMessages = useMemo(() => [...activeMessages].sort((a, b) => {
@@ -1055,6 +1204,19 @@ export function ConversationsView({
             (b.type === "system_event" && (b.event_kind === "escalated" || (b.event_kind === "intercept" && !b.agent_name)) ? 1 : 0);
         return tA - tB;
     }), [activeMessages]);
+
+    // What the thread paints. The server sends a customer's calls with the
+    // first page whatever their age; while older messages are still unloaded,
+    // a call older than the oldest loaded message would sit at the top out of
+    // place — it appears once scrolling back reaches its day.
+    const threadItems = useMemo(() => {
+        if (!threadHasMore[activeConvId]) return sortedActiveMessages;
+        const oldest = sortedActiveMessages.find((m) => m.type !== "system_event" && m.created_at);
+        if (!oldest) return sortedActiveMessages;
+        const floor = new Date(oldest.created_at).getTime();
+        return sortedActiveMessages.filter((m) => !(m.type === "system_event" && m.event_kind === "call"
+            && new Date(m.created_at ?? 0).getTime() < floor));
+    }, [sortedActiveMessages, threadHasMore, activeConvId]);
 
     // WhatsApp-style albums: runs of ≥2 consecutive image messages from the same
     // side collapse into one collage bubble (the first message renders the grid;
@@ -1100,18 +1262,49 @@ export function ConversationsView({
         // A deep link (hub → Neema) can land before the inbox has loaded —
         // don't consume the key against an empty list.
         if (conversations.length === 0) return;
+        const req = openConvKey;
         // "digits|REF" — the hub sends the phone plus the order number, because
         // a Meta customer's thread is keyed by PSID and their phone may exist
         // nowhere in identities. The order number is the strongest key.
-        const [rawKey, refPart] = openConvKey.split("|");
+        const [rawKey, refPart] = req.key.split("|");
         const key = rawKey.replace(/^\+/, "");
+        // Land on the thread; a call's suggested follow-up goes in the reply
+        // box (never sent). Re-opening the thread already on screen keeps its
+        // loaded pages and the scroll where they are.
+        const land = (id: string) => {
+            setNoChat(null);
+            if (id === activeConvId) { if (isMobile) setMobilePanel("thread"); }
+            else handleSelectConv(id);
+            if (req.prefill) putInComposer(req.prefill);
+        };
+        // A thread this list hasn't loaded (the inbox is paged): fetch the one
+        // conversation and reveal it, or the pane would say "Select a
+        // conversation" even though we know exactly which one it is.
+        const reveal = async (id: string) => {
+            if (conversations.some((c) => c.id === id)) return;
+            try {
+                const one = mapConversation(await conversationsApi.get(id));
+                if (inbox) inbox.reveal([one]);
+                else setConversations?.((prev) => (prev.some((c) => c.id === id) ? prev : [one, ...prev]));
+            } catch {
+                // Still select it: messages load by id, so the thread opens
+                // even if the row could not be added.
+            }
+        };
+        // The caller (a call row, the call card) already knows the thread.
+        if (req.conversationId) {
+            const id = req.conversationId;
+            onConsumeOpenConvKey?.();
+            reveal(id).then(() => land(id));
+            return;
+        }
         const matches = conversations.filter(
             (c) => c.wa_id === key || c.external_id === key || c.wa_id === rawKey,
         );
         const conv = matches.find((c) => c.channel === "whatsapp") ?? matches[0];
         // Full open semantics (messages load, unread clears) — selecting the id
         // alone leaves the thread pane empty until the 20s poll catches up.
-        if (conv) handleSelectConv(conv.id);
+        if (conv) land(conv.id);
         // A cached snapshot may simply not contain a brand-new conversation —
         // don't declare "no conversation" until the fresh list has arrived.
         else if (!freshLoaded) return;
@@ -1122,31 +1315,17 @@ export function ConversationsView({
                 .resolve(key, refPart || undefined)
                 .then(async ({ conversation_id }) => {
                     if (!conversation_id) {
-                        onToast?.("No conversation yet — they haven't messaged. Use Invite to WhatsApp.", "warning");
+                        // A caller who never messaged has no chat to open: say
+                        // so in the thread pane (with what the agent CAN do),
+                        // instead of a toast over whatever thread was open.
+                        setNoChat({ waId: key, name: req.name ?? null, prefill: req.prefill ?? null });
+                        if (isMobile) setMobilePanel("thread");
                         return;
                     }
-                    // Selecting an id the LIST does not contain shows "Select a
-                    // conversation" — the thread pane reads
-                    // conversations.find(c => c.id === activeConvId). The list
-                    // paints from a snapshot capped at 600 rows, so every link
-                    // to a thread older than the 600 most recent landed on an
-                    // empty pane even though resolution had succeeded. Fetch
-                    // the one conversation and put it in the list first.
-                    if (!conversations.some((c) => c.id === conversation_id)) {
-                        try {
-                            const one = mapConversation(await conversationsApi.get(conversation_id));
-                            // Revealed, not just cached: the paged inbox would
-                            // otherwise drop its list row on the next refresh.
-                            if (inbox) inbox.reveal([one]);
-                            else setConversations?.((prev) =>
-                                prev.some((c) => c.id === conversation_id) ? prev : [one, ...prev],
-                            );
-                        } catch {
-                            // Still select it: messages load by id, so the
-                            // thread opens even if the row could not be added.
-                        }
-                    }
-                    handleSelectConv(conversation_id);
+                    // The list paints from a snapshot capped at 600 rows, so a
+                    // link to an older thread must add it to the list first.
+                    await reveal(conversation_id);
+                    land(conversation_id);
                 })
                 .catch(() => onToast?.("Could not look up that chat.", "error"));
         }
@@ -1190,21 +1369,36 @@ export function ConversationsView({
     // canActOnThisConv: can perform Pause/Resume/Transfer.
     // True when agent has permissions AND (owns the conv, OR is admin/super,
     // OR the conv isn't currently human-intercepted by someone else).
+    const canCompose = !!activeConv && activeConv.intercept_mode === "human" &&
+        (activeConv.assigned_agent_id === currentAgentId || isAdminOrSuper);
+    useEffect(() => { canComposeRef.current = canCompose; }, [canCompose]);
     const canActOnThisConv =
         canHandleConversations &&
         (isOwner || isAdminOrSuper || activeConv?.intercept_mode !== "human");
 
     // ── Scroll to bottom only when new messages arrive ────────────────────────
+    // …and only when the reader is at the bottom already (or just sent one):
+    // a call pill or a colleague's message landing while they read older
+    // history must not yank them down. A summary card growing under the
+    // last item keeps a reader at the bottom pinned to it.
     useEffect(() => {
         const count = activeMessages.length;
-        if (count > prevMessageCount.current && !holdAutoScroll.current) {
-            messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-        }
+        const grew = count > prevMessageCount.current;
         prevMessageCount.current = count;
-    }, [activeMessages.length]);
+        if (holdAutoScroll.current) return;
+        const last = activeMessages[activeMessages.length - 1];
+        const mine = !!last && String(last.id).startsWith("optimistic-");
+        if (grew && (nearBottomRef.current || mine)) {
+            messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+        } else if (!grew && nearBottomRef.current) {
+            const el = threadScrollRef.current;
+            if (el && el.scrollHeight - el.scrollTop - el.clientHeight > 2) el.scrollTop = el.scrollHeight;
+        }
+    }, [activeMessages]);
 
     useEffect(() => {
         prevMessageCount.current = 0;
+        nearBottomRef.current = true;
         setTimeout(() => {
             messagesEndRef.current?.scrollIntoView({ behavior: "instant" });
         }, 50);
@@ -1385,14 +1579,22 @@ export function ConversationsView({
             }
         }
         if (
-            (event.type === "call_update" || event.type === "call_ended" || event.type === "incoming_call") &&
+            (event.type === "call_update" || event.type === "call_ended" || event.type === "incoming_call"
+             || event.type === "call_answered") &&
             activeConvId
         ) {
-            const wa = (event.type === "call_update" ? event.call?.wa_id
-                : event.type === "incoming_call" ? event.from : null) ?? null;
-            const mine = !!wa && !!activeConv && String(wa).replace(/^\+/, "") === activeConv.wa_id;
-            const known = !!event.call_id && (messages[activeConvId] ?? []).some(
-                (m) => m.call?.call_id === event.call_id);
+            // A call with this customer rang, was answered, ended, or got its
+            // summary: refresh the first page quietly (merged — older pages,
+            // the scroll position and the reply box all stay as they are).
+            const wa = String((event.type === "call_update" ? event.call?.wa_id
+                : event.type === "incoming_call" ? event.from : null) ?? "").replace(/^\+/, "");
+            const person = event.type === "call_update" ? event.call?.person_id ?? null : event.person_id ?? null;
+            const callId = event.call_id ?? event.call?.call_id ?? null;
+            const mine = !!activeConv && (
+                (!!wa && (wa === activeConv.wa_id || (activeConv.channel === "whatsapp" && wa === activeConv.external_id)))
+                || (!!person && person === activeConv.person_id));
+            const known = !!callId && (messages[activeConvId] ?? []).some(
+                (m) => m.call?.call_id === callId);
             if (mine || known) {
                 const convId = activeConvId;
                 if (callRefreshTimer.current) clearTimeout(callRefreshTimer.current);
@@ -1418,6 +1620,7 @@ export function ConversationsView({
                 prev.map((c) => (c.id === id ? { ...c, unread: 0 } : c)),
             );
         }
+        setNoChat(null);
         setActiveConvId(id);
         loadMessages(id);
         if (isMobile) setMobilePanel("thread");
@@ -2784,7 +2987,11 @@ export function ConversationsView({
     const ThreadPanel = (
         <div className="flex flex-1 overflow-hidden">
             <div className="flex flex-col flex-1 overflow-hidden relative" style={{ backgroundColor: "#f8fafc" }}>
-                {!activeConv ? (
+                {noChat ? (
+                    <NoChatPane key={noChat.waId} waId={noChat.waId} name={noChat.name} prefill={noChat.prefill}
+                        onToast={onToast}
+                        onBack={() => { setNoChat(null); if (isMobile) setMobilePanel("list"); }} />
+                ) : !activeConv ? (
                     <div className="flex-1 flex items-center justify-center" style={{ color: "#c5d5bc" }}>
                         <div className="text-center">
                             <div className="text-4xl mb-2">💬</div>
@@ -3026,7 +3233,9 @@ export function ConversationsView({
                         <div
                             ref={threadScrollRef}
                             onScroll={(e) => {
-                                if (e.currentTarget.scrollTop < 80) loadOlder();
+                                const el = e.currentTarget;
+                                nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+                                if (el.scrollTop < 80) loadOlder();
                             }}
                             className="flex-1 overflow-y-auto px-4 sm:px-5 py-4 space-y-3"
                             style={{ backgroundColor: "#f5f7f2",
@@ -3072,16 +3281,17 @@ export function ConversationsView({
                                 // How many messages were unread when this thread was opened
                                 const snap = unreadSnapshot[activeConvId] ?? 0;
                                 // The divider sits before the first unread message
+                                // ── Sort: escalation system events nudged just after their
+                                // preceding inbound message so they always appear below it.
+                                // (Calls older than the loaded page wait for it — threadItems.)
+                                const sortedMessages = threadItems;
                                 const dividerIdx =
                                     snap > 0
                                         ? Math.max(
                                               0,
-                                              activeMessages.length - snap,
+                                              sortedMessages.length - snap,
                                           )
                                         : -1;
-                                // ── Sort: escalation system events nudged just after their
-                                // preceding inbound message so they always appear below it.
-                                const sortedMessages = sortedActiveMessages;
 
                                 // ── Dedup: only show the FIRST escalation/system-intercept per thread.
                                 // Repeat media requests after the first escalation are suppressed.
@@ -3112,7 +3322,11 @@ export function ConversationsView({
                                     }
                                 }
 
-                                return sortedMessages.map((msg, idx) => {
+                                // ── Day headings (Today / Yesterday / Mon 12 Sep) above the
+                                // first item of each day — calls and messages alike, so a
+                                // call pill's clock time always reads against its day.
+                                let lastDay = "";
+                                const renderItem = (msg: Message, idx: number): React.ReactNode => {
                                     const isInbound =
                                         msg.direction === "inbound";
                                     const isNote = msg.isNote;
@@ -3321,7 +3535,7 @@ export function ConversationsView({
                                                             <div className="flex-1 h-px bg-[#427425]/30" />
                                                         </div>
                                                     )}
-                                                    <CallPill msg={msg} onUseReply={putInComposer} />
+                                                    <CallPill msg={msg} onUseReply={putInComposer} composerReady={canCompose} />
                                                 </React.Fragment>
                                             );
                                         }
@@ -3802,12 +4016,34 @@ export function ConversationsView({
                                             </div>
                                         </React.Fragment>
                                     );
+                                };
+                                return sortedMessages.map((msg, idx) => {
+                                    const node = renderItem(msg, idx);
+                                    if (node === null || node === undefined || node === false) return null;
+                                    const d = dayKey(msg.created_at);
+                                    const newDay = !!d && d !== lastDay;
+                                    if (d) lastDay = d;
+                                    // Always the same wrapper (keyed by the item), so a heading
+                                    // appearing above it after an older page loads never remounts it.
+                                    return (
+                                        <React.Fragment key={String(msg.id ?? `msg-${idx}`)}>
+                                            {newDay && (
+                                                <div className="flex justify-center pt-1" role="separator" aria-label={dayLabel(msg.created_at)}>
+                                                    <span className="text-[10px] font-semibold px-2.5 py-0.5 rounded-full bg-white border select-none"
+                                                          style={{ color: "#57534e", borderColor: "#e2e8e0" }}>
+                                                        {dayLabel(msg.created_at)}
+                                                    </span>
+                                                </div>
+                                            )}
+                                            {node}
+                                        </React.Fragment>
+                                    );
                                 });
                             })()}
                             <div ref={messagesEndRef} />
                         </div>
 
-                        {/* Reply box — shown when agent owns the conv, or is admin/superuser */}
+                        {/* Reply box — shown when agent owns the conv, or is admin/superuser (canCompose) */}
                         {activeConv.intercept_mode === "human" &&
                             (activeConv.assigned_agent_id === currentAgentId ||
                                 isAdminOrSuper) && (
@@ -4271,7 +4507,7 @@ export function ConversationsView({
                 )}
             </div>
             {/* Activity Log — collapsible, desktop only */}
-            {activeConv && !isMobile && (() => {
+            {activeConv && !noChat && !isMobile && (() => {
                 const dotColor: Record<string, string> = {
                     escalated:        "bg-amber-100 border-amber-300",
                     flag:             "bg-red-100 border-red-300",
@@ -4408,8 +4644,10 @@ export function ConversationsView({
                     </div>
                 );
             })()}
-            {/* CRM Sidebar — open by default, collapsible */}
+            {/* CRM Sidebar — open by default, collapsible (hidden while the
+                pane says a caller has no chat yet — it would be someone else's) */}
             {activeConv &&
+                !noChat &&
                 !isMobile &&
                 (crmOpen ? (
                     <CustomerSidebar

@@ -19,7 +19,7 @@ import type { Conversation, Order } from "@/types";
 import { whatsappApi, callsApi, askNeema, answerViaNeema, settingsApi, type ApiCall } from "@/lib/api";
 import { useWs } from "@/lib/websocket";
 import { callStatus, fmtCallDuration, upsertCall, CALL_ICON_PATH } from "@/lib/callStatus";
-import { useCall } from "@/lib/callContext";
+import { useCallPresence } from "@/lib/callContext";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -698,12 +698,13 @@ const META_CALL_SHEET: Record<string, MetaSheetStyle> = {
                  ink: "linear-gradient(90deg, #4F5BD5 0%, #962FBF 30%, #D62976 65%, #FA7E1E 100%)" },
 };
 
-function MetaCallSheet({ meta, first, name, callDigits, busy, onCall, onAsk, onInvited, onToast, onClose }: {
+function MetaCallSheet({ meta, first, name, callDigits, busy, busyLabel, onCall, onAsk, onInvited, onToast, onClose }: {
     meta: MetaSheetStyle;
     first: string;
     name: string | null;
     callDigits: string;
     busy: boolean;
+    busyLabel: string;
     onCall: () => void;
     onAsk?: (text: string) => void;
     onInvited: (phone: string) => void;
@@ -751,7 +752,7 @@ function MetaCallSheet({ meta, first, name, callDigits, busy, onCall, onAsk, onI
                         <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="flex-shrink-0">
                             <path d={CALL_ICON_PATH.live} />
                         </svg>
-                        {busy ? "On a call" : "Call on WhatsApp"}
+                        {busy ? busyLabel : "Call on WhatsApp"}
                     </button>
                     <div className="mt-1 text-center text-[11px] tabular-nums" style={{ color: "#64748b" }}>+{callDigits}</div>
                     </>
@@ -802,13 +803,16 @@ function SidebarCalls({ waId }: { waId: string }) {
     useEffect(() => {
         if (!ws) return;
         let t: ReturnType<typeof setTimeout> | null = null;
-        const on = (e: { type?: string; call?: ApiCall; call_id?: string }) => {
+        const soon = () => { if (t) clearTimeout(t); t = setTimeout(load, 600); };
+        const on = (e: { type?: string; call?: ApiCall; call_id?: string; from?: string }) => {
             if (e?.type === "call_update" && e.call && (e.call.wa_id || "").replace(/^\+/, "") === waId) {
                 const row = e.call;
-                setCalls((prev) => (prev ? upsertCall(prev, row).slice(0, 3) : prev));
-            } else if (e?.type === "call_ended" && callsRef.current?.some((c) => c.call_id === e.call_id)) {
-                if (t) clearTimeout(t);
-                t = setTimeout(load, 600);
+                setCalls((prev) => (prev ? upsertCall(prev, row).slice(0, 3) : [row]));
+            } else if (e?.type === "incoming_call" && (e.from || "").replace(/^\+/, "") === waId) {
+                soon();   // they're ringing now — the row appears as "Ringing…"
+            } else if ((e?.type === "call_ended" || e?.type === "call_answered")
+                       && callsRef.current?.some((c) => c.call_id === e.call_id)) {
+                soon();
             }
         };
         ws.on("event", on);
@@ -864,7 +868,9 @@ export function CustomerSidebar({
     hideHeader,
     onPrefillReply,
 }: Props) {
-    const callCtx = useCall();
+    // Presence only (who we're on a call with) — not the whole call state, so a
+    // mute toggle or a device notice doesn't re-render this whole panel.
+    const callCtx = useCallPresence();
     const [templateBusy, setTemplateBusy] = useState(false);
     const [callSheetOpen, setCallSheetOpen] = useState(false);
     const [activeTab, setActiveTab] = useState<
@@ -1407,7 +1413,11 @@ export function CustomerSidebar({
                     const callDigits = valid(waDigits) ? waDigits : valid(digits) ? digits : "";
                     const meta = META_CALL_SHEET[conversation.channel as string];
                     if (!callDigits && !meta) return null;
-                    const busy = !!callCtx && callCtx.phase !== "idle" && callCtx.phase !== "ended";
+                    // One call at a time: while one rings, is placed, live or ending,
+                    // this button can't start another — and says why.
+                    const busy = !!callCtx?.busy;
+                    const withThem = busy && !!callDigits && callCtx?.waId === callDigits;
+                    const busyLabel = withThem ? "On a call" : "On another call";
                     const startCall = async () => {
                         if (!callCtx) return onToast("Calling unavailable", "error");
                         // A real WhatsApp thread id lets the card's "Open chat" go straight back here.
@@ -1424,14 +1434,15 @@ export function CustomerSidebar({
                                 disabled={busy}
                                 onClick={() => (meta ? setCallSheetOpen((v) => !v) : startCall())}
                                 aria-expanded={meta ? callSheetOpen : undefined}
-                                title={meta ? `${meta.label} can't take calls — call on WhatsApp instead` : "Call this customer on WhatsApp"}
+                                title={busy ? (withThem ? "You're on a call with this customer" : "End the current call first")
+                                    : meta ? `${meta.label} can't take calls — call on WhatsApp instead` : "Call this customer on WhatsApp"}
                                 className="flex-1 inline-flex items-center justify-center gap-1.5 h-11 rounded-lg text-xs font-semibold text-white transition-transform hover:brightness-95 active:scale-95 disabled:opacity-60"
                                 style={{ background: meta ? meta.ink : "#008069" }}
                             >
                                 <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                                     <path d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
                                 </svg>
-                                {busy ? "On a call" : "Call"}
+                                {busy ? busyLabel : "Call"}
                             </button>
                             {valid(digits) && (
                             <button
@@ -1464,6 +1475,7 @@ export function CustomerSidebar({
                                 name={profile.name}
                                 callDigits={callDigits}
                                 busy={busy}
+                                busyLabel={busyLabel}
                                 onCall={() => { setCallSheetOpen(false); startCall(); }}
                                 onAsk={onPrefillReply ? (text) => { setCallSheetOpen(false); onPrefillReply(text); } : undefined}
                                 onInvited={(phone) => { setCallSheetOpen(false); if (!valid(digits)) patch({ phone }); }}

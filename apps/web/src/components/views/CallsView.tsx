@@ -12,7 +12,8 @@ import { callsApi, type ApiCall, type CallTranscriptResp } from "@/lib/api";
 import { useWs } from "@/lib/websocket";
 import { useCall } from "@/lib/callContext";
 import { callStatus, fmtCallDuration, upsertCall, CALL_ICON_PATH } from "@/lib/callStatus";
-import type { SharedViewProps } from "@/types";
+import type { SharedViewProps, OpenChatRequest } from "@/types";
+import { dayLabel, clockTime } from "@/lib/utils";
 import { CustomerSidebar } from "@/components/ui/CustomerSidebar";
 
 const C = {
@@ -29,20 +30,7 @@ const initialsOf = (who: string): React.ReactNode => {
     return !i || /^\d/.test(i) ? <PhoneGlyph size={16} /> : i;
 };
 
-const clock = (iso: string | null | undefined) =>
-    iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
-
-function dayLabel(iso: string | null): string {
-    if (!iso) return "Earlier";
-    const d = new Date(iso);
-    const today = new Date();
-    const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
-    const diff = Math.round((startOf(today) - startOf(d)) / 86_400_000);
-    if (diff === 0) return "Today";
-    if (diff === 1) return "Yesterday";
-    return d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short",
-        ...(d.getFullYear() !== today.getFullYear() ? { year: "numeric" } : {}) });
-}
+const clock = clockTime;
 
 function CallIcon({ c, size = 13 }: { c: ApiCall; size?: number }) {
     const st = callStatus(c);
@@ -62,7 +50,9 @@ const PhoneGlyph = ({ size = 16 }: { size?: number }) => (
 );
 
 interface CallsViewProps extends SharedViewProps {
-    onOpenConversation?: (key: string) => void;
+    /** Open the customer's chat — by thread id when the row has one (else the
+     *  number), optionally with a reply pre-filled in the composer (not sent). */
+    onOpenConversation?: (req: OpenChatRequest) => void;
     /** Deep-link (e.g. from the hub's order page): focus this customer's calls. */
     focusWaId?: string | null;
     onConsumeFocus?: () => void;
@@ -71,7 +61,7 @@ interface CallsViewProps extends SharedViewProps {
 // The transcript + AI summary + insights for one call. Lazily fetches the
 // transcript, offers on-demand transcription (the free path — CPU is spent
 // only when you ask), and polls while it runs.
-function CallTranscript({ call, onOpenChat }: { call: ApiCall; onOpenChat?: () => void }): React.ReactElement {
+function CallTranscript({ call, onUseReply }: { call: ApiCall; onUseReply?: (text: string) => void }): React.ReactElement {
     const callId = call.call_id;
     const [data, setData] = useState<CallTranscriptResp | null>(null);
     const [failed, setFailed] = useState(false);
@@ -145,12 +135,15 @@ function CallTranscript({ call, onOpenChat }: { call: ApiCall; onOpenChat?: () =
                         <div style={{ marginTop: 10, background: "rgba(255,255,255,0.04)", borderRadius: 10, padding: "8px 10px" }}>
                             <div style={{ fontSize: 12, color: C.sub, fontWeight: 600 }}>Suggested follow-up</div>
                             <div style={{ fontSize: 13, color: C.text, whiteSpace: "pre-wrap", lineHeight: 1.5, marginTop: 2 }}>{ins.follow_up_message}</div>
-                            {onOpenChat && (
-                                <button type="button" onClick={onOpenChat}
-                                    className="mt-2 rounded-full px-3 font-semibold"
-                                    style={{ minHeight: 44, fontSize: 13, color: "#0b1410", background: C.green }}>
-                                    Open chat
-                                </button>
+                            {onUseReply && (
+                                <div className="mt-2 flex items-center gap-2 flex-wrap">
+                                    <button type="button" onClick={() => onUseReply(ins.follow_up_message!.trim())}
+                                        className="rounded-full px-4 font-semibold"
+                                        style={{ minHeight: 44, fontSize: 13, color: "#0b1410", background: C.green }}>
+                                        Use as reply
+                                    </button>
+                                    <span style={{ fontSize: 12, color: C.sub }}>Opens the chat with it in the reply box — nothing is sent</span>
+                                </div>
                             )}
                         </div>
                     )}
@@ -234,9 +227,10 @@ function Timeline({ c }: { c: ApiCall }) {
     );
 }
 
-function CallDetail({ c, onBack, onCallBack, onOpenChat, onFollowUpDone, busyDone, isMobile }: {
+function CallDetail({ c, onBack, onCallBack, onOpenChat, onUseReply, onFollowUpDone, busyDone, callBusy, isMobile }: {
     c: ApiCall; onBack: () => void; onCallBack?: () => void; onOpenChat?: () => void;
-    onFollowUpDone: () => void; busyDone: boolean; isMobile: boolean;
+    onUseReply?: (text: string) => void;
+    onFollowUpDone: () => void; busyDone: boolean; callBusy: boolean; isMobile: boolean;
 }) {
     const who = whoOf(c);
     const st = callStatus(c);
@@ -274,10 +268,10 @@ function CallDetail({ c, onBack, onCallBack, onOpenChat, onFollowUpDone, busyDon
                 </div>
                 <div className="flex flex-wrap gap-2 mt-4">
                     {onCallBack && (
-                        <button type="button" onClick={onCallBack}
-                            className="flex items-center gap-1.5 rounded-full px-4 font-semibold"
+                        <button type="button" onClick={onCallBack} disabled={callBusy}
+                            className="flex items-center gap-1.5 rounded-full px-4 font-semibold disabled:opacity-50"
                             style={{ minHeight: 44, fontSize: 14, background: C.greenBtn, color: "#fff" }}>
-                            <PhoneGlyph /> Call back
+                            <PhoneGlyph /> {callBusy ? "On a call" : "Call back"}
                         </button>
                     )}
                     {onOpenChat && (
@@ -303,7 +297,7 @@ function CallDetail({ c, onBack, onCallBack, onOpenChat, onFollowUpDone, busyDon
             <div className="px-4 py-4">
                 <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, color: C.faint, marginBottom: 8 }}>Recording &amp; notes</div>
                 {c.has_recording || c.summary || (c.transcript_status && c.transcript_status !== "none")
-                    ? <CallTranscript call={c} onOpenChat={onOpenChat} />
+                    ? <CallTranscript call={c} onUseReply={onUseReply} />
                     : <div style={{ fontSize: 13, color: C.faint }}>
                           {st.live ? "The call is still going." : c.answered_at ? "No recording was captured for this call." : "Not connected — nothing was recorded."}
                       </div>}
@@ -452,6 +446,19 @@ export function CallsView({ isMobile, onOpenConversation, onToast, focusWaId, on
         const r = await callCtx.initiateCall(c.wa_id, c.name, c.conversation_id ?? null);
         if (!r.ok) onToast(r.error || "Couldn't place the call", "error");
     }, [callCtx, onToast]);
+
+    // No second call while one rings, is placed, live or ending.
+    const callBusy = !!callCtx && callCtx.phase !== "idle" && callCtx.phase !== "ended";
+
+    // Back to the customer's chat — the row's thread when it has one, else the
+    // number (a caller who never messaged gets a clear "no chat yet" pane
+    // there). A live call keeps running, minimised.
+    const openChat = useCallback((c: ApiCall, prefill?: string) => {
+        if (!onOpenConversation || (!c.wa_id && !c.conversation_id)) return;
+        onOpenConversation({ key: c.wa_id || "", conversationId: c.conversation_id ?? null, name: c.name, prefill: prefill ?? null });
+    }, [onOpenConversation]);
+    const openChatFor = (c: ApiCall) =>
+        onOpenConversation && (c.wa_id || c.conversation_id) ? () => openChat(c) : undefined;
 
     const markDone = useCallback(async (c: ApiCall) => {
         setBusyDone(c.call_id);
@@ -613,7 +620,7 @@ export function CallsView({ isMobile, onOpenConversation, onToast, focusWaId, on
                                                 {c.wa_id && (
                                                     <button type="button" onClick={() => callBack(c)}
                                                         aria-label={`Call ${who} back on WhatsApp`} title="Call back on WhatsApp"
-                                                        disabled={!!callCtx && callCtx.phase !== "idle" && callCtx.phase !== "ended"}
+                                                        disabled={callBusy}
                                                         className="flex-shrink-0 flex items-center justify-center rounded-full transition-transform hover:scale-105 disabled:opacity-40"
                                                         style={{ width: 44, height: 44, backgroundColor: "rgba(37,211,102,0.16)", color: C.green, border: "1px solid rgba(37,211,102,0.3)" }}>
                                                         <PhoneGlyph size={17} />
@@ -641,7 +648,9 @@ export function CallsView({ isMobile, onOpenConversation, onToast, focusWaId, on
                         isMobile={!!isMobile}
                         onBack={() => setSelectedId(null)}
                         onCallBack={selected.wa_id ? () => callBack(selected) : undefined}
-                        onOpenChat={selected.wa_id && onOpenConversation ? () => onOpenConversation(selected.wa_id!) : undefined}
+                        callBusy={callBusy}
+                        onOpenChat={openChatFor(selected)}
+                        onUseReply={openChatFor(selected) ? (text) => openChat(selected, text) : undefined}
                         onFollowUpDone={() => markDone(selected)}
                         busyDone={busyDone === selected.call_id}
                     />
@@ -653,7 +662,7 @@ export function CallsView({ isMobile, onOpenConversation, onToast, focusWaId, on
                                 conversation={selConv}
                                 onToast={onToast}
                                 onClose={() => setSelectedId(null)}
-                                onOpenIdentity={(channel, externalId) => onOpenConversation?.(externalId)}
+                                onOpenIdentity={(channel, externalId) => onOpenConversation?.({ key: externalId })}
                                 className="w-full flex flex-col overflow-hidden bg-white"
                             />
                         </div>

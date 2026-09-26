@@ -270,6 +270,17 @@ export type ViewId =
     | "profile"
     | "settings";
 
+/** "Open this customer's chat" — from the call card, the minimised call, the
+ *  Calls view, Deals, a hub deep link. `key` is a wa_id / external_id (or the
+ *  hub's "digits|REF"); `conversationId` wins when the caller already knows
+ *  the thread; `prefill` lands in the composer (never sent). */
+export interface OpenChatRequest {
+    key: string;
+    conversationId?: string | null;
+    name?: string | null;
+    prefill?: string | null;
+}
+
 export interface SharedViewProps {
     onToast: (msg: string, type?: ToastType) => void;
     isMobile: boolean;

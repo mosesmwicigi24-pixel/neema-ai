@@ -15,9 +15,10 @@
 // shows what the WhatsApp API can't do: no video, hold, transfer, conference.
 import React, { useEffect, useRef, useState } from "react";
 import {
-    useCall, callerLabel, firstName, isLivePhase, YOU_ELSEWHERE,
+    useCall, useCallPresence, callerLabel, firstName, isLivePhase, YOU_ELSEWHERE,
     type CallOutcome, type CallPhase,
 } from "@/lib/callContext";
+import type { OpenChatRequest } from "@/types";
 
 const WA = {
     bg: "#0B141A", bg2: "#111B21", panel: "#202C33", text: "#E9EDEF", muted: "#8696A0",
@@ -152,13 +153,13 @@ function wrapUpActions(c: NonNullable<ReturnType<typeof useCall>>, showHelp: () 
     }
 }
 
-function RoundBtn({ label, a11y, icon, onClick, color, fg = "#fff", size = 60, pressed, btnRef, disabled }: {
+function RoundBtn({ label, a11y, icon, onClick, color, fg = "#fff", size = 60, pressed, expanded, btnRef, disabled }: {
     label: string; a11y?: string; icon: string; onClick: () => void; color: string; fg?: string; size?: number;
-    pressed?: boolean; btnRef?: React.Ref<HTMLButtonElement>; disabled?: boolean;
+    pressed?: boolean; expanded?: boolean; btnRef?: React.Ref<HTMLButtonElement>; disabled?: boolean;
 }) {
     return (
         <button ref={btnRef} type="button" onClick={onClick} disabled={disabled} aria-label={a11y ?? label}
-            aria-pressed={pressed}
+            aria-pressed={pressed} aria-expanded={expanded} aria-haspopup={expanded !== undefined ? "menu" : undefined}
             className="cs-btn flex flex-col items-center gap-1.5 disabled:opacity-50" style={{ minWidth: Math.max(size, 56) }}>
             <span className="rounded-full flex items-center justify-center"
                 style={{ width: size, height: size, backgroundColor: color, color: fg, boxShadow: "0 6px 16px rgba(0,0,0,0.35)" }}>
@@ -194,7 +195,18 @@ function AudioMenu({ onClose }: { onClose: () => void }) {
     useEffect(() => {
         c?.refreshDevices();
         const onDown = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onClose(); };
-        const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); onClose(); } };
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === "Escape") { e.stopPropagation(); onClose(); return; }
+            // A menu moves with the arrow keys (Tab leaves it).
+            if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
+            const items = Array.from(ref.current?.querySelectorAll<HTMLButtonElement>("button") ?? []);
+            if (!items.length) return;
+            e.preventDefault();
+            const at = items.indexOf(document.activeElement as HTMLButtonElement);
+            const next = e.key === "Home" ? 0 : e.key === "End" ? items.length - 1
+                : e.key === "ArrowDown" ? (at + 1) % items.length : (at - 1 + items.length) % items.length;
+            items[next]?.focus();
+        };
         document.addEventListener("mousedown", onDown);
         document.addEventListener("keydown", onKey, true);
         ref.current?.querySelector<HTMLButtonElement>("button")?.focus();
@@ -260,6 +272,7 @@ function WaitingBanner({ compact }: { compact?: boolean }) {
 }
 
 const STYLES = `
+[data-callui] button:not(.cs-btn):focus-visible { outline: 2px solid #E9EDEF; outline-offset: 2px; }
 .cs-btn > span:first-child { transition: transform .15s ease, filter .15s ease; }
 .cs-btn:hover:not(:disabled) > span:first-child { filter: brightness(1.08); }
 .cs-btn:active:not(:disabled) > span:first-child { transform: scale(.95); }
@@ -280,10 +293,29 @@ const STYLES = `
 /** Where an agent is sent to fix a blocked microphone (web: the site's permission). */
 const MIC_HELP = "Click the lock or tune icon left of the address bar → Site settings → Microphone → Allow, then call again.";
 
-export function CallStage({ onOpenConversation }: { onOpenConversation?: (key: string) => void }): React.ReactElement | null {
+/** What a screen reader hears when the call changes phase — once per change,
+ *  never the ticking clock. */
+function announcement(c: NonNullable<ReturnType<typeof useCall>>): string {
+    const who = callerLabel(c.call);
+    switch (c.phase) {
+        case "incoming": return `Incoming WhatsApp call from ${who}`;
+        case "placing": return `Calling ${who}`;
+        case "ringing_out": return "Ringing";
+        case "connecting": return "Connecting";
+        case "active": return `Connected to ${who}`;
+        case "reconnecting": return "Reconnecting — the connection dropped";
+        case "ending": return "Ending call";
+        case "ended": return outcomeWords(c.outcome, c);
+        default: return "";
+    }
+}
+
+export function CallStage({ onOpenConversation }: { onOpenConversation?: (req: OpenChatRequest) => void }): React.ReactElement | null {
     const c = useCall();
     const answerRef = useRef<HTMLButtonElement>(null);
     const cardRef = useRef<HTMLDivElement>(null);
+    const audioBtnRef = useRef<HTMLButtonElement>(null);
+    const minimiseBtnRef = useRef<HTMLButtonElement>(null);
     // Per-screen UI state, keyed so a new phase / call starts clean without an
     // effect resetting it: the audio menu belongs to one phase of one call,
     // the mic how-to and the auto-close hold to one call.
@@ -297,7 +329,7 @@ export function CallStage({ onOpenConversation }: { onOpenConversation?: (key: s
     useEffect(() => { openerRef.current = onOpenConversation; }, [onOpenConversation]);
     useEffect(() => {
         if (!setChatOpener) return;
-        setChatOpener((wa) => openerRef.current?.(wa));
+        setChatOpener((t) => openerRef.current?.({ key: t.waId, conversationId: t.conversationId ?? null, name: t.name ?? null }));
         return () => setChatOpener(null);
     }, [setChatOpener]);
 
@@ -322,14 +354,47 @@ export function CallStage({ onOpenConversation }: { onOpenConversation?: (key: s
         if (phase === "ended" && !minimised) primaryRef.current?.focus({ preventScroll: true });
     }, [phase, callId, minimised, c?.outcome]);
 
-    // Escape minimises a live call (the audio menu takes Escape first).
+    // Escape minimises a live call and closes a wrap-up (the audio menu takes
+    // Escape first). A ringing call ignores it — Escape must never decline.
     const minimise = c?.minimise;
+    const dismissCard = c?.dismiss;
     useEffect(() => {
-        if (!minimise || minimised || !["connecting", "active", "reconnecting", "placing", "ringing_out"].includes(phase)) return;
-        const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !audioOpen) minimise(); };
+        if (minimised) return;
+        const live = ["connecting", "active", "reconnecting", "placing", "ringing_out"].includes(phase);
+        if (!(live && minimise) && !(phase === "ended" && dismissCard)) return;
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key !== "Escape" || audioOpen || e.defaultPrevented) return;
+            if (live) minimise?.(); else dismissCard?.();
+        };
         window.addEventListener("keydown", onKey);
         return () => window.removeEventListener("keydown", onKey);
-    }, [phase, minimised, audioOpen, minimise]);
+    }, [phase, minimised, audioOpen, minimise, dismissCard]);
+
+    // Focus: the card takes it when it appears (Answer / the wrap-up's main
+    // action do, below; otherwise its first control), and gives it back to
+    // where the agent was when it goes away for good. Minimising hands it to
+    // the call bar (CallBar).
+    const covering = phase !== "idle" && !minimised;
+    const returnFocusRef = useRef<HTMLElement | null>(null);
+    useEffect(() => {
+        if (!covering) return;
+        const prev = document.activeElement as HTMLElement | null;
+        if (prev && prev !== document.body && !cardRef.current?.contains(prev)) returnFocusRef.current = prev;
+        const t = requestAnimationFrame(() => {
+            const card = cardRef.current;
+            if (card && !card.contains(document.activeElement)) {
+                (minimiseBtnRef.current ?? card.querySelector<HTMLElement>("button"))?.focus({ preventScroll: true });
+            }
+        });
+        return () => cancelAnimationFrame(t);
+    }, [covering]);
+    useEffect(() => {
+        if (phase !== "idle") return;
+        const back = returnFocusRef.current;
+        returnFocusRef.current = null;
+        const lost = !document.activeElement || document.activeElement === document.body;
+        if (back && back.isConnected && lost) back.focus({ preventScroll: true });
+    }, [phase]);
 
 
     // Neutral wrap-ups close on their own — paused while the pointer or focus is on the card.
@@ -345,7 +410,12 @@ export function CallStage({ onOpenConversation }: { onOpenConversation?: (key: s
         return () => clearTimeout(t);
     }, [phase, outcome, dismiss, hold, callId, recordingNote]);
 
-    if (!c || phase === "idle" || minimised) return null;
+    // One polite live region, always mounted (also while minimised), so each
+    // phase change is announced exactly once.
+    const announcer = (
+        <div className="sr-only" aria-live="polite" aria-atomic="true">{c ? announcement(c) : ""}</div>
+    );
+    if (!c || phase === "idle" || minimised) return announcer;
 
     const who = callerLabel(c.call);
     const live = isLivePhase(phase);
@@ -360,9 +430,8 @@ export function CallStage({ onOpenConversation }: { onOpenConversation?: (key: s
     if (phase === "active" && c.answeredAt) {
         status = (
             <span className="flex items-center gap-3">
-                {/* The ticking clock stays out of the live region (it would be read out every second). */}
-                <span className="sr-only">Connected</span>
-                <span aria-hidden="true" className="tabular-nums" style={{ fontSize: 17, color: WA.text }}><Elapsed since={c.answeredAt} /></span>
+                {/* Visual only — the announcer says "Connected" once; the clock is never read out per tick. */}
+                <span className="tabular-nums" role="timer" aria-label="Call duration" style={{ fontSize: 17, color: WA.text }}><Elapsed since={c.answeredAt} /></span>
                 {c.recording && (
                     <span className="flex items-center gap-1.5" style={{ fontSize: 13, color: "#FF6B81" }}>
                         <span className="w-2 h-2 rounded-full" style={{ backgroundColor: "#FF3B5C" }} aria-hidden="true" /> Recording
@@ -401,7 +470,11 @@ export function CallStage({ onOpenConversation }: { onOpenConversation?: (key: s
     const actions = ended ? wrapUpActions(c, () => setMicHelpFor(callId ?? null)) : [];
 
     return (
-        <div ref={cardRef}
+        <>
+        {announcer}
+        {/* The view under the card is inert while it covers it (CallCovered),
+            so Tab stays on the card and the app's sidebar. */}
+        <div ref={cardRef} data-callui=""
             className="cs-in absolute inset-0 z-50 flex flex-col overflow-y-auto"
             style={{ background: `linear-gradient(180deg, ${WA.bg} 0%, ${WA.bg2} 100%)`, color: WA.text }}
             role="dialog" aria-modal="false" aria-label={`WhatsApp voice call with ${who}`}>
@@ -411,7 +484,7 @@ export function CallStage({ onOpenConversation }: { onOpenConversation?: (key: s
             <div className="w-full max-w-lg mx-auto px-4 pt-3 flex flex-col gap-2">
                 <div className="flex items-center justify-between" style={{ minHeight: 44 }}>
                     {live ? (
-                        <button type="button" onClick={c.minimise} aria-label="Minimise call"
+                        <button ref={minimiseBtnRef} type="button" onClick={c.minimise} aria-label="Minimise call"
                             className="rounded-full flex items-center justify-center hover:bg-white/5"
                             style={{ width: 44, height: 44, color: WA.muted }}>
                             <Icon name="minimise" />
@@ -449,7 +522,9 @@ export function CallStage({ onOpenConversation }: { onOpenConversation?: (key: s
                 <div className="mt-2 flex items-center gap-1.5" style={{ fontSize: 14, color: WA.muted }}>
                     <WhatsAppGlyph size={15} /> WhatsApp voice call
                 </div>
-                <div aria-live="polite" aria-atomic="true"
+                {/* Readable in place, but not a live region: the announcer above
+                    speaks each change once; this holds the ticking clock. */}
+                <div
                     className="mt-3 flex items-center justify-center gap-2 max-w-md"
                     style={{ fontSize: 15, color: endedTone ? "#FFD1D9" : WA.text, minHeight: 24 }}>
                     {status}
@@ -507,18 +582,18 @@ export function CallStage({ onOpenConversation }: { onOpenConversation?: (key: s
                 {(live || phase === "ending") && (
                     <div className="relative rounded-[28px] px-1 sm:px-2 py-3 flex items-start justify-around sm:gap-1"
                         style={{ backgroundColor: WA.panel }}>
-                        <RoundBtn label={c.muted ? "Unmute" : "Mute"} icon={c.muted ? "mic-off" : "mic"} size={56}
+                        <RoundBtn label="Mute" a11y="Mute microphone" icon={c.muted ? "mic-off" : "mic"} size={56}
                             color={c.muted ? WA.text : "rgba(255,255,255,0.08)"} fg={c.muted ? WA.bg : WA.text}
                             pressed={c.muted} onClick={c.toggleMute} disabled={phase === "ending"} />
                         {(phase === "connecting" || inCall) && audioSupported && (
                             <div className="relative">
-                                <RoundBtn label="Audio" icon="audio" size={56} color="rgba(255,255,255,0.08)" fg={WA.text}
-                                    pressed={audioOpen} onClick={() => setAudioOpen(!audioOpen)} />
-                                {audioOpen && <AudioMenu onClose={() => setAudioOpen(false)} />}
+                                <RoundBtn label="Audio" a11y="Audio devices" icon="audio" size={56} color="rgba(255,255,255,0.08)" fg={WA.text}
+                                    btnRef={audioBtnRef} expanded={audioOpen} onClick={() => setAudioOpen(!audioOpen)} />
+                                {audioOpen && <AudioMenu onClose={() => { setAudioOpen(false); audioBtnRef.current?.focus({ preventScroll: true }); }} />}
                             </div>
                         )}
                         {inCall && (
-                            <RoundBtn label="Chat" icon="chat" size={56} color="rgba(255,255,255,0.08)" fg={WA.text}
+                            <RoundBtn label="Chat" a11y={`Open chat with ${who} — the call keeps going`} icon="chat" size={56} color="rgba(255,255,255,0.08)" fg={WA.text}
                                 onClick={c.openChat} />
                         )}
                         {inCall && (
@@ -552,22 +627,46 @@ export function CallStage({ onOpenConversation }: { onOpenConversation?: (key: s
             </div>
             </div>
         </div>
+        </>
     );
+}
+
+/** The view under the call card: inert (not focusable, not read out) while the
+ *  card covers it, so keyboard and screen-reader users stay on the call. Its
+ *  children come from the dashboard and are not re-rendered by call changes. */
+export function CallCovered({ children, className }: { children: React.ReactNode; className?: string }) {
+    const presence = useCallPresence();
+    const covered = !!presence?.covering;
+    return <div className={className} inert={covered} aria-hidden={covered || undefined}>{children}</div>;
 }
 
 // ── The minimised call + the "allowed calls" banner — a slim strip in the
 // layout flow at the top of the content area (never over a toast or the composer).
 export function CallBar(): React.ReactElement | null {
     const c = useCall();
+    const expandRef = useRef<HTMLButtonElement>(null);
+    const phase = c?.phase ?? "idle";
+    const barShown = !!c?.minimised && phase !== "idle";
+    // Minimising unmounts the card — its focus would fall to <body>. Hand it
+    // to the bar instead (unless the agent already moved on, e.g. Chat
+    // focused the reply box).
+    useEffect(() => {
+        if (!barShown) return;
+        const t = requestAnimationFrame(() => {
+            const a = document.activeElement;
+            if (!a || a === document.body) expandRef.current?.focus({ preventScroll: true });
+        });
+        return () => cancelAnimationFrame(t);
+    }, [barShown]);
     if (!c) return null;
-    const phase = c.phase;
 
     if (phase === "idle" || (phase === "ended" && !c.minimised)) {
         if (!c.granted || phase !== "idle") return null;
         const first = firstName({ name: c.granted.name, from: c.granted.waId });
         return (
-            <div role="status" className="flex items-center gap-3 px-4 flex-shrink-0"
+            <div role="status" data-callui="" className="flex items-center gap-3 px-4 flex-shrink-0"
                 style={{ minHeight: 48, backgroundColor: WA.bg2, color: WA.text }}>
+                <style>{STYLES}</style>
                 <WhatsAppGlyph size={18} />
                 <span className="flex-1 min-w-0 truncate" style={{ fontSize: 14 }}>
                     <b className="font-semibold">{first}</b> allowed calls
@@ -592,9 +691,10 @@ export function CallBar(): React.ReactElement | null {
         // A wrap-up that arrived while minimised: the words + its main action.
         const primary = wrapUpActions(c, c.expand).find((a) => a.primary);
         return (
-            <div role="status" className="flex items-center gap-2 px-3 flex-shrink-0"
+            <div data-callui="" className="flex items-center gap-2 px-3 flex-shrink-0"
                 style={{ minHeight: 48, backgroundColor: WA.bg2, color: WA.text }}>
-                <button type="button" onClick={c.expand} className="flex-1 min-w-0 flex items-center gap-2 text-left"
+                <style>{STYLES}</style>
+                <button ref={expandRef} type="button" onClick={c.expand} className="flex-1 min-w-0 flex items-center gap-2 text-left"
                     style={{ minHeight: 44 }} aria-label={`Show call with ${who}`}>
                     <span className="flex-shrink-0"><WhatsAppGlyph size={16} color={WA.muted} /></span>
                     {/* Two lines: the outcome is the news — it must never be the part cut off. */}
@@ -618,23 +718,30 @@ export function CallBar(): React.ReactElement | null {
     const reconnecting = phase === "reconnecting";
     const dot = reconnecting ? WA.amber : WA.green;
     return (
-        <div className="flex-shrink-0" style={{ backgroundColor: WA.bg2, color: WA.text }}>
+        <div data-callui="" role="region" aria-label="Current call" className="flex-shrink-0" style={{ backgroundColor: WA.bg2, color: WA.text }}>
+            <style>{STYLES}</style>
             <div className="flex items-center gap-1 pl-3 pr-2" style={{ minHeight: 48 }}>
-                <button type="button" onClick={c.expand} aria-label={`Show call with ${who}`}
+                <button ref={expandRef} type="button" onClick={c.expand} aria-label={`Show call with ${who}`}
                     className="flex-1 min-w-0 flex items-center gap-2 text-left" style={{ minHeight: 44 }}>
                     <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: dot }} aria-hidden="true" />
                     <span className="truncate font-semibold" style={{ fontSize: 14 }}>{who}</span>
                     <span className="flex items-center gap-1 flex-shrink-0 tabular-nums"
                         style={{ fontSize: 13, color: reconnecting ? WA.amber : WA.muted }}>
                         {reconnecting && <Icon name="wifi-off" size={14} />}
-                        <span className="sr-only" aria-live="polite">{phase === "active" ? "Connected" : PHASE_WORDS[phase]}</span>
                         {phase === "active" && c.answeredAt
                             ? <span aria-hidden="true"><Elapsed since={c.answeredAt} /></span>
                             : <span aria-hidden="true">{PHASE_WORDS[phase]}</span>}
                         {phase === "active" && c.recording && <span className="ml-1" style={{ color: "#FF6B81" }}>● Rec</span>}
                     </span>
                 </button>
-                <button type="button" onClick={c.toggleMute} aria-label={c.muted ? "Unmute" : "Mute"} aria-pressed={c.muted}
+                {(phase === "active" || phase === "reconnecting") && (
+                    <button type="button" onClick={c.openChat} aria-label={`Open chat with ${who}`} title="Open chat — the call keeps going"
+                        className="rounded-full flex items-center justify-center flex-shrink-0 hover:bg-white/5"
+                        style={{ width: 44, height: 44, color: WA.text }}>
+                        <Icon name="chat" size={18} />
+                    </button>
+                )}
+                <button type="button" onClick={c.toggleMute} aria-label="Mute microphone" aria-pressed={c.muted}
                     disabled={phase === "ending"}
                     className="rounded-full flex items-center justify-center flex-shrink-0"
                     style={{ width: 44, height: 44, backgroundColor: c.muted ? WA.text : "transparent", color: c.muted ? WA.bg : WA.text }}>

@@ -121,8 +121,8 @@ interface CallCtx {
     expand: () => void;
     /** Go to the customer's WhatsApp chat — minimising a live call, closing a wrap-up. */
     openChat: () => void;
-    /** The dashboard registers how to open a customer's conversation (by wa_id). */
-    setChatOpener: (fn: ((waId: string) => void) | null) => void;
+    /** The dashboard registers how to open a customer's conversation. */
+    setChatOpener: (fn: ChatOpener | null) => void;
     selectInput: (deviceId: string) => void;
     selectOutput: (deviceId: string) => void;
     refreshDevices: () => void;
@@ -136,8 +136,29 @@ interface CallCtx {
     offerNotifications: () => void;
 }
 
+/** Where "Open chat" goes: the thread id when the call knows it, else the number. */
+export type ChatOpener = (target: { waId: string; conversationId?: string | null; name?: string | null }) => void;
+
 const Ctx = createContext<CallCtx | null>(null);
 export const useCall = () => useContext(Ctx);
+
+/** The slow-changing slice of the call — who we're on a call with and the
+ *  actions to start / show one. Heavy screens (the customer panel, the Calls
+ *  log, the inert wrapper) read this instead of useCall(), so a mute toggle, a
+ *  device notice or a recording note doesn't re-render them. */
+export interface CallPresence {
+    phase: CallPhase;
+    /** A call is ringing here, being placed, live or ending — no new call can start. */
+    busy: boolean;
+    /** The full card covers the content area (not minimised, not idle). */
+    covering: boolean;
+    /** The customer on the current call (digits), when busy. */
+    waId: string | null;
+    initiateCall: CallCtx["initiateCall"];
+    expand: () => void;
+}
+const PresenceCtx = createContext<CallPresence | null>(null);
+export const useCallPresence = () => useContext(PresenceCtx);
 
 /** The name the card shows: their name, else their number. */
 export const callerLabel = (c: { name?: string | null; from?: string } | null | undefined): string =>
@@ -246,7 +267,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const pendingAnswerRef = useRef<Record<string, string>>({}); // outbound SDP that beat connect's reply
     const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const connectGuardRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const chatOpenerRef = useRef<((waId: string) => void) | null>(null);
+    const chatOpenerRef = useRef<ChatOpener | null>(null);
     // Customers this agent asked for call permission (wa_id → name).
     const requestedRef = useRef<Map<string, string | null>>(new Map());
 
@@ -1108,7 +1129,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
     const minimise = useCallback(() => { if (snapRef.current.phase !== "idle") put({ minimised: true }); }, [put]);
     const expand = useCallback(() => put({ minimised: false }), [put]);
-    const setChatOpener = useCallback((fn: ((waId: string) => void) | null) => { chatOpenerRef.current = fn; }, []);
+    const setChatOpener = useCallback((fn: ChatOpener | null) => { chatOpenerRef.current = fn; }, []);
 
     const openChat = useCallback(() => {
         const s = snapRef.current;
@@ -1116,7 +1137,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
         if (!c) return;
         if (isLivePhase(s.phase)) put({ minimised: true });
         else if (s.phase === "ended") dismiss();
-        chatOpenerRef.current?.(c.from);
+        chatOpenerRef.current?.({ waId: c.from, conversationId: c.conversationId ?? null, name: c.name ?? null });
     }, [put, dismiss]);
 
     // The second call's banner.
@@ -1243,11 +1264,16 @@ export function CallProvider({ children }: { children: ReactNode }) {
         callsApi.get(id).then(applyRow).catch(() => {});
     }, [pollIdle, applyRow, setWaiting]);
 
+    // Whether the live socket is up — the idle poll only needs to be quick
+    // while it isn't (a missed ring then has no other way in).
+    const socketUpRef = useRef(false);
     useEffect(() => {
-        if (!ws) return;
-        const onConnect = () => resync();
+        if (!ws) { socketUpRef.current = false; return; }
+        const onConnect = () => { socketUpRef.current = true; resync(); };
+        const onDown = () => { socketUpRef.current = false; };
         ws.on("connect", onConnect);
-        return () => ws.off("connect", onConnect);
+        ws.on("disconnect", onDown);
+        return () => { ws.off("connect", onConnect); ws.off("disconnect", onDown); };
     }, [ws, resync]);
     useEffect(() => {
         const onVis = () => { if (document.visibilityState === "visible") resync(); };
@@ -1277,9 +1303,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
     // ── Poll fallback (the socket is primary). Cheap: one row every 3 s while a
     // call rings or is reconnecting (catches a colleague answering, the caller
-    // giving up), one row every 20 s on a live call, the last 5 calls every
-    // 15 s when idle (a ring whose event was missed). Idle polling pauses in a
-    // hidden tab; a ringing card keeps checking so it never rings a dead call.
+    // giving up), one row every 20 s on a live call, the last 5 calls when idle
+    // (a ring whose event was missed) — every 15 s while the socket is down,
+    // every 45 s while it is up (it delivers rings itself; this only backstops
+    // a dropped frame). Idle polling pauses in a hidden tab; a ringing card
+    // keeps checking so it never rings a dead call.
     useEffect(() => {
         let stopped = false;
         let timer: ReturnType<typeof setTimeout> | null = null;
@@ -1288,7 +1316,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
             if (p === "incoming" || p === "ringing_out" || p === "reconnecting") return 3000;
             if (p === "connecting") return 5000;
             if (waitingRef.current) return 5000;
-            return p === "active" ? 20_000 : 15_000;
+            if (p === "active") return 20_000;
+            return socketUpRef.current ? 45_000 : 15_000;
         };
         const schedule = () => { if (!stopped) timer = setTimeout(run, cadence()); };
         const run = async () => {
@@ -1322,6 +1351,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
         }, 4000);
         return () => clearTimeout(t);
     }, [iceConfig, session]);
+
+    // Signing out (the provider unmounting) must not leave a mic, a peer
+    // connection or an AudioContext running behind the login page.
+    const teardownRef = useRef(teardown);
+    teardownRef.current = teardown;
+    useEffect(() => () => teardownRef.current(), []);
 
     // Recording starts once media flows (guarded: once per call).
     useEffect(() => {
@@ -1397,9 +1432,17 @@ export function CallProvider({ children }: { children: ReactNode }) {
         dismiss, minimise, expand, openChat, setChatOpener,
         selectInput, selectOutput, refreshDevices,
         declineWaiting, callbackWaiting, endAndAnswerWaiting, callGranted, dismissGranted, requestNotifications, askNotifyOnce]);
+    const busy = snap.phase !== "idle" && snap.phase !== "ended";
+    const covering = snap.phase !== "idle" && !snap.minimised;
+    const presenceWa = busy ? snap.call?.from ?? null : null;
+    const presence = useMemo<CallPresence>(() => ({
+        phase: snap.phase, busy, covering, waId: presenceWa, initiateCall, expand,
+    }), [snap.phase, busy, covering, presenceWa, initiateCall, expand]);
     return (
         <Ctx.Provider value={ctxValue}>
-            {children}
+            <PresenceCtx.Provider value={presence}>
+                {children}
+            </PresenceCtx.Provider>
             <audio ref={remoteAudioRef} autoPlay className="hidden" />
         </Ctx.Provider>
     );
