@@ -28,13 +28,13 @@ class _LLM:
     def __init__(self, text="high"):
         self.text, self.prompt = text, ""
 
-    async def complete(self, *, system, messages, tools):
+    async def complete(self, *, system, messages, tools, **kw):
         self.prompt = messages[0]["content"]
         return types.SimpleNamespace(text=self.text, tool_calls=[], assistant_content=[], usage={})
 
 
 class _Down:
-    async def complete(self, *, system, messages, tools):
+    async def complete(self, *, system, messages, tools, **kw):
         raise RuntimeError("credit balance is too low")
 
 

@@ -287,7 +287,7 @@ class _LLM:
         self.answers = list(answers)
         self.calls = []
 
-    async def complete(self, *, system, messages, tools):
+    async def complete(self, *, system, messages, tools, **kw):
         self.calls.append(messages)
         return _Resp(self.answers.pop(0))
 

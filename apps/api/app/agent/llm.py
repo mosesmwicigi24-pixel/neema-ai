@@ -135,7 +135,7 @@ class AnthropicLLM:
         self.purpose = purpose
 
     async def complete(self, *, system: str | list[str], messages: list[dict],
-                       tools: list[dict]) -> LLMResponse:
+                       tools: list[dict], tool_choice: str | None = None) -> LLMResponse:
         if self._cache:
             sys_param = _cached_system(system)
         elif isinstance(system, str):
@@ -143,12 +143,19 @@ class AnthropicLLM:
         else:
             sys_param = [{"type": "text", "text": s} for s in system if s]
         msgs = _cache_last_message(messages) if self._cache else messages
+        kw: dict = {}
+        if tools and tool_choice:
+            # "none": the tools stay in the prompt — so the fleet's cached
+            # tools+rules prefix is READ, not re-written — but the model may
+            # only answer in words (the gate's rewrite, 2026-09-26).
+            kw["tool_choice"] = {"type": tool_choice}
         resp = await self._client.messages.create(
             model=self._model,
             max_tokens=self._max_tokens,
             system=sys_param,
             messages=msgs,
             tools=tools,
+            **kw,
         )
         r = _blocks_to_response(resp.content)
         r.stop_reason = resp.stop_reason or "end_turn"
@@ -187,7 +194,8 @@ class FakeLLM:
         self._i = 0
         self._uid = 0
 
-    async def complete(self, *, system: str, messages: list[dict], tools: list[dict]) -> LLMResponse:
+    async def complete(self, *, system: str, messages: list[dict], tools: list[dict],
+                       tool_choice: str | None = None) -> LLMResponse:
         if self._i >= len(self._script):
             return LLMResponse(assistant_content=[{"type": "text", "text": ""}], text="")
         step = self._script[self._i]

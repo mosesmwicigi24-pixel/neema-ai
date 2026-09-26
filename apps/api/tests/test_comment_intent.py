@@ -18,7 +18,7 @@ class _CapturingLLM:
     def __init__(self, label="high"):
         self.label, self.prompt, self.system = label, "", ""
 
-    async def complete(self, *, system, messages, tools):
+    async def complete(self, *, system, messages, tools, **kw):
         self.system = system
         self.prompt = messages[0]["content"]
         return types.SimpleNamespace(text=self.label, tool_calls=[],

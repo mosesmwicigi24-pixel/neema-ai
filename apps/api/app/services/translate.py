@@ -293,7 +293,7 @@ async def _translate_thread(redis, conv_id: str, ids: list[str]) -> int:
             payload = [{"i": i, "t": (m.text or "")[:1200]}
                        for i, m in enumerate(rows)]
             from app.agent.runtime import build_llm
-            llm = build_llm(model=settings.tier2_model_light, purpose="translate")
+            llm = build_llm(model=settings.tier2_model_light, purpose="translate", cache=False)
             resp = await llm.complete(
                 system=_SYSTEM,
                 messages=[{"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
@@ -461,7 +461,7 @@ async def translate_reply(db, redis, conv_id, text: str) -> dict:
             "\"text\": <the translation>}. No prose, no code fences."
         )
         from app.agent.runtime import build_llm
-        llm = build_llm(model=settings.tier2_model_light, purpose="translate")
+        llm = build_llm(model=settings.tier2_model_light, purpose="translate", cache=False)
         resp = await llm.complete(system=system,
                                   messages=[{"role": "user", "content": original}],
                                   tools=[])

@@ -166,7 +166,7 @@ def test_the_verifier_reads_rands_and_allows_the_conversion_at_todays_rate():
 def test_the_reviewer_treats_ordinary_promises_as_promises(monkeypatch):
     llm = types.SimpleNamespace(calls=[])
 
-    async def complete(system, messages, tools=None):
+    async def complete(system, messages, tools=None, **kw):
         llm.calls.append(messages[0]["content"])
         return types.SimpleNamespace(text="verdict=pass | issues=-")
     llm.complete = complete

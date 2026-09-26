@@ -323,7 +323,7 @@ def test_post_identity_remembers_how_the_item_looks(monkeypatch):
 def test_describe_post_image_rejects_nonsense_and_never_raises(monkeypatch):
     class _LLM:
         def __init__(self, text): self.text = text
-        async def complete(self, *, system, messages, tools):
+        async def complete(self, *, system, messages, tools, **kw):
             return types.SimpleNamespace(text=self.text)
     monkeypatch.setattr(rt.settings, "tier2_vision", True, raising=False)
     monkeypatch.setattr("app.agent.media.load_image_block", lambda url: {"type": "image"})

@@ -175,7 +175,7 @@ class _LLM:
         self.text = text
         self.calls = []
 
-    async def complete(self, system, messages, tools=None):
+    async def complete(self, system, messages, tools=None, **kw):
         self.calls.append(messages[0]["content"])
         return types.SimpleNamespace(text=self.text)
 
@@ -253,7 +253,7 @@ class _TurnLLM:
         self.texts = list(texts)
         self.calls = []
 
-    async def complete(self, system, messages, tools=None):
+    async def complete(self, system, messages, tools=None, **kw):
         self.calls.append({"system": system, "messages": messages, "tools": tools})
         return types.SimpleNamespace(text=self.texts.pop(0) if self.texts else "")
 
@@ -459,7 +459,7 @@ def test_run_turn_gates_every_real_turn_and_reports_to_the_caller():
     assert 'tool_log.append({"tool": call.name, "input": call.input, "out": out})' in src
     assert "if reply and not read_only and not scribe_only and _gate_applies(user_text):" in src
     assert "reply, _held, _gate_outcome = await _gate_turn_reply(" in src
-    assert "fx=_fx_rates, closer=is_closer(user_text or \"\"))" in src
+    assert "fx=_fx_rates, closer=is_closer(user_text or \"\"), tools=tools," in src
     assert 'turn_facts.update({"tools": tool_log, "held": list(_held), "review": _gate_outcome})' in src
     # the gate runs before the spend is measured and the reply returned
     assert src.index("await _gate_turn_reply(") < src.index("svc.log_agent_usage(")

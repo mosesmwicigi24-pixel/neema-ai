@@ -205,7 +205,13 @@ def test_prompt_greets_by_nairobi_time():
     from app.agent.prompt import _nairobi_daypart
     assert _nairobi_daypart() in ("morning", "afternoon", "evening", "late night")
     p = build_system_prompt(currency="KES")
-    assert "in Nairobi right now" in p and "Greet ONCE" in p
+    # The clock lives in the per-conversation tail now (it changed five times
+    # a day and re-wrote the whole shared block into the fleet cache each
+    # time); the shared block tells the writer where to read it.
+    from app.agent.prompt import customer_context
+    assert "in Nairobi right now" not in p and "Greet ONCE" in p
+    assert "THE CLOCK" in p and "THIS CUSTOMER" in p
+    assert "in Nairobi right now" in customer_context("", "", clock=True)
 
 
 def test_search_catalog_any_token_fallback(monkeypatch):

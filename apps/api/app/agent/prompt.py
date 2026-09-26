@@ -41,12 +41,10 @@ def build_system_prompt(*, country_iso: str = "", currency: str = "KES",
     from ONE shared prompt-cache entry for the whole fleet: one name at the top
     of the prompt was forcing a full ~10k-token cache write per customer."""
     money = money_name(currency)
-    daypart = _nairobi_daypart()
-    # Today, Nairobi — the anchor for every "next Sunday" a customer names.
-    # Costs one shared-cache write per day per market bucket (the date flips
-    # at midnight, inside the late-night daypart) — correctness is worth it.
-    _now_nbo = datetime.now(timezone.utc) + timedelta(hours=3)
-    today_line = _now_nbo.strftime("%A, %d %B %Y")
+    # The clock (Nairobi's time of day, today's date) is NOT rendered here:
+    # it changes five times a day, and every change re-wrote this whole
+    # block into the fleet cache for every market bucket. It lives in
+    # `customer_context` (the per-conversation tail) — see `clock_line`.
     # Do we actually KNOW where they are? A WhatsApp contact carries their country
     # in the phone prefix; a website visitor or a Meta contact carries nothing. The
     # old prompt asserted "you already know their country — never ask it"
@@ -396,12 +394,13 @@ WHEN RULES COLLIDE — precedence, top wins:
 6. Extras last: the one recommendation, the one WhatsApp mention.
 
 FIRST CONTACT
-- It is {daypart} in Nairobi right now — today is {today_line}. Open a
-  brand-new conversation with the matching greeting ("Good {daypart}" — or
-  "Hello" late at night). Greet ONCE per conversation; never restart with a
-  greeting mid-thread.
+- THE CLOCK: the time of day in Nairobi and today's date are stated under
+  THIS CUSTOMER at the end of your instructions. Open a brand-new
+  conversation with the matching greeting ("Good morning" / "Good afternoon"
+  / "Good evening" — or "Hello" late at night). Greet ONCE per conversation;
+  never restart with a greeting mid-thread.
 - TIME MATHS FROM TODAY (owner rule): when a customer names a day ("next
-  Sunday", "on Tuesday", "kesho"), compute it from TODAY above — "next Sunday"
+  Sunday", "on Tuesday", "kesho"), compute it from TODAY as stated there — "next Sunday"
   is the first Sunday AFTER today (a Sunday named on a Sunday means next
   week's). When you promise a check-in, promise THAT day, and when calling
   `schedule_check_in` for a named day pass it as `on_day` and let the system
@@ -1362,8 +1361,17 @@ Move the conversation toward a confirmed order, but never pushy. Serve first.
 {business}{standing}{offer_block}{church}"""
 
 
+def clock_line() -> str:
+    """Nairobi's time of day and today's date — the anchor for the greeting and
+    for every "next Sunday" a customer names. Rendered in the per-conversation
+    tail, never in the shared rules block (see build_system_prompt)."""
+    daypart = _nairobi_daypart()
+    today_line = (datetime.now(timezone.utc) + timedelta(hours=3)).strftime("%A, %d %B %Y")
+    return f"- It is {daypart} in Nairobi right now — today is {today_line}."
+
+
 def customer_context(customer_name: str = "", country: str = "",
-                     standing_offer: str = "") -> str:
+                     standing_offer: str = "", clock: bool = False) -> str:
     """The lines about THIS customer — the start of the per-customer system
     block that follows `build_system_prompt`'s shared one (the runtime appends
     call summaries, cross-channel history and deal guidance to it too).
@@ -1382,6 +1390,8 @@ def customer_context(customer_name: str = "", country: str = "",
         lines.append(f"- You are speaking with {customer_name}.")
     if country:
         lines.append(f"- They appear to be in {country}.")
+    if clock:
+        lines.append(clock_line())
     if not lines:
         return ""
     return "THIS CUSTOMER\n" + "\n".join(lines)

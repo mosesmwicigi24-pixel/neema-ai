@@ -1112,7 +1112,8 @@ async def _gate_turn_reply(reply: str, *, user_text: str, transcript: list, tool
                            ctx, currency: str, channel: str, public_comment: bool,
                            llm, sys_blocks, redis, db, key: str, post_product: str = "",
                            swahili: bool = False, fx: dict | None = None,
-                           closer: bool = False) -> tuple[str, list[str], str]:
+                           closer: bool = False, tools: list | None = None,
+                           greeting: bool = False) -> tuple[str, list[str], str]:
     """DOUBLE VERIFICATION (owner, 2026-09-25: "change from gating to double
     verifying"). Every reply is read twice — by the rules and by the reviewer
     — and the reply that goes out is the best VERIFIED draft:
@@ -1140,11 +1141,18 @@ async def _gate_turn_reply(reply: str, *, user_text: str, transcript: list, tool
     known_text = " ".join(str(b) for b in (sys_blocks if isinstance(sys_blocks, list) else [sys_blocks]))
     seen = ctx.seen_products
 
+    # A plain turn — a greeting or a thank-you answered with words alone (no
+    # figure, no row, no link, no money word) — is read by the rules only:
+    # the reviewer's model call on "you're welcome, God bless" verified
+    # nothing and cost a call every time (cost audit, 2026-09-26).
+    plain = (closer or greeting) and _rv.plain_draft(reply, seen)
+
     async def _verdict(text: str) -> dict:
         return await _rv.review_reply(
             user_text, text, seen, post_product=post_product, currency=currency,
             known_figures=known, redis=redis, transcript=transcript, tool_results=tool_log,
-            mode=mode, known_text=known_text, fx=fx)
+            mode=mode, known_text=known_text, fx=fx,
+            model_review=not (plain and _rv.plain_draft(text, seen)))
 
     v1 = await _verdict(reply)
     if v1["ok"]:
@@ -1158,15 +1166,35 @@ async def _gate_turn_reply(reply: str, *, user_text: str, transcript: list, tool
     block = _rv.rewrite_block(issues, reply, seen, currency, tool_log, mode=mode, fx=fx,
                               comment=user_text)
     second, v2 = "", None
+    # The rewrite rides the loop's own cache: the SAME tools and the same
+    # system blocks make its prefix the one the turn already wrote (tools →
+    # rules → this customer), read at a tenth of the price instead of a cold
+    # 2× write of the whole rules block for one call — `tool_choice: none`
+    # keeps the answer in words. Metered as its own purpose.
+    _kw: dict = {"tools": list(tools or [])}
+    if _kw["tools"]:
+        _kw["tool_choice"] = "none"
+    _prev_purpose = getattr(llm, "purpose", None)
+    if _prev_purpose is not None:
+        try:
+            llm.purpose = "rewrite"
+        except Exception:
+            pass
     try:
         resp = await llm.complete(
             system=sys_blocks,
             messages=list(transcript) + [{"role": "assistant", "content": reply},
                                          {"role": "user", "content": block}],
-            tools=[])
+            **_kw)
         second = (resp.text or "").strip()
     except Exception as exc:
         _log.warning("rewrite failed for %s: %s", key, exc)
+    finally:
+        if _prev_purpose is not None:
+            try:
+                llm.purpose = _prev_purpose
+            except Exception:
+                pass
     if second:
         v2 = await _verdict(second)
         if v2["ok"]:
@@ -1253,6 +1281,11 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         # proves Kenya, then real KES prices, exactly like Messenger/IG.
         user = None
         currency, loc, customer_name, source_post = await _meta_market(db, channel, key)
+        if public_comment and comment_post_id:
+            # A public reply answers the comment under THIS post. The identity
+            # remembers the FIRST post a person ever commented on — under a
+            # later post it named the wrong product (cost audit, 2026-09-26).
+            source_post = {"post_id": str(comment_post_id), "comment": ""}
         # The ad they tapped, when there is no post to carry: "that set" in
         # their first message is the product this ad shows.
         ad_headline = (await _ad_headline(db, channel, key)) if is_meta else ""
@@ -1326,7 +1359,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             await _promo2.granted_promise(redis, channel, key))
     except Exception:
         _promise = ""
-    tail = customer_context(customer_name, loc.get("country") or "", _promise)
+    tail = customer_context(customer_name, loc.get("country") or "", _promise, clock=True)
 
     # 40 messages of context (was 20): re-asking an answered question is the
     # most robotic failure there is, and it usually happened because the answer
@@ -1556,7 +1589,11 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         if public_comment and thread_parent:
             lead_ctx.append(_thread_parent_context(thread_parent))
         if (settings.tier2_vision and not img_block and pctx.get("thumb")
-                and not any(m["role"] == "assistant" for m in messages)):
+                and not any(m["role"] == "assistant" for m in messages)
+                and not identity_trusted_record(_known)):
+            # The photo is for IDENTIFYING the post's product. A trusted
+            # record already names it (and how it looks) — the image would
+            # only be re-read, at image-token prices, to say the same.
             from app.agent.media import load_image_block
             post_img = await asyncio.to_thread(load_image_block, pctx["thumb"])
     elif ad_headline:
@@ -1682,7 +1719,10 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             results.append({
                 "type": "tool_result",
                 "tool_use_id": call.id,
-                "content": json.dumps(out),
+                # Compact and unescaped: a hub row reads the same to the model
+                # with no spaces after commas and "—" as itself, at fewer tokens
+                # than json.dumps' ASCII escapes (cost audit, 2026-09-26).
+                "content": json.dumps(out, ensure_ascii=False, separators=(",", ":")),
             })
         messages.append({"role": "user", "content": results})
     else:
@@ -1707,7 +1747,8 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                 public_comment=public_comment,
                 llm=llm, sys_blocks=sys_blocks, redis=redis, db=db, key=key,
                 post_product=_gate_post_product, swahili=looks_swahili(user_text or ""),
-                fx=_fx_rates, closer=is_closer(user_text or ""))
+                fx=_fx_rates, closer=is_closer(user_text or ""), tools=tools,
+                greeting=bool(_GREETING_RE.match((user_text or "").strip())))
         except Exception as exc:
             _log.warning("reply gate failed open for %s: %s", key, exc)
     if turn_facts is not None:
@@ -1749,16 +1790,22 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     return reply
 
 
-def build_llm(model: str | None = None, purpose: str = "other") -> LLM:
+def build_llm(model: str | None = None, purpose: str = "other",
+              cache: bool | None = None) -> LLM:
     """`purpose` names what the tokens are for — the day's spend is metered by
     it (services/ai_budget): "whatsapp", "messenger", "comment", "reviewer",
-    "vision", "bridge", "follow-up", "job:…"."""
+    "vision", "bridge", "follow-up", "job:…".
+
+    `cache=False` is for a ONE-OFF prompt nothing will ever read again (the
+    reviewer's line, a comment reading, a photo description, a translation):
+    a cache breakpoint on those bills the write (1.25×) and never earns the
+    read, so they go out unmarked (cost audit, 2026-09-26)."""
     from app.agent.llm import AnthropicLLM
     return AnthropicLLM(
         api_key=settings.anthropic_api_key,
         model=model or settings.tier2_model,
         max_tokens=settings.tier2_max_tokens,
-        cache=settings.tier2_prompt_cache,
+        cache=settings.tier2_prompt_cache if cache is None else (bool(cache) and settings.tier2_prompt_cache),
         purpose=purpose,
     )
 
@@ -2042,6 +2089,41 @@ async def escalate_to_human(channel: str, ext: str, note: str,
         return False
 
 
+_SILENCED_KEY_TTL = 24 * 3600
+
+
+async def _mark_silenced(redis, channel: str, external_id: str) -> None:
+    """Record that this thread's latest inbound was answered with DELIBERATE
+    silence (a closer, a held acknowledgement, the guard's pause, an echo), so
+    the missed-reply sweep does not read the unanswered inbound as a miss and
+    compose the same silent turn again — three fully-billed times."""
+    if redis is None:
+        return
+    try:
+        from datetime import datetime, timezone
+        await redis.set(f"agent:missed:silenced:{channel}:{external_id}",
+                        datetime.now(timezone.utc).isoformat(), ex=_SILENCED_KEY_TTL)
+    except Exception:
+        pass
+
+
+async def silenced_since(redis, channel: str, external_id: str):
+    """When this thread was last deliberately left silent (aware UTC), or None."""
+    if redis is None:
+        return None
+    try:
+        raw = await redis.get(f"agent:missed:silenced:{channel}:{external_id}")
+        if not raw:
+            return None
+        if isinstance(raw, bytes):
+            raw = raw.decode()
+        from datetime import datetime, timezone
+        t = datetime.fromisoformat(str(raw))
+        return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
 async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
                              page_id: str | None = None,
                              media: dict | None = None) -> bool:
@@ -2070,10 +2152,12 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
             if not (reply or "").strip():
                 _log.info("silence on %s for %s: nothing to send (a closer, or a held "
                           "acknowledgement)", channel, external_id)
+                await _mark_silenced(redis, channel, external_id)
                 return True
             if await _is_echo(db, channel, external_id, reply):
                 _log.info("echo guard: identical reply within minutes suppressed for %s/%s",
                           channel, external_id)
+                await _mark_silenced(redis, channel, external_id)
                 return True
         await send_to_channel(channel, external_id, reply, page_id=page_id)
         async with AsyncSessionLocal() as db2:
@@ -2128,11 +2212,90 @@ async def schedule_meta_reply(redis, channel: str, external_id: str, text: str,
                 return False
         except Exception:
             pass
-    task = asyncio.create_task(_run_and_send_meta(redis, channel, external_id, text,
-                                                  page_id, media))
+    # A BURST IS ONE TURN (cost audit, 2026-09-26): "Hi" / "I want a cassock" /
+    # "black" in ten seconds used to be three model turns and three
+    # overlapping replies. Like WhatsApp (wa_native's debounce), the messages
+    # are buffered for a short window and answered once, together; the
+    # customer sees "typing…" meanwhile. No redis → no buffer → answered now.
+    token = await _meta_enqueue(redis, channel, external_id, text, media)
+    if token is not None:
+        try:
+            from app.agent.domain import is_paused as _guard_paused
+            from app.services.meta_send import send_typing_on
+            if channel in META_CHANNELS and not await _guard_paused(redis, channel, external_id):
+                await send_typing_on(external_id, page_id=page_id)
+        except Exception:
+            pass
+    task = asyncio.create_task(_run_meta_after_burst(redis, channel, external_id, text,
+                                                     page_id, media, token))
     _bg_tasks.add(task)
     task.add_done_callback(_bg_tasks.discard)
     return True
+
+
+def _meta_buf_key(channel: str, external_id: str) -> str:
+    return f"agent:burst:buf:{channel}:{external_id}"
+
+
+def _meta_tok_key(channel: str, external_id: str) -> str:
+    return f"agent:burst:tok:{channel}:{external_id}"
+
+
+async def _meta_enqueue(redis, channel: str, external_id: str, text: str,
+                        media: dict | None) -> int | None:
+    """Buffer one inbound and bump the burst token. None when there is no
+    buffer (no redis, a window of 0, redis down) — the caller answers now."""
+    if redis is None or settings.meta_debounce_seconds <= 0:
+        return None
+    try:
+        await redis.rpush(_meta_buf_key(channel, external_id),
+                          json.dumps({"text": text or "", "media": media}))
+        await redis.expire(_meta_buf_key(channel, external_id), 600)
+        tok = await redis.incr(_meta_tok_key(channel, external_id))
+        await redis.expire(_meta_tok_key(channel, external_id), 600)
+        return int(tok)
+    except Exception:
+        return None
+
+
+async def _meta_drain(redis, channel: str, external_id: str, token: int):
+    """The combined buffered turn — or None when a newer message superseded
+    this flush (its own flush carries the whole buffer)."""
+    try:
+        current = await redis.get(_meta_tok_key(channel, external_id))
+        if current is None or int(current) != token:
+            return None
+        raw = await redis.lrange(_meta_buf_key(channel, external_id), 0, -1)
+        await redis.delete(_meta_buf_key(channel, external_id))
+    except Exception:
+        return None
+    texts, media = [], None
+    for r in raw or []:
+        try:
+            item = json.loads(r.decode() if isinstance(r, bytes) else r)
+        except Exception:
+            continue
+        if (item.get("text") or "").strip():
+            texts.append(item["text"].strip())
+        # Prefer an image so the agent SEES what they sent; else keep the latest.
+        if item.get("media") and (media is None or item["media"].get("type") == "image"):
+            media = item["media"]
+    return "\n".join(texts), media
+
+
+async def _run_meta_after_burst(redis, channel: str, external_id: str, text: str,
+                                page_id: str | None, media: dict | None,
+                                token: int | None) -> bool:
+    """Wait out the burst window, then answer the COMBINED turn once."""
+    if token is not None:
+        await asyncio.sleep(max(settings.meta_debounce_seconds, 1))
+        drained = await _meta_drain(redis, channel, external_id, token)
+        if drained is None:
+            return False                       # superseded — a later flush owns it
+        text, media = drained
+    if not ((text or "").strip() or media):
+        return False
+    return await _run_and_send_meta(redis, channel, external_id, text, page_id, media)
 
 
 # ── Facebook / Instagram comment engagement ──────────────────────────────────
@@ -2619,6 +2782,10 @@ async def read_comment(text: str, redis=None) -> dict:
     # A hello is a door opening, not praise — engage, never the canned thanks.
     if looks_greeting(t):
         return _settle_reading(t, _reading("high", "greeting"))
+    # "How much?" / "Bei?" — the commonest comment there is — is a price
+    # question by its shape; no model line is needed to say so.
+    if is_bare_price_ask(t):
+        return _settle_reading(t, _reading("high", "question", ask="price"))
     # Past the daily spend stop, even this light call waits for midnight: fall
     # to the same default the except-arm uses. "high" then flows into run_turn
     # (which refuses for free) and lands on the canned pools — so under a
@@ -2678,7 +2845,7 @@ async def read_comment(text: str, redis=None) -> dict:
         "Answer with the one line only."
     )
     try:
-        llm = build_llm(model=settings.tier2_model_light, purpose="comment-read")
+        llm = build_llm(model=settings.tier2_model_light, purpose="comment-read", cache=False)
         resp = await llm.complete(system="You read comments precisely. One line only, in the shape asked.",
                                   messages=[{"role": "user", "content": prompt}], tools=[])
         r = parse_comment_reading(resp.text or "")
@@ -3410,7 +3577,7 @@ async def _describe_post_image(thumb: str) -> str:
         block = await asyncio.to_thread(load_image_block, thumb)
         if not block:
             return ""
-        llm = build_llm(model=settings.tier2_model_light, purpose="vision")
+        llm = build_llm(model=settings.tier2_model_light, purpose="vision", cache=False)
         resp = await llm.complete(
             system=("You describe one product photo for a shopkeeper's reply. Plain "
                     "words only: no price, no brand, no praise, no full stop."),
@@ -3433,6 +3600,19 @@ async def _describe_post_image(thumb: str) -> str:
         return ""
 
 
+async def _may_describe(redis, channel: str, post_id: str) -> bool:
+    """One photo description attempt per post per day. When the light model
+    cannot name what the picture shows (NONE, an outage), every later comment
+    under the post used to pay for the same failed look."""
+    if redis is None:
+        return True
+    try:
+        return bool(await redis.set(f"post:seen:tried:{channel}:{post_id}", "1",
+                                    nx=True, ex=86400))
+    except Exception:
+        return True
+
+
 async def _remember_post_product(redis, channel: str, post_id: str, product: dict,
                                  thumb: str = "") -> None:
     """Record the post's identified product (30 days, best-effort) — and, once,
@@ -3453,7 +3633,7 @@ async def _remember_post_product(redis, channel: str, post_id: str, product: dic
         known = await _recall_post_product(redis, channel, post_id)
         same = known.get("name") == product.get("name")
         seen = (known.get("seen") or "") if same else ""
-        if not seen and thumb:
+        if not seen and thumb and await _may_describe(redis, channel, post_id):
             seen = await _describe_post_image(thumb)
         source = str(product.get("_identity_source") or "model")
         try:
@@ -3573,7 +3753,10 @@ async def _post_identity(redis, channel: str, pctx: dict) -> dict:
         # said "Bishop's Ring", the hub's own "Ring" row).
         retry_key = f"postcat:retry:{channel}:{post_id}"
         try:
-            fresh = bool(await redis.set(retry_key, "1", nx=True, ex=3600)) if redis is not None else True
+            # Four ladders a day per unresolved post, not twenty-four: the
+            # caption does not change between comments, and each ladder may
+            # end in a vision call (cost audit, 2026-09-26).
+            fresh = bool(await redis.set(retry_key, "1", nx=True, ex=6 * 3600)) if redis is not None else True
         except Exception:
             fresh = True
         if fresh and (pctx.get("title") or pctx.get("thumb")):

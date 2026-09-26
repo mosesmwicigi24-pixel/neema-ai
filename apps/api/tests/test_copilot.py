@@ -46,7 +46,7 @@ def test_run_turn_scribe_only_offers_scribe_tools(monkeypatch):
     seen = {}
 
     class _RecLLM:
-        async def complete(self, *, system, messages, tools):
+        async def complete(self, *, system, messages, tools, **kw):
             seen["tools"] = [t["name"] for t in tools]
             seen["system"] = system
             return types.SimpleNamespace(text="noted", tool_calls=[],

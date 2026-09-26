@@ -64,7 +64,7 @@ def test_summarize_transcript_uses_light_model(monkeypatch):
     captured = {}
 
     class _FakeLLM:
-        async def complete(self, *, system, messages, tools):
+        async def complete(self, *, system, messages, tools, **kw):
             captured.update(system=system, messages=messages, tools=tools)
             return types.SimpleNamespace(text="  Two cassocks, KES 9000, deliver Fri  ")
 

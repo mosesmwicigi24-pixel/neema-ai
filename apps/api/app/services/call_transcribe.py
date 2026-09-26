@@ -88,7 +88,7 @@ async def summarize_transcript(transcript: str) -> str:
     no new vendor). Works for Swahili or English; output is a short English brief
     the agent + Neema can act on."""
     from app.agent.runtime import build_llm
-    llm = build_llm(model=settings.tier2_model_light, purpose="calls")
+    llm = build_llm(model=settings.tier2_model_light, purpose="calls", cache=False)
     system = (
         "You summarise a phone call between a Bethany House sales agent and a "
         "customer (clergy apparel + communion supplies, Kenya). The transcript may "
