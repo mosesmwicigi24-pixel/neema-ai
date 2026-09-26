@@ -190,15 +190,31 @@ fun ConversationsScreen(dash: DashboardViewModel) {
 }
 
 /**
- * The web's role rules: `isAdminOrSuper = is_superuser || role === "admin"`,
- * `canHandleConversations = isAdminOrSuper || role === "agent"`. The server
- * enforces nothing finer for these controls, so neither does the app.
+ * The web's role rules (ConversationsView.tsx): `isAdminOrSuper = is_superuser
+ * || role === "admin"`, `canHandleConversations = isAdminOrSuper || role ===
+ * "agent"`. Deliberately the ROLE, not `can(PERMS.…)`: the web never consults
+ * reply_conversations / intercept_release / transfer_conversations here, and
+ * the server (admin.py) checks nothing but sign-in on these routes — only
+ * DELETE /messages is admin-only. So a custom role keeps every control its
+ * legacy role gives, and a readonly (or supervisor) agent gets none.
+ *
+ * Who the agent is comes from the freshest source: the team-list row (polled
+ * every 180 s, refetched on a 403), else /admin/me, else the sign-in session —
+ * so an admin changing this agent's role reaches the open inbox by itself.
  */
 @Composable
 private fun rememberInboxPerms(dash: DashboardViewModel): InboxPerms {
     val me by dash.me.collectAsStateWithLifecycle()
+    val agents by dash.agents.collectAsStateWithLifecycle()
     val session by dash.session.collectAsStateWithLifecycle()
-    return remember(me, session) { inboxPermsOf(me?.role ?: session?.role, me?.isSuperuser == true || session?.isSuperuser == true, session?.agentId) }
+    return remember(me, agents, session) { inboxPermsOf(dash) }
+}
+
+internal fun inboxPermsOf(dash: DashboardViewModel): InboxPerms {
+    val s = dash.session.value
+    val a = dash.currentAgent
+    return if (a != null) inboxPermsOf(a.role, a.isSuperuser, s?.agentId ?: a.id)
+    else inboxPermsOf(s?.role, s?.isSuperuser == true, s?.agentId)
 }
 
 internal fun inboxPermsOf(role: String?, superuser: Boolean, me: String?): InboxPerms {
@@ -226,28 +242,17 @@ private fun ThreadPane(
     onInvite: () -> Unit,
     modifier: Modifier,
 ) {
-    val me = perms.me
-    val mode = conv.interceptMode
-    // isOwner: this agent intercepted it; ownedByOther: a different agent holds it.
-    val isOwner = conv.assignedAgentId != null && conv.assignedAgentId == me
-    val ownedByOther = mode == "human" && conv.assignedAgentId != null && conv.assignedAgentId != me
-    // Pause / Resume / Transfer: owner, admin, or nobody human holds it.
-    val canAct = perms.canHandle && (isOwner || perms.isAdminOrSuper || mode != "human")
+    val can = threadControls(conv, perms)
 
     val actions = buildList {
-        // Any agent can intercept an AI conversation — whoever picks it up owns it.
-        if (mode == "ai" && perms.canHandle) add(HeaderAction("Intercept", "⚡", "intercept", primary = true) { vm.intercept(conv.id) })
-        // Auto-escalated (media) but unclaimed: first one to tap gets it.
-        if (mode == "human" && conv.assignedAgentId == null && perms.canHandle) add(HeaderAction("Pick up", "🙋", "intercept", primary = true) { vm.intercept(conv.id) })
-        // Owner-restricted: only the intercepting agent or admin can release.
-        if (mode == "human" && (isOwner || perms.isAdminOrSuper))
-            add(HeaderAction("Release", "↩", "release", pin = none { it.pin }) { vm.release(conv.id) })
-        if (mode != "paused" && canAct) add(HeaderAction("Pause", "⏸", "pause") { vm.pause(conv.id) })
-        if (mode == "paused" && canAct) add(HeaderAction("Resume", "▶", "release", primary = true, pin = none { it.pin }) { vm.release(conv.id) })
-        if (canAct) add(HeaderAction(if (wide) "" else "Transfer", "⇄") { vm.showTransfer(true) })
-        if (perms.canHandle) add(HeaderAction(if (wide) "" else "Add note", "📝") { vm.showNote(true) })
-        // Clear history — admin/superuser only (the server refuses anyone else).
-        if (perms.isAdminOrSuper) add(HeaderAction(if (wide) "" else "Clear history", "🗑️", danger = true) { vm.showClear(true) })
+        if (can.intercept) add(HeaderAction("Intercept", "⚡", "intercept", primary = true) { vm.intercept(conv.id) })
+        if (can.pickUp) add(HeaderAction("Pick up", "🙋", "intercept", primary = true) { vm.intercept(conv.id) })
+        if (can.release) add(HeaderAction("Release", "↩", "release", pin = none { it.pin }) { vm.release(conv.id) })
+        if (can.pause) add(HeaderAction("Pause", "⏸", "pause") { vm.pause(conv.id) })
+        if (can.resume) add(HeaderAction("Resume", "▶", "release", primary = true, pin = none { it.pin }) { vm.release(conv.id) })
+        if (can.transfer) add(HeaderAction(if (wide) "" else "Transfer", "⇄") { vm.showTransfer(true) })
+        if (can.note) add(HeaderAction(if (wide) "" else "Add note", "📝") { vm.showNote(true) })
+        if (can.clearHistory) add(HeaderAction(if (wide) "" else "Clear history", "🗑️", danger = true) { vm.showClear(true) })
     }
     val siblings = remember(inbox.cache, conv.personId, conv.id) {
         if (conv.personId == null) listOf(conv)
@@ -274,9 +279,11 @@ private fun ThreadPane(
             conv = conv, siblings = siblings, perms = perms, convBusy = thread.busyFor(conv.id), wide = wide,
             actions = actions, menu = menu,
             // Regular agents see who holds it; admins never see the lock.
-            locked = if (ownedByOther && !perms.isAdminOrSuper) conv.assignedAgentName?.split(" ")?.firstOrNull() ?: "Locked" else null,
+            locked = if (can.locked) conv.assignedAgentName?.split(" ")?.firstOrNull() ?: "Locked" else null,
             showBack = !wide, onBack = vm::closeThread,
-            canCall = perms.canHandle && conv.channel == "whatsapp" && hasPhone,
+            // A shortcut to the customer panel's Call button, which the web shows to
+            // every signed-in agent (CustomerSidebar.tsx) — so no role gate here either.
+            canCall = conv.channel == "whatsapp" && hasPhone,
             onCall = { vm.call(digits, conv.name) },
             onProfile = onProfile,
             onSwitch = { vm.select(it.id) },
@@ -306,21 +313,22 @@ private fun ThreadPane(
             modifier = Modifier.weight(1f).fillMaxWidth(),
         )
         // Reply box — when the agent owns the conversation, or is admin/superuser.
-        if (mode == "human" && (conv.assignedAgentId == me || perms.isAdminOrSuper)) {
+        if (can.composer) {
             HorizontalDivider(color = Color(0xFFEDF0EA))
             Box { Composer(vm, composer, thread.window, humanMode = true, threadLang = threadLangOf(thread), txOn = txOnOf(thread, composer)) }
-        } else if (ownedByOther && !perms.isAdminOrSuper) {
+        } else if (can.locked) {
             // Lock banner
-            HorizontalDivider(color = Color(0xFFEDF0EA))
+            val dark = Neema.colors.isDark
+            HorizontalDivider(color = if (dark) Neema.colors.border else Color(0xFFEDF0EA))
             Row(
-                Modifier.fillMaxWidth().background(Color(0xFFFAFBF8)).padding(16.dp),
+                Modifier.fillMaxWidth().background(if (dark) Neema.colors.bg2 else Color(0xFFFAFBF8)).padding(16.dp),
                 horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("🔒", fontSize = 16.sp); Spacer(Modifier.width(8.dp))
                 Text(
                     androidx.compose.ui.text.buildAnnotatedString {
                         append("Handled by ")
-                        pushStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold, color = Color(0xFF589B31)))
+                        pushStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold, color = if (dark) Color(0xFF7FC25A) else Color(0xFF589B31)))
                         append(conv.assignedAgentName ?: "another agent"); pop()
                         append(" — ask them to release or transfer it to you")
                     },

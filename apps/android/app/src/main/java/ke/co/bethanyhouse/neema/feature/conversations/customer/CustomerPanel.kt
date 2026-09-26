@@ -98,11 +98,21 @@ fun CustomerPanel(
     }
 }
 
-/** The server's rule for PUT /admin/settings/pipeline-stages (crm.py): superuser or role admin. */
+/**
+ * The server's rule for PUT /admin/settings/pipeline-stages (crm.py): superuser
+ * or role admin — read from the freshest record of this agent (the polled team
+ * row, else /admin/me), the sign-in session only until one has loaded, so a
+ * demoted admin loses the editor on the next poll instead of meeting a 403.
+ *
+ * A deliberate exception to "gate only where the web gates": the web shows the
+ * editor to everyone and the server refuses all but these agents, so hiding it
+ * removes nothing anyone could actually do.
+ */
 internal fun canEditPipelineStages(dash: DashboardViewModel): Boolean {
+    val a = dash.currentAgent
+    if (a != null) return a.isSuperuser || a.role == "admin"
     val s = dash.session.value
-    val a = dash.currentAgent ?: dash.me.value
-    return s?.isSuperuser == true || s?.role == "admin" || a?.isSuperuser == true || a?.role == "admin"
+    return s?.isSuperuser == true || s?.role == "admin"
 }
 
 @Composable

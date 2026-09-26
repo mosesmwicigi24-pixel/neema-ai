@@ -570,6 +570,53 @@ data class InboxPerms(
     val canHandle: Boolean,
 )
 
+/**
+ * Which of the open thread's controls this agent sees — ConversationsView.tsx
+ * line for line. Everything else in the thread (the per-message Reply, Ask
+ * Neema, the team answer, invite, call, the whole customer panel) the web
+ * shows to every signed-in agent, and so does the app.
+ */
+internal data class ThreadControls(
+    val intercept: Boolean,
+    val pickUp: Boolean,
+    val release: Boolean,
+    val pause: Boolean,
+    val resume: Boolean,
+    val transfer: Boolean,
+    val note: Boolean,
+    val clearHistory: Boolean,
+    /** The reply box (with the AI draft, attachments, translation). */
+    val composer: Boolean,
+    /** The 🔒 header badge and the "Handled by …" banner. */
+    val locked: Boolean,
+)
+
+internal fun threadControls(conv: Conversation, perms: InboxPerms): ThreadControls {
+    val mode = conv.interceptMode
+    // isOwner: this agent intercepted it; ownedByOther: a different agent holds it.
+    val isOwner = conv.assignedAgentId != null && conv.assignedAgentId == perms.me
+    val ownedByOther = mode == "human" && conv.assignedAgentId != null && conv.assignedAgentId != perms.me
+    // canActOnThisConv — Pause / Resume / Transfer: owner, admin, or nobody human holds it.
+    val canAct = perms.canHandle && (isOwner || perms.isAdminOrSuper || mode != "human")
+    return ThreadControls(
+        // Any agent can intercept an AI conversation — whoever picks it up owns it.
+        intercept = mode == "ai" && perms.canHandle,
+        // Auto-escalated (media) but unclaimed: first one to tap gets it.
+        pickUp = mode == "human" && conv.assignedAgentId == null && perms.canHandle,
+        // Owner-restricted: only the intercepting agent or admin can release.
+        release = mode == "human" && (isOwner || perms.isAdminOrSuper),
+        pause = mode != "paused" && canAct,
+        resume = mode == "paused" && canAct,
+        transfer = canAct,
+        note = perms.canHandle,
+        // Admin/superuser only — and the server (DELETE /messages) refuses anyone else.
+        clearHistory = perms.isAdminOrSuper,
+        composer = mode == "human" && (isOwner || perms.isAdminOrSuper),
+        // Regular agents see who holds it; admins never see the lock.
+        locked = ownedByOther && !perms.isAdminOrSuper,
+    )
+}
+
 internal data class HeaderAction(
     val label: String,
     val emoji: String,
@@ -637,8 +684,9 @@ internal fun ThreadHeader(
             }
             if (locked != null) {
                 Text(
-                    "🔒 $locked", fontSize = 12.sp, color = Color(0xFFA8A29E),
-                    modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(Color(0xFFF5F5F4)).padding(horizontal = 8.dp, vertical = 3.dp),
+                    "🔒 $locked", fontSize = 12.sp, color = if (Neema.colors.isDark) Neema.colors.muted else Color(0xFFA8A29E),
+                    modifier = Modifier.clip(RoundedCornerShape(6.dp))
+                        .background(if (Neema.colors.isDark) Neema.colors.bg3 else Color(0xFFF5F5F4)).padding(horizontal = 8.dp, vertical = 3.dp),
                 )
             }
             // The same person on other channels: one tap switches the thread.

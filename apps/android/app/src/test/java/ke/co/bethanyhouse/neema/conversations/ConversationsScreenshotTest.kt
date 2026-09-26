@@ -29,6 +29,7 @@ import ke.co.bethanyhouse.neema.testing.FakeNeema
 import ke.co.bethanyhouse.neema.testing.Fixtures
 import ke.co.bethanyhouse.neema.testing.dashboard
 import ke.co.bethanyhouse.neema.testing.fixtures.InboxFixtures
+import ke.co.bethanyhouse.neema.testing.fixtures.InboxPersonaFixtures
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestCoroutineScheduler
@@ -243,9 +244,40 @@ class ConversationsScreenshotTest {
     }
 
     /** A regular agent on a thread Grace holds: the lock badge and banner, no composer. */
-    @Test fun thread_lockedByAnotherAgent() = screen(role = "agent", superuser = false) {
-        on("GET", "/admin/me", body = Fixtures.me.replace("\"role\":\"admin\"", "\"role\":\"agent\"").replace("\"is_superuser\":true", "\"is_superuser\":false"))
-    }.settle().apply { vm.select("c6") }.snap()
+    @Test fun thread_lockedByAnotherAgent() = persona(InboxPersonaFixtures.Persona.Agent).settle().apply { vm.select("c6") }.snap()
+
+    // ═══════════════ Personas (round 6: permissions and roles) ═══════════════
+
+    private fun persona(p: InboxPersonaFixtures.Persona) = screen(role = p.role, superuser = p.superuser) { InboxPersonaFixtures.install(this, p) }
+
+    /** An admin on Grace's thread: every control, the reply box, no lock. */
+    @Test fun persona_admin_heldByAnotherAgent() = persona(InboxPersonaFixtures.Persona.Admin).settle().apply { vm.select("c6") }.snap()
+
+    /** Readonly on an AI thread: no Intercept, no Pause, no Transfer, no note — the thread reads only. */
+    @Test fun persona_readonly_aiThread() = persona(InboxPersonaFixtures.Persona.Readonly).settle().apply { vm.select("c2") }.snap()
+
+    @Test fun persona_readonly_heldByAnotherAgent_dark() =
+        persona(InboxPersonaFixtures.Persona.Readonly).settle().apply { vm.select("c6") }.snap(dark = true)
+
+    /**
+     * A custom role without reply / intercept permissions on the agent enum:
+     * the web gates on the role, so Intercept and the rest are all there.
+     */
+    @Test fun persona_customRoleWithoutReply_aiThread() = persona(InboxPersonaFixtures.Persona.Viewer).settle().apply { vm.select("c2") }.snap()
+
+    /**
+     * Readonly on a tablet, on a thread they still hold (demoted after taking
+     * it): the web keys Release and the reply box on ownership alone, so both
+     * stay; no Pause / Transfer / note / Clear. The call shortcut and the whole
+     * editable customer panel are there, as on the web.
+     */
+    @Test fun persona_readonly_ownThread_tablet_customerPanel() {
+        paparazzi.unsafeUpdateConfig(deviceConfig = DeviceConfig.PIXEL_C)
+        screen(role = "readonly", superuser = false) {
+            InboxPersonaFixtures.install(this, InboxPersonaFixtures.Persona.Readonly)
+            ke.co.bethanyhouse.neema.testing.fixtures.CustomerFixtures.install(this)
+        }.settle(6).apply { vm.select("c1") }.snap()
+    }
 
     // ═══════════════ The composer ═══════════════
 
