@@ -10,6 +10,7 @@ import ke.co.bethanyhouse.neema.core.model.CallTranscript
 import ke.co.bethanyhouse.neema.core.net.ApiException
 import ke.co.bethanyhouse.neema.core.util.Fmt
 import ke.co.bethanyhouse.neema.core.ws.str
+import ke.co.bethanyhouse.neema.feature.orders.recheckAccess
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -136,6 +137,9 @@ class CallsViewModel(private val dash: DashboardViewModel) : ViewModel() {
             if (seq > shownSeq) { shownSeq = seq; _calls.value = it }
             if (seq == loadSeq) _loadError.value = null
         }.onFailure { e ->
+            // The server never refuses the log by role today (admin.py `list_calls`
+            // only needs a signed-in agent); if it ever does, re-read who we are.
+            if ((e as? ApiException)?.status == 403) dash.recheckAccess()
             if (seq != loadSeq) return
             if (_calls.value == null) _calls.value = emptyList()
             _loadError.value = callsErrorText(e)

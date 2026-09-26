@@ -113,7 +113,7 @@ class OrdersViewModel(private val dash: DashboardViewModel) : ViewModel() {
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
-        _loadError.value = salesFailureOf(e).message()
+        _loadError.value = dash.salesFailure(e).message()
         false
     }
 
@@ -135,7 +135,7 @@ class OrdersViewModel(private val dash: DashboardViewModel) : ViewModel() {
                 if (_selectedId.value == id) _selectedId.value = null
                 dash.toast("Order marked as $status")
             } catch (e: Exception) {
-                val f = salesFailureOf(e)
+                val f = dash.salesFailure(e)
                 when {
                     f.kind == FailKind.NotFound -> {
                         dash.toast("This order no longer exists — it may have been deleted", ToastType.Error)

@@ -44,13 +44,13 @@ class OrdersScreenshotTest {
     }
 
     /** The detail sheet's content for [order], as a bottom sheet over the list. */
-    private fun detail(order: String, dark: Boolean = false, canManage: Boolean = true, busy: Boolean = false) {
+    private fun detail(order: String, dark: Boolean = false, busy: Boolean = false) {
         val fake = FakeNeema.withFixtures()
         SalesFixtures.install(fake, listOf(order))
         val dash = dashboard(paparazzi.context, fake)
         val o = dash.orders.value.first()
         paparazzi.snapshot {
-            AppFrame(dark) { SheetFrame { OrderDetail(dash, o, canManage = canManage, busy = busy, onStatus = {}) } }
+            AppFrame(dark) { SheetFrame { OrderDetail(dash, o, busy = busy, onStatus = {}) } }
         }
     }
 
@@ -59,7 +59,8 @@ class OrdersScreenshotTest {
     @Test fun filteredConfirmed() = render { vm, _ -> vm.setFilter("confirmed") }
     @Test fun searchNoMatch() = render { vm, _ -> vm.setSearch("zzz-nobody") }
     @Test fun empty() = render(orders = emptyList())
-    @Test fun noAccess() = render(perms = listOf(Perms.VIEW_CONVERSATIONS))
+    /** A custom role with neither view_orders nor manage_orders: OrdersView checks neither, so it is all there. */
+    @Test fun roleWithoutOrderPerms() = render(perms = listOf(Perms.VIEW_CONVERSATIONS))
 
     @Test fun detailLinked() = detail(SalesFixtures.linkedOrder)
     @Test fun detailLinkedDark() = detail(SalesFixtures.linkedOrder, dark = true)
@@ -67,7 +68,6 @@ class OrdersScreenshotTest {
     @Test fun detailAgentOrder() = detail(SalesFixtures.agentOrder)
     @Test fun detailFailedPush() = detail(SalesFixtures.failedOrder)
     @Test fun detailUpdating() = detail(SalesFixtures.failedOrder, busy = true)
-    @Test fun detailReadOnly() = detail(SalesFixtures.failedOrder, canManage = false)
 }
 
 /** The pager under the list: 100 orders is seven pages, so the five buttons window around the current one. */

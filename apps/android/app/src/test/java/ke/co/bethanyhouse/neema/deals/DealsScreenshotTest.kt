@@ -55,9 +55,8 @@ class DealsScreenshotTest {
         f.on("GET", "/admin/deals", body = """{"deals":[]}""")
         f.on("GET", "/admin/actions", body = """{"actions":[]}""")
     })
-    /** Can see the pipeline, can't steer it or speak for the shop. */
-    @Test fun readOnly() = renderDeals(paparazzi, perms = listOf(Perms.VIEW_LEADS, Perms.VIEW_CONVERSATIONS))
-    @Test fun noAccess() = renderDeals(paparazzi, perms = listOf(Perms.VIEW_CONVERSATIONS))
+    /** No view_leads (reached by a ?view=deals link): the web renders the board all the same. */
+    @Test fun withoutViewLeads() = renderDeals(paparazzi, perms = listOf(Perms.VIEW_CONVERSATIONS))
 }
 
 /** The edit-and-send dialog over the board. */

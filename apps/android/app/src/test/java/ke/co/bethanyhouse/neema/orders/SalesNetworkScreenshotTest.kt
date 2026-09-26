@@ -102,7 +102,7 @@ class SalesNetworkScreenshotTest {
         paparazzi.snapshot {
             AppFrame(dark) {
                 SheetFrame {
-                    LeadDetail(lead, vm.stages.value, canManage = true, onClose = {}, onOpenChat = {}, onSave = {}, saving = saving, error = error)
+                    LeadDetail(lead, vm.stages.value, onClose = {}, onOpenChat = {}, onSave = {}, saving = saving, error = error)
                 }
             }
         }
