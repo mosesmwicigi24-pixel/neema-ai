@@ -11,7 +11,7 @@ import ke.co.bethanyhouse.neema.feature.orders.filterOrders
 import ke.co.bethanyhouse.neema.feature.orders.orderStats
 import ke.co.bethanyhouse.neema.feature.orders.pageOf
 import ke.co.bethanyhouse.neema.feature.orders.statusColumns
-import ke.co.bethanyhouse.neema.feature.reports.ScreenLife
+import ke.co.bethanyhouse.neema.core.util.ScreenLife
 import ke.co.bethanyhouse.neema.testing.FakeNeema
 import ke.co.bethanyhouse.neema.testing.dashboard
 import ke.co.bethanyhouse.neema.testing.fixtures.SalesStressFixtures

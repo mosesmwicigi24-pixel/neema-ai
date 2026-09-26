@@ -5,7 +5,7 @@ import ke.co.bethanyhouse.neema.core.model.Deal
 import ke.co.bethanyhouse.neema.core.model.PlannedAction
 import ke.co.bethanyhouse.neema.feature.deals.DealsViewModel
 import ke.co.bethanyhouse.neema.feature.deals.groupByStage
-import ke.co.bethanyhouse.neema.feature.reports.ScreenLife
+import ke.co.bethanyhouse.neema.core.util.ScreenLife
 import ke.co.bethanyhouse.neema.orders.ClockedMainRule
 import ke.co.bethanyhouse.neema.testing.FakeNeema
 import ke.co.bethanyhouse.neema.testing.FakeSocketFactory
