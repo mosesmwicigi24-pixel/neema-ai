@@ -13,7 +13,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Inventory2
-import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
@@ -47,9 +46,7 @@ import ke.co.bethanyhouse.neema.app.DashboardViewModel
 import ke.co.bethanyhouse.neema.app.ToastType
 import ke.co.bethanyhouse.neema.core.model.Order
 import ke.co.bethanyhouse.neema.core.model.OrderItem
-import ke.co.bethanyhouse.neema.core.perm.Perms
 import ke.co.bethanyhouse.neema.core.ui.components.Avatar
-import ke.co.bethanyhouse.neema.core.ui.components.EmptyState
 import ke.co.bethanyhouse.neema.core.ui.components.Loading
 import ke.co.bethanyhouse.neema.core.ui.components.channelStyle
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
@@ -77,17 +74,10 @@ private fun qtyText(q: Double): String = if (q == Math.floor(q)) q.toLong().toSt
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OrdersScreen(dash: DashboardViewModel) {
-    // Permissions come from /me; observing it recomposes the gate once it lands.
-    dash.me.collectAsStateWithLifecycle().value
-    if (!dash.can(Perms.VIEW_ORDERS)) {
-        EmptyState(
-            title = "No access to orders",
-            subtitle = "Your role doesn't include viewing orders. Ask an admin if you need it.",
-            icon = Icons.Outlined.Lock,
-        )
-        return
-    }
-
+    // No permission gate, as on the web: page.tsx shows Orders to every agent
+    // and OrdersView checks no permission (not view_orders, not manage_orders),
+    // and routers/admin.py `list_orders` / `update_order` only require a
+    // signed-in agent. A refusal the server does send is said in the toast.
     val vm: OrdersViewModel = viewModel { OrdersViewModel(dash) }
     ke.co.bethanyhouse.neema.feature.reports.TrackShown(vm.life)
     val orders by dash.orders.collectAsStateWithLifecycle()
@@ -99,7 +89,6 @@ fun OrdersScreen(dash: DashboardViewModel) {
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()
     val initialLoading by vm.initialLoading.collectAsStateWithLifecycle()
     val loadError by vm.loadError.collectAsStateWithLifecycle()
-    val canManage = dash.can(Perms.MANAGE_ORDERS)
     val unknown = orders.isEmpty() && (initialLoading || loadError != null)
     val c = Neema.colors
 
@@ -244,7 +233,7 @@ fun OrdersScreen(dash: DashboardViewModel) {
             dragHandle = { WebDragHandle() },
         ) {
             OrderDetail(
-                dash = dash, order = selected, canManage = canManage,
+                dash = dash, order = selected,
                 busy = updating == selected.id,
                 onStatus = { next -> vm.updateStatus(selected.id, next) },
                 onClose = { vm.select(null) },
@@ -405,7 +394,6 @@ private fun PageButton(label: String, selected: Boolean, enabled: Boolean, onCli
 internal fun OrderDetail(
     dash: DashboardViewModel,
     order: Order,
-    canManage: Boolean,
     busy: Boolean,
     onStatus: (String) -> Unit,
     onClose: () -> Unit = {},
@@ -567,22 +555,16 @@ internal fun OrderDetail(
         Spacer(Modifier.height(10.dp))
 
         // Status moves
+        // Shown to every agent, as OrdersView does (it has no manage_orders check).
         if (actions.isNotEmpty()) {
-            if (canManage) {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    actions.forEach { next ->
-                        WebBtn(
-                            "Mark as ${statusMeta(next).label}",
-                            variant = if (next == "cancelled") BtnVariant.Danger else BtnVariant.Primary,
-                            enabled = !busy, busy = busy, onClick = { onStatus(next) },
-                        )
-                    }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                actions.forEach { next ->
+                    WebBtn(
+                        "Mark as ${statusMeta(next).label}",
+                        variant = if (next == "cancelled") BtnVariant.Danger else BtnVariant.Primary,
+                        enabled = !busy, busy = busy, onClick = { onStatus(next) },
+                    )
                 }
-            } else {
-                Text(
-                    "You can view this order but your role can't change its status.",
-                    fontSize = 12.sp, color = c.muted,
-                )
             }
         }
     }

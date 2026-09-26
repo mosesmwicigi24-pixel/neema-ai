@@ -34,7 +34,7 @@ private fun renderLeads(
 }
 
 /** The lead detail sheet for lead [id]. */
-private fun renderDetail(paparazzi: Paparazzi, id: String, dark: Boolean = false, canManage: Boolean = true) {
+private fun renderDetail(paparazzi: Paparazzi, id: String, dark: Boolean = false) {
     val fake = FakeNeema.withFixtures()
     SalesFixtures.install(fake)
     val dash = dashboard(paparazzi.context, fake)
@@ -43,7 +43,7 @@ private fun renderDetail(paparazzi: Paparazzi, id: String, dark: Boolean = false
     paparazzi.snapshot {
         AppFrame(dark) {
             SheetFrame {
-                LeadDetail(lead, vm.stages.value, canManage = canManage, onClose = {}, onOpenChat = {}, onSave = {})
+                LeadDetail(lead, vm.stages.value, onClose = {}, onOpenChat = {}, onSave = {})
             }
         }
     }
@@ -59,13 +59,12 @@ class LeadsScreenshotTest {
     @Test fun filteredProposal() = renderLeads(paparazzi) { it.filterStage.value = "proposal" }
     @Test fun searchNoMatch() = renderLeads(paparazzi) { it.search.value = "zzz-nobody" }
     @Test fun empty() = renderLeads(paparazzi, leadsJson = "[]")
-    @Test fun readOnly() = renderLeads(paparazzi, perms = listOf(Perms.VIEW_LEADS))
-    @Test fun noAccess() = renderLeads(paparazzi, perms = listOf(Perms.VIEW_CONVERSATIONS))
+    /** view_leads without manage_leads: LeadsView checks neither, so the stage moves show. */
+    @Test fun viewLeadsOnly() = renderLeads(paparazzi, perms = listOf(Perms.VIEW_LEADS))
 
     @Test fun detail() = renderDetail(paparazzi, "u1")
     @Test fun detailDark() = renderDetail(paparazzi, "u1", dark = true)
     @Test fun detailUnknownNoNotes() = renderDetail(paparazzi, "u3")
-    @Test fun detailReadOnly() = renderDetail(paparazzi, "u1", canManage = false)
 }
 
 /** A tablet: seven canonical columns plus the custom "measuring", 210dp each. */

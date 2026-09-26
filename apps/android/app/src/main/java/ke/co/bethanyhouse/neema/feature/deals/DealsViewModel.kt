@@ -10,7 +10,7 @@ import ke.co.bethanyhouse.neema.core.model.PlannedAction
 import ke.co.bethanyhouse.neema.feature.orders.FailKind
 import ke.co.bethanyhouse.neema.feature.orders.SalesFailure
 import ke.co.bethanyhouse.neema.feature.orders.lowerFirst
-import ke.co.bethanyhouse.neema.feature.orders.salesFailureOf
+import ke.co.bethanyhouse.neema.feature.orders.salesFailure
 import ke.co.bethanyhouse.neema.feature.reports.Coalescer
 import ke.co.bethanyhouse.neema.feature.reports.ScreenLife
 import kotlinx.coroutines.CancellationException
@@ -172,7 +172,7 @@ class DealsViewModel(private val dash: DashboardViewModel) : ViewModel() {
         w.onSuccess { _wonCount.value = it }
         a.onSuccess { _actions.value = it }
         val failed = d.exceptionOrNull() ?: a.exceptionOrNull() ?: w.exceptionOrNull()
-        _loadError.value = failed?.let { salesFailureOf(it).message() }
+        _loadError.value = failed?.let { dash.salesFailure(it).message() }
         return failed == null
     }
 
@@ -203,7 +203,7 @@ class DealsViewModel(private val dash: DashboardViewModel) : ViewModel() {
                 dash.toast(msg)
                 load()
             } catch (e: Exception) {
-                val f = salesFailureOf(e)
+                val f = dash.salesFailure(e)
                 when {
                     f.kind == FailKind.NotFound -> {
                         onSaved()
@@ -288,7 +288,7 @@ class DealsViewModel(private val dash: DashboardViewModel) : ViewModel() {
                 resolved(id, verb)
                 load()
             } catch (e: Exception) {
-                val f = salesFailureOf(e)
+                val f = dash.salesFailure(e)
                 when {
                     // crm.py approve_action: 409 "Action is sent|vetoed" when the
                     // scheduler (or a colleague) resolved it first. Nothing was sent

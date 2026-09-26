@@ -9,8 +9,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
@@ -35,8 +33,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import ke.co.bethanyhouse.neema.app.DashboardViewModel
 import ke.co.bethanyhouse.neema.core.model.Deal
 import ke.co.bethanyhouse.neema.core.model.PlannedAction
-import ke.co.bethanyhouse.neema.core.perm.Perms
-import ke.co.bethanyhouse.neema.core.ui.components.EmptyState
 import ke.co.bethanyhouse.neema.core.ui.components.ErrorState
 import ke.co.bethanyhouse.neema.feature.orders.InlineError
 import ke.co.bethanyhouse.neema.feature.orders.StaleBanner
@@ -74,16 +70,10 @@ internal fun fmtDue(iso: String?, now: Long = AppClock.now()): String {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DealsScreen(dash: DashboardViewModel) {
-    // Permissions come from /me; observing it recomposes the gate once it lands.
-    dash.me.collectAsStateWithLifecycle().value
-    if (!dash.can(Perms.VIEW_LEADS)) {
-        EmptyState(
-            title = "No access to deals",
-            subtitle = "Your role doesn't include the sales pipeline. Ask an admin if you need it.",
-            icon = Icons.Outlined.Lock,
-        )
-        return
-    }
+    // No permission gate here: page.tsx hides the Deals nav item without
+    // view_leads, but DealsView itself checks nothing (a ?view=deals link still
+    // opens it), and crm.py's deals/actions routes only require a signed-in
+    // agent. Send, Veto, Guidance, Won and Lost show for everyone, as on the web.
     val vm: DealsViewModel = viewModel { DealsViewModel(dash) }
     ke.co.bethanyhouse.neema.feature.reports.TrackShown(vm.life)
     val deals by vm.deals.collectAsStateWithLifecycle()
@@ -95,10 +85,6 @@ fun DealsScreen(dash: DashboardViewModel) {
     val patching by vm.patching.collectAsStateWithLifecycle()
     val loadError by vm.loadError.collectAsStateWithLifecycle()
     val guidanceError by vm.guidanceError.collectAsStateWithLifecycle()
-    // Deals are the pipeline: editing them is lead management. Sending a
-    // follow-up puts words in front of a customer, so it follows the reply right.
-    val canManage = dash.can(Perms.MANAGE_LEADS)
-    val canSend = dash.can(Perms.REPLY_CONVERSATIONS)
     val c = Neema.colors
 
     val open = deals.orEmpty().filter { it.status == "open" }
@@ -159,7 +145,7 @@ fun DealsScreen(dash: DashboardViewModel) {
                             else -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 pending.forEach { a ->
                                     ActionRow(
-                                        a, busy = a.id in acting, checking = a.id in checking, canSend = canSend, wide = wide,
+                                        a, busy = a.id in acting, checking = a.id in checking, wide = wide,
                                         onSend = { vm.act(a.id, "approve") },
                                         onEdit = { vm.openDraft(a) },
                                         onVeto = { vm.act(a.id, "veto") },
@@ -186,7 +172,6 @@ fun DealsScreen(dash: DashboardViewModel) {
                     val column: @Composable (Stage, List<Deal>, Modifier) -> Unit = { stage, col, mod ->
                         StageColumn(
                             stage, col, mod,
-                            canManage = canManage,
                             patching = patching,
                             guidanceError = guidanceError,
                             editing = editing,
@@ -246,7 +231,6 @@ private fun ActionRow(
     a: PlannedAction,
     busy: Boolean,
     checking: Boolean,
-    canSend: Boolean,
     wide: Boolean,
     onSend: () -> Unit,
     onEdit: () -> Unit,
@@ -295,11 +279,9 @@ private fun ActionRow(
     }
     val buttons: @Composable () -> Unit = { Column {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (canSend) {
-                SmallButton("Send", bg = Color(0xFF589B31), fg = Color.White, enabled = !busy, onClick = onSend)
-                SmallButton("Edit & send", bg = c.bg2, fg = c.gold2, border = c.border, enabled = !busy, onClick = onEdit)
-                SmallButton("Veto", bg = if (c.isDark) c.bg4 else Color(0xFFF5F5F4), fg = slate(), enabled = !busy, onClick = onVeto)
-            }
+            SmallButton("Send", bg = Color(0xFF589B31), fg = Color.White, enabled = !busy, onClick = onSend)
+            SmallButton("Edit & send", bg = c.bg2, fg = c.gold2, border = c.border, enabled = !busy, onClick = onEdit)
+            SmallButton("Veto", bg = if (c.isDark) c.bg4 else Color(0xFFF5F5F4), fg = slate(), enabled = !busy, onClick = onVeto)
             if (onOpen != null) {
                 SmallButton("Open chat", bg = Color.Transparent, fg = c.gold2, enabled = true, onClick = onOpen)
             }
@@ -364,7 +346,6 @@ private fun StageColumn(
     stage: Stage,
     col: List<Deal>,
     modifier: Modifier,
-    canManage: Boolean,
     patching: Set<String>,
     guidanceError: String?,
     editing: String?,
@@ -393,7 +374,7 @@ private fun StageColumn(
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             col.forEach { d ->
                 DealCard(
-                    d, canManage = canManage, busy = d.id in patching, isEditing = editing == d.id,
+                    d, busy = d.id in patching, isEditing = editing == d.id,
                     guidanceError = guidanceError.takeIf { editing == d.id },
                     guidanceDraft = guidanceDraft, onGuidanceDraft = onGuidanceDraft,
                     onEdit = { onEdit(d) }, onCancel = onCancel, onSave = { onSave(d) },
@@ -411,7 +392,6 @@ private fun StageColumn(
 @Composable
 private fun DealCard(
     d: Deal,
-    canManage: Boolean,
     busy: Boolean,
     guidanceError: String?,
     isEditing: Boolean,
@@ -474,18 +454,16 @@ private fun DealCard(
                 Text("📌 ${d.guidance}", fontSize = 10.sp, fontStyle = FontStyle.Italic, color = c.textMid,
                     maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
             }
-            if (canManage) {
-                Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SmallButton(
-                        if (!d.guidance.isNullOrBlank()) "📌 Guidance" else "＋ Guidance",
-                        bg = if (c.isDark) c.bg4 else Color(0xFFFAFAF9), fg = slate(), enabled = !busy, fontSize = 10,
-                        hPad = 8.dp, vPad = 4.dp, weight = FontWeight.Normal, onClick = onEdit,
-                    )
-                    SmallButton("Won", bg = if (c.isDark) c.greenDim else Color(0xFFE9F6DF), fg = if (c.isDark) c.green else Color(0xFF427425),
-                        enabled = !busy, fontSize = 10, hPad = 8.dp, vPad = 4.dp, weight = FontWeight.Normal, onClick = onWon)
-                    SmallButton("Lost", bg = if (c.isDark) c.bg4 else Color(0xFFFAFAF9), fg = if (c.isDark) c.muted else Color(0xFF94A3B8), enabled = !busy, fontSize = 10,
-                        hPad = 8.dp, vPad = 4.dp, weight = FontWeight.Normal, onClick = onLost)
-                }
+            Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SmallButton(
+                    if (!d.guidance.isNullOrBlank()) "📌 Guidance" else "＋ Guidance",
+                    bg = if (c.isDark) c.bg4 else Color(0xFFFAFAF9), fg = slate(), enabled = !busy, fontSize = 10,
+                    hPad = 8.dp, vPad = 4.dp, weight = FontWeight.Normal, onClick = onEdit,
+                )
+                SmallButton("Won", bg = if (c.isDark) c.greenDim else Color(0xFFE9F6DF), fg = if (c.isDark) c.green else Color(0xFF427425),
+                    enabled = !busy, fontSize = 10, hPad = 8.dp, vPad = 4.dp, weight = FontWeight.Normal, onClick = onWon)
+                SmallButton("Lost", bg = if (c.isDark) c.bg4 else Color(0xFFFAFAF9), fg = if (c.isDark) c.muted else Color(0xFF94A3B8), enabled = !busy, fontSize = 10,
+                    hPad = 8.dp, vPad = 4.dp, weight = FontWeight.Normal, onClick = onLost)
             }
         }
     }

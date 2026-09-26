@@ -11,8 +11,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
@@ -32,9 +30,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import ke.co.bethanyhouse.neema.app.DashboardViewModel
-import ke.co.bethanyhouse.neema.core.perm.Perms
 import ke.co.bethanyhouse.neema.core.ui.components.Avatar
-import ke.co.bethanyhouse.neema.core.ui.components.EmptyState
 import ke.co.bethanyhouse.neema.core.ui.components.ErrorState
 import ke.co.bethanyhouse.neema.feature.orders.InlineError
 import ke.co.bethanyhouse.neema.feature.orders.StaleBanner
@@ -103,16 +99,11 @@ private fun ChannelIcon(ch: String, size: Dp = 16.dp) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LeadsScreen(dash: DashboardViewModel) {
-    // Permissions come from /me; observing it recomposes the gate once it lands.
-    dash.me.collectAsStateWithLifecycle().value
-    if (!dash.can(Perms.VIEW_LEADS)) {
-        EmptyState(
-            title = "No access to leads",
-            subtitle = "Your role doesn't include the leads pipeline. Ask an admin if you need it.",
-            icon = Icons.Outlined.Lock,
-        )
-        return
-    }
+    // No permission gate here: page.tsx hides the Leads nav item without
+    // view_leads, but LeadsView itself checks nothing (a ?view=leads link still
+    // opens it) — no manage_leads test on the stage moves or the detail's
+    // Save — and crm.py `list_leads` / `update_lead` only require a signed-in
+    // agent. A refusal the server does send is said where the save failed.
     val vm: LeadsViewModel = viewModel { LeadsViewModel(dash) }
     ke.co.bethanyhouse.neema.feature.reports.TrackShown(vm.life)
     val leads by vm.leads.collectAsStateWithLifecycle()
@@ -125,7 +116,6 @@ fun LeadsScreen(dash: DashboardViewModel) {
     val loadError by vm.loadError.collectAsStateWithLifecycle()
     val saving by vm.saving.collectAsStateWithLifecycle()
     val sheetError by vm.sheetError.collectAsStateWithLifecycle()
-    val canManage = dash.can(Perms.MANAGE_LEADS)
     val c = Neema.colors
 
     val filtered = remember(leads, filterStage, search) { filterLeads(leads, filterStage, search) }
@@ -213,7 +203,7 @@ fun LeadsScreen(dash: DashboardViewModel) {
                             val stageLeads = filtered.filter { stage.matches(it.leadStage) }
                             StageColumn(
                                 stage = stage, stageLeads = stageLeads, stages = stages, width = colWidth,
-                                canManage = canManage, saving = saving,
+                                saving = saving,
                                 onSelect = { vm.select(it.id) },
                                 onMove = { lead, to -> vm.moveTo(lead, to) },
                             )
@@ -234,7 +224,7 @@ fun LeadsScreen(dash: DashboardViewModel) {
             dragHandle = { WebDragHandle() },
         ) {
             LeadDetail(
-                lead = selected, stages = stages, canManage = canManage,
+                lead = selected, stages = stages,
                 saving = selected.id in saving, error = sheetError,
                 onClose = { vm.select(null) },
                 onOpenChat = { dash.openConversationFor(selected.handle) },
@@ -286,7 +276,6 @@ private fun StageColumn(
     stageLeads: List<Lead>,
     stages: List<LeadStage>,
     width: Dp,
-    canManage: Boolean,
     saving: Set<String>,
     onSelect: (Lead) -> Unit,
     onMove: (Lead, String) -> Unit,
@@ -317,7 +306,7 @@ private fun StageColumn(
         } else {
             LazyColumn(Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(stageLeads, key = { it.id }) { lead ->
-                    LeadCard(lead, stages, canManage, busy = lead.id in saving, onSelect = { onSelect(lead) }, onMove = { onMove(lead, it) })
+                    LeadCard(lead, stages, busy = lead.id in saving, onSelect = { onSelect(lead) }, onMove = { onMove(lead, it) })
                 }
             }
         }
@@ -329,7 +318,6 @@ private fun StageColumn(
 private fun LeadCard(
     lead: Lead,
     stages: List<LeadStage>,
-    canManage: Boolean,
     busy: Boolean,
     onSelect: () -> Unit,
     onMove: (String) -> Unit,
@@ -392,18 +380,16 @@ private fun LeadCard(
         }
 
         // Stage moves. Hover-only on the web; always shown on a touch screen.
-        if (canManage) {
-            val prev = if (stageIdx > 0) stages[stageIdx - 1] else null
-            val next = if (stageIdx != -1 && stageIdx < stages.size - 1 && stages[stageIdx + 1].id != "lost") stages[stageIdx + 1] else null
-            if (prev != null || next != null) {
-                HorizontalDivider(color = c.bg3, modifier = Modifier.padding(top = 8.dp))
-                Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (prev != null) {
-                        MoveButton("← ${prev.label}", bg = if (c.isDark) c.bg else Color(0xFFF0F9EC), fg = c.textDim, Modifier.weight(1f), enabled = !busy) { onMove(prev.id) }
-                    }
-                    if (next != null) {
-                        MoveButton("${next.label} →", bg = c.bg3, fg = c.gold2, Modifier.weight(1f), enabled = !busy) { onMove(next.id) }
-                    }
+        val prev = if (stageIdx > 0) stages[stageIdx - 1] else null
+        val next = if (stageIdx != -1 && stageIdx < stages.size - 1 && stages[stageIdx + 1].id != "lost") stages[stageIdx + 1] else null
+        if (prev != null || next != null) {
+            HorizontalDivider(color = c.bg3, modifier = Modifier.padding(top = 8.dp))
+            Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (prev != null) {
+                    MoveButton("← ${prev.label}", bg = if (c.isDark) c.bg else Color(0xFFF0F9EC), fg = c.textDim, Modifier.weight(1f), enabled = !busy) { onMove(prev.id) }
+                }
+                if (next != null) {
+                    MoveButton("${next.label} →", bg = c.bg3, fg = c.gold2, Modifier.weight(1f), enabled = !busy) { onMove(next.id) }
                 }
             }
         }
@@ -429,7 +415,6 @@ private fun MoveButton(label: String, bg: Color, fg: Color, modifier: Modifier, 
 internal fun LeadDetail(
     lead: Lead,
     stages: List<LeadStage>,
-    canManage: Boolean,
     onClose: () -> Unit,
     onOpenChat: () -> Unit,
     /** A save is in flight: the fields wait and Save shows progress. */
@@ -480,7 +465,7 @@ internal fun LeadDetail(
                     modifier = Modifier.clip(shape)
                         .background(if (on) s.bgC() else c.bg2)
                         .border(1.dp, if (on) s.borderC() else if (c.isDark) c.hairline else Color(0xFFE7E5E4), shape)
-                        .clickable(enabled = canManage && !saving) { stage = s.id }
+                        .clickable(enabled = !saving) { stage = s.id }
                         .padding(horizontal = 10.dp, vertical = 6.dp),
                     fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
                     color = if (on) s.textC() else if (c.isDark) c.muted else Color(0xFFA8A29E),
@@ -491,7 +476,7 @@ internal fun LeadDetail(
 
         FieldLabel("Tags (comma separated)")
         OutlinedTextField(
-            value = tags, onValueChange = { tags = it }, enabled = canManage, readOnly = saving, singleLine = true,
+            value = tags, onValueChange = { tags = it }, readOnly = saving, singleLine = true,
             placeholder = { Text("church, wholesale, repeat-buyer") },
             colors = fieldColors, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth(),
         )
@@ -499,7 +484,7 @@ internal fun LeadDetail(
 
         FieldLabel("Notes")
         OutlinedTextField(
-            value = notes, onValueChange = { notes = it }, enabled = canManage, readOnly = saving,
+            value = notes, onValueChange = { notes = it }, readOnly = saving,
             placeholder = { Text("Internal notes about this lead…") }, minLines = 3, maxLines = 8,
             colors = fieldColors, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth(),
         )
@@ -543,18 +528,12 @@ internal fun LeadDetail(
             InlineError(error, Modifier.padding(bottom = 12.dp))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (canManage) {
-                WebBtn(
-                    if (saving) "Saving…" else "Save Changes", BtnVariant.Primary, Modifier.weight(1f),
-                    enabled = !saving, busy = saving,
-                    onClick = { onSave(diffLead(base, stage, tags, notes)) },
-                )
-                WebBtn("Cancel", BtnVariant.Outline, onClick = onClose)
-            } else {
-                Text("Your role can view leads but not change them.", fontSize = 12.sp, color = c.muted,
-                    modifier = Modifier.weight(1f).align(Alignment.CenterVertically))
-                WebBtn("Close", BtnVariant.Outline, onClick = onClose)
-            }
+            WebBtn(
+                if (saving) "Saving…" else "Save Changes", BtnVariant.Primary, Modifier.weight(1f),
+                enabled = !saving, busy = saving,
+                onClick = { onSave(diffLead(base, stage, tags, notes)) },
+            )
+            WebBtn("Cancel", BtnVariant.Outline, onClick = onClose)
         }
     }
 }

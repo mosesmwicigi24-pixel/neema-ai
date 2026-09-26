@@ -1,5 +1,6 @@
 package ke.co.bethanyhouse.neema.feature.orders
 
+import ke.co.bethanyhouse.neema.app.DashboardViewModel
 import ke.co.bethanyhouse.neema.core.net.ApiException
 import ke.co.bethanyhouse.neema.core.net.NeemaJson
 import kotlinx.coroutines.CancellationException
@@ -88,4 +89,25 @@ fun salesFailureOf(e: Throwable): SalesFailure {
         502, 503, 504 -> SalesFailure(FailKind.Unavailable, s, null)
         else -> if (s >= 500) SalesFailure(FailKind.ServerError, s, detail) else SalesFailure(FailKind.Invalid, s, detail)
     }
+}
+
+/**
+ * [salesFailureOf], and on a 403 re-read who this agent is: /me and the team
+ * list (where the effective permissions come from). A refusal usually means an
+ * admin changed this agent's role while the app was open; the web only learns
+ * that on its 180 s agents poll, this corrects the nav at once.
+ *
+ * Core is adding `DashboardViewModel.onForbidden()` for exactly this; once it
+ * lands, [recheckAccess] should become a call to it.
+ */
+fun DashboardViewModel.salesFailure(e: Throwable): SalesFailure {
+    val f = salesFailureOf(e)
+    if (f.kind == FailKind.Forbidden) recheckAccess()
+    return f
+}
+
+/** Re-read /me and the agents list so [DashboardViewModel.can] reflects the server's current role. */
+fun DashboardViewModel.recheckAccess() {
+    refetchMe()
+    refetchAgents()
 }

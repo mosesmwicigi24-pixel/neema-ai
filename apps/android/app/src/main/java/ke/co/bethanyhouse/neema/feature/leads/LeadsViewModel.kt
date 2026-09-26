@@ -8,7 +8,7 @@ import ke.co.bethanyhouse.neema.app.ToastType
 import ke.co.bethanyhouse.neema.feature.reports.ScreenLife
 import ke.co.bethanyhouse.neema.feature.orders.FailKind
 import ke.co.bethanyhouse.neema.feature.orders.lowerFirst
-import ke.co.bethanyhouse.neema.feature.orders.salesFailureOf
+import ke.co.bethanyhouse.neema.feature.orders.salesFailure
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -212,7 +212,7 @@ class LeadsViewModel(private val dash: DashboardViewModel) : ViewModel() {
             if (seq == fetchSeq) { _leads.value = list; _loadError.value = null }
             true
         } catch (e: Exception) {
-            val f = salesFailureOf(e)
+            val f = dash.salesFailure(e)
             if (seq == fetchSeq) _loadError.value = f.message()
             false
         }
@@ -273,7 +273,7 @@ class LeadsViewModel(private val dash: DashboardViewModel) : ViewModel() {
                 // quietly so the board shows what was actually stored.
                 if (notes != null) fetch()
             } catch (e: Exception) {
-                val f = salesFailureOf(e)
+                val f = dash.salesFailure(e)
                 val rollback = {
                     _leads.value = _leads.value.map { l ->
                         if (l.id != lead.id) l else l.copy(
@@ -327,7 +327,7 @@ class LeadsViewModel(private val dash: DashboardViewModel) : ViewModel() {
                 api.update(lead.id, bodyOf(edit))
                 saved(lead.id, edit)
             } catch (e: Exception) {
-                val f = salesFailureOf(e)
+                val f = dash.salesFailure(e)
                 when {
                     f.kind == FailKind.NotFound -> gone(lead.id)
                     f.mayHaveHappened -> {
