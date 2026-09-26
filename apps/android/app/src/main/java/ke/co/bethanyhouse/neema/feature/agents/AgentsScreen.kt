@@ -1,0 +1,894 @@
+package ke.co.bethanyhouse.neema.feature.agents
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.layout.SubcomposeLayout
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.outlined.VerifiedUser
+import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import ke.co.bethanyhouse.neema.app.DashboardViewModel
+import ke.co.bethanyhouse.neema.core.model.Agent
+import ke.co.bethanyhouse.neema.core.model.CustomRole
+import ke.co.bethanyhouse.neema.core.ui.components.Avatar
+import ke.co.bethanyhouse.neema.core.ui.components.EmptyState
+import ke.co.bethanyhouse.neema.core.ui.components.Loading
+import ke.co.bethanyhouse.neema.core.ui.components.Pill
+import ke.co.bethanyhouse.neema.core.ui.theme.Neema
+import ke.co.bethanyhouse.neema.core.ui.theme.Palette
+import ke.co.bethanyhouse.neema.core.ui.components.neemaSwitchColors
+import ke.co.bethanyhouse.neema.feature.reports.LocalMeasurePass
+import ke.co.bethanyhouse.neema.feature.reports.measureOnly
+import ke.co.bethanyhouse.neema.core.util.Fmt
+
+/** Port of AgentsView.tsx — the Team screen: agents, custom roles, and the dialogs that edit both. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AgentsScreen(dash: DashboardViewModel) {
+    // No permission gate here — AgentsView.tsx has none. The nav lists Team
+    // only with manage_agents (page.tsx), but ?view=agents opens it for anyone
+    // and it stays open when a poll takes manage_agents away. The server
+    // decides every write: admin.py's agent routes check only sign-in, and
+    // roles.py refuses only protected roles.
+    val vm: AgentsViewModel = viewModel { AgentsViewModel(dash) }
+    // The dialogs' typed input (passwords excepted) comes back after Android restarts the app.
+    ke.co.bethanyhouse.neema.feature.reports.KeepUiState(vm)
+    ke.co.bethanyhouse.neema.core.util.TrackShown(vm.life)
+    // "Last seen 4m ago" keeps counting between polls instead of freezing at
+    // first paint, and is fresh the moment the app comes back to the front.
+    val now = ke.co.bethanyhouse.neema.feature.reports.rememberNow()
+    val agents by dash.agents.collectAsStateWithLifecycle()
+    val roles by vm.roles.collectAsStateWithLifecycle()
+    val rolesLoading by vm.rolesLoading.collectAsStateWithLifecycle()
+    val saving by vm.saving.collectAsStateWithLifecycle()
+    val refreshing by vm.refreshing.collectAsStateWithLifecycle()
+    val availability by vm.availability.collectAsStateWithLifecycle()
+    val agentsError by vm.agentsError.collectAsStateWithLifecycle()
+    val rolesError by vm.rolesError.collectAsStateWithLifecycle()
+    LaunchedEffect(agents) { vm.reconcile(agents) }
+
+    val preview = LocalTeamPreview.current
+    fun opened(kind: String): String? = preview.dialog?.takeIf { it.startsWith("$kind:") }?.substringAfter(':')
+    // Both tabs for everyone here: the web never tests manage_roles.
+    var tab by rememberSaveable(key = ke.co.bethanyhouse.neema.feature.reports.keptKey("team.tab")) { mutableStateOf(preview.tab ?: "agents") }
+
+    // Which dialog is open, by id, so it survives rotation and resets on leaving the screen.
+    var createOpen by rememberSaveable(key = ke.co.bethanyhouse.neema.feature.reports.keptKey("team.create")) { mutableStateOf(preview.dialog == "create") }
+    var editId by rememberSaveable(key = ke.co.bethanyhouse.neema.feature.reports.keptKey("team.edit")) { mutableStateOf(opened("edit")) }
+    var pwId by rememberSaveable(key = ke.co.bethanyhouse.neema.feature.reports.keptKey("team.password")) { mutableStateOf(opened("pw")) }
+    var delId by rememberSaveable(key = ke.co.bethanyhouse.neema.feature.reports.keptKey("team.remove")) { mutableStateOf(opened("del")) }
+    var assignId by rememberSaveable(key = ke.co.bethanyhouse.neema.feature.reports.keptKey("team.assign")) { mutableStateOf(opened("assign")) }
+    /** "create", a role id, or null. */
+    var roleModal by rememberSaveable(key = ke.co.bethanyhouse.neema.feature.reports.keptKey("team.role")) { mutableStateOf(opened("role")) }
+    var delRoleId by rememberSaveable(key = ke.co.bethanyhouse.neema.feature.reports.keptKey("team.deleteRole")) { mutableStateOf(opened("delrole")) }
+    val forms = vm.forms
+    // Screenshot tests open a dialog directly: its form starts where a tap would start it.
+    remember(vm) {
+        val d = preview.dialog ?: return@remember
+        val kind = d.substringBefore(':'); val id = d.substringAfter(':', "")
+        val typed = preview.typed
+        when (kind) {
+            "create" -> {
+                typed["name"]?.let { forms.createName = it }; typed["email"]?.let { forms.createEmail = it }
+                typed["password"]?.let { forms.createPassword = it }; typed["role"]?.let { forms.createRole = it }
+            }
+            "edit" -> dash.agents.value.find { it.id == id }?.let(forms::openEdit)
+            "pw" -> { forms.openPassword(); typed["password"]?.let { forms.password = it }; typed["confirm"]?.let { forms.confirm = it } }
+            "assign" -> dash.agents.value.find { it.id == id }?.let { forms.openAssign(it, vm.roles.value) }
+            "role" -> {
+                forms.openRole(vm.roles.value.find { it.id == id })
+                typed["name"]?.let { forms.roleName = it }; typed["description"]?.let { forms.roleDescription = it }
+                typed["perms"]?.let { p -> forms.rolePerms = p.split(',').filter { it.isNotBlank() } }
+            }
+        }
+    }
+    // A save that succeeded closes its dialog here — also when the phone
+    // turned while it was on the wire (the screen that started it is gone).
+    LaunchedEffect(vm) {
+        vm.closed.collect { d ->
+            when (d) {
+                "create" -> createOpen = false
+                "edit" -> editId = null
+                "pw" -> pwId = null
+                "del" -> delId = null
+                "assign" -> assignId = null
+                "role" -> roleModal = null
+                "delrole" -> delRoleId = null
+            }
+        }
+    }
+
+    // Indexed once per list, not searched per card: a 200-agent, 50-role team.
+    val agentIndex = remember(agents) { HashMap<String, Agent>(agents.size * 2).also { m -> agents.forEach { m.putIfAbsent(it.id, it) } } }
+    val roleIndex = remember(roles) { HashMap<String, CustomRole>(roles.size * 2).also { m -> roles.forEach { m.putIfAbsent(it.id, it) } } }
+    val agentsPerRole = remember(agents) { agents.groupingBy { it.customRoleId }.eachCount() }
+    fun agentById(id: String?) = id?.let(agentIndex::get)
+    fun roleById(id: String?) = id?.let(roleIndex::get)
+    val onlineCount = remember(agents, availability) { agents.count { availability[it.id] ?: it.isAvailable } }
+    val c = Neema.colors
+
+    PullToRefreshBox(isRefreshing = refreshing, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize().background(c.bg)) {
+      BoxWithConstraints(Modifier.fillMaxSize()) {
+        // The web's grid: one column on phones, two from sm, three from lg — here
+        // as many 320dp columns as fit, never more than three.
+        val columns = ((maxWidth - 32.dp + 12.dp) / (320.dp + 12.dp)).toInt().coerceIn(1, 3)
+        val agentRows = remember(agents, columns) { agents.chunked(columns) }
+        val agentRowKeys = remember(agentRows) { ke.co.bethanyhouse.neema.feature.reports.uniqueKeys(agentRows.map { row -> row.joinToString("|") { it.id } }) }
+        LazyColumn(
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxSize(),
+            state = ke.co.bethanyhouse.neema.feature.reports.rememberKeptListState("team.list", preview.scrollItem),
+        ) {
+            // Header
+            item(key = "header") {
+                // A large font or a narrow phone moves the button under the title rather than squeeze the counts.
+                FlowRow(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Column(Modifier.padding(end = 12.dp).align(Alignment.CenterVertically)) {
+                        Text("Team", style = MaterialTheme.typography.headlineSmall, color = c.text)
+                        Text(
+                            androidx.compose.ui.text.buildAnnotatedString {
+                                append("${agents.size} agents · ")
+                                pushStyle(androidx.compose.ui.text.SpanStyle(color = c.gold)); append("$onlineCount online"); pop()
+                            },
+                            fontSize = 14.sp, color = c.textDim,
+                        )
+                    }
+                    if (tab == "agents") {
+                        TeamButton("Add Agent", { createOpen = true }, Modifier.align(Alignment.CenterVertically), variant = BtnVariant.Primary,
+                            leading = { Icon(Icons.Default.Add, null, Modifier.size(16.dp)) })
+                    } else {
+                        TeamButton("New Role", { forms.openRole(null); roleModal = "create" }, Modifier.align(Alignment.CenterVertically), variant = BtnVariant.Primary,
+                            leading = { Icon(Icons.Default.Add, null, Modifier.size(16.dp)) })
+                    }
+                }
+            }
+            // Tabs
+            item(key = "tabs") {
+                val tabs = listOf("agents", "roles")
+                // The web's tabs: left-aligned labels, a 2dp underline on the active one, over a hairline.
+                Box(Modifier.fillMaxWidth()) {
+                    HorizontalDivider(Modifier.align(Alignment.BottomStart), color = c.bg4)
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        tabs.forEach { t ->
+                            val sel = tab == t
+                            Column(
+                                Modifier.clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
+                                    .clickable(role = Role.Tab) { tab = t }.width(IntrinsicSize.Max)
+                                    .semantics { selected = sel },
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Text(
+                                    if (t == "agents") "Agents (${agents.size})" else "Roles (${roles.size})",
+                                    fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                                    color = if (sel) c.gold2 else c.textDim,
+                                    modifier = Modifier.heightIn(min = 46.dp).wrapContentHeight(Alignment.CenterVertically)
+                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                )
+                                Box(Modifier.fillMaxWidth().height(2.dp).background(if (sel) c.gold else Color.Transparent))
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (tab == "agents") {
+                val teamProblem = agentsError
+                if (agents.isEmpty() && teamProblem != null) {
+                    item(key = "error") {
+                        ke.co.bethanyhouse.neema.feature.reports.LoadProblem(
+                            title = "Couldn't load the team",
+                            message = teamProblem, retrying = refreshing, onRetry = vm::refresh,
+                        )
+                    }
+                } else if (agents.isEmpty()) {
+                    item(key = "empty") {
+                        Box(Modifier.fillMaxWidth().padding(vertical = 64.dp), contentAlignment = Alignment.Center) {
+                            Text("No agents yet.", fontSize = 14.sp, color = c.textDim)
+                        }
+                    }
+                }
+                // Cards in a row share its tallest card's height, as a CSS grid row does.
+                itemsIndexed(agentRows, key = { i, _ -> agentRowKeys[i] }, contentType = { _, _ -> "agent-row" }) { _, row ->
+                    EqualHeightRow(columns = columns, spacing = 12.dp, count = row.size) { i ->
+                        val agent = row[i]
+                        AgentCard(
+                            agent = agent,
+                            available = availability[agent.id] ?: agent.isAvailable,
+                            customRole = roleById(agent.customRoleId),
+                            now = now,
+                            onToggle = { vm.toggleOnline(agent, availability[agent.id] ?: agent.isAvailable) },
+                            onRole = { forms.openAssign(agent, roles); assignId = agent.id },
+                            onEdit = { forms.openEdit(agent); editId = agent.id },
+                            onPassword = { forms.openPassword(); pwId = agent.id },
+                            onDelete = { if (vm.requestRemove(agent)) delId = agent.id },
+                        )
+                    }
+                }
+            } else {
+                if (rolesLoading && roles.isEmpty()) {
+                    item(key = "loading") { Loading(Modifier.height(160.dp)) }
+                } else {
+                    val rolesProblem = rolesError
+                    if (roles.isEmpty() && rolesProblem != null) {
+                        item(key = "roleserror") {
+                            ke.co.bethanyhouse.neema.feature.reports.LoadProblem(
+                                title = "Couldn't load the roles",
+                                message = rolesProblem, retrying = refreshing, onRetry = vm::refresh,
+                            )
+                        }
+                    } else if (roles.isEmpty()) {
+                        item(key = "noroles") {
+                            EmptyState("No roles yet", "Create one with New Role.", icon = Icons.Outlined.VerifiedUser)
+                        }
+                    }
+                    // Roles read as a list on the web (space-y-3), full width.
+                    items(roles, key = { it.id }, contentType = { "role" }) { role ->
+                        RoleCard(
+                            role = role,
+                            agentCount = agentsPerRole[role.id] ?: 0,
+                            onEdit = { forms.openRole(role); roleModal = role.id },
+                            onDelete = { delRoleId = role.id },
+                        )
+                    }
+                }
+            }
+        }
+      }
+    }
+
+    // ── Dialogs ───────────────────────────────────────────────────────────────
+
+    agentById(assignId)?.let { a ->
+        AssignRoleDialog(a, roles, forms, saving, onDismiss = { assignId = null }) { roleId, perms ->
+            vm.saveAssign(a, roleId, perms) { vm.close("assign") }
+        }
+    }
+    if (createOpen) {
+        CreateAgentDialog(forms, saving, onDismiss = { createOpen = false }) { name, email, pw, role ->
+            vm.createAgent(name, email, pw, role) { vm.close("create") }
+        }
+    }
+    agentById(editId)?.let { a ->
+        EditAgentDialog(a, forms, saving, onDismiss = { editId = null }) { name, email ->
+            vm.saveEdit(a, name, email) { vm.close("edit") }
+        }
+    }
+    agentById(pwId)?.let { a ->
+        ResetPasswordDialog(a, forms, saving, onDismiss = { pwId = null }) { pw, confirm ->
+            vm.savePassword(a, pw, confirm) { vm.close("pw") }
+        }
+    }
+    agentById(delId)?.let { a ->
+        FormDialog(
+            title = "Remove Agent",
+            onDismiss = { delId = null },
+            buttons = {
+                TeamButton(if (saving) "Removing…" else "Remove Agent", { vm.deleteAgent(a) { vm.close("del") } },
+                    variant = BtnVariant.Danger, enabled = !saving)
+                TeamButton("Cancel", { delId = null })
+            },
+        ) {
+            Text(buildBold("Remove ", a.name, "?"), fontSize = 14.sp, color = c.text)
+            Spacer(Modifier.height(4.dp))
+            Text("This cannot be undone. Their conversations will be unassigned.", fontSize = 12.sp, color = c.textDim)
+        }
+    }
+    roleModal?.let { key ->
+        val editing = if (key == "create") null else roleById(key)
+        if (key == "create" || editing != null) {
+            RoleEditorDialog(editing, forms, saving, onDismiss = { roleModal = null }) { form ->
+                vm.saveRole(editing, form) { vm.close("role") }
+            }
+        }
+    }
+    roleById(delRoleId)?.let { r ->
+        FormDialog(
+            title = "Delete Role",
+            onDismiss = { delRoleId = null },
+            buttons = {
+                TeamButton(if (saving) "Deleting…" else "Delete Role", { vm.deleteRole(r) { vm.close("delrole") } },
+                    variant = BtnVariant.Danger, enabled = !saving)
+                TeamButton("Cancel", { delRoleId = null })
+            },
+        ) {
+            Text(buildBold("Delete role ", r.name, "?"), fontSize = 14.sp, color = c.text)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "${agentsPerRole[r.id] ?: 0} agent(s) will be unassigned from this role.",
+                fontSize = 12.sp, color = c.textDim,
+            )
+        }
+    }
+}
+
+/**
+ * The web's pale greens (#9ccd65, #b5da8b) read at under 2:1 on a white card;
+ * the theme's secondary green (#699a32) and muted grey-green keep the same
+ * quiet tone at a readable contrast, by day and by night.
+ */
+private val faint: Color @Composable get() = Neema.colors.let { if (it.isDark) it.muted else it.textDim }
+private val fainter: Color @Composable get() = Neema.colors.muted
+/** Card borders: #cee6b2 by day, the theme hairline by night. */
+private val cardBorder: Color @Composable get() = Neema.colors.let { if (it.isDark) it.hairline else it.bg4 }
+
+private fun buildBold(
+    pre: String, bold: String, post: String,
+    color: Color = Color.Unspecified, weight: FontWeight = FontWeight.Bold,
+) = androidx.compose.ui.text.buildAnnotatedString {
+    append(pre)
+    pushStyle(androidx.compose.ui.text.SpanStyle(fontWeight = weight, color = color)); append(bold); pop()
+    append(post)
+}
+
+// ── Equal-height row ─────────────────────────────────────────────────────────
+
+/**
+ * [count] cells side by side in a [columns]-wide grid row, every cell as tall
+ * as the tallest — the CSS grid's stretch. Each cell is measured once at its
+ * natural height, then laid out at the row's height. (IntrinsicSize can't be
+ * used: the avatar may be a SubcomposeAsyncImage, which has no intrinsics.)
+ */
+@Composable
+internal fun EqualHeightRow(columns: Int, spacing: Dp, count: Int, cell: @Composable (Int) -> Unit) {
+    SubcomposeLayout(Modifier.fillMaxWidth()) { constraints ->
+        val gap = spacing.roundToPx()
+        val width = constraints.maxWidth
+        val cellW = ((width - gap * (columns - 1)) / columns).coerceAtLeast(0)
+        val loose = Constraints(minWidth = cellW, maxWidth = cellW)
+        val height = (0 until count).maxOfOrNull { i ->
+            subcompose("measure-$i") { CompositionLocalProvider(LocalMeasurePass provides true) { cell(i) } }
+                .maxOfOrNull { it.measure(loose).height } ?: 0
+        } ?: 0
+        val placeables = (0 until count).map { i ->
+            subcompose("place-$i") { cell(i) }.map { it.measure(Constraints.fixed(cellW, height)) }
+        }
+        layout(width, height) {
+            placeables.forEachIndexed { i, ps -> ps.forEach { it.place(i * (cellW + gap), 0) } }
+        }
+    }
+}
+
+// ── Agent card ────────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AgentCard(
+    agent: Agent,
+    available: Boolean,
+    customRole: CustomRole?,
+    now: Long,
+    onToggle: () -> Unit,
+    onRole: () -> Unit,
+    onEdit: () -> Unit,
+    onPassword: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val c = Neema.colors
+    // Before the roles list lands, the agent row already carries its role's name and colour.
+    val roleName = customRole?.name ?: agent.roleName?.takeIf { agent.customRoleId != null }
+    val roleColor = customRole?.color ?: agent.roleColor
+    val rolePermCount = customRole?.permissions?.size ?: agent.rolePermissions?.size
+    Column(
+        Modifier.measureOnly().fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.bg2)
+            .border(1.dp, cardBorder, RoundedCornerShape(12.dp)).padding(16.dp),
+    ) {
+        Row(verticalAlignment = Alignment.Top) {
+            Box {
+                // The sizing pass of an equal-height row draws initials only: the photo loads once.
+                Avatar(agent.name, agent.avatarUrl.takeUnless { LocalMeasurePass.current }, size = 44.dp)
+                // w-3 h-3 with a 2px white ring, nudged 2px past the avatar's corner.
+                Box(
+                    Modifier.align(Alignment.BottomEnd).offset(2.dp, 2.dp).size(12.dp).clip(CircleShape).background(c.bg2).padding(2.dp)
+                        .clip(CircleShape).background(if (available) Palette.Emerald500 else Palette.Stone300),
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(agent.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = c.text,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.align(Alignment.CenterVertically))
+                    if (roleName != null) {
+                        val fill = hexColor(roleColor)
+                        RoleBadge(roleName, fill, contentOn(fill), Modifier.align(Alignment.CenterVertically))
+                    } else {
+                        // The base DB role, capitalised: #e6f3d8 fill, #427425 text.
+                        RoleBadge(
+                            agent.role.replaceFirstChar { it.uppercase() },
+                            if (c.isDark) c.goldDim else c.bg3, c.gold2, Modifier.align(Alignment.CenterVertically),
+                        )
+                    }
+                    if (agent.customPermissions != null) {
+                        Pill("Custom permissions", c.blue, modifier = Modifier.align(Alignment.CenterVertically))
+                    }
+                }
+                Text(agent.email, fontSize = 12.sp, color = c.textDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    "${agent.activeConvs} active · Joined ${if (agent.createdAt != null) Fmt.date(agent.createdAt) else "—"}",
+                    fontSize = 12.sp, color = faint,
+                )
+                Text(
+                    if (available) "Online now" else "Last seen ${Fmt.timeAgo(agent.lastSeenAt, now).let { if (it == "—") "never" else it }}",
+                    fontSize = 11.sp, color = if (available) c.gold else c.muted,
+                )
+                if (roleName != null && rolePermCount != null) {
+                    Text(
+                        if (agent.customPermissions != null) "${agent.customPermissions.size} permissions (custom for this agent)"
+                        else "$rolePermCount permissions assigned",
+                        fontSize = 11.sp, color = fainter,
+                    )
+                }
+            }
+        }
+        // In a stretched grid row the footer sits on the card's bottom edge, so a row's footers line up.
+        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(12.dp))
+        HorizontalDivider(color = if (c.isDark) c.hairline else c.bg3)
+        Spacer(Modifier.height(8.dp))
+        // One line on a phone; at a large font the buttons wrap under the switch instead of clipping.
+        FlowRow(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(Modifier.align(Alignment.CenterVertically).padding(end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Available", fontSize = 12.sp, color = c.textDim)
+                Spacer(Modifier.width(8.dp))
+                Switch(colors = neemaSwitchColors(),
+                    checked = available, onCheckedChange = { onToggle() },
+                    modifier = Modifier.scale(0.8f).semantics { contentDescription = "Available" },
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            TeamButton("Role", onRole, Modifier.align(Alignment.CenterVertically), small = true,
+                leading = { Icon(Icons.Outlined.VerifiedUser, null, Modifier.size(14.dp)) })
+            TeamButton("Edit", onEdit, Modifier.align(Alignment.CenterVertically), small = true)
+            IconBtn(Icons.Outlined.Key, "Reset password", BtnVariant.Ghost, onPassword, Modifier.align(Alignment.CenterVertically))
+            IconBtn(Icons.Outlined.DeleteOutline, "Remove agent", BtnVariant.Danger, onDelete, Modifier.align(Alignment.CenterVertically))
+        }
+    }
+}
+
+@Composable
+private fun IconBtn(
+    icon: androidx.compose.ui.graphics.vector.ImageVector, desc: String, variant: BtnVariant, onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val (bg, fg, edge) = btnColors(variant)
+    // 34dp drawn, as the web's footer (growing a little with a large font to keep level with the text
+    // buttons); the touch area is widened to 48dp by Compose's minimum touch target.
+    val grow = (1f + (androidx.compose.ui.platform.LocalDensity.current.fontScale - 1f) * 0.4f).coerceIn(1f, 1.4f)
+    Box(
+        modifier.size(34.dp * grow).clip(RoundedCornerShape(8.dp)).background(bg)
+            .border(1.dp, edge, RoundedCornerShape(8.dp))
+            .clickable(role = Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { Icon(icon, desc, tint = fg, modifier = Modifier.size(16.dp * grow)) }
+}
+
+// ── Role card ─────────────────────────────────────────────────────────────────
+
+@Composable
+private fun RoleSquare(role: CustomRole, size: Int) {
+    Box(
+        Modifier.size(size.dp).clip(RoundedCornerShape(if (size >= 40) 12.dp else 8.dp)).background(hexColor(role.color)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(role.name.take(1).uppercase().ifEmpty { "?" }, color = contentOn(hexColor(role.color)), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun RoleCard(role: CustomRole, agentCount: Int, onEdit: () -> Unit, onDelete: () -> Unit) {
+    val c = Neema.colors
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.bg2)
+            .border(1.dp, cardBorder, RoundedCornerShape(12.dp)).padding(16.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        RoleSquare(role, 40)
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.weight(1f)) {
+          // The Edit / Delete pair sits beside the name only, so on a phone the
+          // description and permission chips below keep the card's full width.
+          Row(verticalAlignment = Alignment.Top) {
+            FlowRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(role.name, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = c.text, modifier = Modifier.align(Alignment.CenterVertically))
+                if (role.protected) ProtectedTag(Modifier.align(Alignment.CenterVertically))
+                Text("$agentCount agent${if (agentCount != 1) "s" else ""}", fontSize = 11.sp, color = c.textDim,
+                    modifier = Modifier.align(Alignment.CenterVertically))
+            }
+            if (!role.protected) {
+                Spacer(Modifier.width(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    TeamButton("Edit", onEdit, small = true)
+                    IconBtn(Icons.Outlined.DeleteOutline, "Delete role", BtnVariant.Danger, onDelete)
+                }
+            }
+          }
+            if (role.description.isNotBlank()) {
+                Text(role.description, fontSize = 12.sp, color = c.textDim, modifier = Modifier.padding(top = 2.dp, bottom = 6.dp))
+            } else Spacer(Modifier.height(6.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                role.permissions.take(8).forEach { p ->
+                    PermissionLabel(p)?.let { label -> PermChip(label) }
+                }
+                if (role.permissions.size > 8) {
+                    Text("+${role.permissions.size - 8} more", fontSize = 10.sp, color = c.textDim,
+                        modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(c.bg3).padding(horizontal = 6.dp, vertical = 2.dp))
+                }
+                if (role.permissions.isEmpty()) {
+                    Text("No permissions assigned", fontSize = 10.sp, fontStyle = FontStyle.Italic, color = faint)
+                }
+            }
+        }
+    }
+}
+
+private fun PermissionLabel(key: String): String? = PermissionCatalog.label(key)
+
+@Composable
+private fun PermChip(label: String) {
+    val c = Neema.colors
+    Text(
+        label, fontSize = 10.sp, fontWeight = FontWeight.Medium, color = c.gold2,
+        modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(c.goldDim)
+            .border(1.dp, c.border, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
+    )
+}
+
+/**
+ * The role list's tag is an uppercase, tracked, bold pill; the assign
+ * dialog's ([compact]) is "Protected" as typed, semibold, on a 4dp-cornered chip.
+ */
+@Composable
+private fun ProtectedTag(modifier: Modifier = Modifier, compact: Boolean = false) {
+    val c = Neema.colors
+    val fill = if (c.isDark) c.goldDim else c.bg3
+    if (compact) {
+        Text(
+            "Protected", fontSize = 9.sp, fontWeight = FontWeight.SemiBold, color = c.gold2,
+            modifier = modifier.clip(RoundedCornerShape(4.dp)).background(fill).padding(horizontal = 4.dp, vertical = 2.dp),
+        )
+    } else {
+        Text(
+            "PROTECTED", fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp, color = c.gold2,
+            modifier = modifier.clip(RoundedCornerShape(50)).background(fill).padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+    }
+}
+
+/** The agent card's role chip: 10px semibold on a full pill (custom role colour, or the base role's pale green). */
+@Composable
+private fun RoleBadge(text: String, fill: Color, content: Color, modifier: Modifier = Modifier) {
+    Text(
+        text, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = content, maxLines = 1,
+        modifier = modifier.clip(RoundedCornerShape(50)).background(fill).padding(horizontal = 7.dp, vertical = 2.dp),
+    )
+}
+
+// ── Assign role ───────────────────────────────────────────────────────────────
+
+@Composable
+private fun AssignRoleDialog(
+    agent: Agent,
+    roles: List<CustomRole>,
+    forms: TeamForms,
+    saving: Boolean,
+    onDismiss: () -> Unit,
+    onSave: (roleId: String, customPermissions: List<String>?) -> Unit,
+) {
+    val c = Neema.colors
+    var roleId by forms::assignRole
+    // Per-agent override (agents.custom_permissions): off = exactly the role's permissions.
+    var override by forms::assignOverride
+    var perms by forms::assignPerms
+    FormDialog(
+        title = "Assign Role — ${agent.name}",
+        onDismiss = onDismiss,
+        buttons = {
+            TeamButton(if (saving) "Assigning…" else "Assign Role", { onSave(roleId, if (override) perms else null) },
+                variant = BtnVariant.Primary, enabled = !saving && roleId.isNotEmpty())
+            TeamButton("Cancel", onDismiss)
+        },
+    ) {
+        Text("Select a role. The agent will immediately receive those permissions.", fontSize = 12.sp, color = c.textDim)
+        Spacer(Modifier.height(12.dp))
+        roles.forEach { role ->
+            val sel = roleId == role.id
+            Row(
+                Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(12.dp))
+                    .background(if (sel) c.bg else c.bg2)
+                    .border(if (sel) 2.dp else 1.dp, if (sel) hexColor(role.color) else if (c.isDark) c.hairline else c.bg3, RoundedCornerShape(12.dp))
+                    .clickable(role = Role.RadioButton) {
+                        roleId = role.id
+                        // A fresh override starts from the chosen role's set.
+                        if (!override) perms = role.permissions
+                    }
+                    .padding(12.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                RoleSquare(role, 32)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(role.name, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = c.text, modifier = Modifier.align(Alignment.CenterVertically))
+                        if (role.protected) ProtectedTag(Modifier.align(Alignment.CenterVertically), compact = true)
+                    }
+                    if (role.description.isNotBlank()) Text(role.description, fontSize = 11.sp, color = c.textDim)
+                    Text("${role.permissions.size} permission${if (role.permissions.size != 1) "s" else ""}", fontSize = 11.sp, color = fainter)
+                }
+                if (sel) Icon(Icons.Default.Check, "Selected", tint = c.gold, modifier = Modifier.padding(start = 8.dp).size(18.dp))
+            }
+        }
+        if (roles.isEmpty()) Text("No roles yet — create one on the Roles tab.", fontSize = 12.sp, color = c.muted)
+
+        Spacer(Modifier.height(6.dp))
+        HorizontalDivider(color = if (c.isDark) c.hairline else c.bg3)
+        Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Custom permissions for this agent", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = c.text)
+                Text(
+                    if (override) "This agent gets exactly the permissions ticked below, instead of the role's."
+                    else "Off — the agent gets the role's permissions.",
+                    fontSize = 11.sp, color = c.textDim,
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Switch(checked = override, colors = neemaSwitchColors(), modifier = Modifier.semantics { contentDescription = "Custom permissions for this agent" }, onCheckedChange = { on ->
+                override = on
+                if (on && agent.customPermissions == null) perms = roles.find { it.id == roleId }?.permissions ?: perms
+            })
+        }
+        if (override) {
+            // getAgentPermissions reads an empty list as "none set": the agent
+            // falls back to their base role's defaults, not to nothing.
+            if (perms.none { k -> PermissionCatalog.ALL.any { it.key == k } }) {
+                Text(
+                    "With nothing ticked, the agent falls back to the default permissions of their base role " +
+                        "(${agent.role.replaceFirstChar { it.uppercase() }}) — not to none.",
+                    fontSize = 11.sp, color = c.amber, lineHeight = 15.sp,
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(c.amberDim)
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+            PermissionPicker(perms) { perms = it }
+        }
+    }
+}
+
+// ── Create / edit / password ─────────────────────────────────────────────────
+
+@Composable
+private fun CreateAgentDialog(forms: TeamForms, saving: Boolean, onDismiss: () -> Unit, onCreate: (String, String, String, String) -> Unit) {
+    var name by forms::createName
+    var email by forms::createEmail
+    var password by forms::createPassword
+    var roleId by forms::createRole
+    FormDialog(
+        title = "Add Agent",
+        onDismiss = onDismiss,
+        buttons = {
+            TeamButton(if (saving) "Creating…" else "Create Agent", { onCreate(name, email, password, roleId) },
+                variant = BtnVariant.Primary, enabled = !saving)
+            TeamButton("Cancel", onDismiss)
+        },
+    ) {
+        LabeledInput("Full Name", name, { name = it }, placeholder = "Jane Doe")
+        LabeledInput("Email", email, { email = it }, placeholder = "jane@bethanyhouse.co.ke",
+            keyboardType = androidx.compose.ui.text.input.KeyboardType.Email)
+        LabeledInput("Password", password, { password = it }, placeholder = "Min. 8 characters", password = true,
+            imeAction = ImeAction.Done)
+        SelectField(
+            "Base Role",
+            listOf("agent" to "Agent", "admin" to "Admin", "readonly" to "Read Only"),
+            roleId, { roleId = it },
+            container = Neema.colors.bg,
+        )
+        Text(
+            "Assign a detailed custom role after creating the agent using the Role button.",
+            fontSize = 11.sp, color = faint, modifier = Modifier.padding(top = 4.dp),
+        )
+    }
+}
+
+@Composable
+private fun EditAgentDialog(agent: Agent, forms: TeamForms, saving: Boolean, onDismiss: () -> Unit, onSave: (String, String) -> Unit) {
+    var name by forms::editName
+    var email by forms::editEmail
+    FormDialog(
+        title = "Edit — ${agent.name}",
+        onDismiss = onDismiss,
+        buttons = {
+            TeamButton(if (saving) "Saving…" else "Save Changes", { onSave(name, email) }, variant = BtnVariant.Primary, enabled = !saving)
+            TeamButton("Cancel", onDismiss)
+        },
+    ) {
+        LabeledInput("Full Name", name, { name = it }, placeholder = "Jane Doe")
+        LabeledInput("Email", email, { email = it }, placeholder = "jane@bethanyhouse.co.ke",
+            keyboardType = androidx.compose.ui.text.input.KeyboardType.Email, imeAction = ImeAction.Done)
+    }
+}
+
+@Composable
+private fun ResetPasswordDialog(agent: Agent, forms: TeamForms, saving: Boolean, onDismiss: () -> Unit, onSave: (String, String) -> Unit) {
+    val c = Neema.colors
+    var password by forms::password
+    var confirm by forms::confirm
+    val mismatch = confirm.isNotEmpty() && password != confirm
+    FormDialog(
+        title = "Reset Password — ${agent.name}",
+        onDismiss = onDismiss,
+        buttons = {
+            TeamButton(if (saving) "Saving…" else "Update Password", { onSave(password, confirm) },
+                variant = BtnVariant.Primary, enabled = !saving && !mismatch)
+            TeamButton("Cancel", onDismiss)
+        },
+    ) {
+        Text(buildBold("Set a new password for ", agent.email, ".", c.text, FontWeight.SemiBold), fontSize = 12.sp, color = c.textDim)
+        Spacer(Modifier.height(12.dp))
+        LabeledInput("New Password", password, { password = it }, placeholder = "Min. 8 characters", password = true)
+        LabeledInput(
+            "Confirm Password", confirm, { confirm = it }, placeholder = "Repeat new password", password = true,
+            isError = mismatch, supporting = if (mismatch) "Passwords do not match" else null, imeAction = ImeAction.Done,
+        )
+    }
+}
+
+// ── Role editor ───────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun RoleEditorDialog(editing: CustomRole?, forms: TeamForms, saving: Boolean, onDismiss: () -> Unit, onSave: (RoleForm) -> Unit) {
+    val c = Neema.colors
+    var name by forms::roleName
+    var description by forms::roleDescription
+    var color by forms::roleColor
+    var perms by forms::rolePerms
+    // One id per opened editor: a retry after a timeout updates the role the
+    // first attempt may have created instead of adding a second one.
+    val draftId = forms.roleDraftId
+    FormDialog(
+        title = if (editing == null) "New Role" else "Edit Role — ${editing.name}",
+        onDismiss = onDismiss,
+        buttons = {
+            TeamButton(
+                if (saving) "Saving…" else if (editing == null) "Create Role" else "Save Role",
+                { onSave(RoleForm(name, description, color, perms, id = draftId.takeIf { editing == null })) },
+                variant = BtnVariant.Primary, enabled = !saving,
+            )
+            TeamButton("Cancel", onDismiss)
+        },
+    ) {
+        LabeledInput("Role Name", name, { name = it }, placeholder = "e.g. Sales Agent")
+        LabeledInput("Description", description, { description = it }, placeholder = "Brief description", imeAction = ImeAction.Done)
+
+        Text("Colour", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.textDim)
+        Spacer(Modifier.height(6.dp))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            ROLE_COLORS.forEachIndexed { i, hex ->
+                val sel = color.equals(hex, ignoreCase = true)
+                val col = hexColor(hex)
+                // A 32dp swatch (the web's) inside a 40dp tap target; the ring marks the chosen one.
+                Box(
+                    Modifier.size(40.dp).clip(CircleShape)
+                        .clickable(role = Role.RadioButton) { color = hex }
+                        .semantics { contentDescription = "Colour ${i + 1} of ${ROLE_COLORS.size}"; selected = sel }
+                        .padding(4.dp)
+                        .then(if (sel) Modifier.border(2.dp, col, CircleShape) else Modifier)
+                        .padding(4.dp).clip(CircleShape).background(col),
+                    contentAlignment = Alignment.Center,
+                ) { if (sel) Icon(Icons.Default.Check, null, tint = contentOn(col), modifier = Modifier.size(14.dp)) }
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        PermissionPicker(perms) { perms = it }
+    }
+}
+
+/**
+ * The role editor's permission block: select/deselect all, per-group
+ * toggles, a two-column checkbox grid, and the "n of N selected" line.
+ * Also used for a single agent's permission override.
+ */
+@Composable
+private fun PermissionPicker(selected: List<String>, onChange: (List<String>) -> Unit) {
+    val c = Neema.colors
+    val all = PermissionCatalog.ALL.map { it.key }
+    val hasAll = all.all { it in selected }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text("Permissions", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.textDim, modifier = Modifier.weight(1f))
+        TextButton(onClick = { onChange(if (hasAll) emptyList() else all) }) {
+            Text(if (hasAll) "Deselect all" else "Select all", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.gold)
+        }
+    }
+    PermissionCatalog.GROUPS.forEach { group ->
+        val gp = PermissionCatalog.inGroup(group)
+        val allSel = gp.all { it.key in selected }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(group.uppercase(), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp, color = c.gold2, modifier = Modifier.weight(1f))
+            TextButton(onClick = {
+                onChange(if (allSel) selected.filter { k -> gp.none { it.key == k } } else (selected + gp.map { it.key }).distinct())
+            }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) {
+                Text(if (allSel) "Deselect" else "Select all", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = c.gold)
+            }
+        }
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+          // Two columns as on the web, unless each would hold under ~110dp of text (a large font on a phone).
+          val perRow = if (isCramped((maxWidth - 6.dp) / 2, 110.dp)) 1 else 2
+          Column {
+            gp.chunked(perRow).forEach { pair ->
+            Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                pair.forEach { perm ->
+                    val checked = perm.key in selected
+                    Row(
+                        Modifier.weight(1f).heightIn(min = 48.dp).clip(RoundedCornerShape(8.dp))
+                            .background(if (checked) c.bg3 else c.surface)
+                            .border(1.dp, if (checked) c.border else c.hairline, RoundedCornerShape(8.dp))
+                            .toggleable(checked, role = Role.Checkbox) { on -> onChange(if (on) selected + perm.key else selected - perm.key) }
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            Modifier.size(18.dp).clip(RoundedCornerShape(4.dp))
+                                .background(if (checked) c.gold else c.bg2)
+                                // Unticked, the box's edge must read at 3:1: the pale green by day, grey-green by night.
+                                .border(1.5.dp, if (checked) c.gold else if (c.isDark) c.muted else c.border2, RoundedCornerShape(4.dp)),
+                            contentAlignment = Alignment.Center,
+                        ) { if (checked) Icon(Icons.Default.Check, null, tint = onGold(), modifier = Modifier.size(13.dp)) }
+                        Spacer(Modifier.width(8.dp))
+                        Text(perm.label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = if (checked) c.gold2 else c.textMid)
+                    }
+                }
+                if (pair.size < perRow) Spacer(Modifier.weight(1f))
+            }
+            }
+          }
+        }
+        Spacer(Modifier.height(4.dp))
+    }
+    Text(
+        "${selected.count { it in all }} of ${all.size} permissions selected",
+        fontSize = 11.sp, color = c.textDim, modifier = Modifier.padding(top = 4.dp),
+    )
+}
