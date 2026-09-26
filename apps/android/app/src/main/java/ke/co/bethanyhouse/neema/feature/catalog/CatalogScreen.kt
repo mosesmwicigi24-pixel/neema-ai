@@ -23,7 +23,7 @@ import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontFamily
+import ke.co.bethanyhouse.neema.core.ui.theme.NeemaMono
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -40,7 +40,6 @@ import ke.co.bethanyhouse.neema.core.model.PriceAudit
 import ke.co.bethanyhouse.neema.core.ui.components.SearchField
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import ke.co.bethanyhouse.neema.core.ui.theme.Palette
-import ke.co.bethanyhouse.neema.feature.reports.AreaPalette
 import ke.co.bethanyhouse.neema.feature.reports.measureOnly
 import ke.co.bethanyhouse.neema.core.util.Fmt
 
@@ -57,16 +56,16 @@ internal val catEmoji = mapOf(
 internal fun glyph(category: String?): String = catEmoji[category ?: ""] ?: "📦"
 
 // Tailwind *-50 shades, as gradient stops (the web's catColors).
-private val catColors: Map<String, Pair<Color, Color>> = with(AreaPalette) {
+private val catColors: Map<String, Pair<Color, Color>> = with(Palette) {
     mapOf(
-        "Anointing Oil" to (Palette.Amber50 to Yellow50), "Communion Wafers" to (Orange50 to Palette.Amber50),
-        "Communion Cups" to (Sky50 to Palette.Blue50), "Prefilled Cups" to (Palette.Red50 to Rose50),
-        "Communion Wine" to (Palette.Red50 to Pink50), "Communion Trays" to (Palette.Stone50 to Palette.Slate50),
-        "Communion Accessories" to (Teal50 to Cyan50), "Clergy Apparel" to (Palette.Blue50 to Indigo50),
-        "Clergy Vestments" to (Purple50 to Palette.Violet50),
-        "anointing" to (Palette.Amber50 to Yellow50), "communion" to (Palette.Red50 to Rose50),
-        "vestments" to (Purple50 to Palette.Violet50), "trays" to (Palette.Stone50 to Palette.Slate50),
-        "wine" to (Palette.Red50 to Pink50), "apparel" to (Palette.Blue50 to Indigo50),
+        "Anointing Oil" to (Amber50 to Yellow50), "Communion Wafers" to (Orange50 to Amber50),
+        "Communion Cups" to (Sky50 to Blue50), "Prefilled Cups" to (Red50 to Rose50),
+        "Communion Wine" to (Red50 to Pink50), "Communion Trays" to (Stone50 to Slate50),
+        "Communion Accessories" to (Teal50 to Cyan50), "Clergy Apparel" to (Blue50 to Indigo50),
+        "Clergy Vestments" to (Purple50 to Violet50),
+        "anointing" to (Amber50 to Yellow50), "communion" to (Red50 to Rose50),
+        "vestments" to (Purple50 to Violet50), "trays" to (Stone50 to Slate50),
+        "wine" to (Red50 to Pink50), "apparel" to (Blue50 to Indigo50),
     )
 }
 
@@ -123,7 +122,7 @@ internal fun catalogColumns(width: Dp, fontScale: Float = 1f): Int {
     // drop columns until each keeps ~118dp per 100% of font (the web never
     // scales its text, so it never needs to).
     val minCell = 118.dp * fontScale.coerceAtLeast(1f)
-    return (web downTo 1).first { n -> n == 1 || (width - 16.dp * (n - 1)) / n >= minCell }
+    return (web downTo 2).firstOrNull { n -> (width - 16.dp * (n - 1)) / n >= minCell } ?: 1
 }
 
 /** "KES 3,500 – KES 4,200" that wraps only at the dash, never inside an amount. */
@@ -197,7 +196,7 @@ fun CatalogScreen(
                         Text("Catalog", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = c.text)
                         Text(
                             buildAnnotatedString {
-                                withStyle(SpanStyle(color = c.muted)) { append("${catalog.size} items") }
+                                withStyle(SpanStyle(color = c.muted)) { append("${view.total} items") }
                                 withStyle(SpanStyle(color = Palette.Stone200)) { append("  ·  ") }
                                 withStyle(SpanStyle(color = Palette.Emerald600)) { append("$inStock in stock") }
                                 if (outStock > 0) {
@@ -213,7 +212,7 @@ fun CatalogScreen(
                 item(key = "source") {
                     Row(
                         Modifier.padding(bottom = 20.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                            .background(if (c.isDark) c.goldDim else AreaPalette.SproutWash)
+                            .background(if (c.isDark) c.goldDim else Palette.SproutWash)
                             .border(1.dp, c.bg4, RoundedCornerShape(12.dp))
                             .padding(horizontal = 14.dp, vertical = 10.dp),
                     ) {
@@ -261,7 +260,7 @@ fun CatalogScreen(
                     item(key = "error") {
                         ke.co.bethanyhouse.neema.feature.reports.LoadProblem(
                             title = "Couldn't load the catalogue",
-                            message = catalogError!!, retrying = refreshing, onRetry = vm::retry,
+                            message = catalogError.orEmpty(), retrying = refreshing, onRetry = vm::retry,
                         )
                     }
                 } else if (filtered.isEmpty()) {
@@ -419,8 +418,8 @@ private fun ProductCard(item: CatalogItem, onOpen: () -> Unit, modifier: Modifie
                 }
             }
             Row(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                Text(item.sku, fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = faint(), modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                item.hubProductId?.let { Text("#$it", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = faint()) }
+                Text(item.sku, fontSize = 10.sp, fontFamily = NeemaMono, color = faint(), modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                item.hubProductId?.let { Text("#$it", fontSize = 10.sp, fontFamily = NeemaMono, color = faint()) }
             }
         }
         }
@@ -446,7 +445,7 @@ internal fun AliasChip(text: String) {
 private fun PriceAuditBanner(audit: PriceAudit, open: Boolean, onToggle: () -> Unit) {
     val gaps = audit.currencyGaps
     val pp = audit.perPiece
-    val amber900 = Palette.Amber900; val amber800 = Palette.Amber800; val amber950 = AreaPalette.Amber950
+    val amber900 = Palette.Amber900; val amber800 = Palette.Amber800; val amber950 = Palette.Amber950
     val amber700 = Palette.Amber700
     val dark = Neema.colors.isDark
     val fg900 = if (dark) Palette.Amber200 else amber900
@@ -456,19 +455,21 @@ private fun PriceAuditBanner(audit: PriceAudit, open: Boolean, onToggle: () -> U
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
             .background(if (dark) Palette.Amber500.copy(alpha = 0.2f) else Palette.Amber50)
-            .border(1.dp, Palette.Amber300, RoundedCornerShape(12.dp))
-            .clickable(onClick = onToggle).padding(16.dp),
+            .border(1.dp, Palette.Amber300, RoundedCornerShape(12.dp)),
     ) {
-        val parts = buildList {
-            if (gaps.isNotEmpty()) add("${gaps.size} product${if (gaps.size == 1) "" else "s"} whose USD price in the hub disagrees with KES ÷ $rate")
-            if (pp.isNotEmpty()) add("${pp.size} pack good${if (pp.size == 1) "" else "s"} priced per single piece")
+        // The web's toggle is the heading button only: a tap on the list below leaves it open.
+        Column(Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = if (open) 0.dp else 16.dp)) {
+            val parts = buildList {
+                if (gaps.isNotEmpty()) add("${gaps.size} product${if (gaps.size == 1) "" else "s"} whose USD price in the hub disagrees with KES ÷ $rate")
+                if (pp.isNotEmpty()) add("${pp.size} pack good${if (pp.size == 1) "" else "s"} priced per single piece")
+            }
+            Text(parts.joinToString(" · "), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = fg900)
+            Text(
+                "Neema quotes exactly what the hub holds — these are wrong quotes waiting to happen. Fix the rows in the hub. ${if (open) "Hide" else "Show"} the list.",
+                fontSize = 12.sp, color = fg800, modifier = Modifier.padding(top = 2.dp),
+            )
         }
-        Text(parts.joinToString(" · "), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = fg900)
-        Text(
-            "Neema quotes exactly what the hub holds — these are wrong quotes waiting to happen. Fix the rows in the hub. ${if (open) "Hide" else "Show"} the list.",
-            fontSize = 12.sp, color = fg800, modifier = Modifier.padding(top = 2.dp),
-        )
-        if (open) {
+        if (open) Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
             Spacer(Modifier.height(12.dp))
             if (gaps.isNotEmpty()) {
                 Row {

@@ -35,7 +35,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -56,6 +55,7 @@ import ke.co.bethanyhouse.neema.core.ui.components.ALL_CHANNELS
 import ke.co.bethanyhouse.neema.core.ui.components.Panel
 import ke.co.bethanyhouse.neema.core.ui.components.channelStyle
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
+import ke.co.bethanyhouse.neema.core.ui.theme.NeemaMono
 import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 import ke.co.bethanyhouse.neema.core.util.Fmt
 import ke.co.bethanyhouse.neema.feature.reports.AxisLabels
@@ -236,8 +236,9 @@ internal fun activityFeed(orders: List<Order>, human: List<Conversation>, agents
     // Recent orders — each date parsed once, not once per comparison of the sort.
     orders.map { it to (Fmt.millis(it.createdAt) ?: 0L) }.sortedByDescending { it.second }.take(4).map { it.first }.forEach { o ->
         out += ActivityEntry(
-            // mapOrder() makes contact_phone the wa_id: an unnamed buyer shows their number, never "Unknown".
-            "order-${o.id}", Fmt.displayName(o.contactName, o.contactPhone?.takeIf { it.isNotBlank() } ?: o.waId), "placed an order",
+            // mapOrder() makes contact_name fall back to the wa_id (and contact_phone the wa_id):
+            // an unnamed buyer reads as their bare number, as on the web — never "Unknown".
+            "order-${o.id}", Fmt.displayName(o.customerName, o.contactPhone?.takeIf { it.isNotEmpty() } ?: o.waId), "placed an order",
             Fmt.currency(o.total), o.createdAt, "📦",
         )
     }
@@ -250,7 +251,7 @@ internal fun activityFeed(orders: List<Order>, human: List<Conversation>, agents
             out += ActivityEntry(
                 "conv-${conv.id}", agents.find { it.id == conv.assignedAgentId }?.name ?: "An agent",
                 "intercepted conversation with", Fmt.displayName(conv.name, conv.waId),
-                (conv.lastMessageAt ?: conv.createdAt)!!, "⚡",
+                (conv.lastMessageAt ?: conv.createdAt).orEmpty(), "⚡",
             )
         }
     return out.map { it to (Fmt.millis(it.at) ?: 0L) }.sortedByDescending { it.second }.take(8).map { it.first }
@@ -360,7 +361,7 @@ private fun AttributionPanel(a: Attribution, wide: Boolean) {
                     Text(capitalizeWords(r.source), fontSize = 12.sp, fontWeight = FontWeight.Medium, color = c.text, modifier = Modifier.weight(1.2f))
                     Text(
                         r.postTitle ?: r.post ?: "—", fontSize = 10.sp, color = slate, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        fontFamily = if (r.postTitle.isNullOrEmpty()) FontFamily.Monospace else null, modifier = Modifier.weight(2f),
+                        fontFamily = if (r.postTitle.isNullOrEmpty()) NeemaMono else null, modifier = Modifier.weight(2f),
                     )
                     Text("${r.leads}", fontSize = 12.sp, color = c.text, modifier = Modifier.weight(0.7f), textAlign = TextAlign.End)
                     Text("${r.orders}", fontSize = 12.sp, color = c.text, modifier = Modifier.weight(0.7f), textAlign = TextAlign.End)
@@ -409,7 +410,7 @@ private fun AttributionCard(source: String, post: String, mono: Boolean, leads: 
             )
             Text(revenue, fontSize = 13.sp, fontWeight = if (dim) FontWeight.Normal else FontWeight.SemiBold, color = fg)
         }
-        Text(post, fontSize = 11.sp, color = if (dim) fg else Palette.Slate500, fontFamily = if (mono) FontFamily.Monospace else null, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(post, fontSize = 11.sp, color = if (dim) fg else Palette.Slate500, fontFamily = if (mono) NeemaMono else null, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Spacer(Modifier.height(4.dp))
         Text("Leads $leads  ·  Orders $orders", fontSize = 11.sp, color = if (dim) fg else c.muted)
     }
@@ -425,7 +426,7 @@ private fun RevenueChart(bars: List<DayBar>, modifier: Modifier) {
     val todayColor = if (c.isDark) c.gold else AccentEmerald
     // By night a wash of the moss strong enough to read against the navy panel.
     val restColor = if (c.isDark) c.gold.copy(alpha = 0.45f) else c.bg4
-    val pickedColor = ke.co.bethanyhouse.neema.feature.reports.AreaPalette.Green400
+    val pickedColor = Palette.Green400
     Panel(modifier, padding = PaddingValues(16.dp)) {
         PanelHeader(
             title = { PanelTitle("7-Day Revenue (KES)") },

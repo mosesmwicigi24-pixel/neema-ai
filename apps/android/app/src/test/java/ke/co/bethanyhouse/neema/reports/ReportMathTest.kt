@@ -125,17 +125,17 @@ class ReportMathTest {
         assertEquals(
             """
             Date,Customer,Amount,Status
-            25 Sept 2026,+254 712 345 678,8000,confirmed
-            24 Sept 2026,+254 722 000 111,12500,pending
-            22 Sept 2026,+254 733 444 555,18000,delivered
-            21 Sept 2026,+254 700 111 222,9600,cancelled
-            19 Sept 2026,+254 711 000 999,4800,pending
-            15 Sept 2026,+254 733 444 555,3500,delivered
+            25 Sept 2026,254712345678,8000,confirmed
+            24 Sept 2026,254722000111,12500,pending
+            22 Sept 2026,254733444555,18000,delivered
+            21 Sept 2026,254700111222,9600,cancelled
+            19 Sept 2026,254711000999,4800,pending
+            15 Sept 2026,254733444555,3500,delivered
             """.trimIndent(),
             csv,
         )
         // GET /admin/orders sends no contact_name (bare OrderEvent rows), so the customer is the
-        // phone, as the web's mapOrder makes it. Should a name ever arrive, a comma in it is quoted.
+        // bare wa_id, as the web's mapOrder makes it (contact_name ?? wa_id). Should a name ever arrive, a comma in it is quoted.
         val named = report(ReportRange.D30).orders.first { it.id == "o4" }.copy(contactName = "Kariuki, Samuel")
         assertEquals("Date,Customer,Amount,Status\n21 Sept 2026,\"Kariuki, Samuel\",9600,cancelled", reportCsv(listOf(named)))
         assertEquals("Date,Customer,Amount,Status\n", reportCsv(emptyList()))

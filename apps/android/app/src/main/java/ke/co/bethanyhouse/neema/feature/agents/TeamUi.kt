@@ -58,7 +58,7 @@ val LocalTeamPreview = staticCompositionLocalOf { TeamPreview() }
 enum class BtnVariant { Primary, Danger, Ghost, Default, Amber, Secondary, Outline }
 
 /** SBtn danger by day: #fff5f5 fill, #c0392b text, #fecaca border. */
-private val DangerFillLight = ke.co.bethanyhouse.neema.feature.reports.AreaPalette.DangerWash
+private val DangerFillLight = Palette.DangerWash
 private val DangerBorderLight = Palette.Red200
 
 /** (fill, content, border) for [variant] on the current theme. */
