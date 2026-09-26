@@ -192,7 +192,7 @@ class CallManager internal constructor(
     /** The call currently on screen. */
     private var activeId: String? = null
     /** callId → when we last dismissed it (the 12s re-ring cooldown). */
-    private val endedAt = HashMap<String, Long>()
+    private val endedAt = LinkedHashMap<String, Long>()   // oldest first
     private var recEnabled = true
     private var recording: CallRecording? = null
     private var recCallId: String? = null
@@ -386,12 +386,12 @@ class CallManager internal constructor(
      */
     private fun markEnded(callId: String) {
         val t = now()
+        endedAt.remove(callId)   // re-inserted at the end: the map stays oldest-first
         endedAt[callId] = t
         if (endedAt.size <= ENDED_MAX) return
         endedAt.values.removeAll { t - it > ENDED_KEEP_MS }
-        if (endedAt.size > ENDED_MAX) {
-            endedAt.entries.sortedBy { it.value }.take(endedAt.size - ENDED_MAX).map { it.key }.forEach { endedAt.remove(it) }
-        }
+        val it = endedAt.entries.iterator()
+        while (endedAt.size > ENDED_MAX && it.hasNext()) { it.next(); it.remove() }
     }
 
     /** How many ended calls are remembered (tests: it stays bounded under a burst). */

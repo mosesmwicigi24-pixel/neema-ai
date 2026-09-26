@@ -1,5 +1,13 @@
 package ke.co.bethanyhouse.neema.feature.orders
 
+import androidx.compose.ui.semantics.Role
+import androidx.compose.material3.ripple
+import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import ke.co.bethanyhouse.neema.core.ui.theme.TabularNums
+import ke.co.bethanyhouse.neema.core.ui.theme.NeemaFont
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Row
@@ -181,7 +189,7 @@ fun orderStats(orders: List<Order>): OrderStats {
 fun statusColumns(width: Dp, gutter: Dp, fontScale: Float): Int {
     val four = (width - gutter * 2 - 36.dp) / 4
     return when {
-        width >= 600.dp && four >= 90.dp * fontScale + 28.dp -> 4
+        width >= 600.dp && four >= 100.dp * fontScale + 28.dp -> 4
         width / fontScale < 240.dp -> 1
         else -> 2
     }
@@ -228,7 +236,7 @@ val Order.amount: Double get() = if (total != 0.0) total else subtotal
  * Money and counts line up in columns: tabular (fixed-width) figures, so
  * "KES 1,284,750" over "KES 99,999" aligns digit for digit.
  */
-val Tabular = TextStyle(fontFeatureSettings = "tnum")
+val Tabular = TabularNums
 
 /**
  * A figure that must never break inside itself ("KES" on one line, the digits
@@ -273,6 +281,26 @@ fun Badge(
         color = toneText(tone), fontSize = fontSize.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
     )
 }
+
+/**
+ * Makes a compact control's 48dp touch cell the tappable node itself — the
+ * area TalkBack focuses and a finger hits — while the control keeps the web's
+ * smaller look (an h-7 chip, a 34px circle). Put it BEFORE the look; then
+ * [pressedOn] after the look's clip, so the ripple keeps the visible shape:
+ * `Modifier.touchCell(press) { … }.clip(shape).background(bg).pressedOn(press)`.
+ */
+fun Modifier.touchCell(
+    interaction: MutableInteractionSource,
+    enabled: Boolean = true,
+    onClickLabel: String? = null,
+    role: Role? = null,
+    onClick: () -> Unit,
+): Modifier = clickable(interaction, indication = null, enabled = enabled, onClickLabel = onClickLabel, role = role, onClick = onClick)
+    .minimumInteractiveComponentSize()
+
+/** The pressed ripple of a [touchCell], drawn on the control's own shape. */
+@Composable
+fun Modifier.pressedOn(interaction: MutableInteractionSource): Modifier = indication(interaction, ripple())
 
 /** CH_BG — the orders (and leads) list's flat channel colours. */
 internal val CH_BG = mapOf(
@@ -322,24 +350,31 @@ fun CompactSearchField(
 ) {
     val c = Neema.colors
     val shape = RoundedCornerShape(radius)
-    val style = TextStyle(fontSize = fontSize.sp, color = c.text)
+    val style = TextStyle(fontFamily = NeemaFont, fontSize = fontSize.sp, color = c.text)
     BasicTextField(
         value = value, onValueChange = onChange, singleLine = true, textStyle = style,
         cursorBrush = SolidColor(c.gold),
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-        modifier = modifier.heightIn(min = height).clip(shape).background(c.bg2).border(1.dp, c.border, shape),
+        // The field itself — what a finger hits and TalkBack focuses — is at
+        // least 48dp tall; the web's h-8 / h-9 box is drawn centred inside it.
+        modifier = modifier.heightIn(min = maxOf(height, 48.dp)),
         decorationBox = { inner ->
-            Box(Modifier.fillMaxWidth().heightIn(min = height), contentAlignment = Alignment.CenterStart) {
-                Icon(
-                    Icons.Default.Search, contentDescription = null,
-                    tint = if (c.isDark) c.muted else iconTint,
-                    modifier = Modifier.padding(start = iconStart).size(iconSize),
-                )
-                Box(Modifier.padding(start = textStart, end = 12.dp, top = 4.dp, bottom = 4.dp)) {
-                    if (value.isEmpty()) {
-                        Text(placeholder, style = style.copy(color = c.muted), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            Box(Modifier.fillMaxWidth().heightIn(min = maxOf(height, 48.dp)), contentAlignment = Alignment.Center) {
+                Box(
+                    Modifier.fillMaxWidth().heightIn(min = height).clip(shape).background(c.bg2).border(1.dp, c.border, shape),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    Icon(
+                        Icons.Default.Search, contentDescription = null,
+                        tint = if (c.isDark) c.muted else iconTint,
+                        modifier = Modifier.padding(start = iconStart).size(iconSize),
+                    )
+                    Box(Modifier.padding(start = textStart, end = 12.dp, top = 4.dp, bottom = 4.dp)) {
+                        if (value.isEmpty()) {
+                            Text(placeholder, style = style.copy(color = c.muted), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                        }
+                        inner()
                     }
-                    inner()
                 }
             }
         },

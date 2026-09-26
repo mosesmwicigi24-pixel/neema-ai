@@ -1,5 +1,10 @@
 package ke.co.bethanyhouse.neema.feature.calls
 
+import androidx.compose.ui.semantics.Role
+import ke.co.bethanyhouse.neema.feature.orders.pressedOn
+import ke.co.bethanyhouse.neema.feature.orders.touchCell
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import ke.co.bethanyhouse.neema.core.ui.theme.TabularNums
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
@@ -280,18 +285,19 @@ private fun CallLog(
                         Text("WhatsApp voice calls · $total total", color = Muted, fontSize = 13.sp)
                     }
                     if (missed > 0) {
+                        val press = remember { MutableInteractionSource() }
                         Text(
                             "$missed missed" + if (missedOnly) " ✕" else "",
-                            color = CallInk.MissedText, fontSize = 12.sp, fontWeight = FontWeight.Medium, style = TextStyle(fontFeatureSettings = "tnum"),
+                            color = CallInk.MissedText, fontSize = 12.sp, fontWeight = FontWeight.Medium, style = TabularNums,
                             modifier = Modifier
                                 .offset(y = (-10).dp)
-                                .minimumInteractiveComponentSize()
+                                .touchCell(press, onClickLabel = if (missedOnly) "Show all calls" else "Show only missed calls") {
+                                    vm.missedOnly.value = !missedOnly
+                                }
                                 .clip(RoundedCornerShape(50))
                                 .background(RedC.copy(alpha = if (missedOnly) 0.35f else 0.16f))
                                 .border(1.dp, if (missedOnly) RedC.copy(alpha = 0.6f) else Color.Transparent, RoundedCornerShape(50))
-                                .clickable(onClickLabel = if (missedOnly) "Show all calls" else "Show only missed calls") {
-                                    vm.missedOnly.value = !missedOnly
-                                }
+                                .pressedOn(press)
                                 .padding(horizontal = 11.dp, vertical = 5.dp),
                         )
                     }
@@ -391,8 +397,10 @@ internal fun androidx.compose.foundation.lazy.LazyListState.cardExtent(): CardEx
     val first = items.first()
     val last = items.last()
     val avg = items.sumOf { it.size }.toFloat() / items.size
-    val top = first.offset - first.index * avg
-    val bottom = (last.offset + last.size) + (info.totalItemsCount - 1 - last.index) * avg
+    // Item offsets start after the list's top content padding; the box is placed from the list's own top.
+    val shift = -info.viewportStartOffset
+    val top = shift + first.offset - first.index * avg
+    val bottom = shift + (last.offset + last.size) + (info.totalItemsCount - 1 - last.index) * avg
     return CardExtent(top, bottom)
 }
 
@@ -492,8 +500,10 @@ private fun statusLine(o: Outcome, c: Call) = buildAnnotatedString {
 @Composable
 private fun RoundIcon(icon: ImageVector, iconSize: Dp, label: String, bg: Color, tint: Color, border: Color, onClick: () -> Unit) {
     // 34dp to the eye (the web's circle), 48dp to the finger.
+    val press = remember { MutableInteractionSource() }
     Box(
-        Modifier.minimumInteractiveComponentSize().size(34.dp).clip(CircleShape).background(bg).border(1.dp, border, CircleShape).clickable(onClick = onClick),
+        Modifier.touchCell(press, role = Role.Button, onClick = onClick)
+            .size(34.dp).clip(CircleShape).background(bg).border(1.dp, border, CircleShape).pressedOn(press),
         contentAlignment = Alignment.Center,
     ) { Icon(icon, label, tint = tint, modifier = Modifier.size(iconSize)) }
 }
@@ -516,7 +526,7 @@ private fun TranscriptPanel(t: TranscriptUi, vm: CallsViewModel, compact: Boolea
             Text("$err ", color = RedC, fontSize = 12.sp, modifier = Modifier.weight(1f, fill = false))
             Text(
                 "Retry", color = Green, fontSize = 12.sp, textDecoration = TextDecoration.Underline,
-                modifier = Modifier.minimumInteractiveComponentSize().clickable { vm.retryTranscript() }.padding(horizontal = 4.dp, vertical = 4.dp),
+                modifier = Modifier.clickable(role = Role.Button) { vm.retryTranscript() }.minimumInteractiveComponentSize().padding(horizontal = 4.dp, vertical = 4.dp),
             )
         }
         return
@@ -538,7 +548,7 @@ private fun TranscriptPanel(t: TranscriptUi, vm: CallsViewModel, compact: Boolea
             Text(
                 (if (t.showFull) "Hide" else "Show") + " full transcript" + (data.language?.takeIf { it.isNotEmpty() }?.let { " · $it" } ?: ""),
                 color = Muted, fontSize = 11.sp,
-                modifier = Modifier.heightIn(min = 40.dp).clickable { vm.toggleFull() }.wrapContentHeight(Alignment.CenterVertically).padding(vertical = 2.dp),
+                modifier = Modifier.clickable { vm.toggleFull() }.heightIn(min = 48.dp).wrapContentHeight(Alignment.CenterVertically).padding(vertical = 2.dp),
             )
             if (t.showFull) Text(data.transcript!!, color = Sage, fontSize = 12.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 6.dp))
         }
@@ -546,12 +556,13 @@ private fun TranscriptPanel(t: TranscriptUi, vm: CallsViewModel, compact: Boolea
             Text("Transcribing… this runs on our server, usually ~1–2 min.", color = CallInk.Gold, fontSize = 12.sp)
         }
         if (st == "recorded") {
+            val press = remember { MutableInteractionSource() }
             Text(
                 if (t.busy) "Starting…" else "Transcribe & summarise",
                 color = Ink, fontSize = 12.sp, fontWeight = FontWeight.Medium,
                 // opacity: busy ? 0.6 : 1 — the whole button, label included.
-                modifier = Modifier.minimumInteractiveComponentSize().alpha(if (t.busy) 0.6f else 1f).clip(RoundedCornerShape(8.dp)).background(Green)
-                    .clickable(enabled = !t.busy) { vm.runTranscribe() }
+                modifier = Modifier.touchCell(press, enabled = !t.busy, role = Role.Button) { vm.runTranscribe() }
+                    .alpha(if (t.busy) 0.6f else 1f).clip(RoundedCornerShape(8.dp)).background(Green).pressedOn(press)
                     .padding(horizontal = 14.dp, vertical = 9.dp),
             )
         }
@@ -560,7 +571,7 @@ private fun TranscriptPanel(t: TranscriptUi, vm: CallsViewModel, compact: Boolea
                 Text("Transcription failed. ", color = RedC, fontSize = 12.sp)
                 Text(
                     "Retry", color = Green, fontSize = 12.sp, textDecoration = TextDecoration.Underline,
-                    modifier = Modifier.minimumInteractiveComponentSize().clickable(enabled = !t.busy) { vm.runTranscribe() }.padding(horizontal = 4.dp),
+                    modifier = Modifier.clickable(enabled = !t.busy, role = Role.Button) { vm.runTranscribe() }.minimumInteractiveComponentSize().padding(horizontal = 4.dp),
                 )
             }
         }
@@ -600,10 +611,12 @@ private fun LoadErrorBanner(message: String, refreshing: Boolean, onRetry: () ->
 /** A small pill that retries a failed load; a spinner while it runs (no double taps). */
 @Composable
 private fun RetryButton(busy: Boolean, onClick: () -> Unit) {
+    val press = remember { MutableInteractionSource() }
     Box(
-        Modifier.minimumInteractiveComponentSize().clip(RoundedCornerShape(50)).background(ChannelColors.WhatsApp.copy(alpha = 0.16f))
+        Modifier.touchCell(press, enabled = !busy, onClickLabel = "Retry", role = Role.Button, onClick = onClick)
+            .clip(RoundedCornerShape(50)).background(ChannelColors.WhatsApp.copy(alpha = 0.16f))
             .border(1.dp, ChannelColors.WhatsApp.copy(alpha = 0.3f), RoundedCornerShape(50))
-            .clickable(enabled = !busy, onClickLabel = "Retry", onClick = onClick)
+            .pressedOn(press)
             .padding(horizontal = 14.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -679,8 +692,9 @@ private fun PlayerBar(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Color.White.copy(alpha = 0.06f)).padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        val press = remember { MutableInteractionSource() }
         Box(
-            Modifier.minimumInteractiveComponentSize().size(30.dp).clip(CircleShape).background(Green).clickable(onClick = onToggle),
+            Modifier.touchCell(press, role = Role.Button, onClick = onToggle).size(30.dp).clip(CircleShape).background(Green).pressedOn(press),
             contentAlignment = Alignment.Center,
         ) {
             if (buffering) CircularProgressIndicator(Modifier.size(14.dp), color = Ink, strokeWidth = 2.dp)
@@ -693,7 +707,7 @@ private fun PlayerBar(
             colors = SliderDefaults.colors(thumbColor = Green, activeTrackColor = Green, inactiveTrackColor = Color.White.copy(alpha = 0.2f)),
             modifier = Modifier.weight(1f).padding(horizontal = 8.dp).heightIn(max = 32.dp),
         )
-        Text(label, color = Muted, fontSize = 11.sp, style = TextStyle(fontFeatureSettings = "tnum"), maxLines = 1)
+        Text(label, color = Muted, fontSize = 11.sp, style = TabularNums, maxLines = 1)
     }
 }
 
@@ -755,10 +769,12 @@ private fun CallerPanel(
 
 @Composable
 private fun StripButton(text: String, onClick: () -> Unit) {
+    val press = remember { MutableInteractionSource() }
     Row(
-        Modifier.minimumInteractiveComponentSize().clip(RoundedCornerShape(50)).background(ChannelColors.WhatsApp.copy(alpha = 0.14f))
+        Modifier.touchCell(press, role = Role.Button, onClick = onClick)
+            .clip(RoundedCornerShape(50)).background(ChannelColors.WhatsApp.copy(alpha = 0.14f))
             .border(1.dp, ChannelColors.WhatsApp.copy(alpha = 0.3f), RoundedCornerShape(50))
-            .clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 5.dp),
+            .pressedOn(press).padding(horizontal = 12.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(text, color = Green, fontSize = 12.sp, fontWeight = FontWeight.Medium)
@@ -810,10 +826,11 @@ private fun ReadinessBanner(r: CallReadiness, compact: Boolean = false, inset: D
         )
         Spacer(Modifier.width(12.dp))
         val action: @Composable () -> Unit = {
+            val press = remember { MutableInteractionSource() }
             Text(
                 button, color = Ink, fontSize = 12.sp, fontWeight = FontWeight.Medium,
-                modifier = Modifier.minimumInteractiveComponentSize().clip(RoundedCornerShape(50)).background(AmberC)
-                    .clickable { open() }.padding(horizontal = 14.dp, vertical = 7.dp),
+                modifier = Modifier.touchCell(press, role = Role.Button) { open() }
+                    .clip(RoundedCornerShape(50)).background(AmberC).pressedOn(press).padding(horizontal = 14.dp, vertical = 7.dp),
             )
         }
         Column(Modifier.weight(1f)) {

@@ -1,5 +1,10 @@
 package ke.co.bethanyhouse.neema.feature.leads
 
+import androidx.compose.ui.semantics.Role
+import ke.co.bethanyhouse.neema.feature.orders.pressedOn
+import ke.co.bethanyhouse.neema.feature.orders.touchCell
+import androidx.compose.runtime.remember
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -145,9 +150,10 @@ fun LeadsScreen(dash: DashboardViewModel) {
                         LeadsSearch(search, { vm.search.value = it }, Modifier.width(220.dp))
                     }
                 } else {
-                    Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    // The search field's 48dp touch cell adds 8dp above and below its h-8 box.
+                    Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp)) {
                         headerText()
-                        Spacer(Modifier.height(10.dp))
+                        Spacer(Modifier.height(2.dp))
                         LeadsSearch(search, { vm.search.value = it }, Modifier.fillMaxWidth())
                     }
                 }
@@ -265,10 +271,12 @@ private fun StagePill(label: String, selected: Boolean, stage: LeadStage?, onCli
         c.isDark -> c.textMid
         else -> Palette.Stone500
     }
+    val press = remember { MutableInteractionSource() }
     Row(
         // 28dp to the eye (h-7), 48dp to the finger; grows with large text.
-        Modifier.minimumInteractiveComponentSize().heightIn(min = 28.dp).clip(shape).background(bg).border(1.dp, border, shape)
-            .clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 2.dp),
+        Modifier.touchCell(press, role = Role.Tab, onClick = onClick)
+            .heightIn(min = 28.dp).clip(shape).background(bg).border(1.dp, border, shape)
+            .pressedOn(press).padding(horizontal = 12.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (stage != null) {
@@ -411,11 +419,13 @@ private fun MoveButton(label: String, bg: Color, fg: Color, modifier: Modifier, 
     // hover at 9px; here it is always there and is the card's main action, so
     // it reads at 11sp and takes a 48dp touch cell (32dp to the eye).
     val shape = RoundedCornerShape(6.dp)
+    val press = remember { MutableInteractionSource() }
     Text(
         label,
-        modifier = modifier.minimumInteractiveComponentSize().heightIn(min = 32.dp).clip(shape).background(bg)
+        modifier = modifier.touchCell(press, enabled = enabled, role = Role.Button, onClick = onClick)
+            .fillMaxWidth().heightIn(min = 32.dp).clip(shape).background(bg)
             .border(1.dp, Neema.colors.border, shape)
-            .clickable(enabled = enabled, onClick = onClick).wrapContentHeight(Alignment.CenterVertically)
+            .pressedOn(press).wrapContentHeight(Alignment.CenterVertically)
             .padding(horizontal = 4.dp, vertical = 6.dp),
         fontSize = 11.sp, lineHeight = 15.sp, color = fg.copy(alpha = if (enabled) 1f else 0.45f), textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis,
     )
@@ -480,13 +490,15 @@ internal fun LeadDetail(
             stages.forEach { s ->
                 val on = s.id == stage
                 val shape = RoundedCornerShape(8.dp)
+                val press = remember { MutableInteractionSource() }
                 Text(
                     s.label,
                     // 48dp to the finger; the chips keep the web's px-2.5 py-1.5 look.
-                    modifier = Modifier.minimumInteractiveComponentSize().clip(shape)
+                    modifier = Modifier.touchCell(press, enabled = !saving, role = Role.RadioButton) { stage = s.id }
+                        .clip(shape)
                         .background(if (on) s.bgC() else c.bg2)
                         .border(1.dp, if (on) s.borderC() else if (c.isDark) c.hairline else Palette.Stone200, shape)
-                        .clickable(enabled = !saving) { stage = s.id }
+                        .pressedOn(press)
                         .padding(horizontal = 10.dp, vertical = 6.dp),
                     fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
                     color = if (on) s.textC() else if (c.isDark) c.muted else Palette.Stone400,

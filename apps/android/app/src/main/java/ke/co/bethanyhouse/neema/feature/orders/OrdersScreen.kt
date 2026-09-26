@@ -1,5 +1,8 @@
 package ke.co.bethanyhouse.neema.feature.orders
 
+import androidx.compose.ui.semantics.Role
+import androidx.compose.runtime.remember
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -152,7 +155,8 @@ fun OrdersScreen(dash: DashboardViewModel) {
 
                 // ── Status summary cards (tap = filter) ────────────────────
                 item(key = "cards", contentType = "cards") {
-                    Column(Modifier.padding(bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    // 14dp + the search field's 6dp touch margin = the web's mb-5.
+                    Column(Modifier.padding(bottom = 14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         ORDER_STATUSES.chunked(cols).forEach { rowStatuses ->
                             Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 rowStatuses.forEach { s ->
@@ -171,13 +175,15 @@ fun OrdersScreen(dash: DashboardViewModel) {
 
                 // ── Search + active filter ─────────────────────────────────
                 item(key = "search", contentType = "search") {
-                    Row(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    // 10dp + the field's 6dp touch margin = the web's mb-4.
+                    Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                         CompactSearchField(search, vm::setSearch, placeholder = "Search by name or phone…", modifier = Modifier.weight(1f))
                         if (filter != "all") {
                             Spacer(Modifier.width(8.dp))
+                            val press = remember { MutableInteractionSource() }
                             Box(
-                                Modifier.minimumInteractiveComponentSize().heightIn(min = 36.dp).clip(RoundedCornerShape(12.dp)).background(c.gold2)
-                                    .clickable(onClickLabel = "Clear the status filter") { vm.setFilter("all") }.padding(horizontal = 12.dp),
+                                Modifier.touchCell(press, onClickLabel = "Clear the status filter") { vm.setFilter("all") }
+                                    .heightIn(min = 36.dp).clip(RoundedCornerShape(12.dp)).background(c.gold2).pressedOn(press).padding(horizontal = 12.dp),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Text("${STATUS_META[filter]?.label ?: filter} ✕", fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
@@ -797,10 +803,12 @@ fun WebBtn(
             else Triple(Color.Transparent, Palette.Gray700, Palette.Gray300)
     }
     val shape = RoundedCornerShape(8.dp)
+    val press = remember { MutableInteractionSource() }
     Row(
         // 36dp to the eye (the web's h-9), 48dp to the finger.
-        modifier.minimumInteractiveComponentSize().heightIn(min = 36.dp).alpha(if (enabled) 1f else 0.4f).clip(shape).background(bg).border(1.dp, border, shape)
-            .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 16.dp),
+        modifier.touchCell(press, enabled = enabled, role = Role.Button, onClick = onClick)
+            .heightIn(min = 36.dp).alpha(if (enabled) 1f else 0.4f).clip(shape).background(bg).border(1.dp, border, shape)
+            .pressedOn(press).padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {

@@ -1,5 +1,6 @@
 package ke.co.bethanyhouse.neema.feature.calls
 
+import ke.co.bethanyhouse.neema.core.ui.theme.TabularNums
 import android.Manifest
 import android.app.Activity
 import android.content.Context
@@ -222,7 +223,7 @@ fun CallCard(c: CallUiState, actions: CallActions) {
             if (!c.from.isNullOrEmpty()) {
                 Spacer(Modifier.height(6.dp))
                 // tracking-widest: 0.1em.
-                Text("+${c.from}", color = SubText, fontSize = 14.sp, letterSpacing = 1.4.sp, style = TextStyle(fontFeatureSettings = "tnum"), maxLines = 1)
+                Text("+${c.from}", color = SubText, fontSize = 14.sp, letterSpacing = 1.4.sp, style = TabularNums, maxLines = 1)
             }
 
             if (ringing) {
@@ -238,7 +239,7 @@ fun CallCard(c: CallUiState, actions: CallActions) {
                 // font-light tabular-nums, letter-spacing 0.12em.
                 Text(
                     mmss(c.seconds), color = CardText, fontSize = 44.sp, fontWeight = FontWeight.Light,
-                    letterSpacing = 5.28.sp, style = TextStyle(fontFeatureSettings = "tnum"), maxLines = 1,
+                    letterSpacing = 5.28.sp, style = TabularNums, maxLines = 1,
                 )
                 Spacer(Modifier.height(16.dp))
                 if (c.reconnecting) {

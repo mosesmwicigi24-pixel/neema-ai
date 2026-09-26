@@ -1,5 +1,10 @@
 package ke.co.bethanyhouse.neema.feature.deals
 
+import androidx.compose.ui.semantics.Role
+import ke.co.bethanyhouse.neema.feature.orders.pressedOn
+import ke.co.bethanyhouse.neema.feature.orders.touchCell
+import androidx.compose.runtime.remember
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import ke.co.bethanyhouse.neema.core.util.AppClock
 
 import androidx.compose.foundation.background
@@ -61,7 +66,7 @@ private val STAGES = listOf(
 internal fun groupByStage(open: List<Deal>): Map<String, List<Deal>> {
     val ids = STAGES.map { it.id }
     val out = ids.associateWith { ArrayList<Deal>() }
-    for (d in open) out.getValue(d.stage?.takeIf { it in ids } ?: "new").add(d)
+    for (d in open) out.getValue(d.stage.takeIf { it in ids } ?: "new").add(d)
     return out
 }
 
@@ -254,7 +259,7 @@ private fun QueueSlice(first: Boolean, last: Boolean, content: @Composable Colum
     Column(
         Modifier.padding(bottom = if (last) 20.dp else 0.dp).fillMaxWidth()
             .listSegment(first, last, border = stone200(), fill = c.bg2, radius = 16.dp)
-            .padding(start = 16.dp, end = 16.dp, top = if (first) 16.dp else 0.dp, bottom = if (last) 16.dp else 8.dp),
+            .padding(start = 16.dp, end = 16.dp, top = if (first) 16.dp else 0.dp, bottom = when { last -> 16.dp; first -> 0.dp; else -> 8.dp }),
         content = content,
     )
 }
@@ -375,12 +380,14 @@ private fun SmallButton(
     onClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(8.dp)
+    val press = remember { MutableInteractionSource() }
     Text(
         label,
-        // The web's compact button to the eye, a 48dp cell to the finger.
-        modifier = Modifier.minimumInteractiveComponentSize().clip(shape).background(if (enabled) bg else bg.copy(alpha = bg.alpha * 0.5f))
+        // The web's compact button to the eye, a 48dp cell to the finger (and to TalkBack).
+        modifier = Modifier.touchCell(press, enabled = enabled, role = Role.Button, onClick = onClick)
+            .clip(shape).background(if (enabled) bg else bg.copy(alpha = bg.alpha * 0.5f))
             .then(if (border != null) Modifier.border(1.dp, border, shape) else Modifier)
-            .clickable(enabled = enabled, onClick = onClick)
+            .pressedOn(press)
             .padding(horizontal = hPad, vertical = vPad),
         // The web's inherited 1.5 line height, not the theme's body 21sp.
         color = fg.copy(alpha = if (enabled) 1f else 0.5f), fontSize = fontSize.sp, lineHeight = (fontSize * 1.5).sp,
