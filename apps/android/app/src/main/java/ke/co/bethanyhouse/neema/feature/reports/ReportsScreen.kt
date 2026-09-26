@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
@@ -333,7 +334,7 @@ private fun RangeControls(
         Box {
             OutlinedButton(
                 onClick = { menu = true }, shape = RoundedCornerShape(8.dp),
-                contentPadding = PaddingValues(horizontal = 12.dp), modifier = Modifier.height(38.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp), modifier = Modifier.heightIn(min = 38.dp),
             ) {
                 Text(range.label, fontSize = 13.sp, color = c.text)
                 Icon(Icons.Outlined.ExpandMore, null, modifier = Modifier.size(18.dp))
@@ -355,7 +356,7 @@ private fun RangeControls(
             Button(
                 onClick = onExport, shape = RoundedCornerShape(8.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = c.gold, contentColor = MaterialTheme.colorScheme.onPrimary),
-                contentPadding = PaddingValues(horizontal = 14.dp), modifier = Modifier.height(38.dp),
+                contentPadding = PaddingValues(horizontal = 14.dp), modifier = Modifier.heightIn(min = 38.dp),
             ) {
                 Icon(Icons.Outlined.Download, null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
@@ -390,7 +391,7 @@ private fun RangeControls(
 private fun DateButton(date: LocalDate?, onClick: () -> Unit) {
     OutlinedButton(
         onClick = onClick, shape = RoundedCornerShape(8.dp),
-        contentPadding = PaddingValues(horizontal = 10.dp), modifier = Modifier.height(38.dp),
+        contentPadding = PaddingValues(horizontal = 10.dp), modifier = Modifier.heightIn(min = 38.dp),
     ) {
         Icon(Icons.Outlined.CalendarMonth, null, modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(6.dp))
@@ -411,11 +412,15 @@ private fun OverviewTab(r: Report, wide: Boolean) {
         { StatBox("Pending Orders", r.pending.toString(), "Awaiting confirmation", c.amber, it) },
         { StatBox("Delivered Orders", r.delivered.toString(), "$deliveryRate% delivery rate", c.blue, it) },
     )
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        tiles.chunked(if (wide) 4 else 2).forEach { rowTiles ->
+    BoxWithConstraints { val width = maxWidth; Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // The web's grid-cols-2 / grid-cols-4, fewer when the cards would be
+        // too narrow for their figures (a foldable, or a large font).
+        val cols = gridColumns(width, if (wide) 4 else 2)
+        tiles.chunked(cols).forEach { rowTiles ->
             // Equal heights across a row, like the web's grid.
             Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 rowTiles.forEach { it(Modifier.weight(1f).fillMaxHeight()) }
+                repeat(cols - rowTiles.size) { Spacer(Modifier.weight(1f)) }
             }
         }
         val convChart: @Composable (Modifier) -> Unit = {
@@ -446,20 +451,29 @@ private fun OverviewTab(r: Report, wide: Boolean) {
                 Triple("Delivered", c.green, r.delivered),
                 Triple("Cancelled", c.red, r.cancelled),
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                items.forEach { (label, color, count) ->
-                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(count.toString(), fontSize = 20.sp, fontWeight = FontWeight.Bold, color = color)
-                        Text(label, fontSize = 11.sp, color = c.muted, maxLines = 1)
-                        Spacer(Modifier.height(8.dp))
-                        val frac = if (r.orders.isNotEmpty()) count.toFloat() / r.orders.size else 0f
-                        Box(Modifier.fillMaxWidth().height(4.dp).clip(CircleShape).background(c.bg3)) {
-                            Box(Modifier.fillMaxWidth(frac).fillMaxHeight().clip(CircleShape).background(color))
+            // The web's grid-cols-4; two by two when "Confirmed" wouldn't fit a quarter.
+            BoxWithConstraints {
+                val perRow = if (gridColumns(maxWidth, 4, minCell = 64.dp, minWideCell = 72.dp) > 2) 4 else 2
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    items.chunked(perRow).forEach { line ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            line.forEach { (label, color, count) ->
+                                Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                                    BigNumber(count.toString(), color, max = 20.sp)
+                                    Text(label, fontSize = 11.sp, color = c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Spacer(Modifier.height(8.dp))
+                                    val frac = if (r.orders.isNotEmpty()) count.toFloat() / r.orders.size else 0f
+                                    Box(Modifier.fillMaxWidth().height(4.dp).clip(CircleShape).background(c.bg3)) {
+                                        Box(Modifier.fillMaxWidth(frac).fillMaxHeight().clip(CircleShape).background(color))
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
         }
+    }
     }
 }
 

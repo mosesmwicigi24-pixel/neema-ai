@@ -31,6 +31,21 @@ class CatalogFilterTest {
         assertEquals(6, catalogColumns(1024.dp))
     }
 
+    /** Round 7: a large font drops columns until each card keeps ~118dp per 100% of font. */
+    @Test fun columns_giveWayToALargeFont() {
+        assertEquals(2, catalogColumns(328.dp, 1.3f))   // a 360dp phone at 130%: still two
+        assertEquals(1, catalogColumns(361.dp, 2.0f))   // a Pixel 5 at 200%: one card a row
+        assertEquals(4, catalogColumns(1232.dp, 2.0f))  // a landscape tablet at 200%: six → four
+        assertEquals(6, catalogColumns(1232.dp, 1.0f))
+        assertEquals(2, catalogColumns(380.dp, 0.85f))  // a small font never adds columns past the web's
+    }
+
+    /** A price range only wraps at the dash: "KES 3,500 –" / "KES 4,200", never "KES" / "4,200". */
+    @Test fun priceRange_keepsEachAmountWhole() {
+        val shirt = catalog.first { it.sku == "CS-BLK" }
+        assertEquals("KES 3,500 – KES 4,200", ke.co.bethanyhouse.neema.feature.catalog.unbroken(priceText(shirt)))
+    }
+
     @Test fun categories_distinctNonEmpty_inCatalogueOrder() {
         assertEquals(
             // The tray's hub category is "" (hub_client._map_product: name_en or ""), so it offers no option.

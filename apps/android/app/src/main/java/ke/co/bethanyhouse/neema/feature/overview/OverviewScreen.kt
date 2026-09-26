@@ -57,7 +57,12 @@ import ke.co.bethanyhouse.neema.core.ui.components.Panel
 import ke.co.bethanyhouse.neema.core.ui.components.channelStyle
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import ke.co.bethanyhouse.neema.core.util.Fmt
+import ke.co.bethanyhouse.neema.feature.reports.AxisLabels
+import ke.co.bethanyhouse.neema.feature.reports.BigNumber
+import ke.co.bethanyhouse.neema.feature.reports.PanelHeader
+import ke.co.bethanyhouse.neema.feature.reports.tabular
 import ke.co.bethanyhouse.neema.feature.reports.capitalizeWords
+import ke.co.bethanyhouse.neema.feature.reports.gridColumns
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
@@ -109,6 +114,7 @@ fun OverviewScreen(
 
     BoxWithConstraints(Modifier.fillMaxSize().background(c.bg)) {
         val wide = maxWidth >= 600.dp
+        val fullWidth = maxWidth
         PullToRefreshBox(isRefreshing = refreshing, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize()) {
             Column(
                 Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(if (wide) 24.dp else 16.dp),
@@ -145,10 +151,14 @@ fun OverviewScreen(
                     { StatCard("AI Conversations", stats.aiConvs.toString(), "Fully automated", OverviewIcons.Robot, AccentBlue, cardsLoading, it) },
                     { StatCard("Catalog Items", stats.totalItems.toString(), "${stats.inStockItems} in stock", OverviewIcons.Box, AccentViolet, cardsLoading, it) },
                 )
+                // The web's grid-cols-2 sm:grid-cols-3 — one a row when a large
+                // font would leave two cards no room for their figures.
+                val cols = gridColumns(fullWidth - (if (wide) 48.dp else 32.dp), if (wide) 3 else 2)
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    cards.chunked(if (wide) 3 else 2).forEach { row ->
+                    cards.chunked(cols).forEach { row ->
                         Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             row.forEach { it(Modifier.weight(1f).fillMaxHeight()) }
+                            repeat(cols - row.size) { Spacer(Modifier.weight(1f)) }
                         }
                     }
                 }
@@ -275,9 +285,12 @@ private fun qtyText(q: Double): String = if (q == Math.floor(q)) q.toLong().toSt
 @Composable
 private fun strong(): Color = if (Neema.colors.isDark) Neema.colors.gold2 else Color(0xFF2C4E18)
 
-/** The web's #b5da8b (rank numbers); a readable slate by night. */
+/**
+ * Rank numbers. The web's #b5da8b is ~1.6:1 on white — too faint to read —
+ * so both themes use the palette's muted text colour.
+ */
 @Composable
-private fun faint(): Color = if (Neema.colors.isDark) Neema.colors.muted.copy(alpha = 0.75f) else Neema.colors.border
+private fun faint(): Color = Neema.colors.muted
 
 @Composable
 private fun PanelTitle(text: String, modifier: Modifier = Modifier) {
@@ -309,10 +322,12 @@ private fun StatCard(label: String, value: String, sub: String, icon: ImageVecto
                 )
                 Box(Modifier.padding(vertical = 2.dp).size(56.dp, 26.dp).alpha(pulse).clip(RoundedCornerShape(4.dp)).background(c.bg3))
             } else {
-                Text(value, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                // The whole figure, always: it shrinks to fit rather than "KES 98,7…".
+                BigNumber(value, c.text, max = 24.sp)
             }
-            Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = accent, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(sub, fontSize = 12.sp, color = c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(2.dp))
+            Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = accent, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 16.sp)
+            Text(sub, fontSize = 12.sp, color = c.muted, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 16.sp, modifier = Modifier.padding(top = 2.dp))
         }
     }
 }
@@ -321,10 +336,10 @@ private fun StatCard(label: String, value: String, sub: String, icon: ImageVecto
 private fun AttributionPanel(a: Attribution, wide: Boolean) {
     val c = Neema.colors
     Panel(Modifier.fillMaxWidth(), padding = PaddingValues(16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            PanelTitle("Where Sales Come From", Modifier.weight(1f))
-            Text("${a.totals.leads} attributed lead${if (a.totals.leads == 1) "" else "s"}", fontSize = 11.sp, color = c.muted)
-        }
+        PanelHeader(
+            title = { PanelTitle("Where Sales Come From") },
+            trailing = { Text("${a.totals.leads} attributed lead${if (a.totals.leads == 1) "" else "s"}", fontSize = 11.sp, color = c.muted) },
+        )
         Spacer(Modifier.height(10.dp))
         val slate = Color(0xFF64748B)
         if (wide) {
@@ -402,13 +417,14 @@ private fun RevenueChart(bars: List<DayBar>, modifier: Modifier) {
     val max = (bars.maxOfOrNull { it.value } ?: 0.0).coerceAtLeast(1.0)
     // Web: today #427425, other days #cee6b2, hover green-400.
     val todayColor = if (c.isDark) c.gold else AccentEmerald
-    val restColor = if (c.isDark) c.gold.copy(alpha = 0.22f) else c.bg4
+    // By night a wash of the moss strong enough to read against the navy panel.
+    val restColor = if (c.isDark) c.gold.copy(alpha = 0.45f) else c.bg4
     val pickedColor = Color(0xFF4ADE80)
     Panel(modifier, padding = PaddingValues(16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            PanelTitle("7-Day Revenue (KES)", Modifier.weight(1f))
-            Text(Fmt.currency(bars.sumOf { it.value }), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = strong())
-        }
+        PanelHeader(
+            title = { PanelTitle("7-Day Revenue (KES)") },
+            trailing = { Text(Fmt.currency(bars.sumOf { it.value }), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = strong(), style = tabular) },
+        )
         Text(picked?.let { "${bars[it].label}: ${Fmt.currency(bars[it].value)}" } ?: " ", fontSize = 11.sp, color = c.textDim, modifier = Modifier.padding(top = 8.dp))
         Canvas(
             Modifier.fillMaxWidth().height(104.dp).padding(top = 4.dp).pointerInput(bars) {
@@ -438,14 +454,11 @@ private fun RevenueChart(bars: List<DayBar>, modifier: Modifier) {
                 )
             }
         }
-        Row(Modifier.fillMaxWidth().padding(top = 6.dp)) {
-            bars.forEach { d ->
-                Text(
-                    d.label, fontSize = 10.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center,
-                    color = if (d.isToday) strong() else c.muted, modifier = Modifier.weight(1f),
-                )
-            }
-        }
+        val todayLabel = strong()
+        AxisLabels(
+            bars.map { it.label }, fontSize = 10.sp, modifier = Modifier.padding(top = 2.dp),
+            fontWeight = { FontWeight.Medium },
+        ) { i -> if (bars[i].isToday) todayLabel else c.muted }
         if (bars.all { it.value == 0.0 }) {
             Text("No orders in the last 7 days", fontSize = 12.sp, color = c.muted, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
         }
@@ -469,7 +482,7 @@ private fun OrderStatusPanel(s: Headline, modifier: Modifier) {
                 Column {
                     Row {
                         Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = c.textDim, modifier = Modifier.weight(1f))
-                        Text("$count", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = colors.second)
+                        Text("$count", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = colors.second, style = tabular)
                     }
                     Spacer(Modifier.height(6.dp))
                     ThinBar(if (s.totalOrders > 0) count.toFloat() / s.totalOrders else 0f, colors.first)
@@ -502,10 +515,11 @@ private fun ChannelPanel(rows: List<ChannelRow>, stats: Stats?, localCount: Int,
                         }
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
-                            Row {
-                                Text(cfg.label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.gold2, modifier = Modifier.weight(1f))
-                                Text("${r.count} · ${r.open} open", fontSize = 12.sp, color = c.muted)
-                            }
+                            // Counts drop under the name when a large font leaves no room beside it.
+                            PanelHeader(
+                                title = { Text(cfg.label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.gold2) },
+                                trailing = { Text("${r.count} · ${r.open} open", fontSize = 12.sp, color = c.muted, style = tabular) },
+                            )
                             Spacer(Modifier.height(6.dp))
                             ThinBar(r.count.toFloat() / total, cfg.color)
                         }
@@ -519,6 +533,7 @@ private fun ChannelPanel(rows: List<ChannelRow>, stats: Stats?, localCount: Int,
 @Composable
 private fun ActivityPanel(feed: List<ActivityEntry>, now: Long, modifier: Modifier) {
     val c = Neema.colors
+    val lines = if (androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.2f) 4 else 2
     Panel(modifier, padding = PaddingValues(16.dp)) {
         PanelTitle("Recent Activity")
         Spacer(Modifier.height(8.dp))
@@ -539,7 +554,8 @@ private fun ActivityPanel(feed: List<ActivityEntry>, now: Long, modifier: Modifi
                             append(" ${e.action}")
                             if (!e.target.isNullOrEmpty()) append(" · ${e.target}")
                         },
-                        fontSize = 12.sp, lineHeight = 16.sp, color = c.gold2, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                        // Two lines, more at a large font, so the order amount is never the part cut off.
+                        fontSize = 12.sp, lineHeight = 16.sp, color = c.gold2, maxLines = lines, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(Fmt.timeAgo(e.at, now), fontSize = 10.sp, color = c.muted)
@@ -552,6 +568,7 @@ private fun ActivityPanel(feed: List<ActivityEntry>, now: Long, modifier: Modifi
 @Composable
 private fun TopProductsPanel(top: List<TopProduct>) {
     val c = Neema.colors
+    val large = androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.2f
     val maxRev = top.first().revenue.takeIf { it != 0.0 } ?: 1.0
     Panel(Modifier.fillMaxWidth(), padding = PaddingValues(16.dp)) {
         PanelTitle("Top Products by Revenue")
@@ -562,10 +579,17 @@ private fun TopProductsPanel(top: List<TopProduct>) {
                     Text("${i + 1}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = faint(), modifier = Modifier.width(16.dp))
                     Spacer(Modifier.width(8.dp))
                     Column(Modifier.weight(1f)) {
-                        Row {
+                        val revenue: @Composable () -> Unit = {
+                            Text(Fmt.currency(p.revenue), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = strong(), style = tabular)
+                        }
+                        if (large) {
+                            // A large font: the name gets its own lines, the amount sits under it.
+                            Text(p.name, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.text, maxLines = 3, overflow = TextOverflow.Ellipsis, lineHeight = 16.sp)
+                            revenue()
+                        } else Row {
                             Text(p.name, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                             Spacer(Modifier.width(8.dp))
-                            Text(Fmt.currency(p.revenue), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = strong())
+                            revenue()
                         }
                         Spacer(Modifier.height(4.dp))
                         ThinBar((p.revenue / maxRev).toFloat(), c.gold)

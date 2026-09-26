@@ -1,6 +1,8 @@
 package ke.co.bethanyhouse.neema.feature.reports
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -23,6 +25,9 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -34,7 +39,67 @@ import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 /** A cell of a report table: plain text, or any composable (a badge, a dot). */
 typealias Cell = @Composable () -> Unit
 
-fun textCell(s: String): Cell = { Text(s, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+/** How many lines a [textCell] may take: one in a table row, two in a phone card (a phone number must not be cut). */
+val LocalCellLines = compositionLocalOf { 1 }
+
+fun textCell(s: String): Cell = {
+    Text(s, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = LocalCellLines.current, overflow = TextOverflow.Ellipsis)
+}
+
+/** Tabular figures, so totals and counts line up like the web's `tabular-nums`. */
+const val TABULAR = "tnum"
+
+/** The current text style with [TABULAR] figures. */
+val tabular: TextStyle @Composable get() = androidx.compose.material3.LocalTextStyle.current.merge(TextStyle(fontFeatureSettings = TABULAR))
+
+/**
+ * A headline figure (the web's `text-2xl font-bold tabular-nums`) that is
+ * never cut: on a narrow card or at a large font scale it steps down in size
+ * until the whole amount fits on one line, instead of "KES 98,7…".
+ */
+@Composable
+fun BigNumber(text: String, color: Color, modifier: Modifier = Modifier, max: TextUnit = 22.sp, min: TextUnit = 12.sp) {
+    BasicText(
+        text, modifier,
+        style = TextStyle(fontSize = max, fontWeight = FontWeight.Bold, color = color, fontFeatureSettings = TABULAR),
+        maxLines = 1, softWrap = false,
+        autoSize = TextAutoSize.StepBased(minFontSize = min, maxFontSize = max, stepSize = 1.sp),
+    )
+}
+
+/**
+ * Columns for a grid of cards: [max] when each cell keeps at least
+ * [minCell] (scaled with the user's font size), else two, else one. So a
+ * 360dp phone at 130% keeps two KPI cards a row, and at 200% gets one card
+ * per row instead of labels chopped to "Pendin…".
+ */
+@Composable
+fun gridColumns(width: Dp, max: Int, gap: Dp = 12.dp, minCell: Dp = 120.dp, minWideCell: Dp = 160.dp): Int {
+    val scale = LocalDensity.current.fontScale.coerceAtLeast(1f)
+    fun cell(n: Int) = (width - gap * (n - 1)) / n
+    return when {
+        max > 2 && cell(max) >= minWideCell * scale -> max
+        max >= 2 && cell(2) >= minCell * scale -> 2
+        else -> 1
+    }
+}
+
+/**
+ * A panel's title with a figure on the right (the web's `flex justify-between`).
+ * When both can't share a line — a narrow phone at a large font — the figure
+ * drops under the title rather than squeezing it into a word per line.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun PanelHeader(title: @Composable () -> Unit, trailing: @Composable () -> Unit, modifier: Modifier = Modifier) {
+    FlowRow(
+        modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+        verticalArrangement = Arrangement.spacedBy(2.dp), itemVerticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.padding(end = 8.dp)) { title() }
+        trailing()
+    }
+}
 
 /** The web's StatBox: a KPI card with a coloured left edge. */
 @Composable
@@ -46,10 +111,10 @@ fun StatBox(label: String, value: String, sub: String?, accent: Color, modifier:
     ) {
         Box(Modifier.width(4.dp).fillMaxHeight().background(accent))
         Column(Modifier.padding(14.dp)) {
-            Text(label.uppercase(), fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp, color = c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(label.uppercase(), fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp, color = c.muted, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 14.sp)
             Spacer(Modifier.height(6.dp))
-            Text(value, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = c.text, maxLines = 1)
-            if (sub != null) Text(sub, fontSize = 11.sp, color = c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            BigNumber(value, c.text)
+            if (sub != null) Text(sub, fontSize = 11.sp, color = c.muted, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 15.sp)
         }
     }
 }
@@ -103,9 +168,45 @@ fun MiniBar(data: List<BarPoint>, color: Color, format: (Double) -> String = { i
                 )
             }
         }
-        Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
-            data.forEach { d ->
-                Text(d.label, fontSize = 9.sp, color = c.muted, modifier = Modifier.weight(1f), textAlign = TextAlign.Center, maxLines = 1)
+        AxisLabels(data.map { it.label }, fontSize = 9.sp) { _ -> c.muted }
+    }
+}
+
+/**
+ * Day labels under a bar chart, one slot per bar. When a slot is too narrow
+ * for a three-letter day (14 bars on a small phone, or a large font), only
+ * every 2nd / 3rd label is drawn — always including the last (today) — so
+ * no label is chopped to "Mo" or "We" and they never run together.
+ */
+@Composable
+fun AxisLabels(
+    labels: List<String>, fontSize: TextUnit, modifier: Modifier = Modifier,
+    fontWeight: (Int) -> FontWeight = { FontWeight.Normal }, color: (Int) -> Color,
+) {
+    if (labels.isEmpty()) return
+    // A plain Layout (not BoxWithConstraints): the chart sits in rows sized
+    // by IntrinsicSize.Min, which a SubcomposeLayout can't answer.
+    androidx.compose.ui.layout.Layout(
+        content = {
+            labels.forEachIndexed { i, label ->
+                Text(label, fontSize = fontSize, fontWeight = fontWeight(i), color = color(i), maxLines = 1, softWrap = false)
+            }
+        },
+        modifier = modifier.fillMaxWidth().padding(top = 4.dp),
+    ) { measurables, constraints ->
+        val loose = androidx.compose.ui.unit.Constraints()
+        val placeables = measurables.map { it.measure(loose) }
+        val width = if (constraints.hasBoundedWidth) constraints.maxWidth else placeables.sumOf { it.width }
+        val slot = width.toFloat() / labels.size
+        // Every label drawn must clear its neighbours by 4dp.
+        val need = (placeables.maxOf { it.width } + 4.dp.toPx())
+        val every = kotlin.math.ceil(need / slot).toInt().coerceAtLeast(1)
+        val height = placeables.maxOf { it.height }
+        layout(width, height) {
+            placeables.forEachIndexed { i, p ->
+                if ((labels.lastIndex - i) % every != 0) return@forEachIndexed
+                val x = (slot * i + (slot - p.width) / 2).toInt().coerceIn(0, (width - p.width).coerceAtLeast(0))
+                p.placeRelative(x, 0)
             }
         }
     }
@@ -127,7 +228,7 @@ fun ReportTable(
     Panel(Modifier.fillMaxWidth(), padding = PaddingValues(0.dp)) {
         Text(
             header.uppercase(), fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp,
-            color = c.textDim, modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            color = c.textDim, lineHeight = 16.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
         )
         HorizontalDivider(color = c.bg3)
         if (rows.isEmpty()) {
@@ -148,6 +249,12 @@ fun ReportTable(
                 HorizontalDivider(color = c.bg)
             }
         } else {
+            // Two label/value pairs a line where they fit; one when the font is
+            // large, so a phone number or a date is never cut.
+            val scale = LocalDensity.current.fontScale
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val perLine = if (maxWidth / scale.coerceAtLeast(1f) >= 240.dp) 2 else 1
+            CompositionLocalProvider(LocalCellLines provides 2) {
             Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 rows.forEach { row ->
                     Column(
@@ -158,7 +265,7 @@ fun ReportTable(
                     ) {
                         ProvideTextStyle(TextStyle(fontWeight = FontWeight.Bold)) { row.firstOrNull()?.invoke() }
                         // The other columns as a two-up grid of small label over value.
-                        row.drop(1).withIndex().chunked(2).forEach { pair ->
+                        row.drop(1).withIndex().chunked(perLine).forEach { pair ->
                             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 pair.forEach { (j, cell) ->
                                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -166,11 +273,13 @@ fun ReportTable(
                                         cell()
                                     }
                                 }
-                                if (pair.size == 1) Spacer(Modifier.weight(1f))
+                                if (pair.size < perLine) Spacer(Modifier.weight(1f))
                             }
                         }
                     }
                 }
+            }
+            }
             }
         }
     }

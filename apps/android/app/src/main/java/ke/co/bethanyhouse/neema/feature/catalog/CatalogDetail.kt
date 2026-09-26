@@ -52,7 +52,7 @@ internal fun ProductDetail(item: CatalogItem) {
             }
         }
         Spacer(Modifier.height(14.dp))
-        Text(priceText(item), fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = c.gold2)
+        Text(unbroken(priceText(item)), fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = c.gold2, style = ke.co.bethanyhouse.neema.feature.reports.tabular)
         val unit = item.unit?.takeIf { it.isNotBlank() }
         if (unit != null) Text("per $unit", fontSize = 12.sp, color = c.muted)
         if (item.priceUsd != null || item.priceKes != null) {

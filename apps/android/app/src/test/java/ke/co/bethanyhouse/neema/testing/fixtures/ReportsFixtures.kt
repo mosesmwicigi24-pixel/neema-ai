@@ -272,6 +272,46 @@ object ReportsFixtures {
         f.on("GET", "/admin/attribution", body = attribution)
     }
 
+    /**
+     * The stress case for layout: a busy shop. Six- and seven-digit KES
+     * amounts, long Swahili / emoji names, a product title that runs three
+     * lines, and 40+ orders — the same handler shapes as [install].
+     */
+    fun installBig(f: FakeNeema) {
+        install(f)
+        val longName = "Wanjiku Nyambura-Kariuki wa Parokia ya Mtakatifu Yohana 🙏"
+        val bigOrders = orders + listOf(
+            order("b1", "254700999888", "delivered", 845_000.0, ago(2 * H),
+                "[${n8nLine("Kasula ya Kiaskofu — Dhahabu na Nyeupe, Imeshonwa kwa Mkono ✝️", 5, 169_000.0)}]", payment = "paid"),
+            order("b2", "254700999887", "confirmed", 1_250_000.0, ago(1 * D + 5 * H),
+                "[${n8nLine("Kengele ya Kanisa ya Shaba — Kubwa Sana", 1, 1_250_000.0)}]", payment = "paid"),
+            order("b3", "254700999886", "pending", 386_500.0, ago(2 * D + 1 * H),
+                "[${n8nLine("Viti vya Madhabahu (Seti ya 12)", 1, 386_500.0)}]"),
+        ) + (1..40).map { i ->
+            order("m$i", "2547001${"%05d".format(i)}", listOf("delivered", "confirmed", "pending", "cancelled")[i % 4],
+                (i * 7_350).toDouble(), ago((i % 13) * D + i * 17L), "[${n8nLine("Clergy Shirt", 1, (i * 7_350).toDouble())}]")
+        }
+        f.on("GET", "/admin/orders", body = "[${bigOrders.joinToString(",")}]")
+        f.on("GET", "/admin/conversations") { r, _ ->
+            val rows = listOf(conv("b1", longName, "254700999888", "whatsapp", "human", ago(2 * H), agent = Fixtures.ME_ID,
+                agentName = "Moses Mwicigi")) + conversations
+            if (r.url.queryParameter("limit") == null) 200 to "[${rows.joinToString(",")}]"
+            else 200 to """{"items":[${rows.joinToString(",")}],"next_cursor":null}"""
+        }
+        f.on("GET", "/admin/stats", body = """{"open_conversations":128450,"human_conversations":9312,"ai_conversations":119138,"active_agents":12,"total_agents":148,
+          "total_revenue":98765432.0,"total_orders":284310,"pending_orders":21044,"delivered_orders":203119,"confirmed_orders":48007,"cancelled_orders":12140,
+          "in_stock_items":187,"total_items":214,
+          "channel_breakdown":[{"channel":"whatsapp","count":96000,"open":80000},{"channel":"messenger","count":21000,"open":15000},
+            {"channel":"facebook","count":7000,"open":2200},{"channel":"instagram","count":1100,"open":900}]}""")
+        f.on("GET", "/admin/catalog", body = catalog.trimEnd().removeSuffix("]") + """,
+          {"hub_product_id":599,"uuid":null,"sku":"KAS-DHB-XL-HANDMADE-2026","slug":"kasula","name":"Kasula ya Kiaskofu — Dhahabu na Nyeupe, Imeshonwa kwa Mkono na Mafundi wa Nyeri ✝️🙏",
+           "category":"Clergy Vestments","price":169000.0,"price_kes":169000.0,"price_usd":1300.0,"prices":{"KES":169000.0,"USD":1300.0},"unit":"",
+           "description":"Vazi la sherehe kuu, lenye nakshi za dhahabu na bitana ya hariri.","aliases":["chasuble","kasula","vazi la askofu"],
+           "in_stock":true,"available_qty":3,"images":[],"image_url":null,"thumbnail_url":null,"product_type":"variable","is_producible":true,
+           "measurements":[],"price_min_kes":169000.0,"price_max_kes":245000.0,"price_min_usd":1300.0,"price_max_usd":1884.6,"variants":[]}
+        ]""")
+    }
+
     /** A backend with nothing in it (a fresh install) — the same handlers over empty tables. */
     fun installEmpty(f: FakeNeema) {
         f.on("GET", "/admin/conversations") { r, _ ->

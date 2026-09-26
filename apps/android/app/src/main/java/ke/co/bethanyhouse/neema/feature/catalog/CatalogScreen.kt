@@ -82,9 +82,12 @@ internal fun categoryBrush(category: String?): Brush {
     return Brush.linearGradient(listOf(a.copy(alpha = alpha), b.copy(alpha = alpha)))
 }
 
-/** The web's #b5da8b for SKUs and ids; a readable slate by night (the dark border hue vanishes). */
+/**
+ * SKUs and ids. The web's #b5da8b is ~1.6:1 on white (unreadable in the
+ * sun); the palette's muted text colour keeps them quiet but legible.
+ */
 @Composable
-internal fun faint(): Color = if (Neema.colors.isDark) Neema.colors.muted.copy(alpha = 0.75f) else Neema.colors.border
+internal fun faint(): Color = Neema.colors.muted
 
 /** The web's catalog search border: `border-[#cee6b2]` (the other search fields use #b5da8b). */
 private val CatalogSearchBorder = Color(0xFFCEE6B2)
@@ -107,12 +110,22 @@ internal fun usd(v: Double): String =
  * The web's grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6, read
  * against the width the catalogue actually has.
  */
-internal fun catalogColumns(width: Dp): Int = when {
-    width < 640.dp -> 2
-    width < 768.dp -> 3
-    width < 1024.dp -> 4
-    else -> 6
+internal fun catalogColumns(width: Dp, fontScale: Float = 1f): Int {
+    val web = when {
+        width < 640.dp -> 2
+        width < 768.dp -> 3
+        width < 1024.dp -> 4
+        else -> 6
+    }
+    // At a large font a card needs more room for its name, badge and price:
+    // drop columns until each keeps ~118dp per 100% of font (the web never
+    // scales its text, so it never needs to).
+    val minCell = 118.dp * fontScale.coerceAtLeast(1f)
+    return (web downTo 1).first { n -> n == 1 || (width - 16.dp * (n - 1)) / n >= minCell }
 }
+
+/** "KES 3,500 – KES 4,200" that wraps only at the dash, never inside an amount. */
+internal fun unbroken(price: String): String = price.replace("KES ", "KES\u00A0")
 
 /** Price or "KES min – KES max" when the variants differ. */
 internal fun priceText(i: CatalogItem): String {
@@ -155,7 +168,7 @@ fun CatalogScreen(
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val wide = maxWidth >= 600.dp
             val pad = if (wide) 24.dp else 16.dp
-            val cols = catalogColumns(maxWidth - pad * 2)
+            val cols = catalogColumns(maxWidth - pad * 2, androidx.compose.ui.platform.LocalDensity.current.fontScale)
             // The web's gap-4: 16 between cards, both ways.
             val gap = 16.dp
             LazyColumn(contentPadding = PaddingValues(pad), modifier = Modifier.fillMaxSize()) {
@@ -228,7 +241,7 @@ fun CatalogScreen(
                         cols = cols, gap = gap,
                         modifier = Modifier.padding(bottom = if (i < rows.lastIndex) gap else 0.dp),
                     ) {
-                        row.forEach { item -> ProductCard(item = item, onOpen = { detail = item }) }
+                        row.forEach { item -> ProductCard(item = item, onOpen = { detail = item }, imageAspect = if (cols == 1) 4f / 3f else 1f) }
                     }
                 }
                 if (catalog.isEmpty() && catalogError != null) {
@@ -345,25 +358,33 @@ internal fun StockBadge(item: CatalogItem) {
 }
 
 @Composable
-private fun ProductCard(item: CatalogItem, onOpen: () -> Unit, modifier: Modifier = Modifier) {
+private fun ProductCard(item: CatalogItem, onOpen: () -> Unit, modifier: Modifier = Modifier, imageAspect: Float = 1f) {
     val c = Neema.colors
     Column(
         modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)).background(c.bg2).border(1.dp, c.bg3, RoundedCornerShape(12.dp)).clickable(onClick = onOpen),
     ) {
-        Box(Modifier.fillMaxWidth().aspectRatio(1f).background(categoryBrush(item.rawCategory))) {
+        Box(Modifier.fillMaxWidth().aspectRatio(imageAspect).background(categoryBrush(item.rawCategory))) {
             ProductThumb(item)
         }
-        Column(Modifier.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.Top) {
+        BoxWithConstraints(Modifier.padding(12.dp)) {
+        // Name and stock badge side by side (the web's justify-between) when
+        // the card is wide enough; on a narrow card at a large font the badge
+        // goes under the name instead of squeezing it to "Cler / gy".
+        val sideBySide = maxWidth >= 130.dp * androidx.compose.ui.platform.LocalDensity.current.fontScale.coerceAtLeast(1f)
+        Column {
+            if (sideBySide) Row(verticalAlignment = Alignment.Top) {
                 Text(item.name, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.text, lineHeight = 15.sp, modifier = Modifier.weight(1f))
                 Spacer(Modifier.width(4.dp))
                 StockBadge(item)
+            } else {
+                Text(item.name, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.text, lineHeight = 15.sp)
+                Box(Modifier.padding(top = 4.dp)) { StockBadge(item) }
             }
             val hasDescription = !item.description.isNullOrEmpty()
             if (hasDescription) {
                 Text(item.description.orEmpty(), fontSize = 12.sp, color = c.muted, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 16.5.sp, modifier = Modifier.padding(top = 4.dp))
             }
-            Text(priceText(item), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = if (c.isDark) c.gold2 else Color(0xFF2C4E18), modifier = Modifier.padding(top = if (hasDescription) 8.dp else 4.dp))
+            Text(unbroken(priceText(item)), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = if (c.isDark) c.gold2 else Color(0xFF2C4E18), style = ke.co.bethanyhouse.neema.feature.reports.tabular, modifier = Modifier.padding(top = if (hasDescription) 8.dp else 4.dp))
             if (item.variants.isNotEmpty()) {
                 Text("${item.variants.size} variants", fontSize = 10.sp, color = c.textDim, modifier = Modifier.padding(top = 2.dp))
             }
@@ -377,6 +398,7 @@ private fun ProductCard(item: CatalogItem, onOpen: () -> Unit, modifier: Modifie
                 Text(item.sku, fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = faint(), modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 item.hubProductId?.let { Text("#$it", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = faint()) }
             }
+        }
         }
     }
 }
