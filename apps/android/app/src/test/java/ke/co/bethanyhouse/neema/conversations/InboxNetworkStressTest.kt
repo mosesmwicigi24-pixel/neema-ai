@@ -431,7 +431,9 @@ class InboxNetworkStressTest {
         vm.select("c1")
         vm.generateDraft()
         assertFalse(vm.composer.value.generatingDraft)
-        assertEquals("Failed to generate draft. No answer from the server — the connection is too slow right now.", errors().last().message)
+        // A draft is read-only: a timeout lost nothing, so it is a warning, not a failure.
+        assertEquals(ToastType.Warning, toasts.last().type)
+        assertEquals("Neema took too long to write a draft — nothing was sent. Try again.", toasts.last().message)
     }
 
     @Test fun generateDraft_landsOnTheThreadThatAskedForIt() {

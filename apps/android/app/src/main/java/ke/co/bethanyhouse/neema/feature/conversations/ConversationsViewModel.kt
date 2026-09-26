@@ -552,6 +552,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                 }
             }.awaitAll()
             val failed = errors.filterNotNull()
+            failed.firstOrNull { status(it) == 403 }?.let(::forbidden)
             val ok = ids.size - failed.size
             _list.update { it.copy(bulkBusy = false) }
             exitSelect()
@@ -1030,6 +1031,17 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
 
     private fun status(e: Throwable) = (e as? ApiException)?.status ?: 0
 
+    /**
+     * The server said no (403): what this agent may do has changed since the
+     * app last looked (an admin edited their role). Re-read who they are so the
+     * controls correct themselves without waiting for the 180 s agents poll.
+     */
+    private fun forbidden(e: Throwable) {
+        if (status(e) != 403) return
+        dash.refetchMe()
+        dash.refetchAgents()
+    }
+
     /** "Failed to pause. No connection — check your internet and try again." — the web's words, then why. */
     private fun failMsg(fail: String, e: Throwable, useDetail: Boolean = false): String {
         val why = whyFailed(e, "", useDetail)
@@ -1073,6 +1085,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                 else -> {
                     // A state conflict: show the current truth along with the reason.
                     if (status(e) == 409) { truthOf(id); refresh() }
+                    forbidden(e)
                     dash.toast(failMsg(fail, e, useDetail = status(e) in setOf(400, 403, 409, 422)), ToastType.Error); return false
                 }
             }
@@ -1151,6 +1164,9 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 if (conversationGone(e)) { _dialogs.update { it.copy(clearConfirm = false) }; dropGone(convId); return@launch }
+                // Refused: the 🗑️ was stale (this agent is no longer an admin) — close
+                // the dialog and re-read who they are, so the button goes away too.
+                if (status(e) == 403) { _dialogs.update { it.copy(clearConfirm = false) }; forbidden(e) }
                 dash.toast(
                     if (status(e) == 403) "You don't have permission to clear chat history"
                     else failMsg("Failed to clear history", e),
@@ -1346,6 +1362,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         val o = outgoing[localId] ?: return
         val active = _thread.value.activeId == o.convId
         if (statusOf(e) == 409) viewModelScope.launch { truthOf(o.convId); refresh() }
+        forbidden(e)
         val why = when (o.kind) {
             OutKind.Reply -> whyFailed(e, "Failed to send message", useDetail = true)
             OutKind.Approve -> failMsg("Failed to approve draft", e)
@@ -1522,11 +1539,18 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 if (conversationGone(e)) { dropGone(convId); return@launch }
+                forbidden(e)
+                // A draft is read-only (nothing is sent or saved), so a lost answer
+                // loses nothing: a timeout just means ask again.
+                val slow = timedOut(e)
                 dash.toast(
-                    // 502 here is the model failing, not the network.
-                    if (statusOf(e) == 502) "Failed to generate draft. Neema couldn't write one just now — try again."
-                    else failMsg("Failed to generate draft", e),
-                    ToastType.Error,
+                    when {
+                        // 502 here is the model failing, not the network.
+                        statusOf(e) == 502 -> "Failed to generate draft. Neema couldn't write one just now — try again."
+                        slow -> "Neema took too long to write a draft — nothing was sent. Try again."
+                        else -> failMsg("Failed to generate draft", e)
+                    },
+                    if (slow) ToastType.Warning else ToastType.Error,
                 )
             } finally {
                 editComposer(convId) { it.copy(generatingDraft = false) }
@@ -1742,7 +1766,9 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
             true to "Neema sent: “${api.answerViaNeema(convId, facts).sent}”"
         } catch (e: Exception) {
             if (e is CancellationException) throw e
-            val msg = (e as? ApiException)?.detail ?: e.message ?: ""
+            // Only to classify (the web tests its error message for "window"); never shown.
+            val body = (e as? ApiException)?.body.orEmpty().lowercase()
+            forbidden(e)
             when {
                 fateOf(e) == Fate.Unknown -> {
                     val hit = try { inboxApi.messages(convId) } catch (x: Exception) { if (x is CancellationException) throw x; null }
@@ -1753,7 +1779,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                     } else false to "No answer from the server — Neema may still be sending it. Watch the thread before sending it again."
                 }
                 conversationGone(e) -> false to "This conversation no longer exists."
-                status(e) == 409 || msg.lowercase().contains("window") ->
+                status(e) == 409 || "window" in body ->
                     false to "Outside the messaging window — reply yourself when they next write."
                 statusOf(e) == 0 || statusOf(e) == 401 || statusOf(e) == 429 -> false to whyFailed(e, "")
                 else -> false to "Couldn't send right now — try again."

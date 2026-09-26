@@ -630,6 +630,9 @@ class CustomerViewModel(
                     say("Couldn't confirm the stage change — refreshing the stages.", ToastType.Info)
                     loadStagesIfNeeded(force = true)
                 } else {
+                    // Refused: this agent is no longer an admin — re-read who they are
+                    // so the stage editor goes away without waiting for the agents poll.
+                    if (api?.status == 403) { dash.refetchMe(); dash.refetchAgents() }
                     say(
                         when {
                             api?.status == 403 -> "Only an admin can change pipeline stages."
