@@ -395,6 +395,7 @@ def test_the_slow_lane_answers_everything_together_once(monkeypatch):
         got.append((text, media))
 
     async def main():
+        await cl.cool(r, "messenger", "P")                  # a lane only exists on a cooled thread
         assert await cl.slow_lane(r, "messenger", "P", "story one", None, runner)
         assert await cl.slow_lane(r, "messenger", "P", "story two", None, runner)
         assert await cl.slow_lane(r, "messenger", "P", "", {"type": "image", "url": "u"}, runner)
