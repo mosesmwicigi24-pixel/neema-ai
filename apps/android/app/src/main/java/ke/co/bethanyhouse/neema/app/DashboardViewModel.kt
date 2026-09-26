@@ -12,6 +12,8 @@ import ke.co.bethanyhouse.neema.core.model.Order
 import ke.co.bethanyhouse.neema.core.perm.Perms
 import ke.co.bethanyhouse.neema.core.util.AppClock
 import ke.co.bethanyhouse.neema.core.util.Coalescer
+import ke.co.bethanyhouse.neema.core.util.ScreenLife
+import androidx.lifecycle.ViewModelStore
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.delay
@@ -155,6 +157,29 @@ class DashboardViewModel(
         const val FORBIDDEN_COOLDOWN_MS = 15_000L
     }
 
+    /** One inbox refetch per burst of inbox alerts (see the notification collector). */
+    private val inboxKick = Coalescer(viewModelScope, ScreenLife.EVENT_WINDOW_MS) { _inboxRefresh.emit(Unit) }
+    /** One GET /admin/orders per burst of order alerts. */
+    private val ordersKick = Coalescer(viewModelScope, ScreenLife.EVENT_WINDOW_MS) { refetchOrdersNow() }
+
+    /**
+     * The ViewModelStore of the signed-in agent's screens (MainActivity's
+     * SignedInScope). Held here, not in composition, so anything that
+     * recreates the activity's content (a locale or font-size change) keeps
+     * every screen's state and in-flight work instead of refetching it all;
+     * a sign-out or a switch of agent clears it (cancelling its calls).
+     */
+    private var agentStore: Pair<String, ViewModelStore>? = null
+
+    fun viewModelStoreFor(agentId: String): ViewModelStore {
+        agentStore?.let { (id, store) -> if (id == agentId) return store; store.clear() }
+        return ViewModelStore().also { agentStore = agentId to it }
+    }
+
+    private fun dropAgentStore() { agentStore?.second?.clear(); agentStore = null }
+
+    override fun onCleared() { dropAgentStore() }
+
     init {
         viewModelScope.launch {
             container.http.sessionExpired.collect { if (session.value != null) sessionExpired.value = true }
@@ -163,12 +188,13 @@ class DashboardViewModel(
             container.notifications.incoming.collect { n ->
                 toast("${n.title}: ${n.body}", ToastType.Info)
                 // Push events drive freshness; polls are just the fallback.
-                // A timer per event (the web's setTimeout), so a burst of
-                // alerts neither queues up nor delays the next toast.
+                // The web's setTimeout(refetch, 800) per event, coalesced: a
+                // burst of alerts (a busy hour, a replayed backlog) costs one
+                // refetch 800 ms after the first, not one per alert; an alert
+                // that lands while that refetch runs schedules the next.
                 when (n.type) {
-                    "new_conversation", "human_transfer", "intercept", "transfer", "media_escalation" ->
-                        launch { delay(800); _inboxRefresh.tryEmit(Unit) }
-                    "order_update" -> launch { delay(800); refetchOrders() }
+                    "new_conversation", "human_transfer", "intercept", "transfer", "media_escalation" -> inboxKick.kick()
+                    "order_update" -> ordersKick.kick()
                 }
             }
         }
@@ -178,7 +204,7 @@ class DashboardViewModel(
         viewModelScope.launch {
             var last: String? = null
             session.map { it?.agentId }.distinctUntilChanged().collect { id ->
-                if (id == null) { stopPolling(); last = null; return@collect }
+                if (id == null) { stopPolling(); dropAgentStore(); last = null; return@collect }
                 // Someone else signed in without a sign-out in between (a
                 // restored session, a re-login as another agent): nothing of
                 // the previous agent's may stay on screen.

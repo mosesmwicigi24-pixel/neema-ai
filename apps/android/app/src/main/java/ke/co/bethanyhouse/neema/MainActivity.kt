@@ -80,7 +80,7 @@ class MainActivity : ComponentActivity() {
                         // Screen ViewModels live in a store owned by this signed-in agent:
                         // signing out (or in as someone else) discards it, so one agent's
                         // conversations, orders or drafts can never show for the next.
-                        SignedInScope(s.agentId) { DashboardShell(dash, size.widthSizeClass) }
+                        SignedInScope(dash, s.agentId) { DashboardShell(dash, size.widthSizeClass) }
                         if (expired) SessionExpiredDialog(
                             email = s.email,
                             onSuccess = { dash.onReauthenticated() },
@@ -139,15 +139,19 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** A ViewModel store scoped to one signed-in agent; cleared when it leaves composition or the agent changes. */
+/**
+ * A ViewModel store scoped to one signed-in agent, held by the dashboard's
+ * ViewModel (so it survives the activity being recreated) and cleared when
+ * the agent signs out or another signs in.
+ */
 @androidx.compose.runtime.Composable
-private fun SignedInScope(agentId: String, content: @androidx.compose.runtime.Composable () -> Unit) {
-    val owner = androidx.compose.runtime.remember(agentId) {
+private fun SignedInScope(dash: DashboardViewModel, agentId: String, content: @androidx.compose.runtime.Composable () -> Unit) {
+    val owner = androidx.compose.runtime.remember(dash, agentId) {
+        val store = dash.viewModelStoreFor(agentId)
         object : androidx.lifecycle.ViewModelStoreOwner {
-            override val viewModelStore = androidx.lifecycle.ViewModelStore()
+            override val viewModelStore = store
         }
     }
-    androidx.compose.runtime.DisposableEffect(owner) { onDispose { owner.viewModelStore.clear() } }
     androidx.compose.runtime.CompositionLocalProvider(
         androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner provides owner,
         content = content,

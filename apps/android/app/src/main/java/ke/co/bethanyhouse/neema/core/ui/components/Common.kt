@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.SubcomposeAsyncImage
 import ke.co.bethanyhouse.neema.core.ui.theme.ChannelColors
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
+import ke.co.bethanyhouse.neema.core.ui.theme.NeemaFont
 import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 import ke.co.bethanyhouse.neema.core.ui.theme.asFixedSp
 import ke.co.bethanyhouse.neema.core.ui.theme.TabularNums
@@ -287,7 +288,7 @@ fun SearchField(
     val shape = RoundedCornerShape(12.dp)
     androidx.compose.foundation.text.BasicTextField(
         value = value, onValueChange = onChange, singleLine = true,
-        textStyle = androidx.compose.ui.text.TextStyle(color = text, fontSize = fontSize),
+        textStyle = androidx.compose.ui.text.TextStyle(color = text, fontSize = fontSize, fontFamily = NeemaFont),
         cursorBrush = androidx.compose.ui.graphics.SolidColor(Palette.Moss600),
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
         interactionSource = source,

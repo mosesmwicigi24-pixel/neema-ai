@@ -1,7 +1,11 @@
 package ke.co.bethanyhouse.neema.core.net
 
 import ke.co.bethanyhouse.neema.BuildConfig
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.InternalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -13,6 +17,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.serializer
+import okhttp3.Call
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
@@ -40,7 +45,9 @@ class ApiException(
     val body: String,
     val retryAfterSeconds: Long? = null,
     val malformed: Boolean = false,
-) : IOException("$method $path → $status: ${body.take(500)}") {
+    /** The transport failure behind a status-0 answer (kept for crash reports and logs). */
+    cause: Throwable? = null,
+) : IOException("$method $path → $status: ${body.take(500)}", cause) {
     /** The request ran out of time (the 30 s ceiling, or the long client's). */
     val timedOut: Boolean get() = status == 0 && body.startsWith("timed out")
 
@@ -172,37 +179,44 @@ class NeemaHttp(
                 .build()
 
             val c = if (upload) uploadClient else client
-            val used = authStep(method, path) { tokens.validAccessToken() }
-            var res = execute(c, build(used), method, path, upload)
-            // FastAPI 0.115's HTTPBearer answers a request with NO token 403
-            // "Not authenticated", not 401. That only happens once the token ran
-            // out and could not be refreshed: the same dead session.
-            if (res.code == 401 || (res.code == 403 && used == null)) {
-                res.close()
-                tokens.onRejected(used)
-                // One rescue attempt: the token may have expired between the
-                // proactive check and the server's clock. Requests rejected
-                // together share that one refresh (the auth layer serialises
-                // it). A refresh the auth server could not answer is an
-                // outage, not a signed-out agent: it fails this request only.
-                val fresh = authStep(method, path) { tokens.forceRefresh() }
-                if (fresh != null) res = execute(c, build(fresh), method, path, upload)
-                if (fresh == null || res.code == 401) {
+            val flight = InFlight(currentCoroutineContext()[Job])
+            try {
+                val used = authStep(method, path) { tokens.validAccessToken() }
+                var res = execute(flight, c, build(used), method, path, upload)
+                // FastAPI 0.115's HTTPBearer answers a request with NO token 403
+                // "Not authenticated", not 401. That only happens once the token ran
+                // out and could not be refreshed: the same dead session.
+                if (res.code == 401 || (res.code == 403 && used == null)) {
                     res.close()
-                    _sessionExpired.tryEmit(Unit)
-                    throw ApiException(401, method, path, "Session expired")
+                    tokens.onRejected(used)
+                    // One rescue attempt: the token may have expired between the
+                    // proactive check and the server's clock. Requests rejected
+                    // together share that one refresh (the auth layer serialises
+                    // it). A refresh the auth server could not answer is an
+                    // outage, not a signed-out agent: it fails this request only.
+                    val fresh = authStep(method, path) { tokens.forceRefresh() }
+                    if (fresh != null) res = execute(flight, c, build(fresh), method, path, upload)
+                    if (fresh == null || res.code == 401) {
+                        res.close()
+                        _sessionExpired.tryEmit(Unit)
+                        throw ApiException(401, method, path, "Session expired")
+                    }
                 }
-            }
-            res.use { r ->
-                if (!r.isSuccessful) {
-                    // An error page can be anything (a proxy's multi-megabyte
-                    // HTML dump): only its head is worth keeping.
-                    val text = runCatching { r.peekBody(MAX_ERROR_BODY).string() }.getOrDefault("")
-                    if (r.code == 403 && !isIdentityRead(method, path)) _forbidden.tryEmit("$method ${gatePath(path)}")
-                    throw ApiException(r.code, method, path, text, retryAfterSeconds = retryAfter(r))
+                res.use { r ->
+                    if (!r.isSuccessful) {
+                        // An error page can be anything (a proxy's multi-megabyte
+                        // HTML dump): only its head is worth keeping.
+                        val text = runCatching { r.peekBody(MAX_ERROR_BODY).string() }.getOrDefault("")
+                        if (r.code == 403 && !isIdentityRead(method, path)) _forbidden.tryEmit("$method ${gatePath(path)}")
+                        throw ApiException(r.code, method, path, text, retryAfterSeconds = retryAfter(r))
+                    }
+                    // The connection can still drop while the body streams in.
+                    try { r.body?.string().orEmpty() } catch (e: IOException) {
+                        throw if (flight.cancelled) cancelled(method, path, e) else networkError(e, method, path, upload)
+                    }
                 }
-                // The connection can still drop while the body streams in.
-                try { r.body?.string().orEmpty() } catch (e: IOException) { throw networkError(e, method, path, upload) }
+            } finally {
+                flight.close()
             }
         }
     }
@@ -217,21 +231,48 @@ class NeemaHttp(
     private suspend fun <T> authStep(method: String, path: String, step: suspend () -> T): T = try {
         step()
     } catch (e: RefreshUnavailable) {
-        throw ApiException(e.status, method, path, if (e.timedOut) "timed out after 30s" else (e.message ?: "network error"))
+        throw ApiException(e.status, method, path, if (e.timedOut) "timed out after 30s" else (e.message ?: "network error"), cause = e)
     }
 
-    private fun execute(c: OkHttpClient, req: Request, method: String, path: String, upload: Boolean): Response = try {
-        c.newCall(req).execute()
-    } catch (e: IOException) {
-        throw networkError(e, method, path, upload)
+    /**
+     * The OkHttp call a [raw] request is running, tied to its coroutine:
+     * cancelling the coroutine (the screen that asked went away, a newer
+     * search replaced this one) cancels the call — while it connects, waits
+     * or streams the body — which frees the connection and fails the blocking
+     * read at once. The coroutine then ends as cancelled, never as a
+     * "network error" a screen might show.
+     */
+    private class InFlight(private val job: Job?) {
+        @Volatile private var call: Call? = null
+        @OptIn(InternalCoroutinesApi::class)
+        private val handle = job?.invokeOnCompletion(onCancelling = true, invokeImmediately = true) { call?.cancel() }
+
+        fun start(c: OkHttpClient, req: Request): Call = c.newCall(req).also {
+            call = it
+            if (job?.isActive == false) it.cancel()
+        }
+
+        val cancelled: Boolean get() = call?.isCanceled() == true || job?.isActive == false
+
+        fun close() { handle?.dispose() }
     }
+
+    private fun execute(flight: InFlight, c: OkHttpClient, req: Request, method: String, path: String, upload: Boolean): Response =
+        try {
+            flight.start(c, req).execute()
+        } catch (e: IOException) {
+            throw if (flight.cancelled) cancelled(method, path, e) else networkError(e, method, path, upload)
+        }
+
+    private fun cancelled(method: String, path: String, e: IOException) =
+        CancellationException("$method $path cancelled").apply { initCause(e) }
 
     private fun networkError(e: IOException, method: String, path: String, upload: Boolean): ApiException = when (e) {
         is ApiException -> e
         // SocketTimeoutException (connect/read/write) and OkHttp's call
         // timeout (a bare InterruptedIOException "timeout") alike.
-        is InterruptedIOException -> ApiException(0, method, path, if (upload) "timed out after 10 min" else "timed out after 30s")
-        else -> ApiException(0, method, path, e.message ?: "network error")
+        is InterruptedIOException -> ApiException(0, method, path, if (upload) "timed out after 10 min" else "timed out after 30s", cause = e)
+        else -> ApiException(0, method, path, e.message ?: "network error", cause = e)
     }
 
     /** `Retry-After: <seconds>` (the HTTP-date form is rare enough to ignore). */

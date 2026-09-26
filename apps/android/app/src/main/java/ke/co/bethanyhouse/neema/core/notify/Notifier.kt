@@ -13,6 +13,8 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import ke.co.bethanyhouse.neema.MainActivity
 import ke.co.bethanyhouse.neema.R
+import androidx.compose.ui.graphics.toArgb
+import ke.co.bethanyhouse.neema.core.ui.theme.Brand
 
 /**
  * One system notification the notification centre wants shown — built as
@@ -104,7 +106,7 @@ object Notifier {
         if (!canPost(ctx)) return
         val n = NotificationCompat.Builder(ctx, a.channel)
             .setSmallIcon(R.drawable.ic_stat_neema)
-            .setColor(0xFFF59E0B.toInt())
+            .setColor(Brand.Amber.toArgb())
             .setContentTitle(a.title)
             .setContentText(a.body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(a.body))
@@ -128,7 +130,7 @@ object Notifier {
         lines.take(5).forEach { style.addLine(it) }
         val n = NotificationCompat.Builder(ctx, CH_ALERTS)
             .setSmallIcon(R.drawable.ic_stat_neema)
-            .setColor(0xFFF59E0B.toInt())
+            .setColor(Brand.Amber.toArgb())
             .setContentTitle("$count Neema alerts")
             .setContentText(lines.firstOrNull() ?: "")
             .setStyle(style)
