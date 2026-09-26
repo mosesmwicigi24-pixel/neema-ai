@@ -209,6 +209,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const { data: session } = useSession();
     const myIdRef = useRef<string | null>(null);
     myIdRef.current = ((session as { user?: { id?: string } } | null)?.user?.id) ?? null;
+    const myNameRef = useRef<string | null>(null);
+    myNameRef.current = ((session as { user?: { name?: string | null } } | null)?.user?.name ?? "").trim() || null;
 
     // The call itself lives in ONE snapshot (state for rendering + a ref for the
     // async paths), so the phase, the outcome and the words can never disagree.
@@ -239,6 +241,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const attemptRef = useRef(0);                              // bumps on every new call / abort
     const cancelRef = useRef(false);                           // hung up while placing
     const answeredHereRef = useRef<string | null>(null);       // our answer POST succeeded
+    const postedAnswerRef = useRef<string | null>(null);       // we sent an answer POST (it may have landed)
     const endedAtRef = useRef<Record<string, number>>({});     // callId → when it left this screen
     const pendingAnswerRef = useRef<Record<string, string>>({}); // outbound SDP that beat connect's reply
     const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -424,6 +427,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
         setMuted(false); mutedRef.current = false;
         setRecNote(null);
         answeredHereRef.current = null;
+        postedAnswerRef.current = null;
     }, []);
 
     // Ring this device for a call (the WS event, the poll fallback, a promoted
@@ -499,12 +503,21 @@ export function CallProvider({ children }: { children: ReactNode }) {
         const c = s.call;
         if (!c) return;
         const other = !!info.agent_id && info.agent_id !== myIdRef.current;
-        const answeringHere = answeredHereRef.current === c.callId;
+        const me = !!info.agent_id && info.agent_id === myIdRef.current;
+        const answeringHere = answeredHereRef.current === c.callId || postedAnswerRef.current === c.callId;
         switch (status) {
             case "completed":
             case "ended":
-                if (s.phase === "incoming" || (s.phase === "connecting" && c.direction === "inbound" && !answeringHere)) {
-                    return endWith("answered_elsewhere", { byAgent: other ? info.agent_name ?? null : YOU_ELSEWHERE });
+                if (s.phase === "incoming") {
+                    // Back on the ringing card after our answer's reply was lost.
+                    if (me && postedAnswerRef.current === c.callId) {
+                        return endWith("failed", { reason: "The connection dropped while answering — call them back" });
+                    }
+                    return endWith("answered_elsewhere", { byAgent: me ? YOU_ELSEWHERE : info.agent_name ?? null });
+                }
+                // Still connecting here while a colleague took it.
+                if (s.phase === "connecting" && c.direction === "inbound" && !answeringHere && other) {
+                    return endWith("answered_elsewhere", { byAgent: info.agent_name ?? null });
                 }
                 return endWith("completed", s.answeredAt ? {} : { duration: info.duration ?? null });
             case "missed": return endWith("missed");
@@ -534,6 +547,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
         }
     }, [put]);
 
+    // Our answer reached the server but this device lost the reply (and so the
+    // media): hang the call up rather than leave the customer on a silent line.
+    const answerLost = useCallback((callId: string) => {
+        endWith("failed", { reason: "The connection dropped while answering — call them back" });
+        terminateInBackground(callId);
+    }, [endWith, terminateInBackground]);
+
     // Correct this screen from the server's row (after a reconnect, on return
     // to the tab, from the poll fallback, or a call_update).
     const applyRow = useCallback((row: ApiCall) => {
@@ -545,7 +565,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
         const other = !!row.agent_id && row.agent_id !== myIdRef.current;
         if (st === "ringing") return;
         if (s.phase === "incoming") {
-            if (st === "answered") return endWith("answered_elsewhere", { byAgent: other ? row.agent_name : YOU_ELSEWHERE });
+            if (st === "answered") {
+                const me = !!row.agent_id && row.agent_id === myIdRef.current;
+                // Our own answer landed but its reply was lost (the network
+                // dropped mid-answer): the call is up with nobody on it here.
+                if (me && postedAnswerRef.current === c.callId) return answerLost(c.callId);
+                return endWith("answered_elsewhere", { byAgent: me ? YOU_ELSEWHERE : row.agent_name });
+            }
             return endFromStatus(st, row);
         }
         if (s.phase === "ringing_out") {
@@ -561,7 +587,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
             }
             return endFromStatus(st, row);
         }
-    }, [enrich, endWith, endFromStatus, customerAnswered]);
+    }, [enrich, endWith, endFromStatus, customerAnswered, answerLost]);
 
     // ── Media state → phase ──────────────────────────────────────────────────
     const loseConnection = useCallback(() => {
@@ -588,7 +614,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
             if (!reconnectTimerRef.current) {
                 reconnectTimerRef.current = setTimeout(() => {
                     reconnectTimerRef.current = null;
-                    if (snapRef.current.phase === "reconnecting" && pcRef.current === pc) loseConnection();
+                    if (snapRef.current.phase !== "reconnecting" || pcRef.current !== pc) return;
+                    // The browser said "offline" but the media path never dropped.
+                    if (pc.connectionState === "connected" && navigator.onLine !== false) {
+                        put({ phase: "active" });
+                        return;
+                    }
+                    loseConnection();
                 }, RECONNECT_GRACE_MS);
             }
         } else if (st === "failed") {
@@ -678,6 +710,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
         if (!pc || !localStreamRef.current) return;
         try {
             const stream = await getMic(deviceId);
+            // The call ended while the new mic was opening: don't leave it on.
+            if (pcRef.current !== pc) { stream.getTracks().forEach((t) => t.stop()); return; }
             const track = stream.getAudioTracks()[0];
             track.enabled = !mutedRef.current;
             const sender = pc.getSenders().find((x) => x.track?.kind === "audio" || x.track === null);
@@ -764,6 +798,27 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }, [requestNotifications]);
 
     // ── Actions ──────────────────────────────────────────────────────────────
+    // "call already answered by Ann" → "Ann" (or "you on another device" when
+    // the lock is this agent's own, e.g. their phone).
+    const answeredBy = useCallback((detail: string | null): string | null => {
+        const who = (detail || "").match(/answered by (.+?)\.?$/i)?.[1]?.trim() || null;
+        if (who && myNameRef.current && who.toLowerCase() === myNameRef.current.toLowerCase()) return YOU_ELSEWHERE;
+        return who;
+    }, []);
+
+    // Decline / call back later / cancel-while-connecting: the server refuses
+    // (409 "call already answered by X") when a colleague answered a moment
+    // earlier — the card then says so instead of "Call declined".
+    const terminateOrYield = useCallback((callId: string, run: () => Promise<unknown>) => {
+        terminateInBackground(callId, () => run().catch((e) => {
+            if (apiErrorStatus(e) !== 409) throw e;
+            const s = snapRef.current;
+            if (s.phase === "ended" && s.call?.callId === callId) {
+                put({ outcome: "answered_elsewhere", byAgent: answeredBy(apiErrorDetail(e)), reason: null });
+            }
+        }));
+    }, [terminateInBackground, put, answeredBy]);
+
     const answer = useCallback(async () => {
         const s = snapRef.current;
         const c = s.call;
@@ -818,13 +873,17 @@ export function CallProvider({ children }: { children: ReactNode }) {
             return endWith("failed", { reason: "Couldn't set up the call audio" });
         }
         if (!mine()) return;
+        const retry = postedAnswerRef.current === id;
+        postedAnswerRef.current = id;
         try {
             await callsApi.answer(id, pc.localDescription!.sdp);
         } catch (e) {
             if (!mine()) return;
             const st = apiErrorStatus(e);
             if (st === 409) {
-                const who = (apiErrorDetail(e) || "").match(/answered by (.+)$/i)?.[1] ?? null;
+                const who = answeredBy(apiErrorDetail(e));
+                // Our first answer landed but its reply was lost: the lock is ours.
+                if (retry && who === YOU_ELSEWHERE) return answerLost(id);
                 return endWith("answered_elsewhere", { byAgent: who });
             }
             if (st === 410) return endWith("missed", { reason: "This call has already ended" });
@@ -832,8 +891,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
             return endWith("failed", { reason: friendly(apiErrorDetail(e)) || "Couldn't connect the call" });
         }
         answeredHereRef.current = id;
-        if (snapRef.current.phase === "connecting") armConnectGuard(id);
-    }, [put, stopTone, startTone, iceConfig, getMic, buildPc, attachMic, gatherIce, endWith, armConnectGuard]);
+        if (mine() && snapRef.current.phase === "connecting") armConnectGuard(id);
+    }, [put, stopTone, startTone, iceConfig, getMic, buildPc, attachMic, gatherIce, endWith, armConnectGuard, answeredBy, answerLost]);
 
     // Declining / "call back later" end the call for the whole team (WhatsApp has
     // no per-agent decline). Shown at once; the request runs behind it — after
@@ -844,20 +903,24 @@ export function CallProvider({ children }: { children: ReactNode }) {
             .then((row) => {
                 // /callback also turns a call the caller already gave up on into a follow-up.
                 if (row.status === "ringing" || (kind === "callback" && row.status === "missed")) {
-                    terminateInBackground(callId, run);
+                    terminateOrYield(callId, run);
                     return;
                 }
                 // Too late: correct the wrap-up to what really happened.
                 const s = snapRef.current;
                 if (s.phase !== "ended" || s.call?.callId !== callId) return;
-                if ((row.status === "answered" || row.status === "completed") && row.agent_id !== myIdRef.current) {
-                    put({ outcome: "answered_elsewhere", byAgent: row.agent_name, reason: null });
+                if (row.status === "answered" || row.status === "completed") {
+                    const me = !!row.agent_id && row.agent_id === myIdRef.current;
+                    put({ outcome: "answered_elsewhere", byAgent: me ? YOU_ELSEWHERE : row.agent_name, reason: null });
                 } else if (row.status === "missed" && kind === "decline") {
                     put({ outcome: "missed", reason: null, byAgent: null });
+                } else if (row.status === "declined" || row.status === "callback") {
+                    const other = !!row.agent_id && row.agent_id !== myIdRef.current;
+                    if (other) put({ outcome: row.status as CallOutcome, byAgent: row.agent_name ?? "a colleague", reason: null });
                 }
             })
-            .catch(() => terminateInBackground(callId, run));
-    }, [terminateInBackground, put]);
+            .catch(() => terminateOrYield(callId, run));
+    }, [terminateOrYield, put]);
 
     const decline = useCallback(() => {
         const s = snapRef.current;
@@ -890,6 +953,15 @@ export function CallProvider({ children }: { children: ReactNode }) {
                 endWith("cancelled");
                 return terminateInBackground(c.callId);
             case "connecting":
+                // Answer tapped, then End before the server accepted it: the
+                // call is still ringing for the team, so this is a decline —
+                // say so (the Calls log will too).
+                if (c.direction === "inbound" && answeredHereRef.current !== c.callId) {
+                    endWith("declined");
+                    terminateOrYield(c.callId, () => callsApi.terminate(c.callId));
+                    return;
+                }
+            // falls through
             case "active":
             case "reconnecting": {
                 const duration = s.answeredAt ? Math.max(0, Math.round((Date.now() - s.answeredAt) / 1000)) : null;
@@ -906,7 +978,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
             }
             default: return;
         }
-    }, [decline, endWith, teardown, put, terminateInBackground]);
+    }, [decline, endWith, teardown, put, terminateInBackground, terminateOrYield]);
 
     const toggleMute = useCallback(() => {
         const next = !mutedRef.current;
@@ -1013,6 +1085,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
                 put({ outcome: "permission_requested", reason: null });
             }
         } catch (e) {
+            if (snapRef.current.call?.callId !== c.callId || snapRef.current.phase !== "ended") return;
             put({ reason: isNetworkError(e) ? "No connection — the request wasn't sent. Try again."
                 : friendly(apiErrorDetail(e)) || "Couldn't send the call request. Try again." });
         } finally { setPermissionBusy(false); }
@@ -1075,8 +1148,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
         if (c) { endedAtRef.current[c.callId] = Date.now(); if (wasLive) terminateInBackground(c.callId); }
         resetExtras();
         put({ ...IDLE, phase: "incoming", call: { callId: w.callId, from: w.from, name: w.name ?? null, direction: "inbound" } });
+        startTone("ring");   // answer() stops it at once; it keeps ringing only if answering can't start
         answer();
-    }, [setWaiting, teardown, terminateInBackground, resetExtras, put, answer]);
+    }, [setWaiting, teardown, terminateInBackground, resetExtras, put, answer, startTone]);
 
     const dismissGranted = useCallback(() => setGranted(null), []);
     const callGranted = useCallback(() => {
@@ -1102,7 +1176,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
                 if (!mineNow) return;
                 if (cur.phase === "incoming") {
                     const me = evt.agent_id && evt.agent_id === myIdRef.current;
-                    endWith("answered_elsewhere", { byAgent: me ? YOU_ELSEWHERE : evt.agent_name ?? null });
+                    if (me && postedAnswerRef.current === evt.call_id) answerLost(evt.call_id);
+                    else endWith("answered_elsewhere", { byAgent: me ? YOU_ELSEWHERE : evt.agent_name ?? null });
                 } else if (cur.phase === "connecting" && cur.call?.direction === "inbound"
                            && evt.agent_id && evt.agent_id !== myIdRef.current) {
                     endWith("answered_elsewhere", { byAgent: evt.agent_name ?? null });
@@ -1141,7 +1216,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
         };
         ws.on("event", onEvent);
         return () => ws.off("event", onEvent);
-    }, [ws, startRinging, setWaiting, endWith, customerAnswered, put, applyOutboundAnswer, endFromStatus, enrich, applyRow, dismiss]);
+    }, [ws, startRinging, setWaiting, endWith, customerAnswered, put, applyOutboundAnswer, endFromStatus, enrich, applyRow, dismiss, answerLost]);
 
     // ── Re-sync: after the socket reconnects or the tab comes back, re-read the
     // call on screen — a call that ended while we were away shows its real
@@ -1178,12 +1253,27 @@ export function CallProvider({ children }: { children: ReactNode }) {
         const onVis = () => { if (document.visibilityState === "visible") resync(); };
         const onOnline = () => {
             if (snapRef.current.notice === NO_NET) put({ notice: null });
+            // Media that never actually dropped: back to the live timer.
+            const pc = pcRef.current;
+            if (snapRef.current.phase === "reconnecting" && pc?.connectionState === "connected") onMedia(pc, "connected");
             resync();
+        };
+        // The network went away: say so now rather than after ICE notices
+        // (never a "connected" screen with no audio path).
+        const onOffline = () => {
+            const s = snapRef.current;
+            if (s.phase === "incoming") put({ notice: NO_NET });
+            else if (s.phase === "active" && pcRef.current) onMedia(pcRef.current, "disconnected");
         };
         document.addEventListener("visibilitychange", onVis);
         window.addEventListener("online", onOnline);
-        return () => { document.removeEventListener("visibilitychange", onVis); window.removeEventListener("online", onOnline); };
-    }, [resync, put]);
+        window.addEventListener("offline", onOffline);
+        return () => {
+            document.removeEventListener("visibilitychange", onVis);
+            window.removeEventListener("online", onOnline);
+            window.removeEventListener("offline", onOffline);
+        };
+    }, [resync, put, onMedia]);
 
     // ── Poll fallback (the socket is primary). Cheap: one row every 3 s while a
     // call rings or is reconnecting (catches a colleague answering, the caller
@@ -1246,9 +1336,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
     ringingWhoRef.current = ringingWho;
     useEffect(() => {
         if (!ringingId || typeof document === "undefined") return;
-        const original = document.title;
+        // Only ever undo a title WE set — the dashboard may retitle the tab
+        // (a view change) while the call rings.
+        const flashTitle = () => `📞 ${ringingWhoRef.current} is calling`;
+        let base = document.title;
         let note: Notification | null = null;
         let flip = false;
+        const restore = () => { if (document.title === flashTitle()) document.title = base; };
         const notify = () => {
             if (note || !document.hidden || typeof Notification === "undefined" || Notification.permission !== "granted") return;
             try {
@@ -1259,17 +1353,19 @@ export function CallProvider({ children }: { children: ReactNode }) {
             } catch { /* some browsers only allow notifications from a service worker */ }
         };
         const flash = () => {
-            if (document.hidden) { flip = !flip; document.title = flip ? `📞 ${ringingWhoRef.current} is calling` : original; }
-            else if (document.title !== original) document.title = original;
+            if (!document.hidden) { restore(); return; }
+            if (document.title !== flashTitle()) base = document.title;
+            flip = !flip;
+            document.title = flip ? flashTitle() : base;
         };
-        const onVis = () => { if (document.hidden) notify(); else document.title = original; };
+        const onVis = () => { if (document.hidden) notify(); else restore(); };
         notify();
         const t = setInterval(flash, 1000);
         document.addEventListener("visibilitychange", onVis);
         return () => {
             clearInterval(t);
             document.removeEventListener("visibilitychange", onVis);
-            document.title = original;
+            restore();
             note?.close();
         };
     }, [ringingId]);

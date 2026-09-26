@@ -26,7 +26,9 @@ const WA = {
 
 const ICONS: Record<string, React.ReactElement> = {
     phone: <path d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />,
-    "phone-off": <path d="M3.7 13.6c-.5-.5-.5-1.3 0-1.8C6.2 9.4 9 8.2 12 8.2s5.8 1.2 8.3 3.6c.5.5.5 1.3 0 1.8l-1.9 1.9c-.4.4-1.1.5-1.6.1l-2-1.5c-.3-.2-.5-.6-.5-1v-1.9a10.4 10.4 0 00-4.6 0v1.9c0 .4-.2.8-.5 1l-2 1.5c-.5.4-1.2.3-1.6-.1l-1.9-1.9z" />,
+    // The handset tipped down, filled — the hang-up glyph every phone uses.
+    "phone-off": <path transform="rotate(135 12 12) translate(0.5 0.5) scale(0.95)" fill="currentColor" stroke="none" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />,
+    "phone-fill": <path fill="currentColor" stroke="none" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />,
     callback: <path d="M9 14l-4-4 4-4M5 10h11a4 4 0 014 4v3" />,
     mic: <><path d="M12 2a3 3 0 00-3 3v6a3 3 0 006 0V5a3 3 0 00-3-3z" /><path d="M5 10v1a7 7 0 0014 0v-1M12 18v3" /></>,
     "mic-off": <><path d="M3 3l18 18" /><path d="M9 5a3 3 0 016 0v5m-1.3 2.7A3 3 0 019 11V9" /><path d="M5 10v1a7 7 0 0010.7 5.9M19 10v1a6.9 6.9 0 01-.3 2M12 18v3" /></>,
@@ -41,9 +43,9 @@ const ICONS: Record<string, React.ReactElement> = {
     out: <path d="M7 17L17 7M17 7h-7M17 7v7" />,
 };
 
-function Icon({ name, size = 22, stroke = 2, fill }: { name: string; size?: number; stroke?: number; fill?: string }) {
+function Icon({ name, size = 22, stroke = 2, fill, style }: { name: string; size?: number; stroke?: number; fill?: string; style?: React.CSSProperties }) {
     return (
-        <svg width={size} height={size} viewBox="0 0 24 24" fill={fill ?? "none"} stroke="currentColor" strokeWidth={stroke}
+        <svg width={size} height={size} viewBox="0 0 24 24" fill={fill ?? "none"} stroke="currentColor" strokeWidth={stroke} style={style}
             strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
             {ICONS[name]}
         </svg>
@@ -105,6 +107,13 @@ function outcomeWords(o: CallOutcome | null, c: ReturnType<typeof useCall>): str
     }
 }
 
+// Every outcome is an icon AND words (never colour alone, §5).
+const OUTCOME_ICON: Record<CallOutcome, string> = {
+    completed: "phone-off", answered_elsewhere: "check", declined: "phone-off", missed: "in",
+    callback: "callback", no_answer: "alert", cancelled: "phone-off", connection_lost: "wifi-off",
+    failed: "alert", permission_needed: "alert", permission_requested: "check", mic_blocked: "alert",
+};
+
 // Neutral wrap-ups close themselves; ones that leave the agent owing the
 // customer something (missed, no answer, dropped, failed, permission) never do.
 const AUTO_CLOSE: Partial<Record<CallOutcome, number>> = {
@@ -143,17 +152,17 @@ function wrapUpActions(c: NonNullable<ReturnType<typeof useCall>>, showHelp: () 
     }
 }
 
-function RoundBtn({ label, icon, onClick, color, fg = "#fff", size = 60, pressed, btnRef, disabled }: {
-    label: string; icon: string; onClick: () => void; color: string; fg?: string; size?: number;
+function RoundBtn({ label, a11y, icon, onClick, color, fg = "#fff", size = 60, pressed, btnRef, disabled }: {
+    label: string; a11y?: string; icon: string; onClick: () => void; color: string; fg?: string; size?: number;
     pressed?: boolean; btnRef?: React.Ref<HTMLButtonElement>; disabled?: boolean;
 }) {
     return (
-        <button ref={btnRef} type="button" onClick={onClick} disabled={disabled} aria-label={label}
+        <button ref={btnRef} type="button" onClick={onClick} disabled={disabled} aria-label={a11y ?? label}
             aria-pressed={pressed}
-            className="cs-btn flex flex-col items-center gap-1.5 disabled:opacity-50" style={{ minWidth: 64 }}>
+            className="cs-btn flex flex-col items-center gap-1.5 disabled:opacity-50" style={{ minWidth: Math.max(size, 56) }}>
             <span className="rounded-full flex items-center justify-center"
                 style={{ width: size, height: size, backgroundColor: color, color: fg, boxShadow: "0 6px 16px rgba(0,0,0,0.35)" }}>
-                <Icon name={icon} size={Math.round(size * 0.4)} />
+                <Icon name={icon} size={Math.round(size * (icon.startsWith("phone") ? 0.46 : 0.4))} />
             </span>
             <span aria-hidden="true" style={{ fontSize: 12.5, color: WA.muted, lineHeight: 1.2 }}>{label}</span>
         </button>
@@ -228,21 +237,21 @@ function WaitingBanner({ compact }: { compact?: boolean }) {
     const c = useCall();
     if (!c?.waiting) return null;
     const who = callerLabel(c.waiting);
-    const btn = "rounded-full px-3 font-semibold";
+    const btn = "rounded-full px-1.5 font-semibold leading-tight";
     return (
-        <div role="alert" className={`flex flex-wrap items-center gap-2 ${compact ? "px-3 py-2" : "px-4 py-3 rounded-2xl"}`}
+        <div role="alert" className={`flex flex-col gap-2 ${compact ? "px-3 py-2" : "px-4 py-3 rounded-2xl"}`}
             style={{ backgroundColor: WA.panel, color: WA.text }}>
-            <span className="flex items-center gap-2 min-w-0 flex-1" style={{ fontSize: 14 }}>
+            <span className="flex items-center gap-2 min-w-0" style={{ fontSize: 14 }}>
                 <WhatsAppGlyph size={16} />
                 <span className="truncate"><b className="font-semibold">{who}</b> is also calling</span>
             </span>
-            <span className="flex flex-wrap gap-2">
+            <span className="grid grid-cols-3 gap-2 max-w-md">
                 <button type="button" onClick={c.declineWaiting} aria-label={`Decline ${who}'s call`}
-                    className={btn} style={{ minHeight: 44, fontSize: 13, backgroundColor: WA.red, color: "#fff" }}>Decline</button>
+                    className={btn} style={{ minHeight: 44, fontSize: 12.5, backgroundColor: WA.red, color: "#fff" }}>Decline</button>
                 <button type="button" onClick={c.callbackWaiting}
-                    className={btn} style={{ minHeight: 44, fontSize: 13, backgroundColor: "rgba(255,255,255,0.08)", color: WA.text }}>Call back later</button>
+                    className={btn} style={{ minHeight: 44, fontSize: 12.5, backgroundColor: "rgba(255,255,255,0.08)", color: WA.text }}>Call back later</button>
                 <button type="button" onClick={c.endAndAnswerWaiting}
-                    className={btn} style={{ minHeight: 44, fontSize: 13, backgroundColor: WA.greenDeep, color: "#fff" }}>
+                    className={btn} style={{ minHeight: 44, fontSize: 12.5, backgroundColor: WA.greenDeep, color: "#fff" }}>
                     {c.phase === "incoming" ? "Answer instead" : "End & answer"}
                 </button>
             </span>
@@ -376,7 +385,14 @@ export function CallStage({ onOpenConversation }: { onOpenConversation?: (key: s
             </span>
         );
     } else if (ended) {
-        status = outcomeWords(c.outcome, c);
+        // Inline icon so a two-line reason wraps around it, centred.
+        status = (
+            <span className="block text-center">
+                <Icon name={c.outcome ? OUTCOME_ICON[c.outcome] : "phone-off"} size={16}
+                    style={{ display: "inline", verticalAlign: "-3px", marginRight: 6 }} />
+                {outcomeWords(c.outcome, c)}
+            </span>
+        );
     } else {
         status = PHASE_WORDS[phase] ?? "";
     }
@@ -388,9 +404,7 @@ export function CallStage({ onOpenConversation }: { onOpenConversation?: (key: s
         <div ref={cardRef}
             className="cs-in absolute inset-0 z-50 flex flex-col overflow-y-auto"
             style={{ background: `linear-gradient(180deg, ${WA.bg} 0%, ${WA.bg2} 100%)`, color: WA.text }}
-            role="dialog" aria-modal="false" aria-label={`WhatsApp voice call with ${who}`}
-            onMouseEnter={() => setHold(true)} onMouseMove={() => { if (!hold) setHold(true); }}
-            onMouseLeave={() => setHold(false)} onKeyDown={() => { if (!hold) setHold(true); }}>
+            role="dialog" aria-modal="false" aria-label={`WhatsApp voice call with ${who}`}>
             <style>{STYLES}</style>
 
             {/* Top: minimise / close + the waiting banner and device notices */}
@@ -420,10 +434,14 @@ export function CallStage({ onOpenConversation }: { onOpenConversation?: (key: s
                 )}
             </div>
 
-            {/* Middle: who + what's happening */}
-            <div className="flex-1 flex flex-col items-center justify-center text-center px-4 py-4 min-h-0">
-                <Avatar label={who} size="clamp(72px, 20vh, 128px)" pulse={pulse} />
-                <h2 className="mt-5 font-semibold leading-tight max-w-full break-words"
+            {/* Who + what's happening, then the controls — spread over a phone's
+                height, one centred group on a wide screen. */}
+            {/* (No min-h-0: on a short screen the card scrolls — nothing ever overlaps.) */}
+            <div className="flex-1 flex flex-col md:justify-center">
+            <div className="flex-1 md:flex-none flex flex-col items-center justify-center text-center px-4 py-4">
+                {/* Smaller while a second call's banner needs the room, so the controls stay in view. */}
+                <Avatar label={who} size={c.waiting ? "clamp(48px, 10vh, 96px)" : "clamp(64px, 16vh, 128px)"} pulse={pulse} />
+                <h2 title={who} className="mt-4 font-semibold leading-tight max-w-full break-words line-clamp-2"
                     style={{ fontSize: "clamp(22px, 5vw, 28px)" }}>{who}</h2>
                 {c.call?.name && c.call.from && (
                     <div className="mt-1 tabular-nums" style={{ fontSize: 14, color: WA.muted }}>+{c.call.from}</div>
@@ -434,7 +452,6 @@ export function CallStage({ onOpenConversation }: { onOpenConversation?: (key: s
                 <div aria-live="polite" aria-atomic="true"
                     className="mt-3 flex items-center justify-center gap-2 max-w-md"
                     style={{ fontSize: 15, color: endedTone ? "#FFD1D9" : WA.text, minHeight: 24 }}>
-                    {ended && endedTone && <Icon name={c.outcome === "missed" ? "in" : "alert"} size={16} />}
                     {status}
                 </div>
                 {ended && c.outcome === "missed" && c.reason && (
@@ -465,14 +482,18 @@ export function CallStage({ onOpenConversation }: { onOpenConversation?: (key: s
                 )}
             </div>
 
-            {/* Bottom: the controls */}
-            <div className="w-full max-w-lg mx-auto px-4 pb-6 pt-2">
+            {/* The controls. Pointing at (or tabbing through) them pauses a
+                wrap-up's auto-close — the rest of the card doesn't, or a
+                resting mouse would keep "Answered by Ann" up forever. */}
+            <div className="w-full max-w-lg mx-auto px-3 sm:px-4 pb-6 pt-2 md:pt-6"
+                onMouseEnter={() => setHold(true)} onMouseLeave={() => setHold(false)}
+                onKeyDown={() => { if (!hold) setHold(true); }}>
                 {ringingHere && (
                     <div className="flex flex-col items-center gap-3">
-                        <div className="w-full flex items-end justify-between px-2 sm:px-8">
-                            <RoundBtn label="Decline" icon="phone-off" color={WA.red} size={60}
+                        <div className="w-full max-w-[340px] flex items-end justify-between px-2">
+                            <RoundBtn label="Decline" a11y="Decline call" icon="phone-off" color={WA.red} size={60}
                                 onClick={c.decline} />
-                            <RoundBtn label="Answer" icon="phone" color={WA.greenDeep} size={72}
+                            <RoundBtn label="Answer" a11y="Answer call" icon="phone-fill" color={WA.greenDeep} size={72}
                                 onClick={c.answer} btnRef={answerRef} />
                         </div>
                         <button type="button" onClick={c.callbackLater}
@@ -484,7 +505,7 @@ export function CallStage({ onOpenConversation }: { onOpenConversation?: (key: s
                 )}
 
                 {(live || phase === "ending") && (
-                    <div className="relative rounded-[28px] px-2 py-3 flex items-start justify-around gap-1 flex-wrap"
+                    <div className="relative rounded-[28px] px-1 sm:px-2 py-3 flex items-start justify-around sm:gap-1"
                         style={{ backgroundColor: WA.panel }}>
                         <RoundBtn label={c.muted ? "Unmute" : "Mute"} icon={c.muted ? "mic-off" : "mic"} size={56}
                             color={c.muted ? WA.text : "rgba(255,255,255,0.08)"} fg={c.muted ? WA.bg : WA.text}
@@ -504,7 +525,7 @@ export function CallStage({ onOpenConversation }: { onOpenConversation?: (key: s
                             <RoundBtn label="Minimise" icon="minimise" size={56} color="rgba(255,255,255,0.08)" fg={WA.text}
                                 onClick={c.minimise} />
                         )}
-                        <RoundBtn label="End" icon="phone-off" size={56} color={WA.red} onClick={c.hangup}
+                        <RoundBtn label="End" a11y="End call" icon="phone-off" size={56} color={WA.red} onClick={c.hangup}
                             disabled={phase === "ending"} />
                     </div>
                 )}
@@ -514,7 +535,10 @@ export function CallStage({ onOpenConversation }: { onOpenConversation?: (key: s
                         {actions.map((a, i) => (
                             <button key={a.label} type="button" onClick={a.onClick} disabled={a.busy}
                                 ref={i === 0 ? primaryRef : undefined}
-                                className="rounded-full px-5 font-semibold disabled:opacity-60"
+                                // Three choices don't fit one row on a phone: the main one
+                                // gets its own full-width row, the others sit under it.
+                                className={`rounded-full px-5 font-semibold disabled:opacity-60 ${
+                                    a.primary && actions.length > 2 ? "basis-full sm:basis-auto" : "flex-1 sm:flex-none max-w-[200px]"}`}
                                 style={{
                                     minHeight: 48, fontSize: 15,
                                     backgroundColor: a.primary ? WA.greenDeep : "rgba(255,255,255,0.08)",
@@ -525,6 +549,7 @@ export function CallStage({ onOpenConversation }: { onOpenConversation?: (key: s
                         ))}
                     </div>
                 )}
+            </div>
             </div>
         </div>
     );
@@ -549,7 +574,7 @@ export function CallBar(): React.ReactElement | null {
                 </span>
                 <button type="button" onClick={c.callGranted}
                     className="rounded-full px-4 font-semibold flex items-center gap-1.5"
-                    style={{ minHeight: 36, fontSize: 13, backgroundColor: WA.greenDeep, color: "#fff" }}>
+                    style={{ minHeight: 44, fontSize: 14, backgroundColor: WA.greenDeep, color: "#fff" }}>
                     <Icon name="phone" size={15} /> Call now
                 </button>
                 <button type="button" onClick={c.dismissGranted} aria-label="Dismiss"
@@ -571,16 +596,17 @@ export function CallBar(): React.ReactElement | null {
                 style={{ minHeight: 48, backgroundColor: WA.bg2, color: WA.text }}>
                 <button type="button" onClick={c.expand} className="flex-1 min-w-0 flex items-center gap-2 text-left"
                     style={{ minHeight: 44 }} aria-label={`Show call with ${who}`}>
-                    <WhatsAppGlyph size={16} color={WA.muted} />
-                    <span className="truncate" style={{ fontSize: 14 }}>
-                        <b className="font-semibold">{who}</b>
-                        <span style={{ color: WA.muted }}> · {outcomeWords(c.outcome, c)}</span>
+                    <span className="flex-shrink-0"><WhatsAppGlyph size={16} color={WA.muted} /></span>
+                    {/* Two lines: the outcome is the news — it must never be the part cut off. */}
+                    <span className="min-w-0 flex flex-col leading-tight">
+                        <b className="font-semibold truncate" style={{ fontSize: 13 }}>{who}</b>
+                        <span className="truncate" style={{ fontSize: 13, color: WA.muted }}>{outcomeWords(c.outcome, c)}</span>
                     </span>
                 </button>
                 {primary && (
                     <button type="button" onClick={primary.onClick} disabled={primary.busy}
                         className="rounded-full px-3 font-semibold flex-shrink-0"
-                        style={{ minHeight: 36, fontSize: 13, backgroundColor: WA.greenDeep, color: "#fff" }}>{primary.label}</button>
+                        style={{ minHeight: 44, fontSize: 13, backgroundColor: WA.greenDeep, color: "#fff" }}>{primary.label}</button>
                 )}
                 <button type="button" onClick={c.dismiss}
                     className="rounded-full px-3 flex-shrink-0 hover:bg-white/5"

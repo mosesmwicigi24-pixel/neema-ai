@@ -684,14 +684,18 @@ function EditableField({
 // instead" sheet for channels with no business calling API
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface MetaSheetStyle { label: string; gradient: string; }
+interface MetaSheetStyle { label: string; gradient: string; /** Behind white text (readable end of the gradient). */ ink: string; }
 
 // Messenger and Instagram have NO business calling API (docs/CALLING_UX.md §1):
 // their Call button offers a WhatsApp call, styled in the platform's own look.
 const META_CALL_SHEET: Record<string, MetaSheetStyle> = {
-    messenger: { label: "Messenger", gradient: "linear-gradient(135deg, #0084FF 0%, #A033FF 100%)" },
-    facebook: { label: "Messenger", gradient: "linear-gradient(135deg, #0084FF 0%, #A033FF 100%)" },
-    instagram: { label: "Instagram", gradient: "linear-gradient(45deg, #FEDA75 0%, #FA7E1E 25%, #D62976 50%, #962FBF 75%, #4F5BD5 100%)" },
+    messenger: { label: "Messenger", gradient: "linear-gradient(135deg, #0084FF 0%, #A033FF 100%)",
+                 ink: "linear-gradient(135deg, #0066E0 0%, #8A1FEA 100%)" },
+    facebook: { label: "Messenger", gradient: "linear-gradient(135deg, #0084FF 0%, #A033FF 100%)",
+                ink: "linear-gradient(135deg, #0066E0 0%, #8A1FEA 100%)" },
+    // White text never sits on the yellow end: it reads left-to-right over purple → pink.
+    instagram: { label: "Instagram", gradient: "linear-gradient(45deg, #FEDA75 0%, #FA7E1E 25%, #D62976 50%, #962FBF 75%, #4F5BD5 100%)",
+                 ink: "linear-gradient(90deg, #4F5BD5 0%, #962FBF 30%, #D62976 65%, #FA7E1E 100%)" },
 };
 
 function MetaCallSheet({ meta, first, name, callDigits, busy, onCall, onAsk, onInvited, onToast, onClose }: {
@@ -727,11 +731,11 @@ function MetaCallSheet({ meta, first, name, callDigits, busy, onCall, onAsk, onI
     return (
         <div role="region" aria-label="Call on WhatsApp instead" className="mt-2 rounded-xl overflow-hidden"
             style={{ border: "1px solid #e2e8f0", backgroundColor: "#fff" }}>
-            <div className="flex items-center justify-between px-3 py-2 text-white"
-                style={{ background: meta.gradient, textShadow: "0 1px 2px rgba(0,0,0,0.35)" }}>
+            <div className="flex items-center justify-between pl-3 py-0.5 text-white"
+                style={{ background: meta.ink, textShadow: "0 1px 2px rgba(0,0,0,0.35)" }}>
                 <span className="text-xs font-bold">{meta.label}</span>
                 <button type="button" onClick={onClose} aria-label="Close"
-                    className="w-8 h-8 -mr-1 rounded-full flex items-center justify-center hover:bg-white/15">
+                    className="w-11 h-11 rounded-full flex items-center justify-center hover:bg-white/15">
                     <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
                 </button>
             </div>
@@ -740,21 +744,24 @@ function MetaCallSheet({ meta, first, name, callDigits, busy, onCall, onAsk, onI
                     {meta.label} doesn&apos;t let businesses take calls. Call {first} on WhatsApp instead.
                 </p>
                 {callDigits ? (
+                    <>
                     <button type="button" onClick={onCall} disabled={busy}
                         className="mt-2.5 w-full h-11 rounded-lg text-xs font-semibold text-white inline-flex items-center justify-center gap-1.5 disabled:opacity-60"
-                        style={{ backgroundColor: "#25D366" }}>
-                        <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                        style={{ backgroundColor: "#008069" }}>
+                        <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="flex-shrink-0">
                             <path d={CALL_ICON_PATH.live} />
                         </svg>
-                        {busy ? "On a call" : `Call on WhatsApp · +${callDigits}`}
+                        {busy ? "On a call" : "Call on WhatsApp"}
                     </button>
+                    <div className="mt-1 text-center text-[11px] tabular-nums" style={{ color: "#64748b" }}>+{callDigits}</div>
+                    </>
                 ) : (
                     <>
                         {onAsk && (
                             <button type="button"
                                 onClick={() => onAsk(`Hi ${first !== "them" ? first : "there"}! We can't take calls here on ${meta.label} — could you share your WhatsApp number so we can call you there?`)}
                                 className="mt-2.5 w-full h-11 rounded-lg text-xs font-semibold text-white"
-                                style={{ background: meta.gradient, textShadow: "0 1px 2px rgba(0,0,0,0.3)" }}>
+                                style={{ background: meta.ink, textShadow: "0 1px 2px rgba(0,0,0,0.3)" }}>
                                 Ask for their WhatsApp number
                             </button>
                         )}
@@ -764,11 +771,11 @@ function MetaCallSheet({ meta, first, name, callDigits, busy, onCall, onAsk, onI
                         <div className="mt-1 flex gap-1.5">
                             <input type="tel" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)}
                                 placeholder="+254…" aria-label="Their WhatsApp number"
-                                className="flex-1 min-w-0 h-10 rounded-lg px-2 text-xs outline-none"
+                                className="flex-1 min-w-0 h-11 rounded-lg px-2 text-xs outline-none focus:ring-2 focus:ring-emerald-600"
                                 style={{ border: "1px solid #cbd5e1", color: "#16270c" }} />
                             <button type="button" onClick={invite} disabled={sending}
-                                className="h-10 px-3 rounded-lg text-xs font-semibold text-white disabled:opacity-60"
-                                style={{ backgroundColor: "#25D366" }}>
+                                className="h-11 px-3 rounded-lg text-xs font-semibold text-white disabled:opacity-60"
+                                style={{ backgroundColor: "#008069" }}>
                                 {sending ? "Sending…" : "Invite to WhatsApp"}
                             </button>
                         </div>
@@ -1419,7 +1426,7 @@ export function CustomerSidebar({
                                 aria-expanded={meta ? callSheetOpen : undefined}
                                 title={meta ? `${meta.label} can't take calls — call on WhatsApp instead` : "Call this customer on WhatsApp"}
                                 className="flex-1 inline-flex items-center justify-center gap-1.5 h-11 rounded-lg text-xs font-semibold text-white transition-transform hover:brightness-95 active:scale-95 disabled:opacity-60"
-                                style={{ background: meta ? meta.gradient : "#25D366" }}
+                                style={{ background: meta ? meta.ink : "#008069" }}
                             >
                                 <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                                     <path d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />

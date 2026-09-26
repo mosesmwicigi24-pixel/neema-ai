@@ -23,8 +23,11 @@ const C = {
 const AV = ["#3b6ea5", "#a5417d", "#b5892f", "#3c8c5a", "#8a4fc4", "#b24a4a"];
 const avatarColor = (s: string) => AV[[...(s || "?")].reduce((a, c) => a + c.charCodeAt(0), 0) % AV.length];
 const whoOf = (c: ApiCall) => c.name || (c.wa_id ? `+${c.wa_id}` : "Unknown caller");
-const initialsOf = (who: string) =>
-    who.replace("+", "").split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase() || "?";
+const initialsOf = (who: string): React.ReactNode => {
+    const i = who.replace("+", "").split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+    // A bare number has no initials — show a handset, as the call card does.
+    return !i || /^\d/.test(i) ? <PhoneGlyph size={16} /> : i;
+};
 
 const clock = (iso: string | null | undefined) =>
     iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
@@ -108,7 +111,7 @@ function CallTranscript({ call, onOpenChat }: { call: ApiCall; onOpenChat?: () =
         return (
             <div style={{ fontSize: 13, color: C.sub }}>
                 Couldn&apos;t load the recording details.{" "}
-                <button type="button" onClick={load} style={{ color: C.green, textDecoration: "underline", minHeight: 32 }}>Retry</button>
+                <button type="button" onClick={load} style={{ color: C.green, textDecoration: "underline", minHeight: 44 }}>Retry</button>
             </div>
         );
     }
@@ -145,7 +148,7 @@ function CallTranscript({ call, onOpenChat }: { call: ApiCall; onOpenChat?: () =
                             {onOpenChat && (
                                 <button type="button" onClick={onOpenChat}
                                     className="mt-2 rounded-full px-3 font-semibold"
-                                    style={{ minHeight: 36, fontSize: 12, color: "#0b1410", background: C.green }}>
+                                    style={{ minHeight: 44, fontSize: 13, color: "#0b1410", background: C.green }}>
                                     Open chat
                                 </button>
                             )}
@@ -156,7 +159,7 @@ function CallTranscript({ call, onOpenChat }: { call: ApiCall; onOpenChat?: () =
             {st === "done" && data.transcript && (
                 <>
                     <button type="button" onClick={() => setShowFull((v) => !v)}
-                        style={{ fontSize: 12, color: C.sub, minHeight: 32 }}>
+                        style={{ fontSize: 12, color: C.sub, minHeight: 44 }}>
                         {showFull ? "Hide" : "Show"} full transcript{data.language ? ` · ${data.language}` : ""}
                     </button>
                     {showFull && (
@@ -171,7 +174,7 @@ function CallTranscript({ call, onOpenChat }: { call: ApiCall; onOpenChat?: () =
                 <div className="flex items-center gap-3 flex-wrap">
                     <span style={{ fontSize: 13, color: C.sub }}>Recording saved.</span>
                     <button type="button" onClick={runTranscribe} disabled={busy}
-                        style={{ fontSize: 13, fontWeight: 600, color: "#0b1410", background: C.green, borderRadius: 999, padding: "0 16px", minHeight: 40, opacity: busy ? 0.6 : 1 }}>
+                        style={{ fontSize: 13, fontWeight: 600, color: "#0b1410", background: C.green, borderRadius: 999, padding: "0 16px", minHeight: 44, opacity: busy ? 0.6 : 1 }}>
                         {busy ? "Starting…" : "Transcribe & summarise"}
                     </button>
                 </div>
@@ -180,7 +183,7 @@ function CallTranscript({ call, onOpenChat }: { call: ApiCall; onOpenChat?: () =
                 <div style={{ fontSize: 13, color: C.red }}>
                     Transcription failed.{" "}
                     <button type="button" onClick={runTranscribe} disabled={busy}
-                        style={{ color: C.green, textDecoration: "underline", minHeight: 32 }}>Retry</button>
+                        style={{ color: C.green, textDecoration: "underline", minHeight: 44 }}>Retry</button>
                 </div>
             )}
             {(st === "none" || !st) && !data.has_recording && (
@@ -261,7 +264,9 @@ function CallDetail({ c, onBack, onCallBack, onOpenChat, onFollowUpDone, busyDon
                         <div className="truncate" style={{ fontSize: 18, fontWeight: 600 }}>{who}</div>
                         <div className="flex items-center gap-1.5 flex-wrap" style={{ fontSize: 13, color: st.dark }}>
                             <CallIcon c={c} />
-                            <span>{st.word}{c.direction === "outbound" ? " · outgoing" : " · incoming"}</span>
+                            {/* "Incoming" / "Outgoing" already say the direction — never "Incoming · incoming". */}
+                            <span>{st.word}{["completed", "ended", "ringing", "answered"].includes(c.status) ? ""
+                                : c.direction === "outbound" ? " · outgoing" : " · incoming"}</span>
                             {c.duration ? <span style={{ color: C.sub }}>· {fmtCallDuration(c.duration)}</span> : null}
                             {c.name && c.wa_id && <span style={{ color: C.faint }}>· +{c.wa_id}</span>}
                         </div>
@@ -494,7 +499,7 @@ export function CallsView({ isMobile, onOpenConversation, onToast, focusWaId, on
                                 return (
                                     <button key={id} type="button" role="tab" aria-selected={on} onClick={() => setFilter(id)}
                                         className="rounded-full px-4 flex items-center gap-1.5"
-                                        style={{ minHeight: 40, fontSize: 13, fontWeight: 600,
+                                        style={{ minHeight: 44, fontSize: 13, fontWeight: 600,
                                                  background: on ? "rgba(37,211,102,0.2)" : "rgba(255,255,255,0.05)",
                                                  color: on ? C.green : C.sub,
                                                  border: on ? "1px solid rgba(37,211,102,0.4)" : "1px solid transparent" }}>
@@ -521,13 +526,13 @@ export function CallsView({ isMobile, onOpenConversation, onToast, focusWaId, on
                                 Get told about calls while Neema is in another tab.
                             </span>
                             <button type="button" onClick={() => callCtx?.requestNotifications()}
-                                className="rounded-full px-3 font-semibold" style={{ minHeight: 36, fontSize: 12, background: C.greenBtn, color: "#fff" }}>
+                                className="rounded-full px-4 font-semibold" style={{ minHeight: 44, fontSize: 13, background: C.greenBtn, color: "#fff" }}>
                                 Turn on
                             </button>
                             <button type="button" onClick={() => {
                                 setNotifyHidden(true);
                                 try { localStorage.setItem("neema:call-notify-dismissed", "1"); } catch { /* private mode */ }
-                            }} className="rounded-full px-2" style={{ minHeight: 36, fontSize: 12, color: C.sub }}>
+                            }} className="rounded-full px-3" style={{ minHeight: 44, fontSize: 13, color: C.sub }}>
                                 Not now
                             </button>
                         </div>
@@ -558,7 +563,7 @@ export function CallsView({ isMobile, onOpenConversation, onToast, focusWaId, on
                             {loadError && (
                                 <div className="mx-5 mb-2 flex items-center gap-2" style={{ fontSize: 12, color: "#f5c451" }}>
                                     Couldn&apos;t refresh the list.
-                                    <button type="button" onClick={load} style={{ color: C.green, textDecoration: "underline", minHeight: 32 }}>Retry</button>
+                                    <button type="button" onClick={load} style={{ color: C.green, textDecoration: "underline", minHeight: 44 }}>Retry</button>
                                 </div>
                             )}
                             {groups.map((g) => (
@@ -584,15 +589,16 @@ export function CallsView({ isMobile, onOpenConversation, onToast, focusWaId, on
                                                     <span className="flex-1 min-w-0">
                                                         <span className="flex items-center gap-1.5">
                                                             <span className="truncate" style={{ fontSize: 14, fontWeight: 500, color: st.icon === "missed" ? st.dark : C.text }}>{who}</span>
-                                                            {c.follow_up_open && (
-                                                                <span className="flex-shrink-0 rounded-full px-1.5" style={{ fontSize: 10, fontWeight: 600, background: "rgba(242,85,90,0.2)", color: "#ffb3b5" }}>
-                                                                    Follow up
-                                                                </span>
-                                                            )}
                                                         </span>
                                                         <span className="flex items-center gap-1.5 flex-wrap" style={{ fontSize: 12, color: st.dark, marginTop: 1 }}>
                                                             <CallIcon c={c} />
                                                             <span>{st.word}</span>
+                                                            {/* On the outcome line, so the name keeps its room. */}
+                                                            {c.follow_up_open && (
+                                                                <span className="rounded-full px-1.5" style={{ fontSize: 11, fontWeight: 600, background: "rgba(242,85,90,0.2)", color: "#ffb3b5" }}>
+                                                                    Follow up
+                                                                </span>
+                                                            )}
                                                             {c.duration ? <span style={{ color: "#7f9b8b" }}>· {fmtCallDuration(c.duration)}</span> : null}
                                                             {c.agent_name ? <span style={{ color: "#7f9b8b" }}>· {c.agent_name.split(" ")[0]}</span> : null}
                                                             {(c.has_recording || hasNote) && (
