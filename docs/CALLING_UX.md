@@ -66,6 +66,14 @@ Live events (`ws:channel:calls`, reach every signed-in agent):
   insights, follow-up)
 - `call_permission {wa_id, status, expires_at, permanent}`
 
+Ordering (Meta doesn't promise it): a `terminate` that arrives before its
+`connect` is parked and applied when the row is written — the call is logged
+(missed) and never rings; a `connect` for a call already logged (a late
+redelivery) never rings again; the customer's answer / Meta's terminate that
+beat `/calls/connect`'s outbound row are applied the moment the row lands. A
+call still `ringing` after 2 min is closed (missed / no_answer) whenever the
+Calls list or a single row is read — only `ringing` rows, never a live call.
+
 The thread (`GET /conversations/{id}/messages`, first page) now includes
 `system_event` items with `event_kind: "call"`, `text` (the label), `agent_name`,
 `event_reason` (the summary) and `call` (the full row).

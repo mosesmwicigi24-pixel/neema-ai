@@ -99,6 +99,17 @@ async def record_ringing(call_id: str, wa_id: str | None, name: str | None) -> d
         return {}
 
 
+async def known_call(call_id: str) -> bool:
+    """Whether this call is already logged — a `connect` for it is a redelivery.
+    False when the database can't say (ringing beats staying silent)."""
+    try:
+        async with AsyncSessionLocal() as db:
+            return (await db.execute(
+                select(Call.id).where(Call.call_id == call_id))).first() is not None
+    except Exception:
+        return False
+
+
 async def mark_answered(call_id: str, agent_id) -> dict | None:
     """ringing → answered. `agent_id` None (the customer answered OUR call) keeps
     the agent who placed it. Returns {agent_id, agent_name, direction} when this
@@ -197,23 +208,95 @@ async def mark_ended(call_id: str, status: str | None = None, duration: int | No
 async def sweep_stale(db, redis=None) -> int:
     """Calls still ringing after [RING_STALE_AFTER] never got their terminate
     event: close them (missed / no_answer) and tell everyone, so no screen keeps
-    ringing a call that is long gone. Returns how many were closed."""
+    ringing a call that is long gone. Returns how many were closed.
+
+    Only `ringing` rows are touched — a live answered call is never swept — and
+    each move is a conditional UPDATE, so an answer landing in the same instant
+    wins instead of being overwritten. Cheap when nothing is stale (one indexed
+    lookup on status)."""
     cutoff = datetime.now(timezone.utc) - RING_STALE_AFTER
-    stale = (await db.execute(
-        select(Call).where(Call.status == "ringing", Call.started_at < cutoff))).scalars().all()
-    if not stale:
-        return 0
     now = datetime.now(timezone.utc)
     events = []
-    for s in stale:
-        s.status = "no_answer" if s.direction == "outbound" else "missed"
-        s.ended_at = now
-        events.append({"type": "call_ended", "call_id": s.call_id, "outcome": s.status,
-                       "duration": None, "direction": s.direction})
+    for direction, outcome in (("outbound", "no_answer"), (None, "missed")):
+        cond = [Call.status == "ringing", Call.started_at < cutoff]
+        cond.append(Call.direction == "outbound" if direction else
+                    (Call.direction.is_(None) | (Call.direction != "outbound")))
+        res = await db.execute(
+            update(Call).where(*cond).values(status=outcome, ended_at=now)
+            .returning(Call.call_id, Call.direction))
+        for r in res.all():
+            events.append({"type": "call_ended", "call_id": r.call_id, "outcome": outcome,
+                           "duration": None, "direction": r.direction})
+    if not events:
+        await db.rollback()
+        return 0
     await db.commit()
     for e in events:
         await publish(redis, e)
-    return len(stale)
+    return len(events)
+
+
+# ── Webhooks that beat the row (Meta does not promise order) ─────────────────
+# A `terminate` can land before the `connect` it closes, and the customer's
+# answer to OUR call can land before /calls/connect has written its row. The
+# event is parked here and applied the moment the row exists, so no call is
+# left "ringing" (or rings a phone) after it is already over.
+
+EARLY_TTL = 600
+
+
+def _early_key(kind: str, call_id: str) -> str:
+    return f"wa:call:early:{kind}:{call_id}"
+
+
+async def note_early(redis, kind: str, call_id: str, data: dict | None = None) -> None:
+    """Park an event (`answer` / `end`) for a call whose row isn't written yet."""
+    if redis is None or not call_id:
+        return
+    try:
+        await redis.set(_early_key(kind, call_id), json.dumps(data or {}), ex=EARLY_TTL)
+    except Exception as exc:
+        _log.warning("call early-event park failed: %s", exc)
+
+
+async def _take_early(redis, kind: str, call_id: str) -> dict | None:
+    if redis is None:
+        return None
+    try:
+        raw = await redis.get(_early_key(kind, call_id))
+        if raw is None:
+            return None
+        await redis.delete(_early_key(kind, call_id))
+        return json.loads(raw) if raw else {}
+    except Exception:
+        return None
+
+
+async def ended_before_ring(redis, call_id: str) -> dict | None:
+    """The parked terminate for a call whose `connect` came after it, if any."""
+    if redis is None:
+        return None
+    try:
+        raw = await redis.get(_early_key("end", call_id))
+        return json.loads(raw) if raw else None
+    except Exception:
+        return None
+
+
+async def apply_early(redis, call_id: str) -> None:
+    """The row now exists: replay any answer / terminate that arrived first,
+    and tell everyone (the placing phone reads the row and follows)."""
+    ans = await _take_early(redis, "answer", call_id)
+    if ans is not None:
+        moved = await mark_answered(call_id, None)
+        if moved is not None:
+            await publish(redis, {"type": "call_answered", "call_id": call_id, **moved})
+    end = await _take_early(redis, "end", call_id)
+    if end is not None:
+        info = await mark_ended(call_id, duration=end.get("duration"))
+        if info is not None:
+            info.pop("wa_id", None)
+            await publish(redis, {"type": "call_ended", **info, "status": end.get("status")})
 
 
 async def mark_follow_up_done(db, call_id: str) -> bool:

@@ -192,11 +192,25 @@ async def _handle_calls(request: Request, payload: dict) -> None:
                     moved = await call_log.mark_answered(cid, None)
                     if moved is not None:
                         await call_log.publish(redis, {"type": "call_answered", "call_id": cid, **moved})
+                    else:
+                        # Beat /calls/connect's row: applied when it lands.
+                        await call_log.note_early(redis, "answer", cid)
                     continue
 
                 if event == "connect":
                     _log.info("WA incoming call %s from %s", cid, call.get("from"))
                     frm = call.get("from")
+                    # Never ring a call that is already over: its terminate
+                    # beat this connect, or this is a late redelivery of a call
+                    # we logged long ago (the dedup key only lives an hour).
+                    early_end = await call_log.ended_before_ring(redis, cid)
+                    if early_end is not None:
+                        await call_log.record_ringing(cid, frm, _contacts.get(str(frm)))
+                        await call_log.apply_early(redis, cid)
+                        await call_log.publish_update(redis, cid)
+                        continue
+                    if await call_log.known_call(cid):
+                        continue
                     if redis is not None:
                         # Stash the SDP offer + metadata for the accept step.
                         await redis.set(
@@ -237,7 +251,14 @@ async def _handle_calls(request: Request, payload: dict) -> None:
                                 r = await call_log.row(db, cid)
                         except Exception:
                             r = None
-                        info = {"call_id": cid, "outcome": (r or {}).get("status") or "completed",
+                        if r is None:
+                            # No row yet (this terminate beat the connect, or
+                            # our outbound row): park it for when it lands.
+                            await call_log.note_early(redis, "end", cid, {
+                                "duration": call.get("duration"), "status": call.get("status")})
+                        info = {"call_id": cid,
+                                "outcome": (r or {}).get("status")
+                                or ("completed" if call.get("duration") else "missed"),
                                 "duration": (r or {}).get("duration") or call.get("duration"),
                                 "direction": (r or {}).get("direction"),
                                 "agent_id": (r or {}).get("agent_id"),

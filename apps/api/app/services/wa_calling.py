@@ -131,7 +131,8 @@ _CALL_ERRORS = {
     "138003": "A call to this customer is already in progress.",
     "138004": "The call couldn't connect — try again.",
     "138005": "Too many calls to this customer in a short time — try again later or message them.",
-    "138007": "They didn't pick up in time.",
+    # A connect-time timeout on Meta's side — not the customer declining.
+    "138007": "The call couldn't connect in time — try again.",
 }
 
 

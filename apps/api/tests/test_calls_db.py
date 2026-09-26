@@ -397,3 +397,77 @@ def test_a_decline_a_moment_after_a_colleague_answered_never_cuts_them_off(env, 
     # Ann herself can still hang up.
     assert env.client.post("/api/admin/calls/wacid.9/terminate", json={},
                            headers=_as(world["ann"])).json()["outcome"] == "completed"
+
+
+# ── Meta doesn't promise order: events that beat the row they belong to ──────
+
+async def _webhook_async(env, *calls):
+    """[_webhook] from inside a running request (a fake Meta call)."""
+    from app.routers import whatsapp_webhook as ww
+    payload = {"object": "whatsapp_business_account", "entry": [{"changes": [{"field": "calls", "value": {
+        "metadata": {"phone_number_id": "PNID"}, "contacts": [], "calls": list(calls)}}]}]}
+    req = types.SimpleNamespace(app=types.SimpleNamespace(state=types.SimpleNamespace(redis=env.redis)))
+    await ww._handle_calls(req, payload)
+
+
+def test_a_terminate_that_beats_its_connect_never_rings_a_phone(env, world):
+    _end(env, "wacid.10", status="FAILED")        # the caller gave up at once …
+    _ring(env, "wacid.10")                          # … and the connect limps in after
+    assert env.redis.events("incoming_call") == []
+    assert _get(env, "wacid.10", world["ann"])["status"] == "missed"
+    assert env.redis.events("call_ended")[-1]["outcome"] == "missed"
+
+
+def test_a_redelivered_connect_for_a_logged_call_never_rings_again(env, world):
+    _ring(env, "wacid.11")
+    _end(env, "wacid.11")
+    env.redis.store.pop("wa:call:wacid.11:connect", None)   # the dedup key expired
+    _ring(env, "wacid.11")
+    assert len(env.redis.events("incoming_call")) == 1
+    assert _get(env, "wacid.11", world["ann"])["status"] == "missed"
+
+
+def test_an_answer_that_beats_the_outbound_row_still_marks_it_answered(env, world, monkeypatch):
+    from app.services import wa_calling
+
+    async def connect(to, sdp):
+        cid = f"wacid.out.{to}"
+        await _webhook_async(env, {"id": cid, "event": "connect",
+                                   "session": {"sdp_type": "answer", "sdp": "v=0 ans"}})
+        return {"calls": [{"id": cid}]}
+    monkeypatch.setattr(wa_calling, "connect", connect)
+    cid = env.client.post("/api/admin/calls/connect", json={"to": "254722000010", "sdp": "v=0"},
+                          headers=_as(world["ann"])).json()["call_id"]
+    row = _get(env, cid, world["ann"])
+    assert row["status"] == "answered" and row["agent_name"] == "Ann Wanjiru"
+    assert env.redis.events("call_answered")[-1]["agent_name"] == "Ann Wanjiru"
+    _end(env, cid, duration=30)
+    assert _get(env, cid, world["ann"])["status"] == "completed"
+
+
+def test_a_terminate_that_beats_the_outbound_row_closes_it(env, world, monkeypatch):
+    from app.services import wa_calling
+
+    async def connect(to, sdp):
+        cid = f"wacid.out.{to}"
+        await _webhook_async(env, {"id": cid, "event": "terminate", "status": "REJECTED"})
+        return {"calls": [{"id": cid}]}
+    monkeypatch.setattr(wa_calling, "connect", connect)
+    cid = env.client.post("/api/admin/calls/connect", json={"to": "254722000011", "sdp": "v=0"},
+                          headers=_as(world["ann"])).json()["call_id"]
+    assert _get(env, cid, world["ann"])["status"] == "no_answer"
+    assert env.redis.events("call_ended")[-1]["outcome"] == "no_answer"
+
+
+def test_the_stale_sweep_never_touches_a_live_call_and_runs_on_a_polled_row(env, world):
+    _ring(env, "wacid.12")
+    env.client.post("/api/admin/calls/wacid.12/answer", json={"sdp": "v=0"}, headers=_as(world["ann"]))
+    _ring(env, "wacid.13", frm="254700111333")
+    eng = sa.create_engine(env.db_url)
+    with eng.begin() as c:
+        c.execute(sa.text("UPDATE calls SET started_at = NOW() - INTERVAL '5 minutes' "
+                          "WHERE call_id IN ('wacid.12', 'wacid.13')"))
+    eng.dispose()
+    # A phone polling only its own row still learns the ring is over.
+    assert _get(env, "wacid.13", world["ben"])["status"] == "missed"
+    assert _get(env, "wacid.12", world["ann"])["status"] == "answered"

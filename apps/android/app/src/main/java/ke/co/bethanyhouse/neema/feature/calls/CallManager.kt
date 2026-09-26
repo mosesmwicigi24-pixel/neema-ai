@@ -1659,7 +1659,7 @@ class CallManager internal constructor(
         const val MIC_BLOCKED = "Microphone blocked — allow it and try again"
         /** The wrap-up's words for a refused microphone (its button opens the settings). */
         const val MIC_BLOCKED_WRAP = "Microphone blocked — allow it in settings"
-        const val NO_CALL_PERMISSION = "Customer hasn't granted call permission. Send the WhatsApp template first."
+        const val NO_CALL_PERMISSION = "This customer hasn't allowed WhatsApp calls yet — send them a call request"
         const val RING_POLL_MS = 2_500L
         const val IDLE_POLL_MS = 12_000L
         const val RERING_COOLDOWN_MS = 12_000L

@@ -2509,7 +2509,8 @@ async def calls_permission(
     """Whether this customer allowed business calls: granted | denied |
     requested | unknown (never asked — a call may still go through)."""
     from app.services import call_log
-    return await call_log.permission(_redis(request), wa_id.lstrip("+").strip())
+    # Digits only: the number keys a redis entry.
+    return await call_log.permission(_redis(request), "".join(ch for ch in wa_id if ch.isdigit())[:20])
 
 
 @router.get("/calls/{call_id}/offer")
@@ -2649,6 +2650,8 @@ async def calls_connect(
         await db.commit()
     except Exception:
         await db.rollback()
+    # The customer's answer (or Meta's terminate) may have beaten this row.
+    await call_log.apply_early(redis, call_id)
     await call_log.publish_update(redis, call_id)
     return {"ok": True, "call_id": call_id}
 
@@ -2669,7 +2672,7 @@ async def list_calls(
     await call_log.sweep_stale(db, _redis(request))
     q = select(Call)
     if wa_id:
-        q = q.where(Call.wa_id == wa_id.lstrip("+").strip())
+        q = q.where(Call.wa_id == "".join(ch for ch in wa_id if ch.isdigit()))
     if view == "follow_up":
         q = q.where(Call.status.in_(call_log.FOLLOW_UP), Call.follow_up_done_at.is_(None))
     rows = (await db.execute(
@@ -2684,12 +2687,16 @@ async def list_calls(
 @router.get("/calls/{call_id}")
 async def get_call(
     call_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
 ):
     """One call's current row — what a phone that lost its connection reads to
     learn how the call on its screen really ended."""
     from app.services import call_log
+    # A phone polling a ringing call must learn it's over even when nobody
+    # opens the Calls view (the other place stale rings are swept).
+    await call_log.sweep_stale(db, _redis(request))
     r = await call_log.row(db, call_id)
     if r is None:
         raise HTTPException(status_code=404, detail="Call not found")

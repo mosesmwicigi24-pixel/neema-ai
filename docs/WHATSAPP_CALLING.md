@@ -5,6 +5,24 @@ built **direct on the WhatsApp Cloud API** (no BSP). Voice only (Meta lists
 video/screen-share as "in development"). Messenger has **no** business calling
 API — Messenger callers get offered a WhatsApp call-back instead.
 
+## What shipped (2026-09) — read this first
+This file is the original build plan. What runs today, and the UX contract both
+clients (web + Android) implement, is `docs/CALLING_UX.md`. In short:
+- Inbound and outbound (business-initiated) WhatsApp voice calls, web and
+  Android. Accept is a single `accept` with our SDP answer (pre_accept + accept
+  back-to-back raced and failed, so pre_accept is no longer sent).
+- Outbound needs the customer's permission: `call_permission_request` →
+  their `call_permission_reply` (`response` accept/reject, `is_permanent`,
+  `expiration_timestamp`) is stored and broadcast as `call_permission`.
+- One status model and event stream in `apps/api/app/services/call_log.py`;
+  every transition is conditional, so a Meta retry, a late event or two agents
+  tapping at once can never rewrite a finished call. Webhooks that beat their
+  row (a `terminate` before its `connect`, the customer's answer before
+  `/calls/connect` wrote the outbound row) are parked in redis and applied the
+  moment the row exists; a `connect` for a call already logged never rings.
+- Recording (agent device) → self-hosted Whisper transcript → summary and
+  structured insights on the call row, shown in the thread and the Calls view.
+
 ## The good news from Meta's actual API
 The media path is **browser ↔ Meta directly** (WebRTC: ICE + DTLS + SRTP). Our
 server is only a **signaling relay** — it never carries audio. So we do NOT need
@@ -50,7 +68,7 @@ returns duration + status.
 ## ✅ Phase 0 DONE (2026-07-13) — pipe proven with a real call
 - Our API is the WABA front door (`/api/wa/webhook`), transparent-forwarding to
   n8n (`whatsapp_forward_url`); messaging verified unbroken. Verify token
-  `GerdPatience@2017`. `calls` + `messages` fields subscribed. "Allow voice
+  is the server setting `meta_verify_token` (env), never written in docs. `calls` + `messages` fields subscribed. "Allow voice
   calls" enabled; call hours Mon–Sat 08:00–19:00 Africa/Nairobi.
 - A REAL call (Pastor Mwicigi 254700706875 → 254785490805) hit the webhook and
   logged `WA calls webhook received`. Real ids look like

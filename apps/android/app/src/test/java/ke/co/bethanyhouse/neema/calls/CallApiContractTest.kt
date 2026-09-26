@@ -246,10 +246,10 @@ class CallApiContractTest {
             return runCatching { api.connect("254712345678", "sdp", null) }.exceptionOrNull()!!
         }
         // calls_connect: Meta error 138006 → 409 with the permission detail.
-        val e409 = fail(409, "This customer hasn't granted call permission yet. Send the WhatsApp template first, or wait until they message/call us.")
+        val e409 = fail(409, "This customer hasn't allowed calls yet. Send them a call request — you can call as soon as they tap Allow.")
         assertTrue(e409 is ApiException && e409.status == 409)
         assertEquals(CallManager.NO_CALL_PERMISSION, CallManager.outboundError(e409))
-        assertTrue((e409 as ApiException).detail.startsWith("This customer hasn't granted call permission"))
+        assertTrue((e409 as ApiException).detail.startsWith("This customer hasn't allowed calls yet"))
         assertEquals("Couldn't place the call", CallManager.outboundError(fail(400, "A valid phone number is required.")))
         assertEquals("Couldn't place the call", CallManager.outboundError(fail(400, "sdp offer is required")))
         assertEquals("Couldn't place the call", CallManager.outboundError(fail(502, "call failed: WA call connect failed (500)")))

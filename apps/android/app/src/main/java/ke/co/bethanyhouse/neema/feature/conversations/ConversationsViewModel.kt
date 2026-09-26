@@ -1025,6 +1025,9 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                 if (seenFrames.size > SEEN_FRAMES) seenFrames.remove(seenFrames.first())
             }
         }
+        // A call with the open thread's customer rang, was answered, ended or got
+        // its summary: its pill (and brief) must follow, as on the web.
+        if (type in CALL_FRAMES) { onCallFrame(type, e); return }
         // Any thread moving means rows / badges moved: refetch shortly (coalesced).
         if (type in MOVING_FRAMES) scheduleSocketRefresh()
         if (convId == null) return
@@ -1069,6 +1072,36 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                 setMsgs(active) { emptyList() }
                 dash.toast("History cleared by ${e.s("clearedBy") ?: "an agent"}")
             }
+        }
+    }
+
+    private var callRefreshJob: Job? = null
+
+    /**
+     * A calls frame for the open thread's customer (their number, their person,
+     * or a call already in the thread): re-read the first page quietly — merged,
+     * so older pages, the scroll and the composer stay — to update the call pill
+     * and bring its summary in (ConversationsView.tsx does the same). A burst of
+     * frames is one read.
+     */
+    private fun onCallFrame(type: String?, e: JsonObject) {
+        val active = _thread.value.activeId
+        if (active.isEmpty()) return
+        val conv = _inbox.value.cache[active]
+        val row = e["call"] as? JsonObject
+        val wa = (if (type == "call_update") row?.s("wa_id") else if (type == "incoming_call") e.s("from") else null)
+            ?.removePrefix("+")
+        val person = if (type == "call_update") row?.s("person_id") else e.s("person_id")
+        val callId = e.s("call_id") ?: row?.s("call_id")
+        val mine = conv != null && (
+            (wa != null && (wa == conv.waId || (conv.channel == "whatsapp" && wa == conv.externalId))) ||
+                (person != null && person == conv.personId))
+        val known = callId != null && _thread.value.messages[active].orEmpty().any { it.call?.callId == callId }
+        if (!mine && !known) return
+        callRefreshJob?.cancel()
+        callRefreshJob = viewModelScope.launch {
+            delay(CALL_REFRESH_MS)
+            if (_thread.value.activeId == active) loadMessages(active, silent = true)
         }
     }
 
@@ -2146,6 +2179,9 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         const val MAX_CACHED_THREADS = 8
         /** Message-frame ids remembered for duplicate-delivery checks. */
         const val SEEN_FRAMES = 512
+        /** Calls frames that can change the open thread's call pills ([onCallFrame]). */
+        val CALL_FRAMES = setOf("incoming_call", "call_answered", "call_ended", "call_update")
+        const val CALL_REFRESH_MS = 700L
         /** Conversation frames that move a row or a badge. */
         val MOVING_FRAMES = setOf("new_message", "message", "intercept_changed", "history_cleared")
         const val MAX_IMAGE = 5 * MB
