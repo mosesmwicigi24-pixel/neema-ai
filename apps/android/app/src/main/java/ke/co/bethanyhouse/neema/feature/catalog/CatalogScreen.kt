@@ -41,6 +41,7 @@ import ke.co.bethanyhouse.neema.core.ui.components.SearchField
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 import ke.co.bethanyhouse.neema.feature.reports.AreaPalette
+import ke.co.bethanyhouse.neema.feature.reports.measureOnly
 import ke.co.bethanyhouse.neema.core.util.Fmt
 
 // ── Category glyphs and card tints (the web's catEmoji / catColors) ─────────
@@ -379,7 +380,7 @@ internal fun StockBadge(item: CatalogItem) {
 private fun ProductCard(item: CatalogItem, onOpen: () -> Unit, modifier: Modifier = Modifier, imageAspect: Float = 1f) {
     val c = Neema.colors
     Column(
-        modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)).background(c.bg2).border(1.dp, c.bg3, RoundedCornerShape(12.dp)).clickable(onClick = onOpen),
+        modifier.measureOnly().fillMaxSize().clip(RoundedCornerShape(12.dp)).background(c.bg2).border(1.dp, c.bg3, RoundedCornerShape(12.dp)).clickable(onClick = onOpen),
     ) {
         Box(Modifier.fillMaxWidth().aspectRatio(imageAspect).background(categoryBrush(item.rawCategory))) {
             ProductThumb(item)

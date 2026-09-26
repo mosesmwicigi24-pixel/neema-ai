@@ -18,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -50,6 +51,15 @@ typealias Cell = @Composable () -> Unit
  */
 val LocalMeasurePass = staticCompositionLocalOf { false }
 
+/**
+ * On a cell's root: inside the sizing copy ([LocalMeasurePass]) the cell is
+ * hidden from accessibility, so TalkBack (and the a11y probe) see each card
+ * once — the drawn copy — never its unplaced twin.
+ */
+@Composable
+fun Modifier.measureOnly(): Modifier =
+    if (LocalMeasurePass.current) this.clearAndSetSemantics { } else this
+
 /** How many lines a [textCell] may take: one in a table row, two in a phone card (a phone number must not be cut). */
 val LocalCellLines = compositionLocalOf { 1 }
 
@@ -72,7 +82,7 @@ val tabular: TextStyle @Composable get() = androidx.compose.material3.LocalTextS
 fun BigNumber(text: String, color: Color, modifier: Modifier = Modifier, max: TextUnit = 22.sp, min: TextUnit = 12.sp) {
     BasicText(
         text, modifier,
-        style = TextStyle(fontSize = max, fontWeight = FontWeight.Bold, color = color, fontFeatureSettings = TABULAR),
+        style = TextStyle(fontFamily = ke.co.bethanyhouse.neema.core.ui.theme.NeemaFont, fontSize = max, fontWeight = FontWeight.Bold, color = color, fontFeatureSettings = TABULAR),
         maxLines = 1, softWrap = false,
         autoSize = TextAutoSize.StepBased(minFontSize = min, maxFontSize = max, stepSize = 1.sp),
     )

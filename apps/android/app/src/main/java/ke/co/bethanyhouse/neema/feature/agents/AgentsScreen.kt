@@ -52,6 +52,7 @@ import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 import ke.co.bethanyhouse.neema.core.ui.components.neemaSwitchColors
 import ke.co.bethanyhouse.neema.feature.reports.LocalMeasurePass
+import ke.co.bethanyhouse.neema.feature.reports.measureOnly
 import ke.co.bethanyhouse.neema.core.util.AppClock
 import ke.co.bethanyhouse.neema.core.util.Fmt
 
@@ -370,7 +371,7 @@ private fun AgentCard(
     val roleColor = customRole?.color ?: agent.roleColor
     val rolePermCount = customRole?.permissions?.size ?: agent.rolePermissions?.size
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.bg2)
+        Modifier.measureOnly().fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.bg2)
             .border(1.dp, cardBorder, RoundedCornerShape(12.dp)).padding(16.dp),
     ) {
         Row(verticalAlignment = Alignment.Top) {
