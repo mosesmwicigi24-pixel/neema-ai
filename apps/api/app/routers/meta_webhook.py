@@ -444,7 +444,9 @@ async def _post_context(post_id: str, redis=None, channel: str = "facebook") -> 
     Empty dict on no post id / fetch failure."""
     if not post_id:
         return {}
-    key = f"meta:postctx:{channel}:{post_id}"
+    # v2 (2026-09-26): the record now carries the caption whole — an older
+    # record is simply left to expire and the post read once more.
+    key = f"meta:postctx:v2:{channel}:{post_id}"
     if redis is not None:
         try:
             import json
