@@ -175,14 +175,15 @@ internal fun Composer(
             )
             Spacer(Modifier.width(8.dp))
             val closed = window?.mode == "closed"
-            val enabled = state.replyText.isNotBlank() && !state.sending && !closed
+            // The box clears the moment a reply is sent, so an empty box is the
+            // double-tap guard; the reply's own bubble shows it on its way.
+            val enabled = state.replyText.isNotBlank() && !closed
             Box(
                 Modifier.size(44.dp).clip(RoundedCornerShape(16.dp)).background(if (enabled) Amber else Amber.copy(alpha = 0.5f))
                     .clickable(enabled = enabled, onClickLabel = if (closed) (window?.reason ?: "Outside the messaging window") else "Send") { vm.sendReply() },
                 contentAlignment = Alignment.Center,
             ) {
-                if (state.sending) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
-                else Icon(Icons.AutoMirrored.Filled.Send, if (closed) (window?.reason ?: "Outside the messaging window") else "Send", tint = Color.White, modifier = Modifier.size(18.dp))
+                Icon(Icons.AutoMirrored.Filled.Send, if (closed) (window?.reason ?: "Outside the messaging window") else "Send", tint = Color.White, modifier = Modifier.size(18.dp))
             }
         }
         if (state.media.isNotEmpty()) MediaTray(vm, state)
@@ -327,6 +328,8 @@ private val ACCEPT_TYPES = arrayOf(
 @Composable
 private fun MediaTray(vm: ConversationsViewModel, state: ComposerUi) {
     val more = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { vm.addMedia(it) }
+    val nc0 = ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors
+    val retry = state.media.any { it.error != null }
     Column(
         Modifier.padding(top = 8.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color(0xFFF5F7F2))
             .border(1.dp, Color(0xFFE8EBE3), RoundedCornerShape(12.dp)).padding(10.dp),
@@ -366,6 +369,13 @@ private fun MediaTray(vm: ConversationsViewModel, state: ComposerUi) {
                     },
                 )
             }
+            // A file that didn't go says why, under its own row; it stays for a retry.
+            it.error?.let { why ->
+                Text(
+                    "⚠ Not sent — $why", fontSize = 11.sp, lineHeight = 15.sp, color = if (nc0.isDark) Color(0xFFF87171) else Color(0xFFB91C1C),
+                    modifier = Modifier.padding(start = 66.dp),
+                )
+            }
         }
         // Add-more tile
         Box(
@@ -379,10 +389,19 @@ private fun MediaTray(vm: ConversationsViewModel, state: ComposerUi) {
                 contentPadding = PaddingValues(horizontal = 12.dp), shape = RoundedCornerShape(8.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF589B31), contentColor = Color.White, disabledContainerColor = Color(0xFF589B31).copy(alpha = 0.5f), disabledContentColor = Color.White),
             ) {
-                if (state.uploading) CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = Color.White)
-                else {
+                if (state.uploading) {
+                    CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = Color.White)
+                    Spacer(Modifier.width(6.dp)); Text("Sending…", fontSize = 12.sp)
+                } else {
                     Icon(Icons.AutoMirrored.Filled.Send, null, Modifier.size(12.dp)); Spacer(Modifier.width(4.dp))
-                    Text(if (state.media.size > 1) "Send ${state.media.size}" else "Send", fontSize = 12.sp)
+                    Text(
+                        when {
+                            retry -> if (state.media.size > 1) "Retry ${state.media.size}" else "Retry"
+                            state.media.size > 1 -> "Send ${state.media.size}"
+                            else -> "Send"
+                        },
+                        fontSize = 12.sp,
+                    )
                 }
             }
             OutlinedButton(onClick = vm::clearMedia, enabled = !state.uploading, modifier = Modifier.height(28.dp), contentPadding = PaddingValues(horizontal = 12.dp), shape = RoundedCornerShape(8.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE8EBE3))) {

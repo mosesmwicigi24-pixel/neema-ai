@@ -84,6 +84,10 @@ data class ThreadMsg(
      */
     @SerialName("comment_context") val commentRaw: JsonElement? = null,
     @SerialName("reply_to") val replyTo: QuotedRef? = null,
+    /** This device's own bubble on its way: "sending" (not yet confirmed) or "failed". */
+    @kotlinx.serialization.Transient val sendState: String? = null,
+    /** Why a failed bubble didn't go, for the line under it. */
+    @kotlinx.serialization.Transient val sendError: String? = null,
 ) {
     val commentContext: PostContext?
         get() = (commentRaw as? JsonObject)?.let {
@@ -122,10 +126,19 @@ data class PickedMedia(
     /** Set when the image was re-encoded to fit the 5 MB cap. */
     val bytes: ByteArray? = null,
     val caption: String = "",
+    /** Why the last attempt to send it failed; the file stays in the tray for a retry. */
+    val error: String? = null,
+    /**
+     * The last attempt ended without an answer (a timeout, a dropped
+     * connection): it may have reached the customer, so a retry checks the
+     * thread before uploading it again.
+     */
+    val unconfirmed: Boolean = false,
 ) {
     val isImage: Boolean get() = mime.startsWith("image/")
-    override fun equals(other: Any?) = other is PickedMedia && other.id == id && other.caption == caption
-    override fun hashCode() = id.hashCode() * 31 + caption.hashCode()
+    override fun equals(other: Any?) = other is PickedMedia && other.id == id && other.caption == caption &&
+        other.error == error && other.unconfirmed == unconfirmed
+    override fun hashCode() = (id.hashCode() * 31 + caption.hashCode()) * 31 + (error?.hashCode() ?: 0)
 }
 
 /** One PERSON in the list: the newest thread plus their other channels. */
@@ -181,6 +194,10 @@ internal fun mergeThread(existing: List<ThreadMsg>, incoming: List<ThreadMsg>): 
 internal fun mergeServer(existing: List<ThreadMsg>, incoming: List<ThreadMsg>): List<ThreadMsg> {
     val kept = existing.filter { m ->
         when {
+            // A send still being confirmed (or one that failed) is settled by the
+            // view model against the server's NEW rows — an older identical
+            // "ok" must never swallow it.
+            m.sendState != null -> true
             m.id.startsWith("optimistic-") || m.id.startsWith("ws-") -> incoming.none { s ->
                 !s.isSystem && s.direction == m.direction && s.isNote == m.isNote &&
                     s.body.trim() == m.body.trim() &&
@@ -360,9 +377,12 @@ class InboxApi(private val http: NeemaHttp) {
             append("?limit=").append(limit)
             if (before != null) append("&before=").append(enc(before))
         }
-        val arr = when (val el = parse(http.raw("GET", "/admin/conversations/$id/messages$qs"))) {
+        val raw = http.raw("GET", "/admin/conversations/$id/messages$qs")
+        val arr = when (val el = parse(raw)) {
             is JsonArray -> el
-            is JsonNull -> JsonArray(emptyList())
+            // An empty answer is an empty thread; an unreadable one (a captive
+            // portal's HTML page, a truncated body) is not.
+            is JsonNull -> if (raw.isBlank() || raw.trim() == "null") JsonArray(emptyList()) else throw IllegalStateException("Unreadable thread")
             // Not a thread at all: an error, never "No messages yet".
             else -> throw IllegalStateException("Unreadable thread")
         }
@@ -437,7 +457,7 @@ class InboxApi(private val http: NeemaHttp) {
         val res = http.raw("POST", "/admin/conversations/$id/reply", http.jsonBody(body))
         val obj = runCatching { NeemaJson.parseToJsonElement(res) as? JsonObject }.getOrNull()
         if (obj != null && obj.b("ok") == false) {
-            throw IllegalStateException(obj.s("error") ?: "Couldn't send the reply")
+            throw NotDelivered(obj.s("error") ?: "Couldn't send the reply")
         }
     }
 

@@ -258,7 +258,7 @@ class InboxContractTest {
         val b = body("POST", "/admin/conversations/k1/reply")
         assertEquals(setOf("text"), b.keys)
         assertEquals("Yes, Friday.", b.str("text"))
-        assertEquals("", vm.composer.value.replyText); assertFalse(vm.composer.value.sending)
+        assertEquals("", vm.composer.value.replyText)
         assertTrue(toasts.none { it.type == ToastType.Error })
     }
 
@@ -305,7 +305,7 @@ class InboxContractTest {
         vm.select("k1"); vm.toggleTx()
         fake.on("GET", "/admin/conversations/[^/]+/messages", code = 502, body = "<html>Bad Gateway</html>")
         vm.setReplyText("On its way"); vm.sendReply()
-        assertEquals("", vm.composer.value.replyText); assertFalse(vm.composer.value.sending)
+        assertEquals("", vm.composer.value.replyText)
         assertTrue(toasts.none { it.type == ToastType.Error })
         assertTrue(vm.thread.value.messages["k1"]!!.any { it.id.startsWith("optimistic-") && it.body == "On its way" })
     }
@@ -374,8 +374,11 @@ class InboxContractTest {
         assertEquals("""{"facts":"yes, KES 12,500"}""", calls("POST", "/admin/conversations/k1/answer").single().body)
         fake.on("POST", "/admin/conversations/k1/answer", code = 409, body = Contract.outsideWindow)
         assertEquals(false to "Outside the messaging window — reply yourself when they next write.", vm.answerViaNeema("x"))
-        fake.on("POST", "/admin/conversations/k1/answer", code = 502, body = """{"detail":"Neema could not compose the answer"}""")
+        fake.on("POST", "/admin/conversations/k1/answer", code = 422, body = """{"detail":"facts is required — what the team confirmed"}""")
         assertEquals(false to "Couldn't send right now — try again.", vm.answerViaNeema("x"))
+        // A gateway error mid-turn may still end with Neema sending it: never "failed".
+        fake.on("POST", "/admin/conversations/k1/answer", code = 502, body = "<html>502 Bad Gateway</html>")
+        assertEquals(false to "No answer from the server — Neema may still be sending it. Watch the thread before sending it again.", vm.answerViaNeema("x"))
     }
 
     // ═══════════════ State and ownership ═══════════════
@@ -402,7 +405,7 @@ class InboxContractTest {
         vm.intercept("k1"); assertEquals("Already claimed by another agent", toasts.last().message)
         fake.on("POST", "/admin/conversations/k1/pause", code = 409, body = Contract.pauseConflict)
         vm.pause("k1"); assertEquals("Handled by another agent — they must pause it", toasts.last().message)
-        assertEquals("", vm.thread.value.convBusy)
+        assertTrue(vm.thread.value.busy.isEmpty())
     }
 
     @Test fun clearHistory_deleteAndThe403() {
@@ -468,7 +471,10 @@ class InboxContractTest {
         assertTrue(toasts.any { it.message == "big.jpg: Image too large — max 5 MB." })
         assertEquals("Sent 1, 1 failed", toasts.last().message)
         assertTrue(vm.thread.value.messages["k1"]!!.any { it.id == "srv-u1" && it.mediaType == "document" })
-        assertTrue(vm.composer.value.media.isEmpty()); assertFalse(vm.composer.value.uploading)
+        // Input is sacred: the file that failed stays in the tray, with why, for a retry.
+        assertEquals(listOf("big.jpg"), vm.composer.value.media.map { it.name })
+        assertEquals("Image too large — max 5 MB.", vm.composer.value.media.single().error)
+        assertFalse(vm.composer.value.uploading)
     }
 
     @Test fun replyMedia_bodyKeys() = runBlocking {
@@ -483,14 +489,14 @@ class InboxContractTest {
         val (_, vm) = vm()
         vm.select("k1")
         fake.on("POST", "/admin/messages/m2/recover-media", body = Contract.recovered)
-        var got: String? = "unset"
+        var got: Recovery? = null
         vm.recoverMedia("m2") { got = it }
         assertEquals("{}", calls("POST", "/admin/messages/m2/recover-media").single().body)
-        assertEquals("https://api.bethanyhouse.co.ke/api/admin/media/rehosted.jpg", got)
-        assertEquals(got, vm.thread.value.recovered["m2"])
+        assertEquals(Recovery.Found("https://api.bethanyhouse.co.ke/api/admin/media/rehosted.jpg"), got)
+        assertEquals((got as Recovery.Found).url, vm.thread.value.recovered["m2"])
         fake.on("POST", "/admin/messages/m9/recover-media", code = 404, body = Contract.recoverGone)
         vm.recoverMedia("m9") { got = it }
-        assertNull(got)
+        assertEquals(Recovery.Gone, got)
     }
 
     @Test fun postVideo_pathEncodingAndChannel() = runBlocking {
@@ -507,10 +513,10 @@ class InboxContractTest {
         val (_, vm) = vm()
         vm.select("k2")
         fake.on("POST", "/admin/whatsapp-invite", body = Contract.invited)
-        assertTrue(runBlocking { vm.invite("250788123456", "Rev. Mary Achieng") })
+        assertEquals(ConversationsViewModel.InviteResult.Sent, runBlocking { vm.invite("250788123456", "Rev. Mary Achieng") })
         assertEquals("""{"phone":"250788123456","name":"Rev. Mary Achieng"}""", calls("POST", "/admin/whatsapp-invite").last().body)
         fake.on("POST", "/admin/whatsapp-invite", code = 400, body = Contract.inviteBadPhone)
-        assertFalse(runBlocking { vm.invite("123", null) })
+        assertEquals(ConversationsViewModel.InviteResult.Refused, runBlocking { vm.invite("123", null) })
         assertEquals("""{"phone":"123"}""", calls("POST", "/admin/whatsapp-invite").last().body)
     }
 
