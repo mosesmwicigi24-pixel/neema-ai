@@ -407,7 +407,10 @@ TOOLS: list[dict] = [
                        "shoe — even one at a time, and even mid-sentence. Pass what "
                        "they said, with units as they said them (e.g. chest '42in', "
                        "height '5ft10'). Merges with what's already on file, so "
-                       "sending one corrected figure never wipes the rest.",
+                       "sending one corrected figure never wipes the rest. Several "
+                       "wearers (a choir, a team of deacons): prefix each label with "
+                       "the wearer, e.g. {\"Deacon 1 chest\": \"40in\", \"Deacon 2 "
+                       "chest\": \"44in\"} — one list per person, never averaged.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -591,6 +594,7 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
     # matches a whole word of the name / category / aliases (plural-tolerant),
     # and the little words that carry no product are dropped before matching.
     from app.services.post_catalog import is_set_row, set_components
+    from app.core import companions as _companions
     toks = _search_tokens(query)
     # A query made ONLY of little words ("our client from south africa gave us
     # this") names nothing: say so, rather than answering with the whole shelf
@@ -757,6 +761,48 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
                          "complete set and say what it comes with; never one piece's "
                          "price as the set's"),
             }
+            # Each piece as the hub sells it ALONE, with its own price — so
+            # "the cassock alone is $120; the complete set is $200" is a fact
+            # in both directions (A SET IS PRICED AS ITS TOTAL).
+            _pp = _companions.pieces_priced(p, catalog)
+            if _pp:
+                row["set"]["pieces_priced"] = [
+                    {"piece": e["piece"], "row": e["row"].get("name"),
+                     "price": _to_display(e["row"].get("price"), ctx, e["row"].get("price_usd"),
+                                          prices=e["row"].get("prices"))}
+                    for e in _pp[:6]]
+        else:
+            # This piece is also sold inside a set: name the set and its price
+            # when they ask about the piece under a set (never one piece's
+            # price as if it were the whole).
+            _ps = _companions.part_of_set(p, catalog)
+            if _ps is not None:
+                row["part_of_set"] = {
+                    "name": _ps.get("name"),
+                    "price": _to_display(_ps.get("price"), ctx, _ps.get("price_usd"),
+                                         prices=_ps.get("prices")),
+                    "comes_with": set_components(_ps, catalog),
+                    "note": ("also sold inside this set — under a set post, or when they "
+                             "ask about the piece and the set, give the piece's own price "
+                             "AND the set's total in one reply"),
+                }
+        # THE COMPANION MAP, grounded (owner, 2026-09-26): what a buyer of this
+        # item completes it with — the humblest hub row of each companion kind
+        # with its price, so the ONE suggestion (after their need is settled)
+        # is a fact, never a guess. The first rows only: those are the ones
+        # that get quoted.
+        if len(results) < 3:
+            _gw = _companions.goes_with(p, catalog)
+            if _gw:
+                row["goes_with"] = [
+                    {"name": g.get("name"),
+                     "price": _to_display(g.get("price"), ctx, g.get("price_usd"),
+                                          prices=g.get("prices"))}
+                    for g in _gw]
+                row["goes_with_note"] = ("the natural companions, cheapest of each kind — "
+                                         "ONE of them may be your one suggestion once the "
+                                         "order for THIS item is settled, at the price shown; "
+                                         "never before the price of what they asked for")
         # The workshop's own measurement spec for THIS item (production items
         # carry it in the hub) — the source of truth for WHAT to ask when
         # measuring. Compacted to one line; required figures lead.
@@ -807,6 +853,16 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
             prices = [vr["price"] for vr in row["variants"] if isinstance(vr["price"], (int, float))]
             if prices and min(prices) != max(prices):
                 row["price_range"] = {"from": min(prices), "to": max(prices)}
+                if row.get("offer_available"):
+                    # The card on a varied product: the played line names the
+                    # chosen variant's figures, never the base row's.
+                    _lo = promo.offer_price(campaign, min(prices))
+                    row["offer_available"]["say_when_played"] = (
+                        f"{campaign['name']}: {campaign['percent']}% off — the exact "
+                        "figure is the chosen variant's `offer_price` (from "
+                        f"{_fmt_price(min(prices), ctx.currency)}, now "
+                        f"{_fmt_price(_lo, ctx.currency) if _lo is not None else '—'}, "
+                        "for the smallest); name the variant with its two figures")
                 row["price_note"] = ("price depends on the variant — quote the one the "
                                      "customer picks, or give the range and ask")
                 row["variant_note"] = (
@@ -830,7 +886,11 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
         if mto:
             row["ask_next"] = ("made to order — the open details are the customer's: ask "
                                "the colour first, then the size or measurements "
-                               "(measurements_needed), then how many and how soon")
+                               "(measurements_needed), then how many and how soon — as "
+                               "the owner's pull, one question at its end ('Kindly place "
+                               "your order — tell us the colour and how many you need. How "
+                               "soon do you want it?'); measurements after the yes, never "
+                               "before the price")
         elif variants:
             row["ask_next"] = ("stock item with a FIXED set of options (see variants) — "
                                "offer those options by name, never an open 'which "
