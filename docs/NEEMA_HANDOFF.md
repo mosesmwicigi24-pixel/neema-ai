@@ -233,6 +233,32 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   so the shared rules block no longer changes five times a day. A public
   comment turn's post is the post it is under (`comment_post_id`), not the
   first post the person ever commented on.
+- **The ten cycles — one coherent brain** (owner 2026-09-26: "run 10 full
+  top-to-bottom cycles… a highly intelligent human salesperson"). The shared
+  prompt was restructured without losing a pinned rule (the pin set is every
+  test literal found in it): the first open detail depends on the item
+  (colour for a garment we sew, nothing for a stock item); the order pull is
+  the one multi-detail shape and an either/or is a form except for the hub's
+  fixed choices; TWO READINGS, ONE REPLY (both items priced, never a silent
+  pick); colour truth (sewn takes any colour, a stock line has its own) and
+  NEVER SPEAK THE ABSENCE's two plain-truth exceptions; THE COMPANION MAP
+  (cassock → stole, cincture, shirt, collar; tray → cups, wafers, wine…) as
+  the source of the ONE suggestion, after the need is settled; THE OBJECTION
+  LADDER (value + smaller door → instalments → the offer, only while one runs
+  → a colleague; one rung per message, never a discount of her own); a first
+  deferral gets the three-part message, a second one line then silence; ONE
+  figure per item; WHEN TO MEASURE (after the yes, the guide on first ask,
+  one list per wearer) and A PARISH ORDER IN WRITING (`prepare_quotation`);
+  the international close = order number + order link + the transfer-route
+  question, the team told by `create_order` itself (`tools._team_note`;
+  result carries `team_told`/`next_step`) — Neema stays on the thread, no
+  handoff at the moment of payment; Kenya proved by evidence is a known
+  country on every channel. The hub grounds the map: every search row's
+  `goes_with` (cheapest of each companion kind, one per role — a cassock's
+  belt is the CINCTURE belt), `part_of_set` on a piece, `set.pieces_priced`
+  on a set (`core/companions.py`); a varied product's offer line names the
+  chosen variant; the made-to-order `ask_next` is the owner's pull. Tests:
+  `test_cost_cycle.py`, `test_companion_map.py`, `test_ten_cycles_battery.py`.
 - **The gate before posting** (owner 2026-09-25: "someone is asking for
   golden trays and you give silver… put a gate to review before posting…
   when someone asks for Holy Communion Cups without specifying chalice, give
