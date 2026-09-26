@@ -12,7 +12,9 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import ke.co.bethanyhouse.neema.core.net.RefreshUnavailable
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -170,22 +172,33 @@ class AuthRepositoryTest {
     }
 
     @Test
-    fun refreshRetriesThreeTimesThenGivesUp() = runBlocking {
+    fun aRefusedRefreshIsFinalAtOnce() = runBlocking {
         val expiring = fakeJwt("a1", 120)
         store.save(direct(expiring))
         fake.on("POST", "/agent-auth/refresh", code = 401, body = """{"detail":"Invalid refresh token"}""")
 
         assertNull(auth.forceRefresh())
-        assertEquals("doRefresh(): three attempts", 3, fake.callsTo("POST", "/agent-auth/refresh").size)
+        // Deliberate: doRefresh() retries a 401 three times; a verdict doesn't change on retry.
+        assertEquals(1, fake.callsTo("POST", "/agent-auth/refresh").size)
         // Still unexpired, so it is handed out until the server says otherwise.
         assertEquals(expiring, auth.validAccessToken())
+        assertEquals("the refusal is remembered: no second ask", 1, fake.callsTo("POST", "/agent-auth/refresh").size)
     }
 
     @Test
     fun anExpiredTokenThatCannotBeRefreshedIsNotHandedOut() = runBlocking {
         store.save(direct(fakeJwt("a1", -60)))
-        fake.on("POST", "/agent-auth/refresh", code = 500, body = "{}")
+        fake.on("POST", "/agent-auth/refresh", code = 401, body = """{"detail":"Invalid refresh token"}""")
         assertNull(auth.validAccessToken())
+    }
+
+    @Test
+    fun anExpiredTokenDuringAnOutageFailsAsTheOutageNotAsSignedOut() = runBlocking {
+        store.save(direct(fakeJwt("a1", -60)))
+        fake.on("POST", "/agent-auth/refresh", code = 500, body = "{}")
+        try { auth.validAccessToken(); fail() } catch (e: RefreshUnavailable) { assertEquals(500, e.status) }
+        assertEquals("three attempts while the server can't answer", 3, fake.callsTo("POST", "/agent-auth/refresh").size)
+        assertNotNull("the session stays", store.current)
     }
 
     @Test

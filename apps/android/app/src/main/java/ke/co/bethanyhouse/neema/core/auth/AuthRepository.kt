@@ -4,8 +4,12 @@ import ke.co.bethanyhouse.neema.core.util.AppClock
 
 import ke.co.bethanyhouse.neema.BuildConfig
 import ke.co.bethanyhouse.neema.core.net.NeemaJson
+import ke.co.bethanyhouse.neema.core.net.RefreshUnavailable
 import ke.co.bethanyhouse.neema.core.net.TokenProvider
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import java.io.IOException
+import java.io.InterruptedIOException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -70,16 +74,50 @@ class AuthRepository(
     private val json = "application/json".toMediaType()
     private val refreshLock = Mutex()
 
+    /**
+     * Every failure is an [AuthException] whose message is meant for people:
+     * a wrong password, the server failing, too many attempts, no network,
+     * or a timeout each say which.
+     */
     suspend fun login(email: String, password: String): Session = withContext(io) {
-        for (prefix in DIRECT_PREFIXES) {
-            val direct = runCatching { directLogin(prefix, email, password) }
-            direct.getOrNull()?.let { return@withContext it.also(store::save) }
-            // Wrong password is final; only "route not there" falls through.
-            val err = direct.exceptionOrNull()
-            if (err !is RouteMissing) throw err!!
+        try {
+            for (prefix in DIRECT_PREFIXES) {
+                val direct = runCatching { directLogin(prefix, email, password) }
+                direct.getOrNull()?.let { return@withContext it.also(store::save) }
+                // Wrong password is final; only "route not there" falls through.
+                val err = direct.exceptionOrNull()
+                if (err !is RouteMissing) throw err!!
+            }
+            nextAuthLogin(email, password).also(store::save)
+        } catch (e: RefreshUnavailable) {
+            throw AuthException(
+                when {
+                    e.timedOut -> TIMED_OUT
+                    e.status == 0 -> OFFLINE
+                    e.status == 429 -> TOO_MANY
+                    else -> UNAVAILABLE
+                },
+            )
+        } catch (e: IOException) {
+            throw AuthException(if (e is InterruptedIOException) TIMED_OUT else OFFLINE)
         }
-        nextAuthLogin(email, password).also(store::save)
     }
+
+    /**
+     * Run one auth call. No answer at all (offline, refused, dropped, timed
+     * out) becomes [RefreshUnavailable] with status 0, so callers can tell it
+     * from the server refusing.
+     */
+    private fun exec(req: Request): okhttp3.Response = try {
+        http.newCall(req).execute()
+    } catch (e: InterruptedIOException) {
+        throw RefreshUnavailable(0, true, "timed out")
+    } catch (e: IOException) {
+        throw RefreshUnavailable(0, false, e.message ?: "network error")
+    }
+
+    /** The server is up but can't serve this now: a 5xx, a 429, a 408. Never a verdict on the session. */
+    private fun transient(code: Int) = code >= 500 || code == 429 || code == 408
 
     fun logout() = store.clear()
 
@@ -105,12 +143,16 @@ class AuthRepository(
         val body = buildJsonObject { put("email", email); put("password", password) }.toString()
         val req = Request.Builder().url("$base/api/$prefix/login")
             .post(body.toRequestBody(json)).build()
-        http.newCall(req).execute().use { r ->
+        exec(req).use { r ->
             val text = r.body?.string().orEmpty()
+            // Too many attempts, or a gateway with nothing behind it: final,
+            // whatever page came with it — NextAuth would only relay the same.
+            if (r.code == 429) throw AuthException(TOO_MANY)
+            if (r.code in 502..504) throw AuthException(UNAVAILABLE)
             if (routeMissing(r.code, text)) throw RouteMissing()
-            if (r.code == 401 || r.code == 422) throw AuthException("Invalid email or password. Please try again.")
+            if (r.code == 401 || r.code == 422) throw AuthException(INVALID)
             // A 5xx here is the API itself failing — NextAuth would only relay the same failure.
-            if (!r.isSuccessful) throw AuthException("Sign-in is unavailable right now. Please try again shortly.")
+            if (!r.isSuccessful) throw AuthException(UNAVAILABLE)
             val o = runCatching { NeemaJson.parseToJsonElement(text).jsonObject }.getOrNull() ?: throw RouteMissing()
             if (o.str("access_token") == null) throw RouteMissing()
             return sessionFromTokens(o, email, mode = "direct", cookie = null)
@@ -120,18 +162,22 @@ class AuthRepository(
     /**
      * `POST …/refresh {refresh_token}` → a new pair. Null when the server
      * refused it (401 "Invalid refresh token", 404 "Agent not found") or no
-     * auth router answered.
+     * auth router answered. Throws [RefreshUnavailable] when it could not be
+     * asked: no answer, or a 5xx / 429 (even as a proxy's HTML page).
      */
     private fun directRefresh(refresh: String): Session? {
         val body = buildJsonObject { put("refresh_token", refresh) }.toString()
         for (prefix in DIRECT_PREFIXES) {
             val req = Request.Builder().url("$base/api/$prefix/refresh")
                 .post(body.toRequestBody(json)).build()
-            val o = http.newCall(req).execute().use { r ->
+            val o = exec(req).use { r ->
                 val text = r.body?.string().orEmpty()
+                if (transient(r.code)) throw RefreshUnavailable(r.code, false, "auth server answered ${r.code}")
                 if (routeMissing(r.code, text)) return@use null
                 if (!r.isSuccessful) return null
-                runCatching { NeemaJson.parseToJsonElement(text).jsonObject }.getOrNull() ?: return null
+                // A 2xx that isn't JSON (a captive portal's page) proves nothing about the session.
+                runCatching { NeemaJson.parseToJsonElement(text).jsonObject }.getOrNull()
+                    ?: throw RefreshUnavailable(0, false, "unreadable refresh answer")
             } ?: continue
             if (o.str("access_token") == null) return null
             val cur = store.current
@@ -139,11 +185,14 @@ class AuthRepository(
                 name = cur?.name ?: "", email = cur?.email ?: "",
             )
         }
-        return null
+        // This session came from one of these routes, so neither answering as
+        // FastAPI is a network in the way (a captive portal's page or
+        // redirect), not a refused session.
+        throw RefreshUnavailable(0, false, "no auth route answered")
     }
 
     private fun sessionFromTokens(o: JsonObject, email: String, mode: String, cookie: String?): Session {
-        val access = o.str("access_token") ?: throw AuthException("Login failed — no token returned")
+        val access = o.str("access_token") ?: throw AuthException(UNAVAILABLE)
         return Session(
             accessToken = access,
             refreshToken = o.str("refresh_token"),
@@ -163,32 +212,42 @@ class AuthRepository(
         val jar = linkedMapOf<String, String>()
         fun absorb(r: okhttp3.Response) = mergeSetCookies(jar, r.headers("Set-Cookie"))
 
-        val csrf = http.newCall(Request.Builder().url("$base/api/auth/csrf").build()).execute().use { r ->
+        val csrf = exec(Request.Builder().url("$base/api/auth/csrf").build()).use { r ->
             absorb(r)
             val text = r.body?.string().orEmpty()
-            if (!r.isSuccessful) throw AuthException("Sign-in is unavailable right now. Please try again shortly.")
+            if (r.code == 429) throw AuthException(TOO_MANY)
+            if (!r.isSuccessful) throw AuthException(UNAVAILABLE)
             runCatching { NeemaJson.parseToJsonElement(text).jsonObject.str("csrfToken") }.getOrNull()
-                ?: throw AuthException("Sign-in is unavailable right now. Please try again shortly.")
+                ?: throw AuthException(UNAVAILABLE)
         }
         // What next-auth/react signIn("credentials", {redirect:false}) posts.
         val form = FormBody.Builder()
             .add("csrfToken", csrf).add("email", email).add("password", password)
             .add("json", "true").add("callbackUrl", "$base/dashboard").build()
-        http.newCall(
+        exec(
             Request.Builder().url("$base/api/auth/callback/credentials")
                 .header("Cookie", cookieHeader(jar)).post(form).build(),
-        ).execute().use { r ->
+        ).use { r ->
             absorb(r)
+            // The web app itself failing (NextAuth's authorize() threw on a
+            // FastAPI outage) is not a wrong password.
+            if (r.code == 429) throw AuthException(TOO_MANY)
+            if (r.code >= 500) throw AuthException(UNAVAILABLE)
             // v4 answers {url} (json=true) or a 302; a failed authorize() points
             // at …/error?error=CredentialsSignin, a stale csrf at …?csrf=true.
             val loc = r.header("Location").orEmpty() + r.body?.string().orEmpty()
-            if (loc.contains("error=")) throw AuthException("Invalid email or password. Please try again.")
-            if (loc.contains("csrf=true")) throw AuthException("Sign-in is unavailable right now. Please try again shortly.")
+            if (loc.contains("error=")) throw AuthException(INVALID)
+            if (loc.contains("csrf=true")) throw AuthException(UNAVAILABLE)
         }
         val session = sessionCookies(jar)
-        if (session.isEmpty()) throw AuthException("Invalid email or password. Please try again.")
-        return nextAuthSession(cookieHeader(session), email)
-            ?: throw AuthException("Invalid email or password. Please try again.")
+        if (session.isEmpty()) throw AuthException(INVALID)
+        // Signed in, but the session endpoint is failing: say so, not "wrong password".
+        return try {
+            nextAuthSession(cookieHeader(session), email)
+        } catch (e: RefreshUnavailable) {
+            if (e.status == 0) throw e
+            throw AuthException(if (e.status == 429) TOO_MANY else UNAVAILABLE)
+        } ?: throw AuthException(INVALID)
     }
 
     /**
@@ -199,7 +258,8 @@ class AuthRepository(
      */
     private fun nextAuthSession(cookie: String, email: String): Session? {
         val req = Request.Builder().url("$base/api/auth/session").header("Cookie", cookie).build()
-        return http.newCall(req).execute().use { r ->
+        return exec(req).use { r ->
+            if (transient(r.code)) throw RefreshUnavailable(r.code, false, "session endpoint answered ${r.code}")
             if (!r.isSuccessful) return null
             val jar = parseCookieHeader(cookie)
             mergeSetCookies(jar, r.headers("Set-Cookie"))
@@ -230,9 +290,26 @@ class AuthRepository(
         val left = jwtExp(s.accessToken) - AppClock.now() / 1000
         // Same 5-minute buffer the web's jwt() callback uses.
         if (left > 300) return s.accessToken
-        return forceRefresh() ?: s.accessToken.takeIf { left > 0 }
+        // The auth server just failed to answer: while the token still works,
+        // don't make every request wait out another round of attempts.
+        if (left > 0 && AppClock.now() < unavailableUntil) return s.accessToken
+        return try {
+            forceRefresh() ?: s.accessToken.takeIf { left > 0 }
+        } catch (e: RefreshUnavailable) {
+            // Still unexpired: use it; the server is the judge. Expired: the
+            // request would only bounce, so it fails as the outage it is.
+            if (left > 0) s.accessToken else throw e
+        }
     }
 
+    /**
+     * One refresh for everyone: callers queue on a lock, and whoever comes
+     * second finds the new token already stored. Up to three attempts
+     * (lib/auth.ts doRefresh) while the auth server can't answer; a refusal
+     * is final at once, and so is a timeout (three of those would hold every
+     * request for 90 s). A refusal is remembered for that token, so a burst of
+     * 401s after it asks the server once, not once each.
+     */
     override suspend fun forceRefresh(): String? = refreshLock.withLock {
         withContext(io) {
             val s = store.current ?: return@withContext null
@@ -240,22 +317,31 @@ class AuthRepository(
             if (jwtExp(s.accessToken) - AppClock.now() / 1000 > 300 &&
                 s.accessToken != lastRejected
             ) return@withContext s.accessToken
+            if (s.accessToken == refusedFor) return@withContext null
             var fresh: Session? = null
+            var outage: RefreshUnavailable? = null
             for (attempt in 1..3) {
-                fresh = runCatching {
-                    s.refreshToken?.let { directRefresh(it) }
-                        ?: s.nextAuthCookie?.let { nextAuthSession(it, s.email) }
-                }.getOrNull()
-                    ?: runCatching { s.nextAuthCookie?.let { nextAuthSession(it, s.email) } }.getOrNull()
+                outage = null
+                fresh = try { refreshOnce(s) } catch (e: RefreshUnavailable) { outage = e; null }
                 // NextAuth may hand back the very token the API just refused
                 // (its session callback doesn't always refresh): that is no rescue.
                 if (fresh != null && fresh.accessToken == s.accessToken &&
                     (s.accessToken == lastRejected || jwtExp(s.accessToken) <= AppClock.now() / 1000)
                 ) fresh = null
-                if (fresh != null || attempt == 3) break
-                if (backoffMs > 0) Thread.sleep(attempt * backoffMs)
+                val retry = fresh == null && outage != null && !outage.timedOut && attempt < 3
+                if (!retry) break
+                if (backoffMs > 0) delay(attempt * backoffMs)
             }
-            if (fresh == null) { lastRejected = s.accessToken; return@withContext null }
+            if (fresh == null) {
+                outage?.let {
+                    unavailableUntil = AppClock.now() + UNAVAILABLE_COOLDOWN_MS
+                    throw it
+                }
+                lastRejected = s.accessToken
+                refusedFor = s.accessToken
+                return@withContext null
+            }
+            unavailableUntil = 0
             val merged = fresh.copy(
                 name = s.name.ifBlank { fresh.name },
                 email = s.email.ifBlank { fresh.email },
@@ -270,7 +356,32 @@ class AuthRepository(
         }
     }
 
+    /**
+     * One try through every refresh path this session has: FastAPI's
+     * refresh token, then NextAuth's session cookie. Null when refused;
+     * [RefreshUnavailable] when none could give an answer either way.
+     */
+    private fun refreshOnce(s: Session): Session? {
+        var outage: RefreshUnavailable? = null
+        fun attempt(block: () -> Session?): Session? = try {
+            block()
+        } catch (e: RefreshUnavailable) {
+            outage = outage ?: e; null
+        } catch (e: IOException) {
+            // The body cut off mid-stream.
+            outage = outage ?: RefreshUnavailable(0, e is InterruptedIOException, e.message ?: "network error"); null
+        }
+        s.refreshToken?.let { rt -> attempt { directRefresh(rt) }?.let { return it } }
+        s.nextAuthCookie?.let { c -> attempt { nextAuthSession(c, s.email) }?.let { return it } }
+        outage?.let { throw it }
+        return null
+    }
+
     @Volatile private var lastRejected: String? = null
+    /** The access token whose refresh the server refused — asking again is pointless. */
+    @Volatile private var refusedFor: String? = null
+    /** Until when proactive refreshes are skipped after the auth server failed to answer. */
+    @Volatile private var unavailableUntil = 0L
 
     /** Called after a 401 so forceRefresh() doesn't trust an unexpired-but-revoked token. */
     override fun onRejected(token: String?) { lastRejected = token }
@@ -294,6 +405,15 @@ class AuthRepository(
     companion object {
         /** FastAPI's auth router mounts, newest first (main.py). */
         private val DIRECT_PREFIXES = listOf("agent-auth", "auth")
+
+        private const val UNAVAILABLE_COOLDOWN_MS = 30_000L
+
+        // What sign-in says, for people.
+        const val INVALID = "Invalid email or password. Please try again."
+        const val UNAVAILABLE = "Sign-in is unavailable right now. Please try again shortly."
+        const val TOO_MANY = "Too many sign-in attempts. Please wait a minute and try again."
+        const val OFFLINE = "Can't reach Neema. Check your internet connection and try again."
+        const val TIMED_OUT = "Neema is taking too long to answer. Check your connection and try again."
 
         private fun JsonObject.str(k: String): String? = (this[k] as? JsonPrimitive)?.contentOrNull
         private fun JsonObject.bool(k: String): Boolean? = (this[k] as? JsonPrimitive)?.booleanOrNull

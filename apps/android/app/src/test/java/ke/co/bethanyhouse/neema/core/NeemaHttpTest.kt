@@ -126,7 +126,7 @@ class NeemaHttpTest {
         fake.on("GET", "/a", code = 422, body = """{"detail":[{"loc":["body","email"],"msg":"field required"}]}""")
         fake.on("GET", "/b", code = 502, body = "<html>Bad Gateway</html>")
         assertTrue(expectApi { http.raw("GET", "/a") }.detail.contains("field required"))
-        assertEquals("<html>Bad Gateway</html>", expectApi { http.raw("GET", "/b") }.detail)
+        assertEquals("", expectApi { http.raw("GET", "/b") }.detail)
     }
 
     @Test

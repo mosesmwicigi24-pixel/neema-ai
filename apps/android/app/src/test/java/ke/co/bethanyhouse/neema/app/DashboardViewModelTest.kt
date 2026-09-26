@@ -236,7 +236,7 @@ class DashboardViewModelTest {
         fake.on("POST", "/agent-auth/refresh", code = 401, body = """{"detail":"Invalid refresh token"}""")
         val dash = dashboard(paparazzi.context, fake)
         assertTrue(dash.sessionExpired.value)
-        assertEquals("3 refresh attempts before giving up", 3, fake.callsTo("POST", "/agent-auth/refresh").size)
+        assertEquals("a refusal is final at once (no retries of a verdict)", 1, fake.callsTo("POST", "/agent-auth/refresh").size)
 
         // Re-auth: everything refetches, the prompt closes.
         fake.on("GET", "/admin/agents", body = Fixtures.agents)
