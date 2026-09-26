@@ -94,7 +94,8 @@ class DealsContractTest {
         fake.on("PATCH", "/admin/deals/.*", code = 422, body = """{"detail":"Invalid deal id"}""")
         val vm = vm()
         vm.saveGuidance("not-a-uuid", "x")
-        assertEquals("Update failed", toasts!!.all.last().message)
+        // The web's "Update failed", plus the server's reason.
+        assertEquals("Update failed — invalid deal id", toasts!!.all.last().message)
         assertEquals(ToastType.Error, toasts!!.all.last().type)
     }
 
@@ -124,7 +125,7 @@ class DealsContractTest {
         fake.on("POST", "/admin/actions/.*/approve", code = 409, body = """{"detail":"Action is sent"}""")
         fake.on("GET", "/admin/actions", body = """{"actions":[]}""")
         vm.act("x1", "approve")
-        assertEquals("approve failed — Action is sent", toasts!!.all.last().message)
+        assertEquals("Already sent — nothing was sent twice", toasts!!.all.last().message)
         assertEquals(ToastType.Error, toasts!!.all.last().type)
         assertEquals(gets + 1, fake.callsTo("GET", "/admin/actions").size)
         assertEquals(emptyList<Any>(), vm.actions.value)
@@ -135,7 +136,7 @@ class DealsContractTest {
         val vm = vm()
         fake.on("POST", "/admin/actions/.*/approve", code = 404, body = """{"detail":"Conversation gone"}""")
         vm.act("x2", "approve")
-        assertEquals("approve failed — Conversation gone", toasts!!.all.last().message)
+        assertEquals("This follow-up is gone — its conversation was deleted", toasts!!.all.last().message)
     }
 
     @Test fun approveServerCrashKeepsTheWebsToast() {
@@ -143,11 +144,11 @@ class DealsContractTest {
         // An unhandled send failure is Starlette's plain-text 500, not JSON.
         fake.on("POST", "/admin/actions/.*/approve", code = 500, body = "Internal Server Error")
         vm.act("x1", "approve")
-        assertEquals("approve failed", toasts!!.all.last().message)
-        // "Could not compose the message" is a JSON 500 — same toast.
+        assertEquals("Couldn't send — the server hit an error — try again", toasts!!.all.last().message)
+        // "Could not compose the message" is a JSON 500 meant for people: it is said.
         fake.on("POST", "/admin/actions/.*/approve", code = 500, body = """{"detail":"Could not compose the message"}""")
         vm.act("x2", "approve")
-        assertEquals("approve failed", toasts!!.all.last().message)
+        assertEquals("Couldn't send — could not compose the message", toasts!!.all.last().message)
     }
 
     @Test fun vetoPostsAnEmptyObjectAndReadsOk() {
@@ -160,7 +161,7 @@ class DealsContractTest {
         val vm = vm()
         fake.on("POST", "/admin/actions/.*/veto", code = 404, body = """{"detail":"Action not found"}""")
         vm.act("x2", "veto")
-        assertEquals("veto failed — Action not found", toasts!!.all.last().message)
+        assertEquals("This follow-up is gone — someone else removed it", toasts!!.all.last().message)
     }
 
     // ── GET /admin/settings/pipeline-stages ─────────────────────────────────

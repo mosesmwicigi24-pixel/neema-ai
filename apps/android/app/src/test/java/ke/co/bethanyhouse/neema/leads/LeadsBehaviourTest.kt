@@ -70,16 +70,15 @@ class LeadsBehaviourTest {
         assertEquals("Lead updated", toasts.all.last().message)
     }
 
-    @Test fun failedSaveToastsAndReloadsTheBoard() {
-        fake.on("PATCH", "/admin/leads/.*", code = 404, body = """{"detail":"Lead not found"}""")
+    @Test fun failedSaveToastsAndRollsBackThatLead() {
+        fake.on("PATCH", "/admin/leads/.*", code = 422, body = """{"detail":"Invalid stage"}""")
         val vm = vm()
-        val gets = fake.calls.count { it.method == "GET" && it.path == "/admin/leads" }
         vm.moveTo(vm.leads.value.first { it.id == "u3" }, "contacted")
         assertEquals(ToastType.Error, toasts.all.last().type)
-        assertEquals("Failed to update lead", toasts.all.last().message)
-        assertEquals(gets + 1, fake.calls.count { it.method == "GET" && it.path == "/admin/leads" })
-        // The reload rolled the optimistic move back.
+        assertEquals("Failed to update lead — invalid stage", toasts.all.last().message)
+        // Rolled back in place: no reload that could empty the board offline.
         assertEquals("new", vm.leads.value.first { it.id == "u3" }.leadStage)
+        assertEquals(8, vm.leads.value.size)
     }
 
     @Test fun untouchedSheetSendsNothing() {

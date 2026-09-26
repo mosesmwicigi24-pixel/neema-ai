@@ -10,12 +10,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
 /**
  * OrdersView's local state. The orders themselves are the dashboard's polled
  * list ([DashboardViewModel.orders]); this holds the filter, search, page, the
- * open order and which row is mid-update.
+ * open order, which row is mid-update and why the last read failed.
  */
 class OrdersViewModel(private val dash: DashboardViewModel) : ViewModel() {
 
@@ -42,6 +43,15 @@ class OrdersViewModel(private val dash: DashboardViewModel) : ViewModel() {
     val initialLoading: StateFlow<Boolean> = _initialLoading.asStateFlow()
 
     /**
+     * Why the last read of the list failed (null when it worked). With orders
+     * on screen it is a banner over them; with none it replaces "No orders
+     * found", which would be a lie. The dashboard's poller keeps trying, and
+     * any good answer clears it.
+     */
+    private val _loadError = MutableStateFlow<String?>(null)
+    val loadError: StateFlow<String?> = _loadError.asStateFlow()
+
+    /**
      * The list is the dashboard's 90 s poll, which already pauses in the
      * background and refetches on return (usePolling). On top of that, while
      * this screen is on display: coming back to it re-reads the orders, and so
@@ -50,7 +60,7 @@ class OrdersViewModel(private val dash: DashboardViewModel) : ViewModel() {
      */
     val life = ScreenLife(
         viewModelScope, dash.foreground, dash.container.socket.connected,
-        catchUpOnForeground = false, catchUp = { dash.refreshOrders() },
+        catchUpOnForeground = false, catchUp = { awaitRefetch() },
     )
 
     init {
@@ -60,6 +70,8 @@ class OrdersViewModel(private val dash: DashboardViewModel) : ViewModel() {
                 _initialLoading.value = false
             }
         }
+        // A good read from anywhere (the dashboard's own poll included) clears the error.
+        viewModelScope.launch { dash.orders.drop(1).collect { _loadError.value = null } }
     }
 
     fun setFilter(f: String) { filter.value = f; page.value = 1 }
@@ -79,21 +91,40 @@ class OrdersViewModel(private val dash: DashboardViewModel) : ViewModel() {
         }
     }
 
-    /**
-     * Refetch through the dashboard and return when the round trip is over
-     * ([DashboardViewModel.refreshOrders] suspends until the list has landed).
-     * A failure leaves the list as it was: the dashboard's poller keeps trying.
-     */
-    private suspend fun awaitRefetch() {
-        try {
-            dash.refreshOrders()
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            // the screen keeps showing what it has
+    /** The error state's Retry: the first load again, with its spinner. */
+    fun retry() {
+        if (_initialLoading.value || _refreshing.value) return
+        viewModelScope.launch {
+            _initialLoading.value = true
+            awaitRefetch()
+            _initialLoading.value = false
         }
     }
 
+    /**
+     * Refetch through the dashboard and return when the round trip is over
+     * ([DashboardViewModel.refreshOrders] suspends until the list has landed).
+     * A failure keeps the list as it was and says why; true when it worked.
+     */
+    private suspend fun awaitRefetch(): Boolean = try {
+        dash.refreshOrders()
+        _loadError.value = null
+        true
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        _loadError.value = salesFailureOf(e).message()
+        false
+    }
+
+    /**
+     * PATCH the order's status. The web toasts "Failed to update order" on any
+     * throw; on a phone network that is often a lie — the PATCH can land and
+     * its answer be lost — so a failure that may have happened is settled by
+     * re-reading the list: the order's real status decides what is said. A
+     * 404 means someone deleted it: the list is re-read (the row goes) and the
+     * sheet closes. On any other failure the sheet stays open for another tap.
+     */
     fun updateStatus(id: String, status: String) {
         if (_updating.value != null) return
         viewModelScope.launch {
@@ -104,10 +135,35 @@ class OrdersViewModel(private val dash: DashboardViewModel) : ViewModel() {
                 if (_selectedId.value == id) _selectedId.value = null
                 dash.toast("Order marked as $status")
             } catch (e: Exception) {
-                dash.toast("Failed to update order", ToastType.Error)
+                val f = salesFailureOf(e)
+                when {
+                    f.kind == FailKind.NotFound -> {
+                        dash.toast("This order no longer exists — it may have been deleted", ToastType.Error)
+                        awaitRefetch()
+                        if (_selectedId.value == id) _selectedId.value = null
+                    }
+                    f.mayHaveHappened -> {
+                        val read = awaitRefetch()
+                        val now = dash.orders.value.find { it.id == id }
+                        when {
+                            read && now?.status == status -> {
+                                if (_selectedId.value == id) _selectedId.value = null
+                                dash.toast("Order marked as $status")
+                            }
+                            read -> dash.toast("Order not updated — ${f.message().lowerFirst()}", ToastType.Error)
+                            else -> dash.toast("No answer from the server — the order may not have updated. Pull down to check.", ToastType.Error)
+                        }
+                    }
+                    // The session-expired dialog says so; the sheet waits for a retry after sign-in.
+                    f.kind == FailKind.SessionExpired -> Unit
+                    else -> dash.toast("Failed to update order — ${f.message().lowerFirst()}", ToastType.Error)
+                }
             } finally {
                 _updating.value = null
             }
         }
     }
 }
+
+/** "No connection — …" → "no connection — …", for the tail of a sentence. */
+internal fun String.lowerFirst(): String = replaceFirstChar { it.lowercase() }

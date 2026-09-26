@@ -65,7 +65,7 @@ class DealsDialogScreenshotTest {
     @get:Rule val main = MainDispatcherRule()
     @get:Rule val paparazzi = Paparazzi(deviceConfig = DeviceConfig.PIXEL_6, showSystemUi = false)
 
-    private fun dialog(dark: Boolean, id: String) {
+    private fun dialog(dark: Boolean, id: String, busy: Boolean = false, checking: Boolean = false, error: String? = null) {
         val fake = FakeNeema.withFixtures()
         SalesFixtures.install(fake)
         val dash = dashboard(paparazzi.context, fake)
@@ -73,7 +73,10 @@ class DealsDialogScreenshotTest {
         paparazzi.snapshot {
             AppFrame(dark) {
                 Box(Modifier.fillMaxSize().background(Color(0x99000000)).padding(24.dp), contentAlignment = Alignment.Center) {
-                    DraftDialogCard(action, onDismiss = {}, onSend = {})
+                    DraftDialogCard(
+                        action, text = action.draft.orEmpty(), onText = {}, busy = busy, checking = checking, error = error,
+                        onDismiss = {}, onSend = {},
+                    )
                 }
             }
         }
@@ -83,6 +86,14 @@ class DealsDialogScreenshotTest {
     @Test fun editAndSendDark() = dialog(true, "x1")
     /** No draft yet: empty text lets Neema write it from the reason. */
     @Test fun editAndSendNoDraft() = dialog(false, "x2")
+    /** On the wire: the text is locked and Send shows progress. */
+    @Test fun editAndSendSending() = dialog(false, "x1", busy = true)
+    /** The answer was lost: the queue is re-read to learn whether it went. */
+    @Test fun editAndSendChecking() = dialog(false, "x1", busy = true, checking = true,
+        error = "No answer from the server — checking whether it was sent…")
+    /** Offline: not sent, every word kept, the reason inside the dialog. */
+    @Test fun editAndSendFailed() = dialog(false, "x1", error = "Couldn't send — no connection — check your internet and try again")
+    @Test fun editAndSendFailedDark() = dialog(true, "x1", error = "Couldn't send — no connection — check your internet and try again")
 }
 
 /** A tablet: the three stage columns side by side. */
