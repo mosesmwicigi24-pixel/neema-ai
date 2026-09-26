@@ -287,7 +287,7 @@ class SoftphoneStressTest {
     @Test fun signingOutMidCallReleasesEverything() = rig { r ->
         r.answerAndConnect()
         r.calls.hangup() // what logout() calls
-        testScheduler.advanceTimeBy(6_001); r.settle()
+        testScheduler.advanceTimeBy(8_001); r.settle()
         assertEquals(CallPhase.Idle, r.state.phase)
         r.assertReleased("sign-out")
         assertEquals("the recording still reached the server", listOf("wacid.1"), r.api.uploads.map { it.first })
@@ -297,7 +297,7 @@ class SoftphoneStressTest {
         repeat(10) { i ->
             r.answerAndConnect("wacid.row$i")
             r.calls.hangup(); r.settle()
-            testScheduler.advanceTimeBy(6_100); r.settle()
+            testScheduler.advanceTimeBy(8_100); r.settle()
             assertEquals(CallPhase.Idle, r.state.phase)
         }
         r.assertReleased("ten calls")

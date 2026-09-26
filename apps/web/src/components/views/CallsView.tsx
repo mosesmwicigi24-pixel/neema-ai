@@ -18,7 +18,7 @@ import { CustomerSidebar } from "@/components/ui/CustomerSidebar";
 
 const C = {
     text: "#e9edef", sub: "#9fb3a8", faint: "#6b8577", line: "rgba(255,255,255,0.06)",
-    green: "#2ad17f", greenBtn: "#00A884", red: "#ff6b70",
+    green: "#2ad17f", greenBtn: "#008069", red: "#ff6b70",
 };
 
 const AV = ["#3b6ea5", "#a5417d", "#b5892f", "#3c8c5a", "#8a4fc4", "#b24a4a"];

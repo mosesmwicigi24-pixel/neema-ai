@@ -23,7 +23,7 @@ fun callRowWords(c: Call): CallRowWords {
         "missed" -> CallRowWords("Missed", CallTone.Bad, CallIcons.DirMissed)
         "declined" -> CallRowWords("Declined", CallTone.Warn, dir)
         "callback" -> CallRowWords("Call back", CallTone.Warn, CallIcons.DirBack)
-        "no_answer" -> CallRowWords("No answer", CallTone.Warn, dir)
+        "no_answer" -> CallRowWords("No answer", CallTone.Bad, dir)
         "cancelled" -> CallRowWords("Cancelled", CallTone.Neutral, dir)
         "failed" -> CallRowWords("Failed", CallTone.Bad, dir)
         else -> CallRowWords(c.status.replace('_', ' ').replaceFirstChar { it.uppercase() }.ifEmpty { "Call" }, CallTone.Neutral, dir)

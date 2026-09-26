@@ -37,9 +37,26 @@ internal object CallIcons {
             }
         }.build()
 
+    /** A filled glyph, optionally turned about the centre (the web's `transform="rotate(… 12 12)"`). */
+    private fun filled(name: String, d: String, rotate: Float = 0f, scale: Float = 1f): ImageVector =
+        ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f).apply {
+            addGroup(name = "$name-g", rotate = rotate, pivotX = 12f, pivotY = 12f, scaleX = scale, scaleY = scale)
+            addPath(pathData = addPathNodes(WebIcons.expandArcFlags(d)), fill = SolidColor(Color.Black))
+            clearGroup()
+        }.build()
+
+    private const val HANDSET = "M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"
+
+    /** Answer: the filled handset (CallStage.tsx "phone-fill"). */
+    val PhoneFill = filled("call_phone_fill", HANDSET)
+    /**
+     * Decline / End: the handset tipped down, filled — the hang-up glyph every
+     * phone and WhatsApp use (CallStage.tsx "phone-off": rotate(135 12 12) scale(.95)).
+     */
+    val PhoneDown = filled("call_phone_down", HANDSET, rotate = 135f, scale = 0.95f)
+
     // CallStage.tsx ICONS (stroke 2).
     val Phone = build("call_phone", 2f, "M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z")
-    val PhoneOff = build("call_phone_off", 2f, "M16 8l4-4m0 4l-4-4", "M18.5 16.5c.5.5.5 1.2.4 1.8A2 2 0 0117 20C9.7 20 4 14.3 4 7a2 2 0 011.7-2 1.9 1.9 0 011.8.4")
     val Callback = build("call_callback", 2f, "M9 14l-4-4 4-4M5 10h11a4 4 0 014 4v3")
     val Mic = build("call_mic", 2f, "M12 2a3 3 0 00-3 3v6a3 3 0 006 0V5a3 3 0 00-3-3z", "M5 10v1a7 7 0 0014 0v-1M12 18v3")
     val MicOff = build("call_mic_off", 2f, "M3 3l18 18", "M9 5a3 3 0 016 0v5m-1.3 2.7A3 3 0 019 11V9", "M5 10v1a7 7 0 0010.7 5.9M19 10v1a6.9 6.9 0 01-.3 2M12 18v3")
@@ -56,6 +73,8 @@ internal object CallIcons {
     val NoSignal = build("call_no_signal", 2f, "M1 1l22 22", "M16.72 11.06A10.94 10.94 0 0119 12.55", "M5 12.55a10.94 10.94 0 015.17-2.39",
         "M10.71 5.05A16 16 0 0122.58 9", "M1.42 9a15.91 15.91 0 014.7-2.88", "M8.53 16.11a6 6 0 016.95 0", "M12 20h.01")
     val Check = build("call_check", 2.2f, "M5 13l4 4L19 7")
+    /** A wrap-up the agent must act on (CallStage.tsx "alert"). */
+    val Alert = build("call_alert", 2f, "M12 9v4M12 17h.01", "M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z")
     val Close = build("call_close", 2f, "M18 6L6 18M6 6l12 12")
 
     // CallsView.tsx DirIcon (stroke 2.2).
@@ -63,7 +82,7 @@ internal object CallIcons {
     val DirBack = build("call_dir_back", 2.2f, "M9 14l-4-4 4-4M5 10h10a4 4 0 014 4v2")
     val DirOut = build("call_dir_out", 2.2f, "M7 17L17 7M17 7h-7M17 7v7")
     /** A missed call: the arrow that turns back (as the phone's call log draws it). */
-    val DirMissed = build("call_dir_missed", 2.2f, "M3 7l7 7 8-8", "M13 6h5v5")
+    val DirMissed = build("call_dir_missed", 2.2f, "M3 7l6 6 4-4 8 8M21 11v6h-6")
 
     // CallsView.tsx row buttons (stroke 2).
     val Transcript = build("call_transcript", 2f, "M4 6h16M4 12h16M4 18h10")

@@ -263,6 +263,14 @@ object Palette {
         val WaSub = Color(0xFF8696A0)
         /** WhatsApp's teal (accents, the minimised bar's live dot). */
         val WaTeal = Color(0xFF00A884)
+        /** WhatsApp's darker green: white TEXT on it reads at 4.9:1 (on [WaTeal] only ~3:1 — fine for an icon, not words). */
+        val WaTealText = Color(0xFF008069)
+        /** WhatsApp's deepest green: white text on it on light surfaces (4.9:1). */
+        val WaDeep = Color(0xFF008069)
+        /** The thread's "Use as reply" button and summary accents (ConversationsView.tsx #128C4B, 4.9:1 with white). */
+        val ReplyGreen = Color(0xFF128C4B)
+        /** The suggested reply's box under a call summary (#f3f8f1). */
+        val SuggestedReplyBg = Color(0xFFF3F8F1)
         /** End / decline. */
         val WaRed = Color(0xFFEA0038)
         /** A round control that is off. */

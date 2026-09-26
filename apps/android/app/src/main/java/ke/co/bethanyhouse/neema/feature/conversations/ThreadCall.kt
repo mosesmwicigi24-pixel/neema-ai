@@ -19,6 +19,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -29,7 +41,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import ke.co.bethanyhouse.neema.core.model.CallInsights
 import ke.co.bethanyhouse.neema.core.ui.theme.ChannelColors
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import ke.co.bethanyhouse.neema.core.ui.theme.Palette
@@ -58,8 +69,10 @@ internal fun ThreadCallEvent(msg: ThreadMsg, onUseAsReply: (String) -> Unit) {
         else -> c.textMid
     }
     val label = msg.body.ifBlank { words?.label ?: "Call" }
+    // Who took it — not for calls nobody answered (as the web's pill).
     val agent = agentFirst(msg.agentName ?: call?.agentName)
-    val time = msg.createdAt?.let { Fmt.time(it) }.orEmpty()
+        ?.takeIf { call?.status !in setOf("missed", "no_answer", "cancelled", "failed") }
+    val time = (call?.startedAt ?: msg.createdAt)?.let { Fmt.time(it) }.orEmpty()
     val line = listOfNotNull(label, agent, time.ifEmpty { null }).joinToString(" · ")
     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Row(
@@ -75,51 +88,107 @@ internal fun ThreadCallEvent(msg: ThreadMsg, onUseAsReply: (String) -> Unit) {
             val rest = listOfNotNull(agent, time.ifEmpty { null }).joinToString(" · ")
             if (rest.isNotEmpty()) Text(" · $rest", fontSize = 11.sp, color = c.textMid, maxLines = 1)
         }
-        val summary = (msg.eventReason ?: call?.summary)?.takeIf { it.isNotBlank() }
+        val summary = (call?.summary ?: msg.eventReason)?.trim()?.takeIf { it.isNotEmpty() }
         val insights = call?.insights
-        if (summary != null || insights != null) CallSummaryCard(summary, insights, onUseAsReply)
+        val facts = listOf("Products" to insights?.products, "Objections" to insights?.objections, "Commitments" to insights?.commitments)
+            .mapNotNull { (k, v) -> v?.takeIf { it.isNotEmpty() }?.let { k to it } }
+        val followUp = insights?.followUpMessage?.trim()?.takeIf { it.isNotEmpty() }
+        if (summary != null || insights?.nextAction != null || followUp != null || facts.isNotEmpty()) {
+            CallSummaryCard(summary, insights?.nextAction, facts, followUp, onUseAsReply)
+        }
     }
 }
 
+/**
+ * The web's CallPill card: the summary (three lines, then "Show more"), the
+ * next action, products / objections / commitments, and the suggested reply
+ * — shown in full, so the agent sees what "Use as reply" puts in the box.
+ */
 @Composable
-private fun CallSummaryCard(summary: String?, insights: CallInsights?, onUseAsReply: (String) -> Unit) {
+private fun CallSummaryCard(
+    summary: String?,
+    nextAction: String?,
+    facts: List<Pair<String, List<String>>>,
+    followUp: String?,
+    onUseAsReply: (String) -> Unit,
+) {
     val c = Neema.colors
     val green = if (c.isDark) Palette.Emerald300 else Palette.Emerald700
+    var more by rememberSaveable(summary) { mutableStateOf(false) }
+    var used by rememberSaveable(followUp) { mutableStateOf(false) }
     Column(
         Modifier.padding(top = 6.dp).fillMaxWidth(0.88f).widthIn(max = 560.dp).clip(RoundedCornerShape(12.dp))
-            .background(if (c.isDark) ChannelColors.WhatsApp.copy(alpha = 0.08f) else Palette.Emerald50)
-            .border(1.dp, ChannelColors.WhatsApp.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .background(if (c.isDark) ChannelColors.WhatsApp.copy(alpha = 0.08f) else Color.White)
+            .border(1.dp, if (c.isDark) ChannelColors.WhatsApp.copy(alpha = 0.3f) else Palette.Emerald100, RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+            .semantics { contentDescription = "Call summary" },
     ) {
         Text("CALL SUMMARY", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp, color = green)
         summary?.let {
+            val long = it.length > 220
             Spacer(Modifier.height(4.dp))
-            Text(it, fontSize = 12.sp, lineHeight = 17.sp, color = c.text)
+            Text(
+                it, fontSize = 12.sp, lineHeight = 17.sp, color = c.text,
+                maxLines = if (long && !more) 3 else Int.MAX_VALUE, overflow = TextOverflow.Ellipsis,
+            )
+            if (long) {
+                Box(
+                    Modifier.heightIn(min = 32.dp).clickable(role = Role.Button) { more = !more },
+                    contentAlignment = Alignment.CenterStart,
+                ) { Text(if (more) "Show less" else "Show more", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = green) }
+            }
         }
-        insights?.nextAction?.let {
+        nextAction?.let {
             Spacer(Modifier.height(6.dp))
-            Text("Next: $it", fontSize = 12.sp, lineHeight = 17.sp, color = c.text, fontWeight = FontWeight.Medium)
+            Text(
+                buildAnnotatedString {
+                    withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append("Next: ") }
+                    append(it)
+                },
+                fontSize = 12.sp, lineHeight = 17.sp, color = c.text,
+            )
         }
-        insights?.commitments?.takeIf { it.isNotEmpty() }?.let {
-            Spacer(Modifier.height(4.dp))
-            Text("Agreed: ${it.joinToString("; ")}", fontSize = 11.sp, lineHeight = 16.sp, color = c.textMid)
+        if (facts.isNotEmpty()) Spacer(Modifier.height(6.dp))
+        facts.forEach { (k, v) ->
+            Text(
+                buildAnnotatedString {
+                    withStyle(SpanStyle(fontWeight = FontWeight.SemiBold, color = c.textMid)) { append("$k: ") }
+                    append(v.joinToString(" · "))
+                },
+                fontSize = 11.sp, lineHeight = 16.sp, color = c.text,
+            )
         }
-        insights?.followUpMessage?.let { reply ->
-            Spacer(Modifier.height(4.dp))
-            Box(
-                Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(50))
-                    .clickable(role = Role.Button, onClickLabel = "Put the suggested reply in the message box") { onUseAsReply(reply) },
-                contentAlignment = Alignment.CenterStart,
+        followUp?.let { reply ->
+            Spacer(Modifier.height(8.dp))
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                    .background(if (c.isDark) Color.White.copy(alpha = 0.05f) else Palette.Call.SuggestedReplyBg)
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
             ) {
-                Row(
-                    Modifier.clip(RoundedCornerShape(50)).background(ChannelColors.WhatsApp.copy(alpha = 0.16f))
-                        .padding(horizontal = 12.dp, vertical = 7.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
-                ) {
-                    Icon(CallIcons.Chat, null, tint = green, modifier = Modifier.size(13.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Use as reply", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = green, textAlign = TextAlign.Center)
+                Text("SUGGESTED REPLY", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp, color = c.textMid)
+                Spacer(Modifier.height(2.dp))
+                Text(reply, fontSize = 12.sp, lineHeight = 17.sp, color = c.text)
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier.heightIn(min = 48.dp)
+                            .clickable(role = Role.Button, onClickLabel = "Put the suggested reply in the message box") { onUseAsReply(reply); used = true },
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        Row(
+                            Modifier.clip(RoundedCornerShape(8.dp)).background(Palette.Call.ReplyGreen)
+                                .padding(horizontal = 12.dp, vertical = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                        ) {
+                            Text("Use as reply", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White, textAlign = TextAlign.Center)
+                        }
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (used) "In the reply box — edit, then send" else "Goes in the reply box — not sent",
+                        fontSize = 11.sp, color = c.textMid, modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite },
+                    )
                 }
             }
         }

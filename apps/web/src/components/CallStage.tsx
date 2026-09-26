@@ -22,7 +22,7 @@ import type { OpenChatRequest } from "@/types";
 
 const WA = {
     bg: "#0B141A", bg2: "#111B21", panel: "#202C33", text: "#E9EDEF", muted: "#8696A0",
-    green: "#25D366", greenDeep: "#00A884", red: "#EA0038", amber: "#FFB02E",
+    green: "#25D366", greenDeep: "#00A884", greenText: "#008069", red: "#EA0038", amber: "#FFB02E",
 };
 
 const ICONS: Record<string, React.ReactElement> = {
@@ -63,6 +63,11 @@ export function WhatsAppGlyph({ size = 14, color = WA.green }: { size?: number; 
     );
 }
 
+/** The live timer: mm:ss, as a phone shows it ("03:07"). */
+const fmtClock = (s: number) => `${Math.floor(s / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
+/** A colleague by first name, as the card addresses everyone ("Answered by Ann"). */
+const agentFirst = (n?: string | null) => (n || "").trim().split(/\s+/)[0] || "";
+
 export const fmtDuration = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`;
 
 // mm:ss from the moment media connected — a clock, not a counter that drifts.
@@ -72,7 +77,7 @@ function Elapsed({ since }: { since: number }) {
         const t = setInterval(() => setNow(Date.now()), 500);
         return () => clearInterval(t);
     }, [since]);
-    return <>{fmtDuration(Math.max(0, Math.floor((now - since) / 1000)))}</>;
+    return <>{fmtClock(Math.max(0, Math.floor((now - since) / 1000)))}</>;
 }
 
 // The phase's own words (§3 table).
@@ -92,10 +97,10 @@ function outcomeWords(o: CallOutcome | null, c: ReturnType<typeof useCall>): str
     switch (o) {
         case "completed": return `Call ended${d}`;
         case "answered_elsewhere":
-            return c.byAgent === YOU_ELSEWHERE ? "Answered on your other device" : `Answered by ${c.byAgent || "a colleague"}`;
-        case "declined": return c.byAgent ? `Declined by ${c.byAgent}` : "Call declined";
+            return c.byAgent === YOU_ELSEWHERE ? "Answered on your other device" : `Answered by ${agentFirst(c.byAgent) || "a colleague"}`;
+        case "declined": return c.byAgent ? `Declined by ${agentFirst(c.byAgent)}` : "Call declined";
         case "missed": return "Missed call";
-        case "callback": return c.byAgent ? `${c.byAgent} saved it to call back — find it under Calls`
+        case "callback": return c.byAgent ? `${agentFirst(c.byAgent)} saved it to call back — find it under Calls`
             : "Saved to call back — find it under Calls";
         case "no_answer": return "No answer";
         case "cancelled": return "Call cancelled";
@@ -263,7 +268,7 @@ function WaitingBanner({ compact }: { compact?: boolean }) {
                 <button type="button" onClick={c.callbackWaiting}
                     className={btn} style={{ minHeight: 44, fontSize: 12.5, backgroundColor: "rgba(255,255,255,0.08)", color: WA.text }}>Call back later</button>
                 <button type="button" onClick={c.endAndAnswerWaiting}
-                    className={btn} style={{ minHeight: 44, fontSize: 12.5, backgroundColor: WA.greenDeep, color: "#fff" }}>
+                    className={btn} style={{ minHeight: 44, fontSize: 12.5, backgroundColor: WA.greenText, color: "#fff" }}>
                     {c.phase === "incoming" ? "Answer instead" : "End & answer"}
                 </button>
             </span>
@@ -622,7 +627,7 @@ export function CallStage({ onOpenConversation }: { onOpenConversation?: (req: O
                                     a.primary && actions.length > 2 ? "basis-full sm:basis-auto" : "flex-1 sm:flex-none max-w-[200px]"}`}
                                 style={{
                                     minHeight: 48, fontSize: 15,
-                                    backgroundColor: a.primary ? WA.greenDeep : "rgba(255,255,255,0.08)",
+                                    backgroundColor: a.primary ? WA.greenText : "rgba(255,255,255,0.08)",
                                     color: a.primary ? "#fff" : WA.text,
                                 }}>
                                 {a.label}
@@ -679,7 +684,7 @@ export function CallBar(): React.ReactElement | null {
                 </span>
                 <button type="button" onClick={c.callGranted}
                     className="rounded-full px-4 font-semibold flex items-center gap-1.5"
-                    style={{ minHeight: 44, fontSize: 14, backgroundColor: WA.greenDeep, color: "#fff" }}>
+                    style={{ minHeight: 44, fontSize: 14, backgroundColor: WA.greenText, color: "#fff" }}>
                     <Icon name="phone" size={15} /> Call now
                 </button>
                 <button type="button" onClick={c.dismissGranted} aria-label="Dismiss"
@@ -712,7 +717,7 @@ export function CallBar(): React.ReactElement | null {
                 {primary && (
                     <button type="button" onClick={primary.onClick} disabled={primary.busy}
                         className="rounded-full px-3 font-semibold flex-shrink-0"
-                        style={{ minHeight: 44, fontSize: 13, backgroundColor: WA.greenDeep, color: "#fff" }}>{primary.label}</button>
+                        style={{ minHeight: 44, fontSize: 13, backgroundColor: WA.greenText, color: "#fff" }}>{primary.label}</button>
                 )}
                 <button type="button" onClick={c.dismiss}
                     className="rounded-full px-3 flex-shrink-0 hover:bg-white/5"

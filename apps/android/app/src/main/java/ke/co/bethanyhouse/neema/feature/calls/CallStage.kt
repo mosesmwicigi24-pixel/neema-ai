@@ -98,7 +98,10 @@ private val Bottom = Palette.Call.WaBottom
 private val Ink = Palette.Call.WaText
 private val Sub = Palette.Call.WaSub
 private val Green = ChannelColors.WhatsApp
+/** Filled call actions (Answer, the wrap-up's main action, Call now): white on WhatsApp's deep green, as the web. */
 private val Teal = Palette.Call.WaTeal
+/** Buttons with words on them (white text needs the darker green for contrast). */
+private val TealText = Palette.Call.WaTealText
 private val Red = Palette.Call.WaRed
 private val Amber = Palette.Call.WaAmber
 private val Control = Palette.Call.WaControl
@@ -397,20 +400,49 @@ private fun StatusLine(c: CallUiState) {
             Spacer(Modifier.width(8.dp))
             Text(text, color = Sub, fontSize = 15.sp)
         }
-        c.phase == CallPhase.Ended -> Text(
-            text, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, modifier = live,
-        )
+        // Every outcome is an icon AND words (never colour alone, §5).
+        c.phase == CallPhase.Ended -> Row(live, verticalAlignment = Alignment.CenterVertically) {
+            val owed = c.outcome.let {
+                it is CallOutcome.Missed || it == CallOutcome.NoAnswer || it == CallOutcome.ConnectionLost ||
+                    it is CallOutcome.Failed || it == CallOutcome.MicBlocked || it == CallOutcome.PermissionNeeded
+            }
+            val tint = if (owed) OwedInk else Ink
+            Icon(outcomeIcon(c.outcome), null, tint = tint, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(text, color = tint, fontSize = 16.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center)
+        }
         else -> Text(text, color = Sub, fontSize = 15.sp, textAlign = TextAlign.Center, modifier = live)
+    }
+    c.outcomeNote()?.let {
+        Spacer(Modifier.height(8.dp))
+        Text(it, color = Sub, fontSize = 13.sp, textAlign = TextAlign.Center, lineHeight = 18.sp, modifier = Modifier.widthIn(max = 340.dp))
     }
     c.recordingNote?.takeIf { c.phase == CallPhase.Ended }?.let {
         Spacer(Modifier.height(8.dp))
-        Text(it, color = Sub, fontSize = 13.sp, textAlign = TextAlign.Center)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(8.dp).clip(CircleShape).background(Sub))
+            Spacer(Modifier.width(6.dp))
+            Text(it, color = Sub, fontSize = 13.sp, textAlign = TextAlign.Center)
+        }
     }
     c.error?.let {
         Spacer(Modifier.height(10.dp))
         Text(it, color = Palette.Red300, fontSize = 14.sp, textAlign = TextAlign.Center, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
     }
 }
+
+/** The wrap-up's outcome glyph (CallStage.tsx OUTCOME_ICON). */
+internal fun outcomeIcon(o: CallOutcome?): ImageVector = when (o) {
+    is CallOutcome.AnsweredElsewhere, CallOutcome.PermissionRequested -> CallIcons.Check
+    is CallOutcome.Missed -> CallIcons.DirIn
+    is CallOutcome.Callback -> CallIcons.Callback
+    CallOutcome.ConnectionLost -> CallIcons.NoSignal
+    CallOutcome.NoAnswer, is CallOutcome.Failed, CallOutcome.PermissionNeeded, CallOutcome.MicBlocked -> CallIcons.Alert
+    else -> CallIcons.PhoneDown
+}
+
+/** The outcome words when the agent still owes the customer something (the web's #FFD1D9). */
+private val OwedInk = Color(0xFFFFD1D9)
 
 private fun spokenLength(s: Int): String {
     val m = s / 60
@@ -430,8 +462,8 @@ private fun Controls(c: CallUiState, actions: CallActions, compact: Boolean) {
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.Bottom,
             ) {
-                RoundButton("Decline", "Decline call", CallIcons.PhoneOff, Red, size = 64.dp, enabled = on, onClick = actions.decline)
-                RoundButton("Answer", "Answer call", CallIcons.Phone, Green, iconTint = Top, size = 76.dp, enabled = on, onClick = actions.answer)
+                RoundButton("Decline", "Decline call", CallIcons.PhoneDown, Red, size = 64.dp, enabled = on, onClick = actions.decline)
+                RoundButton("Answer", "Answer call", CallIcons.PhoneFill, Teal, size = 76.dp, enabled = on, onClick = actions.answer)
             }
             Spacer(Modifier.height(if (compact) 4.dp else 12.dp))
             TextAction(if (c.busy) "Saving…" else "Call back later", CallIcons.Callback, enabled = on, onClick = actions.callback)
@@ -445,7 +477,7 @@ private fun Controls(c: CallUiState, actions: CallActions, compact: Boolean) {
             if (c.phase == CallPhase.InCall) {
                 RoundButton("Minimise", "Minimise call", CallIcons.Minimise, Control, onClick = actions.minimise, modifier = Modifier.weight(1f))
             }
-            RoundButton("End", "End call", CallIcons.PhoneOff, Red, onClick = actions.hangup, modifier = Modifier.weight(1f))
+            RoundButton("End", "End call", CallIcons.PhoneDown, Red, onClick = actions.hangup, modifier = Modifier.weight(1f))
         }
         CallPhase.Ended -> WrapUp(c, actions)
         CallPhase.Idle -> Unit
@@ -521,13 +553,7 @@ private fun WrapUp(c: CallUiState, actions: CallActions) {
     val list = c.wrapActions()
     Column(Modifier.fillMaxWidth().widthIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         list.forEachIndexed { i, a ->
-            val run: () -> Unit = when (a) {
-                WrapAction.OpenChat, WrapAction.Message -> actions.openChat
-                WrapAction.CallAgain, WrapAction.CallBack, WrapAction.TryAgain -> actions.redial
-                WrapAction.SendCallRequest -> actions.sendCallRequest
-                WrapAction.OpenSettings -> actions.openSettings
-                WrapAction.Done, WrapAction.Cancel -> actions.dismiss
-            }
+            val run = actions.run(a)
             val label = if (a == WrapAction.SendCallRequest && c.busy) "Sending…" else a.label
             val closer = a == WrapAction.Done || a == WrapAction.Cancel
             when {
@@ -544,14 +570,14 @@ private fun PillButton(text: String, filled: Boolean, outlined: Boolean = true, 
     val shape = RoundedCornerShape(50)
     Box(
         Modifier.fillMaxWidth().heightIn(min = 48.dp).alpha(if (enabled) 1f else 0.5f).clip(shape)
-            .then(if (filled) Modifier.background(Green) else Modifier)
+            .then(if (filled) Modifier.background(TealText) else Modifier)
             .then(if (!filled && outlined) Modifier.border(1.dp, Sub.copy(alpha = 0.5f), shape) else Modifier)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            text, color = if (filled) Top else Ink, fontSize = 15.sp,
+            text, color = if (filled) Color.White else Ink, fontSize = 15.sp,
             fontWeight = if (filled) FontWeight.SemiBold else FontWeight.Medium, textAlign = TextAlign.Center,
         )
     }
@@ -645,6 +671,7 @@ private fun RoundButton(
 @Composable
 fun MinimisedCallBar(c: CallUiState, actions: CallActions) {
     val ended = c.phase == CallPhase.Ended
+    val inCall = c.phase == CallPhase.InCall
     Row(
         Modifier.fillMaxWidth().background(Bar)
             .clickable(onClickLabel = "Show the call", role = Role.Button, onClick = actions.expand)
@@ -656,14 +683,48 @@ fun MinimisedCallBar(c: CallUiState, actions: CallActions) {
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
             Text(c.who, color = Ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(
-                c.statusText(), color = if (c.reconnecting) Amber else Sub, fontSize = 13.sp, style = TabularNums,
-                maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-            )
+            val timer = inCall && !c.reconnecting
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    c.statusText(), color = if (c.reconnecting) Amber else Sub, fontSize = 13.sp, style = TabularNums,
+                    // The clock never breaks across lines; words may take two.
+                    maxLines = if (timer) 1 else 2, softWrap = !timer, overflow = TextOverflow.Ellipsis,
+                    modifier = (if (timer) Modifier else Modifier.weight(1f, fill = false)).semantics { liveRegion = LiveRegionMode.Polite },
+                )
+                if (timer && c.recording) {
+                    Spacer(Modifier.width(8.dp))
+                    Box(Modifier.size(8.dp).clip(CircleShape).background(RecInk).semantics { contentDescription = "Recording" })
+                    // At large text sizes the dot alone: the timer and the controls keep their room.
+                    if (LocalDensity.current.fontScale <= 1.3f) {
+                        Spacer(Modifier.width(4.dp))
+                        Text("Rec", color = RecInk, fontSize = 13.sp, maxLines = 1, softWrap = false)
+                    }
+                }
+            }
         }
         if (ended) {
-            IconCell(CallIcons.Close, "Dismiss", onClick = actions.dismiss)
+            // A wrap-up that arrived while minimised: its main action, and Done.
+            val primary = c.wrapActions().firstOrNull()?.takeIf { it != WrapAction.Done && it != WrapAction.Cancel }
+            if (primary != null) {
+                Box(
+                    Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(50))
+                        .clickable(enabled = !c.busy, role = Role.Button, onClick = actions.run(primary)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        primary.label, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                        modifier = Modifier.clip(RoundedCornerShape(50)).background(TealText).padding(horizontal = 12.dp, vertical = 8.dp),
+                    )
+                }
+            }
+            Box(
+                Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(50))
+                    .clickable(role = Role.Button, onClick = actions.dismiss).padding(horizontal = 12.dp),
+                contentAlignment = Alignment.Center,
+            ) { Text("Done", color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Medium) }
         } else {
+            // Chat: the customer's conversation, the call stays up here (the web's bar has it too).
+            if (inCall && c.chatKey != null) IconCell(CallIcons.Chat, "Open chat with ${c.who} — the call keeps going", onClick = actions.openChat)
             IconCell(if (c.muted) CallIcons.MicOff else CallIcons.Mic, if (c.muted) "Unmute" else "Mute", onClick = actions.toggleMute)
             Box(
                 Modifier.size(48.dp).clip(CircleShape)
@@ -672,11 +733,23 @@ fun MinimisedCallBar(c: CallUiState, actions: CallActions) {
                 contentAlignment = Alignment.Center,
             ) {
                 Box(Modifier.size(38.dp).clip(CircleShape).background(Red), contentAlignment = Alignment.Center) {
-                    Icon(CallIcons.PhoneOff, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                    Icon(CallIcons.PhoneDown, null, tint = Color.White, modifier = Modifier.size(20.dp))
                 }
             }
         }
     }
+}
+
+/** "● Rec" on the minimised bar (CallStage.tsx #FF6B81). */
+private val RecInk = Color(0xFFFF6B81)
+
+/** What a wrap-up action does. */
+internal fun CallActions.run(a: WrapAction): () -> Unit = when (a) {
+    WrapAction.OpenChat, WrapAction.Message -> openChat
+    WrapAction.CallAgain, WrapAction.CallBack, WrapAction.TryAgain -> redial
+    WrapAction.SendCallRequest -> sendCallRequest
+    WrapAction.OpenSettings -> openSettings
+    WrapAction.Done, WrapAction.Cancel -> dismiss
 }
 
 /**
@@ -697,21 +770,25 @@ fun WaitingBanner(w: WaitingCall, actions: CallActions, modifier: Modifier = Mod
             Spacer(Modifier.width(8.dp))
             Text("${w.who} is also calling", color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            SmallAction("Decline", Palette.Red300, actions.declineWaiting)
-            SmallAction("Call back later", Ink, actions.callbackWaiting)
-            SmallAction("End & answer", Green, actions.endAndAnswer)
+        Spacer(Modifier.height(8.dp))
+        // As the web's banner: three filled pills — Decline red, Call back later quiet, End & answer green.
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SmallAction("Decline", Red, Color.White, "Decline ${w.who}'s call", actions.declineWaiting)
+            SmallAction("Call back later", Control, Ink, null, actions.callbackWaiting)
+            SmallAction("End & answer", TealText, Color.White, null, actions.endAndAnswer)
         }
     }
 }
 
 @Composable
-private fun SmallAction(text: String, color: Color, onClick: () -> Unit) {
+private fun SmallAction(text: String, fill: Color, ink: Color, description: String?, onClick: () -> Unit) {
     Box(
-        Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(50)).clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 10.dp),
+        Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(50)).background(fill)
+            .clickable(role = Role.Button, onClick = onClick)
+            .then(if (description != null) Modifier.semantics { contentDescription = description } else Modifier)
+            .padding(horizontal = 16.dp),
         contentAlignment = Alignment.Center,
-    ) { Text(text, color = color, fontSize = 14.sp, fontWeight = FontWeight.SemiBold) }
+    ) { Text(text, color = ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }
 }
 
 /** "{First} allowed calls — Call now": a customer this phone asked has tapped Allow. */
@@ -730,10 +807,14 @@ fun PermissionGrantBanner(g: PermissionGrant, onCall: () -> Unit, onDismiss: () 
             Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(50)).clickable(role = Role.Button, onClick = onCall),
             contentAlignment = Alignment.Center,
         ) {
-            Text(
-                "Call now", color = Top, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.clip(RoundedCornerShape(50)).background(Green).padding(horizontal = 14.dp, vertical = 8.dp),
-            )
+            Row(
+                Modifier.clip(RoundedCornerShape(50)).background(TealText).padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(CallIcons.Phone, null, tint = Color.White, modifier = Modifier.size(15.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Call now", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            }
         }
         IconCell(CallIcons.Close, "Dismiss", onClick = onDismiss)
     }

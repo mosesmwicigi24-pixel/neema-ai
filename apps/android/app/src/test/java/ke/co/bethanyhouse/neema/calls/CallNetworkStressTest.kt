@@ -8,6 +8,7 @@ import ke.co.bethanyhouse.neema.feature.calls.CallPhase
 import ke.co.bethanyhouse.neema.feature.calls.CallbackSave
 import ke.co.bethanyhouse.neema.feature.calls.WrapAction
 import ke.co.bethanyhouse.neema.feature.calls.statusText
+import ke.co.bethanyhouse.neema.feature.calls.outcomeNote
 import ke.co.bethanyhouse.neema.feature.calls.wrapActions
 import ke.co.bethanyhouse.neema.feature.calls.PeerEvent
 import ke.co.bethanyhouse.neema.feature.calls.RecordingOutbox
@@ -106,7 +107,8 @@ class CallNetworkStressTest {
         advanceTimeBy(2); runCurrent()
         assertEquals(CallPhase.Ended, r.state.phase)
         assertEquals(CallOutcome.ConnectionLost, r.state.outcome)
-        assertEquals("the call's length through the grace", "Call dropped · 0:10 — the connection was lost", r.state.statusText())
+        // Dropped the moment it connected: the grace spent waiting is not call time (the web's bug a).
+        assertEquals("the connected time, not the grace", "Call dropped — the connection was lost", r.state.statusText())
         assertFalse(r.state.reconnecting)
         assertTrue(p.closed)
         assertEquals(1, r.count("terminate wacid.1"))
@@ -122,9 +124,9 @@ class CallNetworkStressTest {
         p.onEvent(PeerEvent.Ended); r.settle()
         assertEquals(CallPhase.Ended, r.state.phase)
         assertEquals(CallOutcome.ConnectionLost, r.state.outcome)
-        // The grace timer is gone with the call: nothing fires later.
+        // Hung up behind it (never a silent line on their side), once: the grace timer is gone with the call.
         advanceTimeBy(CallManager.ICE_GRACE_MS + 1); runCurrent()
-        assertEquals(0, r.count("terminate"))
+        assertEquals(1, r.count("terminate"))
     }
 
     @Test fun hangingUpWhileReconnectingEndsCleanly() = rig { r ->
@@ -168,7 +170,7 @@ class CallNetworkStressTest {
         repeat(4) { r.calls.hangup() }
         r.settle()
         assertEquals(1, r.count("terminate"))
-        advanceTimeBy(6_001); runCurrent()
+        advanceTimeBy(8_001); runCurrent()
         assertEquals(CallPhase.Idle, r.state.phase)
     }
 
@@ -261,11 +263,13 @@ class CallNetworkStressTest {
         r.api.answerError = timeout("POST", "/admin/calls/wacid.1/answer")
         r.ring(); r.calls.answer(); r.settle()
         advanceTimeBy(CallManager.ANSWER_CONFIRM_MS + 1); runCurrent()
-        assertEquals(CallManager.ANSWER_SLOW, r.state.error)
+        // Our answer left, its reply and the audio never came: hung up, and said plainly (web bug b).
+        assertEquals(CallManager.ANSWER_DROPPED, r.state.error)
         advanceTimeBy(1_801); runCurrent()
         assertEquals(1, r.count("terminate wacid.1"))
         assertEquals(CallPhase.Ended, r.state.phase)
-        assertEquals(CallOutcome.Failed(CallManager.ANSWER_SLOW), r.state.outcome)
+        assertEquals(CallOutcome.Failed(CallManager.ANSWER_DROPPED), r.state.outcome)
+        assertEquals("The connection dropped while answering — call them back", r.state.statusText())
     }
 
     @Test fun answerWhileOfflineSaysSoAndKeepsRinging() = rig { r ->
@@ -289,7 +293,8 @@ class CallNetworkStressTest {
         r.ring(); r.calls.answer(); r.settle()
         assertEquals(CallPhase.Ended, r.state.phase)
         assertEquals(CallOutcome.Missed(CallManager.CALL_GONE), r.state.outcome)
-        assertEquals(CallManager.CALL_GONE, r.state.statusText())
+        assertEquals("Missed call", r.state.statusText())
+        assertEquals(CallManager.CALL_GONE, r.state.outcomeNote())
         advanceTimeBy(1_801); runCurrent()
         assertEquals("nothing to terminate: the caller is gone", 0, r.count("terminate"))
     }

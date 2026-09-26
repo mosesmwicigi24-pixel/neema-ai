@@ -15,6 +15,7 @@ import ke.co.bethanyhouse.neema.feature.calls.WaitingCall
 import ke.co.bethanyhouse.neema.feature.calls.WrapAction
 import ke.co.bethanyhouse.neema.feature.calls.firstNameOf
 import ke.co.bethanyhouse.neema.feature.calls.statusText
+import ke.co.bethanyhouse.neema.feature.calls.outcomeNote
 import ke.co.bethanyhouse.neema.feature.calls.wrapActions
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
@@ -102,7 +103,7 @@ class CallUxTest {
         assertEquals("Peter hasn't allowed WhatsApp calls yet", ended(CallOutcome.PermissionNeeded))
         assertEquals("Call request sent — you'll be told when Peter taps Allow", ended(CallOutcome.PermissionRequested))
         assertEquals("Microphone blocked — allow it in settings", ended(CallOutcome.MicBlocked))
-        assertEquals("This customer hasn't allowed WhatsApp calls yet",
+        assertEquals("no name: their number, as the web", "+254700000000 hasn't allowed WhatsApp calls yet",
             CallUiState(phase = CallPhase.Ended, from = "254700000000", outcome = CallOutcome.PermissionNeeded).statusText())
     }
 
@@ -114,11 +115,13 @@ class CallUxTest {
     }
 
     @Test fun neutralWrapUpsCloseByThemselvesActionableOnesWait() {
-        assertEquals(6_000L, CallOutcome.Completed.autoCloseMs)
+        assertEquals(8_000L, CallOutcome.Completed.autoCloseMs)
+        assertEquals(5_000L, CallOutcome.Declined().autoCloseMs)
+        assertEquals(6_000L, CallOutcome.PermissionRequested.autoCloseMs)
         assertEquals(4_000L, CallOutcome.AnsweredElsewhere(null).autoCloseMs)
         assertEquals(2_000L, CallOutcome.Cancelled.autoCloseMs)
         for (o in listOf(CallOutcome.Missed(), CallOutcome.NoAnswer, CallOutcome.ConnectionLost, CallOutcome.Failed("x"),
-            CallOutcome.PermissionNeeded, CallOutcome.PermissionRequested, CallOutcome.MicBlocked, CallOutcome.Callback(CallbackSave.NotSaved))) {
+            CallOutcome.PermissionNeeded, CallOutcome.MicBlocked, CallOutcome.Callback(CallbackSave.NotSaved))) {
             assertNull("$o stays until the agent acts", o.autoCloseMs)
         }
     }
@@ -181,7 +184,8 @@ class CallUxTest {
         r.api.answerError = ApiException(410, "POST", "/admin/calls/wacid.1/answer", """{"detail":"This call has already ended."}""")
         r.ring(); r.calls.answer(); r.settle()
         assertEquals(CallOutcome.Missed(CallManager.CALL_GONE), r.state.outcome)
-        assertEquals("This call has already ended", r.state.statusText())
+        assertEquals("Missed call", r.state.statusText())
+        assertEquals("the reason, under it (as the web)", "This call has already ended", r.state.outcomeNote())
         assertEquals(WrapAction.CallBack, r.state.wrapActions().first())
         assertFalse(r.api.log.any { it.startsWith("terminate") })
     }
@@ -189,7 +193,7 @@ class CallUxTest {
     @Test fun callEndedOutcomesMapToTheWrapUp() = rig { r ->
         fun endWith(outcome: String, setup: () -> Unit): CallOutcome? {
             setup()
-            r.raw("""{"type":"call_ended","call_id":"${r.state.callId}","outcome":"$outcome","status":"COMPLETED","duration":42,"agent_name":"Ann Wanjiru"}""")
+            r.raw("""{"type":"call_ended","call_id":"${r.state.callId}","outcome":"$outcome","status":"COMPLETED","duration":42,"agent_id":"agent-ann","agent_name":"Ann Wanjiru"}""")
             val o = r.state.outcome
             r.calls.dismiss(); r.settle()
             advanceTimeBy(13_000); runCurrent()
@@ -199,7 +203,7 @@ class CallUxTest {
         fun ringFresh() = r.ring("wacid.r${n++}")
         assertEquals(CallOutcome.Missed(), endWith("missed", ::ringFresh))
         assertEquals(CallOutcome.Declined("Ann Wanjiru"), endWith("declined", ::ringFresh))
-        assertEquals(CallOutcome.Callback(CallbackSave.Saved), endWith("callback", ::ringFresh))
+        assertEquals(CallOutcome.Callback(CallbackSave.Saved, "Ann Wanjiru"), endWith("callback", ::ringFresh))
         assertEquals("completed while it rang here: someone else took it", CallOutcome.AnsweredElsewhere("Ann Wanjiru"), endWith("completed", ::ringFresh))
         assertEquals(CallOutcome.Completed, endWith("completed") { r.live("wacid.r${n++}") })
         assertEquals(CallOutcome.NoAnswer, endWith("no_answer") { r.api.connectId = "wacid.o${n++}"; r.scope.async { r.calls.initiateCall("254733444555") }; r.settle() })

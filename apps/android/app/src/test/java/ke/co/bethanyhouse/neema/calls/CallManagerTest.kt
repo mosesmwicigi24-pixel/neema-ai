@@ -119,7 +119,7 @@ class CallManagerTest {
         assertEquals("Call declined", r.state.statusText())
         assertFalse(r.ringer.ringing)
         // A neutral wrap-up closes by itself.
-        advanceTimeBy(2_999); runCurrent()
+        advanceTimeBy(4_999); runCurrent()
         assertEquals(CallPhase.Ended, r.state.phase)
         advanceTimeBy(2); runCurrent()
         assertEquals(CallPhase.Idle, r.state.phase)
@@ -288,7 +288,7 @@ class CallManagerTest {
         // Said at once, on the wrap-up: no error to read and wait out.
         assertEquals(CallPhase.Ended, r.state.phase)
         assertEquals(CallOutcome.AnsweredElsewhere(null), r.state.outcome)
-        assertEquals("Answered by another agent", r.state.statusText())
+        assertEquals("Answered by a colleague", r.state.statusText())
         advanceTimeBy(1_801); runCurrent()
         // The colleague who won the call keeps it: no terminate from this device.
         assertFalse(r.api.log.any { it.startsWith("terminate") })
@@ -390,7 +390,7 @@ class CallManagerTest {
         assertEquals(CallOutcome.Completed, r.state.outcome)
         assertTrue(p.closed)
         assertFalse(r.audio.inCall)
-        advanceTimeBy(6_001); runCurrent()
+        advanceTimeBy(8_001); runCurrent()
         assertEquals(CallPhase.Idle, r.state.phase)
     }
 

@@ -136,9 +136,9 @@ internal fun avatarIndex(s: String): Int {
 }
 private fun avatarColor(s: String) = Palette.Call.Avatars[avatarIndex(s)]
 
-/** The row's `who`: name, else +wa_id, else "Unknown" (a blank name falls through too). */
+/** The row's `who`: name, else +wa_id, else "Unknown caller" (a blank name falls through too). */
 internal fun rowWho(c: Call): String =
-    c.name?.takeIf { it.isNotBlank() } ?: c.waId?.takeIf { it.isNotEmpty() }?.let { "+$it" } ?: "Unknown"
+    c.name?.takeIf { it.isNotBlank() } ?: c.waId?.takeIf { it.isNotEmpty() }?.let { "+$it" } ?: "Unknown caller"
 
 /**
  * The row's initials: who minus its first "+", first letter of the first two
@@ -341,7 +341,7 @@ private fun CallLog(
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         Text(
-                            if (followUpsOnly) "No follow-ups" else "No calls yet — incoming WhatsApp calls ring here",
+                            if (followUpsOnly) "No follow-ups — every caller has been called back" else "No calls yet — incoming WhatsApp calls ring here",
                             color = Soft, fontSize = 15.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center,
                         )
                         Spacer(Modifier.height(6.dp))
@@ -534,7 +534,8 @@ private fun CallRow(
                 RoundIcon(
                     icon = CallIcons.Phone, iconSize = 15.dp,
                     label = "Call ${who} back on WhatsApp",
-                    bg = ChannelColors.WhatsApp, tint = Ink, border = ChannelColors.WhatsApp,
+                    // The web's row button: WhatsApp green glyph on a soft green disc.
+                    bg = ChannelColors.WhatsApp.copy(alpha = 0.16f), tint = Green, border = ChannelColors.WhatsApp.copy(alpha = 0.3f),
                     onClick = onCallBack,
                 )
             }
@@ -859,7 +860,7 @@ private fun CallDetails(
                     StripButton("Open chat") { dash.openConversationFor(wa) }
                 }
                 if (sel.followUpOpen) {
-                    StripButton(if (sel.callId in doneBusy) "Marking…" else "Mark follow-up done") { vm.markFollowUpDone(sel) }
+                    StripButton(if (sel.callId in doneBusy) "Saving…" else "Mark follow-up done") { vm.markFollowUpDone(sel) }
                 }
             }
             if (callerCalls.size > 1) {
@@ -952,12 +953,16 @@ private fun StripButton(text: String, filled: Boolean = false, onClick: () -> Un
     val press = remember { MutableInteractionSource() }
     Row(
         Modifier.touchCell(press, role = Role.Button, onClick = onClick)
-            .clip(RoundedCornerShape(50)).background(if (filled) Green else ChannelColors.WhatsApp.copy(alpha = 0.14f))
-            .border(1.dp, ChannelColors.WhatsApp.copy(alpha = 0.3f), RoundedCornerShape(50))
-            .pressedOn(press).padding(horizontal = 12.dp, vertical = 5.dp),
+            // The web's CallDetail buttons: the call one white on #008069, the rest quiet.
+            .clip(RoundedCornerShape(50)).background(if (filled) Palette.Call.WaTealText else Color.White.copy(alpha = 0.08f))
+            .pressedOn(press).padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(text, color = if (filled) Ink else Green, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        if (filled) {
+            Icon(CallIcons.Phone, null, tint = Color.White, modifier = Modifier.size(15.dp))
+            Spacer(Modifier.width(6.dp))
+        }
+        Text(text, color = if (filled) Color.White else TextC, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 

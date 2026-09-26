@@ -413,10 +413,18 @@ private fun Hero(
                     enabled = !callBusy,
                     modifier = Modifier.weight(1f).webHeight(36.dp),
                     shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = WA_GREEN, contentColor = Color.White,
-                        disabledContainerColor = WA_GREEN.copy(alpha = 0.55f), disabledContentColor = Color.White,
-                    ),
+                    // White text only on a fill it reads on (the web's #008069 / the platform's deep ink), never #25D366.
+                    colors = run {
+                        val fill = when (platform) {
+                            CallPlatform.Messenger -> Color(0xFF0066E0)
+                            CallPlatform.Instagram -> Color(0xFFD62976)
+                            null -> Palette.Call.WaDeep
+                        }
+                        ButtonDefaults.buttonColors(
+                            containerColor = fill, contentColor = Color.White,
+                            disabledContainerColor = fill.copy(alpha = 0.55f), disabledContentColor = Color.White,
+                        )
+                    },
                     contentPadding = PaddingValues(horizontal = 8.dp),
                 ) {
                     Icon(Icons.Default.Call, null, modifier = Modifier.size(15.dp))

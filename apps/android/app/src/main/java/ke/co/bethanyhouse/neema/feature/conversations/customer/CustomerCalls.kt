@@ -180,7 +180,7 @@ fun CallOnWhatsAppContent(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(Modifier.size(36.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.22f)), contentAlignment = Alignment.Center) {
-                Icon(CallIcons.PhoneOff, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                Icon(CallIcons.PhoneDown, null, tint = Color.White, modifier = Modifier.size(18.dp))
             }
             Spacer(Modifier.width(12.dp))
             Text(
@@ -215,16 +215,17 @@ private fun SheetButton(text: String, filled: Boolean, onClick: () -> Unit) {
     val c = Neema.colors
     Box(
         Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(RoundedCornerShape(50))
-            .then(if (filled) Modifier.background(ChannelColors.WhatsApp) else Modifier.border(1.dp, c.border, RoundedCornerShape(50)))
+            // White on WhatsApp's deep green (#008069, as the web's sheet): 4.9:1, not white on #25D366.
+            .then(if (filled) Modifier.background(Palette.Call.WaDeep) else Modifier.border(1.dp, c.border, RoundedCornerShape(50)))
             .clickable(role = Role.Button, onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
             if (filled) {
-                Icon(CallIcons.Phone, null, tint = Palette.Call.WaTop, modifier = Modifier.size(16.dp))
+                Icon(CallIcons.Phone, null, tint = Color.White, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(8.dp))
             }
-            Text(text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = if (filled) Palette.Call.WaTop else c.text)
+            Text(text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = if (filled) Color.White else c.text)
         }
     }
 }

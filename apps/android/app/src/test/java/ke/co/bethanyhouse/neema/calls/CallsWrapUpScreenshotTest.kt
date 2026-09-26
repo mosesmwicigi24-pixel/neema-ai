@@ -112,6 +112,14 @@ class CallsWrapUpScreenshotTest {
     @Test fun minimisedEnded() = shot {
         OverApp { MinimisedCallBar(peter.copy(seconds = 252, outcome = CallOutcome.Completed), CallActions()) }
     }
+    /** A wrap-up that owes the customer something, while minimised: its main action and Done (the web's bar). */
+    @Test fun minimisedMissed() = shot {
+        OverApp { MinimisedCallBar(peter.copy(outcome = CallOutcome.Missed()), CallActions()) }
+    }
+    /** Chat, Mute, End and "● Rec" on the smallest phone at 200% text. */
+    @Test fun minimisedInCallRecording320() = shot(Devices.Narrow320HugeText) {
+        OverApp { MinimisedCallBar(peter.copy(phase = CallPhase.InCall, seconds = 187, recording = true), CallActions()) }
+    }
     @Test fun minimisedWithWaitingCallerHugeText() = shot(Devices.HugeText) {
         OverApp {
             MinimisedCallBar(peter.copy(phase = CallPhase.InCall, seconds = 187), CallActions())
@@ -169,16 +177,21 @@ class CallsWrapUpScreenshotTest {
         callRaw = NeemaJson.parseToJsonElement("""{"call_id":5,"status":["?"],"insights":"not an object"}"""),
     )
 
-    private fun thread(dark: Boolean = false, device: DeviceConfig = DeviceConfig.PIXEL_6) = shot(device, dark) {
+    private fun thread(
+        dark: Boolean = false,
+        device: DeviceConfig = DeviceConfig.PIXEL_6,
+        // The thread scrolls; a still frame at 200% text holds the summary card and one pill.
+        pills: List<ThreadMsg> = listOf(missedPill, summarised, outgoing, odd),
+    ) = shot(device, dark) {
         Column(
             Modifier.fillMaxSize().background(if (dark) Neema.colors.bg else Palette.Mist).padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            listOf(missedPill, summarised, outgoing, odd).forEach { ThreadCallEvent(it, onUseAsReply = {}) }
+            pills.forEach { ThreadCallEvent(it, onUseAsReply = {}) }
         }
     }
     @Test fun threadCallPills() = thread()
     @Test fun threadCallPillsDark() = thread(dark = true)
-    @Test fun threadCallPillsHugeText() = thread(device = Devices.HugeText)
+    @Test fun threadCallPillsHugeText() = thread(device = Devices.HugeText, pills = listOf(summarised, missedPill))
     @Test fun threadCallPillsTablet() = thread(device = DeviceConfig.PIXEL_C)
 }

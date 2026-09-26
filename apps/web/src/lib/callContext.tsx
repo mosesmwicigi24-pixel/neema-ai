@@ -164,8 +164,19 @@ export const useCallPresence = () => useContext(PresenceCtx);
 export const callerLabel = (c: { name?: string | null; from?: string } | null | undefined): string =>
     (c?.name || "").trim() || (c?.from ? `+${c.from}` : "Unknown caller");
 
-export const firstName = (c: { name?: string | null; from?: string } | null | undefined): string =>
-    (c?.name || "").trim().split(/\s+/)[0] || (c?.from ? `+${c.from}` : "they");
+/** Words that come before a name ("Fr. Peter", "Deacon James", "Askofu Mkuu …"):
+ *  never what the customer is called by. Same list as Android's firstNameOf. */
+const TITLES = new Set(["fr", "father", "rev", "revd", "reverend", "sr", "sister", "br", "bro", "brother", "dr",
+    "mr", "mrs", "ms", "prof", "deacon", "pastor", "bishop", "archbishop", "canon", "most", "the", "rt", "right",
+    "very", "askofu", "mkuu"]);
+
+/** The name to address them by — the first word that isn't a title ("Fr. Peter Kamau" → "Peter"). */
+export const firstName = (c: { name?: string | null; from?: string } | null | undefined): string => {
+    const name = (c?.name || "").trim();
+    const words = name.startsWith("+") ? [] : name.split(/\s+/).filter(Boolean);
+    const isTitle = (w: string) => w.endsWith(".") || TITLES.has(w.toLowerCase());
+    return words.find((w) => !isTitle(w)) || words[0] || (c?.from ? `+${c.from}` : "they");
+};
 
 const LIVE: CallPhase[] = ["placing", "ringing_out", "connecting", "active", "reconnecting"];
 export const isLivePhase = (p: CallPhase) => LIVE.includes(p);
