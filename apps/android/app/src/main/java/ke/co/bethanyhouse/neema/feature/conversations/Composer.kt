@@ -42,11 +42,12 @@ import ke.co.bethanyhouse.neema.core.model.ConversationWindow
 import ke.co.bethanyhouse.neema.core.util.Fmt
 import kotlinx.coroutines.delay
 import java.io.File
+import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 
-private val Blue50 = Color(0xFFEFF6FF)
-private val Blue200 = Color(0xFFBFDBFE)
-private val Blue700 = Color(0xFF1D4ED8)
-private val Amber = Color(0xFFF59E0B)
+private val Blue50 = Palette.Blue50
+private val Blue200 = Palette.Blue200
+private val Blue700 = Palette.Blue700
+private val Amber = Palette.Amber500
 
 /**
  * The reply box — shown when the agent owns the thread, or is admin: AI
@@ -76,7 +77,7 @@ internal fun Composer(
                 Text("🤖", fontSize = 14.sp)
                 Spacer(Modifier.width(8.dp))
                 Text("AI has a draft ready", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = blue.fg, modifier = Modifier.weight(1f))
-                Text("Tap to review ↑", fontSize = 10.sp, color = ink(Color(0xFF3B82F6)))
+                Text("Tap to review ↑", fontSize = 10.sp, color = ink(Palette.Blue500))
             }
         }
         if (state.draftVisible && state.draftExpanded) DraftPanel(vm, state)
@@ -87,10 +88,10 @@ internal fun Composer(
                     onClick = vm::generateDraft, enabled = !state.generatingDraft, modifier = Modifier.webHeight(28.dp),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp), shape = RoundedCornerShape(8.dp),
                     border = androidx.compose.foundation.BorderStroke(1.dp, if (state.generatingDraft) blue.border.copy(alpha = 0.5f) else blue.border),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = ink(Color(0xFF2563EB)), disabledContentColor = ink(Color(0xFF2563EB)).copy(alpha = 0.5f)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = ink(Palette.Blue600), disabledContentColor = ink(Palette.Blue600).copy(alpha = 0.5f)),
                 ) {
                     if (state.generatingDraft) {
-                        CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = Color(0xFF60A5FA))
+                        CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = Palette.Blue400)
                         Spacer(Modifier.width(6.dp)); Text("Generating…", fontSize = 12.sp)
                     } else Text("🤖 Generate AI draft", fontSize = 12.sp)
                 }
@@ -99,7 +100,7 @@ internal fun Composer(
         // ── The message being answered ──
         state.quoted?.let { q ->
             Row(
-                Modifier.padding(bottom = 8.dp).fillMaxWidth().height(IntrinsicSize.Min).clip(RoundedCornerShape(8.dp)).background(if (c.isDark) c.bg3 else Color(0xFFF1F5F9)),
+                Modifier.padding(bottom = 8.dp).fillMaxWidth().height(IntrinsicSize.Min).clip(RoundedCornerShape(8.dp)).background(if (c.isDark) c.bg3 else Hue.Slate100),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(Modifier.width(2.dp).fillMaxHeight().heightIn(min = 44.dp).background(Amber))
@@ -116,11 +117,11 @@ internal fun Composer(
                             q.mediaType != null -> "[${q.mediaType}]"
                             else -> q.text
                         },
-                        fontSize = 12.sp, color = if (c.isDark) c.textMid else Color(0xFF475569), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        fontSize = 12.sp, color = if (c.isDark) c.textMid else Hue.Slate600, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                 }
                 q.mediaUrl?.let { AsyncImage(it, "quoted", contentScale = ContentScale.Crop, modifier = Modifier.size(36.dp).clip(RoundedCornerShape(4.dp))) }
-                IconButton(onClick = vm::clearQuote, modifier = Modifier.size(32.dp)) { Icon(Icons.Filled.Close, "Remove quote", tint = Color(0xFF94A3B8), modifier = Modifier.size(16.dp)) }
+                IconButton(onClick = vm::clearQuote, modifier = Modifier.size(32.dp)) { Icon(Icons.Filled.Close, "Remove quote", tint = Palette.Slate400, modifier = Modifier.size(16.dp)) }
             }
         }
         // ── Messaging window — said BEFORE a reply is typed that Meta would refuse ──
@@ -128,7 +129,7 @@ internal fun Composer(
         // ── Translate-to-their-language toggle ──
         if (threadLang != null || txOn) {
             Row(Modifier.padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                val tx = if (txOn) tint(Color(0xFFE6F3D8), Color(0xFF427425), Color(0xFF427425).copy(alpha = 0.3f)) else tint(Color(0xFFF5F5F4), Color(0xFF78716C), Color(0xFFE7E5E4))
+                val tx = if (txOn) tint(Palette.Willow100, Palette.Moss700, Palette.Moss700.copy(alpha = 0.3f)) else tint(Palette.Stone100, Palette.Stone500, Palette.Stone200)
                 Text(
                     "🌐 " + if (txOn) "Sending in ${state.txPreview?.lang ?: threadLang ?: "their language"}" else "Translate: off",
                     fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = tx.fg,
@@ -136,19 +137,19 @@ internal fun Composer(
                         .border(1.dp, tx.border, RoundedCornerShape(50))
                         .clickable(onClick = vm::toggleTx).padding(horizontal = 10.dp, vertical = 4.dp),
                 )
-                if (txOn && state.txBusy) Text("translating…", fontSize = 10.sp, color = Color(0xFFA8A29E), modifier = Modifier.padding(start = 8.dp))
+                if (txOn && state.txBusy) Text("translating…", fontSize = 10.sp, color = Palette.Stone400, modifier = Modifier.padding(start = 8.dp))
             }
         }
         if (txOn && state.txPreview != null && state.replyText.trim().length > 1) {
             Column(
-                Modifier.padding(bottom = 8.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if (c.isDark) c.bg3 else Color(0xFFFAFAF9))
-                    .border(1.dp, if (c.isDark) c.border else Color(0xFFE7E5E4), RoundedCornerShape(12.dp)).padding(horizontal = 12.dp, vertical = 8.dp),
+                Modifier.padding(bottom = 8.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if (c.isDark) c.bg3 else Palette.Stone50)
+                    .border(1.dp, if (c.isDark) c.border else Palette.Stone200, RoundedCornerShape(12.dp)).padding(horizontal = 12.dp, vertical = 8.dp),
             ) {
                 Text(
                     ("They will receive" + (state.txPreview.lang?.let { " — $it" } ?: "")).uppercase(),
-                    fontSize = 9.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFA8A29E), letterSpacing = 0.5.sp,
+                    fontSize = 9.sp, fontWeight = FontWeight.SemiBold, color = Palette.Stone400, letterSpacing = 0.5.sp,
                 )
-                Text(state.txPreview.text, fontSize = 12.sp, fontStyle = FontStyle.Italic, color = if (c.isDark) c.textMid else Color(0xFF57534E))
+                Text(state.txPreview.text, fontSize = 12.sp, fontStyle = FontStyle.Italic, color = if (c.isDark) c.textMid else Palette.Stone600)
             }
         }
         }
@@ -167,13 +168,13 @@ internal fun Composer(
                 cursorBrush = androidx.compose.ui.graphics.SolidColor(Amber),
                 maxLines = 6,
                 modifier = Modifier.weight(1f).heightIn(min = 44.dp, max = 132.dp)
-                    .clip(boxShape).background(if (c.isDark) c.bg3 else Color(0xFFF6F7F5))
-                    .border(if (focused) 2.dp else 1.dp, if (focused) Amber.copy(alpha = 0.7f) else if (c.isDark) c.border else Color(0xFFE5E8E2), boxShape),
+                    .clip(boxShape).background(if (c.isDark) c.bg3 else Hue.SageFieldBg)
+                    .border(if (focused) 2.dp else 1.dp, if (focused) Amber.copy(alpha = 0.7f) else if (c.isDark) c.border else Hue.SageField, boxShape),
                 decorationBox = { inner ->
                     Box(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), contentAlignment = Alignment.CenterStart) {
                         if (state.replyText.isEmpty()) Text(
                             if (window?.mode == "human_agent") "Type a reply — goes out under your name (human agent)…" else "Type a reply…",
-                            fontSize = 14.sp, lineHeight = 19.sp, color = if (c.isDark) c.muted else Color(0xFFA8A29E), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            fontSize = 14.sp, lineHeight = 19.sp, color = if (c.isDark) c.muted else Palette.Stone400, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         )
                         inner()
                     }
@@ -199,7 +200,7 @@ internal fun Composer(
 @Composable
 private fun DraftPanel(vm: ConversationsViewModel, state: ComposerUi) {
     val blue = tint(Blue50, Blue700, Blue200)
-    val soft = ink(Color(0xFF3B82F6))
+    val soft = ink(Palette.Blue500)
     Column(Modifier.padding(bottom = 8.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(blue.bg).border(1.dp, blue.border, RoundedCornerShape(12.dp))) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("🤖", fontSize = 14.sp); Spacer(Modifier.width(6.dp))
@@ -212,13 +213,13 @@ private fun DraftPanel(vm: ConversationsViewModel, state: ComposerUi) {
             IconButton(onClick = { vm.expandDraft(false) }, modifier = Modifier.size(28.dp)) { Icon(Icons.Filled.KeyboardArrowDown, "Collapse the AI draft", tint = soft, modifier = Modifier.size(16.dp)) }
             IconButton(onClick = vm::dismissDraft, modifier = Modifier.size(28.dp)) { Icon(Icons.Filled.Close, "Dismiss the AI draft", tint = soft, modifier = Modifier.size(14.dp)) }
         }
-        HorizontalDivider(color = if (ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.isDark) blue.border else Color(0xFFDBEAFE))
+        HorizontalDivider(color = if (ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.isDark) blue.border else Hue.Blue100)
         Box(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             if (state.draftEditing) {
                 OutlinedTextField(
                     value = state.draftText, onValueChange = vm::setDraftText, minLines = 4, maxLines = 8,
                     placeholder = { Text("Edit the draft…", fontSize = 12.sp) },
-                    textStyle = LocalTextStyle.current.copy(fontSize = 12.sp, color = ink(Color(0xFF1E40AF))),
+                    textStyle = LocalTextStyle.current.copy(fontSize = 12.sp, color = ink(Hue.Blue800)),
                     modifier = Modifier.fillMaxWidth(),
                 )
             } else {
@@ -239,7 +240,7 @@ internal fun SmallBtn(label: String, bg: Color, fg: Color, onClick: () -> Unit, 
     Text(
         label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = fg.copy(alpha = if (enabled) 1f else 0.5f), maxLines = 1,
         modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(bg)
-            .then(if (bg == Color.White) Modifier.border(1.dp, Color(0xFFE8EBE3), RoundedCornerShape(8.dp)) else Modifier)
+            .then(if (bg == Color.White) Modifier.border(1.dp, Palette.Hairline, RoundedCornerShape(8.dp)) else Modifier)
             .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 12.dp, vertical = 7.dp),
     )
 }
@@ -262,10 +263,10 @@ internal fun WindowStrip(win: ConversationWindow) {
         return if (h >= 24) "${h / 24}d ${h % 24}h" else if (h > 0) "${h}h ${m}m" else "${m}m"
     }
     val (bg0, bd0, fg0, icon) = when (win.mode) {
-        "open" -> Quad(Color(0xFFF0F9E8), Color(0xFFD6E9C2), Color(0xFF427425), "🟢")
-        "human_agent" -> Quad(Color(0xFFFFF7ED), Color(0xFFFED7AA), Color(0xFFB45309), "🟠")
-        "closed" -> Quad(Color(0xFFFEF2F2), Color(0xFFFECACA), Color(0xFFB91C1C), "🔴")
-        else -> Quad(Color(0xFFF5F6F3), Color(0xFFE8EBE3), Color(0xFF6B7E64), "•")
+        "open" -> Quad(Hue.MossTint, Hue.MossRim, Palette.Moss700, "🟢")
+        "human_agent" -> Quad(Hue.Orange50, Hue.Orange200, Palette.Amber700, "🟠")
+        "closed" -> Quad(Palette.Red50, Palette.Red200, Palette.Red700, "🔴")
+        else -> Quad(Hue.StoneGreen, Palette.Hairline, Palette.Sage500, "•")
     }
     val (bg, fg, bd) = tint(bg0, fg0, bd0)
     val text = when (win.mode) {
@@ -302,9 +303,9 @@ private fun AttachButton(vm: ConversationsViewModel) {
     val camPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> if (granted) launchCamera() }
     Box {
         Box(
-            Modifier.size(44.dp).clip(RoundedCornerShape(16.dp)).background(if (ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.isDark) ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.bg3 else Color(0xFFF1F3F5)).clickable { menu = true },
+            Modifier.size(44.dp).clip(RoundedCornerShape(16.dp)).background(if (ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.isDark) ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.bg3 else Hue.CoolGray).clickable { menu = true },
             contentAlignment = Alignment.Center,
-        ) { Icon(Icons.Filled.AttachFile, "Attach images or files (up to 5 MB each for images)", tint = Color(0xFF64748B), modifier = Modifier.size(18.dp)) }
+        ) { Icon(Icons.Filled.AttachFile, "Attach images or files (up to 5 MB each for images)", tint = Palette.Slate500, modifier = Modifier.size(18.dp)) }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
             DropdownMenuItem(text = { Text("Camera") }, leadingIcon = { Icon(Icons.Filled.PhotoCamera, null) }, onClick = {
                 menu = false
@@ -341,8 +342,8 @@ private fun MediaTray(vm: ConversationsViewModel, state: ComposerUi, modifier: M
     val nc0 = ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors
     val retry = state.media.any { it.error != null }
     Column(
-        modifier.padding(top = 8.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if (nc0.isDark) nc0.bg3 else Color(0xFFF5F7F2))
-            .border(1.dp, if (nc0.isDark) nc0.border else Color(0xFFE8EBE3), RoundedCornerShape(12.dp)).padding(10.dp),
+        modifier.padding(top = 8.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if (nc0.isDark) nc0.bg3 else Palette.Mist)
+            .border(1.dp, if (nc0.isDark) nc0.border else Palette.Hairline, RoundedCornerShape(12.dp)).padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         // The files scroll when the keyboard leaves little room; Send / Cancel never do.
@@ -352,14 +353,14 @@ private fun MediaTray(vm: ConversationsViewModel, state: ComposerUi, modifier: M
                 Box {
                     if (it.isImage) AsyncImage(it.bytes ?: it.uri, it.name, contentScale = ContentScale.Crop, modifier = Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)).border(1.dp, hairline(), RoundedCornerShape(8.dp)))
                     else Column(
-                        Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)).background(if (nc0.isDark) nc0.bg4 else Color(0xFFE8EBE3)).padding(2.dp),
+                        Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)).background(if (nc0.isDark) nc0.bg4 else Palette.Hairline).padding(2.dp),
                         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
                     ) {
-                        Icon(if (it.mime.startsWith("video/")) Icons.Filled.Movie else Icons.Filled.Description, null, tint = Color(0xFF8A9E80), modifier = Modifier.size(20.dp))
-                        Text(it.name, fontSize = 9.sp, color = if (nc0.isDark) nc0.textMid else Color(0xFF5F6F57), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Icon(if (it.mime.startsWith("video/")) Icons.Filled.Movie else Icons.Filled.Description, null, tint = Palette.Sage400, modifier = Modifier.size(20.dp))
+                        Text(it.name, fontSize = 9.sp, color = if (nc0.isDark) nc0.textMid else Hue.SageCaption, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     Box(
-                        Modifier.align(Alignment.TopEnd).offset(6.dp, (-6).dp).size(20.dp).clip(CircleShape).background(Color(0xFF1C2917))
+                        Modifier.align(Alignment.TopEnd).offset(6.dp, (-6).dp).size(20.dp).clip(CircleShape).background(Palette.Ink)
                             .clickable(enabled = !state.uploading) { vm.removeMedia(it.id) },
                         contentAlignment = Alignment.Center,
                     ) { Icon(Icons.Filled.Close, "Remove", tint = Color.White, modifier = Modifier.size(12.dp)) }
@@ -370,12 +371,12 @@ private fun MediaTray(vm: ConversationsViewModel, state: ComposerUi, modifier: M
                 androidx.compose.foundation.text.BasicTextField(
                     value = it.caption, onValueChange = { v -> vm.setMediaCaption(it.id, v) }, enabled = !state.uploading, singleLine = true,
                     textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp, color = nc.text),
-                    cursorBrush = androidx.compose.ui.graphics.SolidColor(Color(0xFF589B31)),
+                    cursorBrush = androidx.compose.ui.graphics.SolidColor(Palette.Moss600),
                     modifier = Modifier.weight(1f).alpha(if (state.uploading) 0.5f else 1f).clip(RoundedCornerShape(8.dp))
-                        .background(if (nc.isDark) nc.bg2 else Color.White).border(1.dp, if (nc.isDark) nc.border else Color(0xFFE8EBE3), RoundedCornerShape(8.dp)),
+                        .background(if (nc.isDark) nc.bg2 else Color.White).border(1.dp, if (nc.isDark) nc.border else Palette.Hairline, RoundedCornerShape(8.dp)),
                     decorationBox = { inner ->
                         Box(Modifier.padding(horizontal = 8.dp, vertical = 7.dp)) {
-                            if (it.caption.isEmpty()) Text("Add a caption (optional)…", fontSize = 12.sp, color = if (nc.isDark) nc.muted else Color(0xFFA8A29E), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (it.caption.isEmpty()) Text("Add a caption (optional)…", fontSize = 12.sp, color = if (nc.isDark) nc.muted else Palette.Stone400, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             inner()
                         }
                     },
@@ -384,23 +385,23 @@ private fun MediaTray(vm: ConversationsViewModel, state: ComposerUi, modifier: M
             // A file that didn't go says why, under its own row; it stays for a retry.
             it.error?.let { why ->
                 Text(
-                    "⚠ Not sent — $why", fontSize = 11.sp, lineHeight = 15.sp, color = if (nc0.isDark) Color(0xFFF87171) else Color(0xFFB91C1C),
+                    "⚠ Not sent — $why", fontSize = 11.sp, lineHeight = 15.sp, color = if (nc0.isDark) Palette.Red400 else Palette.Red700,
                     modifier = Modifier.padding(start = 66.dp),
                 )
             }
         }
         // Add-more tile
         Box(
-            Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)).dashedBorder(Color(0xFFC7CEC0), 8.dp)
+            Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)).dashedBorder(Hue.SageDash, 8.dp)
                 .clickable(enabled = !state.uploading) { more.launch(ACCEPT_TYPES) },
             contentAlignment = Alignment.Center,
-        ) { Icon(Icons.Filled.Add, "Add more", tint = Color(0xFF8A9E80)) }
+        ) { Icon(Icons.Filled.Add, "Add more", tint = Palette.Sage400) }
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Button(
                 onClick = vm::sendMedia, enabled = !state.uploading, modifier = Modifier.webHeight(28.dp),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp), shape = RoundedCornerShape(8.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF589B31), contentColor = Color.White, disabledContainerColor = Color(0xFF589B31).copy(alpha = 0.5f), disabledContentColor = Color.White),
+                colors = ButtonDefaults.buttonColors(containerColor = Palette.Moss600, contentColor = Color.White, disabledContainerColor = Palette.Moss600.copy(alpha = 0.5f), disabledContentColor = Color.White),
             ) {
                 if (state.uploading) {
                     CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = Color.White)
@@ -417,10 +418,10 @@ private fun MediaTray(vm: ConversationsViewModel, state: ComposerUi, modifier: M
                     )
                 }
             }
-            OutlinedButton(onClick = vm::clearMedia, enabled = !state.uploading, modifier = Modifier.webHeight(28.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp), shape = RoundedCornerShape(8.dp), border = androidx.compose.foundation.BorderStroke(1.dp, if (nc0.isDark) nc0.border else Color(0xFFE8EBE3))) {
-                Text("Cancel", fontSize = 12.sp, color = Color(0xFF8A9E80))
+            OutlinedButton(onClick = vm::clearMedia, enabled = !state.uploading, modifier = Modifier.webHeight(28.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp), shape = RoundedCornerShape(8.dp), border = androidx.compose.foundation.BorderStroke(1.dp, if (nc0.isDark) nc0.border else Palette.Hairline)) {
+                Text("Cancel", fontSize = 12.sp, color = Palette.Sage400)
             }
-            Text("Images up to 5 MB each", fontSize = 10.sp, color = Color(0xFF8A9E80), textAlign = androidx.compose.ui.text.style.TextAlign.End, modifier = Modifier.weight(1f))
+            Text("Images up to 5 MB each", fontSize = 10.sp, color = Palette.Sage400, textAlign = androidx.compose.ui.text.style.TextAlign.End, modifier = Modifier.weight(1f))
         }
     }
 }

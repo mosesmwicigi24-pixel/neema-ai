@@ -32,7 +32,10 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -212,9 +215,14 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
      * in place so every frame is deterministic. The initial value is computed
      * synchronously either way, so the list never flashes empty on open.
      */
-    val rows: StateFlow<List<RowGroup>> = combine(_inbox, dash.session) { s, sess -> buildRows(s, sess?.agentId) }
-        .let { if (dash.container.config.io === Dispatchers.Unconfined) it else it.flowOn(Dispatchers.Default) }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, buildRows(_inbox.value, dash.session.value?.agentId))
+    val rows: StateFlow<List<RowGroup>> = combine(
+        // Only what decides the rows: a spinner, a badge or an error flag never regroups 5,000 people.
+        _inbox.distinctUntilChanged { a, b -> a.cache === b.cache && a.orderIds === b.orderIds && a.orderKey == b.orderKey && a.filters == b.filters },
+        dash.session.map { it?.agentId }.distinctUntilChanged(),
+    ) { s, me -> groupRows(s, me) }
+        // A burst of frames regroups at the speed the list can use, never once per frame queued up.
+        .let { if (dash.container.config.io === Dispatchers.Unconfined) it else it.conflate().flowOn(Dispatchers.Default) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, groupRows(_inbox.value, dash.session.value?.agentId))
 
     // useInbox refs
     private var cursor: String? = null
@@ -234,6 +242,16 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
     private var draftJob: Job? = null
     private var windowJob: Job? = null
     private var activityJob: Job? = null
+    /** The newest page-one request: a newer refresh cancels it (the answer would be ignored anyway). */
+    private var pageJob: Job? = null
+    /** One messaging-window re-check per burst of new messages. */
+    private var windowSoonJob: Job? = null
+    /** Each thread's load in flight: a poll or catch-up never stacks a second one on it. */
+    private val threadJobs = HashMap<String, Job>()
+    /** Threads opened most recently (last = newest): only these keep their messages cached. */
+    private val recentThreads = ArrayDeque<String>()
+    /** Ids of message frames already handled: a duplicate delivery neither re-counts nor re-moves a row. */
+    private val seenFrames = LinkedHashSet<String>()
 
     /** Sends on their way, by bubble id (touched on the main thread only). */
     private val outgoing = LinkedHashMap<String, Outgoing>()
@@ -335,7 +353,8 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                 if (seq == firstSeq) { _inbox.update { it.copy(summary = s) }; dash.inboxSummary.value = s }
             } // on failure the badges keep their last value
         }
-        viewModelScope.launch {
+        pageJob?.cancel()
+        pageJob = viewModelScope.launch {
             val res = try {
                 inboxApi.page(f, PAGE)
             } catch (e: Exception) {
@@ -368,13 +387,17 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                     )
                 }
             } else {
-                // Scrolled further this session: page one on top, the rest kept below.
-                _inbox.update { it.copy(orderKey = key, orderIds = fresh + o.orderIds.filter { id -> id !in top }) }
+                // Scrolled further this session: page one on top, the rest kept below
+                // (read inside the update, so a row revealed meanwhile is never lost).
+                _inbox.update { it.copy(orderKey = key, orderIds = fresh + it.orderIds.filter { id -> id !in top }) }
             }
             _inbox.update { it.copy(freshLoaded = true, loading = false, loadError = false, errorText = null, moreError = false) }
             if (key == DEFAULT_KEY) {
                 val id = myId
-                withContext(Dispatchers.IO) { dash.container.snapshots.write(id, SNAP_KEY, ConversationPage.serializer(), res) }
+                // The container's I/O dispatcher, never a hard-coded one: in tests it is
+                // synchronous, so the rest of this refresh cannot carry on on another
+                // thread (what made InboxContractTest.resolve_… flaky).
+                withContext(dash.container.config.io) { dash.container.snapshots.write(id, SNAP_KEY, ConversationPage.serializer(), res) }
             }
             // The open thread stays fresh even when it is not on page one.
             val w = watched
@@ -402,10 +425,13 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                 val res = inboxApi.page(f, PAGE, c)
                 if (seq != moreSeq || key != filterKeyOf(_inbox.value.filters)) return@launch
                 upsert(res.items)
-                val o = _inbox.value
-                if (o.orderKey != key) return@launch
-                val have = o.orderIds.toSet()
-                _inbox.update { it.copy(orderIds = o.orderIds + res.items.map { r -> r.id }.filter { id -> id !in have }, hasMore = res.nextCursor != null) }
+                if (_inbox.value.orderKey != key) return@launch
+                // Dedup by set (never `list.contains` per row), inside the update so a
+                // live frame that moved a row meanwhile is kept.
+                _inbox.update {
+                    val have = it.orderIds.toHashSet()
+                    it.copy(orderIds = it.orderIds + res.items.map { r -> r.id }.filter { id -> have.add(id) }, hasMore = res.nextCursor != null)
+                }
                 cursor = res.nextCursor
                 pages += 1
             } catch (e: Exception) {
@@ -451,6 +477,16 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
     /** Optimistic local edit to cached rows; a quiet refresh follows. */
     fun patchRows(t: (Conversation) -> Conversation) {
         _inbox.update { s -> s.copy(cache = s.cache.mapValues { (_, c) -> t(c) }) }
+        quietRefresh()
+    }
+
+    /** [patchRows] for one row: no pass over the whole (5,000-row) cache. */
+    private fun patchRow(id: String, t: (Conversation) -> Conversation) {
+        _inbox.update { s -> s.cache[id]?.let { c -> s.copy(cache = s.cache + (id to t(c))) } ?: s }
+        quietRefresh()
+    }
+
+    private fun quietRefresh() {
         quietJob?.cancel()
         quietJob = viewModelScope.launch { delay(2000); refresh() }
     }
@@ -460,57 +496,12 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         upsert(rows)
         revealed = (revealed + rows.map { it.id }).distinct()
         _inbox.update { s ->
-            val have = s.orderIds.toSet()
-            s.copy(orderIds = s.orderIds + rows.map { it.id }.filter { it !in have })
+            val have = s.orderIds.toHashSet()
+            s.copy(orderIds = s.orderIds + rows.map { it.id }.filter { have.add(it) })
         }
     }
 
     fun renameCustomer(waId: String, newName: String) = patchRows { c -> if (c.waId == waId) c.copy(name = newName) else c }
-
-    private fun buildRows(s: InboxUi, me: String?): List<RowGroup> {
-        val f = s.filters
-        val visible = if (s.orderKey == filterKeyOf(f)) s.orderIds.toHashSet() else hashSetOf()
-        // The current filters' server pages decide WHO is listed; these checks then
-        // show each person's qualifying threads, exactly as over the full list.
-        val filtered = s.cache.values.filter { c ->
-            c.id in visible &&
-                (f.channel == "all" || c.channel == f.channel) &&
-                (f.tag == null || f.tag in c.tags) &&
-                (f.mode == "all" || c.interceptMode == f.mode) &&
-                when (f.tab) {
-                    "unread" -> c.unread > 0
-                    "read" -> c.unread <= 0
-                    "human" -> c.interceptMode == "human"
-                    // "Yours" — held by a human AND that human is me.
-                    "yours" -> c.interceptMode == "human" && c.assignedAgentId == me
-                    else -> true
-                }
-        }.map { it to (Fmt.millis(it.lastMessageAt ?: it.createdAt) ?: 0L) }
-            .sortedByDescending { it.second }.map { it.first }
-
-        // Conversations sharing a person_id are the SAME customer across channels:
-        // the newest is the row, the rest become channel chips on it.
-        val repByPerson = HashMap<String, Conversation>()
-        val siblings = LinkedHashMap<String, MutableList<Conversation>>()
-        val order = mutableListOf<Conversation>()
-        for (c in filtered) {
-            val pid = c.personId
-            if (pid == null) { order += c; siblings[c.id] = mutableListOf(c); continue }
-            val rep = repByPerson[pid]
-            if (rep == null) { repByPerson[pid] = c; order += c; siblings[c.id] = mutableListOf(c) }
-            else siblings.getValue(rep.id) += c
-        }
-        return order.map { rep ->
-            val sibs = (siblings[rep.id] ?: listOf(rep)).sortedBy { CHAN_ORDER.indexOf(it.channel).let { i -> if (i < 0) 99 else i } }
-            RowGroup(
-                key = rep.personId ?: rep.id,
-                rep = rep,
-                siblings = sibs,
-                unread = sibs.sumOf { it.unread },
-                lastAt = sibs.mapNotNull { it.lastMessageAt }.maxByOrNull { Fmt.millis(it) ?: 0L },
-            )
-        }
-    }
 
     // ═══════════════════════════ Bulk selection ═══════════════════════════
 
@@ -570,7 +561,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         if (conv != null && conv.unread > 0) {
             // Snapshot before clearing so the "N new" divider can be placed.
             _thread.update { it.copy(unreadSnapshot = it.unreadSnapshot + (id to conv.unread)) }
-            patchRows { c -> if (c.id == id) c.copy(unread = 0) else c }
+            patchRow(id) { it.copy(unread = 0) }
         }
         val prev = _thread.value.activeId
         val changed = prev != id
@@ -598,8 +589,29 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         }
         _thread.update { it.copy(activeId = id, threadOpen = openThread || it.threadOpen, window = if (changed) null else it.window, activity = if (changed) emptyList() else it.activity) }
         watched = id
+        keepRecent(id)
         loadMessages(id)
         if (changed) onActiveChanged(id)
+    }
+
+    /**
+     * Only the [MAX_CACHED_THREADS] threads opened most recently keep their
+     * messages in memory (an agent working through the queue would otherwise
+     * hold every thread of the day, media rows and all). A thread with a send
+     * still on its way is never dropped; one dropped reloads when reopened.
+     */
+    private fun keepRecent(id: String) {
+        recentThreads.remove(id); recentThreads.addLast(id)
+        val pending = outgoing.values.mapTo(HashSet()) { it.convId }
+        while (recentThreads.size > MAX_CACHED_THREADS) {
+            val old = recentThreads.firstOrNull { it != id && it !in pending } ?: break
+            recentThreads.remove(old)
+        }
+        val keep = recentThreads.toHashSet() + pending
+        val drop = _thread.value.messages.keys.filter { it !in keep }
+        if (drop.isEmpty()) return
+        drop.forEach { threadJobs.remove(it); loadSeq.remove(it) }
+        _thread.update { it.copy(messages = it.messages - drop.toSet(), hasMore = it.hasMore - drop.toSet()) }
     }
 
     fun closeThread() = _thread.update { it.copy(threadOpen = false) }
@@ -709,11 +721,19 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
     // ═══════════════════════════ The thread ═══════════════════════════
 
     private fun setMsgs(convId: String, t: (List<ThreadMsg>) -> List<ThreadMsg>) {
+        val loaded = convId in _thread.value.messages
         val before = _thread.value.messages[convId]?.size ?: 0
         _thread.update { it.copy(messages = it.messages + (convId to t(it.messages[convId] ?: emptyList()))) }
         val after = _thread.value.messages[convId]?.size ?: 0
-        // An inbound reopens the messaging window: refresh it on every new message.
-        if (convId == _thread.value.activeId && after != before) refreshWindow()
+        // An inbound reopens the messaging window: re-check it when messages arrive —
+        // once per burst (a busy socket is not a request per frame), and not for the
+        // first load of a thread, whose opening already asked.
+        if (convId == _thread.value.activeId && after != before && loaded) scheduleWindowRefresh()
+    }
+
+    private fun scheduleWindowRefresh() {
+        if (windowSoonJob?.isActive == true) return
+        windowSoonJob = viewModelScope.launch { delay(WINDOW_REFRESH_MS); refreshWindow() }
     }
 
     /**
@@ -728,12 +748,15 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
 
     fun loadMessages(convId: String, silent: Boolean = false) {
         if (convId.isEmpty()) return
+        // A background re-read (the 20 s poll, a catch-up) while a load is already
+        // on its way would fetch the same page twice: that answer covers it.
+        if (silent && threadJobs[convId]?.isActive == true) return
         val seq = (loadSeq[convId] ?: 0) + 1
         if (!silent) { loadSeq[convId] = seq; _thread.update { it.copy(loading = true, error = false, errorText = null) } }
         // Only this thread's newest open touches the spinner and error — and only
         // while it is still the thread on screen.
         fun mine() = !silent && loadSeq[convId] == seq && _thread.value.activeId == convId
-        viewModelScope.launch {
+        threadJobs[convId] = viewModelScope.launch {
             try {
                 val msgs = inboxApi.messages(convId)
                 applyServer(convId, msgs, replace = !silent)
@@ -920,6 +943,15 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         if (e.s("event") == "notification") {
             if (type == "new_message") scheduleSocketRefresh()
             return
+        }
+        // A message frame delivered twice (a relay retry, a reconnect replay) is the
+        // same message: it must not bump the row or count as unread a second time.
+        if (type == "new_message" || type == "message") {
+            val fid = e.s("id")
+            if (fid != null) {
+                if (!seenFrames.add(fid)) return
+                if (seenFrames.size > SEEN_FRAMES) seenFrames.remove(seenFrames.first())
+            }
         }
         // Any thread moving means rows / badges moved: refetch shortly (coalesced).
         if (type in MOVING_FRAMES) scheduleSocketRefresh()
@@ -1556,7 +1588,10 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
     fun addMedia(uris: List<Uri>) {
         if (uris.isEmpty()) return
         viewModelScope.launch {
-            val accepted = withContext(Dispatchers.IO) {
+            // Reading, sizing and re-encoding run on the I/O dispatcher; what was refused
+            // is said afterwards, in order, from here.
+            val refused = mutableListOf<String>()
+            val accepted = withContext(dash.container.config.io) {
                 uris.mapNotNull { uri ->
                     val (name0, size) = queryMeta(uri)
                     var mime = cr.getType(uri) ?: guessMime(name0)
@@ -1579,11 +1614,11 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                     // upload-media refuses anything outside its ALLOWED_MIME with a 415;
                     // the web's file picker never offers such a file — say so up front.
                     if (!uploadable(mime, name)) {
-                        withContext(Dispatchers.Main) { dash.toast("$name can't be sent — unsupported file type", ToastType.Error) }
+                        refused += "$name can't be sent — unsupported file type"
                         return@mapNotNull null
                     }
                     if (bytes == null && size > limit) {
-                        withContext(Dispatchers.Main) { dash.toast("$name is too large (max $label)", ToastType.Error) }
+                        refused += "$name is too large (max $label)"
                         return@mapNotNull null
                     }
                     PickedMedia(
@@ -1592,6 +1627,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                     )
                 }
             }
+            refused.forEach { dash.toast(it, ToastType.Error) }
             if (accepted.isNotEmpty()) _composer.update { it.copy(media = it.media + accepted) }
         }
     }
@@ -1824,6 +1860,12 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         /** A burst of frames becomes one list refetch this long after the first. */
         const val SOCKET_REFRESH_MS = 1_500L
         const val CATCH_UP_WINDOW_MS = 2_000L
+        /** New messages in the open thread re-check its messaging window this long after the first. */
+        const val WINDOW_REFRESH_MS = 1_000L
+        /** Threads whose messages stay cached (the open one plus the most recently visited). */
+        const val MAX_CACHED_THREADS = 8
+        /** Message-frame ids remembered for duplicate-delivery checks. */
+        const val SEEN_FRAMES = 512
         /** Conversation frames that move a row or a badge. */
         val MOVING_FRAMES = setOf("new_message", "message", "intercept_changed", "history_cleared")
         const val MAX_IMAGE = 5 * MB
@@ -1833,6 +1875,76 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         val SENDABLE_IMAGES = setOf("image/jpeg", "image/png", "image/webp", "image/gif")
         /** WhatsApp first (it can transact), then the social channels. */
         val CHAN_ORDER = listOf("whatsapp", "messenger", "facebook", "instagram", "tiktok", "email", "sms")
+    }
+}
+
+/**
+ * Parsed row timestamps, memoised: a regroup of 5,000 rows re-reads the same
+ * few thousand ISO strings every time, and parsing them was most of its cost.
+ * Bounded — cleared wholesale when it grows past a busy day's worth.
+ */
+private val rowMillisMemo = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+internal fun rowMillis(iso: String?): Long {
+    if (iso == null) return 0L
+    rowMillisMemo[iso]?.let { return it }
+    val v = Fmt.millis(iso) ?: 0L
+    if (rowMillisMemo.size > 20_000) rowMillisMemo.clear()
+    rowMillisMemo[iso] = v
+    return v
+}
+
+/**
+ * The people the list shows, grouped and sorted (filteredConvs → groupedConvs):
+ * the current filter's server pages decide WHO is listed, these checks then
+ * show each person's qualifying threads, newest first (server order breaks
+ * ties, as the web's stable sort does). Linear in the rows plus one sort.
+ */
+internal fun groupRows(s: InboxUi, me: String?): List<RowGroup> {
+    val f = s.filters
+    if (s.orderKey != filterKeyOf(f)) return emptyList()
+    val seen = HashSet<String>(s.orderIds.size * 2)
+    val filtered = ArrayList<Conversation>(s.orderIds.size)
+    for (id in s.orderIds) {
+        if (!seen.add(id)) continue
+        val c = s.cache[id] ?: continue
+        val ok = (f.channel == "all" || c.channel == f.channel) &&
+            (f.tag == null || f.tag in c.tags) &&
+            (f.mode == "all" || c.interceptMode == f.mode) &&
+            when (f.tab) {
+                "unread" -> c.unread > 0
+                "read" -> c.unread <= 0
+                "human" -> c.interceptMode == "human"
+                // "Yours" — held by a human AND that human is me.
+                "yours" -> c.interceptMode == "human" && c.assignedAgentId == me
+                else -> true
+            }
+        if (ok) filtered += c
+    }
+    val sorted = filtered.sortedByDescending { rowMillis(it.lastMessageAt ?: it.createdAt) }
+
+    // Conversations sharing a person_id are the SAME customer across channels:
+    // the newest is the row, the rest become channel chips on it.
+    val repByPerson = HashMap<String, Conversation>()
+    val siblings = LinkedHashMap<String, MutableList<Conversation>>()
+    val order = ArrayList<Conversation>(sorted.size)
+    for (c in sorted) {
+        val pid = c.personId
+        if (pid == null) { order += c; siblings[c.id] = mutableListOf(c); continue }
+        val rep = repByPerson[pid]
+        if (rep == null) { repByPerson[pid] = c; order += c; siblings[c.id] = mutableListOf(c) }
+        else siblings.getValue(rep.id) += c
+    }
+    val chan = ConversationsViewModel.CHAN_ORDER
+    return order.map { rep ->
+        val sibs = siblings.getValue(rep.id).let { l -> if (l.size == 1) l else l.sortedBy { chan.indexOf(it.channel).let { i -> if (i < 0) 99 else i } } }
+        RowGroup(
+            key = rep.personId ?: rep.id,
+            rep = rep,
+            siblings = sibs,
+            unread = sibs.sumOf { it.unread },
+            lastAt = sibs.mapNotNull { it.lastMessageAt }.maxByOrNull { rowMillis(it) },
+        )
     }
 }
 

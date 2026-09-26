@@ -89,19 +89,26 @@ data class ThreadMsg(
     /** Why a failed bubble didn't go, for the line under it. */
     @kotlinx.serialization.Transient val sendError: String? = null,
 ) {
-    val commentContext: PostContext?
-        get() = (commentRaw as? JsonObject)?.let {
+    /** Read once per row (the thread's rows and bubbles ask for it on every pass). */
+    val commentContext: PostContext? by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        (commentRaw as? JsonObject)?.let {
             PostContext(
                 postId = it.s("post_id"), title = it.s("title"), permalink = it.s("permalink"), thumb = it.s("thumb"),
                 mediaType = it.s("media_type"), hasVideo = it.b("has_video"), replyTo = it.s("reply_to"),
             )
         }
+    }
     val isSystem: Boolean get() = type == "system_event"
     val inbound: Boolean get() = direction == "inbound"
     val body: String get() = text ?: ""
     /** A bubble this device made up (optimistic send, socket echo without an id). */
     val isLocal: Boolean get() = id.startsWith("optimistic-") || id.startsWith("ws-") || id.startsWith("live-evt-")
-    val millis: Long get() = Fmt.millis(createdAt) ?: 0L
+    /**
+     * Parsed once per row, not on every comparison: sorting and merging a
+     * 2,000-message thread otherwise re-parsed each timestamp ~20 times.
+     * (A delegated property: not serialized, not part of equals.)
+     */
+    val millis: Long by lazy(LazyThreadSafetyMode.PUBLICATION) { Fmt.millis(createdAt) ?: 0L }
 }
 
 data class TxPreview(val src: String, val text: String, val lang: String?)
@@ -141,7 +148,12 @@ data class PickedMedia(
     override fun hashCode() = (id.hashCode() * 31 + caption.hashCode()) * 31 + (error?.hashCode() ?: 0)
 }
 
-/** One PERSON in the list: the newest thread plus their other channels. */
+/**
+ * One PERSON in the list: the newest thread plus their other channels.
+ * Immutable, so a row whose person did not change skips recomposition even
+ * though every regroup builds a new list.
+ */
+@androidx.compose.runtime.Immutable
 data class RowGroup(
     val key: String,
     val rep: Conversation,

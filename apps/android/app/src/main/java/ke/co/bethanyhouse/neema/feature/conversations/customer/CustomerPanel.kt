@@ -41,6 +41,8 @@ import ke.co.bethanyhouse.neema.feature.conversations.webHeight
 import ke.co.bethanyhouse.neema.core.util.Fmt
 import ke.co.bethanyhouse.neema.feature.conversations.isWebVisitor
 import kotlin.math.roundToInt
+import ke.co.bethanyhouse.neema.core.ui.theme.Palette
+import ke.co.bethanyhouse.neema.feature.conversations.Hue
 
 /**
  * The customer profile / CRM panel beside a thread (components/ui/CustomerSidebar.tsx).
@@ -210,9 +212,9 @@ private fun LoadErrorBanner(vm: CustomerViewModel, refreshing: Boolean) {
     val error by vm.loadError.collectAsState()
     val msg = error ?: return
     val c = Neema.colors
-    val amber = if (c.isDark) Color(0xFFFCD34D) else Color(0xFF92400E)
+    val amber = if (c.isDark) Palette.Amber300 else Palette.Amber800
     Row(
-        Modifier.fillMaxWidth().background(if (c.isDark) Color(0xFFF59E0B).copy(alpha = 0.12f) else Color(0xFFFFFBEB))
+        Modifier.fillMaxWidth().background(if (c.isDark) Palette.Amber500.copy(alpha = 0.12f) else Palette.Amber50)
             .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -222,7 +224,7 @@ private fun LoadErrorBanner(vm: CustomerViewModel, refreshing: Boolean) {
             Text(if (refreshing) "Retrying…" else "Retry", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = amber)
         }
     }
-    HorizontalDivider(color = if (c.isDark) Color(0xFFF59E0B).copy(alpha = 0.3f) else Color(0xFFFCD34D))
+    HorizontalDivider(color = if (c.isDark) Palette.Amber500.copy(alpha = 0.3f) else Palette.Amber300)
 }
 
 /** Below this the made-to-order card scrolls with the panel instead of being pinned. */
@@ -262,7 +264,7 @@ private fun Hero(
                         // The thread header's words for an unnamed web visitor; otherwise the web's "Unknown".
                         Text(if (isWebVisitor(p.waId)) "Website visitor" else "Unknown", fontSize = 14.sp, fontStyle = FontStyle.Italic, color = c.muted)
                     }
-                    if (p.nameConfirmed) Text(" ✓", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF059669))
+                    if (p.nameConfirmed) Text(" ✓", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Palette.Emerald600)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val flag = Fmt.flagEmoji(p.countryIso)
@@ -332,10 +334,10 @@ private fun Hero(
                 if (p.buyingRhythm?.overdue == true) {
                     Hint("Past their usual buying gap — a good moment to reach out") {
                         Text(
-                            "⏰ Overdue", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFB45309).themed(),
+                            "⏰ Overdue", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Palette.Amber700.themed(),
                             modifier = Modifier.clip(RoundedCornerShape(4.dp))
-                                .background(if (c.isDark) Color(0xFFF59E0B).dim(0.1f) else Color(0xFFFFFBEB))
-                                .border(1.dp, Color(0xFFFCD34D), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
+                                .background(if (c.isDark) Palette.Amber500.dim(0.1f) else Palette.Amber50)
+                                .border(1.dp, Palette.Amber300, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
                         )
                     }
                 }
@@ -349,7 +351,7 @@ private fun Hero(
                 val label = channelLabel(ch.channel, ch.identifier)
                 Hint("Open $label conversation") {
                     Row(
-                        Modifier.clip(RoundedCornerShape(4.dp)).background(if (c.isDark) c.bg3 else Color(0xFFF1F5F9)).border(1.dp, c.border, RoundedCornerShape(4.dp))
+                        Modifier.clip(RoundedCornerShape(4.dp)).background(if (c.isDark) c.bg3 else Hue.Slate100).border(1.dp, c.border, RoundedCornerShape(4.dp))
                             .clickable {
                                 // Non-WhatsApp channels have no wa_id identifier; this thread's own handle stands in.
                                 val handle = ch.identifier ?: if (ch.channel == conversation.channel) conversation.handle else ""
@@ -372,7 +374,7 @@ private fun Hero(
             if (!hasWa && phoneDigits != null && ctx.canReply) {
                 Hint("Send this customer a WhatsApp invite (delivers the approved template to their number)") {
                     Row(
-                        Modifier.clip(RoundedCornerShape(4.dp)).background(WA_GREEN).border(1.dp, Color(0xFF1DA851), RoundedCornerShape(4.dp))
+                        Modifier.clip(RoundedCornerShape(4.dp)).background(WA_GREEN).border(1.dp, Hue.WhatsAppDeep, RoundedCornerShape(4.dp))
                             .clickable(enabled = !inviteBusy) { vm.inviteToWhatsApp(phoneDigits) { url -> runCatching { uri.openUri(url) } } }
                             .padding(horizontal = 6.dp, vertical = 2.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -384,7 +386,7 @@ private fun Hero(
                 }
             }
             if (p.mergedIds.isNotEmpty()) {
-                Text("+${p.mergedIds.size} merged", fontSize = 10.sp, fontWeight = FontWeight.Medium, color = Color(0xFF7C3AED).themed())
+                Text("+${p.mergedIds.size} merged", fontSize = 10.sp, fontWeight = FontWeight.Medium, color = Palette.Violet600.themed())
             }
         }
 
@@ -413,7 +415,7 @@ private fun Hero(
                     enabled = !templateBusy,
                     modifier = Modifier.weight(1f).webHeight(36.dp),
                     shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(containerColor = if (c.isDark) c.bg3 else Color(0xFFEEF2E8), contentColor = if (c.isDark) c.textMid else Color(0xFF3D5A30)),
+                    colors = ButtonDefaults.outlinedButtonColors(containerColor = if (c.isDark) c.bg3 else Hue.SageButton, contentColor = if (c.isDark) c.textMid else Hue.SageDeep),
                     border = androidx.compose.foundation.BorderStroke(1.dp, c.bg4),
                     contentPadding = PaddingValues(horizontal = 8.dp),
                 ) {
@@ -474,7 +476,7 @@ private fun EnquiryCard(vm: CustomerViewModel, canProduce: Boolean, inline: Bool
     val pushing by vm.pushing.collectAsState()
     val e = enquiry ?: return
     val c = Neema.colors
-    val green = if (c.isDark) c.gold2 else Color(0xFF3A5C28)
+    val green = if (c.isDark) c.gold2 else Hue.ForestInk
     if (!inline) HorizontalDivider(color = c.hairline)
     Column(Modifier.fillMaxWidth().background(c.bg2).padding(horizontal = 16.dp, vertical = 12.dp)) {
         Text("🧵 MADE-TO-ORDER REQUEST", fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp, color = c.textMid,
@@ -521,8 +523,8 @@ private fun QuickActions(vm: CustomerViewModel, ctx: PanelCtx) {
         Text("QUICK ACTIONS", fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp, color = c.textMid,
             modifier = Modifier.padding(bottom = 8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            TintButton("✓ Mark Won", Color(0xFF047857).themed(), { vm.setStage("won") }, Modifier.weight(1f), enabled = !busy)
-            TintButton("✕ Mark Lost", Color(0xFFDC2626).themed(), { vm.setStage("lost") }, Modifier.weight(1f), enabled = !busy)
+            TintButton("✓ Mark Won", Palette.Emerald700.themed(), { vm.setStage("won") }, Modifier.weight(1f), enabled = !busy)
+            TintButton("✕ Mark Lost", Palette.Red600.themed(), { vm.setStage("lost") }, Modifier.weight(1f), enabled = !busy)
         }
         Spacer(Modifier.height(6.dp))
         NeutralButton("→ Advance Stage", {
