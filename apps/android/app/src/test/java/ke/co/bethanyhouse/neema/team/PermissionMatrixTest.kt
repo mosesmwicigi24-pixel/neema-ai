@@ -52,7 +52,10 @@ import org.junit.Test
 class PermissionMatrixTest {
     @get:Rule val paparazzi = Paparazzi(deviceConfig = DeviceConfig.PIXEL_6, showSystemUi = false)
 
-    @Before fun eager() { Dispatchers.setMain(UnconfinedTestDispatcher()) }
+    private val scheduler = kotlinx.coroutines.test.TestCoroutineScheduler()
+    @Before fun eager() { Dispatchers.setMain(UnconfinedTestDispatcher(scheduler)) }
+    /** Core batches a burst of 403s into one access re-read after a short window. */
+    private fun settle() { scheduler.advanceTimeBy(1_000); scheduler.runCurrent() }
     @After fun reset() { Dispatchers.resetMain() }
 
     private val salesPerms = listOf("view_conversations", "reply_conversations", "view_orders", "manage_orders")
@@ -172,6 +175,7 @@ class PermissionMatrixTest {
         vm.saveRole(vm.roles.value.first { it.id == "super_admin" }, RoleForm("Super Admin", "x", "#7c3aed", emptyList())) {}
         assertEquals(ToastType.Error, s.toasts.last().type)
         assertEquals("Cannot modify a protected role", s.toasts.last().message)
+        settle()
         assertTrue("a 403 re-reads the team", s.fake.called("GET", "/admin/agents"))
         assertTrue("a 403 re-reads /me", s.fake.called("GET", "/admin/me"))
     }
@@ -221,6 +225,7 @@ class PermissionMatrixTest {
                 )
                 assertEquals("${p.name}: the switch goes back", true, vm.translation.value?.enabled)
                 assertEquals("${p.name}: typing is kept", "Push copes this week.", vm.directives.value)
+                settle()
                 assertTrue("${p.name}: a 403 re-reads the team", s.fake.called("GET", "/admin/agents"))
                 assertTrue("${p.name}: a 403 re-reads /me", s.fake.called("GET", "/admin/me"))
             }
@@ -259,6 +264,7 @@ class PermissionMatrixTest {
         val vm = SettingsViewModel(s.dash)
         vm.saveDirectives()
         assertEquals("Couldn't save (admin only)", s.toasts.last().message)
+        settle()
         assertFalse("the refused save corrected the permissions", s.dash.can(Perms.MANAGE_SETTINGS))
         assertFalse(ViewId.Settings in s.dash.navItems().map { it.id })
         assertEquals(salesPerms.toSet(), s.profilePerms())

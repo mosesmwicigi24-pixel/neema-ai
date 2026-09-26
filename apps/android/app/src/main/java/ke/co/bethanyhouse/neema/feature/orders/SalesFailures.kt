@@ -107,7 +107,4 @@ fun DashboardViewModel.salesFailure(e: Throwable): SalesFailure {
 }
 
 /** Re-read /me and the agents list so [DashboardViewModel.can] reflects the server's current role. */
-fun DashboardViewModel.recheckAccess() {
-    refetchMe()
-    refetchAgents()
-}
+fun DashboardViewModel.recheckAccess() = onForbidden()

@@ -203,6 +203,7 @@ class SalesPermissionMatrixTest {
         assertEquals(ToastType.Error, t.type)
         assertEquals("Failed to update order — not allowed for your role", t.message)
         assertEquals("o2", vm.selectedId.value) // the sheet stays open
+        main.settle()
         assertEquals(me + 1, fake.callsTo("GET", "/admin/me").size)
         assertEquals(agents + 1, fake.callsTo("GET", "/admin/agents").size)
     }
@@ -267,6 +268,7 @@ class SalesPermissionMatrixTest {
         val leads = LeadsViewModel(dash)
         val lead = leads.leads.value.first { it.id == "u1" }
         leads.moveTo(lead, leads.stages.value.first { !it.matches(lead.leadStage) }.id)
+        main.settle()
         assertFalse(ViewId.Leads in navOf(dash))
         assertFalse(ViewId.Deals in navOf(dash))
         assertFalse(dash.can(Perms.VIEW_LEADS))
@@ -278,6 +280,7 @@ class SalesPermissionMatrixTest {
         val (me, agents) = rechecks()
         val vm = CallsViewModel(dash)
         assertEquals("You don't have access to calls.", vm.loadError.value)
+        main.settle()
         assertEquals(me + 1, fake.callsTo("GET", "/admin/me").size)
         assertEquals(agents + 1, fake.callsTo("GET", "/admin/agents").size)
     }

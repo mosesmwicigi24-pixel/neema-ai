@@ -75,6 +75,9 @@ fun SheetFrame(content: @Composable () -> Unit) {
 /** Main = an unconfined test dispatcher: every viewModelScope launch runs inline, delays never fire. */
 @OptIn(ExperimentalCoroutinesApi::class)
 class MainDispatcherRule : TestWatcher() {
-    override fun starting(description: Description) = Dispatchers.setMain(UnconfinedTestDispatcher())
+    val scheduler = kotlinx.coroutines.test.TestCoroutineScheduler()
+    /** Let core's 403 coalescing window pass (it batches a burst into one access re-read). */
+    fun settle() { scheduler.advanceTimeBy(1_000); scheduler.runCurrent() }
+    override fun starting(description: Description) = Dispatchers.setMain(UnconfinedTestDispatcher(scheduler))
     override fun finished(description: Description) = Dispatchers.resetMain()
 }

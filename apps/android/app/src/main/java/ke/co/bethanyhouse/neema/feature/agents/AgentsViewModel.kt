@@ -56,7 +56,7 @@ internal fun availabilityFailure(e: Throwable): String = when (e.httpStatus()) {
  * Any other failure does nothing. (Replace with dash.onForbidden() once core has it.)
  */
 internal fun DashboardViewModel.refreshAfterForbidden(e: Throwable) {
-    if (e.httpStatus() == 403) { refetchMe(); refetchAgents() }
+    if (e.httpStatus() == 403) onForbidden()
 }
 
 /** What a write that got no answer says when it can't tell whether it landed. */
