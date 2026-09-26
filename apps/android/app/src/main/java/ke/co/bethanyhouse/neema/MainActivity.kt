@@ -60,7 +60,10 @@ class MainActivity : ComponentActivity() {
                     if (s == null) {
                         LoginScreen(onSignedIn = {})
                     } else {
-                        DashboardShell(dash, size.widthSizeClass)
+                        // Screen ViewModels live in a store owned by this signed-in agent:
+                        // signing out (or in as someone else) discards it, so one agent's
+                        // conversations, orders or drafts can never show for the next.
+                        SignedInScope(s.agentId) { DashboardShell(dash, size.widthSizeClass) }
                         if (expired) SessionExpiredDialog(
                             email = s.email,
                             onSuccess = { dash.onReauthenticated() },
@@ -112,4 +115,19 @@ class MainActivity : ComponentActivity() {
     private companion object {
         const val ASKED_NOTIFICATIONS = "asked_post_notifications"
     }
+}
+
+/** A ViewModel store scoped to one signed-in agent; cleared when it leaves composition or the agent changes. */
+@androidx.compose.runtime.Composable
+private fun SignedInScope(agentId: String, content: @androidx.compose.runtime.Composable () -> Unit) {
+    val owner = androidx.compose.runtime.remember(agentId) {
+        object : androidx.lifecycle.ViewModelStoreOwner {
+            override val viewModelStore = androidx.lifecycle.ViewModelStore()
+        }
+    }
+    androidx.compose.runtime.DisposableEffect(owner) { onDispose { owner.viewModelStore.clear() } }
+    androidx.compose.runtime.CompositionLocalProvider(
+        androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner provides owner,
+        content = content,
+    )
 }
