@@ -21,6 +21,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -57,6 +58,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -153,7 +155,7 @@ fun CallCard(c: CallUiState, actions: CallActions) {
     val ringing = c.phase == CallPhase.Ringing
     val live = c.phase == CallPhase.InCall
 
-    Box(
+    BoxWithConstraints(
         Modifier
             .fillMaxSize()
             .drawBehind {
@@ -164,29 +166,44 @@ fun CallCard(c: CallUiState, actions: CallActions) {
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {},
         contentAlignment = Alignment.Center,
     ) {
+        // A short screen (a small phone, big text, landscape): a smaller avatar
+        // and tighter spacing, so the whole card — above all its buttons — fits.
+        val short = maxHeight < 720.dp
+        // Little room for text (a small phone or big text): slimmer margins.
+        val narrow = maxWidth / LocalDensity.current.fontScale < 400.dp
+        val avatar = if (short) 104.dp else 132.dp
+        val initialSize = with(LocalDensity.current) { (if (short) 36.dp else 46.dp).toSp() }
         Column(
             Modifier
-                .padding(24.dp)
+                .padding(if (narrow) 16.dp else 24.dp)
                 .widthIn(max = 448.dp)
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(32.dp))
                 .background(Color(0x990B141A))
                 .border(1.dp, Color(0x2E25D366), RoundedCornerShape(32.dp))
-                .verticalScroll(rememberScrollState())
-                .padding(start = 40.dp, end = 40.dp, top = 56.dp, bottom = 40.dp),
+                .padding(
+                    start = if (narrow) 20.dp else 40.dp, end = if (narrow) 20.dp else 40.dp,
+                    top = if (short) 32.dp else 56.dp, bottom = if (short) 24.dp else 40.dp,
+                ),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+        // Who / status scroll if they must; the controls below are always on screen.
+        Column(
+            Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             // Avatar with the ringing pulse and the live dot.
-            Box(Modifier.size(132.dp), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(avatar), contentAlignment = Alignment.Center) {
                 if (ringing) {
-                    PulseRing(maxScale = 2f, startAlpha = 0.45f)
-                    PulseRing(maxScale = 2.6f, startAlpha = 0.3f)
+                    PulseRing(maxScale = 2f, startAlpha = 0.45f, size = avatar)
+                    PulseRing(maxScale = 2.6f, startAlpha = 0.3f, size = avatar)
                 }
                 Box(
-                    Modifier.size(132.dp).clip(CircleShape).background(WaGreen),
+                    Modifier.size(avatar).clip(CircleShape).background(WaGreen),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(initial, color = Color(0xFF04220F), fontSize = 46.sp, fontWeight = FontWeight.SemiBold)
+                    // The initial fills the circle at any font scale (it is a picture, not text to read).
+                    Text(initial, color = Color(0xFF04220F), fontSize = initialSize, fontWeight = FontWeight.SemiBold)
                 }
                 if (live) Box(
                     Modifier.align(Alignment.BottomEnd).padding(8.dp).size(26.dp).clip(CircleShape)
@@ -194,7 +211,7 @@ fun CallCard(c: CallUiState, actions: CallActions) {
                         .background(if (c.reconnecting) Amber else WaGreen),
                 )
             }
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(if (short) 16.dp else 24.dp))
             Text(
                 who, color = CardText, fontSize = 26.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(horizontal = 8.dp),
@@ -202,7 +219,7 @@ fun CallCard(c: CallUiState, actions: CallActions) {
             if (!c.from.isNullOrEmpty()) {
                 Spacer(Modifier.height(6.dp))
                 // tracking-widest: 0.1em.
-                Text("+${c.from}", color = SubText, fontSize = 14.sp, letterSpacing = 1.4.sp)
+                Text("+${c.from}", color = SubText, fontSize = 14.sp, letterSpacing = 1.4.sp, style = TextStyle(fontFeatureSettings = "tnum"), maxLines = 1)
             }
 
             if (ringing) {
@@ -214,11 +231,11 @@ fun CallCard(c: CallUiState, actions: CallActions) {
                 Text("Connecting…", color = Color(0xFFCFE9D9), fontSize = 14.sp)
             }
             if (live) {
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(if (short) 16.dp else 24.dp))
                 // font-light tabular-nums, letter-spacing 0.12em.
                 Text(
                     mmss(c.seconds), color = CardText, fontSize = 44.sp, fontWeight = FontWeight.Light,
-                    letterSpacing = 5.28.sp, style = TextStyle(fontFeatureSettings = "tnum"),
+                    letterSpacing = 5.28.sp, style = TextStyle(fontFeatureSettings = "tnum"), maxLines = 1,
                 )
                 Spacer(Modifier.height(16.dp))
                 if (c.reconnecting) {
@@ -244,8 +261,9 @@ fun CallCard(c: CallUiState, actions: CallActions) {
                 Spacer(Modifier.height(16.dp))
                 Text(c.note ?: "Call ended", color = Color(0xFFA8C7B6), fontSize = 14.sp, textAlign = TextAlign.Center)
             }
+        }
 
-            Spacer(Modifier.height(40.dp))
+            Spacer(Modifier.height(if (short) 24.dp else 40.dp))
             if (ringing) {
                 // justify-center gap-12 items-end
                 Row(
@@ -301,7 +319,7 @@ private fun StatusPill(text: String, dot: Color = WaGreen, bg: Color = PillBg, t
 
 /** The expanding green rings behind a ringing avatar (cr1 / cr2 keyframes). */
 @Composable
-private fun PulseRing(maxScale: Float, startAlpha: Float) {
+private fun PulseRing(maxScale: Float, startAlpha: Float, size: Dp = 132.dp) {
     val t = rememberInfiniteTransition(label = "ring")
     val p by t.animateFloat(
         0f, 1f,
@@ -310,7 +328,7 @@ private fun PulseRing(maxScale: Float, startAlpha: Float) {
         label = "ringP",
     )
     Box(
-        Modifier.size(132.dp)
+        Modifier.size(size)
             .graphicsLayer {
                 val s = 1f + (maxScale - 1f) * p
                 scaleX = s; scaleY = s
@@ -341,7 +359,8 @@ private fun Waveform() {
     }
 }
 
-private enum class ButtonSize(val d: Dp, val icon: Dp) { Small(54.dp, 24.dp), Normal(62.dp, 24.dp), Big(72.dp, 28.dp) }
+/** Every call control is at least 56dp across (Callback was the web's 54px). */
+private enum class ButtonSize(val d: Dp, val icon: Dp) { Small(56.dp, 24.dp), Normal(62.dp, 24.dp), Big(72.dp, 28.dp) }
 
 @Composable
 private fun CallButton(
@@ -373,6 +392,10 @@ private fun CallButton(
             Icon(icon, null, tint = Color.White, modifier = Modifier.size(size.icon))
         }
         Spacer(Modifier.height(10.dp))
-        Text(label, color = LabelGrey, fontSize = 12.sp)
+        // Large text wraps under its own button instead of pushing the row off the card.
+        Text(
+            label, color = LabelGrey, fontSize = 12.sp, textAlign = TextAlign.Center, maxLines = 2,
+            modifier = Modifier.widthIn(max = size.d + 48.dp),
+        )
     }
 }

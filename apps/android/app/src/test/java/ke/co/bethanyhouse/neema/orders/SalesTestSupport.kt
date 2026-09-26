@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -60,7 +61,7 @@ fun SheetFrame(content: @Composable () -> Unit) {
     val c = Neema.colors
     Box(Modifier.fillMaxSize().background(Color(0x66000000))) {
         Column(
-            Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(top = 48.dp)
+            Modifier.align(Alignment.BottomCenter).widthIn(max = 640.dp).fillMaxWidth().padding(top = 48.dp)
                 .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)).background(c.bg2),
         ) {
             Box(

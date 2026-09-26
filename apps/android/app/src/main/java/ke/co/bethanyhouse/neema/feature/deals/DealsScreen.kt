@@ -99,11 +99,15 @@ fun DealsScreen(dash: DashboardViewModel) {
 
     // The page is the web's own #f6f7f2, a shade off the shell's parchment.
     BoxWithConstraints(Modifier.fillMaxSize().background(if (c.isDark) c.surface else Color(0xFFF6F7F2))) {
-        val wide = maxWidth >= 600.dp
+        // Three stage columns (and the queue's buttons beside its text) need a
+        // real tablet width: at ~600dp they squeezed a card's buttons to nothing.
+        val wide = maxWidth >= 840.dp
+        val gutter = if (maxWidth >= 600.dp) 24.dp else 16.dp
         PullToRefreshBox(isRefreshing = refreshing, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize()) {
             LazyColumn(
-                Modifier.fillMaxSize().widthIn(max = 1100.dp).align(Alignment.TopCenter),
-                contentPadding = PaddingValues(horizontal = if (wide) 24.dp else 16.dp, vertical = 24.dp),
+                // imePadding: the guidance editor in a card stays above the keyboard.
+                Modifier.fillMaxSize().widthIn(max = 1100.dp).align(Alignment.TopCenter).imePadding(),
+                contentPadding = PaddingValues(horizontal = gutter, vertical = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 item(key = "header") {
@@ -278,7 +282,7 @@ private fun ActionRow(
         }
     }
     val buttons: @Composable () -> Unit = { Column {
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             SmallButton("Send", bg = Color(0xFF589B31), fg = Color.White, enabled = !busy, onClick = onSend)
             SmallButton("Edit & send", bg = c.bg2, fg = c.gold2, border = c.border, enabled = !busy, onClick = onEdit)
             SmallButton("Veto", bg = if (c.isDark) c.bg4 else Color(0xFFF5F5F4), fg = slate(), enabled = !busy, onClick = onVeto)
@@ -331,7 +335,8 @@ private fun SmallButton(
     val shape = RoundedCornerShape(8.dp)
     Text(
         label,
-        modifier = Modifier.clip(shape).background(if (enabled) bg else bg.copy(alpha = bg.alpha * 0.5f))
+        // The web's compact button to the eye, a 48dp cell to the finger.
+        modifier = Modifier.minimumInteractiveComponentSize().clip(shape).background(if (enabled) bg else bg.copy(alpha = bg.alpha * 0.5f))
             .then(if (border != null) Modifier.border(1.dp, border, shape) else Modifier)
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = hPad, vertical = vPad),
@@ -389,6 +394,7 @@ private fun StageColumn(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DealCard(
     d: Deal,
@@ -443,7 +449,7 @@ private fun DealCard(
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             )
             if (guidanceError != null) InlineError(guidanceError, Modifier.padding(top = 4.dp))
-            Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 SmallButton(if (busy) "Saving…" else "Save", bg = Color(0xFF1E293B), fg = Color.White, enabled = !busy, fontSize = 10, hPad = 10.dp, vPad = 4.dp, onClick = onSave)
                 SmallButton("Cancel", bg = Color.Transparent, fg = slate(), enabled = true, fontSize = 10, hPad = 8.dp, vPad = 4.dp,
                     weight = FontWeight.Normal, onClick = onCancel)
@@ -454,7 +460,8 @@ private fun DealCard(
                 Text("📌 ${d.guidance}", fontSize = 10.sp, fontStyle = FontStyle.Italic, color = c.textMid,
                     maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
             }
-            Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // A flow, not a row: a narrow column wraps Lost instead of crushing it.
+            FlowRow(Modifier.padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 SmallButton(
                     if (!d.guidance.isNullOrBlank()) "📌 Guidance" else "＋ Guidance",
                     bg = if (c.isDark) c.bg4 else Color(0xFFFAFAF9), fg = slate(), enabled = !busy, fontSize = 10,
