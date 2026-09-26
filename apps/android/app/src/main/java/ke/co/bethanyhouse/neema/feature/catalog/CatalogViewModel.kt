@@ -81,7 +81,7 @@ class CatalogView(
  * source of truth — nothing is written from here.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
-class CatalogViewModel(private val dash: DashboardViewModel) : ViewModel() {
+class CatalogViewModel(private val dash: DashboardViewModel) : ViewModel(), ke.co.bethanyhouse.neema.feature.reports.KeepsUiState {
 
     val filter = MutableStateFlow("all")
     val search = MutableStateFlow("")
@@ -154,6 +154,21 @@ class CatalogViewModel(private val dash: DashboardViewModel) : ViewModel() {
                 dash.recheckAccessOn(it)
             }
             .exceptionOrNull()
+
+    /** The search, the category and the audit's open state come back after Android restarts the app. */
+    override fun saveUi(): String = kotlinx.serialization.json.buildJsonObject {
+        put("filter", kotlinx.serialization.json.JsonPrimitive(filter.value))
+        put("search", kotlinx.serialization.json.JsonPrimitive(search.value))
+        put("audit", kotlinx.serialization.json.JsonPrimitive(auditOpen.value))
+    }.toString()
+
+    override fun restoreUi(saved: String) {
+        val o = runCatching { ke.co.bethanyhouse.neema.core.net.NeemaJson.parseToJsonElement(saved) as kotlinx.serialization.json.JsonObject }
+            .getOrNull() ?: return
+        (o["filter"] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.let { filter.value = it.content }
+        (o["search"] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.let { search.value = it.content }
+        (o["audit"] as? kotlinx.serialization.json.JsonPrimitive)?.let { auditOpen.value = it.content == "true" }
+    }
 
     /** The empty state's Retry. */
     fun retry() = refresh()

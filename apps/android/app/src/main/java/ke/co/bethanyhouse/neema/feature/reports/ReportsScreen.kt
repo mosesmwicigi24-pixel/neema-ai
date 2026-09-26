@@ -89,6 +89,8 @@ fun ReportsScreen(
     dash: DashboardViewModel,
     vm: ReportsViewModel = viewModel { ReportsViewModel(dash) },
 ) {
+    // Tab, range and custom dates come back after Android restarts the app.
+    KeepUiState(vm)
     TrackShown(vm.life)
     val allConvs by vm.allConvs.collectAsStateWithLifecycle()
     val report by vm.report.collectAsStateWithLifecycle()
@@ -101,6 +103,22 @@ fun ReportsScreen(
     val customTo by vm.customTo.collectAsStateWithLifecycle()
     val c = Neema.colors
     val context = LocalContext.current
+
+    // A CSV that finished writing opens the share sheet from whichever screen
+    // is on display: one written across a rotation reaches the new screen, one
+    // finished in the background waits for the agent to come back.
+    val readyExport by vm.readyExport.collectAsStateWithLifecycle()
+    LaunchedEffect(readyExport) {
+        val ready = readyExport ?: return@LaunchedEffect
+        runCatching { shareCsv(context, ready.file, ready.range) }
+            .onSuccess { dash.toast("Report exported") }
+            .onFailure { dash.toast(exportFailureText(it), ToastType.Error) }
+        vm.exportShown(ready)
+    }
+    val exportInterrupted by vm.exportInterrupted.collectAsStateWithLifecycle()
+    LaunchedEffect(exportInterrupted) { if (exportInterrupted) vm.interruptionShown() }
+    // "3h ago" in the Conversations table keeps counting, and is fresh on return to the app.
+    val now = rememberNow(clock = vm.clock::millis)
 
     // Never show zeros that look like real figures while the data is loading.
     val loadError by vm.loadError.collectAsStateWithLifecycle()
@@ -137,14 +155,15 @@ fun ReportsScreen(
 
     // The visible table's rows, built once per report / tab — not on every
     // recomposition — with the agent lookup indexed rather than searched per row.
-    val table = remember(r, tab, agents) { tableFor(tab, r, agents, vm.clock.millis()) }
+    val tableNow = if (tab == ReportTab.Conversations) now else 0L
+    val table = remember(r, tab, agents, tableNow) { tableFor(tab, r, agents, now) }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(c.bg)) {
         val wide = maxWidth >= 600.dp
         val pad = if (wide) 24.dp else 16.dp
         val panelWidth = maxWidth - pad * 2
         PullToRefreshBox(isRefreshing = refreshing, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize()) {
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(pad)) {
+            LazyColumn(Modifier.fillMaxSize(), state = rememberKeptListState("reports.list"), contentPadding = PaddingValues(pad)) {
                 // ── Header ───────────────────────────────────────────────
                 // Title left, range + export right (wide); stacked on a phone.
                 item(key = "header", contentType = "header") {
@@ -167,11 +186,7 @@ fun ReportsScreen(
                             onTo = { vm.customTo.value = it },
                             onExport = {
                                 // Written on the I/O thread; only the share sheet opens here.
-                                vm.exportCsv(File(context.cacheDir, "reports")) { file, forRange ->
-                                    runCatching { shareCsv(context, file, forRange) }
-                                        .onSuccess { dash.toast("Report exported") }
-                                        .onFailure { dash.toast(exportFailureText(it), ToastType.Error) }
-                                }
+                                vm.exportCsv(File(context.cacheDir, "reports"))
                             },
                         )
                     }
@@ -402,7 +417,8 @@ private fun RangeControls(
 ) {
     val c = Neema.colors
     var menu by remember { mutableStateOf(false) }
-    var picking by remember { mutableStateOf<String?>(null) } // "from" | "to"
+    // The open date picker (and its pick, which the picker state saves) outlives a rotation.
+    var picking by androidx.compose.runtime.saveable.rememberSaveable(key = keptKey("reports.datePicker")) { mutableStateOf<String?>(null) } // "from" | "to"
 
     @OptIn(ExperimentalLayoutApi::class)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), itemVerticalAlignment = Alignment.CenterVertically) {

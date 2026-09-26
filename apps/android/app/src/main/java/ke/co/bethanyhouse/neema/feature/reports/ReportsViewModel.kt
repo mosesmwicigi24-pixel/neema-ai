@@ -115,7 +115,7 @@ class ReportsViewModel(
     private val dash: DashboardViewModel,
     /** "Now" for the date range, the per-day charts and "3h ago" (fixed in tests). */
     val clock: Clock = AppClockClock,
-) : ViewModel() {
+) : ViewModel(), KeepsUiState {
     private val cpu = dash.container.cpu
 
     private val _allConvs = MutableStateFlow<List<Conversation>?>(null)
@@ -182,29 +182,77 @@ class ReportsViewModel(
     /** A CSV is being written: a second tap doesn't start another. */
     val exporting: StateFlow<Boolean> = _exporting.asStateFlow()
 
+    /** A written CSV waiting for the share sheet (see [exportCsv]). */
+    data class ReadyExport(val file: File, val range: ReportRange)
+
+    private val _readyExport = MutableStateFlow<ReadyExport?>(null)
+    /**
+     * The CSV the share sheet should open with, until the screen has opened
+     * it ([exportShown]). Held here rather than passed to a callback so an
+     * export that finishes while the phone rotates, or while the app is in
+     * the background, still reaches the share sheet: whichever screen is on
+     * display when it is ready (or when the agent comes back) opens it.
+     */
+    val readyExport: StateFlow<ReadyExport?> = _readyExport.asStateFlow()
+
     init { load() }
 
     /**
      * Writes the report's orders as CSV into [dir] on the I/O thread (streamed
-     * row by row, never one giant string), then hands the file to [onReady]
-     * back on the main thread, for the share sheet. A write failure is a
-     * toast; a tap while one is being written is ignored.
+     * row by row, never one giant string), then offers it as [readyExport]
+     * for the share sheet. A write failure is a toast; a tap while one is
+     * being written (or waiting to be shared) is ignored.
      */
-    fun exportCsv(dir: File, onReady: (File, ReportRange) -> Unit) {
+    fun exportCsv(dir: File) {
         val r = report.value ?: return
-        if (_exporting.value) return
+        if (_exporting.value || _readyExport.value != null) return
         val range = range.value
         _exporting.value = true
         viewModelScope.launch {
             try {
                 val file = withContext(dash.container.config.io) { writeReportCsv(dir, r.orders, range) }
-                onReady(file, range)
+                _readyExport.value = ReadyExport(file, range)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 dash.toast(exportFailureText(e), ToastType.Error)
             } finally { _exporting.value = false }
         }
+    }
+
+    /** The screen opened the share sheet for [ready] (or failed to, and said so). */
+    fun exportShown(ready: ReadyExport) { _readyExport.compareAndSet(ready, null) }
+
+    // ── Process death ─────────────────────────────────────────────────────────
+
+    override fun saveUi(): String = kotlinx.serialization.json.buildJsonObject {
+        put("tab", kotlinx.serialization.json.JsonPrimitive(tab.value.name))
+        put("range", kotlinx.serialization.json.JsonPrimitive(range.value.name))
+        customFrom.value?.let { put("from", kotlinx.serialization.json.JsonPrimitive(it.toString())) }
+        customTo.value?.let { put("to", kotlinx.serialization.json.JsonPrimitive(it.toString())) }
+        // A CSV being written (or not yet shared) is lost with the process: say so on return.
+        if (_exporting.value || _readyExport.value != null) put("exporting", kotlinx.serialization.json.JsonPrimitive(true))
+    }.toString()
+
+    override fun restoreUi(saved: String) {
+        val o = runCatching { NeemaJson.parseToJsonElement(saved) as kotlinx.serialization.json.JsonObject }.getOrNull() ?: return
+        fun str(k: String) = (o[k] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content
+        str("tab")?.let { n -> ReportTab.entries.find { it.name == n } }?.let { tab.value = it }
+        str("range")?.let { n -> ReportRange.entries.find { it.name == n } }?.let { range.value = it }
+        str("from")?.let { runCatching { LocalDate.parse(it) }.getOrNull() }?.let { customFrom.value = it }
+        str("to")?.let { runCatching { LocalDate.parse(it) }.getOrNull() }?.let { customTo.value = it }
+        if ((o["exporting"] as? kotlinx.serialization.json.JsonPrimitive)?.content == "true") exportInterrupted.value = true
+    }
+
+    /**
+     * The app was closed by Android while a CSV was being written: nothing
+     * reached the share sheet. The screen tells the agent once ([EXPORT_INTERRUPTED]).
+     */
+    val exportInterrupted = MutableStateFlow(false)
+
+    /** The screen showed the [exportInterrupted] notice. */
+    fun interruptionShown() {
+        if (exportInterrupted.compareAndSet(true, false)) dash.toast(EXPORT_INTERRUPTED, ToastType.Warning)
     }
 
     private suspend fun fetch() {
@@ -249,6 +297,9 @@ class ReportsViewModel(
         }
     }
 }
+
+/** What the agent is told when the app was closed mid-export. */
+internal const val EXPORT_INTERRUPTED = "Android closed Neema while the CSV was being prepared — tap Export CSV again."
 
 /**
  * Why the full list didn't arrive. It is the largest download in the app, so

@@ -109,7 +109,11 @@ fun OverviewScreen(
     val activity = remember(orders, humanRows, conversations, agents) {
         activityFeed(orders, humanRows ?: conversations, agents)
     }
-    val bars = remember(orders, clock) { sevenDayRevenue(orders, LocalDate.now(clock), clock.zone) }
+    // "4m ago" in the feed and today's bar follow the clock: re-read every
+    // minute on screen and at once on coming back to the app.
+    val now = ke.co.bethanyhouse.neema.feature.reports.rememberNow(clock = clock::millis)
+    val today = remember(now, clock) { java.time.Instant.ofEpochMilli(now).atZone(clock.zone).toLocalDate() }
+    val bars = remember(orders, today, clock) { sevenDayRevenue(orders, today, clock.zone) }
     val top = remember(orders) { topProducts(orders) }
     val cardsLoading = statsLoading && apiStats == null
 
@@ -118,7 +122,7 @@ fun OverviewScreen(
         val fullWidth = maxWidth
         PullToRefreshBox(isRefreshing = refreshing, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize()) {
             Column(
-                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(if (wide) 24.dp else 16.dp),
+                Modifier.fillMaxSize().verticalScroll(ke.co.bethanyhouse.neema.feature.reports.rememberKeptScrollState("overview.page")).padding(if (wide) 24.dp else 16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 // ── Header ───────────────────────────────────────────────
@@ -176,7 +180,7 @@ fun OverviewScreen(
 
                 // ── Bottom row ───────────────────────────────────────────
                 val byChannel: @Composable (Modifier) -> Unit = { ChannelPanel(channels, apiStats, conversations.size, it) }
-                val feed: @Composable (Modifier) -> Unit = { ActivityPanel(activity, clock.millis(), it) }
+                val feed: @Composable (Modifier) -> Unit = { ActivityPanel(activity, now, it) }
                 if (wide) Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     byChannel(Modifier.weight(2f).fillMaxHeight()); feed(Modifier.weight(3f).fillMaxHeight())
                 } else { byChannel(Modifier.fillMaxWidth()); feed(Modifier.fillMaxWidth()) }

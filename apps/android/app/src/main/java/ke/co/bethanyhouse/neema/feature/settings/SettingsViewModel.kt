@@ -139,7 +139,7 @@ const val OFFER_SAVE_FAILED = "Couldn't save that offer (admin only, and it need
  * panel); Business, AI, Integrations and Danger Zone are local-only on the
  * web too and behave the same here (they toast but persist nothing).
  */
-class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel() {
+class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel(), ke.co.bethanyhouse.neema.feature.reports.KeepsUiState {
     private val api = dash.api.settings
 
     // Standing orders
@@ -166,6 +166,8 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel() {
     val savingOffer: StateFlow<Boolean> = _savingOffer.asStateFlow()
 
     // Pipeline stages
+    /** The "add a stage" box. Held here so a save on the wire when the phone turns still clears it. */
+    val newStage = MutableStateFlow("")
     private val _stages = MutableStateFlow<List<String>?>(null)
     val stages: StateFlow<List<String>?> = _stages.asStateFlow()
     private val _savingStages = MutableStateFlow(false)
@@ -299,6 +301,8 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel() {
             _directives.value = r.directives
             if (r.maxChars > 0) _maxChars.value = r.maxChars
             directivesBase = _directives.value
+            // Typing the process lost when Android closed the app goes back in the box, unsaved.
+            pendingDirectives?.let { pendingDirectives = null; _directives.value = it.take(_maxChars.value) }
             _directivesLoaded.value = true
             loaded("directives")
         } catch (e: CancellationException) {
@@ -382,6 +386,7 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel() {
             _offer.value = r
             _draft.value = r.campaign ?: blankCampaign()
             draftBase = _draft.value
+            pendingDraft?.let { pendingDraft = null; _draft.value = it }
             loaded("offer")
         } catch (e: CancellationException) {
             throw e
@@ -538,6 +543,74 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel() {
             if (label.isNotEmpty() && label.lowercase() !in PIPELINE_CANONICAL && out.none { it.equals(label, true) }) out += label
         }
         return out
+    }
+
+    // ── Process death ─────────────────────────────────────────────────────────
+
+    /** Unsaved standing orders / offer from before Android restarted the app, put back once the card has loaded. */
+    private var pendingDirectives: String? = null
+    private var pendingDraft: Campaign? = null
+
+    /**
+     * What a restarted app gets back: unsaved typing in the standing orders
+     * and the offer (only when it differs from what the server holds), the
+     * stage being typed, and the local-only Business, AI and integration
+     * fields — every integration field marked secret (tokens, keys,
+     * passwords) excepted: those are never written to saved state.
+     */
+    override fun saveUi(): String = kotlinx.serialization.json.buildJsonObject {
+        val j = ke.co.bethanyhouse.neema.core.net.NeemaJson
+        val d = pendingDirectives ?: _directives.value.takeIf { directivesBase != null && it != directivesBase }
+        d?.let { put("directives", JsonPrimitive(it)) }
+        val o = pendingDraft ?: _draft.value.takeIf { draftBase != null && it != draftBase }
+        o?.let { put("offer", j.encodeToJsonElement(Campaign.serializer(), it)) }
+        if (newStage.value.isNotEmpty()) put("stage", JsonPrimitive(newStage.value))
+        if (biz.value != BizSettings()) biz.value.let {
+            put("biz", kotlinx.serialization.json.buildJsonArray {
+                listOf(it.businessName, it.currency, it.waNumber, it.openHours, it.timezone).forEach { v -> add(JsonPrimitive(v)) }
+            })
+        }
+        if (ai.value != AiSettings()) ai.value.let {
+            put("ai", kotlinx.serialization.json.buildJsonArray {
+                add(JsonPrimitive(it.autoInterceptThreshold)); add(JsonPrimitive(it.draftApproval))
+                add(JsonPrimitive(it.responseDelayMs)); add(JsonPrimitive(it.escalationKeywords))
+            })
+        }
+        val connected = integrations.value.filter { it.connected != INTEGRATIONS.first { d -> d.key == it.key }.connected }
+        if (connected.isNotEmpty()) put("toggled", kotlinx.serialization.json.buildJsonArray { connected.forEach { add(JsonPrimitive(it.key)) } })
+        val plain = integConfig.value.mapValues { (k, fields) ->
+            val secret = INTEGRATIONS.find { it.key == k }?.fields.orEmpty().filter { it.secret }.map { it.key }.toSet()
+            fields.filterKeys { it !in secret }
+        }.filterValues { it.isNotEmpty() }
+        if (plain.isNotEmpty()) put("config", kotlinx.serialization.json.buildJsonObject {
+            plain.forEach { (k, fields) -> put(k, kotlinx.serialization.json.buildJsonObject { fields.forEach { (f, v) -> put(f, JsonPrimitive(v)) } }) }
+        })
+    }.toString()
+
+    override fun restoreUi(saved: String) {
+        val o = runCatching { ke.co.bethanyhouse.neema.core.net.NeemaJson.parseToJsonElement(saved) as kotlinx.serialization.json.JsonObject }
+            .getOrNull() ?: return
+        fun str(e: kotlinx.serialization.json.JsonElement?) = (e as? JsonPrimitive)?.takeIf { it.isString }?.content
+        str(o["directives"])?.let { d ->
+            if (_directivesLoaded.value) _directives.value = d.take(_maxChars.value) else pendingDirectives = d
+        }
+        o["offer"]?.let { e -> runCatching { ke.co.bethanyhouse.neema.core.net.NeemaJson.decodeFromJsonElement(Campaign.serializer(), e) }.getOrNull() }
+            ?.let { c -> if (_offer.value != null) _draft.value = c else pendingDraft = c }
+        str(o["stage"])?.let { newStage.value = it }
+        (o["biz"] as? kotlinx.serialization.json.JsonArray)?.mapNotNull { str(it) }?.takeIf { it.size == 5 }?.let {
+            biz.value = BizSettings(it[0], it[1], it[2], it[3], it[4])
+        }
+        (o["ai"] as? kotlinx.serialization.json.JsonArray)?.takeIf { it.size == 4 }?.let {
+            ai.value = AiSettings(str(it[0]).orEmpty(), (it[1] as? JsonPrimitive)?.content == "true", str(it[2]).orEmpty(), str(it[3]).orEmpty())
+        }
+        (o["toggled"] as? kotlinx.serialization.json.JsonArray)?.mapNotNull { str(it) }?.toSet()?.let { keys ->
+            integrations.update { list -> list.map { if (it.key in keys) it.copy(connected = !it.connected) else it } }
+        }
+        (o["config"] as? kotlinx.serialization.json.JsonObject)?.let { cfg ->
+            integConfig.value = cfg.mapValues { (_, v) ->
+                (v as? kotlinx.serialization.json.JsonObject)?.mapNotNull { (f, x) -> str(x)?.let { f to it } }?.toMap().orEmpty()
+            }
+        }
     }
 
     // ── Local-only sections ───────────────────────────────────────────────────
