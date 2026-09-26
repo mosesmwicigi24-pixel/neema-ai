@@ -178,6 +178,9 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
     private var quietJob: Job? = null
     private var searchJob: Job? = null
     private var socketRefreshJob: Job? = null
+    private var catchUpJob: Job? = null
+    /** Alive for a moment after each refresh() — a catch-up right then needn't repeat it. */
+    private var recentRefresh: Job? = null
     private var txJob: Job? = null
     private var draftJob: Job? = null
     private var windowJob: Job? = null
@@ -196,19 +199,28 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                 refresh()
             }
         }
-        // Poll (push events are the primary signal) while foregrounded; refetch on return.
+        // Poll (push events are the primary signal) while foregrounded. A tick
+        // that falls while backgrounded waits for the return — where catchUp()
+        // has already refetched — and skips, so coming back is one request.
         viewModelScope.launch {
             while (isActive) {
                 delay(60_000)
-                if (!fg.value) { fg.first { it }; }
+                if (!fg.value) { fg.first { it }; continue }
                 refresh()
             }
         }
+        // Frames sent while the app was away, or while the socket was down, are
+        // gone: returning to the foreground and every reconnect catch up.
         viewModelScope.launch {
             var was = fg.value
-            fg.collect { v -> if (v && !was) { refresh(); _thread.value.activeId.takeIf { it.isNotEmpty() }?.let { loadMessages(it, silent = true) } }; was = v }
+            fg.collect { v -> if (v && !was) catchUp(); was = v }
         }
-        // The open thread: poll as the socket's fallback (skip while backgrounded).
+        viewModelScope.launch {
+            var was = dash.container.socket.connected.value
+            dash.container.socket.connected.collect { v -> if (v && !was) catchUp(); was = v }
+        }
+        // The open thread: poll as the socket's fallback every 20 s, as the web
+        // does (skip while backgrounded).
         viewModelScope.launch {
             while (isActive) {
                 delay(20_000)
@@ -248,6 +260,8 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
     fun refresh() {
         if (dash.session.value == null) return
         val seq = ++firstSeq
+        recentRefresh?.cancel()
+        recentRefresh = viewModelScope.launch { delay(CATCH_UP_WINDOW_MS) }
         val f = _inbox.value.filters
         val key = filterKeyOf(f)
         _inbox.value.let { if (it.orderKey != key || it.orderIds.isEmpty()) _inbox.update { s -> s.copy(loading = true, loadError = false) } }
@@ -480,13 +494,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         // Reset the draft; a human-held thread fetches the latest AI draft (pill only).
         draftJob?.cancel()
         _composer.update { it.copy(draftVisible = false, draftExpanded = false, draftText = "", draftEditing = false, txPreview = null) }
-        if (_inbox.value.cache[id]?.interceptMode == "human") {
-            draftJob = viewModelScope.launch {
-                runCatching { api.conversations.latestDraft(id) }.getOrNull()?.takeIf { it.isNotBlank() }?.let { d ->
-                    if (_thread.value.activeId == id) _composer.update { it.copy(draftText = d, draftVisible = true) }
-                }
-            }
-        }
+        fetchLatestDraft(id)
         refreshWindow()
         loadActivity()
         scheduleTranslate()
@@ -665,30 +673,85 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
 
     // ═══════════════════════════ Live events ═══════════════════════════
 
+    /**
+     * Catch up on what the socket could not deliver: the list and badges, the
+     * open thread, and — for a human-held thread — a draft that may have been
+     * written meanwhile. The app returning to the foreground usually also
+     * reopens the socket a moment later; both land in one catch-up, and a list
+     * refresh that has only just run is not repeated.
+     */
+    private fun catchUp() {
+        if (dash.session.value == null || catchUpJob?.isActive == true) return
+        catchUpJob = viewModelScope.launch {
+            if (recentRefresh?.isActive != true) refresh()
+            val id = _thread.value.activeId
+            if (id.isNotEmpty()) {
+                loadMessages(id, silent = true)
+                if (!_composer.value.draftVisible) fetchLatestDraft(id)
+            }
+            delay(CATCH_UP_WINDOW_MS)
+        }
+    }
+
+    /** The latest AI draft of a human-held thread, as a pill (never auto-expanded). */
+    private fun fetchLatestDraft(id: String) {
+        if (_inbox.value.cache[id]?.interceptMode != "human") return
+        draftJob?.cancel()
+        draftJob = viewModelScope.launch {
+            runCatching { api.conversations.latestDraft(id) }.getOrNull()?.takeIf { it.isNotBlank() }?.let { d ->
+                if (_thread.value.activeId == id && !_composer.value.draftVisible) _composer.update { it.copy(draftText = d, draftVisible = true) }
+            }
+        }
+    }
+
+    /**
+     * One refetch per burst: the first frame schedules it, frames arriving
+     * before it runs ride along (a busy minute is never postponed forever the
+     * way restarting the timer on each frame would).
+     */
+    private fun scheduleSocketRefresh() {
+        if (socketRefreshJob?.isActive == true) return
+        socketRefreshJob = viewModelScope.launch { delay(SOCKET_REFRESH_MS); refresh() }
+    }
+
     private fun onSocket(e: JsonObject) {
         val type = e.s("type")
         val convId = e.s("conversationId") ?: e.s("conversation_id")
-        val active = _thread.value.activeId
-        // Any thread moving means rows / badges moved: refetch shortly (coalesced).
-        if (type == "new_message" || type == "intercept_changed" || type == "history_cleared") {
-            socketRefreshJob?.cancel()
-            socketRefreshJob = viewModelScope.launch { delay(1500); refresh() }
-        }
-        if (convId == null || convId != active) return
         // Agent-level pings (`event: "notification"`) share type names with thread
-        // events but carry a title/body, not a message — never paint them.
-        if (e.s("event") == "notification") return
+        // events but carry a title/body, not a message — never paint them. The
+        // shell refetches the inbox for the kinds that move it (page.tsx); an
+        // SMS arrival (`new_message`) is the one it doesn't, so it counts here.
+        if (e.s("event") == "notification") {
+            if (type == "new_message") scheduleSocketRefresh()
+            return
+        }
+        // Any thread moving means rows / badges moved: refetch shortly (coalesced).
+        if (type in MOVING_FRAMES) scheduleSocketRefresh()
+        if (convId == null) return
+        // The row moves NOW; the refetch then confirms it (same values, no flicker).
+        patchLive(convId, type, e)
+        val active = _thread.value.activeId
+        if (convId != active) {
+            // A cached thread that isn't open would reappear uncleared for a moment.
+            if (type == "history_cleared" && convId in _thread.value.messages) setMsgs(convId) { emptyList() }
+            return
+        }
         when (type) {
             "ai_draft_ready" -> _composer.update {
                 it.copy(draftText = e.s("draft") ?: "", draftVisible = true, draftExpanded = false, draftEditing = false)
             }
-            "new_message" -> {
+            // `message` is the older frame (web chat, ManyChat, TikTok, the Tier-2
+            // agent's WhatsApp replies, channel sends). The web drops it and waits
+            // for its 20 s poll; here it paints like `new_message`.
+            "new_message", "message" -> {
                 val msg = wsMessageOf(e) ?: return
                 setMsgs(active) { existing -> appendWs(existing, msg) }
             }
             "translations" -> {
                 val items = (e["items"] as? JsonArray)?.mapNotNull { it as? JsonObject } ?: return
                 val byId = items.associateBy { it.s("id") ?: "" }
+                val cur = _thread.value.messages[active].orEmpty()
+                if (cur.none { x -> x.translation == null && x.id in byId }) return // nothing to change: no re-render
                 setMsgs(active) { existing ->
                     existing.map { x ->
                         val t = byId[x.id]
@@ -698,16 +761,56 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
             }
             "intercept_changed" -> {
                 val evt = systemEventFromWs(e) ?: return
-                setMsgs(active) { existing ->
-                    // One live pill per kind: a repeat fire is skipped.
-                    if (existing.any { it.id.startsWith("live-evt-") && it.eventKind == evt.eventKind }) existing
-                    else existing + evt
-                }
+                // One live pill per kind: a repeat fire is skipped.
+                if (_thread.value.messages[active].orEmpty().any { it.id.startsWith("live-evt-") && it.eventKind == evt.eventKind }) return
+                setMsgs(active) { existing -> existing + evt }
             }
             "history_cleared" -> {
                 setMsgs(active) { emptyList() }
                 dash.toast("History cleared by ${e.s("clearedBy") ?: "an agent"}")
             }
+        }
+    }
+
+    /**
+     * Move the conversation's row the moment its frame lands, with the values
+     * the refetch will bring (admin.py _conversation_rows): a message sets the
+     * preview and time; an inbound one adds to `unread` (inbound since our
+     * last reply), an outbound reply zeroes it; a mode change sets the mode
+     * and owner, so the thread's banner and controls follow at once. A frame
+     * for a conversation not loaded yet leaves it to the refetch.
+     */
+    private fun patchLive(convId: String, type: String?, e: JsonObject) {
+        val cur = _inbox.value.cache[convId] ?: return
+        val next = when (type) {
+            "new_message", "message" -> {
+                val msg = wsMessageOf(e) ?: return
+                val text = msg.body.trim()
+                cur.copy(
+                    lastMessageAt = nowIso(),
+                    lastMessagePreview = if (text.isNotEmpty()) text.take(100) else cur.lastMessagePreview,
+                    unread = if (msg.inbound) cur.unread + 1 else 0,
+                )
+            }
+            "intercept_changed" -> {
+                val mode = e.s("mode") ?: return // an AI escalation carries no mode: the refetch says
+                val released = mode == "ai"
+                cur.copy(
+                    interceptMode = mode,
+                    assignedAgentId = if (released) null else if ("assignedAgentId" in e) e.s("assignedAgentId") else cur.assignedAgentId,
+                    assignedAgentName = if (released) null else e.s("assignedAgentName") ?: cur.assignedAgentName,
+                )
+            }
+            "history_cleared" -> cur.copy(lastMessagePreview = null, unread = 0)
+            else -> return
+        }
+        if (next == cur) return
+        _inbox.update { s ->
+            // A thread just written to is on page one of an unsearched list; a
+            // search waits for the server to say whether it still matches.
+            val show = type != "intercept_changed" && type != "history_cleared" &&
+                s.orderKey == filterKeyOf(s.filters) && s.filters.q.isBlank() && convId !in s.orderIds
+            s.copy(cache = s.cache + (convId to next), orderIds = if (show) listOf(convId) + s.orderIds else s.orderIds)
         }
     }
 
@@ -1189,6 +1292,11 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
 
     companion object {
         const val MB = 1024L * 1024L
+        /** A burst of frames becomes one list refetch this long after the first. */
+        const val SOCKET_REFRESH_MS = 1_500L
+        const val CATCH_UP_WINDOW_MS = 2_000L
+        /** Conversation frames that move a row or a badge. */
+        val MOVING_FRAMES = setOf("new_message", "message", "intercept_changed", "history_cleared")
         const val MAX_IMAGE = 5 * MB
         const val MAX_VIDEO = 150 * MB
         const val MAX_AUDIO = 16 * MB

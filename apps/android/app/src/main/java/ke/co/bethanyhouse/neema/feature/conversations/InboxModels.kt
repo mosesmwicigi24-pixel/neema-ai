@@ -23,13 +23,9 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import okhttp3.MediaType
-import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import ke.co.bethanyhouse.neema.core.api.UploadFile
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
-import okhttp3.RequestBody.Companion.toRequestBody
-import okio.BufferedSink
-import okio.source
 import java.net.URLEncoder
 
 // The thread's wire shapes. The core `Message` model is the api.ts subset; the
@@ -214,11 +210,14 @@ internal fun mergeServer(existing: List<ThreadMsg>, incoming: List<ThreadMsg>): 
  */
 internal fun wsMessageOf(e: JsonObject): ThreadMsg? {
     if (e.s("event") == "notification") return null
-    val sender = e.s("sender") ?: "ai"
+    // The older `message` frame (web_chat, n8n outbound sends) states its
+    // direction but often no sender: an inbound one is the customer.
+    val dir = e.s("direction")?.takeIf { it == "inbound" || it == "outbound" }
+    val sender = e.s("sender") ?: if (dir == "inbound") "user" else "ai"
     return ThreadMsg(
         id = e.s("id") ?: "ws-${java.util.UUID.randomUUID()}",
         type = "message",
-        direction = e.s("direction") ?: if (sender == "user") "inbound" else "outbound",
+        direction = dir ?: if (sender == "user") "inbound" else "outbound",
         sender = sender,
         text = e.s("text"),
         createdAt = e.s("created_at") ?: nowIso(),
@@ -240,7 +239,8 @@ internal fun wsMessageOf(e: JsonObject): ThreadMsg? {
  * an audio/media echo within 15 s (the web's guard); our own reply echoing
  * while its optimistic bubble is up; or — frames from the reply/approve/media
  * paths carry no id — an OUTBOUND echo of a row the after-send refetch
- * already brought in (same sender and text, within two minutes). A
+ * already brought in (same sender and text, within two minutes), or of an
+ * id-less frame for the same send moments ago (a duplicate delivery). A
  * customer's repeated "ok" is never swallowed: inbound frames only dedupe by id.
  */
 internal fun appendWs(existing: List<ThreadMsg>, msg: ThreadMsg): List<ThreadMsg> = when {
@@ -252,8 +252,15 @@ internal fun appendWs(existing: List<ThreadMsg>, msg: ThreadMsg): List<ThreadMsg
         x.id.startsWith("optimistic-") && !x.isNote && x.body.trim() == msg.body.trim()
     } -> existing
     msg.id.startsWith("ws-") && !msg.inbound && existing.any { x ->
-        !x.isLocal && !x.isSystem && !x.isNote && !x.inbound && x.sender == msg.sender &&
-            x.body.trim() == msg.body.trim() && kotlin.math.abs(x.millis - msg.millis) < 120_000
+        val window = when {
+            // The same send relayed twice (a duplicate delivery, or one path
+            // publishing both frame shapes) lands within moments.
+            x.id.startsWith("ws-") -> 10_000
+            x.isLocal -> 0
+            else -> 120_000
+        }
+        !x.isSystem && !x.isNote && !x.inbound && x.sender == msg.sender &&
+            x.body.trim() == msg.body.trim() && kotlin.math.abs(x.millis - msg.millis) < window
     } -> existing
     else -> existing + msg
 }
@@ -333,21 +340,6 @@ internal fun JsonObject.s(key: String): String? =
 
 internal fun JsonObject.b(key: String): Boolean? =
     this[key]?.let { runCatching { it.jsonPrimitive.booleanOrNull }.getOrNull() }
-
-/** Streams a picked file into a multipart part — a 150 MB clip never sits in memory. */
-private class UriBody(
-    private val cr: ContentResolver,
-    private val uri: Uri,
-    private val type: MediaType?,
-    private val length: Long,
-) : RequestBody() {
-    override fun contentType() = type
-    override fun contentLength() = if (length > 0) length else -1
-    override fun writeTo(sink: BufferedSink) {
-        val input = cr.openInputStream(uri) ?: throw java.io.IOException("Can't read the file")
-        input.source().use { sink.writeAll(it) }
-    }
-}
 
 /**
  * Calls the inbox makes beyond NeemaApi's typed ones: the thread in the
@@ -451,8 +443,11 @@ class InboxApi(private val http: NeemaHttp) {
 
     /** Upload one picked file (streamed, or its re-encoded bytes) with its caption. */
     suspend fun upload(cr: ContentResolver, convId: String, item: PickedMedia): ThreadMsg {
-        val type = item.mime.toMediaTypeOrNull()
-        val part: RequestBody = item.bytes?.toRequestBody(type) ?: UriBody(cr, item.uri, type, item.size)
+        // Streamed from the picker (re-opened on each write, so the retry after a
+        // token refresh sends it whole), or the re-encoded photo's bytes.
+        val file = item.bytes?.let { UploadFile(it, item.name, item.mime) }
+            ?: UploadFile.of(cr, item.uri, item.name, item.mime, item.size)
+        val part: RequestBody = file.requestBody()
         val parts = MultipartBody.Builder().setType(MultipartBody.FORM)
             .addFormDataPart("file", item.name, part)
             .apply { if (item.caption.isNotBlank()) addFormDataPart("caption", item.caption.trim()) }

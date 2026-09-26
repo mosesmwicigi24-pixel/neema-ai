@@ -315,4 +315,48 @@ class ConversationsScreenshotTest {
         paparazzi.unsafeUpdateConfig(deviceConfig = tabletPortrait)
         screen().settle(6).apply { vm.select("c2"); vm.enterSelect("p1"); vm.toggleRow("c6") }.snap(dark = true)
     }
+
+    // ═══════════════ Live (round 4) ═══════════════
+
+    /** Page two is empty, so the list's auto "load more" doesn't re-serve page one's rows over the live ones. */
+    private val lastPage: FakeNeema.() -> Unit = {
+        on("GET", "/admin/conversations") { r, _ ->
+            200 to if (r.url.queryParameter("cursor") != null) """{"items":[],"next_cursor":null}""" else InboxFixtures.page
+        }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun Screen.frame(json: String): Screen {
+        val f = ke.co.bethanyhouse.neema.core.ws.LiveSocket::class.java.getDeclaredField("_events").apply { isAccessible = true }
+        (f.get(dash.container.socket) as kotlinx.coroutines.flow.MutableSharedFlow<kotlinx.serialization.json.JsonObject>)
+            .tryEmit(kotlinx.serialization.json.Json.parseToJsonElement(json) as kotlinx.serialization.json.JsonObject)
+        sched.runCurrent()
+        return this
+    }
+
+    /**
+     * Frames as they land, before any refetch: a web-chat line (the older
+     * `message` frame) lifts the visitor to the top with its badge, Grace
+     * picks up Mary on another device (the row's mode flips, the lock shows),
+     * and the open thread paints a customer line, the Tier-2 agent's reply and
+     * a draft pill live.
+     */
+    @Test fun live_framesMoveRowsAndPaintTheThread_tablet() {
+        paparazzi.unsafeUpdateConfig(deviceConfig = tabletPortrait)
+        screen(setup = lastPage).settle(6).apply { vm.select("c1") }
+            .frame("""{"type":"message","conversationId":"c7","waId":"web_3fa9c1e20b7d4c5a9e11","direction":"inbound","text":"Hello — is the Kampala delivery free?"}""")
+            .frame("""{"type":"intercept_changed","conversationId":"c2","mode":"human","assignedAgentId":"${Fixtures.AGENT2_ID}","assignedAgentName":"Grace Wanjiru","eventKind":"intercept","eventAgentName":"Grace Wanjiru"}""")
+            .frame("""{"type":"new_message","conversationId":"c1","sender":"user","text":"Also a purple stole, please"}""")
+            .frame("""{"type":"message","conversationId":"c1","direction":"outbound","text":"Noted, Father — adding a purple stole 🙏"}""")
+            .frame("""{"type":"ai_draft_ready","conversationId":"c1","draft":"The stole is KES 4,800 — shall I add it to the order?"}""")
+            .snap()
+    }
+
+    @Test fun live_framesMoveRowsAndPaintTheThread_phone_dark() {
+        screen(setup = lastPage).settle(6)
+            .frame("""{"type":"new_message","conversationId":"c4","sender":"user","text":"Do you have albs in size L too?"}""")
+            .frame("""{"type":"message","conversationId":"c7","direction":"inbound","text":"Hello — is the Kampala delivery free?"}""")
+            .frame("""{"type":"intercept_changed","conversationId":"c2","mode":"human","assignedAgentId":"${Fixtures.AGENT2_ID}","assignedAgentName":"Grace Wanjiru","eventKind":"intercept"}""")
+            .snap(dark = true)
+    }
 }

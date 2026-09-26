@@ -17,13 +17,12 @@ import java.time.temporal.ChronoUnit
  * apps/api/app/routers/admin.py (GET /admin/conversations/{id}/messages).
  */
 object InboxFixtures {
-    /** A web-chat visitor: `web_<sha1[:20]>` on the default channel (web_chat.py). */
-    val webVisitor get() = Fixtures.conv(
-        "c7", null, "web_3fa9c1e20b7d4c5a9e11", "whatsapp", "ai", "Do you ship to Kampala?", 20, unread = 1, iso = "UG",
-    )
+    /** A web-chat visitor (web_chat.py) — the core fixture's. */
+    val webVisitor get() = Fixtures.webVisitor
 
-    val conversations get() = Fixtures.conversations + webVisitor
-    val page get() = """{"items":[${conversations.joinToString(",")}],"next_cursor":"cursor-2"}"""
+    /** The base inbox plus the web visitor — the core fixture's own list and page. */
+    val conversations get() = Fixtures.inbox
+    val page get() = Fixtures.conversationPage
 
     /** Every bubble the thread can draw, oldest first. */
     val richThread get() = """[
@@ -199,7 +198,7 @@ object InboxFixtures {
             val id = r.url.pathSegments.last()
             200 to (conversations.firstOrNull { it.contains("\"id\":\"$id\"") } ?: conversations.first())
         }
-        f.on("GET", "/admin/conversations/summary", body = Fixtures.summary)
+        f.on("GET", "/admin/conversations/summary", body = Fixtures.inboxSummary)
         f.on("GET", "/admin/conversations/[^/]+/messages", body = Fixtures.messages)
         f.on("GET", "/admin/conversations/[^/]+/window", body = windowOpen())
         f.on("GET", "/admin/conversations/[^/]+/latest-draft", body = """{"draft":null}""")
