@@ -567,3 +567,53 @@ def test_the_ladder_has_sensible_defaults():
     assert settings.cooling_economy_day < settings.cooling_cool_day
     assert 1 <= settings.cooling_hours <= 12 and settings.cooling_drift_turns >= 4
     assert settings.meta_comment_person_cap >= 3
+
+
+# ── never a generic hold when the facts are in hand (owner, 2026-09-26) ──────
+
+def test_a_wordless_final_turn_asks_once_for_the_reply_in_words(monkeypatch):
+    from app.agent.llm import FakeLLM
+    calls = []
+
+    class _Twice(FakeLLM):
+        async def complete(self, *, system, messages, tools, tool_choice=None):
+            calls.append({"tool_choice": tool_choice, "last": messages[-1]})
+            return await super().complete(system=system, messages=messages, tools=tools)
+    llm = _Twice([{"text": ""}, {"text": "Yes, we have the Silver Communion Tray — shall I put one down for you?"}])
+    out = asyncio.run(rt.run_turn(_db(), _R(), "254700000001", "do you have the silver tray?", llm))
+    assert out.startswith("Yes, we have the Silver Communion Tray")
+    assert len(calls) == 2 and calls[1]["tool_choice"] == "none"
+    assert "Write your reply to the customer now" in str(calls[1]["last"]["content"])
+
+
+def test_running_out_of_iterations_ends_in_words_not_a_colleague(monkeypatch):
+    from app.agent.llm import FakeLLM
+    monkeypatch.setattr(settings, "tier2_max_iterations", 2)
+    script = [{"tools": [{"name": "search_catalog", "input": {"query": "stole"}}]},
+              {"tools": [{"name": "search_catalog", "input": {"query": "stole"}}]},
+              {"text": "We have the Single Sided Stole at KES 2,500 — which colour would you like?"}]
+    calls = []
+
+    class _Rec(FakeLLM):
+        async def complete(self, *, system, messages, tools, tool_choice=None):
+            calls.append(tool_choice)
+            return await super().complete(system=system, messages=messages, tools=tools)
+
+    async def _search(args, ctx):
+        return {"count": 1, "results": [{"name": "Single Sided Stole", "price": 2500}]}
+    import app.agent.tools as tools_mod
+    monkeypatch.setitem(tools_mod._HANDLERS, "search_catalog", _search)
+    out = asyncio.run(rt.run_turn(_db(), _R(), "254700000001", "do you have stoles?", _Rec(script)))
+    assert out.startswith("We have the Single Sided Stole")
+    assert calls == [None, None, "none"]
+    assert "colleague" not in out
+
+
+def test_the_prompt_reads_before_writing_and_checks_before_sending():
+    p = build_system_prompt(currency="USD")
+    assert "BEFORE YOU WRITE — THE CONSULTANT'S READ (owner rule, 2026-09-26)" in p
+    assert "trust, clarity, the\n  recommendation, the add-on that genuinely fits, the purchase, the close" in p
+    assert 'Never a generic\n  "just hold on"' in p
+    assert "BEFORE IT GOES OUT — THE CHECK (owner rule, 2026-09-26)" in p
+    assert "never invent it" in p
+    assert p.index("BEFORE IT GOES OUT") < p.index("Move the conversation toward a confirmed order")
