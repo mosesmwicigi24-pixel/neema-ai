@@ -24,7 +24,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
-import androidx.compose.ui.text.font.FontFamily
+import ke.co.bethanyhouse.neema.core.ui.theme.NeemaMono
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -36,7 +36,6 @@ import ke.co.bethanyhouse.neema.core.util.Fmt
 import ke.co.bethanyhouse.neema.feature.conversations.isWebVisitor
 import kotlin.math.roundToInt
 import ke.co.bethanyhouse.neema.core.ui.theme.Palette
-import ke.co.bethanyhouse.neema.feature.conversations.Hue
 
 /** What every tab needs, computed once by the panel. */
 class PanelCtx(
@@ -164,8 +163,8 @@ private fun PipelineSection(vm: CustomerViewModel, ctx: PanelCtx) {
                     modifier = Modifier.padding(bottom = 6.dp)) {
                     customs.forEach { s ->
                         RemovableChip(
-                            s, if (c.isDark) PIPE_GOLD else Hue.PipeGoldInk, if (c.isDark) PIPE_GOLD.dim(0.15f) else Hue.PipeGoldWash,
-                            if (c.isDark) PIPE_GOLD.dim(0.5f) else Hue.PipeGoldRim, enabled = !stagesSaving,
+                            s, if (c.isDark) PIPE_GOLD else Palette.PipeGoldInk, if (c.isDark) PIPE_GOLD.dim(0.15f) else Palette.PipeGoldWash,
+                            if (c.isDark) PIPE_GOLD.dim(0.5f) else Palette.PipeGoldRim, enabled = !stagesSaving,
                         ) {
                             vm.saveCustomStages(customs.filter { it != s })
                         }
@@ -280,9 +279,9 @@ private fun IdentitySection(vm: CustomerViewModel, ctx: PanelCtx, onOpenIdentity
     val unmerging by vm.unmerging.collectAsState()
     // In the ViewModel: kept through a failed merge, cleared once it went through.
     val mergeQuery by vm.mergeQuery.collectAsState()
-    val slate = if (c.isDark) c.textMid else Hue.Slate800
+    val slate = if (c.isDark) c.textMid else Palette.Slate800
     // The web's filled slate (#1e293b) buttons; on dark, the palette's deep blue keeps white text legible.
-    val slateFill = if (c.isDark) c.border2 else Hue.Slate800
+    val slateFill = if (c.isDark) c.border2 else Palette.Slate800
 
     CrmSection(
         "Cross-channel Identity",
@@ -308,7 +307,7 @@ private fun IdentitySection(vm: CustomerViewModel, ctx: PanelCtx, onOpenIdentity
                     Text(channelLabel(ch.channel, ch.identifier), fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = c.text)
                     // formatPhone reads a web visitor's key as "Website visitor", never as a number.
                     Text(Fmt.formatPhone(ch.identifier), fontSize = 10.sp, color = c.muted,
-                        fontFamily = if (isWebVisitor(ch.identifier)) null else FontFamily.Monospace,
+                        fontFamily = if (isWebVisitor(ch.identifier)) null else NeemaMono,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 Column(horizontalAlignment = Alignment.End) {
@@ -348,7 +347,7 @@ private fun IdentitySection(vm: CustomerViewModel, ctx: PanelCtx, onOpenIdentity
                                 Text(label, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = color)
                                 Text(
                                     if (id.channel == "whatsapp") Fmt.formatPhone(id.externalId) else id.externalId,
-                                    fontSize = 10.sp, color = c.muted, fontFamily = if (web) null else FontFamily.Monospace,
+                                    fontSize = 10.sp, color = c.muted, fontFamily = if (web) null else NeemaMono,
                                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                                 )
                             }
@@ -373,7 +372,7 @@ private fun IdentitySection(vm: CustomerViewModel, ctx: PanelCtx, onOpenIdentity
                     modifier = Modifier.padding(bottom = 4.dp))
                 p.mergedIds.forEach { mid ->
                     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(Fmt.formatPhone(mid), fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = c.text, modifier = Modifier.weight(1f))
+                        Text(Fmt.formatPhone(mid), fontSize = 10.sp, fontFamily = NeemaMono, color = c.text, modifier = Modifier.weight(1f))
                         if (ctx.canEdit) {
                             val busy = mid in unmerging
                             Text(
@@ -409,6 +408,7 @@ private fun IdentitySection(vm: CustomerViewModel, ctx: PanelCtx, onOpenIdentity
                     }
                 }
                 // Evidence-backed candidates — one tap, no typing.
+                val found = sugs
                 when {
                     // The scan failed (offline, a 5xx): say so, with a retry — never "no duplicates".
                     sugsError != null -> Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -418,12 +418,12 @@ private fun IdentitySection(vm: CustomerViewModel, ctx: PanelCtx, onOpenIdentity
                             modifier = Modifier.clip(RoundedCornerShape(4.dp)).clickable { vm.retryMergeScan() }
                                 .padding(horizontal = 8.dp, vertical = 6.dp))
                     }
-                    sugs == null -> Text("Scanning for likely duplicates…", fontSize = 10.sp, fontStyle = FontStyle.Italic,
+                    found == null -> Text("Scanning for likely duplicates…", fontSize = 10.sp, fontStyle = FontStyle.Italic,
                         color = c.muted, modifier = Modifier.padding(bottom = 8.dp))
-                    sugs!!.isEmpty() -> Text("No likely duplicates found — you can still merge manually below.", fontSize = 10.sp,
+                    found.isEmpty() -> Text("No likely duplicates found — you can still merge manually below.", fontSize = 10.sp,
                         fontStyle = FontStyle.Italic, color = c.muted, modifier = Modifier.padding(bottom = 8.dp))
                     else -> Column(Modifier.padding(bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        sugs!!.forEach { s -> MergeCandidate(s, slateFill, enabled = !merging) { vm.merge(s.mergeWith) } }
+                        found.forEach { s -> MergeCandidate(s, slateFill, enabled = !merging) { vm.merge(s.mergeWith) } }
                     }
                 }
                 Text(
@@ -452,7 +452,7 @@ private fun MergeCandidate(s: MergeSuggestion, fill: Color, enabled: Boolean = t
     val strong = s.strength == "strong"
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(c.bg2)
-            .border(if (strong) 1.5.dp else 1.dp, if (strong) Hue.MossBright else c.hairline, RoundedCornerShape(8.dp))
+            .border(if (strong) 1.5.dp else 1.dp, if (strong) Palette.MossBright else c.hairline, RoundedCornerShape(8.dp))
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -471,7 +471,7 @@ private fun MergeCandidate(s: MergeSuggestion, fill: Color, enabled: Boolean = t
                 s.evidence.forEach { ev ->
                     Text(ev, fontSize = 9.sp, color = if (strong) (if (c.isDark) c.gold2 else Palette.Moss700) else c.textMid,
                         modifier = Modifier.clip(RoundedCornerShape(50))
-                            .background(if (strong) (if (c.isDark) c.greenDim else Hue.MossWash) else c.bg3).padding(horizontal = 6.dp, vertical = 2.dp))
+                            .background(if (strong) (if (c.isDark) c.greenDim else Palette.MossWash) else c.bg3).padding(horizontal = 6.dp, vertical = 2.dp))
                 }
             }
         }
@@ -493,7 +493,7 @@ fun InsightsTab(ctx: PanelCtx) {
         KvRow(
             "Avg order value",
             when {
-                (p.avgOrderValue ?: 0.0) != 0.0 -> Fmt.currency(p.avgOrderValue!!.roundToInt())
+                (p.avgOrderValue ?: 0.0) != 0.0 -> Fmt.currency((p.avgOrderValue ?: 0.0).roundToInt())
                 n > 0 -> Fmt.currency((ctx.totalSpent / n).roundToInt())
                 else -> "—"
             },
@@ -590,7 +590,7 @@ fun ActivityTab(ctx: PanelCtx) {
                     Text(
                         "Same customer in the shop" + (p.hubCustomerName?.ifEmpty { null }?.let { " · $it" } ?: "") +
                             " — showing full in-shop + WhatsApp history",
-                        fontSize = 11.sp, color = if (c.isDark) c.gold2 else Hue.Lime800,
+                        fontSize = 11.sp, color = if (c.isDark) c.gold2 else Palette.Lime800,
                     )
                 }
             }

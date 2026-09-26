@@ -41,7 +41,6 @@ import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import ke.co.bethanyhouse.neema.core.ui.theme.NeemaFont
 import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 import ke.co.bethanyhouse.neema.core.ui.theme.ChannelColors
-import ke.co.bethanyhouse.neema.feature.conversations.Hue
 
 // ── Metadata (the web's STAGE_META / TIER_META / SOURCE_META / CH_META) ─────
 
@@ -50,9 +49,9 @@ data class StageMeta(val label: String, val color: Color, val dot: Color)
 private val STAGE_META = mapOf(
     "new" to StageMeta("New", Palette.Stone500, Palette.Stone400),
     "contacted" to StageMeta("Contacted", Palette.Blue600, Palette.Blue500),
-    "qualified" to StageMeta("Qualified", Palette.Violet600, Hue.Violet500),
+    "qualified" to StageMeta("Qualified", Palette.Violet600, Palette.Violet500),
     "proposal" to StageMeta("Proposal", Palette.Amber600, Palette.Amber500),
-    "negotiation" to StageMeta("Negotiating", Hue.Orange600, Hue.Orange500),
+    "negotiation" to StageMeta("Negotiating", Palette.Orange600, Palette.Orange500),
     "won" to StageMeta("Won ✓", Palette.Emerald700, Palette.Emerald500),
     "lost" to StageMeta("Lost", Palette.Red500, Palette.Red400),
 )
@@ -73,8 +72,8 @@ data class TierMeta(val label: String, val color: Color, val border: Color, val 
 
 val TIER_META = mapOf(
     "vip" to TierMeta("VIP", Palette.Amber800, Palette.Amber300, "Top spender / very frequent buyer", Palette.Amber100),
-    "loyal" to TierMeta("Loyal", Palette.Emerald700, Palette.Emerald300, "Repeat customer", Hue.Emerald100),
-    "regular" to TierMeta("Regular", Hue.Sky700, Hue.Sky300, "A few orders", Hue.Sky100),
+    "loyal" to TierMeta("Loyal", Palette.Emerald700, Palette.Emerald300, "Repeat customer", Palette.Emerald100),
+    "regular" to TierMeta("Regular", Palette.Sky700, Palette.Sky300, "A few orders", Palette.Sky100),
     "new" to TierMeta("New", Palette.Stone600, Palette.Stone300, "First order", Palette.Stone100),
     "prospect" to TierMeta("Prospect", Palette.Stone400, Palette.Stone200, "No orders yet", Palette.Stone50),
     "at_risk" to TierMeta("At risk", Palette.Red700, Palette.Red300, "Good customer who's gone quiet — worth a nudge", Palette.Red100),
@@ -116,13 +115,13 @@ fun chMeta(channel: String): Pair<String, Color> = when (channel) {
 }
 
 // Goldenrod stepper palette (sampled by the web from its reference design).
-val PIPE_GOLD = Hue.PipeGold
-val PIPE_GOLD_SOLID = Hue.PipeGoldSolid
+val PIPE_GOLD = Palette.PipeGold
+val PIPE_GOLD_SOLID = Palette.PipeGoldSolid
 private val PIPE_IDLE = Palette.Stone200
 private val PIPE_IDLE_TEXT = Palette.Stone400
-private val PIPE_LOST = Hue.PipeLost
-private val PIPE_LOST_ICON = Hue.PipeLostIcon
-private val PIPE_LOST_TEXT = Hue.PipeLostText
+private val PIPE_LOST = Palette.PipeLost
+private val PIPE_LOST_ICON = Palette.PipeLostIcon
+private val PIPE_LOST_TEXT = Palette.PipeLostText
 private val LOST_RED = Palette.Red500
 
 val WA_GREEN = ChannelColors.WhatsApp
@@ -152,10 +151,10 @@ fun Hint(text: String?, content: @Composable () -> Unit) {
 fun ChannelBadge(channel: String, size: Dp = 20.dp) {
     val bg: Brush = when (channel) {
         "whatsapp" -> SolidColor(WA_GREEN)
-        "messenger" -> SolidColor(Hue.MessengerSky)
+        "messenger" -> SolidColor(Palette.MessengerSky)
         "facebook" -> SolidColor(ChannelColors.Facebook)
         "instagram" -> Brush.linearGradient(
-            listOf(Hue.InstaOrange, Hue.InstaCoral, Hue.InstaRed, Hue.InstaMagenta, Hue.InstaPurple),
+            listOf(Palette.InstaOrange, Palette.InstaCoral, Palette.InstaRed, Palette.InstaMagenta, Palette.InstaPurple),
         )
         "email" -> SolidColor(Palette.Indigo500)
         "web" -> SolidColor(Palette.Slate500)

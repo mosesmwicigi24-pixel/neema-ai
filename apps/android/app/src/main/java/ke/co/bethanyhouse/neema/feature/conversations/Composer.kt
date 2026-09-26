@@ -101,7 +101,7 @@ internal fun Composer(
         // ── The message being answered ──
         state.quoted?.let { q ->
             Row(
-                Modifier.padding(bottom = 8.dp).fillMaxWidth().height(IntrinsicSize.Min).clip(RoundedCornerShape(8.dp)).background(if (c.isDark) c.bg3 else Hue.Slate100),
+                Modifier.padding(bottom = 8.dp).fillMaxWidth().height(IntrinsicSize.Min).clip(RoundedCornerShape(8.dp)).background(if (c.isDark) c.bg3 else Palette.Slate100),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(Modifier.width(2.dp).fillMaxHeight().heightIn(min = 44.dp).background(Amber))
@@ -118,7 +118,7 @@ internal fun Composer(
                             q.mediaType != null -> "[${q.mediaType}]"
                             else -> q.text
                         },
-                        fontSize = 12.sp, color = if (c.isDark) c.textMid else Hue.Slate600, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        fontSize = 12.sp, color = if (c.isDark) c.textMid else Palette.Slate600, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                 }
                 q.mediaUrl?.let { AsyncImage(it, "quoted", contentScale = ContentScale.Crop, modifier = Modifier.size(36.dp).clip(RoundedCornerShape(4.dp))) }
@@ -170,8 +170,8 @@ internal fun Composer(
                 cursorBrush = androidx.compose.ui.graphics.SolidColor(Amber),
                 maxLines = 6,
                 modifier = Modifier.weight(1f).heightIn(min = 44.dp, max = 132.dp)
-                    .clip(boxShape).background(if (c.isDark) c.bg3 else Hue.SageFieldBg)
-                    .border(if (focused) 2.dp else 1.dp, if (focused) Amber.copy(alpha = 0.7f) else if (c.isDark) c.border else Hue.SageField, boxShape),
+                    .clip(boxShape).background(if (c.isDark) c.bg3 else Palette.SageFieldBg)
+                    .border(if (focused) 2.dp else 1.dp, if (focused) Amber.copy(alpha = 0.7f) else if (c.isDark) c.border else Palette.SageField, boxShape),
                 decorationBox = { inner ->
                     Box(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), contentAlignment = Alignment.CenterStart) {
                         if (state.replyText.isEmpty()) Text(
@@ -215,13 +215,13 @@ private fun DraftPanel(vm: ConversationsViewModel, state: ComposerUi) {
             IconButton(onClick = { vm.expandDraft(false) }, modifier = Modifier.size(28.dp)) { Icon(Icons.Filled.KeyboardArrowDown, "Collapse the AI draft", tint = soft, modifier = Modifier.size(16.dp)) }
             IconButton(onClick = vm::dismissDraft, modifier = Modifier.size(28.dp)) { Icon(Icons.Filled.Close, "Dismiss the AI draft", tint = soft, modifier = Modifier.size(14.dp)) }
         }
-        HorizontalDivider(color = if (ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.isDark) blue.border else Hue.Blue100)
+        HorizontalDivider(color = if (ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.isDark) blue.border else Palette.Blue100)
         Box(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             if (state.draftEditing) {
                 OutlinedTextField(
                     value = state.draftText, onValueChange = vm::setDraftText, minLines = 4, maxLines = 8,
                     placeholder = { Text("Edit the draft…", fontSize = 12.sp) },
-                    textStyle = LocalTextStyle.current.copy(fontSize = 12.sp, color = ink(Hue.Blue800)),
+                    textStyle = LocalTextStyle.current.copy(fontSize = 12.sp, color = ink(Palette.Blue800)),
                     modifier = Modifier.fillMaxWidth(),
                 )
             } else {
@@ -265,10 +265,10 @@ internal fun WindowStrip(win: ConversationWindow) {
         return if (h >= 24) "${h / 24}d ${h % 24}h" else if (h > 0) "${h}h ${m}m" else "${m}m"
     }
     val (bg0, bd0, fg0, icon) = when (win.mode) {
-        "open" -> Quad(Hue.MossTint, Hue.MossRim, Palette.Moss700, "🟢")
-        "human_agent" -> Quad(Hue.Orange50, Hue.Orange200, Palette.Amber700, "🟠")
+        "open" -> Quad(Palette.MossTint, Palette.MossRim, Palette.Moss700, "🟢")
+        "human_agent" -> Quad(Palette.Orange50, Palette.Orange200, Palette.Amber700, "🟠")
         "closed" -> Quad(Palette.Red50, Palette.Red200, Palette.Red700, "🔴")
-        else -> Quad(Hue.StoneGreen, Palette.Hairline, Palette.Sage500, "•")
+        else -> Quad(Palette.StoneGreen, Palette.Hairline, Palette.Sage500, "•")
     }
     val (bg, fg, bd) = tint(bg0, fg0, bd0)
     val text = when (win.mode) {
@@ -307,7 +307,7 @@ private fun AttachButton(vm: ConversationsViewModel) {
     val camPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> if (granted) launchCamera() }
     Box {
         Box(
-            Modifier.size(44.dp).clip(RoundedCornerShape(16.dp)).background(if (ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.isDark) ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.bg3 else Hue.CoolGray).clickable { menu = true },
+            Modifier.size(44.dp).clip(RoundedCornerShape(16.dp)).background(if (ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.isDark) ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.bg3 else Palette.CoolGray).clickable { menu = true },
             contentAlignment = Alignment.Center,
         ) { Icon(Icons.Filled.AttachFile, "Attach images or files (up to 5 MB each for images)", tint = Palette.Slate500, modifier = Modifier.size(18.dp)) }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -386,7 +386,7 @@ private fun MediaTray(vm: ConversationsViewModel, state: ComposerUi, modifier: M
                         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
                     ) {
                         Icon(if (it.mime.startsWith("video/")) Icons.Filled.Movie else Icons.Filled.Description, null, tint = Palette.Sage400, modifier = Modifier.size(20.dp))
-                        Text(it.name, fontSize = 9.sp, color = if (nc0.isDark) nc0.textMid else Hue.SageCaption, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(it.name, fontSize = 9.sp, color = if (nc0.isDark) nc0.textMid else Palette.SageCaption, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     Box(
                         Modifier.align(Alignment.TopEnd).offset(6.dp, (-6).dp).size(20.dp).clip(CircleShape).background(Palette.Ink)
@@ -421,7 +421,7 @@ private fun MediaTray(vm: ConversationsViewModel, state: ComposerUi, modifier: M
         }
         // Add-more tile
         Box(
-            Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)).dashedBorder(Hue.SageDash, 8.dp)
+            Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)).dashedBorder(Palette.SageDash, 8.dp)
                 .clickable(enabled = !state.uploading) { more.launch(ACCEPT_TYPES) },
             contentAlignment = Alignment.Center,
         ) { Icon(Icons.Filled.Add, "Add more", tint = Palette.Sage400) }

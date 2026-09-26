@@ -57,11 +57,11 @@ private val Green = Palette.Moss600
 
 /** Lead-stage row chip palette (matches the sidebar pipeline): bg, fg, border. */
 private val STAGE_CHIP = mapOf(
-    "contacted" to Triple(Hue.Sky100, Hue.Sky700, Hue.Sky200),
+    "contacted" to Triple(Palette.Sky100, Palette.Sky700, Palette.Sky200),
     "qualified" to Triple(Palette.Amber100, Palette.Amber700, Palette.Amber200),
-    "negotiation" to Triple(Hue.Violet100, Hue.Violet700, Palette.Violet200),
-    "proposal" to Triple(Hue.Violet100, Hue.Violet700, Palette.Violet200),
-    "won" to Triple(Hue.Green100, Hue.Green700, Hue.Green200),
+    "negotiation" to Triple(Palette.Violet100, Palette.Violet700, Palette.Violet200),
+    "proposal" to Triple(Palette.Violet100, Palette.Violet700, Palette.Violet200),
+    "won" to Triple(Palette.Green100, Palette.Green700, Palette.Green200),
     "lost" to Triple(Palette.Red100, Palette.Red700, Palette.Red200),
 )
 
@@ -107,7 +107,7 @@ internal fun ConversationList(
                     TextButton(onClick = vm::exitSelect) { Text("Cancel", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = c.muted) }
                 } else {
                     if (humanCount > 0) {
-                        val lt = tint(Hue.LivePill, Hue.LivePillInk)
+                        val lt = tint(Palette.LivePill, Palette.LivePillInk)
                         Text(
                             "$humanCount live", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = lt.fg, maxLines = 1, softWrap = false,
                             modifier = Modifier.clip(RoundedCornerShape(50)).background(lt.bg).padding(horizontal = 8.dp, vertical = 2.dp),
@@ -136,7 +136,7 @@ internal fun ConversationList(
                     val count = when (t) { "unread" -> unreadCount; "human" -> humanCount; "yours" -> yoursCount; else -> 0 }
                     Row(
                         Modifier.widthIn(min = fifth).heightIn(min = 28.dp).clip(RoundedCornerShape(8.dp))
-                            .background(if (active) accent else if (c.isDark) c.bg3 else Hue.StoneGreen)
+                            .background(if (active) accent else if (c.isDark) c.bg3 else Palette.StoneGreen)
                             .clickable(onClickLabel = t.replaceFirstChar { it.uppercase() }) { vm.setTab(t) }
                             .padding(horizontal = 6.dp, vertical = 2.dp),
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center,
@@ -158,7 +158,7 @@ internal fun ConversationList(
             // ── Search (the server searches names, phones and everything said) ──
             Row(
                 Modifier.fillMaxWidth().heightIn(min = 32.dp).clip(RoundedCornerShape(8.dp))
-                    .background(if (c.isDark) c.bg3 else Hue.StoneGreen).border(1.dp, if (c.isDark) c.border else Palette.Hairline2, RoundedCornerShape(8.dp))
+                    .background(if (c.isDark) c.bg3 else Palette.StoneGreen).border(1.dp, if (c.isDark) c.border else Palette.Hairline2, RoundedCornerShape(8.dp))
                     .padding(horizontal = 10.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -228,7 +228,7 @@ internal fun ConversationList(
         // Rows on screen but the refresh failed: they stay, and the list says it's showing saved rows.
         if (inbox.loadError && rows.isNotEmpty()) {
             Row(
-                Modifier.fillMaxWidth().background(if (c.isDark) Hue.Amber950.copy(alpha = 0.35f) else Palette.Amber50)
+                Modifier.fillMaxWidth().background(if (c.isDark) Palette.Amber950.copy(alpha = 0.35f) else Palette.Amber50)
                     .padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -293,11 +293,11 @@ internal fun ConversationList(
         // ── Bulk action bar — only while selecting ──
         if (listUi.selectMode) {
             HorizontalDivider(color = if (c.isDark) c.border else Palette.Hairline2)
-            Row(Modifier.fillMaxWidth().background(if (c.isDark) c.bg3 else Hue.SageStrip).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().background(if (c.isDark) c.bg3 else Palette.SageStrip).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(
                         if (listUi.selected.isEmpty()) "Tap chats to select" else "${listUi.selected.size} chat${if (listUi.selected.size == 1) "" else "s"} selected",
-                        fontSize = 11.sp, fontWeight = FontWeight.Medium, color = if (c.isDark) c.text else Hue.SageDeep,
+                        fontSize = 11.sp, fontWeight = FontWeight.Medium, color = if (c.isDark) c.text else Palette.SageDeep,
                     )
                     if (listUi.selected.isNotEmpty()) Text(
                         if (heldIds.isEmpty()) "none are human-held" else "${heldIds.size} to hand back to Neema",
@@ -362,8 +362,8 @@ private fun ConversationRow(g: RowGroup, activeId: String, me: String?, selectMo
     val stage = g.siblings.firstNotNullOfOrNull { it.leadStage?.takeIf { s -> s.isNotBlank() } }
     val orders = g.siblings.maxOf { it.ordersCount }.coerceAtLeast(0)
     val heldHere = g.siblings.any { it.interceptMode == "human" }
-    val bg = when { picked -> Hue.PickedRow; isActive -> Hue.ActiveRow; else -> Color.Transparent }
-    val edge = when { picked -> Green; isActive -> ROW_ACCENT; hasUnread -> Hue.UnreadEdge; else -> Color.Transparent }
+    val bg = when { picked -> Palette.PickedRow; isActive -> Palette.ActiveRow; else -> Color.Transparent }
+    val edge = when { picked -> Green; isActive -> ROW_ACCENT; hasUnread -> Palette.UnreadEdge; else -> Color.Transparent }
 
     Row(
         Modifier.fillMaxWidth().background(if (c.isDark && bg != Color.Transparent) bg.copy(alpha = 0.12f) else bg)
@@ -384,7 +384,7 @@ private fun ConversationRow(g: RowGroup, activeId: String, me: String?, selectMo
                         .graphicsLayer { val s = if (picked) 1f else 0.92f; scaleX = s; scaleY = s }
                         .clip(RoundedCornerShape(6.dp))
                         .background(if (picked) Green else c.bg2)
-                        .border(1.dp, if (picked) Green else Hue.SageRim, RoundedCornerShape(6.dp)),
+                        .border(1.dp, if (picked) Green else Palette.SageRim, RoundedCornerShape(6.dp)),
                     contentAlignment = Alignment.Center,
                 ) {
                     // A row Neema already handles stays selectable but reads as a no-op.
@@ -444,7 +444,7 @@ private fun ConversationRow(g: RowGroup, activeId: String, me: String?, selectMo
                         )
                     }
                     conv.countryIso?.takeIf { it.isNotBlank() }?.let { iso ->
-                        val ct = tint(Hue.Orange100, Hue.Orange700, Hue.Orange300)
+                        val ct = tint(Palette.Orange100, Palette.Orange700, Palette.Orange300)
                         Text(
                             Fmt.countryName(iso), fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = ct.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.widthIn(max = 110.dp).clip(RoundedCornerShape(4.dp)).background(ct.bg)
@@ -471,10 +471,10 @@ private fun ConversationRow(g: RowGroup, activeId: String, me: String?, selectMo
                 Text(
                     conv.lastMessagePreview?.takeIf { it.isNotBlank() } ?: "No messages yet",
                     fontSize = 12.sp, lineHeight = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    color = if (hasUnread) (if (c.isDark) c.textMid else Hue.SageDeep) else c.muted, fontWeight = if (hasUnread) FontWeight.Medium else FontWeight.Normal,
+                    color = if (hasUnread) (if (c.isDark) c.textMid else Palette.SageDeep) else c.muted, fontWeight = if (hasUnread) FontWeight.Medium else FontWeight.Normal,
                 )
             }
         }
     }
-    HorizontalDivider(color = if (c.isDark) c.border else Hue.SageRule)
+    HorizontalDivider(color = if (c.isDark) c.border else Palette.SageRule)
 }

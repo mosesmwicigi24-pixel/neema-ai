@@ -6,11 +6,12 @@ import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontFamily
+import ke.co.bethanyhouse.neema.core.ui.theme.NeemaMono
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.em
 import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 
 /**
@@ -40,7 +41,7 @@ fun formatWa(text: String?, linkColor: Color = Palette.Blue600): AnnotatedString
             val part = m.value
             when {
                 part.startsWith("```") && part.length > 6 ->
-                    withStyle(SpanStyle(fontFamily = FontFamily.Monospace)) { append(part.substring(3, part.length - 3)) }
+                    withStyle(SpanStyle(fontFamily = NeemaMono, fontSize = 0.95.em)) { append(part.substring(3, part.length - 3)) }
                 part.startsWith("**") && part.endsWith("**") && part.length > 4 ->
                     withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(part.substring(2, part.length - 2)) }
                 part.startsWith("*") && part.length > 2 ->
@@ -50,7 +51,7 @@ fun formatWa(text: String?, linkColor: Color = Palette.Blue600): AnnotatedString
                 part.startsWith("~") && part.length > 2 ->
                     withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) { append(part.substring(1, part.length - 1)) }
                 part.startsWith("`") && part.length > 2 ->
-                    withStyle(SpanStyle(fontFamily = FontFamily.Monospace)) { append(part.substring(1, part.length - 1)) }
+                    withStyle(SpanStyle(fontFamily = NeemaMono, fontSize = 0.95.em)) { append(part.substring(1, part.length - 1)) }
                 else -> append(part)
             }
             last = m.range.last + 1
