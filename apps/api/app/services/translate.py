@@ -293,7 +293,7 @@ async def _translate_thread(redis, conv_id: str, ids: list[str]) -> int:
             payload = [{"i": i, "t": (m.text or "")[:1200]}
                        for i, m in enumerate(rows)]
             from app.agent.runtime import build_llm
-            llm = build_llm(model=settings.tier2_model_light)
+            llm = build_llm(model=settings.tier2_model_light, purpose="translate")
             resp = await llm.complete(
                 system=_SYSTEM,
                 messages=[{"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
@@ -346,19 +346,12 @@ async def _translate_thread(redis, conv_id: str, ids: list[str]) -> int:
             # Meter the spend honestly (node "translate") and feed the breaker.
             try:
                 u = resp.usage or {}
-                from app.core.ai_pricing import estimate_cost_usd
                 from app.services import ai_budget
                 from app.services import n8n_bridge as svc
                 totals = {k: int(u.get(k, 0) or 0) for k in
                           ("input_tokens", "output_tokens", "cache_read_tokens",
                            "cache_write_tokens", "cache_write_1h_tokens")}
-                await ai_budget.add_spend(redis, estimate_cost_usd(
-                    settings.tier2_model_light,
-                    totals["input_tokens"] + totals["cache_read_tokens"]
-                    + totals["cache_write_tokens"],
-                    totals["output_tokens"], cached_tokens=totals["cache_read_tokens"],
-                    cache_write_tokens=totals["cache_write_tokens"],
-                    cache_write_1h_tokens=totals["cache_write_1h_tokens"]))
+                # (spend is metered by the LLM client itself — services/ai_budget.meter)
                 await svc.log_agent_usage(db, None, settings.tier2_model_light,
                                           totals, node="translate")
             except Exception:
@@ -468,7 +461,7 @@ async def translate_reply(db, redis, conv_id, text: str) -> dict:
             "\"text\": <the translation>}. No prose, no code fences."
         )
         from app.agent.runtime import build_llm
-        llm = build_llm(model=settings.tier2_model_light)
+        llm = build_llm(model=settings.tier2_model_light, purpose="translate")
         resp = await llm.complete(system=system,
                                   messages=[{"role": "user", "content": original}],
                                   tools=[])
@@ -486,18 +479,11 @@ async def translate_reply(db, redis, conv_id, text: str) -> dict:
                    "lang": (str(obj.get("lang") or lang or "").strip()[:24] or None)}
         try:
             u = resp.usage or {}
-            from app.core.ai_pricing import estimate_cost_usd
             from app.services import n8n_bridge as svc
             totals = {k: int(u.get(k, 0) or 0) for k in
                       ("input_tokens", "output_tokens", "cache_read_tokens",
                        "cache_write_tokens", "cache_write_1h_tokens")}
-            await ai_budget.add_spend(redis, estimate_cost_usd(
-                settings.tier2_model_light,
-                totals["input_tokens"] + totals["cache_read_tokens"]
-                + totals["cache_write_tokens"],
-                totals["output_tokens"], cached_tokens=totals["cache_read_tokens"],
-                cache_write_tokens=totals["cache_write_tokens"],
-                cache_write_1h_tokens=totals["cache_write_1h_tokens"]))
+            # (spend is metered by the LLM client itself — services/ai_budget.meter)
             await svc.log_agent_usage(db, None, settings.tier2_model_light,
                                       totals, node="translate")
         except Exception:

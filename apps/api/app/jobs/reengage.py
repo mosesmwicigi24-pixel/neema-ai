@@ -118,10 +118,10 @@ async def _draft(redis, conv: Conversation, text: str, *, live: bool = False) ->
     async with AsyncSessionLocal() as db:
         if is_wa:
             return await runtime.run_turn(db, redis, conv.wa_id, text,
-                                          build_llm(model=route_model(text)),
+                                          build_llm(model=route_model(text), purpose="job:reengage"),
                                           read_only=not live)
         return await runtime.run_turn(db, redis, wa_id=conv.external_id, user_text=text,
-                                      llm=build_llm(model=route_model(text)),
+                                      llm=build_llm(model=route_model(text), purpose="job:reengage"),
                                       channel=conv.channel, external_id=conv.external_id,
                                       read_only=not live)
 

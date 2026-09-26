@@ -294,7 +294,7 @@ class _LLM:
 
 def _vision_env(monkeypatch, answers):
     llm = _LLM(answers)
-    monkeypatch.setattr("app.agent.runtime.build_llm", lambda model=None: llm)
+    monkeypatch.setattr("app.agent.runtime.build_llm", lambda model=None, **kw: llm)
     monkeypatch.setattr("app.agent.media.load_image_block",
                         lambda url: {"type": "image", "source": {"type": "url", "url": url}})
     return llm

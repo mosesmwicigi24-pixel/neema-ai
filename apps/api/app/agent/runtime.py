@@ -1240,7 +1240,8 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     from app.services import ai_budget
     if await ai_budget.guard_turn(redis) == "economy" \
             and getattr(llm, "_model", None) == settings.tier2_model:
-        llm = build_llm(model=settings.tier2_model_light)
+        llm = build_llm(model=settings.tier2_model_light,
+                        purpose=getattr(llm, "purpose", "turn"))
 
     # Currency display gate: Kenya → KES; everyone else → USD (= KES /
     # usd_kes_rate, done in the tools). WhatsApp knows Kenya from the +254
@@ -1724,16 +1725,9 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             pass
 
     _served = getattr(llm, "_model", None) or settings.tier2_model
-    # Feed the daily breaker FIRST, from the same numbers, independently of the
-    # DB — a down database must never blind the spend meter (ai_budget owns
-    # its own best-effort guards, so this line can't cost the reply either).
-    from app.core.ai_pricing import estimate_cost_usd
-    await ai_budget.add_spend(redis, estimate_cost_usd(
-        _served,
-        totals["input_tokens"] + totals["cache_read_tokens"] + totals["cache_write_tokens"],
-        totals["output_tokens"], cached_tokens=totals["cache_read_tokens"],
-        cache_write_tokens=totals["cache_write_tokens"],
-        cache_write_1h_tokens=totals["cache_write_1h_tokens"]))
+    # The daily breaker is fed by the LLM client itself, call by call and by
+    # purpose (services/ai_budget.meter) — the reviewer, the rewrite and every
+    # vision read included — so nothing is metered twice here.
     try:
         from app.services import n8n_bridge as svc
         _node = f"{channel}:comment" if public_comment else channel
@@ -1750,13 +1744,17 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     return reply
 
 
-def build_llm(model: str | None = None) -> LLM:
+def build_llm(model: str | None = None, purpose: str = "other") -> LLM:
+    """`purpose` names what the tokens are for — the day's spend is metered by
+    it (services/ai_budget): "whatsapp", "messenger", "comment", "reviewer",
+    "vision", "bridge", "follow-up", "job:…"."""
     from app.agent.llm import AnthropicLLM
     return AnthropicLLM(
         api_key=settings.anthropic_api_key,
         model=model or settings.tier2_model,
         max_tokens=settings.tier2_max_tokens,
         cache=settings.tier2_prompt_cache,
+        purpose=purpose,
     )
 
 
@@ -1914,7 +1912,7 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None)
         model = settings.tier2_model if media else route_model(text)
         async with AsyncSessionLocal() as db:
             reply = await run_turn(db, redis, wa_id, text,
-                                   build_llm(model=model), media=media)
+                                   build_llm(model=model, purpose="whatsapp"), media=media)
             if not (reply or "").strip():
                 _log.info("silence for %s: nothing to send (a closer, or a held acknowledgement)", wa_id)
                 return
@@ -2061,7 +2059,7 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
         model = settings.tier2_model if media else route_model(text)
         async with AsyncSessionLocal() as db:
             reply = await run_turn(db, redis, wa_id=external_id, user_text=text,
-                                   llm=build_llm(model=model),
+                                   llm=build_llm(model=model, purpose=channel),
                                    channel=channel, external_id=external_id,
                                    media=media)
             if not (reply or "").strip():
@@ -2675,7 +2673,7 @@ async def read_comment(text: str, redis=None) -> dict:
         "Answer with the one line only."
     )
     try:
-        llm = build_llm(model=settings.tier2_model_light)
+        llm = build_llm(model=settings.tier2_model_light, purpose="comment-read")
         resp = await llm.complete(system="You read comments precisely. One line only, in the shape asked.",
                                   messages=[{"role": "user", "content": prompt}], tools=[])
         r = parse_comment_reading(resp.text or "")
@@ -3407,7 +3405,7 @@ async def _describe_post_image(thumb: str) -> str:
         block = await asyncio.to_thread(load_image_block, thumb)
         if not block:
             return ""
-        llm = build_llm(model=settings.tier2_model_light)
+        llm = build_llm(model=settings.tier2_model_light, purpose="vision")
         resp = await llm.complete(
             system=("You describe one product photo for a shopkeeper's reply. Plain "
                     "words only: no price, no brand, no praise, no full stop."),
@@ -4233,7 +4231,7 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
                 _parent = await _thread_parent(comment.get("parent_id") or "")
                 answer = (await run_turn(
                     db, redis, wa_id=ext, user_text=prompt_text,
-                    llm=build_llm(model=_cmodel),
+                    llm=build_llm(model=_cmodel, purpose="comment"),
                     media=media, channel=channel, external_id=ext,
                     public_comment=True, product_sink=seen_products,
                     comment_reading=reading, comment_post_id=post_id,

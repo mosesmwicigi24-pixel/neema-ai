@@ -303,7 +303,7 @@ def test_the_prompt_the_reviewer_and_the_rewrite_carry_the_rule(monkeypatch):
         llm.calls.append(messages[0]["content"])
         return types.SimpleNamespace(text="verdict=pass | issues=-")
     llm.complete = complete
-    monkeypatch.setattr(rt, "build_llm", lambda model=None: llm)
+    monkeypatch.setattr(rt, "build_llm", lambda model=None, **kw: llm)
     monkeypatch.setattr(rv, "reviewer_verdict", _REAL_REVIEWER)
     asyncio.run(rv.review_reply("Maharagwe", DECLINE, [], mode="dm"))
     sent = llm.calls[-1]

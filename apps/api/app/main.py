@@ -266,6 +266,9 @@ async def lifespan(app: FastAPI):
         await redis.set("__startup_write_check__", "1", ex=10)
         await redis.delete("__startup_write_check__")
         logger.info("Redis: connected to writable primary ✓")
+        # The spend meter every model call feeds (services/ai_budget.meter).
+        from app.services import ai_budget as _ai_budget
+        _ai_budget.attach(redis)
     except Exception as exc:
         # Log clearly so the error is obvious in deployment logs, but don't
         # crash — the app can still serve requests; Redis failures are handled

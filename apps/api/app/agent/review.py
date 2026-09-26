@@ -1016,7 +1016,7 @@ async def reviewer_verdict(comment: str, answer: str, seen: list, *,
     )
     try:
         from app.agent.runtime import build_llm
-        llm = build_llm(model=_reviewer_model(comment, answer))
+        llm = build_llm(model=_reviewer_model(comment, answer), purpose="reviewer")
         resp = await llm.complete(
             system="You verify a shop's replies before they are sent. One line only, in the shape asked.",
             messages=[{"role": "user", "content": prompt}], tools=[])

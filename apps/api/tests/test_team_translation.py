@@ -170,7 +170,7 @@ def _worker_world(monkeypatch, *, reply_json, rows):
                 usage={"input_tokens": 300, "output_tokens": 60,
                        "cache_read_tokens": 0, "cache_write_tokens": 0,
                        "cache_write_1h_tokens": 0})
-    monkeypatch.setattr(runtime, "build_llm", lambda model=None: _LLM())
+    monkeypatch.setattr(runtime, "build_llm", lambda model=None, **kw: _LLM())
 
     published = []
 
@@ -264,7 +264,7 @@ def test_reply_is_translated_into_the_customers_language(monkeypatch):
                 text=json.dumps({"lang": "Bulgarian",
                                  "text": "Благодарим ви — подносът е $70."}),
                 usage={})
-    monkeypatch.setattr(runtime, "build_llm", lambda model=None: _LLM())
+    monkeypatch.setattr(runtime, "build_llm", lambda model=None, **kw: _LLM())
     db = _FakeDB([_Res(many=[("Bulgarian", "Каква е цената")])])
     out = asyncio.run(tx.translate_reply(db, _Redis(), "conv",
                                          "Thank you — the tray is $70."))
@@ -274,7 +274,7 @@ def test_reply_is_translated_into_the_customers_language(monkeypatch):
 def test_an_english_thread_sends_english_untouched(monkeypatch):
     import app.agent.runtime as runtime
     monkeypatch.setattr(runtime, "build_llm",
-                        lambda model=None: (_ for _ in ()).throw(AssertionError("model called")))
+                        lambda model=None, **kw: (_ for _ in ()).throw(AssertionError("model called")))
     db = _FakeDB([_Res(many=[(None, "how much is it"), (None, "ok thanks")])])
     out = asyncio.run(tx.translate_reply(db, _Redis(), "conv", "It is $70."))
     assert out == {"text": "It is $70.", "lang": None}
@@ -288,7 +288,7 @@ def test_reply_translation_fails_open_never_blocking_the_human(monkeypatch):
 
         async def complete(self, **kw):
             raise RuntimeError("model down")
-    monkeypatch.setattr(runtime, "build_llm", lambda model=None: _Boom())
+    monkeypatch.setattr(runtime, "build_llm", lambda model=None, **kw: _Boom())
     db = _FakeDB([_Res(many=[("Bulgarian", "Каква е цената")])])
     out = asyncio.run(tx.translate_reply(db, _Redis(), "conv", "It is $70."))
     assert out["text"] == "It is $70."      # the English still goes out
@@ -375,7 +375,7 @@ def test_the_worker_never_writes_a_marker_onto_foreign_text(monkeypatch):
                                {"i": 1, "lang": "", "en": ""}]),
                 usage={})
     import app.agent.runtime as runtime
-    monkeypatch.setattr(runtime, "build_llm", lambda model=None: _LLM())
+    monkeypatch.setattr(runtime, "build_llm", lambda model=None, **kw: _LLM())
 
     class _R:
         def __init__(self): self.kv = {}

@@ -27,7 +27,7 @@ class _CapturingLLM:
 
 def _prompt_for(text, monkeypatch, label="high"):
     llm = _CapturingLLM(label)
-    monkeypatch.setattr(rt, "build_llm", lambda model=None: llm)
+    monkeypatch.setattr(rt, "build_llm", lambda model=None, **kw: llm)
     out = asyncio.run(rt.classify_comment_intent(text))
     return llm.prompt, out
 

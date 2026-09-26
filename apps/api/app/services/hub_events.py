@@ -179,7 +179,7 @@ async def _compose_announcement(db, redis, conv, brief: str) -> str:
             "message Neema should send them right now about this. No questions "
             f"unless truly natural, no re-selling.] {brief}")
     return (await runtime.run_turn(
-        db, redis, wa_id=key, user_text=text, llm=runtime.build_llm(),
+        db, redis, wa_id=key, user_text=text, llm=runtime.build_llm(purpose="announce"),
         channel=conv.channel,
         external_id=(None if conv.channel == "whatsapp" else conv.external_id),
         read_only=True)).strip()

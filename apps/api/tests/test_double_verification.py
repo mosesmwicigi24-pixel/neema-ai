@@ -170,7 +170,7 @@ def test_the_reviewer_treats_ordinary_promises_as_promises(monkeypatch):
         llm.calls.append(messages[0]["content"])
         return types.SimpleNamespace(text="verdict=pass | issues=-")
     llm.complete = complete
-    monkeypatch.setattr(rt, "build_llm", lambda model=None: llm)
+    monkeypatch.setattr(rt, "build_llm", lambda model=None, **kw: llm)
     asyncio.run(rv.review_reply("my number", "Noted — a colleague will reach out shortly.", [], mode="dm"))
     sent = llm.calls[-1]
     assert "A colleague reaching out, a delivery being arranged, a price to be confirmed are ordinary promises" in sent

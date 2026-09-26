@@ -153,7 +153,7 @@ async def manychat_webhook(body: ManyChatIn, request: Request,
 
     try:
         reply = await asyncio.wait_for(
-            run_turn(db, redis, sub_id, text, build_llm(model=route_model(text)),
+            run_turn(db, redis, sub_id, text, build_llm(model=route_model(text), purpose="manychat"),
                      channel=CHANNEL, external_id=sub_id),
             timeout=settings.manychat_reply_budget_s)
         await mark_closer_answered(redis, CHANNEL, sub_id, text)

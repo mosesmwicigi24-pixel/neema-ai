@@ -296,7 +296,7 @@ async def distill_weekly(db, llm=None) -> int:
     try:
         if llm is None:
             from app.agent.runtime import build_llm
-            llm = build_llm()
+            llm = build_llm(purpose="job:self-qa")
         resp = await llm.complete(
             system=("You improve a sales agent's standing rules. From the evidence "
                     "of human edits and QA findings, propose AT MOST 3 short, "

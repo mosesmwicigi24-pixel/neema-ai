@@ -108,7 +108,7 @@ async def _compose_bridge(db, redis, dest_conv, src_channel: str,
         "mention windows, policies or systems — just continue the conversation.]"
     )
     reply = await runtime.run_turn(
-        db, redis, wa_id=key, user_text=text, llm=runtime.build_llm(),
+        db, redis, wa_id=key, user_text=text, llm=runtime.build_llm(purpose="bridge"),
         channel=dest_conv.channel,
         external_id=(None if dest_conv.channel == "whatsapp" else dest_conv.external_id),
         read_only=True)
