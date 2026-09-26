@@ -7,8 +7,13 @@ import ke.co.bethanyhouse.neema.app.ToastType
 import ke.co.bethanyhouse.neema.core.model.Conversation
 import ke.co.bethanyhouse.neema.core.net.ApiException
 import ke.co.bethanyhouse.neema.feature.conversations.isWebVisitor
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -35,15 +40,22 @@ enum class CustomerTab(val label: String) { Profile("profile"), Insights("insigh
 class CustomerViewModel(
     private val dash: DashboardViewModel,
     private var conversation: Conversation,
+    /** GET /admin/customers/{key}; swappable so tests can hold and reorder answers. */
+    fetchProfile: (suspend (key: String, channel: String?) -> CustomerProfile)? = null,
     /** Places the WhatsApp voice call (the web's callCtx.initiateCall); swappable for tests. */
     private val placeCall: suspend (to: String, name: String?) -> Result<Unit> =
         { to, name -> dash.container.calls.initiateCall(to, name) },
 ) : ViewModel() {
     private val crm = CrmApi(dash.api.http)
+    private val fetchProfile: suspend (String, String?) -> CustomerProfile = fetchProfile ?: { k, ch -> crm.profile(k, ch) }
 
-    /** wa_id for WhatsApp, else the PSID / IGSID (WhatsApp's wa_id IS its external_id). */
-    private val custId: String = conversation.waId ?: conversation.externalId ?: ""
-    private val channel: String? = conversation.channel.ifEmpty { null }
+    /**
+     * wa_id for WhatsApp, else the PSID / IGSID (WhatsApp's wa_id IS its external_id).
+     * Read from the live row, as the web's loadProfile deps are: a row that gains a
+     * wa_id (a linked identity) reloads against the new key.
+     */
+    private val custId: String get() = conversation.waId ?: conversation.externalId ?: ""
+    private val channel: String? get() = conversation.channel.ifEmpty { null }
 
     private val _loading = MutableStateFlow(true)
     val loading: StateFlow<Boolean> = _loading.asStateFlow()
@@ -64,6 +76,16 @@ class CustomerViewModel(
     val stageEditorOpen = MutableStateFlow(false)
     val editNotes = MutableStateFlow(false)
 
+    /**
+     * The notes editor's text and the snapshot it started from. Held here, not in
+     * the composable, so a live reload (an AI stage change, an appended call
+     * summary) never resets what the agent is typing, and switching tabs keeps it.
+     */
+    val noteDraft = MutableStateFlow("")
+    private val _notesBase = MutableStateFlow<String?>(null)
+    /** The notes as they were when the edit began (null when not editing). */
+    val notesBase: StateFlow<String?> = _notesBase.asStateFlow()
+
     private val _customStages = MutableStateFlow(StageCache.stages ?: emptyList())
     val customStages: StateFlow<List<String>> = _customStages.asStateFlow()
 
@@ -78,6 +100,24 @@ class CustomerViewModel(
     private val _mergeSugs = MutableStateFlow<List<MergeSuggestion>?>(null)
     val mergeSugs: StateFlow<List<MergeSuggestion>?> = _mergeSugs.asStateFlow()
     private var mergeJob: Job? = null
+
+    // Reload bookkeeping — declared before init, whose load() already uses it.
+    private var liveJob: Job? = null
+    private var shownBefore = false
+    private var reloadJob: Job? = null
+    private var loadJob: Job? = null
+    /** Bumped per GET; only the newest GET's answer is ever painted. */
+    private var loadSeq = 0
+    /** Bumped per local edit; a GET that left before an edit is not painted over it. */
+    private var editSeq = 0
+    private var patchesInFlight = 0
+    /** A reload was held back by an edit in flight; run it once the edits settle. */
+    private var reloadAfterEdits = false
+
+    companion object {
+        /** Live triggers landing within this window cost one GET. */
+        const val RELOAD_COALESCE_MS = 400L
+    }
 
     private val _templateBusy = MutableStateFlow(false)
     val templateBusy: StateFlow<Boolean> = _templateBusy.asStateFlow()
@@ -95,32 +135,115 @@ class CustomerViewModel(
     }
 
     /**
-     * The web re-runs loadProfile whenever the thread's row changes (a new
-     * message, a rename), so an AI-set stage or an appended call summary shows
-     * up without reopening the panel. Same here, quietly over the painted profile.
+     * The web re-runs loadProfile whenever the thread's row changes (its deps:
+     * wa_id, name, channel, last_message_at), so an AI-set stage or an appended
+     * call summary shows up without reopening the panel. Same here, quietly over
+     * the painted profile — and also when the row's own lead stage or order count
+     * moves (an inbox refetch after the AI advanced the stage). Bursts of row
+     * updates coalesce into one request ([requestReload]).
      */
     fun sync(conv: Conversation) {
         val prev = conversation
         conversation = conv
-        if (conv.id == prev.id && (conv.lastMessageAt != prev.lastMessageAt || conv.name != prev.name)) {
-            load(showSpinner = false)
+        if (conv.id != prev.id) return
+        if (conv.lastMessageAt != prev.lastMessageAt || conv.name != prev.name ||
+            conv.waId != prev.waId || conv.externalId != prev.externalId || conv.channel != prev.channel ||
+            conv.leadStage != prev.leadStage || conv.ordersCount != prev.ordersCount
+        ) requestReload()
+    }
+
+    // ── Staying live while the panel is on screen ────────────────────────────
+
+    /**
+     * The panel is on screen. The web remounts CustomerSidebar (and so refetches)
+     * every time it opens; a re-shown panel here refetches quietly over what it
+     * painted last. While shown, it also catches up on what the socket could not
+     * tell it: coming back to the foreground, the socket reconnecting (frames were
+     * lost meanwhile), and this customer's orders changing (`order_update` →
+     * dash.orders refetch). All of it goes through [requestReload], so a
+     * foreground return that also reconnects the socket costs one request.
+     */
+    fun onShown() {
+        if (shownBefore) requestReload()
+        shownBefore = true
+        liveJob?.cancel()
+        liveJob = viewModelScope.launch {
+            launch {
+                var was = dash.foreground.value
+                dash.foreground.collect { v -> if (v && !was) requestReload(); was = v }
+            }
+            launch {
+                val socket = dash.container.socket
+                var was = socket.connected.value
+                socket.connected.collect { v -> if (v && !was) requestReload(); was = v }
+            }
+            launch {
+                dash.orders
+                    .map { all ->
+                        val w = conversation.waId
+                        if (w.isNullOrEmpty()) emptyList() else all.filter { it.waId == w || it.contactPhone == w }
+                    }
+                    .distinctUntilChanged()
+                    .drop(1)
+                    .collect { requestReload() }
+            }
         }
+    }
+
+    /** The panel left the screen: nothing it would show is worth a request. */
+    fun onHidden() {
+        liveJob?.cancel()
+        liveJob = null
+        reloadJob?.cancel()
     }
 
     /** The key edits persist against: the profile's own wa_id (a shim for non-WhatsApp contacts), else the handle. */
     private val key: String get() = _profile.value?.waId?.ifEmpty { null } ?: custId
 
+
+    /**
+     * A live trigger (row change, reconnect, foreground, orders): reload quietly,
+     * coalescing everything that lands within [RELOAD_COALESCE_MS] into one GET.
+     */
+    fun requestReload() {
+        reloadJob?.cancel()
+        reloadJob = viewModelScope.launch {
+            delay(RELOAD_COALESCE_MS)
+            reloadJob = null
+            load(showSpinner = false)
+        }
+    }
+
+    /**
+     * GET the profile. The newest request wins: an older one still in flight is
+     * cancelled and, should its answer land anyway, dropped. An answer that raced
+     * a local edit (an optimistic PATCH not yet settled, or one made after the GET
+     * left) is not painted over the edit; the reload runs again once edits settle.
+     */
     fun load(showSpinner: Boolean = _profile.value == null) {
-        viewModelScope.launch {
-            if (showSpinner) _loading.value = true else _refreshing.value = true
+        reloadJob?.cancel()
+        if (patchesInFlight > 0) { reloadAfterEdits = true; return }
+        loadJob?.cancel()
+        val seq = ++loadSeq
+        val editsAtStart = editSeq
+        if (showSpinner) _loading.value = true else _refreshing.value = true
+        loadJob = viewModelScope.launch {
             try {
-                _profile.value = crm.profile(custId, channel)
+                val fresh = fetchProfile(custId, channel)
+                if (seq != loadSeq) return@launch
+                if (editSeq != editsAtStart || patchesInFlight > 0) { reloadAfterEdits = true; return@launch }
+                _profile.value = fresh
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Throwable) {
                 // Fallback: a minimal profile from the conversation row, so the panel still works.
-                if (_profile.value == null) _profile.value = fallbackProfile()
+                if (seq == loadSeq && _profile.value == null) _profile.value = fallbackProfile()
             } finally {
-                _loading.value = false
-                _refreshing.value = false
+                if (seq == loadSeq) {
+                    _loading.value = false
+                    _refreshing.value = false
+                    if (reloadAfterEdits && patchesInFlight == 0) { reloadAfterEdits = false; requestReload() }
+                }
             }
         }
     }
@@ -158,16 +281,25 @@ class CustomerViewModel(
         val k = key
         _saving.value = true
         _profile.value = local(prev)
+        editSeq++
+        patchesInFlight++
         viewModelScope.launch {
             try {
                 crm.patch(k, channel, body)
                 dash.toast("Saved")
                 onSaved?.invoke()
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Throwable) {
                 dash.toast("Failed to save", ToastType.Error)
                 _profile.value = prev
             } finally {
-                _saving.value = false
+                patchesInFlight--
+                if (patchesInFlight == 0) {
+                    _saving.value = false
+                    // A live update arrived mid-save: fetch it now, over the settled edit.
+                    if (reloadAfterEdits) { reloadAfterEdits = false; requestReload() }
+                }
             }
         }
     }
@@ -208,10 +340,36 @@ class CustomerViewModel(
         patch(buildJsonObject { putJsonArray("tags") { next.forEach { add(JsonPrimitive(it)) } } }, { it.copy(tags = next) })
     }
 
-    /** notes_base = the snapshot the edit started from, so the server MERGES rather than dropping a concurrent call summary. */
-    fun saveNotes(draft: String) {
-        val base = _profile.value?.notes ?: ""
-        patch(buildJsonObject { put("notes", draft); put("notes_base", base) }, { it.copy(notes = draft) })
+    /** Open the notes editor on the notes as they are now; that text is the edit's base. */
+    fun startEditNotes() {
+        val n = _profile.value?.notes ?: ""
+        noteDraft.value = n
+        _notesBase.value = n
+        editNotes.value = true
+    }
+
+    fun cancelEditNotes() {
+        editNotes.value = false
+        _notesBase.value = null
+    }
+
+    /**
+     * notes_base = the snapshot the edit STARTED from (the web's own comment), so
+     * the server MERGES rather than dropping a call summary appended while the
+     * agent typed. The web reads it at save time, after a reload may already have
+     * replaced the snapshot; this keeps the real one. When something did arrive
+     * meanwhile, the merged text is fetched back so the panel shows what the
+     * server kept.
+     */
+    fun saveNotes(draft: String = noteDraft.value) {
+        val current = _profile.value?.notes ?: ""
+        val base = _notesBase.value ?: current
+        editNotes.value = false
+        _notesBase.value = null
+        val merged = base != current
+        patch(buildJsonObject { put("notes", draft); put("notes_base", base) }, { it.copy(notes = draft) }) {
+            if (merged) requestReload()
+        }
     }
 
     // ── Custom pipeline stages (admin-only on the server) ────────────────────

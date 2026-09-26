@@ -261,7 +261,9 @@ fun EditableField(
 ) {
     val c = Neema.colors
     var editing by remember { mutableStateOf(false) }
-    var draft by remember(value) { mutableStateOf(value) }
+    // Seeded when the edit starts, never re-keyed on [value]: a live reload that
+    // brings a new value mid-edit must not wipe what the agent is typing.
+    var draft by remember { mutableStateOf(value) }
     val focus = remember { FocusRequester() }
     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp).heightIn(min = 32.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, fontSize = 10.sp, color = c.textMid, modifier = Modifier.width(64.dp))
@@ -281,7 +283,7 @@ fun EditableField(
         } else {
             Box(
                 Modifier.weight(1f).clip(RoundedCornerShape(6.dp))
-                    .then(if (enabled) Modifier.clickable { editing = true } else Modifier)
+                    .then(if (enabled) Modifier.clickable { draft = value; editing = true } else Modifier)
                     .padding(vertical = 6.dp, horizontal = 2.dp),
             ) {
                 if (value.isNotEmpty()) Text(value, fontSize = 12.sp, color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)

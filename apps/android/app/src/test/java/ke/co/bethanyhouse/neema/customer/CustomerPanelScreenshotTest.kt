@@ -187,7 +187,20 @@ class CustomerPanelScreenshotTest {
     /** A plain agent: everything editable except the stage editor (no "+ Add stage"). */
     @Test fun plainAgentNoStageEditor() = tall(admin = false)
 
-    @Test fun notesEditing() = tall(prepare = { it.editNotes.value = true })
+    @Test fun notesEditing() = tall(prepare = { it.startEditNotes() })
+
+    /** A call summary landed on the notes mid-edit: the draft is kept, and the panel says the summary will be too. */
+    @Test fun notesArrivedWhileTyping() = tall(prepare = ::notesArrived)
+    @Test fun notesArrivedWhileTypingDark() = tall(dark = true, prepare = ::notesArrived)
+
+    private fun notesArrived(vm: CustomerViewModel) {
+        if (vm.notesBase.value != null) return  // tall() paints three slices of one ViewModel
+        vm.startEditNotes()
+        vm.noteDraft.value = vm.noteDraft.value + "\n\nWants gold thread on the stole."
+        fake.on("GET", "/admin/customers/${CustomerFixtures.PETER}", body = CustomerFixtures.peter.replace(
+            "Ask about the Easter order in March.", "Ask about the Easter order in March.\\n\\nCall summary: asked about delivery to Nyeri."))
+        vm.load(showSpinner = false)
+    }
 
     @Test fun customStageActive() {
         fake.on("GET", "/admin/customers/${CustomerFixtures.PETER}",
