@@ -26,6 +26,15 @@ import ke.co.bethanyhouse.neema.core.ui.theme.LightNeema
 import ke.co.bethanyhouse.neema.core.ui.theme.LocalNeemaColors
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import ke.co.bethanyhouse.neema.core.ui.theme.WebIcons
+import ke.co.bethanyhouse.neema.core.ui.theme.Palette
+import ke.co.bethanyhouse.neema.core.ui.theme.scaledAtMost
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import ke.co.bethanyhouse.neema.core.util.Fmt
 import ke.co.bethanyhouse.neema.feature.agents.AgentsScreen
 import ke.co.bethanyhouse.neema.feature.calls.CallStage
@@ -86,7 +95,9 @@ fun DashboardShell(
     val items = remember(access, me, agents, summary, orders, session) { dash.navItems() }
 
     var showBell by remember { mutableStateOf(initialBellOpen) }
-    var collapsed by rememberSaveable { mutableStateOf(initialCollapsed) }
+    // A 600–840dp window (an unfolded foldable, a small tablet upright) opens on
+    // the 60dp icon rail so the view keeps its width; the toggle still expands it.
+    var collapsed by rememberSaveable { mutableStateOf(initialCollapsed || widthClass == WindowWidthSizeClass.Medium) }
     val unreadBell = notifications.count { !it.read }
     val wide = widthClass != WindowWidthSizeClass.Compact
     val drawer = rememberDrawerState(if (initialDrawerOpen) DrawerValue.Open else DrawerValue.Closed)
@@ -125,6 +136,8 @@ fun DashboardShell(
         )
     }
 
+    // The docked sidebar widens with large text (up to 130%) so its labels keep their room.
+    val dockedWidth = 208.dp * LocalDensity.current.fontScale.coerceIn(1f, 1.3f)
     val sidebar = @Composable { isCollapsed: Boolean, onToggle: (() -> Unit)?, width: Dp ->
         NeemaSidebar(
             items = items, view = view,
@@ -156,9 +169,17 @@ fun DashboardShell(
                     onSelect = dash::navigate, onMore = { scope.launch { drawer.open() } })
             },
             containerColor = MaterialTheme.colorScheme.background,
-            contentWindowInsets = if (immersive) WindowInsets(0) else ScaffoldDefaults.contentWindowInsets,
+            contentWindowInsets = when {
+                immersive -> WindowInsets(0)
+                // Docked: the sidebar owns the start edge (and a landscape cutout there).
+                wide -> WindowInsets.systemBars.union(WindowInsets.displayCutout).only(WindowInsetsSides.Top + WindowInsetsSides.End + WindowInsetsSides.Bottom)
+                else -> ScaffoldDefaults.contentWindowInsets
+            },
         ) { pad ->
-            Column(Modifier.fillMaxSize().padding(pad)) {
+            // The views sit above the keyboard: the bars' padding counts towards
+            // it (consumed), so a search field at the bottom is never covered and
+            // a view's own imePadding (the thread's composer) is not added twice.
+            Column(Modifier.fillMaxSize().padding(pad).consumeWindowInsets(pad).imePadding()) {
             // Immersive views (an open thread) run to the top edge and pad for the
             // status bar themselves: the banner takes that padding and the view
             // below is told the status bar is already accounted for.
@@ -192,9 +213,16 @@ fun DashboardShell(
 
     Box(Modifier.fillMaxSize()) {
         if (wide) {
-            Row(Modifier.fillMaxSize().background(Brand.Navy)) {
-                if (!immersive) Box(Modifier.statusBarsPadding().navigationBarsPadding()) { sidebar(collapsed, { collapsed = !collapsed }, 208.dp) }
-                Box(Modifier.weight(1f)) { content() }
+            // Navy runs under the status bar across the whole width (light status
+            // icons over it — see MainActivity), framing the view like the web's
+            // full-height sidebar does.
+            Row(Modifier.fillMaxSize().background(Brand.Navy).windowInsetsPadding(WindowInsets.statusBars.only(WindowInsetsSides.Top))) {
+                if (!immersive) Box(
+                    Modifier.windowInsetsPadding(
+                        WindowInsets.systemBars.union(WindowInsets.displayCutout).only(WindowInsetsSides.Start + WindowInsetsSides.Bottom),
+                    ),
+                ) { sidebar(collapsed, { collapsed = !collapsed }, dockedWidth) }
+                Box(Modifier.weight(1f).background(MaterialTheme.colorScheme.background)) { content() }
             }
             // The web's bell popup (Notifications.tsx): 316dp and white in both themes.
             // Expanded, it drops 6dp below the bell (bell at x 130, bottom 46);
@@ -203,12 +231,12 @@ fun DashboardShell(
             if (showBell) {
                 Box(Modifier.fillMaxSize().clickable(interactionSource = null, indication = null) { showBell = false })
                 Box(
-                    Modifier.statusBarsPadding()
+                    Modifier.windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout).only(WindowInsetsSides.Top + WindowInsetsSides.Start))
                         .padding(start = if (collapsed) 58.dp else 130.dp, top = if (collapsed) 50.dp else 52.dp)
                         .width(316.dp)
                         .shadow(16.dp, RoundedCornerShape(14.dp))
                         .clip(RoundedCornerShape(14.dp))
-                        .border(1.dp, Color(0xFFE8EBE3), RoundedCornerShape(14.dp)),
+                        .border(1.dp, Palette.Hairline, RoundedCornerShape(14.dp)),
                 ) { CompositionLocalProvider(LocalNeemaColors provides LightNeema) { panel(Modifier, 360.dp) } }
             }
         } else {
@@ -230,7 +258,10 @@ fun DashboardShell(
             ToastView(
                 t, mobile = !wide,
                 modifier = if (wide) Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(top = 20.dp, end = 20.dp)
-                else Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = 96.dp),
+                // Clear of the bottom nav, or of the keyboard / composer while typing.
+                else Modifier.align(Alignment.BottomCenter)
+                    .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
+                    .padding(start = 16.dp, end = 16.dp, bottom = 96.dp),
             )
         }
     }
@@ -238,7 +269,7 @@ fun DashboardShell(
     if (showBell && !wide) {
         ModalBottomSheet(
             onDismissRequest = { showBell = false },
-            containerColor = if (dark) Color(0xFF0A1229) else Color.White,
+            containerColor = Neema.chrome.bar,
         ) { panel(Modifier.navigationBarsPadding(), 520.dp) }
     }
 }
@@ -246,55 +277,80 @@ fun DashboardShell(
 @Composable
 private fun OfflineDot(modifier: Modifier = Modifier) {
     Row(
-        modifier.clip(RoundedCornerShape(50)).background(Color(0xFFFEF3C7)).padding(horizontal = 8.dp, vertical = 3.dp),
+        modifier.clip(RoundedCornerShape(50)).background(Palette.Amber100).padding(horizontal = 8.dp, vertical = 3.dp)
+            .semantics(mergeDescendants = true) { contentDescription = "Reconnecting to live updates" },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(6.dp).clip(RoundedCornerShape(50)).background(Color(0xFFD97706)))
-        Text("  Reconnecting…", fontSize = 10.sp, color = Color(0xFF92400E), fontWeight = FontWeight.SemiBold)
+        Box(Modifier.size(6.dp).clip(RoundedCornerShape(50)).background(Palette.Amber600))
+        Text("  Reconnecting…", fontSize = 10.sp.scaledAtMost(1.3f), color = Palette.Amber800, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }
 
 /**
  * components/ui/MobileNav.tsx MobileHeader, plus ☰ for the sidebar drawer:
- * a flat 28dp amber mark, "Neema · <view>" in grey, then the bell and the
- * theme switch as 16dp grey glyphs. White by day; the Prussian surface by night.
- * The web's bell here only zeroes the count; the app's opens the bell's list.
+ * a flat 28dp amber mark, "Neema · <view>", then the bell and the theme
+ * switch as 48dp touch targets around the web's 16dp glyphs. White by day;
+ * the Prussian surface by night. At very large text sizes the "Neema ·"
+ * wordmark gives its room to the view's name. The web's bell here only
+ * zeroes the count; the app's opens the bell's list.
  */
 @Composable
 internal fun MobileHeader(
     title: String, connected: Boolean, dark: Boolean, bell: Int,
     onMenu: () -> Unit, onBell: () -> Unit, onTheme: () -> Unit,
 ) {
-    val c = Neema.colors
-    val grey400 = Color(0xFF9CA3AF)
-    Column(Modifier.background(if (c.isDark) c.bg2 else Color.White).statusBarsPadding()) {
-        Row(Modifier.fillMaxWidth().height(56.dp).padding(start = 4.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onMenu) { Icon(WebIcons.Menu, "Menu", tint = grey400, modifier = Modifier.size(20.dp)) }
+    val chrome = Neema.chrome
+    val roomy = LocalDensity.current.fontScale < 1.5f
+    Column(Modifier.background(chrome.bar).windowInsetsPadding(WindowInsets.statusBars.union(WindowInsets.displayCutout).only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(start = 4.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)).clickable(role = Role.Button, onClick = onMenu),
+                contentAlignment = Alignment.Center,
+            ) { Icon(WebIcons.Menu, "Open navigation menu", tint = chrome.icon, modifier = Modifier.size(20.dp)) }
             NeemaLogo(28.dp, corner = 8.dp, glow = false)
             Spacer(Modifier.width(12.dp))
-            Text("Neema", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = if (c.isDark) Color.White else Color(0xFF111827))
-            Spacer(Modifier.width(12.dp))
-            Text("·", fontSize = 14.sp, color = if (c.isDark) Color(0xFF4B5563) else Color(0xFFD1D5DB))
-            Spacer(Modifier.width(12.dp))
+            if (roomy) {
+                Text("Neema", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = chrome.title, maxLines = 1)
+                Spacer(Modifier.width(12.dp))
+                Text("·", fontSize = 14.sp, color = chrome.separator)
+                Spacer(Modifier.width(12.dp))
+            }
             Text(
-                title, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = if (c.isDark) grey400 else Color(0xFF6B7280),
-                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                title, fontSize = 14.sp, fontWeight = if (roomy) FontWeight.Medium else FontWeight.SemiBold,
+                color = if (roomy) chrome.subtitle else chrome.title,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f).semantics { heading() },
             )
             if (!connected) OfflineDot(Modifier.padding(end = 4.dp))
-            Box(Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = onBell), contentAlignment = Alignment.Center) {
-                Icon(WebIcons.Bell, "Notifications", tint = grey400, modifier = Modifier.size(16.dp))
-                if (bell > 0) Box(
-                    Modifier.align(Alignment.TopEnd).padding(top = 2.dp, end = 2.dp).defaultMinSize(16.dp, 16.dp)
-                        .clip(RoundedCornerShape(50)).background(Color(0xFFEF4444)).padding(horizontal = 4.dp),
-                    contentAlignment = Alignment.Center,
-                ) { Text(if (bell > 9) "9+" else "$bell", color = Color.White, fontSize = 10.sp, lineHeight = 10.sp, fontWeight = FontWeight.SemiBold) }
+            Box(
+                Modifier.size(48.dp).clip(RoundedCornerShape(12.dp))
+                    .clickable(role = Role.Button, onClickLabel = "Open notifications", onClick = onBell)
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = if (bell > 0) "Notifications, $bell unread" else "Notifications"
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(WebIcons.Bell, null, tint = chrome.icon, modifier = Modifier.size(18.dp))
+                if (bell > 0) {
+                    val size = 10.sp.scaledAtMost(1.2f)
+                    Box(
+                        Modifier.align(Alignment.TopEnd).padding(top = 6.dp, end = 6.dp).defaultMinSize(16.dp, 16.dp)
+                            .clip(RoundedCornerShape(50)).background(Palette.Red500).padding(horizontal = 4.dp),
+                        contentAlignment = Alignment.Center,
+                    ) { Text(if (bell > 9) "9+" else "$bell", color = Color.White, fontSize = size, lineHeight = size, fontWeight = FontWeight.SemiBold) }
+                }
             }
-            Spacer(Modifier.width(4.dp))
-            Box(Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = onTheme), contentAlignment = Alignment.Center) {
-                Icon(if (dark) WebIcons.Sun else WebIcons.Moon, "Theme", tint = grey400, modifier = Modifier.size(16.dp))
+            Box(
+                Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)).clickable(role = Role.Button, onClick = onTheme),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    if (dark) WebIcons.Sun else WebIcons.Moon, if (dark) "Switch to light mode" else "Switch to dark mode",
+                    tint = chrome.icon, modifier = Modifier.size(18.dp),
+                )
             }
         }
-        HorizontalDivider(color = if (c.isDark) c.hairline else Color(0xFFF3F4F6))
+        HorizontalDivider(color = chrome.barLine)
     }
 }
 
@@ -303,16 +359,23 @@ internal fun MobileHeader(
  * labels, amber when active with a 2dp indicator across the middle half, an
  * amber count 8dp right of centre. The web shows the first five views; the
  * app shows four and a "More" that opens the drawer, so every view is reachable.
+ * Labels and counts grow with the font size up to 130% so they stay inside
+ * the bar; TalkBack reads each tab as "Inbox, 2 new, tab, selected".
  */
 @Composable
 internal fun MobileBottomNav(
     items: List<NavItem>, view: ViewId, moreActive: Boolean,
     onSelect: (ViewId) -> Unit, onMore: () -> Unit,
 ) {
-    val c = Neema.colors
-    Column(Modifier.background(if (c.isDark) c.bg2 else Color.White)) {
-        HorizontalDivider(color = if (c.isDark) c.hairline else Color(0xFFF3F4F6))
-        Row(Modifier.fillMaxWidth().navigationBarsPadding().height(56.dp)) {
+    val chrome = Neema.chrome
+    Column(Modifier.background(chrome.bar)) {
+        HorizontalDivider(color = chrome.barLine)
+        Row(
+            Modifier.fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.displayCutout).only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
+                .height(56.dp)
+                .selectableGroup(),
+        ) {
             items.forEach { item ->
                 BottomTab(item.icon, item.id.label, item.badge, item.id == view, Modifier.weight(1f)) { onSelect(item.id) }
             }
@@ -326,18 +389,28 @@ private fun BottomTab(
     icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, badge: Int, active: Boolean,
     modifier: Modifier, onClick: () -> Unit,
 ) {
-    val tint = if (active) Brand.Amber else Color(0xFF9CA3AF)
-    Box(modifier.fillMaxHeight().clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+    val chrome = Neema.chrome
+    val tint = if (active) chrome.active else chrome.subtitle
+    Box(
+        modifier.fillMaxHeight()
+            .selectable(selected = active, role = Role.Tab, onClick = onClick)
+            .semantics(mergeDescendants = true) { contentDescription = if (badge > 0) "$label, $badge new" else label },
+        contentAlignment = Alignment.Center,
+    ) {
         if (active) Box(Modifier.align(Alignment.TopCenter).fillMaxWidth(0.5f).height(2.dp).clip(RoundedCornerShape(bottomStart = 2.dp, bottomEnd = 2.dp)).background(Brand.Amber))
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(icon, label, tint = tint, modifier = Modifier.size(20.dp))
+            Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
             Spacer(Modifier.height(4.dp))
-            Text(label, fontSize = 10.sp, lineHeight = 14.sp, fontWeight = FontWeight.Medium, color = tint, maxLines = 1)
+            val size = 10.sp.scaledAtMost(1.3f)
+            Text(
+                label, fontSize = size, lineHeight = size * 1.4f, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                color = tint, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
         }
         // top-2 left-1/2 ml-2: the count starts 8dp right of the tab's centre, 8dp down.
-        if (badge > 0) Row(Modifier.align(Alignment.TopStart).fillMaxWidth().padding(top = 8.dp)) {
+        if (badge > 0) Row(Modifier.align(Alignment.TopStart).fillMaxWidth().padding(top = 6.dp)) {
             Spacer(Modifier.weight(1f))
-            Box(Modifier.weight(1f).padding(start = 8.dp)) { AmberBadge(badge, bottomNav = true) }
+            Box(Modifier.weight(1f).padding(start = 6.dp)) { AmberBadge(badge, bottomNav = true) }
         }
     }
 }

@@ -2,8 +2,11 @@
     <style name="Theme.Neema" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/neema_parchment</item>
     </style>
-    <style name="Theme.Neema.Starting" parent="Theme.SplashScreen">
+    <!-- The launch splash: the launcher icon's moss disc and white bubble on the
+         Prussian night of the sign-in page, so launch → login is one surface. -->
+    <style name="Theme.Neema.Starting" parent="Theme.SplashScreen.IconBackground">
         <item name="windowSplashScreenBackground">@color/neema_night</item>
+        <item name="windowSplashScreenIconBackgroundColor">@color/neema_moss</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
         <item name="postSplashScreenTheme">@style/Theme.Neema</item>
     </style>

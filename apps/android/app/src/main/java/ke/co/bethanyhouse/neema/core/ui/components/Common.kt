@@ -23,6 +23,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -33,6 +35,10 @@ import androidx.compose.ui.unit.sp
 import coil.compose.SubcomposeAsyncImage
 import ke.co.bethanyhouse.neema.core.ui.theme.ChannelColors
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
+import ke.co.bethanyhouse.neema.core.ui.theme.Palette
+import ke.co.bethanyhouse.neema.core.ui.theme.asFixedSp
+import ke.co.bethanyhouse.neema.core.ui.theme.TabularNums
+import ke.co.bethanyhouse.neema.core.ui.theme.contentOn
 import ke.co.bethanyhouse.neema.core.ui.theme.WebIcons
 import ke.co.bethanyhouse.neema.core.util.Fmt
 
@@ -73,9 +79,9 @@ private const val WEBSITE_VISITOR = "Website visitor"
 @Composable
 fun Avatar(name: String?, url: String? = null, size: Dp = 40.dp, modifier: Modifier = Modifier) {
     val dark = Neema.colors.isDark
-    val bg = if (dark) Color(0xFF0F1424) else Color(0xFFF5F6F3)
-    val fg = if (dark) Color(0xFFB5DA8B) else Color(0xFF3A5C28)
-    val ring = if (dark) Color(0xFF1F367A) else Color(0xFFDDE8D5)
+    val bg = if (dark) Palette.Indigo900 else Palette.AvatarDisc
+    val fg = if (dark) Palette.Willow300 else Palette.AvatarInk
+    val ring = if (dark) Palette.Prussian700 else Palette.AvatarRing
     val initialsBox = @Composable {
         Box(
             Modifier.size(size).clip(CircleShape).background(bg).border(1.dp, ring, CircleShape),
@@ -84,9 +90,11 @@ fun Avatar(name: String?, url: String? = null, size: Dp = 40.dp, modifier: Modif
             if (name.isNullOrBlank() || isPhoneLike(name)) {
                 Icon(WebIcons.Profile, contentDescription = null, tint = fg, modifier = Modifier.size(size * 0.5f))
             } else {
+                // Sized to the disc, not the font scale: at 200% text "MM" would overflow it.
+                val initials = (size * 0.36f).asFixedSp()
                 Text(
                     Fmt.initials(name), color = fg, fontWeight = FontWeight.Bold,
-                    fontSize = (size.value * 0.36f).sp, letterSpacing = (size.value * 0.36f * 0.02f).sp, maxLines = 1,
+                    fontSize = initials, letterSpacing = initials * 0.02f, maxLines = 1,
                 )
             }
         }
@@ -110,7 +118,7 @@ fun channelStyle(channel: String?): ChannelStyle = when (channel?.lowercase()) {
     "tiktok" -> ChannelStyle("TikTok", ChannelColors.TikTok)
     "email" -> ChannelStyle("Email", ChannelColors.Email)
     "sms" -> ChannelStyle("SMS", ChannelColors.Sms)
-    "web" -> ChannelStyle("Web chat", Color(0xFF589B31))
+    "web" -> ChannelStyle("Web chat", ChannelColors.Web)
     else -> ChannelStyle("WhatsApp", ChannelColors.WhatsApp)
 }
 
@@ -132,7 +140,7 @@ fun ChannelChip(channel: String?, modifier: Modifier = Modifier, showLabel: Bool
     }
 }
 
-/** Rounded status pill; [color] drives both text and tint. */
+/** Rounded status pill; [color] drives both text and tint. Filled, the text is white or ink, whichever reads on [color]. */
 @Composable
 fun Pill(text: String, color: Color, modifier: Modifier = Modifier, filled: Boolean = false) {
     Text(
@@ -140,7 +148,7 @@ fun Pill(text: String, color: Color, modifier: Modifier = Modifier, filled: Bool
         modifier = modifier.clip(RoundedCornerShape(50))
             .background(if (filled) color else color.copy(alpha = 0.13f))
             .padding(horizontal = 8.dp, vertical = 3.dp),
-        color = if (filled) Color.White else color,
+        color = if (filled) contentOn(color) else color,
         fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
     )
 }
@@ -151,9 +159,9 @@ fun statusColor(status: String?): Color {
     return when (status?.lowercase()) {
         "delivered", "paid", "done", "completed", "won", "answered", "active", "open_window", "confirmed" -> c.green
         "cancelled", "canceled", "failed", "lost", "missed", "declined", "error" -> c.red
-        "pending", "processing", "ringing", "partial", "awaiting" -> Color(0xFFD97706)
+        "pending", "processing", "ringing", "partial", "awaiting" -> Palette.Amber600
         "human" -> c.blue
-        "paused" -> Color(0xFFD97706)
+        "paused" -> Palette.Amber600
         else -> c.muted
     }
 }
@@ -161,7 +169,10 @@ fun statusColor(status: String?): Color {
 @Composable
 fun Loading(modifier: Modifier = Modifier) {
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        CircularProgressIndicator(strokeWidth = 2.5.dp, modifier = Modifier.size(32.dp))
+        CircularProgressIndicator(
+            strokeWidth = 2.5.dp,
+            modifier = Modifier.size(32.dp).semantics { contentDescription = "Loading" },
+        )
     }
 }
 
@@ -234,9 +245,13 @@ fun SectionTitle(text: String, modifier: Modifier = Modifier, trailing: (@Compos
 @Composable
 fun StatTile(label: String, value: String, modifier: Modifier = Modifier, hint: String? = null, accent: Color? = null) {
     Panel(modifier) {
-        Text(label, fontSize = 12.sp, color = Neema.colors.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        // Two lines each, so large text wraps instead of cutting a label or an amount.
+        Text(label, fontSize = 12.sp, color = Neema.colors.muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Spacer(Modifier.height(4.dp))
-        Text(value, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = accent ?: MaterialTheme.colorScheme.onSurface, maxLines = 1)
+        Text(
+            value, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = accent ?: MaterialTheme.colorScheme.onSurface,
+            maxLines = 2, style = TabularNums,
+        )
         if (hint != null) Text(hint, fontSize = 11.sp, color = Neema.colors.muted, maxLines = 2)
     }
 }
@@ -263,34 +278,35 @@ fun SearchField(
     val c = Neema.colors
     val source = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     val focused by source.collectIsFocusedAsState()
-    val text = if (c.isDark) c.text else Color(0xFF16270C)
+    val text = if (c.isDark) c.text else Palette.Moss900
     val line = when {
-        focused -> Color(0xFF589B31)
+        focused -> Palette.Moss600
         c.isDark -> c.border
-        else -> borderColor ?: Color(0xFFB5DA8B)
+        else -> borderColor ?: Palette.Willow300
     }
     val shape = RoundedCornerShape(12.dp)
     androidx.compose.foundation.text.BasicTextField(
         value = value, onValueChange = onChange, singleLine = true,
         textStyle = androidx.compose.ui.text.TextStyle(color = text, fontSize = fontSize),
-        cursorBrush = androidx.compose.ui.graphics.SolidColor(Color(0xFF589B31)),
+        cursorBrush = androidx.compose.ui.graphics.SolidColor(Palette.Moss600),
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
         interactionSource = source,
         modifier = modifier.fillMaxWidth(),
         decorationBox = { inner ->
+            // At least [height]; taller only when large text needs a second placeholder line.
             Row(
-                Modifier.fillMaxWidth().height(height).clip(shape)
+                Modifier.fillMaxWidth().heightIn(min = height).clip(shape)
                     .background(if (c.isDark) c.bg2 else Color.White)
                     .border(if (focused) 2.dp else 1.dp, line, shape)
                     .padding(start = 12.dp, end = if (value.isNotEmpty()) 2.dp else 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(WebIcons.Search, null, tint = if (c.isDark) c.muted else Color(0xFFD6D3D1), modifier = Modifier.size(16.dp))
+                Icon(WebIcons.Search, null, tint = if (c.isDark) c.muted else Palette.Stone300, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(8.dp))
-                Box(Modifier.weight(1f)) {
+                Box(Modifier.weight(1f).padding(vertical = 4.dp)) {
                     if (value.isEmpty()) Text(
                         placeholder, color = text.copy(alpha = 0.5f), fontSize = fontSize,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis,
                     )
                     inner()
                 }
@@ -347,6 +363,21 @@ fun ConfirmDialog(
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/**
+ * The theme's switch, legible in both modes: M3's default unchecked switch
+ * is navy-on-navy on the Prussian surfaces. Use `Switch(colors = neemaSwitchColors())`.
+ */
+@Composable
+fun neemaSwitchColors(): SwitchColors {
+    val c = Neema.colors
+    return SwitchDefaults.colors(
+        checkedThumbColor = Color.White, checkedTrackColor = c.gold, checkedBorderColor = c.gold,
+        uncheckedThumbColor = if (c.isDark) c.textMid else Palette.Sage400,
+        uncheckedTrackColor = if (c.isDark) c.bg4 else Palette.Mist,
+        uncheckedBorderColor = if (c.isDark) c.border2 else Palette.Sage300,
     )
 }
 

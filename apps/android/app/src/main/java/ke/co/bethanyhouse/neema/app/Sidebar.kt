@@ -36,6 +36,17 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import ke.co.bethanyhouse.neema.core.ui.theme.WebIcons
+import ke.co.bethanyhouse.neema.core.ui.theme.Palette
+import ke.co.bethanyhouse.neema.core.ui.theme.scaledAtMost
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 
 data class NavItem(val id: ViewId, val icon: ImageVector, val badge: Int = 0)
 
@@ -141,15 +152,18 @@ fun NeemaSidebar(
             }
         } else {
             Row(
-                Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 10.dp),
+                Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 10.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 NeemaLogo()
                 Column(Modifier.weight(1f).padding(start = 6.dp)) {
-                    Text("Neema AI", color = Brand.TextLight, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, lineHeight = 13.sp, maxLines = 1, softWrap = false)
+                    // The wordmark is a logo: it grows with the font size only to 130%.
+                    val mark = 13.sp.scaledAtMost(1.3f)
+                    val tag = 10.sp.scaledAtMost(1.3f)
+                    Text("Neema AI", color = Brand.TextLight, fontWeight = FontWeight.SemiBold, fontSize = mark, lineHeight = mark * 1.25f, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     // Like the web's (no overflow: hidden), the tag may run into the bell's empty margin rather than be cut.
-                    Text("ADMIN PORTAL", color = Brand.TextMuted, fontWeight = FontWeight.Medium, fontSize = 10.sp, lineHeight = 14.sp, letterSpacing = 0.8.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Visible, modifier = Modifier.padding(top = 2.dp))
+                    Text("ADMIN PORTAL", color = Brand.TextMuted, fontWeight = FontWeight.Medium, fontSize = tag, lineHeight = tag * 1.4f, letterSpacing = 0.8.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Visible, modifier = Modifier.padding(top = 2.dp))
                 }
                 BellButton(bellCount, bellOpen, compact = false, onClick = onBell)
                 if (onToggleCollapse != null) NavyIconButton(WebIcons.Collapse, "Collapse sidebar", onToggleCollapse)
@@ -159,24 +173,24 @@ fun NeemaSidebar(
 
         // ── Nav ───────────────────────────────────────────────────────────
         Column(
-            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(8.dp),
+            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = if (collapsed) 6.dp else 8.dp, vertical = 8.dp),
         ) {
             if (collapsed && onToggleCollapse != null) {
                 // The web's full-width 36dp "Expand sidebar" button above the items.
                 Box(
-                    Modifier.fillMaxWidth().padding(bottom = 6.dp).height(36.dp).clip(RoundedCornerShape(10.dp))
-                        .clickable(onClick = onToggleCollapse),
+                    Modifier.fillMaxWidth().padding(bottom = 6.dp).height(48.dp).clip(RoundedCornerShape(10.dp))
+                        .clickable(role = Role.Button, onClick = onToggleCollapse),
                     contentAlignment = Alignment.Center,
                 ) { Icon(WebIcons.Expand, "Expand sidebar", tint = Brand.TextMuted, modifier = Modifier.size(14.dp)) }
             }
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 items.forEach { item -> SidebarItem(item, item.id == view, collapsed) { onSelect(item.id) } }
             }
         }
 
         // ── Footer: account ───────────────────────────────────────────────
         HorizontalDivider(color = Brand.NavyBorder)
-        Column(Modifier.padding(8.dp)) {
+        Column(Modifier.padding(horizontal = if (collapsed) 6.dp else 8.dp, vertical = 8.dp)) {
             val card = @Composable {
                 AccountCard(
                     userName, userEmail, userRole, avatarUrl, dark, onToggleDark,
@@ -189,8 +203,8 @@ fun NeemaSidebar(
             AnimatedVisibility(menuOpen && !collapsed) { Box(Modifier.padding(bottom = 8.dp)) { card() } }
             // Collapsed rail: it opens to the right (8dp past the button), bottom-aligned with the avatar.
             if (menuOpen && collapsed) {
-                // Anchored to this padded column's content (x = 8dp): 8 + 52 = the web's 60dp.
-                val dx = with(LocalDensity.current) { 52.dp.roundToPx() }
+                // Anchored to this padded column's content (x = 6dp on the rail): 6 + 54 = the web's 60dp.
+                val dx = with(LocalDensity.current) { 54.dp.roundToPx() }
                 Popup(
                     alignment = Alignment.BottomStart, offset = IntOffset(dx, 0),
                     onDismissRequest = { menuOpen = false },
@@ -201,7 +215,13 @@ fun NeemaSidebar(
             Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
                     .background(if (menuOpen) Brand.NavyHover else Color.Transparent)
-                    .clickable { menuOpen = !menuOpen }
+                    .clickable(role = Role.Button, onClickLabel = if (menuOpen) "Close account menu" else "Open account menu") { menuOpen = !menuOpen }
+                    .clearAndSetSemantics {
+                        contentDescription = "Account: ${userName.ifBlank { userEmail }}, ${userRole.ifBlank { "agent" }}"
+                        role = Role.Button
+                        onClick(if (menuOpen) "Close account menu" else "Open account menu") { menuOpen = !menuOpen; true }
+                    }
+                    .heightIn(min = 48.dp)
                     .padding(horizontal = if (collapsed) 0.dp else 8.dp, vertical = if (collapsed) 4.dp else 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = if (collapsed) Arrangement.Center else Arrangement.Start,
@@ -233,18 +253,22 @@ fun NeemaSidebar(
 
 @Composable
 private fun SidebarItem(item: NavItem, active: Boolean, collapsed: Boolean, onClick: () -> Unit) {
-    val fg = if (active) Color.White else Brand.TextMuted
+    // Navy on the amber pill: the web's white is 2.1:1 there, navy 8.3:1.
+    val fg = if (active) Brand.Navy else Brand.TextMuted
     Box(
-        Modifier.fillMaxWidth().height(40.dp).clip(RoundedCornerShape(12.dp))
+        Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(RoundedCornerShape(12.dp))
             .background(if (active) Brand.Amber else Color.Transparent)
-            .clickable(onClick = onClick),
+            .selectable(selected = active, role = Role.Tab, onClick = onClick)
+            .semantics(mergeDescendants = true) {
+                contentDescription = if (item.badge > 0) "${item.id.label}, ${item.badge} new" else item.id.label
+            },
     ) {
         Row(
-            Modifier.fillMaxSize().padding(horizontal = if (collapsed) 0.dp else 12.dp),
+            Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = if (collapsed) 0.dp else 12.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = if (collapsed) Arrangement.Center else Arrangement.Start,
         ) {
-            Icon(item.icon, item.id.label, tint = fg, modifier = Modifier.size(20.dp))
+            Icon(item.icon, null, tint = fg, modifier = Modifier.size(20.dp))
             if (!collapsed) {
                 Spacer(Modifier.width(10.dp))
                 Text(
@@ -264,31 +288,31 @@ private fun SidebarItem(item: NavItem, active: Boolean, collapsed: Boolean, onCl
 /**
  * The nav count (Sidebar.tsx / MobileNav.tsx): the full number, as the web
  * prints it. 18dp/10sp beside a label; 14dp/8sp on the collapsed rail;
- * [bottomNav] is the phone bar's 14dp/9sp.
+ * [bottomNav] is the phone bar's 14dp/9sp. Navy numerals on amber (the
+ * web's white is 2.1:1); on the amber active pill the badge turns navy.
+ * The count grows with the font size only to 130%, so it stays a badge.
  */
 @Composable
 fun AmberBadge(n: Int, onActive: Boolean = false, small: Boolean = false, onNavy: Boolean = false, bottomNav: Boolean = false) {
     val min = if (small || bottomNav) 14.dp else 18.dp
+    val onPill = onNavy || onActive
+    val size = (if (bottomNav) 9.sp else if (small) 8.sp else 10.sp).scaledAtMost(1.3f)
     Box(
         Modifier.defaultMinSize(minWidth = min, minHeight = min)
             .clip(RoundedCornerShape(50))
-            // On the amber pill an amber badge would vanish: navy when collapsed, translucent white when expanded.
-            .background(if (onNavy) Brand.Navy else if (onActive) Color.White.copy(alpha = 0.3f) else Brand.Amber)
-            .padding(horizontal = if (bottomNav) 2.dp else if (small) 0.dp else 4.dp),
+            // On the amber pill an amber badge would vanish: navy there.
+            .background(if (onPill) Brand.Navy else Brand.Amber)
+            .padding(horizontal = if (bottomNav) 3.dp else if (small) 2.dp else 5.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            "$n", color = Color.White, fontWeight = FontWeight.Bold,
-            fontSize = if (bottomNav) 9.sp else if (small) 8.sp else 10.sp,
-            lineHeight = if (bottomNav) 9.sp else if (small) 8.sp else 10.sp,
-        )
+        Text("$n", color = if (onPill) Brand.Amber else Brand.Navy, fontWeight = FontWeight.Bold, fontSize = size, lineHeight = size)
     }
 }
 
 @Composable
 private fun NavyIconButton(icon: ImageVector, label: String, onClick: () -> Unit) {
     Box(
-        Modifier.size(28.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick),
+        Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).clickable(role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) { Icon(icon, label, tint = Brand.TextMuted, modifier = Modifier.size(14.dp)) }
 }
@@ -303,20 +327,27 @@ private fun BellButton(count: Int, open: Boolean, compact: Boolean, onClick: () 
     Box(Modifier.size(if (compact) 40.dp else 36.dp)) {
         Box(
             Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp))
-                .background(if (open) Color(0xFFF0F4EC) else Color.Transparent)
-                .clickable(onClick = onClick),
+                .background(if (open) Palette.Leaf else Color.Transparent)
+                .clickable(role = Role.Button, onClick = onClick)
+                .semantics { contentDescription = if (count > 0) "Notifications, $count unread" else "Notifications" },
             contentAlignment = Alignment.Center,
         ) {
-            Icon(WebIcons.Bell, "Notifications", tint = if (open) Color(0xFF427425) else Color(0xFF8A9E80), modifier = Modifier.size(16.dp))
+            Icon(WebIcons.Bell, null, tint = if (open) Palette.Moss700 else Palette.Sage400, modifier = Modifier.size(16.dp))
         }
         if (count > 0) {
+            val size = 9.sp.scaledAtMost(1.2f)
             Box(
                 Modifier.align(Alignment.TopEnd).offset(x = 2.dp, y = (-2).dp)
                     .defaultMinSize(minWidth = 16.dp, minHeight = 16.dp).clip(RoundedCornerShape(50))
-                    .background(Color(0xFFEF4444)).border(2.dp, Color.White, RoundedCornerShape(50))
+                    .background(Palette.Red500).border(2.dp, Brand.Navy, RoundedCornerShape(50))
                     .padding(horizontal = 4.dp),
                 contentAlignment = Alignment.Center,
-            ) { Text(if (count > 9) "9+" else "$count", color = Color.White, fontSize = 9.sp, lineHeight = 9.sp, fontWeight = FontWeight.Bold) }
+            ) {
+                Text(
+                    if (count > 9) "9+" else "$count", color = Color.White, fontSize = size, lineHeight = size, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clearAndSetSemantics {},
+                )
+            }
         }
     }
 }
@@ -332,23 +363,23 @@ private fun AccountCard(
     dark: Boolean, onToggleDark: () -> Unit,
     onProfile: () -> Unit, onSettings: () -> Unit, onSignOut: () -> Unit,
 ) {
-    val hairline = Color(0xFFEDF0EA)
+    val hairline = Palette.Hairline2
     val shape = RoundedCornerShape(14.dp)
     Column(
         Modifier.fillMaxWidth().shadow(12.dp, shape).clip(shape).background(Color.White)
-            .border(1.dp, Color(0xFFE8EBE3), shape),
+            .border(1.dp, Palette.Hairline, shape),
     ) {
         Row(Modifier.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             CompositionLocalProvider(LocalNeemaColors provides LightNeema) {
                 Avatar(name.ifBlank { "User" }, avatarUrl, size = 40.dp)
             }
             Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                Text(name.ifBlank { "—" }, fontSize = 13.sp, lineHeight = 17.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1C2917), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(email.ifBlank { "—" }, fontSize = 11.sp, lineHeight = 15.sp, color = Color(0xFF8A9E80), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+                Text(name.ifBlank { "—" }, fontSize = 13.sp, lineHeight = 17.sp, fontWeight = FontWeight.SemiBold, color = Palette.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(email.ifBlank { "—" }, fontSize = 11.sp, lineHeight = 15.sp, color = Palette.Sage500, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
                 Text(
                     role.uppercase(), fontSize = 9.sp, lineHeight = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.72.sp, color = Brand.Moss,
-                    modifier = Modifier.padding(top = 6.dp).clip(RoundedCornerShape(50)).background(Color(0xFFF0F9EC))
-                        .border(1.dp, Color(0xFFC5E7B1), RoundedCornerShape(50)).padding(horizontal = 8.dp, vertical = 2.dp),
+                    modifier = Modifier.padding(top = 6.dp).clip(RoundedCornerShape(50)).background(Palette.Moss50)
+                        .border(1.dp, Palette.Moss200, RoundedCornerShape(50)).padding(horizontal = 8.dp, vertical = 2.dp),
                 )
             }
         }
@@ -358,27 +389,28 @@ private fun AccountCard(
             MenuRow(WebIcons.Settings, "Settings", onClick = onSettings)
         }
         HorizontalDivider(color = hairline)
+        // One switch for TalkBack: the row and its pill toggle together.
         Row(
-            Modifier.fillMaxWidth().clickable(onClick = onToggleDark).padding(horizontal = 14.dp, vertical = 10.dp),
+            Modifier.fillMaxWidth().toggleable(value = dark, role = Role.Switch, onValueChange = { onToggleDark() })
+                .heightIn(min = 48.dp).padding(horizontal = 14.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(if (dark) WebIcons.Sun else WebIcons.Moon, null, tint = Color(0xFFA0AEC0), modifier = Modifier.size(14.dp))
-            Text(if (dark) "Light mode" else "Dark mode", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Color(0xFF4A5568), modifier = Modifier.weight(1f).padding(start = 8.dp))
-            ThemePill(dark, onToggleDark)
+            Icon(if (dark) WebIcons.Sun else WebIcons.Moon, null, tint = Palette.Pewter600, modifier = Modifier.size(14.dp))
+            Text(if (dark) "Light mode" else "Dark mode", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Palette.Pewter700, modifier = Modifier.weight(1f).padding(start = 8.dp))
+            ThemePill(dark)
         }
         HorizontalDivider(color = hairline)
         Column(Modifier.padding(6.dp)) { MenuRow(WebIcons.Logout, "Sign out", danger = true, onClick = onSignOut) }
     }
 }
 
-/** The popup's 32×18 toggle: moss when dark, sage otherwise, a 14dp white knob. */
+/** The popup's 32×18 toggle: moss when dark, sage otherwise, a 14dp white knob. Its row is the switch. */
 @Composable
-private fun ThemePill(on: Boolean, onToggle: () -> Unit) {
+private fun ThemePill(on: Boolean) {
     val knob by animateDpAsState(if (on) 14.dp else 2.dp, label = "knob")
     Box(
         Modifier.size(32.dp, 18.dp).clip(RoundedCornerShape(50))
-            .background(if (on) Color(0xFF589B31) else Color(0xFFDDE4D6))
-            .clickable(onClick = onToggle),
+            .background(if (on) Palette.Moss600 else Palette.Sage300),
     ) {
         Box(
             Modifier.padding(start = knob, top = 2.dp).size(14.dp)
@@ -390,12 +422,13 @@ private fun ThemePill(on: Boolean, onToggle: () -> Unit) {
 @Composable
 private fun MenuRow(icon: ImageVector, label: String, danger: Boolean = false, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 36.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick)
+        Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        val c = if (danger) Color(0xFFEF4444) else Color(0xFF4A5568)
-        Icon(icon, null, tint = if (danger) c else Color(0xFF718096), modifier = Modifier.size(14.dp).alpha(0.65f))
+        // red-600 for the destructive row: the web's red-500 is 3.8:1 on white.
+        val c = if (danger) Palette.Red600 else Palette.Pewter700
+        Icon(icon, null, tint = if (danger) c else Palette.Pewter600, modifier = Modifier.size(14.dp).alpha(if (danger) 1f else 0.65f))
         Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = c, modifier = Modifier.padding(start = 10.dp))
     }
 }

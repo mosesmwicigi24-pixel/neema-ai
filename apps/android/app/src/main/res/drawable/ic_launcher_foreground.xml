@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- The Neema chat bubble, 48dp across and centred in the 66dp safe zone of
+     the 108dp adaptive canvas (so no launcher mask clips its tail). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <group android:translateX="30" android:translateY="30">
+    <group android:scaleX="1.2" android:scaleY="1.2" android:translateX="25.2" android:translateY="25.8">
         <path android:fillColor="#FFFFFF"
             android:pathData="M24,4C12.95,4 4,11.61 4,21c0,4.46 2.03,8.52 5.34,11.55L7,43l11.2,-5.6C20.06,37.8 22,38 24,38c11.05,0 20,-7.61 20,-17S35.05,4 24,4z" />
         <path android:fillColor="#589B31"

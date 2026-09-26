@@ -6,6 +6,9 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
+import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
+import androidx.compose.runtime.DisposableEffect
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -49,6 +52,20 @@ class MainActivity : ComponentActivity() {
             val session by dash.session.collectAsStateWithLifecycle()
             val expired by dash.sessionExpired.collectAsStateWithLifecycle()
             val size = calculateWindowSizeClass(this)
+            // System bar icons follow what is drawn under them, not the phone's
+            // own theme: light over the night login, the navy frame of a
+            // tablet's docked sidebar, and the app's dark mode; dark over the
+            // white phone header / bottom bar by day.
+            val wide = size.widthSizeClass != WindowWidthSizeClass.Compact
+            val lightStatusIcons = session == null || dark || wide
+            val lightNavIcons = session == null || dark
+            DisposableEffect(lightStatusIcons, lightNavIcons) {
+                enableEdgeToEdge(
+                    statusBarStyle = barStyle(lightStatusIcons),
+                    navigationBarStyle = barStyle(lightNavIcons),
+                )
+                onDispose {}
+            }
             // Ask for notifications once, after the first sign-in (a login
             // screen asking out of nowhere reads as spam). Denied is final:
             // alerts still reach the bell and the toast in the app, and
@@ -74,6 +91,11 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    /** Transparent bars (every screen draws its own colour under them) with light or dark icons. */
+    private fun barStyle(lightIcons: Boolean): SystemBarStyle =
+        if (lightIcons) SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+        else SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
 
     private fun maybeAskForNotifications() {
         if (Build.VERSION.SDK_INT < 33 || Notifier.canPost(this)) return

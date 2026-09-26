@@ -95,6 +95,8 @@ object WebIcons {
     // The offline banner: lucide's wifi-off, and a plain check for "back online".
     val WifiOff = icon("wifi_off", 2f, "M12 20h.01M8.5 16.429a5 5 0 0 1 7 0M5 12.859a10 10 0 0 1 5.17-2.69M19 12.859a10 10 0 0 0-2.007-1.523M2 8.82a15 15 0 0 1 4.177-2.643M22 8.82a15 15 0 0 0-11.288-3.764M2 2l20 20")
     val Check = icon("check", 2.5f, "M5 13l4 4L19 7")
+    val Close = icon("close", 2.5f, "M6 18L18 6M6 6l12 12")
+    val Exclamation = icon("exclamation", 3f, "M12 6v7m0 5h.01")
     val AlertCircle =icon("alert_circle", 2f, "M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z")
     val Warning = icon("warning", 1.8f, "M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z")
 }
