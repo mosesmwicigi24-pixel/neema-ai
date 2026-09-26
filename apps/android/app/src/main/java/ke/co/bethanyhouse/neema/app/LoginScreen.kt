@@ -47,6 +47,7 @@ import ke.co.bethanyhouse.neema.core.auth.AuthException
 import ke.co.bethanyhouse.neema.core.ui.theme.WebIcons
 import ke.co.bethanyhouse.neema.core.ui.theme.LightNeema
 import ke.co.bethanyhouse.neema.core.ui.theme.Palette
+import ke.co.bethanyhouse.neema.core.ui.theme.NeemaFont
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -320,7 +321,7 @@ private fun NightField(
     val focused by source.collectIsFocusedAsState()
     BasicTextField(
         value = value, onValueChange = onChange, singleLine = true,
-        textStyle = TextStyle(color = Parchment, fontSize = 14.sp),
+        textStyle = TextStyle(color = Parchment, fontSize = 14.sp, fontFamily = NeemaFont),
         cursorBrush = SolidColor(Moss), keyboardOptions = keyboard, keyboardActions = actions,
         visualTransformation = visual, interactionSource = source,
         modifier = Modifier.fillMaxWidth().semantics { contentDescription = label },
@@ -434,7 +435,7 @@ internal fun SessionExpiredCard(
                 val focused by source.collectIsFocusedAsState()
                 BasicTextField(
                     value = password, onValueChange = { password = it }, singleLine = true,
-                    textStyle = TextStyle(color = stone900, fontSize = 14.sp, lineHeight = 20.sp), cursorBrush = SolidColor(Palette.Green500),
+                    textStyle = TextStyle(color = stone900, fontSize = 14.sp, lineHeight = 20.sp, fontFamily = NeemaFont), cursorBrush = SolidColor(Palette.Green500),
                     visualTransformation = PasswordVisualTransformation(), interactionSource = source,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { submit() }),
