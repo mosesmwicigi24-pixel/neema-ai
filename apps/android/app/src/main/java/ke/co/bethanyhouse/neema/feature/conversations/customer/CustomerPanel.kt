@@ -181,6 +181,10 @@ private fun ColumnScope.PanelBody(
                     LoadErrorBanner(vm, refreshing)
                     Hero(vm, ctx, saving, conversation, onOpenIdentity)
                     HorizontalDivider(color = c.hairline)
+                    if (vm.callsKey() != null) {
+                        CallsSection(vm, dash)
+                        HorizontalDivider(color = c.hairline)
+                    }
                     QuickStats(ctx)
                     HorizontalDivider(color = c.hairline)
                     if (!pinEnquiry) EnquiryCard(vm, canProduce, inline = true)
@@ -390,11 +394,21 @@ private fun Hero(
         }
 
         // Reach-out actions: WhatsApp voice call + the approved template (re-opens
-        // the chat / requests call permission). Only for a customer with a valid phone.
-        if (phoneDigits != null && ctx.canReply) {
+        // the chat / requests call permission). A WhatsApp call needs a valid phone;
+        // on Messenger / Instagram (no business calling there) Call explains that
+        // and offers WhatsApp instead.
+        val platform = callPlatformOf(conversation.channel)
+        var platformSheet by remember { mutableStateOf(false) }
+        if (platformSheet && platform != null) {
+            CallOnWhatsAppSheet(
+                platform, ke.co.bethanyhouse.neema.feature.calls.firstNameOf(p.name), phoneDigits,
+                onCall = { phoneDigits?.let(vm::call) }, onAsk = vm::askForWhatsAppNumber, onDismiss = { platformSheet = false },
+            )
+        }
+        if ((phoneDigits != null || platform != null) && ctx.canReply) {
             Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
-                    onClick = { vm.call(phoneDigits) },
+                    onClick = { if (platform != null) platformSheet = true else phoneDigits?.let(vm::call) },
                     // One call at a time: a second tap while dialling would say "Already in a call".
                     enabled = !callBusy,
                     modifier = Modifier.weight(1f).webHeight(36.dp),
@@ -409,7 +423,7 @@ private fun Hero(
                     Spacer(Modifier.width(6.dp))
                     Text(if (callBusy) "Calling…" else "Call", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                OutlinedButton(
+                if (phoneDigits != null) OutlinedButton(
                     onClick = { vm.sendTemplate(phoneDigits) },
                     enabled = !templateBusy,
                     modifier = Modifier.weight(1f).webHeight(36.dp),

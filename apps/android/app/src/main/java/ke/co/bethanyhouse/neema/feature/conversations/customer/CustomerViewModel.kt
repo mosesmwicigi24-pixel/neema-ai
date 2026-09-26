@@ -4,7 +4,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import ke.co.bethanyhouse.neema.app.DashboardViewModel
 import ke.co.bethanyhouse.neema.app.ToastType
+import ke.co.bethanyhouse.neema.core.model.Call
 import ke.co.bethanyhouse.neema.core.model.Conversation
+import ke.co.bethanyhouse.neema.core.net.NeemaJson
+import ke.co.bethanyhouse.neema.feature.calls.firstNameOf
 import ke.co.bethanyhouse.neema.core.net.ApiException
 import ke.co.bethanyhouse.neema.feature.conversations.isWebVisitor
 import kotlinx.coroutines.CancellationException
@@ -50,7 +53,11 @@ class CustomerViewModel(
     fetchProfile: (suspend (key: String, channel: String?) -> CustomerProfile)? = null,
     /** Places the WhatsApp voice call (the web's callCtx.initiateCall); swappable for tests. */
     private val placeCall: suspend (to: String, name: String?) -> Result<Unit> =
-        { to, name -> dash.container.calls.initiateCall(to, name) },
+        { to, name ->
+            // The call screen's "Open chat" opens this thread when it is the customer's WhatsApp one.
+            val chat = conversation.id.takeIf { conversation.channel == "whatsapp" && !it.startsWith("call:") }
+            dash.container.calls.initiateCall(to, name, chat)
+        },
 ) : ViewModel() {
     private val crm = CrmApi(dash.api.http)
     private val fetchProfile: suspend (String, String?) -> CustomerProfile = fetchProfile ?: { k, ch -> crm.profile(k, ch) }
@@ -161,6 +168,11 @@ class CustomerViewModel(
     private val _callBusy = MutableStateFlow(false)
     val callBusy: StateFlow<Boolean> = _callBusy.asStateFlow()
 
+    private val _recentCalls = MutableStateFlow<List<Call>?>(null)
+    /** This customer's last calls — the panel's "Calls" section (null until first read). */
+    val recentCalls: StateFlow<List<Call>?> = _recentCalls.asStateFlow()
+    private var callsJob: Job? = null
+
     // Reload bookkeeping — declared before init, whose load() already uses it.
     private var liveJob: Job? = null
     private var shownBefore = false
@@ -193,6 +205,8 @@ class CustomerViewModel(
     companion object {
         /** Live triggers landing within this window cost one GET. */
         const val RELOAD_COALESCE_MS = 400L
+        /** How many calls the panel's "Calls" section lists. */
+        const val RECENT_CALLS = 3
     }
 
     init {
@@ -935,6 +949,67 @@ class CustomerViewModel(
         }
     }
 
+    // ── Calls ────────────────────────────────────────────────────────────────
+
+    /** The WhatsApp number this customer's calls are logged under (null: nobody to call). */
+    fun callsKey(): String? =
+        conversation.waId?.takeIf { conversation.channel == "whatsapp" }?.let(::realPhoneDigits)
+            ?: realPhoneDigits(_profile.value?.phone)
+
+    /** GET /admin/calls?wa_id= — the last [RECENT_CALLS] calls. A failure keeps what is shown. */
+    fun loadCalls() {
+        val wa = callsKey() ?: return
+        if (callsJob?.isActive == true) return
+        callsJob = viewModelScope.launch {
+            try {
+                val rows = dash.api.calls.list(waId = wa, limit = RECENT_CALLS)
+                _recentCalls.value = rows.filter { it.waId == wa }.take(RECENT_CALLS)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Throwable) {
+                if (_recentCalls.value == null) _recentCalls.value = emptyList()
+            }
+        }
+    }
+
+    /**
+     * While the section is on screen: a `call_update` for this customer lands
+     * in place; any other call frame reads the list again (a burst is one read).
+     */
+    suspend fun watchCalls() {
+        var pending: Job? = null
+        dash.container.socket.events.collect { e ->
+            val type = e["type"]?.let { runCatching { (it as JsonPrimitive).content }.getOrNull() }
+            if (type != "call_update" && type != "call_ended" && type != "incoming_call" && type != "call_answered") return@collect
+            val wa = callsKey() ?: return@collect
+            if (type == "call_update") {
+                val row = (e["call"] as? JsonObject)?.let {
+                    runCatching { NeemaJson.decodeFromJsonElement(Call.serializer(), it) }.getOrNull()
+                }
+                if (row != null && row.waId == wa) {
+                    val cur = _recentCalls.value.orEmpty()
+                    _recentCalls.value = (if (cur.any { it.callId == row.callId }) cur.map { if (it.callId == row.callId) row else it } else listOf(row) + cur)
+                        .take(RECENT_CALLS)
+                    return@collect
+                }
+                if (row != null) return@collect
+            }
+            if (pending?.isActive == true) return@collect
+            pending = viewModelScope.launch { delay(500); loadCalls() }
+        }
+    }
+
+    /**
+     * "Ask for their WhatsApp number" (a Messenger / Instagram customer with no
+     * phone on file): the question goes in this thread's composer — never sent
+     * by itself.
+     */
+    fun askForWhatsAppNumber() {
+        val first = firstNameOf(_profile.value?.name ?: conversation.name)
+        dash.composerPrefill.value = conversation.id to
+            "Hi${if (first != null) " $first" else ""}, could you share your WhatsApp number? We can give you a call there."
+    }
+
     // ── Reach-out: invite, template, call ────────────────────────────────────
     // Only ever to a real phone (realPhoneDigits): never a web visitor's hash.
 
@@ -1001,7 +1076,12 @@ class CustomerViewModel(
         }
     }
 
-    /** WhatsApp voice call; with no call permission yet, ask the customer for it automatically. One at a time. */
+    /**
+     * WhatsApp voice call. One at a time. The call screen carries what happens
+     * next — "hasn't allowed calls yet" offers "Send call request", which the
+     * agent taps (it messages the customer, so it is never sent by itself);
+     * only a refusal the screen doesn't show is a toast.
+     */
     fun call(digits: String) {
         val p = _profile.value ?: return
         // The web derives these digits from profile.phone; a profile without a real phone has no reach-out.
@@ -1010,27 +1090,9 @@ class CustomerViewModel(
         viewModelScope.launch {
             try {
                 val r = placeCall(digits, p.name)
-                if (r.isSuccess) return@launch
-                val err = r.exceptionOrNull()?.message.orEmpty()
-                val lower = err.lowercase()
-                // "Microphone permission" is the agent's own device, not the customer's consent.
-                if ("permission" in lower && "microphone" !in lower) {
-                    try {
-                        dash.api.calls.requestPermission(digits)
-                        val first = p.name?.split(" ")?.firstOrNull()?.ifEmpty { null } ?: "them"
-                        say("Asked $first for permission to call — you can call once they tap Allow.")
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Throwable) {
-                        if (e.mayHaveLanded) {
-                            say("Couldn't confirm the call request went out — check the thread before asking again.", ToastType.Info)
-                        } else {
-                            say("Couldn't send the call request — ${e.reason()}", ToastType.Error)
-                        }
-                    }
-                } else {
-                    say(err.ifEmpty { "Couldn't place the call" }, ToastType.Error)
-                }
+                val err = r.exceptionOrNull() ?: return@launch
+                if ((err as? ke.co.bethanyhouse.neema.feature.calls.CallManager.CallError)?.shown == true) return@launch
+                say(err.message?.ifEmpty { null } ?: "Couldn't place the call", ToastType.Error)
             } finally {
                 _callBusy.value = false
             }

@@ -46,9 +46,24 @@ internal object CallIcons {
     /** Android only (earpiece ↔ loudspeaker), drawn in the same stroke style. */
     val Speaker = build("call_speaker", 2f, "M11 5L6 9H2v6h4l5 4V5z", "M15.54 8.46a5 5 0 010 7.07", "M19.07 4.93a10 10 0 010 14.14")
 
+    // The call screen's other controls (same stroke style, feather-shaped).
+    val Minimise = build("call_minimise", 2f, "M6 9l6 6 6-6")
+    val Bluetooth = build("call_bluetooth", 2f, "M7 7l10 10-5 5V2l5 5L7 17")
+    val Headset = build("call_headset", 2f, "M3 18v-6a9 9 0 0118 0v6",
+        "M21 19a2 2 0 01-2 2h-1a2 2 0 01-2-2v-3a2 2 0 012-2h3z", "M3 19a2 2 0 002 2h1a2 2 0 002-2v-3a2 2 0 00-2-2H3z")
+    val Earpiece = build("call_earpiece", 2f, "M7 2h10a2 2 0 012 2v16a2 2 0 01-2 2H7a2 2 0 01-2-2V4a2 2 0 012-2z", "M12 18h.01")
+    /** Reconnecting: never colour alone — this icon and the words. */
+    val NoSignal = build("call_no_signal", 2f, "M1 1l22 22", "M16.72 11.06A10.94 10.94 0 0119 12.55", "M5 12.55a10.94 10.94 0 015.17-2.39",
+        "M10.71 5.05A16 16 0 0122.58 9", "M1.42 9a15.91 15.91 0 014.7-2.88", "M8.53 16.11a6 6 0 016.95 0", "M12 20h.01")
+    val Check = build("call_check", 2.2f, "M5 13l4 4L19 7")
+    val Close = build("call_close", 2f, "M18 6L6 18M6 6l12 12")
+
     // CallsView.tsx DirIcon (stroke 2.2).
     val DirIn = build("call_dir_in", 2.2f, "M17 7L7 17M7 17h7M7 17V10")
     val DirBack = build("call_dir_back", 2.2f, "M9 14l-4-4 4-4M5 10h10a4 4 0 014 4v2")
+    val DirOut = build("call_dir_out", 2.2f, "M7 17L17 7M17 7h-7M17 7v7")
+    /** A missed call: the arrow that turns back (as the phone's call log draws it). */
+    val DirMissed = build("call_dir_missed", 2.2f, "M3 7l7 7 8-8", "M13 6h5v5")
 
     // CallsView.tsx row buttons (stroke 2).
     val Transcript = build("call_transcript", 2f, "M4 6h16M4 12h16M4 18h10")

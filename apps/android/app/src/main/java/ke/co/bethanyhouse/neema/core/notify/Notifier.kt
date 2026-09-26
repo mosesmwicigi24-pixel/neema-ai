@@ -66,7 +66,9 @@ object Notifier {
     const val EXTRA_VIEW = "view"                 // a ViewId name
     const val EXTRA_NOTIFICATION = "notification" // the bell entry's id, marked read on tap
     const val EXTRA_CALL_ID = "call_id"
-    const val EXTRA_CALL_ACTION = "call_action"   // "show" | "answer" | "decline"
+    const val EXTRA_CALL_ACTION = "call_action"   // "show" | "answer" | "decline" | "end"
+    /** Broadcast (package-only) of the ongoing-call notification's End; CallAlert's receiver hangs up. */
+    const val ACTION_END_CALL = "ke.co.bethanyhouse.neema.action.END_CALL"
 
     fun createChannels(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)

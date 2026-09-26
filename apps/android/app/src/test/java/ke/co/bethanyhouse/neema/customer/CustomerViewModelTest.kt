@@ -491,17 +491,15 @@ class CustomerViewModelTest {
         assertEquals(before, toasts.size)
     }
 
-    @Test fun noCallPermissionYetAsksTheCustomerForIt() {
-        val vm = vm(placeCall = { _, _ ->
-            Result.failure(IllegalStateException("Customer hasn't granted call permission. Send the WhatsApp template first."))
-        })
+    @Test fun noCallPermissionIsNeverAskedForByItself() {
+        // The call screen says it and offers "Send call request" (it messages the
+        // customer): the panel neither sends it nor toasts over the card.
+        val vm = vm(placeCall = { _, _ -> Result.failure(CallManager.CallError(CallManager.NO_CALL_PERMISSION, shown = true)) })
+        val before = toasts.size
         vm.call(CustomerFixtures.PETER)
-        assertEquals("""{"to":"254712345678"}""", calls("POST", "/admin/calls/request-permission").single().body)
-        assertEquals("Asked Fr. for permission to call — you can call once they tap Allow.", lastToast()!!.message)
-
-        fake.on("POST", "/admin/calls/request-permission", code = 500, body = "{}")
-        vm.call(CustomerFixtures.PETER)
-        assertEquals("Couldn't send the call request — the server had a problem. Try again in a moment.", lastToast()!!.message)
+        assertTrue(calls("POST", "/admin/calls/request-permission").isEmpty())
+        assertEquals(before, toasts.size)
+        assertFalse(vm.callBusy.value)
     }
 
     @Test fun aBlockedMicrophoneIsTheAgentsProblemNotTheCustomers() {

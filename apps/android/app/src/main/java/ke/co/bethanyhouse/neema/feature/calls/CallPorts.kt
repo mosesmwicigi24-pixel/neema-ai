@@ -4,7 +4,9 @@ import ke.co.bethanyhouse.neema.core.api.NeemaApi
 import ke.co.bethanyhouse.neema.core.api.UploadFile
 import ke.co.bethanyhouse.neema.core.model.Call
 import ke.co.bethanyhouse.neema.core.model.CallOffer
+import ke.co.bethanyhouse.neema.core.model.CallPermission
 import ke.co.bethanyhouse.neema.core.model.IceConfig
+import kotlinx.coroutines.flow.StateFlow
 import java.io.File
 
 /*
@@ -18,6 +20,8 @@ import java.io.File
 /** The backend calls the softphone makes (callsApi in lib/api.ts, NeemaApi.calls here). */
 interface CallApi {
     suspend fun list(): List<Call>
+    /** GET /admin/calls/{id}: one call's row now (the re-sync after the phone was offline). */
+    suspend fun get(callId: String): Call
     suspend fun iceConfig(): IceConfig
     suspend fun offer(callId: String): CallOffer
     suspend fun answer(callId: String, sdp: String)
@@ -25,7 +29,10 @@ interface CallApi {
     suspend fun callback(callId: String)
     /** Returns the new call's id. */
     suspend fun connect(to: String, sdp: String, name: String?): String
-    suspend fun requestPermission(to: String)
+    /** GET /admin/calls/permission: has this customer allowed business calls? */
+    suspend fun permission(waId: String): CallPermission
+    /** Sends WhatsApp's call-permission request; returns the permission now on file (null when the server didn't say). */
+    suspend fun requestPermission(to: String): CallPermission?
     /** POST /admin/calls/{id}/recording — pass [UploadFile.of] a File so it streams from disk. */
     suspend fun uploadRecording(callId: String, file: UploadFile)
 }
@@ -33,13 +40,15 @@ interface CallApi {
 /** [CallApi] over the real HTTP client. */
 class NeemaCallApi(private val api: NeemaApi) : CallApi {
     override suspend fun list() = api.calls.list()
+    override suspend fun get(callId: String) = api.calls.get(callId)
     override suspend fun iceConfig() = api.calls.iceConfig()
     override suspend fun offer(callId: String) = api.calls.offer(callId)
     override suspend fun answer(callId: String, sdp: String) { api.calls.answer(callId, sdp) }
     override suspend fun terminate(callId: String) { api.calls.terminate(callId) }
     override suspend fun callback(callId: String) { api.calls.callback(callId) }
     override suspend fun connect(to: String, sdp: String, name: String?) = api.calls.connect(to, sdp, name).callId
-    override suspend fun requestPermission(to: String) { api.calls.requestPermission(to) }
+    override suspend fun permission(waId: String) = api.calls.permission(waId)
+    override suspend fun requestPermission(to: String) = api.calls.requestPermission(to).permission
     override suspend fun uploadRecording(callId: String, file: UploadFile) { api.calls.uploadRecording(callId, file) }
 }
 
@@ -107,10 +116,34 @@ interface CallRinger {
     fun cancelIncoming()
 }
 
-/** In-call audio routing (communication mode, focus, earpiece/speaker) and the mic foreground service. */
+/** Where a call's audio plays: the phone's earpiece, its loudspeaker, a wired headset or a Bluetooth one. */
+enum class AudioRouteKind { Earpiece, Speaker, Wired, Bluetooth }
+
+/** One output a call can use ([name]: the Bluetooth device's own name, when the system gives one). */
+data class AudioRoute(val kind: AudioRouteKind, val name: String? = null) {
+    /** The words on the audio button and in its list. */
+    val label: String get() = when (kind) {
+        AudioRouteKind.Earpiece -> "Phone"
+        AudioRouteKind.Speaker -> "Speaker"
+        AudioRouteKind.Wired -> "Headset"
+        AudioRouteKind.Bluetooth -> name?.trim()?.takeIf { it.isNotEmpty() } ?: "Bluetooth"
+    }
+    val isHeadset: Boolean get() = kind == AudioRouteKind.Wired || kind == AudioRouteKind.Bluetooth
+
+    companion object {
+        val Earpiece = AudioRoute(AudioRouteKind.Earpiece)
+        val Speaker = AudioRoute(AudioRouteKind.Speaker)
+    }
+}
+
+/**
+ * In-call audio (communication mode, focus, the output route) and the mic
+ * foreground service. Which route a call uses is [CallManager]'s rule; this
+ * port only reports what is plugged in and applies the choice.
+ */
 interface CallAudio {
-    /** A call is connecting: communication mode, audio focus, the chosen route. */
-    fun enter(speaker: Boolean)
+    /** A call is starting: communication mode, audio focus, and [route]. */
+    fun enter(route: AudioRoute)
     /**
      * The microphone is live on the call (the agent allowed it): keep capturing
      * in the background (the microphone-type foreground service). Never called
@@ -118,5 +151,11 @@ interface CallAudio {
      */
     fun micLive()
     fun leave()
-    fun setSpeaker(on: Boolean)
+    /** Plays the call through [route] (one of [routes]). */
+    fun select(route: AudioRoute)
+    /**
+     * The outputs a call can use right now, earpiece / speaker first, then any
+     * headset — updated as headsets are plugged in, paired or unplugged.
+     */
+    val routes: StateFlow<List<AudioRoute>>
 }

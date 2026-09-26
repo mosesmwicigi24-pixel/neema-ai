@@ -55,6 +55,8 @@ internal sealed interface TRow { val key: String }
 @Immutable internal data class TEscalated(val msg: ThreadMsg, val reason: String, override val key: String = msg.id) : TRow
 @Immutable internal data class TFlag(val msg: ThreadMsg, override val key: String = msg.id) : TRow
 @Immutable internal data class TPill(val msg: ThreadMsg, override val key: String = msg.id) : TRow
+/** A WhatsApp call where it happened: the pill, and its summary card when there is one. */
+@Immutable internal data class TCall(val msg: ThreadMsg, override val key: String = msg.id) : TRow
 @Immutable internal data class TNote(val msg: ThreadMsg, override val key: String = msg.id) : TRow
 @Immutable internal data class TBubble(val msg: ThreadMsg, val album: List<ThreadMsg>?, override val key: String = msg.id) : TRow
 
@@ -126,6 +128,7 @@ internal fun buildThreadRows(sorted: List<ThreadMsg>, unreadSnap: Int): List<TRo
                         TEscalated(msg, msg.eventReason ?: "AI could not continue — agent needed")
                     }
                     kind == "flag" -> TFlag(msg)
+                    kind == "call" -> TCall(msg)
                     kind == "intercept" -> if (escalationShown) null else {
                         escalationShown = true
                         val hasInboundMedia = sorted.subList(0, idx).any { it.inbound && it.mediaType != null }
@@ -159,6 +162,8 @@ internal class ThreadCallbacks(
     /** A "Not sent" bubble: send it again / take the words back to edit. */
     val onRetrySend: (String) -> Unit = {},
     val onEditFailed: (String) -> Unit = {},
+    /** A call card's "Use as reply": the AI's follow-up into the composer (never sent by itself). */
+    val onUseAsReply: (String) -> Unit = {},
 )
 
 @Composable
@@ -306,6 +311,7 @@ private fun ThreadRowView(row: TRow, channel: String?, recovered: Map<String, St
             }
         }
         is TBubble -> MessageBubble(row.msg, row.album, channel, recovered, brokenVideos, cb)
+        is TCall -> ThreadCallEvent(row.msg, cb.onUseAsReply)
     }
 }
 

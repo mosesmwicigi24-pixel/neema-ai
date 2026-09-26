@@ -106,8 +106,8 @@ class CallLifecycleTest {
         advanceTimeBy(1_000); runCurrent()
         assertEquals(6, r.state.seconds)
         r.calls.hangup(); r.settle()
-        advanceTimeBy(1_500); runCurrent()
         assertNull(r.calls.liveSinceForTest)
+        advanceTimeBy(1_500); runCurrent()
         advanceTimeBy(15_000); runCurrent()
         r.live()
         advanceTimeBy(1_001); runCurrent()
@@ -122,7 +122,7 @@ class CallLifecycleTest {
         assertEquals(CallPhase.Ended, r.state.phase)
         advanceTimeBy(1_100); runCurrent()
         r.foreground.value = true; r.settle()
-        assertEquals("not a stale live card", CallPhase.Idle, r.state.phase)
+        assertFalse("not a stale live card", r.state.live)
         assertFalse(r.audio.inCall)
     }
 
@@ -223,19 +223,20 @@ class SweepingMedia : ke.co.bethanyhouse.neema.feature.calls.CallMedia {
 class CallsConsoleLifecycleTest {
     @get:Rule val main = MainDispatcherRule()
     @get:Rule val paparazzi = Paparazzi()
+    @get:Rule val clock = ke.co.bethanyhouse.neema.testing.PinnedClock()
 
     private fun fake() = FakeNeema.withFixtures().also(CallsFixtures::install)
 
-    @Test fun missedFilterAndOpenCallerSurviveProcessDeath() {
+    @Test fun followUpsFilterAndOpenCallSurviveProcessDeath() {
         val a = CallsViewModel(dashboard(paparazzi.context, fake()))
-        a.missedOnly.value = true
+        a.followUpsOnly.value = true
         a.select(a.calls.value!!.first { it.id == CallsFixtures.K1 })
         // The new process: the log hasn't loaded when the screen restores.
         val f = fake()
         f.on("GET", "/admin/calls", code = 500, body = "{}")
         val b = CallsViewModel(dashboard(paparazzi.context, f))
         paparazzi.processDeath(a, b)
-        assertTrue(b.missedOnly.value)
+        assertTrue(b.followUpsOnly.value)
         assertNull("waits for its row", b.selected.value)
         f.on("GET", "/admin/calls", body = CallsFixtures.calls)
         b.refresh()

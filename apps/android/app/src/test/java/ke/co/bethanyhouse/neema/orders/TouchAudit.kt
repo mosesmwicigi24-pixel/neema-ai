@@ -76,6 +76,13 @@ object Devices {
     /** ~600dp wide: an unfolded foldable / small tablet. */
     val Foldable = DeviceConfig.NEXUS_7
     val TabletLandscape = DeviceConfig.PIXEL_C
+    /** A phone on its side: short and wide. */
+    val PhoneLandscape = DeviceConfig.PIXEL_6.copy(
+        screenWidth = DeviceConfig.PIXEL_6.screenHeight, screenHeight = DeviceConfig.PIXEL_6.screenWidth,
+        orientation = ScreenOrientation.LANDSCAPE,
+    )
+    /** 320dp wide at 200% text: the narrowest phone at the largest accessibility font. */
+    val Narrow320HugeText = DeviceConfig.NEXUS_5.copy(screenWidth = 960, fontScale = 2.0f)
     val TabletPortrait = DeviceConfig.PIXEL_C.copy(
         screenWidth = DeviceConfig.PIXEL_C.screenHeight, screenHeight = DeviceConfig.PIXEL_C.screenWidth,
         orientation = ScreenOrientation.PORTRAIT,

@@ -39,10 +39,79 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
+import ke.co.bethanyhouse.neema.core.net.NeemaJson
 import java.io.File
 
-/** idle | ringing | connecting | in_call | ended (lib/callContext.tsx). */
-enum class CallPhase { Idle, Ringing, Connecting, InCall, Ended }
+/**
+ * Where the call on this phone is (docs/CALLING_UX.md §3). Exactly one at a
+ * time; the words on screen are always the phase's own ([statusText]).
+ * "Reconnecting" is [CallUiState.reconnecting] on a live call (the timer keeps
+ * the call's true length through it); "ending" never shows — hang-up ends the
+ * call on this phone at once and the terminate follows in the background.
+ */
+enum class CallPhase {
+    Idle,
+    /** Ringing this phone (inbound). */
+    Ringing,
+    /** Outbound: building the offer, asking Meta to place the call ("Calling…"). */
+    Placing,
+    /** Outbound: Meta is ringing the customer ("Ringing…"). */
+    RingingOut,
+    /** Answered, the media not flowing yet ("Connecting…"). */
+    Connecting,
+    /** Media flowing; the timer runs from here. */
+    InCall,
+    /** The wrap-up card: the [CallUiState.outcome] and what to do next. */
+    Ended,
+}
+
+/** How a call ended, as the wrap-up card says it (the §3 table). */
+sealed interface CallOutcome {
+    /**
+     * How long the wrap-up stays by itself. Null: until the agent acts or
+     * dismisses it — the team still owes the customer something.
+     */
+    val autoCloseMs: Long? get() = null
+
+    data object Completed : CallOutcome { override val autoCloseMs get() = 6_000L }
+    /** Another agent (or this agent on another device) took it. */
+    data class AnsweredElsewhere(val agent: String?) : CallOutcome { override val autoCloseMs get() = 4_000L }
+    /** Declined for the whole team; [agent] null when it was this agent. */
+    data class Declined(val agent: String? = null) : CallOutcome { override val autoCloseMs get() = 3_000L }
+    /** The caller gave up while it rang ([note]: why, when the server said more). */
+    data class Missed(val note: String? = null) : CallOutcome
+    data class Callback(val saved: CallbackSave) : CallOutcome {
+        override val autoCloseMs get() = if (saved == CallbackSave.NotSaved) null else 4_000L
+    }
+    /** Our call rang out, or the customer turned it down. */
+    data object NoAnswer : CallOutcome
+    /** The agent hung up our call before the customer answered. */
+    data object Cancelled : CallOutcome { override val autoCloseMs get() = 2_000L }
+    /** The media dropped and did not come back. */
+    data object ConnectionLost : CallOutcome
+    data class Failed(val reason: String) : CallOutcome
+    /** The customer hasn't allowed business calls: the agent may send WhatsApp's call request. */
+    data object PermissionNeeded : CallOutcome
+    data object PermissionRequested : CallOutcome
+    data object MicBlocked : CallOutcome
+}
+
+enum class CallbackSave { Saved, Retrying, NotSaved }
+
+/** What the wrap-up card offers (in this order; the first is the primary one when [WrapAction.primary]). */
+enum class WrapAction(val label: String) {
+    OpenChat("Open chat"), CallAgain("Call again"), CallBack("Call back"), TryAgain("Try again"),
+    Message("Message"), SendCallRequest("Send call request"), OpenSettings("Open settings"),
+    Done("Done"), Cancel("Cancel"),
+}
+
+/** A second caller while this phone is on a call: a banner, never a take-over. */
+data class WaitingCall(val callId: String, val from: String?, val name: String?) {
+    val who: String get() = name?.takeIf { it.isNotBlank() } ?: from?.takeIf { it.isNotEmpty() }?.let { "+$it" } ?: "Someone"
+}
+
+/** A customer this phone asked allowed calls: "{First} allowed calls — Call now". */
+data class PermissionGrant(val waId: String, val name: String?)
 
 data class CallUiState(
     val phase: CallPhase = CallPhase.Idle,
@@ -51,30 +120,139 @@ data class CallUiState(
     val from: String? = null,
     val name: String? = null,
     val muted: Boolean = false,
-    val speaker: Boolean = false,
     val seconds: Int = 0,
+    /** Said inline on a live card ("No connection — can't answer yet"); the wrap-up says [outcome]. */
     val error: String? = null,
-    val note: String? = null,
     /** True while we placed the call (ringing THEM). */
     val outbound: Boolean = false,
     /** The network blipped mid-call: ICE is trying to recover (see [CallManager.ICE_GRACE_MS]). */
     val reconnecting: Boolean = false,
-    /** A request the card is waiting on (saving a callback): its buttons are disabled. */
+    /** A request the card is waiting on (saving a callback, sending a call request): its buttons are disabled. */
     val busy: Boolean = false,
+    /** Set in [CallPhase.Ended]. */
+    val outcome: CallOutcome? = null,
+    /** The customer's WhatsApp conversation (from the ring or a `call_update`), for "Open chat". */
+    val conversationId: String? = null,
+    val personId: String? = null,
+    /** Where the call's audio plays, and what it could play through. */
+    val route: AudioRoute = AudioRoute.Earpiece,
+    val routes: List<AudioRoute> = listOf(AudioRoute.Earpiece, AudioRoute.Speaker),
+    /** A recording is really running (the only time "● Recording" shows). */
+    val recording: Boolean = false,
+    /** After the call: "Recording saved — …", or null when nothing was recorded. */
+    val recordingNote: String? = null,
+    /** The call shrank to the bar at the top of the app (§6). */
+    val minimised: Boolean = false,
+    val waiting: WaitingCall? = null,
+) {
+    val speaker: Boolean get() = route.kind == AudioRouteKind.Speaker
+    /** Ringing, placing, connecting or on a call — anything but idle and the wrap-up. */
+    val live: Boolean get() = phase != CallPhase.Idle && phase != CallPhase.Ended
+    /** Name, else +number, else "Unknown". */
+    val who: String get() = name?.takeIf { it.isNotBlank() } ?: from?.takeIf { it.isNotEmpty() }?.let { "+$it" } ?: "Unknown"
+    /** The key "Open chat" / "Message" opens: the wa_id (the inbox matches it), else the conversation. */
+    val chatKey: String? get() = from?.takeIf { it.isNotEmpty() } ?: conversationId?.takeIf { it.isNotEmpty() }
+    /** A headset or Bluetooth is there: the audio button opens a list instead of toggling the speaker. */
+    val routeChoice: Boolean get() = routes.any { it.isHeadset }
+}
+
+/** mm:ss for the live timer (tabular numerals on screen). */
+fun mmss(s: Int): String = "%02d:%02d".format(s / 60, s % 60)
+
+/** "4:12" — a finished call's length. */
+fun callLength(s: Int): String = "${s / 60}:${(s % 60).toString().padStart(2, '0')}"
+
+/**
+ * The name to address a customer by: the first word, skipping a title
+ * ("Fr. Peter Kamau" → "Peter"); null when there is no name.
+ */
+fun firstNameOf(name: String?): String? {
+    val words = name?.trim()?.split(Regex("\\s+"))?.filter { it.isNotEmpty() }.orEmpty()
+    if (words.isEmpty() || name.orEmpty().trim().startsWith("+")) return null
+    fun title(w: String) = w.endsWith(".") || w.lowercase() in TITLES
+    return words.firstOrNull { !title(it) } ?: words.first()
+}
+
+/** Words that come before a name ("Deacon James", "Rev Mary"): never what the customer is called by. */
+private val TITLES = setOf(
+    "fr", "father", "rev", "revd", "reverend", "sr", "sister", "br", "bro", "brother", "dr", "mr", "mrs", "ms", "prof",
+    "deacon", "pastor", "bishop", "archbishop", "canon", "most", "the", "rt", "right", "very", "askofu", "mkuu",
 )
+
+/** The status line under the name — the §3 words for every phase and outcome. */
+fun CallUiState.statusText(): String = when (phase) {
+    CallPhase.Idle -> ""
+    CallPhase.Ringing -> "Incoming…"
+    CallPhase.Placing -> "Calling…"
+    CallPhase.RingingOut -> "Ringing…"
+    CallPhase.Connecting -> if (reconnecting) "Reconnecting…" else "Connecting…"
+    CallPhase.InCall -> if (reconnecting) "Reconnecting…" else mmss(seconds)
+    CallPhase.Ended -> outcome?.let { outcomeText(it) } ?: "Call ended"
+}
+
+/** The wrap-up's words for [o] (a table row of CALLING_UX.md §3). */
+fun CallUiState.outcomeText(o: CallOutcome): String {
+    val first = firstNameOf(name)
+    return when (o) {
+        CallOutcome.Completed -> if (seconds > 0) "Call ended · ${callLength(seconds)}" else "Call ended"
+        is CallOutcome.AnsweredElsewhere -> "Answered by ${o.agent?.trim()?.split(" ")?.firstOrNull()?.takeIf { it.isNotBlank() } ?: "another agent"}"
+        is CallOutcome.Declined -> o.agent?.takeIf { it.isNotBlank() }?.let { "Declined by $it" } ?: "Call declined"
+        is CallOutcome.Missed -> o.note ?: "Missed call"
+        is CallOutcome.Callback -> when (o.saved) {
+            CallbackSave.Saved -> CallManager.CALLBACK_SAVED
+            CallbackSave.Retrying -> CallManager.CALLBACK_RETRYING
+            CallbackSave.NotSaved -> CallManager.CALLBACK_FAILED
+        }
+        CallOutcome.NoAnswer -> "No answer"
+        CallOutcome.Cancelled -> "Call cancelled"
+        CallOutcome.ConnectionLost ->
+            if (seconds > 0) "Call dropped · ${callLength(seconds)} — the connection was lost" else "Call dropped — the connection was lost"
+        is CallOutcome.Failed -> o.reason
+        CallOutcome.PermissionNeeded -> "${first ?: "This customer"} hasn't allowed WhatsApp calls yet"
+        CallOutcome.PermissionRequested -> "Call request sent — you'll be told when ${first ?: "they"} tap${if (first == null) "" else "s"} Allow"
+        CallOutcome.MicBlocked -> CallManager.MIC_BLOCKED_WRAP
+    }
+}
+
+/**
+ * What the wrap-up card offers for its outcome, the primary action first.
+ * Chat actions need someone to write to; call actions a number to call.
+ */
+fun CallUiState.wrapActions(): List<WrapAction> {
+    val o = outcome ?: return listOf(WrapAction.Done)
+    val chat = chatKey != null
+    val dial = !from.isNullOrEmpty()
+    fun list(vararg a: WrapAction?) = a.filterNotNull()
+    return when (o) {
+        CallOutcome.Completed -> list(WrapAction.OpenChat.takeIf { chat }, WrapAction.CallAgain.takeIf { dial }, WrapAction.Done)
+        is CallOutcome.AnsweredElsewhere, is CallOutcome.Callback, CallOutcome.Cancelled -> list(WrapAction.Done)
+        is CallOutcome.Declined -> list(WrapAction.Message.takeIf { chat }, WrapAction.Done)
+        is CallOutcome.Missed -> list(WrapAction.CallBack.takeIf { dial }, WrapAction.Message.takeIf { chat }, WrapAction.Done)
+        CallOutcome.NoAnswer -> list(WrapAction.CallAgain.takeIf { dial }, WrapAction.Message.takeIf { chat }, WrapAction.Done)
+        CallOutcome.ConnectionLost -> list(WrapAction.CallAgain.takeIf { dial }, WrapAction.OpenChat.takeIf { chat }, WrapAction.Done)
+        is CallOutcome.Failed -> list(
+            (if (outbound) WrapAction.TryAgain else WrapAction.CallBack).takeIf { dial }, WrapAction.Message.takeIf { chat }, WrapAction.Done,
+        )
+        CallOutcome.PermissionNeeded -> list(WrapAction.SendCallRequest.takeIf { dial }, WrapAction.Message.takeIf { chat }, WrapAction.Cancel)
+        CallOutcome.PermissionRequested -> list(WrapAction.Message.takeIf { chat }, WrapAction.Done)
+        CallOutcome.MicBlocked -> list(WrapAction.OpenSettings, WrapAction.Done)
+    }
+}
 
 /**
  * The WhatsApp softphone: incoming-call ringing, answer / decline / callback,
- * outbound calls, mute, and call recording — the port of lib/callContext.tsx.
+ * outbound calls, mute, audio routes, the wrap-up after a call, and call
+ * recording — the port of lib/callContext.tsx, grown into docs/CALLING_UX.md.
  * Process-wide (lives in AppContainer) so a call survives navigating between
  * screens.
  *
- * This class is the web's rules and nothing else: the device side (WebRTC,
- * audio routing, ringtone, notification, the mic permission) arrives through
- * the interfaces in CallPorts.kt, so every rule here runs on the JVM in tests.
+ * This class is the rules and nothing else: the device side (WebRTC, audio
+ * routing, ringtone, notification, the mic permission) arrives through the
+ * interfaces in CallPorts.kt, so every rule here runs on the JVM in tests.
  *
- * PUBLIC CONTRACT — other features call only [state], [initiateCall],
- * [requestPermission], [hangup] and (MainActivity) [handleIntent].
+ * PUBLIC CONTRACT — other features call only [state], [permissionGranted],
+ * [initiateCall], [requestPermission], [hangup], [openChat] and (MainActivity)
+ * [handleIntent]; the call card and bar call the rest.
  *
  * Threading: every state change runs on [main]; peer events hop there first.
  *
@@ -82,8 +260,19 @@ data class CallUiState(
  * of answering or placing a call. Here the same moment raises [micRequest];
  * [CallStage] (always composed while signed in) shows the system prompt and
  * reports back through [onMicResult]. Refused (or unanswered for a minute),
- * the call fails with "Microphone blocked — allow it and try again", as the
- * web's does.
+ * the call ends with "Microphone blocked".
+ *
+ * Several agents, one call (CALLING_UX.md §4): ringing stops here the moment
+ * `call_answered` (a colleague — "Answered by Ann"), `call_ended` (its
+ * outcome), a poll that finds the row not ringing, or our own 409 / 410
+ * arrives. After the socket reconnects or the app returns to the front, a
+ * phone that shows a call re-reads its row ([resync]) and corrects itself.
+ *
+ * The wrap-up ([CallPhase.Ended]) stays until the agent acts when the team
+ * still owes the customer something (missed, no answer, dropped, failed,
+ * permission); neutral ones close by themselves ([CallOutcome.autoCloseMs]).
+ * A new ring replaces it at once. A second caller during a live call is a
+ * [CallUiState.waiting] banner — never a take-over.
  *
  * Deliberate differences from the web (all web bugs, none visible otherwise):
  *  - a `call_ended` frame ends the call properly (the web showed "ended" and
@@ -105,8 +294,9 @@ data class CallUiState(
  *    also how a process restarted by LiveService finds a call that is
  *    ringing right now — and when the app comes back to the foreground;
  *  - a call that rang in while another was live (the web ignores it, as
- *    here) is looked for again the moment this one is over, not up to 12s
- *    later, so the waiting customer rings through straight away;
+ *    here — beyond the banner) is looked for again the moment this one is
+ *    over, not up to 12s later, so the waiting customer rings through
+ *    straight away;
  *  - a `call_ended` for a call this phone never showed starts its cooldown,
  *    so an `incoming_call` delivered late (out of order) or a lagging
  *    "ringing" row can't ring a call that is already over;
@@ -116,7 +306,10 @@ data class CallUiState(
  *    found by [findPlacedCall]) is kept and applied once the id is known —
  *    the web dropped it, leaving a customer who picked up in silence;
  *  - ringing stops after [RING_TIMEOUT_MS] even if every end signal was lost
- *    (the server treats a call still ringing after 2 minutes as missed).
+ *    (the server treats a call still ringing after 2 minutes as missed);
+ *  - a refused microphone ends the call on this phone only: nothing was
+ *    answered, so a colleague can still pick it up (declining would end it
+ *    for the whole team).
  *
  * Network failures (a phone network drops calls the web never sees):
  *  - a "disconnected" peer is a blip, not the end: the call shows
@@ -128,6 +321,9 @@ data class CallUiState(
  *  - an answer or outbound call whose request timed out may still have gone
  *    through: an answer waits for the media to connect before calling it
  *    failed, an outbound call looks for the row the server wrote;
+ *  - an answer that couldn't even start (no connection before anything was
+ *    sent) leaves the call ringing, says so, and lets the agent tap Answer
+ *    again;
  *  - the callback note says the callback was saved only once the server said
  *    so; otherwise it says it is still trying, and retries;
  *  - recordings are kept on disk until uploaded ([RecordingOutbox]).
@@ -150,6 +346,8 @@ class CallManager internal constructor(
     private val now: () -> Long,
     /** Where recordings wait until the server has them. */
     outboxDir: File = java.nio.file.Files.createTempDirectory("neema-call-rec").toFile(),
+    /** The signed-in agent: tells a colleague's `call_answered` from this agent's own. */
+    private val myAgentId: () -> String? = { null },
 ) {
     constructor(
         context: Context,
@@ -159,6 +357,7 @@ class CallManager internal constructor(
         foreground: StateFlow<Boolean>,
         signedInFn: () -> Boolean,
         prefs: AppPrefs,
+        agentIdFn: () -> String? = { null },
     ) : this(
         api = NeemaCallApi(api),
         events = socket.events,
@@ -176,13 +375,14 @@ class CallManager internal constructor(
         io = Dispatchers.IO,
         now = System::currentTimeMillis,
         outboxDir = File(context.filesDir, "call-recordings"),
+        myAgentId = agentIdFn,
     )
 
     private val ui = CoroutineScope(scope.coroutineContext + main)
     private val bg = CoroutineScope(scope.coroutineContext + io)
     private val outbox = RecordingOutbox(outboxDir, now)
 
-    private val _state = MutableStateFlow(CallUiState())
+    private val _state = MutableStateFlow(CallUiState(routes = audio.routes.value, route = preferredRoute(audio.routes.value)))
     val state: StateFlow<CallUiState> = _state.asStateFlow()
 
     /** Tests: when the live call started, on the injected clock (null when none is live). */
@@ -193,6 +393,10 @@ class CallManager internal constructor(
     val micRequest: StateFlow<Boolean> = _micRequest.asStateFlow()
     private var micWaiter: CompletableDeferred<Boolean>? = null
 
+    private val _permissionGranted = MutableStateFlow<PermissionGrant?>(null)
+    /** A customer this phone asked has allowed calls: the "{First} allowed calls — Call now" banner. */
+    val permissionGranted: StateFlow<PermissionGrant?> = _permissionGranted.asStateFlow()
+
     // ── Refs (the web's useRef state) ────────────────────────────────────────
     private var peer: CallPeer? = null
     /** The call currently on screen. */
@@ -200,6 +404,9 @@ class CallManager internal constructor(
     /** callId → when we last dismissed it (the 12s re-ring cooldown). */
     private val endedAt = LinkedHashMap<String, Long>()   // oldest first
     private var recEnabled = true
+    /** The server transcribes recordings (and without being asked): what the wrap-up promises. */
+    private var transcribes = false
+    private var autoTranscribes = false
     private var recording: CallRecording? = null
     private var recCallId: String? = null
     private var timerJob: Job? = null
@@ -210,10 +417,16 @@ class CallManager internal constructor(
      * the call look shorter than it is.
      */
     private var liveSince: Long? = null
+    /** When this phone started ringing: an answer that goes back to ringing keeps the 2-minute limit. */
+    private var ringSince: Long? = null
     private var resetJob: Job? = null
     private var ringTimeoutJob: Job? = null
     /** Running while a "disconnected" peer has its chance to recover. */
     private var graceJob: Job? = null
+    /** Our SDP answer went to the server: hanging up now ends a call, not a ringing one. */
+    private var answerPosted = false
+    /** The call's audio route is set up (communication mode, focus). */
+    private var audioIn = false
     /**
      * The customer's SDP answer to OUR call, when it arrived before we knew
      * the call's id (connect's reply was slow, or timed out and the row had
@@ -223,16 +436,18 @@ class CallManager internal constructor(
     private var earlyAnswer: Pair<String, String>? = null
     /** An incoming call was ignored because another call was on screen: look again once it's over. */
     private var missedWhileBusy = false
+    /** wa_id → name of the customers this phone asked for call permission (for the "allowed calls" banner). */
+    private val askedPermission = LinkedHashMap<String, String?>()
     private var started = false
 
     private val phase: CallPhase get() = _state.value.phase
     private fun update(f: (CallUiState) -> CallUiState) { _state.value = f(_state.value) }
 
     init {
-        (ringer as? CallAlert)?.onDecline = { id -> handleAction("decline", id) }
+        (ringer as? CallAlert)?.onAction = { action, id -> handleAction(action, id) }
     }
 
-    /** Begin listening for incoming_call / outbound_answer / call_ended and the poll fallback. */
+    /** Begin listening for the call frames, the poll fallback and the audio routes. */
     fun start() {
         if (started) return
         started = true
@@ -247,17 +462,21 @@ class CallManager internal constructor(
         // Catch-up: frames sent while the socket was down are lost. Poll the
         // moment it (re)connects — after a network drop, after the process was
         // restarted by LiveService, after the app returns from a socket-less
-        // background — and when the app comes back on screen.
+        // background — and when the app comes back on screen. A call on screen
+        // re-reads its own row too: it may have ended while we couldn't hear.
         ui.launch {
             var was = connected.value
-            connected.collect { c -> if (c && !was) { pollOnce(); drainRecordings() }; was = c }
+            connected.collect { c -> if (c && !was) catchUp(); was = c }
         }
         ui.launch {
             var was = foreground.value
-            foreground.collect { fg -> if (fg && !was) { pollOnce(); drainRecordings() }; was = fg }
+            foreground.collect { fg -> if (fg && !was) catchUp(); was = fg }
         }
         // Recordings a previous session could not upload.
         drainRecordings()
+
+        // Headsets come and go: the call follows them (see [onRoutes]).
+        ui.launch { audio.routes.collect(::onRoutes) }
 
         // Fallback path: poll the call log for a fresh "ringing" call, so the card
         // appears even if the WS event was missed. 2.5s only while RINGING (hang-up
@@ -284,19 +503,18 @@ class CallManager internal constructor(
                     ringer.startRinging()
                     if (!foreground.value) postIncoming()
                     val id = _state.value.callId
+                    val left = RING_TIMEOUT_MS - (now() - (ringSince ?: now())).coerceAtLeast(0)
                     ringTimeoutJob = ui.launch {
-                        delay(RING_TIMEOUT_MS)
-                        if (phase == CallPhase.Ringing && _state.value.callId == id) {
-                            cleanup(); id?.let { markEnded(it) }; activeId = null
-                            update { CallUiState() }
-                        }
+                        delay(left.coerceAtLeast(0))
+                        // Every end signal was lost: the caller is long gone.
+                        if (phase == CallPhase.Ringing && _state.value.callId == id) finish(CallOutcome.Missed())
                     }
                 } else {
                     ringer.stopRinging()
                     ringer.cancelIncoming()
                 }
                 // A caller who rang in during the last call may still be waiting.
-                if (p == CallPhase.Idle && missedWhileBusy) {
+                if ((p == CallPhase.Idle || p == CallPhase.Ended) && missedWhileBusy) {
                     missedWhileBusy = false
                     ui.launch { pollOnce() }
                 }
@@ -313,10 +531,9 @@ class CallManager internal constructor(
                     }
                 } else {
                     timerJob?.cancel(); timerJob = null
-                    if (p == CallPhase.Idle || p == CallPhase.Connecting || p == CallPhase.Ringing) liveSince = null
+                    liveSince = null
                 }
-                if (p == CallPhase.Connecting || p == CallPhase.InCall) audio.enter(_state.value.speaker)
-                else if (p == CallPhase.Idle || p == CallPhase.Ended) audio.leave()
+                if (p in AUDIO_PHASES) enterAudio() else leaveAudio()
             }
         }
         // The app went to the background while a call is still ringing: notify.
@@ -329,6 +546,12 @@ class CallManager internal constructor(
                 if (fg) ringer.cancelIncoming() else postIncoming()
             }
         }
+    }
+
+    private fun catchUp() {
+        ui.launch { pollOnce() }
+        ui.launch { resync() }
+        drainRecordings()
     }
 
     /** The live call's length from [liveSince] (the only way [CallUiState.seconds] moves). */
@@ -344,17 +567,88 @@ class CallManager internal constructor(
     private fun postIncoming() {
         val s = _state.value
         val id = s.callId ?: return
-        ringer.postIncoming(id, who(s), s.from?.takeIf { it.isNotEmpty() })
+        ringer.postIncoming(id, s.who, s.from?.takeIf { it.isNotEmpty() })
     }
 
-    /** One WebSocket frame (only the three call types matter here). */
+    // ── Audio routes ─────────────────────────────────────────────────────────
+    /** What a call starts on, as phones do: a connected headset, else the earpiece (the speaker only when there is nothing else). */
+    private fun preferredRoute(routes: List<AudioRoute>): AudioRoute =
+        routes.lastOrNull { it.kind == AudioRouteKind.Bluetooth } ?: routes.lastOrNull { it.kind == AudioRouteKind.Wired }
+            ?: quietRoute(routes)
+
+    /** Never the loudspeaker when the phone has an earpiece: a headset that goes must not blast the call into the room. */
+    private fun quietRoute(routes: List<AudioRoute>): AudioRoute =
+        routes.firstOrNull { it.kind == AudioRouteKind.Earpiece } ?: routes.firstOrNull() ?: AudioRoute.Earpiece
+
+    private fun enterAudio() {
+        if (audioIn) return
+        audioIn = true
+        val r = preferredRoute(_state.value.routes)
+        update { it.copy(route = r) }
+        audio.enter(r)
+    }
+
+    private fun leaveAudio() {
+        if (!audioIn) return
+        audioIn = false
+        audio.leave()
+    }
+
+    /**
+     * The outputs changed. Outside a call the button just shows what a call
+     * would start on. During one: a headset that was just connected takes the
+     * call (as a phone does); the route in use disappearing (unplugged, out of
+     * range) falls back to another headset, else the earpiece — never the
+     * loudspeaker while there is an earpiece.
+     */
+    private fun onRoutes(routes: List<AudioRoute>) {
+        val s = _state.value
+        val before = s.routes
+        update { it.copy(routes = routes) }
+        if (!audioIn) {
+            update { it.copy(route = preferredRoute(routes)) }
+            return
+        }
+        val added = routes.filter { r -> r.isHeadset && before.none { it == r } }
+        val next = when {
+            added.isNotEmpty() -> added.last()
+            s.route !in routes -> routes.lastOrNull { it.isHeadset } ?: quietRoute(routes)
+            else -> null
+        }
+        if (next != null && next != s.route) selectRoute(next)
+    }
+
+    /** The audio list's choice (or [toggleSpeaker]'s). */
+    fun selectRoute(route: AudioRoute) {
+        if (route !in _state.value.routes) return
+        update { it.copy(route = route) }
+        audio.select(route)
+    }
+
+    /** Earpiece (or the headset) ↔ loudspeaker: the audio button when there is nothing else to choose. */
+    fun toggleSpeaker() {
+        val s = _state.value
+        val next = if (s.speaker) s.routes.lastOrNull { it.isHeadset } ?: quietRoute(s.routes) else AudioRoute.Speaker
+        if (next !in s.routes) return
+        selectRoute(next)
+    }
+
+    // ── Frames ───────────────────────────────────────────────────────────────
+    /** One WebSocket frame (only the call types matter here). */
     internal fun onFrame(evt: JsonObject) {
         when (evt.str("type")) {
             "incoming_call" -> {
                 logD("WS event: $evt")
                 val id = evt.str("call_id") ?: return
-                if (phase != CallPhase.Idle && id != _state.value.callId) missedWhileBusy = true
-                startRinging(id, evt.str("from") ?: "", evt.str("name"))
+                val s = _state.value
+                if (s.live && id != s.callId) {
+                    missedWhileBusy = true
+                    // On a call: a banner, never a take-over (there is no hold in the API).
+                    if (s.phase != CallPhase.Ringing && !endedAt.containsKey(id)) {
+                        update { it.copy(waiting = WaitingCall(id, evt.str("from"), evt.str("name"))) }
+                    }
+                }
+                startRinging(id, evt.str("from") ?: "", evt.str("name"), evt.str("conversation_id"), evt.str("person_id"))
             }
             "outbound_answer" -> {
                 val id = evt.str("call_id") ?: return
@@ -364,21 +658,126 @@ class CallManager internal constructor(
                     // The customer accepted OUR call — apply their SDP answer to connect.
                     logD("outbound answered")
                     val p = peer ?: return
+                    if (phase == CallPhase.RingingOut) update { it.copy(phase = CallPhase.Connecting) }
                     ui.launch { runCatching { p.setRemote(SdpType.Answer, sdp) } }
-                } else if (activeId == null && s.outbound && s.callId == "pending" && s.phase == CallPhase.Connecting) {
+                } else if (activeId == null && s.outbound && s.callId == "pending" && s.phase == CallPhase.Placing) {
                     // Ours, most likely, but connect hasn't told us its id yet.
                     earlyAnswer = id to sdp
                 }
             }
+            "call_answered" -> onAnswered(evt)
             "call_ended" -> {
                 logD("WS event: $evt")
                 val id = evt.str("call_id") ?: return
                 val cur = _state.value
-                if (cur.callId == id) { if (cur.phase != CallPhase.Ended) finish() }
+                if (cur.waiting?.callId == id) update { it.copy(waiting = null) }
+                if (cur.callId == id && cur.live) {
+                    finish(outcomeOf(evt.str("outcome"), cur, evt.str("agent_name")), evt.str("duration")?.toIntOrNull())
+                }
                 // A call we never showed (or not yet: frames can arrive out of
                 // order): it is over, so a late incoming_call must not ring it.
-                else if (!endedAt.containsKey(id)) markEnded(id)
+                else if (cur.callId != id && !endedAt.containsKey(id)) markEnded(id)
             }
+            "call_update" -> {
+                val row = (evt["call"] as? JsonObject)?.let {
+                    runCatching { NeemaJson.decodeFromJsonElement(Call.serializer(), it) }.getOrNull()
+                } ?: return
+                applyRow(row)
+            }
+            "call_permission" -> onPermission(evt)
+        }
+    }
+
+    /**
+     * Someone answered. For our outbound call that is the customer picking up;
+     * for a call ringing here it is a colleague (this phone stops at once);
+     * while this phone is still answering, a colleague who won the race.
+     */
+    private fun onAnswered(evt: JsonObject) {
+        val id = evt.str("call_id") ?: return
+        val s = _state.value
+        if (s.waiting?.callId == id) update { it.copy(waiting = null) }
+        if (s.callId != id) return
+        val agentId = evt.str("agent_id")
+        when (s.phase) {
+            CallPhase.Ringing -> finish(CallOutcome.AnsweredElsewhere(evt.str("agent_name")))
+            CallPhase.RingingOut -> update { it.copy(phase = CallPhase.Connecting) }
+            CallPhase.Connecting -> if (!s.outbound && takenBySomeoneElse(agentId)) finish(CallOutcome.AnsweredElsewhere(evt.str("agent_name")))
+            else -> Unit
+        }
+    }
+
+    private fun takenBySomeoneElse(agentId: String?): Boolean {
+        val me = myAgentId() ?: return false
+        return agentId != null && agentId != me
+    }
+
+    /** `call_permission`: a customer this phone asked has allowed calls (or not). */
+    private fun onPermission(evt: JsonObject) {
+        val wa = evt.str("wa_id")?.removePrefix("+") ?: return
+        if (evt.str("status") != "granted" || !askedPermission.containsKey(wa)) return
+        val name = askedPermission.remove(wa)
+        _permissionGranted.value = PermissionGrant(wa, name)
+        // The wrap-up that said "call request sent" has its answer: the banner replaces it.
+        val s = _state.value
+        if (s.phase == CallPhase.Ended && s.from == wa &&
+            (s.outcome == CallOutcome.PermissionRequested || s.outcome == CallOutcome.PermissionNeeded)
+        ) dismiss()
+    }
+
+    /**
+     * What a call's end means for this phone: the server's outcome, read
+     * against where this phone was (a "completed" call that was still ringing
+     * here was answered by a colleague).
+     */
+    private fun outcomeOf(status: String?, s: CallUiState, agent: String?): CallOutcome = when (status) {
+        "answered" -> CallOutcome.AnsweredElsewhere(agent)
+        "completed", "ended" -> if (s.phase == CallPhase.Ringing) CallOutcome.AnsweredElsewhere(agent) else CallOutcome.Completed
+        "missed" -> CallOutcome.Missed()
+        "declined" -> CallOutcome.Declined(agent)
+        "callback" -> CallOutcome.Callback(CallbackSave.Saved)
+        "no_answer" -> CallOutcome.NoAnswer
+        "cancelled" -> CallOutcome.Cancelled
+        "failed" -> CallOutcome.Failed(if (s.outbound) CALL_NOT_CONNECTED else "Couldn't connect the call")
+        // An older frame without an outcome: judge by where the call was.
+        else -> when (s.phase) {
+            CallPhase.Ringing -> CallOutcome.Missed()
+            CallPhase.Placing, CallPhase.RingingOut -> CallOutcome.NoAnswer
+            else -> if (s.reconnecting) CallOutcome.ConnectionLost else CallOutcome.Completed
+        }
+    }
+
+    /**
+     * A call's current row (a `call_update`, the re-sync, the poll): fill in
+     * what the ring didn't carry (the chat, the person, the name) and correct
+     * a phase the server knows to be over.
+     */
+    private fun applyRow(row: Call) {
+        val s = _state.value
+        if (row.callId.isEmpty() || row.callId != s.callId) return
+        update {
+            it.copy(
+                conversationId = row.conversationId ?: it.conversationId,
+                personId = row.personId ?: it.personId,
+                name = it.name?.takeIf { n -> n.isNotBlank() } ?: row.name,
+            )
+        }
+        val st = row.status
+        if (st.isEmpty()) return
+        when (s.phase) {
+            // Saving a callback: the server marks the row itself; the card ends with its note.
+            CallPhase.Ringing -> if (st != "ringing" && !s.busy) finish(outcomeOf(st, s, row.agentName))
+            CallPhase.Placing, CallPhase.RingingOut -> when {
+                st == "answered" -> if (s.phase == CallPhase.RingingOut) update { it.copy(phase = CallPhase.Connecting) }
+                st != "ringing" -> finish(outcomeOf(st, s, row.agentName), row.duration)
+            }
+            CallPhase.Connecting, CallPhase.InCall -> when {
+                st == "answered" -> if (s.phase == CallPhase.Connecting && !s.outbound && takenBySomeoneElse(row.agentId)) {
+                    finish(CallOutcome.AnsweredElsewhere(row.agentName))
+                }
+                st != "ringing" -> finish(outcomeOf(st, s, row.agentName), row.duration)
+            }
+            else -> Unit
         }
     }
 
@@ -395,28 +794,50 @@ class CallManager internal constructor(
         if (!signedInFn()) return
         val calls = try { api.list() } catch (e: CancellationException) { throw e } catch (e: Exception) { return }
         val t = now()
-        if (phase == CallPhase.Ringing) {
-            // The caller hung up (row no longer "ringing") — tear the card down.
-            val cur = calls.find { it.callId == activeId }
+        val s = _state.value
+        if (s.phase == CallPhase.Ringing) {
+            // The caller hung up, or a colleague answered (row no longer "ringing").
             if (calls.any { it.isFreshInboundRing(t) && it.callId != activeId }) missedWhileBusy = true
-            // Saving a callback: the server marks the row itself; the card ends with its note.
-            if (cur != null && cur.status != "ringing" && !_state.value.busy) {
-                // Answered on another phone, or the caller gave up.
-                cleanup(); activeId = null
-                update { CallUiState() }
-            }
+            calls.find { it.callId == activeId }?.let(::applyRow)
             return
         }
-        if (phase != CallPhase.Idle) {
-            // Busy with another call: remember that someone is waiting.
-            if (calls.any { it.isFreshInboundRing(t) && it.callId != _state.value.callId }) missedWhileBusy = true
+        if (s.live) {
+            // Busy with another call: remember that someone is waiting, and show them.
+            val other = calls.firstOrNull { it.isFreshInboundRing(t) && it.callId != s.callId && !coolingDown(it.callId, t) }
+            if (other != null) {
+                missedWhileBusy = true
+                if (s.waiting == null) update { it.copy(waiting = WaitingCall(other.callId, other.waId, other.name)) }
+            }
+            s.waiting?.let { w ->
+                val row = calls.find { it.callId == w.callId }
+                if (row != null && row.status != "ringing") update { it.copy(waiting = null) }
+            }
+            if (s.callId != "pending") calls.find { it.callId == s.callId }?.let(::applyRow)
             return
         }
         val ringing = calls.find { it.isFreshInboundRing(t) && !coolingDown(it.callId, t) }
         if (ringing != null) {
             logD("poll fallback caught ringing call: ${ringing.callId}")
-            startRinging(ringing.callId, ringing.waId ?: "", ringing.name)
+            startRinging(ringing.callId, ringing.waId ?: "", ringing.name, ringing.conversationId, ringing.personId)
         }
+    }
+
+    /**
+     * After the socket reconnects or the app returns to the front: the call on
+     * screen re-reads its own row and takes the server's word for how it
+     * ended while this phone couldn't hear (CALLING_UX.md §4).
+     */
+    internal suspend fun resync() = resyncs.run()
+
+    private val resyncs = SingleFlight(ui) { resyncNow() }
+
+    private suspend fun resyncNow() {
+        if (!signedInFn()) return
+        val s = _state.value
+        val id = s.callId?.takeIf { it != "pending" } ?: return
+        if (!s.live) return
+        val row = try { api.get(id) } catch (e: CancellationException) { throw e } catch (e: Exception) { return }
+        applyRow(row)
     }
 
     /** A row the poll fallback rings for: inbound, still ringing, started under 90s ago. */
@@ -445,25 +866,23 @@ class CallManager internal constructor(
 
     private fun coolingDown(callId: String, t: Long) = endedAt[callId]?.let { t - it < RERING_COOLDOWN_MS } == true
 
-    private fun who(s: CallUiState) =
-        s.name?.takeIf { it.isNotBlank() } ?: s.from?.takeIf { it.isNotEmpty() }?.let { "+$it" } ?: "Unknown"
-
-    /** A notification action (answer/decline/show) routed through MainActivity. */
+    /** A notification action (answer/decline/end/show) routed through MainActivity or a broadcast. */
     fun handleIntent(intent: Intent) {
         val action = intent.getStringExtra(Notifier.EXTRA_CALL_ACTION) ?: return
         handleAction(action, intent.getStringExtra(Notifier.EXTRA_CALL_ID))
     }
 
-    /** "answer" | "decline" | "show" from the incoming-call notification. */
+    /** "answer" | "decline" | "end" | "show" from the call notifications. */
     internal fun handleAction(action: String, id: String?) {
         val s = _state.value
         val matches = id == null || id == s.callId
         when (action) {
             "answer" -> when {
-                matches && s.phase == CallPhase.Ringing -> { ringer.cancelIncoming(); answer() }
+                // One tap from a locked phone: straight to Connecting, on the full card.
+                matches && s.phase == CallPhase.Ringing -> { ringer.cancelIncoming(); update { it.copy(minimised = false) }; answer() }
                 // The process was restarted since the notification went up: find
                 // the call again, then answer it if it's still ringing.
-                s.phase == CallPhase.Idle && id != null -> ui.launch {
+                !s.live && id != null -> ui.launch {
                     ringer.cancelIncoming()
                     pollOnce()
                     if (_state.value.callId == id && phase == CallPhase.Ringing) answer()
@@ -472,12 +891,14 @@ class CallManager internal constructor(
             "decline" -> when {
                 matches && s.phase == CallPhase.Ringing -> hangup()
                 // A call this process no longer tracks: still tell the server.
-                s.phase == CallPhase.Idle && id != null -> ui.launch {
+                !s.live && id != null -> ui.launch {
                     ringer.cancelIncoming()
                     markEnded(id)
                     terminateSoon(id)
                 }
             }
+            // The ongoing-call notification's End.
+            "end" -> if (matches && s.live && s.phase != CallPhase.Ringing) hangup()
             else -> Unit   // "show": the activity is up; CallStage renders the call
         }
     }
@@ -485,11 +906,20 @@ class CallManager internal constructor(
     // Start ringing for a given call (shared by the WS event + the poll fallback).
     // A short cooldown stops a still-"ringing" record from instantly re-ringing
     // after a decline / failed answer, while allowing a genuine retry after ~12s.
-    private fun startRinging(callId: String, from: String, name: String?) {
-        if (phase != CallPhase.Idle) return
+    // A wrap-up on screen gives way at once.
+    private fun startRinging(callId: String, from: String, name: String?, conversationId: String? = null, personId: String? = null) {
+        if (_state.value.live) return
         if (coolingDown(callId, now())) return
+        resetJob?.cancel(); resetJob = null
         activeId = callId
-        update { it.copy(callId = callId, from = from, name = name, phase = CallPhase.Ringing) }
+        ringSince = now()
+        answerPosted = false
+        val s = _state.value
+        _state.value = CallUiState(
+            phase = CallPhase.Ringing, callId = callId, from = from, name = name,
+            conversationId = conversationId, personId = personId,
+            routes = s.routes, route = preferredRoute(s.routes),
+        )
     }
 
     // ── Microphone ───────────────────────────────────────────────────────────
@@ -519,6 +949,7 @@ class CallManager internal constructor(
             logW("recording unavailable", e); null
         } ?: return
         recCallId = activeId ?: _state.value.callId
+        update { it.copy(recording = true) }
     }
 
     /** Stop + upload. Called at the top of cleanup() so it flushes on EVERY end path. */
@@ -527,6 +958,16 @@ class CallManager internal constructor(
         val callId = recCallId
         recording = null
         recCallId = null
+        update {
+            it.copy(
+                recording = false,
+                recordingNote = when {
+                    autoTranscribes -> RECORDING_SAVED_AUTO
+                    transcribes -> RECORDING_SAVED_MANUAL
+                    else -> RECORDING_SAVED
+                },
+            )
+        }
         bg.launch {
             val file = try { r.stop() } catch (e: Exception) { null } ?: return@launch
             if (callId == null || callId == "pending" || file.length() < MIN_RECORDING_BYTES) {
@@ -552,6 +993,12 @@ class CallManager internal constructor(
         }
     }
 
+    private fun readConfig(cfg: IceConfig) {
+        recEnabled = cfg.record != false
+        transcribes = cfg.transcribe == true
+        autoTranscribes = cfg.autoTranscribe == true
+    }
+
     // ── Teardown ─────────────────────────────────────────────────────────────
     private fun cleanup() {
         graceJob?.cancel(); graceJob = null
@@ -562,31 +1009,108 @@ class CallManager internal constructor(
         ringer.cancelIncoming()
     }
 
-    private fun finish(noteText: String? = null) {
+    /**
+     * The call is over on this phone: the wrap-up with its [outcome]. A neutral
+     * one closes by itself; a caller waiting behind this call rings at once.
+     */
+    private fun finish(outcome: CallOutcome, serverSeconds: Int? = null, promoteWaiting: Boolean = true) {
         cleanup()
         activeId?.let { markEnded(it) }
         activeId = null
-        update { it.copy(phase = CallPhase.Ended, note = noteText ?: it.note, reconnecting = false, busy = false) }
-        resetJob?.cancel()
-        resetJob = ui.launch {
-            delay(if (noteText != null) 1_600 else 1_000)
-            update { CallUiState() }
+        earlyAnswer = null
+        val waiting = _state.value.waiting
+        update {
+            it.copy(
+                phase = CallPhase.Ended, outcome = outcome, reconnecting = false, busy = false, error = null,
+                seconds = if (it.seconds == 0 && serverSeconds != null) serverSeconds else it.seconds,
+                waiting = null,
+                recordingNote = it.recordingNote.takeIf { _ -> outcome == CallOutcome.Completed || outcome == CallOutcome.ConnectionLost },
+            )
+        }
+        resetJob?.cancel(); resetJob = null
+        outcome.autoCloseMs?.let { ms ->
+            resetJob = ui.launch {
+                delay(ms)
+                if (phase == CallPhase.Ended && _state.value.outcome === outcome) toIdle()
+            }
+        }
+        if (promoteWaiting && waiting != null && !endedAt.containsKey(waiting.callId)) {
+            missedWhileBusy = false   // this is the look-again
+            promote(waiting)
         }
     }
 
-    private val live: Boolean get() = phase != CallPhase.Idle && phase != CallPhase.Ended
+    /**
+     * The call that kept [w] waiting is over: ring them now — after one quick
+     * read that they are still on the line (a caller who gave up meanwhile
+     * must not ring). No answer from the server: the frame is trusted.
+     */
+    private fun promote(w: WaitingCall) {
+        ui.launch {
+            val rows = try { api.list() } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+            if (_state.value.live) return@launch
+            val row = rows?.find { it.callId == w.callId }
+            if (row != null && row.status != "ringing") { markEnded(w.callId); return@launch }
+            startRinging(w.callId, row?.waId ?: w.from ?: "", row?.name ?: w.name, row?.conversationId, row?.personId)
+        }
+    }
+
+    private fun toIdle() {
+        resetJob?.cancel(); resetJob = null
+        val routes = _state.value.routes
+        _state.value = CallUiState(routes = routes, route = preferredRoute(routes))
+    }
+
+    /** The wrap-up's Done / Cancel (a live call is never dismissed — it is hung up). */
+    fun dismiss() {
+        if (phase == CallPhase.Ended) toIdle()
+    }
+
+    /** §6: the call shrinks to the bar at the top of the app; the rest of Neema stays usable. */
+    fun minimise() { if (phase != CallPhase.Idle && phase != CallPhase.Ringing) update { it.copy(minimised = true) } }
+
+    fun expand() { update { it.copy(minimised = false) } }
+
+    /**
+     * "Open chat" / "Message": the key of the customer's conversation to open
+     * (null when there is nobody to write to). A live call shrinks to the bar
+     * rather than ending; a wrap-up closes.
+     */
+    fun openChat(): String? {
+        val s = _state.value
+        val key = s.chatKey ?: return null
+        if (s.live && s.phase != CallPhase.Ringing) update { it.copy(minimised = true) }
+        else if (s.phase == CallPhase.Ended) dismiss()
+        return key
+    }
+
+    /** "Call again" / "Call back" / "Try again" from the wrap-up. */
+    fun redial() {
+        val s = _state.value
+        val to = s.from?.takeIf { it.isNotEmpty() } ?: return
+        if (s.live) return
+        ui.launch { initiateCall(to, s.name, s.conversationId) }
+    }
 
     /**
      * Ends the call on this phone at once (a second tap finds it over), then
      * tells the server in the background — a slow or unreachable server never
-     * keeps a live-looking card on screen.
+     * keeps a live-looking card on screen. What the tap meant depends on where
+     * the call was: a ringing call is declined (for the whole team), our call
+     * not yet answered is cancelled, a call that was answered is completed.
      */
     fun hangup() {
         ui.launch {
-            if (!live || _state.value.busy) return@launch
-            val id = _state.value.callId
-            cleanup()
-            finish()
+            val s = _state.value
+            if (!s.live || s.busy) return@launch
+            val id = s.callId
+            val outcome = when (s.phase) {
+                CallPhase.Ringing -> CallOutcome.Declined()
+                CallPhase.Placing, CallPhase.RingingOut -> CallOutcome.Cancelled
+                CallPhase.Connecting -> if (!s.outbound && !answerPosted) CallOutcome.Declined() else CallOutcome.Completed
+                else -> CallOutcome.Completed
+            }
+            finish(outcome)
             if (id != null && id != "pending") terminateSoon(id)
         }
     }
@@ -604,14 +1128,16 @@ class CallManager internal constructor(
     suspend fun endForSignOut(timeoutMs: Long = SIGN_OUT_TERMINATE_MS) = withContext(main) {
         val s = _state.value
         resetJob?.cancel(); resetJob = null
+        _permissionGranted.value = null
+        askedPermission.clear()
         if (s.phase == CallPhase.Idle) return@withContext
         val id = s.callId
-        val terminateId = id?.takeIf { s.phase != CallPhase.Ringing && s.phase != CallPhase.Ended && it != "pending" }
+        val terminateId = id?.takeIf { s.live && s.phase != CallPhase.Ringing && it != "pending" }
         cleanup()
         id?.let { markEnded(it) }
         activeId = null
         earlyAnswer = null
-        update { CallUiState() }
+        toIdle()
         if (terminateId != null) withTimeoutOrNull(timeoutMs) {
             try { api.terminate(terminateId) } catch (e: CancellationException) { throw e } catch (_: Exception) {}
         }
@@ -638,28 +1164,28 @@ class CallManager internal constructor(
 
     /**
      * Decline now, call them back later. The card waits for the server (its
-     * buttons disabled) so "Callback saved" is only said once it is; a request
-     * that never got an answer keeps retrying in the background.
+     * buttons disabled) so "Saved to call back" is only said once it is; a
+     * request that never got an answer keeps retrying in the background.
      */
     fun callback() {
         ui.launch {
             val s = _state.value
-            if (!live || s.busy) return@launch
+            if (!s.live || s.busy) return@launch
             val id = s.callId
             cleanup()
-            if (id == null || id == "pending") { finish(CALLBACK_SAVED); return@launch }
+            if (id == null || id == "pending") { finish(CallOutcome.Callback(CallbackSave.Saved)); return@launch }
             update { it.copy(busy = true) }
-            val note = try {
-                api.callback(id); CALLBACK_SAVED
+            val saved = try {
+                api.callback(id); CallbackSave.Saved
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 logW("callback failed", e)
-                if (RecordingOutbox.isTransient(e) && e.statusOrNull() != 401) { callbackSoon(id); CALLBACK_RETRYING }
-                else CALLBACK_FAILED
+                if (RecordingOutbox.isTransient(e) && e.statusOrNull() != 401) { callbackSoon(id); CallbackSave.Retrying }
+                else CallbackSave.NotSaved
             }
             if (_state.value.callId != id) return@launch   // the card has moved on
-            finish(note)
+            finish(CallOutcome.Callback(saved))
         }
     }
 
@@ -675,13 +1201,50 @@ class CallManager internal constructor(
         }
     }
 
+    // ── The second caller (a banner while this phone is on a call) ───────────
+    /** Decline the waiting caller — for the whole team, as any decline. */
+    fun declineWaiting() {
+        val w = _state.value.waiting ?: return
+        update { it.copy(waiting = null) }
+        markEnded(w.callId)
+        terminateSoon(w.callId)
+    }
+
+    /** "Call back later" for the waiting caller: it ends and lands under Calls → Follow-ups. */
+    fun callbackWaiting() {
+        val w = _state.value.waiting ?: return
+        update { it.copy(waiting = null) }
+        markEnded(w.callId)
+        ui.launch {
+            try { api.callback(w.callId) }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { if (RecordingOutbox.isTransient(e)) callbackSoon(w.callId) }
+        }
+    }
+
+    /** "End & answer": the API has no hold, so taking the waiting caller means hanging up this call. */
+    fun endAndAnswer() {
+        ui.launch {
+            val s = _state.value
+            val w = s.waiting ?: return@launch
+            if (!s.live || s.busy || s.phase == CallPhase.Ringing) return@launch
+            val id = s.callId
+            finish(CallOutcome.Completed, promoteWaiting = false)
+            if (id != null && id != "pending") terminateSoon(id)
+            // The agent chose them: straight to answering (a 409 / 410 says if they are gone).
+            startRinging(w.callId, w.from ?: "", w.name)
+            if (_state.value.callId == w.callId && phase == CallPhase.Ringing) answer()
+        }
+    }
+
     // ── Answer an inbound call ───────────────────────────────────────────────
     fun answer() {
         ui.launch {
             val s = _state.value
             val callId = s.callId ?: return@launch
             if (s.phase != CallPhase.Ringing || s.busy) return@launch
-            update { it.copy(error = null, phase = CallPhase.Connecting) }
+            update { it.copy(error = null, phase = CallPhase.Connecting, minimised = false) }
+            answerPosted = false
             ringer.stopRinging(); ringer.cancelIncoming()
             fun stillMine() = _state.value.callId == callId && (phase == CallPhase.Connecting || phase == CallPhase.InCall)
             try {
@@ -690,7 +1253,7 @@ class CallManager internal constructor(
                     val o = async { api.offer(callId) }
                     c.await() to o.await()
                 }
-                recEnabled = cfg.record != false
+                readConfig(cfg)
                 if (!stillMine()) return@launch   // hung up meanwhile
                 val p = newPeer(cfg)
                 if (!ensureMic()) throw MicBlocked()
@@ -702,12 +1265,29 @@ class CallManager internal constructor(
                 p.setLocal(SdpType.Answer, answer)
                 awaitGathering(p)
                 if (peer !== p) return@launch
+                answerPosted = true
                 api.answer(callId, p.localSdp ?: answer)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 logW("answer failed", e)
                 if (!stillMine()) return@launch
+                when {
+                    // 409: a colleague won the redis lock and is talking to the customer.
+                    // Only this device's side goes — never terminate their call.
+                    e.isTakenElsewhere() -> { finish(CallOutcome.AnsweredElsewhere(e.answeredBy())); return@launch }
+                    // 410, or the offer is gone (404): the caller hung up — nothing to terminate.
+                    e.isCallGone() || e.isOfferGone() -> { finish(CallOutcome.Missed(CALL_GONE)); return@launch }
+                    // Nothing was answered: colleagues' phones still ring, so this one just steps back.
+                    e is MicBlocked -> { finish(CallOutcome.MicBlocked); return@launch }
+                    // Nothing reached Meta yet (no connection before our answer left): keep it
+                    // ringing and let the agent tap Answer again.
+                    !answerPosted && e.statusOrNull() == 0 -> {
+                        cleanup()
+                        update { it.copy(phase = CallPhase.Ringing, error = if (e.isTimeout()) ANSWER_SLOW_RETRY else ANSWER_NO_CONNECTION) }
+                        return@launch
+                    }
+                }
                 if (e.isAmbiguous("/answer")) {
                     // The accept may have reached Meta even though its answer never
                     // came back: if the media connects, the call went through.
@@ -716,16 +1296,14 @@ class CallManager internal constructor(
                     }
                     if (!stillMine() || phase == CallPhase.InCall) return@launch
                 }
-                update { it.copy(error = answerError(e)) }
+                val why = answerError(e)
+                update { it.copy(error = why) }
                 delay(1_800)
-                if (_state.value.callId != callId || !live) return@launch
+                if (_state.value.callId != callId || !_state.value.live) return@launch
                 // Connected after all (the error was about a request whose work was done).
                 if (phase == CallPhase.InCall) { update { it.copy(error = null) }; return@launch }
-                // 409 "call already answered": a colleague won the redis lock and is
-                // talking to the customer. The web's hangup() here terminated THEIR
-                // call; only tear down this device's side. A 404 offer: the caller
-                // is gone, there is nothing to terminate.
-                if (e.isTakenElsewhere() || e.isOfferGone()) finish() else hangup()
+                finish(CallOutcome.Failed(why))
+                terminateSoon(callId)
             }
         }
     }
@@ -739,32 +1317,32 @@ class CallManager internal constructor(
         update { it.copy(muted = next) }
     }
 
-    /** Earpiece ↔ loudspeaker (the web plays through the computer's speakers). */
-    fun toggleSpeaker() {
-        val next = !_state.value.speaker
-        audio.setSpeaker(next)
-        update { it.copy(speaker = next) }
-    }
-
     /**
      * Business-initiated call: WE call the customer. Build an offer, ask Meta to
-     * place the call; the customer's SDP answer arrives as an outbound_answer
-     * frame. Needs the customer's call permission (409 otherwise).
-     * Result.failure carries the user-facing message; a call the agent hung up
-     * before it was placed counts as success (there is nothing to report).
+     * place the call ("Calling…"); once it rings them ("Ringing…") the
+     * customer's SDP answer arrives as an outbound_answer frame. Without their
+     * call permission (409) the wrap-up says so and offers the call request —
+     * never sent by itself, it messages the customer.
+     * Result.failure carries the user-facing message ([CallError.shown]: the
+     * card already says it); a call the agent hung up before it was placed
+     * counts as success (there is nothing to report).
      */
-    suspend fun initiateCall(to: String, name: String? = null): Result<Unit> = withContext(main) {
-        if (phase != CallPhase.Idle) return@withContext Result.failure(CallError("Already in a call"))
-        resetJob?.cancel()
+    suspend fun initiateCall(to: String, name: String? = null, conversationId: String? = null): Result<Unit> = withContext(main) {
+        if (_state.value.live) return@withContext Result.failure(CallError("Already in a call"))
+        resetJob?.cancel(); resetJob = null
         earlyAnswer = null
-        update {
-            CallUiState(phase = CallPhase.Connecting, callId = "pending", from = to.removePrefix("+"), name = name, outbound = true)
-        }
-        fun stillMine() = _state.value.outbound && _state.value.callId == "pending" && phase == CallPhase.Connecting
+        answerPosted = false
+        val wa = to.removePrefix("+")
+        val routes = _state.value.routes
+        _state.value = CallUiState(
+            phase = CallPhase.Placing, callId = "pending", from = wa, name = name, outbound = true,
+            conversationId = conversationId, routes = routes, route = preferredRoute(routes),
+        )
+        fun stillMine() = _state.value.outbound && _state.value.callId == "pending" && phase == CallPhase.Placing
         val startedAfter = now() - CLOCK_SKEW_MS
         try {
             val cfg = api.iceConfig()
-            recEnabled = cfg.record != false
+            readConfig(cfg)
             if (!stillMine()) return@withContext Result.success(Unit)
             val p = newPeer(cfg)
             if (!ensureMic()) throw MicBlocked()
@@ -791,10 +1369,14 @@ class CallManager internal constructor(
                 return@withContext Result.success(Unit)
             }
             activeId = id
-            update { if (it.callId == "pending") it.copy(callId = id) else it }
+            update { if (it.callId == "pending") it.copy(callId = id, phase = CallPhase.RingingOut) else it }
             earlyAnswer?.let { (early, sdp) ->
                 earlyAnswer = null
-                if (early == id) { logD("outbound answered (early)"); runCatching { p.setRemote(SdpType.Answer, sdp) } }
+                if (early == id) {
+                    logD("outbound answered (early)")
+                    if (phase == CallPhase.RingingOut) update { it.copy(phase = CallPhase.Connecting) }
+                    runCatching { p.setRemote(SdpType.Answer, sdp) }
+                }
             }
             Result.success(Unit)
         } catch (e: CancellationException) {
@@ -804,27 +1386,63 @@ class CallManager internal constructor(
             // A connect that timed out and left no row: it may yet ring them.
             val friendly = if (e.isAmbiguous("/admin/calls/connect") && e.isTimeout()) UNCONFIRMED_CALL else outboundError(e)
             if (!stillMine()) return@withContext Result.failure(CallError(friendly))
-            update { it.copy(error = friendly) }
-            resetJob?.cancel()
-            resetJob = ui.launch {
-                delay(2_200)
-                cleanup()
-                update { CallUiState() }
+            val outcome = when {
+                e is MicBlocked -> CallOutcome.MicBlocked
+                e is ApiException && e.status == 409 -> {
+                    // Asked already (and waiting on their Allow), or never: the card says which.
+                    val perm = try { api.permission(wa) } catch (x: CancellationException) { throw x } catch (_: Exception) { null }
+                    if (perm?.status == "requested") CallOutcome.PermissionRequested else CallOutcome.PermissionNeeded
+                }
+                friendly == UNCONFIRMED_CALL -> CallOutcome.Failed(UNCONFIRMED_CALL)
+                else -> CallOutcome.Failed(e.serverReason() ?: friendly)
             }
-            Result.failure(CallError(friendly))
+            if (!stillMine()) return@withContext Result.failure(CallError(friendly))
+            finish(outcome)
+            Result.failure(CallError(friendly, shown = true))
         }
     }
 
     /**
      * Ask the customer for permission to call them (WhatsApp's interactive
-     * call_permission_request). The web's customer panel sends this
-     * automatically when [initiateCall] fails for lack of permission — callers
-     * check `message.contains("permission", ignoreCase = true)`.
+     * call_permission_request). It messages the customer, so only ever on the
+     * agent's tap — "Send call request" on the wrap-up. Their Allow arrives as
+     * `call_permission` and raises [permissionGranted] on this phone.
      */
-    suspend fun requestPermission(to: String): Result<Unit> =
-        try { api.requestPermission(to.filter { it.isDigit() }); Result.success(Unit) }
-        catch (e: CancellationException) { throw e }
-        catch (e: Exception) { Result.failure(e) }
+    suspend fun requestPermission(to: String, name: String? = null): Result<Unit> {
+        val wa = to.filter { it.isDigit() }
+        return try {
+            api.requestPermission(wa)
+            withContext(main) { askedPermission[wa] = name ?: _state.value.takeIf { it.from == wa }?.name }
+            Result.success(Unit)
+        } catch (e: CancellationException) { throw e } catch (e: Exception) { Result.failure(e) }
+    }
+
+    /** The wrap-up's "Send call request". */
+    fun sendCallRequest() {
+        ui.launch {
+            val s = _state.value
+            val to = s.from?.takeIf { it.isNotEmpty() } ?: return@launch
+            if (s.phase != CallPhase.Ended || s.outcome != CallOutcome.PermissionNeeded || s.busy) return@launch
+            update { it.copy(busy = true, error = null) }
+            val r = requestPermission(to, s.name)
+            val now = _state.value
+            if (now.phase != CallPhase.Ended || now.from != to || now.outcome != CallOutcome.PermissionNeeded) return@launch
+            update {
+                if (r.isSuccess) it.copy(busy = false, outcome = CallOutcome.PermissionRequested)
+                else it.copy(busy = false, error = permissionRequestError(r.exceptionOrNull()))
+            }
+        }
+    }
+
+    /** The banner's "Call now" for a customer who just allowed calls. */
+    fun callGranted() {
+        val g = _permissionGranted.value ?: return
+        _permissionGranted.value = null
+        if (_state.value.live) return
+        ui.launch { initiateCall(g.waId, g.name) }
+    }
+
+    fun dismissGrant() { _permissionGranted.value = null }
 
     /**
      * The outbound row calls_connect records once Meta placed the call: to this
@@ -858,7 +1476,7 @@ class CallManager internal constructor(
                         setInCall()
                     }
                     PeerEvent.Interrupted -> onInterrupted(me)
-                    PeerEvent.Ended -> finish(if (_state.value.reconnecting) CONNECTION_LOST else null)
+                    PeerEvent.Ended -> finish(if (_state.value.reconnecting) CallOutcome.ConnectionLost else CallOutcome.Completed)
                 }
             }
         }
@@ -881,13 +1499,15 @@ class CallManager internal constructor(
             if (peer !== p) return@launch
             val id = _state.value.callId
             graceJob = null
-            finish(CONNECTION_LOST)
+            finish(CallOutcome.ConnectionLost)
             if (id != null && id != "pending") terminateSoon(id)
         }
     }
 
     private fun setInCall() {
-        if (phase == CallPhase.Connecting || phase == CallPhase.Ringing) update { it.copy(phase = CallPhase.InCall) }
+        if (phase == CallPhase.Connecting || phase == CallPhase.Ringing || phase == CallPhase.RingingOut) {
+            update { it.copy(phase = CallPhase.InCall) }
+        }
     }
 
     /** Wait for ICE gathering to finish, capped at 2.5s (as the web does). */
@@ -897,16 +1517,21 @@ class CallManager internal constructor(
 
     private class MicBlocked : Exception("Permission denied")
 
-    /** A failed call carrying the user-facing message. */
-    class CallError(message: String) : Exception(message)
+    /** A failed call carrying the user-facing message ([shown]: the call card already says it). */
+    class CallError(message: String, val shown: Boolean = false) : Exception(message)
 
     companion object {
         private const val TAG = "CallManager"
+
+        /** The phases with the call's audio set up (communication mode, focus, route). */
+        private val AUDIO_PHASES = setOf(CallPhase.Placing, CallPhase.RingingOut, CallPhase.Connecting, CallPhase.InCall)
 
         // android.util.Log is a stub on the plain JVM (unit tests): never let logging throw.
         private fun logD(msg: String) { runCatching { Log.d(TAG, msg) } }
         private fun logW(msg: String, e: Throwable) { runCatching { Log.w(TAG, msg, e) } }
         const val MIC_BLOCKED = "Microphone blocked — allow it and try again"
+        /** The wrap-up's words for a refused microphone (its button opens the settings). */
+        const val MIC_BLOCKED_WRAP = "Microphone blocked — allow it in settings"
         const val NO_CALL_PERMISSION = "Customer hasn't granted call permission. Send the WhatsApp template first."
         const val RING_POLL_MS = 2_500L
         const val IDLE_POLL_MS = 12_000L
@@ -925,15 +1550,21 @@ class CallManager internal constructor(
         const val CALL_GONE = "This call has already ended"
         const val ANSWER_OFFLINE = "No connection — couldn't answer the call"
         const val ANSWER_SLOW = "The server took too long — couldn't connect the call"
+        /** An answer that never left this phone: the call still rings and Answer stays live. */
+        const val ANSWER_NO_CONNECTION = "No connection — can't answer yet"
+        const val ANSWER_SLOW_RETRY = "The server is slow — tap Answer to try again"
         const val OUTBOUND_OFFLINE = "No connection — couldn't place the call"
         const val OUTBOUND_SLOW = "The server took too long — couldn't place the call"
         /** connect timed out and no placed call turned up: it may still be ringing them. */
         const val UNCONFIRMED_CALL = "Couldn't confirm the call went through — check Calls before trying again"
+        const val CALL_NOT_CONNECTED = "The call couldn't be connected"
         const val SESSION_EXPIRED = "Your session expired — sign in again"
-        const val CALLBACK_SAVED = "Callback saved — find them under Calls"
+        const val CALLBACK_SAVED = "Saved to call back — find it under Calls"
         const val CALLBACK_RETRYING = "Callback not saved yet — retrying"
         const val CALLBACK_FAILED = "Couldn't save the callback"
-        const val CONNECTION_LOST = "Connection lost — call ended"
+        const val RECORDING_SAVED_AUTO = "Recording saved — summary in a minute"
+        const val RECORDING_SAVED_MANUAL = "Recording saved — Transcribe from Calls"
+        const val RECORDING_SAVED = "Recording saved"
 
         /** How long a "disconnected" call may take to recover before it is ended. */
         const val ICE_GRACE_MS = 10_000L
@@ -956,26 +1587,48 @@ class CallManager internal constructor(
         private fun Throwable.isTimeout() = this is ApiException && status == 0 && body.startsWith("timed out")
         private fun Throwable.isOffline() = this is ApiException && status == 0 && !isTimeout()
 
-        /** POST /admin/calls/{id}/answer's 409 (routers/admin.py calls_answer: "call already answered"). */
+        /** POST /admin/calls/{id}/answer's 409 (routers/admin.py calls_answer: "call already answered by {name}"). */
         private fun Throwable.isTakenElsewhere() =
             this is ApiException && status == 409 && path.endsWith("/answer")
+
+        /** POST /answer's 410: "This call has already ended." (the caller gave up, a colleague declined). */
+        private fun Throwable.isCallGone() = this is ApiException && status == 410
 
         /** GET /offer's 404 "call offer expired or not found": the caller hung up. */
         private fun Throwable.isOfferGone() =
             this is ApiException && status == 404 && path.endsWith("/offer")
 
+        /** The winner's name in a 409's "call already answered by Ann" (null when it isn't named). */
+        internal fun Throwable.answeredBy(): String? {
+            val d = (this as? ApiException)?.detail ?: return null
+            return Regex("answered by (.+)$", RegexOption.IGNORE_CASE).find(d.trim())?.groupValues?.get(1)?.trim()?.trimEnd('.')
+                ?.takeIf { it.isNotEmpty() && it != "None" }
+        }
+
+        /**
+         * A connect refusal the agent can act on (routers/admin.py calls_connect's
+         * 502 "call failed: <reason>") — never an HTML error page or a stack of codes.
+         */
+        private fun Throwable.serverReason(): String? {
+            val a = this as? ApiException ?: return null
+            if (a.status != 502 || !a.path.endsWith("/connect")) return null
+            val d = a.detail.trim().removePrefix("call failed:").trim()
+            if (d.isEmpty() || d.startsWith("<") || d.length > 160) return null
+            return d.replaceFirstChar { it.uppercase() }
+        }
+
         /** answer()'s catch in lib/callContext.tsx (plus the 409 a colleague's answer causes). */
         internal fun answerError(e: Throwable): String = when {
             e is MicBlocked -> MIC_BLOCKED
             e.isTakenElsewhere() -> TAKEN_ELSEWHERE
-            e.isOfferGone() -> CALL_GONE
+            e.isOfferGone() || e.isCallGone() -> CALL_GONE
             e.isTimeout() -> ANSWER_SLOW
             e.isOffline() -> ANSWER_OFFLINE
             e.statusOrNull() == 401 -> SESSION_EXPIRED
             else -> "Couldn't connect the call"
         }
 
-        /** initiateCall()'s catch in lib/callContext.tsx. Never says "permission" but for the 409 (callers key on it). */
+        /** initiateCall()'s catch in lib/callContext.tsx. Never says "permission" but for the 409. */
         internal fun outboundError(e: Throwable): String = when {
             e is MicBlocked -> MIC_BLOCKED
             e is ApiException && e.status == 409 -> NO_CALL_PERMISSION
@@ -983,6 +1636,15 @@ class CallManager internal constructor(
             e.isOffline() -> OUTBOUND_OFFLINE
             e.statusOrNull() == 401 -> SESSION_EXPIRED
             else -> "Couldn't place the call"
+        }
+
+        /** Why "Send call request" didn't go. */
+        internal fun permissionRequestError(e: Throwable?): String = when {
+            e == null -> "Couldn't send the call request"
+            e.isTimeout() -> "No answer from the server — the request may still arrive. Check the chat before sending again."
+            e.isOffline() -> "No connection — the call request wasn't sent"
+            e.statusOrNull() == 401 -> SESSION_EXPIRED
+            else -> "Couldn't send the call request"
         }
     }
 }

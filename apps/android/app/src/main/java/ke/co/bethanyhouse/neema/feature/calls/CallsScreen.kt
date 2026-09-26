@@ -1,6 +1,11 @@
 package ke.co.bethanyhouse.neema.feature.calls
 
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import ke.co.bethanyhouse.neema.core.util.Fmt
 import ke.co.bethanyhouse.neema.feature.orders.pressedOn
 import ke.co.bethanyhouse.neema.feature.orders.touchCell
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -34,7 +39,9 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.layout.layout
 import androidx.compose.foundation.rememberScrollState
@@ -112,19 +119,6 @@ private val Soft = Palette.Call.Soft
 private val Sage = Palette.Call.Sage
 private val Ink = Palette.Call.Ink
 
-private enum class Dir { In, Back }
-private data class Outcome(val label: String, val color: Color, val dir: Dir)
-
-private val OUTCOME = mapOf(
-    "answered" to Outcome("Answered", Green, Dir.In),
-    "ended" to Outcome("Answered", Green, Dir.In),
-    "missed" to Outcome("Missed", RedC, Dir.In),
-    "declined" to Outcome("Declined", AmberC, Dir.In),
-    "callback" to Outcome("Callback", AmberC, Dir.Back),
-    "ringing" to Outcome("Ringing…", Green, Dir.In),
-)
-
-
 /**
  * The web's `avatarColor`: `[...s].reduce((a, c) => a + c.charCodeAt(0))` —
  * one term per code point, taking its FIRST UTF-16 unit (so an emoji adds its
@@ -157,7 +151,6 @@ internal fun initialsOf(who: String): String =
 
 internal fun firstGlyph(s: String): String = if (s.isEmpty()) "" else s.substring(0, Character.charCount(s.codePointAt(0)))
 
-private fun fmtDur(s: Int?): String = if (s == null || s == 0) "" else "${s / 60}:${(s % 60).toString().padStart(2, '0')}"
 
 /** A recording_url is absolute when the server knows its public base, else a bare filename under /api/admin/media. */
 private fun recordingUrl(raw: String): String =
@@ -165,10 +158,13 @@ private fun recordingUrl(raw: String): String =
     else "${BuildConfig.NEEMA_BASE_URL.trimEnd('/')}/api/admin/media/${raw.substringAfterLast('/')}"
 
 /**
- * Calls — the "Calls · History" console (components/views/CallsView.tsx): a
- * dark call log with a live missed badge (tap to filter), colour-coded
- * outcomes, duration, the agent who took it, the transcript/summary expander
- * with recording playback, a chat shortcut, and the caller's CRM panel.
+ * Calls — the WhatsApp call history (components/views/CallsView.tsx, CALLING_UX.md §7):
+ * All · Follow-ups, rows grouped Today / Yesterday / date, each with its
+ * direction and outcome in words and colour, length, who took it, the time,
+ * the recording / summary indicator and a one-tap call back. A row opens its
+ * details: the timeline, the recording, transcript and insights, Call back ·
+ * Open chat · Mark follow-up done, and the customer's full panel. Phone: the
+ * details replace the log; tablet: side by side.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -182,7 +178,7 @@ fun CallsScreen(
     val calls by vm.calls.collectAsStateWithLifecycle()
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()
     val loadError by vm.loadError.collectAsStateWithLifecycle()
-    val missedOnly by vm.missedOnly.collectAsStateWithLifecycle()
+    val followUpsOnly by vm.followUpsOnly.collectAsStateWithLifecycle()
     val selected by vm.selected.collectAsStateWithLifecycle()
     val transcript by vm.transcript.collectAsStateWithLifecycle()
     val focusKey by dash.callsFocusKey.collectAsStateWithLifecycle()
@@ -192,9 +188,9 @@ fun CallsScreen(
     ke.co.bethanyhouse.neema.core.util.TrackShown(vm.life)
     val list = calls
     // Once per change of the log, not per recomposition (a tick of a recording's scrubber).
-    val missed = remember(list) { list.orEmpty().count { it.status == "missed" } }
-    val shown = remember(list, missedOnly) { if (missedOnly) list?.filter { it.status == "missed" } else list }
-    val sel = selected?.takeIf { !it.waId.isNullOrEmpty() }
+    val followUps = remember(list) { list.orEmpty().count { it.followUpOpen } }
+    val shown = remember(list, followUpsOnly) { if (followUpsOnly) list?.filter { it.followUpOpen } else list }
+    val sel = selected
     val ctx = LocalContext.current
     var readiness by remember { mutableStateOf(readinessOverride ?: CallReadiness.of(ctx)) }
     // Re-check on return from the system settings page.
@@ -203,8 +199,8 @@ fun CallsScreen(
         onPauseOrDispose {}
     }
 
-    // Held here, not in the log: on a phone the caller panel replaces the log,
-    // and back from it must land where the agent was scrolled, not at the top.
+    // Held here, not in the log: on a phone the details replace the log,
+    // and back from them must land where the agent was scrolled, not at the top.
     val logState = rememberLazyListState()
 
     MinuteTicker {
@@ -214,7 +210,7 @@ fun CallsScreen(
         // Little room for text (a small phone, big text): each row puts its time
         // on the name line, and the readiness prompt its button under the words.
         val compact = maxWidth / LocalDensity.current.fontScale < 400.dp
-        // Phone: the caller panel replaces the log; back returns to it.
+        // Phone: the details replace the log; back returns to it.
         BackHandler(enabled = sel != null && !wide) { vm.select(null) }
 
         PullToRefreshBox(isRefreshing = refreshing, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize()) {
@@ -225,22 +221,39 @@ fun CallsScreen(
                 if (wide || sel == null) {
                     CallLog(
                         modifier = Modifier.widthIn(max = 560.dp).weight(1f, fill = false).fillMaxWidth(),
-                        vm = vm, state = logState, shown = shown, total = list?.size ?: 0, missed = missed, missedOnly = missedOnly,
-                        selectedId = sel?.id, openTranscript = transcript,
+                        vm = vm, state = logState, shown = shown, total = list?.size ?: 0, followUps = followUps,
+                        followUpsOnly = followUpsOnly, selectedId = sel?.id, openTranscript = transcript,
                         readiness = readiness, loadError = loadError, refreshing = refreshing, compact = compact,
-                        onOpenConversation = { dash.openConversationFor(it) },
                     )
                 }
                 if (sel != null) {
-                    CallerPanel(
-                        dash = dash, vm = vm, sel = sel, calls = list.orEmpty(),
-                        modifier = if (wide) Modifier.width(400.dp) else Modifier.fillMaxWidth(),
+                    CallDetails(
+                        dash = dash, vm = vm, sel = sel, calls = list.orEmpty(), transcript = transcript,
+                        modifier = if (wide) Modifier.width(420.dp) else Modifier.fillMaxWidth(),
                     )
                 }
             }
         }
     }
     }
+}
+
+/** A day header, then its rows (the log is newest first, so days come in order). */
+private sealed interface LogItem {
+    data class Day(val label: String) : LogItem
+    data class Row(val call: Call, val key: String) : LogItem
+}
+
+private fun logItems(rows: List<Call>): List<LogItem> {
+    val keys = rowKeys(rows)
+    val out = ArrayList<LogItem>(rows.size + 8)
+    var day: String? = null
+    rows.forEachIndexed { i, c ->
+        val d = Fmt.dayLabel(c.startedAt).ifEmpty { "Earlier" }
+        if (d != day) { out += LogItem.Day(d); day = d }
+        out += LogItem.Row(c, keys[i])
+    }
+    return out
 }
 
 @Composable
@@ -250,21 +263,20 @@ private fun CallLog(
     state: androidx.compose.foundation.lazy.LazyListState,
     shown: List<Call>?,
     total: Int,
-    missed: Int,
-    missedOnly: Boolean,
+    followUps: Int,
+    followUpsOnly: Boolean,
     selectedId: String?,
     openTranscript: TranscriptUi?,
     readiness: CallReadiness,
     loadError: String?,
     refreshing: Boolean,
     compact: Boolean = false,
-    onOpenConversation: (String) -> Unit,
 ) {
     // One card, as the web draws it (gradient, outline, shadow), over a lazy
     // list: a log of a thousand calls composes only the rows on screen. The
     // card is drawn once behind the list, spanning its first item to its last.
     val cardShape = RoundedCornerShape(16.dp)
-    val keys = remember(shown) { rowKeys(shown.orEmpty()) }
+    val items = remember(shown) { logItems(shown.orEmpty()) }
     val inset = if (compact) 16.dp else 24.dp
     Box(modifier.fillMaxSize()) {
         Box(
@@ -287,30 +299,20 @@ private fun CallLog(
                 .border(1.dp, ChannelColors.WhatsApp.copy(alpha = 0.14f), cardShape),
         )
         LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(vertical = 24.dp)) {
-            // Header: title, total, and the missed badge (a filter toggle).
+            // Header: title, total, and the All · Follow-ups filter.
             item(key = "header", contentType = "header") {
-                Row(Modifier.fillMaxWidth().padding(start = inset, end = inset, top = 24.dp, bottom = 16.dp), verticalAlignment = Alignment.Top) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Calls", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Medium)
-                        Spacer(Modifier.height(2.dp))
-                        Text("WhatsApp voice calls · $total total", color = Muted, fontSize = 13.sp)
-                    }
-                    if (missed > 0) {
-                        val press = remember { MutableInteractionSource() }
-                        Text(
-                            "$missed missed" + if (missedOnly) " ✕" else "",
-                            color = Palette.Call.MissedText, fontSize = 12.sp, fontWeight = FontWeight.Medium, style = TabularNums,
-                            modifier = Modifier
-                                .offset(y = (-10).dp)
-                                .touchCell(press, onClickLabel = if (missedOnly) "Show all calls" else "Show only missed calls") {
-                                    vm.missedOnly.value = !missedOnly
-                                }
-                                .clip(RoundedCornerShape(50))
-                                .background(RedC.copy(alpha = if (missedOnly) 0.35f else 0.16f))
-                                .border(1.dp, if (missedOnly) RedC.copy(alpha = 0.6f) else Color.Transparent, RoundedCornerShape(50))
-                                .pressedOn(press)
-                                .padding(horizontal = 11.dp, vertical = 5.dp),
-                        )
+                Column(Modifier.fillMaxWidth().padding(start = inset, end = inset, top = 24.dp, bottom = 12.dp)) {
+                    Text("Calls", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Medium,
+                        modifier = Modifier.semantics { heading() })
+                    Spacer(Modifier.height(2.dp))
+                    Text("WhatsApp voice calls · $total total", color = Muted, fontSize = 13.sp)
+                    Spacer(Modifier.height(12.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip("All", selected = !followUpsOnly) { vm.followUpsOnly.value = false }
+                        FilterChip(
+                            if (followUps > 0) "Follow-ups ($followUps)" else "Follow-ups", selected = followUpsOnly,
+                            alert = followUps > 0,
+                        ) { vm.followUpsOnly.value = true }
                     }
                 }
             }
@@ -320,12 +322,7 @@ private fun CallLog(
                 item(key = "load-error", contentType = "banner") { LoadErrorBanner(loadError, refreshing, vm::refresh, inset) }
             }
             when {
-                shown == null -> item(key = "loading", contentType = "state") {
-                    Text(
-                        "Loading…", color = Muted, fontSize = 14.sp, textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 40.dp),
-                    )
-                }
+                shown == null -> items(4, key = { "skeleton-$it" }, contentType = { "skeleton" }) { SkeletonRow(compact) }
                 shown.isEmpty() && loadError != null -> item(key = "error", contentType = "state") {
                     Column(
                         Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 48.dp),
@@ -343,31 +340,77 @@ private fun CallLog(
                         Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 56.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        Text("No calls yet", color = Soft, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                        Text(
+                            if (followUpsOnly) "No follow-ups" else "No calls yet — incoming WhatsApp calls ring here",
+                            color = Soft, fontSize = 15.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center,
+                        )
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            "Incoming WhatsApp voice calls appear here. Keep the dashboard open — a call takes over the screen when it rings.",
+                            if (followUpsOnly) "Every missed call has been returned or marked done."
+                            else "Keep Neema signed in — a call rings this phone even when the app is closed.",
                             color = Muted, fontSize = 13.sp, textAlign = TextAlign.Center,
                         )
                     }
                 }
-                else -> itemsIndexed(shown, key = { i, _ -> keys[i] }, contentType = { _, _ -> "call" }) { _, c ->
-                    Column {
-                        // borderTop: 1px solid rgba(255,255,255,0.05)
-                        Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.05f)))
-                        CallRow(
-                            c = c, selected = selectedId == c.id,
-                            open = openTranscript?.callId == c.callId,
-                            onSelect = { if (!c.waId.isNullOrEmpty()) vm.select(c) },
-                            onToggleTranscript = { vm.toggleTranscript(c.callId) },
-                            onOpenConversation = onOpenConversation,
-                            ago = liveAgo(c.startedAt),
-                            compact = compact,
+                else -> items(items, key = { when (it) { is LogItem.Day -> "day:${it.label}"; is LogItem.Row -> it.key } },
+                    contentType = { if (it is LogItem.Day) "day" else "call" }) { item ->
+                    when (item) {
+                        is LogItem.Day -> Text(
+                            item.label.uppercase(), color = Dim, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.8.sp,
+                            modifier = Modifier.fillMaxWidth().padding(start = inset, end = inset, top = 14.dp, bottom = 6.dp).semantics { heading() },
                         )
-                        if (openTranscript?.callId == c.callId) TranscriptPanel(openTranscript, vm, compact)
+                        is LogItem.Row -> Column {
+                            val c = item.call
+                            // borderTop: 1px solid rgba(255,255,255,0.05)
+                            Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.05f)))
+                            CallRow(
+                                c = c, selected = selectedId == c.id,
+                                open = openTranscript?.callId == c.callId,
+                                onSelect = { vm.select(c) },
+                                onToggleTranscript = { vm.toggleTranscript(c.callId) },
+                                onCallBack = { vm.callBack(c) },
+                                compact = compact,
+                            )
+                            if (openTranscript?.callId == c.callId && selectedId != c.id) TranscriptPanel(openTranscript, vm, compact)
+                        }
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun FilterChip(text: String, selected: Boolean, alert: Boolean = false, onClick: () -> Unit) {
+    val press = remember { MutableInteractionSource() }
+    Text(
+        text, color = if (selected) Ink else if (alert) Palette.Call.MissedText else TextC,
+        fontSize = 13.sp, fontWeight = FontWeight.Medium, style = TabularNums,
+        modifier = Modifier
+            .touchCell(press, role = Role.Tab, onClickLabel = "Show $text") { onClick() }
+            .semantics { this.selected = selected }
+            .clip(RoundedCornerShape(50))
+            .background(if (selected) Green else Color.White.copy(alpha = 0.06f))
+            .border(1.dp, if (selected) Green else Color.White.copy(alpha = 0.12f), RoundedCornerShape(50))
+            .pressedOn(press)
+            .padding(horizontal = 14.dp, vertical = 7.dp),
+    )
+}
+
+/** A placeholder row while the log loads (no spinner: the page keeps its shape). */
+@Composable
+private fun SkeletonRow(compact: Boolean) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = if (compact) 16.dp else 24.dp, end = 24.dp, top = 12.dp, bottom = 12.dp)
+            .semantics { contentDescription = "Loading calls" },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(40.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.07f)))
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Box(Modifier.fillMaxWidth(0.5f).height(12.dp).clip(RoundedCornerShape(6.dp)).background(Color.White.copy(alpha = 0.08f)))
+            Spacer(Modifier.height(8.dp))
+            Box(Modifier.fillMaxWidth(0.35f).height(10.dp).clip(RoundedCornerShape(5.dp)).background(Color.White.copy(alpha = 0.05f)))
         }
     }
 }
@@ -438,19 +481,19 @@ private fun CallRow(
     open: Boolean,
     onSelect: () -> Unit,
     onToggleTranscript: () -> Unit,
-    onOpenConversation: (String) -> Unit,
-    ago: String,
+    onCallBack: () -> Unit,
     compact: Boolean = false,
 ) {
-    val o = OUTCOME[c.status] ?: OUTCOME.getValue("ended")
+    val w = callRowWords(c)
     val who = rowWho(c)
     val initials = initialsOf(who)
     val hasNote = !c.summary.isNullOrEmpty()
+    val time = Fmt.time(c.startedAt)
     Row(
         Modifier
             .fillMaxWidth()
             .background(if (selected) ChannelColors.WhatsApp.copy(alpha = 0.08f) else Color.Transparent)
-            .then(if (!c.waId.isNullOrEmpty()) Modifier.clickable(onClick = onSelect) else Modifier)
+            .clickable(onClickLabel = "Call details", onClick = onSelect)
             .padding(start = if (compact) 16.dp else 24.dp, end = if (compact) 8.dp else 20.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 12.dp),
@@ -461,24 +504,23 @@ private fun CallRow(
         }
         Column(Modifier.weight(1f).padding(vertical = 6.dp)) {
             Text(who, color = TextC, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            // flex items-center gap-1.5
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier.padding(top = 1.dp),
             ) {
-                Icon(if (o.dir == Dir.Back) CallIcons.DirBack else CallIcons.DirIn, null, tint = o.color, modifier = Modifier.size(13.dp))
+                Icon(w.icon, null, tint = toneColor(w.tone), modifier = Modifier.size(13.dp))
                 // One run of text so a tight row trims the end ("· Mo…") rather
                 // than dropping a whole part; an en space is the web's 6px gap at 12px.
-                Text(statusLine(o, c), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(statusLine(w, c), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             // Little room: the time drops under the outcome, and the name keeps the line.
-            if (compact) Text(ago, color = Dim, fontSize = 11.sp, maxLines = 1, modifier = Modifier.padding(top = 1.dp))
+            if (compact) Text(time, color = Dim, fontSize = 11.sp, maxLines = 1, style = TabularNums, modifier = Modifier.padding(top = 1.dp))
         }
-        if (!compact) Text(ago, color = Dim, fontSize = 11.sp, maxLines = 1)
+        if (!compact) Text(time, color = Dim, fontSize = 11.sp, maxLines = 1, style = TabularNums)
         // The two 48dp touch cells sit flush: their 34dp circles still read 14dp apart.
         Row {
-            if (c.hasRecording) {
+            if (c.hasRecording || hasNote) {
                 RoundIcon(
                     icon = CallIcons.Transcript, iconSize = 15.dp,
                     label = if (hasNote) "Call summary & transcript" else "Call recording — transcribe & summarise",
@@ -490,23 +532,33 @@ private fun CallRow(
             }
             if (!c.waId.isNullOrEmpty()) {
                 RoundIcon(
-                    icon = CallIcons.Chat, iconSize = 16.dp,
-                    label = "Open the conversation in Neema",
-                    bg = ChannelColors.WhatsApp.copy(alpha = 0.16f), tint = Green, border = ChannelColors.WhatsApp.copy(alpha = 0.3f),
-                    onClick = { c.waId?.let(onOpenConversation) },
+                    icon = CallIcons.Phone, iconSize = 15.dp,
+                    label = "Call ${who} back on WhatsApp",
+                    bg = ChannelColors.WhatsApp, tint = Ink, border = ChannelColors.WhatsApp,
+                    onClick = onCallBack,
                 )
             }
         }
     }
 }
 
-/** "Answered · 3:04 · Moses": the outcome in its colour, duration and the agent's first name muted. */
-private fun statusLine(o: Outcome, c: Call) = buildAnnotatedString {
-    withStyle(SpanStyle(color = o.color)) { append(o.label) }
+/** The outcome word's colour on the dark log (the word is always there too). */
+private fun toneColor(t: CallTone): Color = when (t) {
+    CallTone.Live, CallTone.Good -> Green
+    CallTone.Bad -> RedC
+    CallTone.Warn -> AmberC
+    CallTone.Neutral -> Sage
+}
+
+/** "Missed · 3:04 · Moses · Follow up": the outcome in its colour, then length, agent, follow-up muted. */
+private fun statusLine(w: CallRowWords, c: Call) = buildAnnotatedString {
+    withStyle(SpanStyle(color = toneColor(w.tone))) { append(w.label) }
     withStyle(SpanStyle(color = Muted)) {
-        fmtDur(c.duration).takeIf { it.isNotEmpty() }?.let { append("\u2002· $it") }
-        c.agentName?.takeIf { it.isNotEmpty() }?.let { append("\u2002· ${it.split(" ").first()}") }
+        callDuration(c.duration).takeIf { it.isNotEmpty() }?.let { append(" · $it") }
+        agentFirst(c.agentName)?.let { append(" · $it") }
+        Unit
     }
+    if (c.followUpOpen) withStyle(SpanStyle(color = Palette.Call.MissedText)) { append(" · Follow up") }
 }
 
 @Composable
@@ -527,9 +579,13 @@ private fun RoundIcon(icon: ImageVector, iconSize: Dp, label: String, bg: Color,
  * plus playback of the recording.
  */
 @Composable
-private fun TranscriptPanel(t: TranscriptUi, vm: CallsViewModel, compact: Boolean = false) {
-    // Under the row's text: its inset + the 40dp avatar + the gap.
-    val pad = if (compact) Modifier.padding(start = 64.dp, end = 16.dp, bottom = 16.dp) else Modifier.padding(start = 68.dp, end = 24.dp, bottom = 16.dp)
+private fun TranscriptPanel(t: TranscriptUi, vm: CallsViewModel, compact: Boolean = false, inDetails: Boolean = false) {
+    // Under the row's text: its inset + the 40dp avatar + the gap (in the details: the card's own padding).
+    val pad = when {
+        inDetails -> Modifier.padding(bottom = 8.dp)
+        compact -> Modifier.padding(start = 64.dp, end = 16.dp, bottom = 16.dp)
+        else -> Modifier.padding(start = 68.dp, end = 24.dp, bottom = 16.dp)
+    }
     val data = t.data
     if (data == null) {
         val err = t.loadErr
@@ -726,18 +782,25 @@ private fun PlayerBar(
 
 private fun fmtMs(ms: Long): String { val s = (ms / 1000).toInt(); return "${s / 60}:${(s % 60).toString().padStart(2, '0')}" }
 
-/** The caller panel: this caller's call-history strip, then the full CRM profile. */
+/**
+ * One call's details: what happened (rang → answered by → ended), the
+ * recording, transcript and insights, what to do next (Call back · Open chat
+ * · Mark follow-up done), then the customer's full CRM panel.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun CallerPanel(
+private fun CallDetails(
     dash: DashboardViewModel,
     vm: CallsViewModel,
     sel: Call,
     calls: List<Call>,
+    transcript: TranscriptUi?,
     modifier: Modifier,
 ) {
     val wa = sel.waId.orEmpty()
-    val callerCalls = remember(calls, wa) { calls.filter { it.waId == wa } }
-    val callerMissed = remember(callerCalls) { callerCalls.count { it.status == "missed" } }
+    val callerCalls = remember(calls, wa) { if (wa.isEmpty()) emptyList() else calls.filter { it.waId == wa } }
+    val doneBusy by vm.doneBusy.collectAsStateWithLifecycle()
+    val w = callRowWords(sel)
     // A synthetic conversation handle is enough — the panel fetches the real CRM profile by wa_id itself.
     val conv = remember(sel.callId, wa, sel.name) {
         Conversation(
@@ -746,51 +809,155 @@ private fun CallerPanel(
         )
     }
     Column(modifier.fillMaxSize().padding(vertical = 24.dp)) {
-        Row(
+        Column(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Ink)
                 .border(1.dp, ChannelColors.WhatsApp.copy(alpha = 0.14f), RoundedCornerShape(16.dp))
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .heightIn(max = 460.dp).verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 14.dp),
         ) {
-            Row(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(w.icon, null, tint = toneColor(w.tone), modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
                 Text(
-                    "${callerCalls.size} call${if (callerCalls.size == 1) "" else "s"}",
-                    color = TextC, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                    rowWho(sel), color = TextC, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).semantics { heading() },
                 )
-                if (callerMissed > 0) Text(" · $callerMissed missed", color = Palette.Call.MissedText, fontSize = 12.sp)
-                callerCalls.firstOrNull()?.startedAt?.let { Text(" · last ${liveAgo(it)}", color = Sage, fontSize = 12.sp, maxLines = 1) }
+                Text(
+                    "Close", color = Sage, fontSize = 12.sp,
+                    modifier = Modifier.clickable(role = Role.Button) { vm.select(null) }.minimumInteractiveComponentSize().padding(horizontal = 6.dp),
+                )
             }
-            StripButton("Open chat →") { dash.openConversationFor(wa) }
-        }
-        Spacer(Modifier.height(12.dp))
-        Box(
-            Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(16.dp))
-                .border(1.dp, if (Neema.colors.isDark) Neema.colors.border else Palette.Stone200, RoundedCornerShape(16.dp))
-                .background(Neema.colors.bg2),
-        ) {
-            CustomerPanel(
-                dash = dash,
-                conversation = conv,
-                onClose = { vm.select(null) },
-                onOpenIdentity = { _, externalId -> dash.openConversationFor(externalId) },
-                onNameChange = { _, _ -> vm.load() },
-                modifier = Modifier.fillMaxSize(),
+            Text(
+                "${w.label}${callDuration(sel.duration).takeIf { it.isNotEmpty() }?.let { " · $it" } ?: ""} · ${Fmt.dateTime(sel.startedAt)}",
+                color = toneColor(w.tone), fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp),
             )
+            Spacer(Modifier.height(12.dp))
+            Timeline(sel)
+            // Recording / transcript state (§7), and the insights the AI drew from the call.
+            recordingLine(sel)?.let {
+                Spacer(Modifier.height(10.dp))
+                Text(it, color = Sage, fontSize = 12.sp)
+            }
+            sel.insights?.let { ins ->
+                Spacer(Modifier.height(10.dp))
+                InsightsBlock(ins)
+            }
+            if (sel.hasRecording || !sel.summary.isNullOrEmpty()) {
+                val open = transcript?.callId == sel.callId
+                Text(
+                    if (open) "Hide summary & transcript" else "Summary, transcript & recording",
+                    color = Green, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                    modifier = Modifier.clickable(role = Role.Button) { vm.toggleTranscript(sel.callId) }
+                        .heightIn(min = 48.dp).wrapContentHeight(Alignment.CenterVertically),
+                )
+                if (open && transcript != null) TranscriptPanel(transcript, vm, compact = true, inDetails = true)
+            }
+            Spacer(Modifier.height(8.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (wa.isNotEmpty()) {
+                    StripButton("Call back", filled = true) { vm.callBack(sel) }
+                    StripButton("Open chat") { dash.openConversationFor(wa) }
+                }
+                if (sel.followUpOpen) {
+                    StripButton(if (sel.callId in doneBusy) "Marking…" else "Mark follow-up done") { vm.markFollowUpDone(sel) }
+                }
+            }
+            if (callerCalls.size > 1) {
+                val missed = callerCalls.count { it.status == "missed" }
+                Text(
+                    "${callerCalls.size} calls with them" + (if (missed > 0) " · $missed missed" else "") +
+                        (callerCalls.firstOrNull()?.startedAt?.let { " · last ${liveAgo(it)}" } ?: ""),
+                    color = Sage, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp),
+                )
+            }
+        }
+        if (wa.isNotEmpty()) {
+            Spacer(Modifier.height(12.dp))
+            Box(
+                Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(16.dp))
+                    .border(1.dp, if (Neema.colors.isDark) Neema.colors.border else Palette.Stone200, RoundedCornerShape(16.dp))
+                    .background(Neema.colors.bg2),
+            ) {
+                CustomerPanel(
+                    dash = dash,
+                    conversation = conv,
+                    onClose = { vm.select(null) },
+                    onOpenIdentity = { _, externalId -> dash.openConversationFor(externalId) },
+                    onNameChange = { _, _ -> vm.load() },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
     }
 }
 
+/** Rang → answered by → ended, each with its time. */
 @Composable
-private fun StripButton(text: String, onClick: () -> Unit) {
+private fun Timeline(c: Call) {
+    val out = c.direction == "outbound"
+    val steps = buildList {
+        add((if (out) "Called${agentFirst(c.agentName)?.let { " by $it" } ?: ""}" else "Rang") to c.startedAt)
+        if (c.answeredAt != null) add((if (out) "Answered" else "Answered${agentFirst(c.agentName)?.let { " by $it" } ?: ""}") to c.answeredAt)
+        val end = when (c.status) {
+            "ringing" -> null
+            "answered" -> "On the call now"
+            "completed", "ended" -> "Ended${callDuration(c.duration).takeIf { it.isNotEmpty() }?.let { " · $it" } ?: ""}"
+            else -> callRowWords(c).label
+        }
+        if (end != null) add(end to (c.endedAt ?: if (c.status == "answered") null else c.endedAt))
+    }
+    Column {
+        steps.forEachIndexed { i, (label, at) ->
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
+                Box(Modifier.size(8.dp).clip(CircleShape).background(if (i == steps.lastIndex) toneColor(callRowWords(c).tone) else Sage))
+                Spacer(Modifier.width(10.dp))
+                Text(label, color = TextC, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                at?.let { Text(Fmt.time(it), color = Dim, fontSize = 12.sp, style = TabularNums) }
+            }
+        }
+    }
+}
+
+/** §7's recording words for a finished call (null when nothing was recorded). */
+private fun recordingLine(c: Call): String? = when (c.transcriptStatus) {
+    "recorded" -> "Recording saved — Transcribe below"
+    "pending", "processing" -> "Recording saved — summary in a minute"
+    "done" -> "Recording saved · summarised"
+    "failed" -> "Recording saved — the transcript failed; retry below"
+    else -> if (c.hasRecording) "Recording saved" else null
+}
+
+/** What the AI drew from the call: intent, products, objections, agreed, next action. */
+@Composable
+private fun InsightsBlock(i: ke.co.bethanyhouse.neema.core.model.CallInsights) {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(ChannelColors.WhatsApp.copy(alpha = 0.06f))
+            .border(1.dp, ChannelColors.WhatsApp.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        Text("INSIGHTS", color = Green, fontSize = 11.sp, letterSpacing = 0.6.sp)
+        @Composable fun line(k: String, v: String?) { if (!v.isNullOrBlank()) Text("$k: $v", color = Soft, fontSize = 12.sp, lineHeight = 17.sp) }
+        line("Wants", i.intent)
+        line("Products", i.products.joinToString(", ").ifEmpty { null })
+        line("Concerns", i.objections.joinToString("; ").ifEmpty { null })
+        line("Agreed", i.commitments.joinToString("; ").ifEmpty { null })
+        line("Next", i.nextAction)
+        line("Mood", i.sentiment)
+    }
+}
+
+@Composable
+private fun StripButton(text: String, filled: Boolean = false, onClick: () -> Unit) {
     val press = remember { MutableInteractionSource() }
     Row(
         Modifier.touchCell(press, role = Role.Button, onClick = onClick)
-            .clip(RoundedCornerShape(50)).background(ChannelColors.WhatsApp.copy(alpha = 0.14f))
+            .clip(RoundedCornerShape(50)).background(if (filled) Green else ChannelColors.WhatsApp.copy(alpha = 0.14f))
             .border(1.dp, ChannelColors.WhatsApp.copy(alpha = 0.3f), RoundedCornerShape(50))
             .pressedOn(press).padding(horizontal = 12.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(text, color = Green, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        Text(text, color = if (filled) Ink else Green, fontSize = 12.sp, fontWeight = FontWeight.Medium)
     }
 }
 

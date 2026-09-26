@@ -363,6 +363,12 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         viewModelScope.launch {
             combine(dash.openConvKey, _inbox) { k, s -> k to s }.collect { (k, s) -> if (k != null) tryOpenKey(k, s) }
         }
+        // Words another view asked for in the open thread's composer (never sent by themselves).
+        viewModelScope.launch {
+            combine(dash.composerPrefill, _thread) { p, t -> p to t.activeId }.collect { (p, active) ->
+                if (p != null && p.first == active) { dash.composerPrefill.value = null; useAsReply(p.second) }
+            }
+        }
     }
 
     // ═══════════════════════════ The paged list (useInbox) ═══════════════════════════
@@ -1932,26 +1938,29 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
     }
 
     /**
-     * Business-initiated WhatsApp call; no permission yet → ask for it automatically.
+     * Business-initiated WhatsApp call. The call screen carries every outcome —
+     * including "hasn't allowed calls yet", whose "Send call request" the agent
+     * taps (never sent by itself: it messages the customer); only a refusal the
+     * screen doesn't show ("Already in a call") is a toast.
      * Only ever a real number: a web-chat visitor's `web_<hash>` key (or a Meta
      * PSID) is not dialable, whatever digits it happens to contain.
      */
     fun call(waId: String, name: String?) {
         if (isWebVisitor(waId) || waId.any { !it.isDigit() } || waId.length !in 7..15) return
+        val convId = _thread.value.activeId.takeIf { id -> _inbox.value.cache[id]?.channel == "whatsapp" }
         viewModelScope.launch {
-            val r = dash.container.calls.initiateCall(waId, name)
+            val r = dash.container.calls.initiateCall(waId, name, convId)
             val err = r.exceptionOrNull() ?: return@launch
-            val msg = err.message ?: ""
-            if (msg.lowercase().contains("permission")) {
-                try {
-                    api.calls.requestPermission(waId)
-                    dash.toast("Asked ${name?.trim()?.split(" ")?.firstOrNull()?.ifBlank { null } ?: "them"} for permission to call — you can call once they tap Allow.")
-                } catch (e: Exception) {
-                    if (e is CancellationException) throw e
-                    dash.toast("Couldn't send the call request", ToastType.Error)
-                }
-            } else dash.toast(msg.ifBlank { "Couldn't place the call" }, ToastType.Error)
+            if ((err as? ke.co.bethanyhouse.neema.feature.calls.CallManager.CallError)?.shown == true) return@launch
+            dash.toast(err.message?.ifBlank { null } ?: "Couldn't place the call", ToastType.Error)
         }
+    }
+
+    /** "Use as reply" on a call's summary card: the AI's follow-up goes in the composer — never sent by itself. */
+    fun useAsReply(text: String) {
+        val t = text.trim()
+        if (t.isEmpty()) return
+        _composer.update { c -> c.copy(replyText = if (c.replyText.isBlank()) t else c.replyText.trimEnd() + "\n" + t) }
     }
 
     // ═══════════════════════════ Surviving process death (InboxMemory) ═══════════════════════════

@@ -63,5 +63,6 @@ class AppContainer(val context: Context, val config: ContainerConfig = Container
         foreground = foreground,
         signedInFn = { sessionStore.session.value != null },
         prefs = prefs,
+        agentIdFn = { sessionStore.session.value?.agentId },
     )
 }

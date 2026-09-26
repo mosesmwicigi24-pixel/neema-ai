@@ -96,6 +96,30 @@ class CallsViewModelTest {
         assertEquals("{}", fake.callsTo("POST", CallsFixtures.path(CallsFixtures.C3, "transcribe")).last().body)
     }
 
+    @Test fun followUpsAreTheCallsStillOwedAndCanBeMarkedDone() {
+        val (v, fake) = vm()
+        val owed = v.calls.value!!.filter { it.followUpOpen }
+        assertEquals(listOf("missed", "callback", "missed"), owed.map { it.status })
+        val first = owed.first()
+        v.markFollowUpDone(first)
+        assertEquals("{}", fake.callsTo("POST", CallsFixtures.path(first.callId, "follow-up-done")).single().body)
+        assertEquals(2, v.calls.value!!.count { it.followUpOpen })
+        v.markFollowUpDone(first)
+        assertEquals("not owed any more: nothing sent", 1, fake.callsTo("POST", CallsFixtures.path(first.callId, "follow-up-done")).size)
+        // Refused: it goes back on the list.
+        val second = v.calls.value!!.first { it.followUpOpen }
+        fake.on("POST", CallsFixtures.route(second.callId, "follow-up-done"), code = 404, body = """{"detail":"Call not found"}""")
+        v.markFollowUpDone(second)
+        assertEquals(2, v.calls.value!!.count { it.followUpOpen })
+        assertTrue(v.doneBusy.value.isEmpty())
+    }
+
+    @Test fun followUpsFilterSurvivesProcessDeathKeys() {
+        val (v, _) = vm()
+        v.followUpsOnly.value = true
+        assertEquals(true, v.saveUi()["followUps"])
+    }
+
     @Test fun showFullTranscriptToggles() {
         val (v, _) = vm()
         v.toggleTranscript(CallsFixtures.C1)

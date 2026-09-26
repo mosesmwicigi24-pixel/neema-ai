@@ -80,12 +80,12 @@ object SalesStressFixtures {
 
     /** A [n]-row call log (the API caps at 200 today; the screen must not care). */
     fun calls(n: Int = 1_000): String = (0 until n).joinToString(",", "[", "]") { i ->
-        val st = listOf("answered", "missed", "declined", "callback", "ended")[i % 5]
+        val st = listOf("completed", "missed", "declined", "callback", "no_answer")[i % 5]
         CallsFixtures.row(
             id = "9c1d2e3f-4a5b-4c6d-8e7f-%012d".format(i), callId = CallsFixtures.wacid("U1RS%04d".format(i)),
             waId = if (i % 13 == 0) null else waId(i % 150), name = if (i % 7 == 0) null else names[i % names.size],
             direction = if (i % 9 == 0) "outbound" else "inbound", status = st,
-            duration = if (st == "answered" || st == "ended") 30 + i % 400 else null,
+            duration = if (st == "completed") 30 + i % 400 else null,
             agentName = if (i % 3 == 0) "Moses Mwicigi" else null, startedAt = CallsFixtures.pyIso(3L + i * 11),
             summary = if (i % 6 == 0) "Asked about delivery #$i." else null, transcriptStatus = if (i % 6 == 0) "done" else "none",
             hasRecording = i % 6 == 0,

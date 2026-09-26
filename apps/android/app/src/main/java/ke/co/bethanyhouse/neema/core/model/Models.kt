@@ -11,6 +11,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.JsonTransformingSerializer
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
@@ -475,23 +476,108 @@ data class Stats(
     @SerialName("channel_breakdown") val channelBreakdown: List<ChannelCount> = emptyList(),
 )
 
+/**
+ * One call row as services/call_log.py `serialize` builds it (GET /admin/calls,
+ * GET /admin/calls/{id}, the `call` of a `call_update` frame and of a thread's
+ * call event). Every field has a default: a legacy row, a bare row the
+ * recording upload created, or a key the server adds later never fails the
+ * decode ([ke.co.bethanyhouse.neema.core.net.NeemaJson] ignores unknown keys).
+ */
 @Serializable
 data class Call(
     val id: String = "",
     @SerialName("call_id") val callId: String = "",
     @SerialName("wa_id") val waId: String? = null,
     val name: String? = null,
+    @SerialName("person_id") val personId: String? = null,
+    /** The customer's WhatsApp conversation, for "Open chat" (null before they ever wrote). */
+    @SerialName("conversation_id") val conversationId: String? = null,
+    /** Always "whatsapp": Messenger and Instagram have no business calling API. */
+    val channel: String = "whatsapp",
     val direction: String = "inbound",
-    /** ringing | answered | ended | missed | declined */
+    /**
+     * ringing | answered | completed | missed | declined | callback | no_answer |
+     * cancelled | failed (legacy rows may still say `ended` = completed).
+     */
     val status: String = "",
     val duration: Int? = null,
+    @SerialName("agent_id") val agentId: String? = null,
     @SerialName("agent_name") val agentName: String? = null,
     @SerialName("started_at") val startedAt: String? = null,
+    @SerialName("answered_at") val answeredAt: String? = null,
+    @SerialName("ended_at") val endedAt: String? = null,
     val summary: String? = null,
+    /**
+     * The AI's read of the call (call_transcribe.py), kept raw and read field by
+     * field through [insights]: one odd value never sinks the whole call log.
+     */
+    @SerialName("insights") val insightsRaw: JsonElement? = null,
     /** none | recorded | pending | processing | done | failed */
     @SerialName("transcript_status") val transcriptStatus: String? = null,
     @SerialName("has_recording") val hasRecording: Boolean = false,
+    /** A missed / callback call nobody has returned or marked done yet. */
+    @SerialName("follow_up_open") val followUpOpen: Boolean = false,
+    @SerialName("follow_up_done_at") val followUpDoneAt: String? = null,
+) {
+    /** [insightsRaw] read leniently (null when absent or not an object). Not serialized. */
+    val insights: CallInsights? by lazy(LazyThreadSafetyMode.PUBLICATION) { CallInsights.of(insightsRaw) }
+}
+
+/**
+ * `insights` on a call row: what the customer wanted, what was agreed, and
+ * the follow-up the AI drafted. Every field is optional; lists that arrive as
+ * a single string (or hold numbers / objects) still read as text.
+ */
+data class CallInsights(
+    val intent: String? = null,
+    val products: List<String> = emptyList(),
+    val objections: List<String> = emptyList(),
+    val commitments: List<String> = emptyList(),
+    val nextAction: String? = null,
+    /** A reply the agent may put in the composer ("Use as reply") — never sent by itself. */
+    val followUpMessage: String? = null,
+    val sentiment: String? = null,
+) {
+    val isEmpty: Boolean get() = intent == null && products.isEmpty() && objections.isEmpty() && commitments.isEmpty() &&
+        nextAction == null && followUpMessage == null && sentiment == null
+
+    companion object {
+        private fun text(e: JsonElement?): String? = when (e) {
+            is JsonPrimitive -> e.contentOrNull?.trim()?.takeIf { it.isNotEmpty() && it != "null" }
+            is JsonObject -> (e["name"] ?: e["text"] ?: e["title"])?.let(::text)
+            else -> null
+        }
+        private fun texts(e: JsonElement?): List<String> = when (e) {
+            is JsonArray -> e.mapNotNull(::text)
+            null, is JsonNull -> emptyList()
+            else -> listOfNotNull(text(e))
+        }
+
+        fun of(raw: JsonElement?): CallInsights? {
+            val o = raw as? JsonObject ?: return null
+            val i = CallInsights(
+                intent = text(o["intent"]), products = texts(o["products"]), objections = texts(o["objections"]),
+                commitments = texts(o["commitments"]), nextAction = text(o["next_action"]),
+                followUpMessage = text(o["follow_up_message"]), sentiment = text(o["sentiment"]),
+            )
+            return i.takeUnless { it.isEmpty }
+        }
+    }
+}
+
+/** GET /admin/calls/permission: may we call this customer? */
+@Serializable
+data class CallPermission(
+    @SerialName("wa_id") val waId: String? = null,
+    /** granted | denied | requested | unknown (never asked — a call may still go through). */
+    val status: String = "unknown",
+    @SerialName("expires_at") val expiresAt: String? = null,
+    val permanent: Boolean = false,
 )
+
+/** POST /admin/calls/request-permission → {ok, permission}. */
+@Serializable
+data class PermissionRequestResponse(val ok: Boolean = true, val permission: CallPermission? = null)
 
 @Serializable
 data class CallTranscript(
@@ -502,7 +588,11 @@ data class CallTranscript(
     val language: String? = null,
     @SerialName("has_recording") val hasRecording: Boolean = false,
     @SerialName("recording_url") val recordingUrl: String? = null,
-)
+    /** The AI's read of the call, as on the row (see [Call.insights]). */
+    @SerialName("insights") val insightsRaw: JsonElement? = null,
+) {
+    val insights: CallInsights? by lazy(LazyThreadSafetyMode.PUBLICATION) { CallInsights.of(insightsRaw) }
+}
 
 @Serializable
 data class IceServer(
@@ -515,6 +605,10 @@ data class IceServer(
 data class IceConfig(
     @SerialName("ice_servers") val iceServers: List<IceServer> = emptyList(),
     val record: Boolean? = null,
+    /** Recordings get transcribed (Whisper on): the UI may promise a summary. */
+    val transcribe: Boolean? = null,
+    /** …and without anyone asking (whisper_auto): "summary in a minute". */
+    @SerialName("auto_transcribe") val autoTranscribe: Boolean? = null,
 )
 
 @Serializable

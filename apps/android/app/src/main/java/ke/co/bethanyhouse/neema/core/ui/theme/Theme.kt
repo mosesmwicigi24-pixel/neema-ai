@@ -255,6 +255,22 @@ object Palette {
         val StageControl = Color(0xFF1F2C33)
         /** "Call ended" / the callback note. */
         val StageEnded = Color(0xFFA8C7B6)
+
+        // The call screen (docs/CALLING_UX.md §5): WhatsApp's own dark call surface.
+        val WaTop = Color(0xFF0B141A)
+        val WaBottom = Color(0xFF111B21)
+        val WaText = Color(0xFFE9EDEF)
+        val WaSub = Color(0xFF8696A0)
+        /** WhatsApp's teal (accents, the minimised bar's live dot). */
+        val WaTeal = Color(0xFF00A884)
+        /** End / decline. */
+        val WaRed = Color(0xFFEA0038)
+        /** A round control that is off. */
+        val WaControl = Color(0xFF2A3942)
+        /** The rounded bar the controls sit in, and banners on the call surface. */
+        val WaBar = Color(0xFF1F2C33)
+        /** "Reconnecting…" (always with its icon — never colour alone). */
+        val WaAmber = Color(0xFFFFB02E)
     }
 }
 
@@ -391,6 +407,10 @@ object ChannelColors {
     val Email = Color(0xFF6366F1)
     val Sms = Color(0xFF64748B)
     val Web = Color(0xFF589B31)
+    /** Messenger's brand gradient: used only on the "call on WhatsApp instead" sheet and the channel badge. */
+    val MessengerGradient = listOf(Color(0xFF0084FF), Color(0xFFA033FF))
+    /** Instagram's brand gradient (same use). */
+    val InstagramGradient = listOf(Color(0xFFFEDA75), Color(0xFFFA7E1E), Color(0xFFD62976), Color(0xFF962FBF), Color(0xFF4F5BD5))
 }
 
 private val NeemaType = Typography(

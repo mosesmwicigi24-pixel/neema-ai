@@ -1,5 +1,6 @@
 package ke.co.bethanyhouse.neema.core.notify
 
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -33,14 +34,22 @@ class LiveService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val inCall = intent?.getBooleanExtra(EXTRA_IN_CALL, false) == true
-        val n = NotificationCompat.Builder(this, Notifier.CH_LIVE)
+        val b = NotificationCompat.Builder(this, Notifier.CH_LIVE)
             .setSmallIcon(R.drawable.ic_stat_neema)
-            .setContentTitle(if (inCall) "Neema call in progress" else "Neema is connected")
+            .setContentTitle(if (inCall) "WhatsApp call in progress" else "Neema is connected")
             .setContentText(if (inCall) "Tap to return to the call" else "Alerts and calls will reach you")
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_MIN)
             .setContentIntent(Notifier.openIntent(this, 1))
-            .build()
+        if (inCall) {
+            // Hang up from the shade without opening the app (CallAlert's receiver, package-only).
+            val end = PendingIntent.getBroadcast(
+                this, REQ_END, Intent(Notifier.ACTION_END_CALL).setPackage(packageName),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            b.setCategory(NotificationCompat.CATEGORY_CALL).setUsesChronometer(true).addAction(0, "End", end)
+        }
+        val n = b.build()
         val type = when {
             Build.VERSION.SDK_INT < 29 -> 0
             inCall && Build.VERSION.SDK_INT >= 30 -> ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
@@ -73,6 +82,7 @@ class LiveService : Service() {
 
     companion object {
         private const val NOTIF_ID = 1001
+        private const val REQ_END = 2104
         private const val EXTRA_IN_CALL = "in_call"
 
         /** Should the service run: signed in, and live mode on (or a call is up). */

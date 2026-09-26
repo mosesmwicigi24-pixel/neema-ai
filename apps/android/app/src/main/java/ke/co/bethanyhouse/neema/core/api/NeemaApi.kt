@@ -303,7 +303,24 @@ class NeemaApi(val http: NeemaHttp) {
         http.post("/admin/whatsapp-invite", buildJsonObject { put("phone", phone); if (name != null) put("name", name) })
 
     inner class Calls {
-        suspend fun list(): List<Call> = http.get("/admin/calls")
+        /**
+         * GET /admin/calls, newest first. [waId] narrows to one customer; [view]
+         * "follow_up" to the missed / callback calls nobody has returned yet.
+         * With no argument the request carries no query (the web's own call).
+         */
+        suspend fun list(waId: String? = null, view: String? = null, limit: Int? = null): List<Call> {
+            val q = listOfNotNull(
+                waId?.let { "wa_id=${enc(it.removePrefix("+"))}" }, view?.let { "view=${enc(it)}" }, limit?.let { "limit=$it" },
+            )
+            return http.get(if (q.isEmpty()) "/admin/calls" else "/admin/calls?" + q.joinToString("&"))
+        }
+        /** One call's current row — how a phone that was offline learns how its call really ended. */
+        suspend fun get(callId: String): Call = http.get("/admin/calls/${enc(callId)}")
+        /** Whether this customer allowed business calls (granted | denied | requested | unknown). */
+        suspend fun permission(waId: String): CallPermission = http.get("/admin/calls/permission?wa_id=${enc(waId.removePrefix("+"))}")
+        /** Clear a missed / callback call from the follow-up list. */
+        suspend fun followUpDone(callId: String): OkResponse =
+            http.post("/admin/calls/${enc(callId)}/follow-up-done", JsonObject(emptyMap()))
         suspend fun iceConfig(): IceConfig = http.get("/admin/calls/ice-config")
         suspend fun offer(callId: String): CallOffer = http.get("/admin/calls/${enc(callId)}/offer")
         suspend fun answer(callId: String, sdp: String): OkResponse =
@@ -312,7 +329,8 @@ class NeemaApi(val http: NeemaHttp) {
         suspend fun callback(callId: String): OkResponse = http.post("/admin/calls/${enc(callId)}/callback", JsonObject(emptyMap()))
         suspend fun connect(to: String, sdp: String, name: String? = null): ConnectResponse =
             http.post("/admin/calls/connect", buildJsonObject { put("to", to); put("sdp", sdp); if (name != null) put("name", name) })
-        suspend fun requestPermission(to: String): OkResponse =
+        /** Sends the customer WhatsApp's call-permission request; their answer arrives as `call_permission`. */
+        suspend fun requestPermission(to: String): PermissionRequestResponse =
             http.post("/admin/calls/request-permission", buildJsonObject { put("to", to) })
         suspend fun transcript(callId: String): CallTranscript = http.get("/admin/calls/${enc(callId)}/transcript")
         suspend fun transcribe(callId: String): TranscribeResponse =

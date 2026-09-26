@@ -27,6 +27,7 @@ import org.junit.Test
 class SalesStressScreenshotTest {
     @get:Rule val main = MainDispatcherRule()
     @get:Rule val paparazzi = Paparazzi(deviceConfig = DeviceMatrix.PHONE.config, showSystemUi = false)
+    @get:Rule val clock = ke.co.bethanyhouse.neema.testing.PinnedClock()
 
     private fun dash(): DashboardViewModel =
         dashboard(paparazzi.context, FakeNeema.withFixtures().also { SalesStressFixtures.install(it) })
@@ -61,6 +62,7 @@ class SalesA11yTest {
     private val probe = A11yProbe()
     @get:Rule val main = MainDispatcherRule()
     @get:Rule val paparazzi = Paparazzi(deviceConfig = DeviceMatrix.PHONE.config, showSystemUi = false, renderExtensions = setOf(probe))
+    @get:Rule val clock = ke.co.bethanyhouse.neema.testing.PinnedClock()
 
     private fun check(name: String, screen: @androidx.compose.runtime.Composable (DashboardViewModel) -> Unit) =
         listOf(DeviceMatrix.PHONE, DeviceMatrix.PHONE_HUGE_TEXT).forEach { d ->

@@ -41,7 +41,9 @@ import kotlinx.coroutines.launch
  * - Decline is a broadcast to a receiver this class registers at runtime (not
  *   exported), so declining doesn't pull the app up — the web's Decline just
  *   ends the call. If the receiver can't be registered it falls back to the
- *   activity route.
+ *   activity route. The ongoing-call notification's End ([Notifier.ACTION_END_CALL],
+ *   posted by LiveService while a call runs in the background) lands on the
+ *   same receiver.
  * - Android 14+ only lets an app use full-screen intents when the user allows
  *   it ([canUseFullScreenIntent]). Without it the system shows the call as a
  *   heads-up notification (still ringing and vibrating) instead of taking over
@@ -55,16 +57,23 @@ internal class CallAlert(private val context: Context, private val scope: Corout
     private var loopJob: Job? = null
     private var vibrating = false
 
-    /** Set by [CallManager]: the notification's Decline was tapped. */
-    var onDecline: ((callId: String?) -> Unit)? = null
+    /** Set by [CallManager]: a notification's Decline ("decline") or End ("end") was tapped. */
+    var onAction: ((action: String, callId: String?) -> Unit)? = null
 
     private val declineReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, intent: Intent) {
+            val id = intent.getStringExtra(Notifier.EXTRA_CALL_ID)
+            if (intent.action == Notifier.ACTION_END_CALL) { onAction?.invoke("end", id); return }
             cancelIncoming()
-            onDecline?.invoke(intent.getStringExtra(Notifier.EXTRA_CALL_ID))
+            onAction?.invoke("decline", id)
         }
     }
     private var receiverRegistered = false
+
+    init {
+        // Up front, so the ongoing-call notification's End works before anything rang.
+        ensureDeclineReceiver()
+    }
 
     override fun startRinging() {
         stopRinging()
@@ -110,7 +119,8 @@ internal class CallAlert(private val context: Context, private val scope: Corout
         if (receiverRegistered) return true
         receiverRegistered = runCatching {
             ContextCompat.registerReceiver(
-                context.applicationContext, declineReceiver, IntentFilter(ACTION_DECLINE), ContextCompat.RECEIVER_NOT_EXPORTED,
+                context.applicationContext, declineReceiver,
+                IntentFilter(ACTION_DECLINE).apply { addAction(Notifier.ACTION_END_CALL) }, ContextCompat.RECEIVER_NOT_EXPORTED,
             )
         }.isSuccess
         return receiverRegistered
@@ -138,7 +148,8 @@ internal class CallAlert(private val context: Context, private val scope: Corout
         fun base() = NotificationCompat.Builder(context, Notifier.CH_CALLS)
             .setSmallIcon(R.drawable.ic_stat_neema)
             .setContentTitle(who)
-            .setContentText(if (from != null) "Incoming WhatsApp call · +$from" else "Incoming WhatsApp call")
+            // The card's own words (CALLING_UX.md §3): what it is, then the number.
+            .setContentText(if (from != null && who != "+$from") "WhatsApp voice call · Incoming… · +$from" else "WhatsApp voice call · Incoming…")
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)

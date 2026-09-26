@@ -250,11 +250,11 @@ object Fixtures {
     ]"""
 
     val calls get() = """[
-      {"id":"k1","call_id":"wacid.1","wa_id":"254712345678","name":"Fr. Peter Kamau","direction":"inbound","status":"answered","duration":184,
+      {"id":"k1","call_id":"wacid.1","wa_id":"254712345678","name":"Fr. Peter Kamau","direction":"inbound","status":"completed","duration":184,
        "agent_name":"Moses Mwicigi","started_at":"${ago(40)}","summary":"Wants two black clergy shirts delivered to Nyeri by Friday.","transcript_status":"done","has_recording":true},
       {"id":"k2","call_id":"wacid.2","wa_id":"254722000111","name":"Rev. Mary Achieng","direction":"inbound","status":"missed","duration":null,
        "agent_name":null,"started_at":"${ago(130)}","transcript_status":"none","has_recording":false},
-      {"id":"k3","call_id":"wacid.3","wa_id":"254733444555","name":"Deacon James Mwangi","direction":"outbound","status":"answered","duration":61,
+      {"id":"k3","call_id":"wacid.3","wa_id":"254733444555","name":"Deacon James Mwangi","direction":"outbound","status":"completed","duration":61,
        "agent_name":"Grace Wanjiru","started_at":"${ago(60 * 20)}","transcript_status":"pending","has_recording":true}
     ]"""
 

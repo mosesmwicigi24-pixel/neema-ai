@@ -3,7 +3,12 @@ package ke.co.bethanyhouse.neema.calls
 import ke.co.bethanyhouse.neema.core.model.Call
 import ke.co.bethanyhouse.neema.core.net.ApiException
 import ke.co.bethanyhouse.neema.feature.calls.CallManager
+import ke.co.bethanyhouse.neema.feature.calls.CallOutcome
 import ke.co.bethanyhouse.neema.feature.calls.CallPhase
+import ke.co.bethanyhouse.neema.feature.calls.CallbackSave
+import ke.co.bethanyhouse.neema.feature.calls.WrapAction
+import ke.co.bethanyhouse.neema.feature.calls.statusText
+import ke.co.bethanyhouse.neema.feature.calls.wrapActions
 import ke.co.bethanyhouse.neema.feature.calls.PeerEvent
 import ke.co.bethanyhouse.neema.feature.calls.RecordingOutbox
 import kotlinx.coroutines.CompletableDeferred
@@ -100,13 +105,15 @@ class CallNetworkStressTest {
         assertEquals(CallPhase.InCall, r.state.phase)
         advanceTimeBy(2); runCurrent()
         assertEquals(CallPhase.Ended, r.state.phase)
-        assertEquals(CallManager.CONNECTION_LOST, r.state.note)
+        assertEquals(CallOutcome.ConnectionLost, r.state.outcome)
+        assertEquals("the call's length through the grace", "Call dropped · 0:10 — the connection was lost", r.state.statusText())
         assertFalse(r.state.reconnecting)
         assertTrue(p.closed)
         assertEquals(1, r.count("terminate wacid.1"))
         assertEquals("the recording is still uploaded", 1, r.api.uploads.size)
-        advanceTimeBy(1_601); runCurrent()
-        assertEquals(CallPhase.Idle, r.state.phase)
+        advanceTimeBy(60_000); runCurrent()
+        assertEquals("Call again is owed: the wrap-up stays", CallPhase.Ended, r.state.phase)
+        assertEquals(WrapAction.CallAgain, r.state.wrapActions().first())
     }
 
     @Test fun iceFailingWhileReconnectingEndsAtOnce() = rig { r ->
@@ -114,7 +121,7 @@ class CallNetworkStressTest {
         p.onEvent(PeerEvent.Interrupted); r.settle()
         p.onEvent(PeerEvent.Ended); r.settle()
         assertEquals(CallPhase.Ended, r.state.phase)
-        assertEquals(CallManager.CONNECTION_LOST, r.state.note)
+        assertEquals(CallOutcome.ConnectionLost, r.state.outcome)
         // The grace timer is gone with the call: nothing fires later.
         advanceTimeBy(CallManager.ICE_GRACE_MS + 1); runCurrent()
         assertEquals(0, r.count("terminate"))
@@ -125,7 +132,7 @@ class CallNetworkStressTest {
         p.onEvent(PeerEvent.Interrupted); r.settle()
         r.calls.hangup(); r.settle()
         assertEquals(CallPhase.Ended, r.state.phase)
-        assertNull("a plain hang-up, not a lost connection", r.state.note)
+        assertEquals("a plain hang-up, not a lost connection", CallOutcome.Completed, r.state.outcome)
         advanceTimeBy(CallManager.ICE_GRACE_MS + 1); runCurrent()
         assertEquals("one terminate: the grace timer died with the call", 1, r.count("terminate"))
     }
@@ -161,7 +168,7 @@ class CallNetworkStressTest {
         repeat(4) { r.calls.hangup() }
         r.settle()
         assertEquals(1, r.count("terminate"))
-        advanceTimeBy(1_001); runCurrent()
+        advanceTimeBy(6_001); runCurrent()
         assertEquals(CallPhase.Idle, r.state.phase)
     }
 
@@ -190,7 +197,7 @@ class CallNetworkStressTest {
         assertTrue(r.state.busy)
         r.api.callbackGate!!.complete(Unit); r.settle()
         assertEquals(CallPhase.Ended, r.state.phase)
-        assertEquals(CallManager.CALLBACK_SAVED, r.state.note)
+        assertEquals(CallManager.CALLBACK_SAVED, r.state.statusText())
         assertFalse(r.state.busy)
     }
 
@@ -199,7 +206,8 @@ class CallNetworkStressTest {
         r.ring()
         r.calls.callback(); r.settle()
         assertEquals(CallPhase.Ended, r.state.phase)
-        assertEquals(CallManager.CALLBACK_RETRYING, r.state.note)
+        assertEquals(CallOutcome.Callback(CallbackSave.Retrying), r.state.outcome)
+        assertEquals(CallManager.CALLBACK_RETRYING, r.state.statusText())
         advanceTimeBy(2_001); runCurrent()
         assertEquals("retried in the background", 2, r.count("callback wacid.1"))
         advanceTimeBy(60_000); runCurrent()
@@ -210,7 +218,8 @@ class CallNetworkStressTest {
         r.api.callbackErrors += ApiException(401, "POST", "/admin/calls/wacid.1/callback", "Session expired")
         r.ring()
         r.calls.callback(); r.settle()
-        assertEquals(CallManager.CALLBACK_FAILED, r.state.note)
+        assertEquals(CallOutcome.Callback(CallbackSave.NotSaved), r.state.outcome)
+        assertEquals("not saved: the wrap-up stays", null, r.state.outcome?.autoCloseMs)
         advanceTimeBy(60_000); runCurrent()
         assertEquals(1, r.count("callback"))
     }
@@ -256,22 +265,32 @@ class CallNetworkStressTest {
         advanceTimeBy(1_801); runCurrent()
         assertEquals(1, r.count("terminate wacid.1"))
         assertEquals(CallPhase.Ended, r.state.phase)
+        assertEquals(CallOutcome.Failed(CallManager.ANSWER_SLOW), r.state.outcome)
     }
 
-    @Test fun answerWhileOfflineSaysSo() = rig { r ->
+    @Test fun answerWhileOfflineSaysSoAndKeepsRinging() = rig { r ->
         r.api.iceError = offline("GET", "/admin/calls/ice-config")
         r.ring(); r.calls.answer(); r.settle()
-        assertEquals(CallManager.ANSWER_OFFLINE, r.state.error)
-        advanceTimeBy(1_801); runCurrent()
-        assertEquals(CallPhase.Ended, r.state.phase)
+        // Nothing reached the server: the call still rings and Answer stays live.
+        assertEquals(CallPhase.Ringing, r.state.phase)
+        assertEquals(CallManager.ANSWER_NO_CONNECTION, r.state.error)
+        assertTrue(r.ringer.ringing)
+        assertEquals(0, r.count("terminate"))
+        // Back online: one more tap answers it.
+        r.api.iceError = null
+        r.calls.answer(); r.settle()
+        assertTrue("answer wacid.1" in r.api.log)
+        assertNull(r.state.error)
+        assertEquals(CallPhase.Connecting, r.state.phase)
     }
 
     @Test fun answerAfterTheCallerHungUpSaysTheCallEnded() = rig { r ->
         r.api.offerError = ApiException(404, "GET", "/admin/calls/wacid.1/offer", """{"detail":"call offer expired or not found"}""")
         r.ring(); r.calls.answer(); r.settle()
-        assertEquals(CallManager.CALL_GONE, r.state.error)
-        advanceTimeBy(1_801); runCurrent()
         assertEquals(CallPhase.Ended, r.state.phase)
+        assertEquals(CallOutcome.Missed(CallManager.CALL_GONE), r.state.outcome)
+        assertEquals(CallManager.CALL_GONE, r.state.statusText())
+        advanceTimeBy(1_801); runCurrent()
         assertEquals("nothing to terminate: the caller is gone", 0, r.count("terminate"))
     }
 
@@ -311,8 +330,9 @@ class CallNetworkStressTest {
         assertEquals(CallManager.UNCONFIRMED_CALL, res.await().exceptionOrNull()!!.message)
         assertEquals("looked twice", 2, r.count("list"))
         assertFalse("never mistaken for the permission prompt", CallManager.UNCONFIRMED_CALL.contains("permission", ignoreCase = true))
-        advanceTimeBy(2_201); runCurrent()
-        assertEquals(CallPhase.Idle, r.state.phase)
+        assertEquals(CallOutcome.Failed(CallManager.UNCONFIRMED_CALL), r.state.outcome)
+        advanceTimeBy(60_000); runCurrent()
+        assertEquals("the agent checks before trying again: it stays", CallPhase.Ended, r.state.phase)
     }
 
     @Test fun placingACallOfflineSaysSo() = rig { r ->
@@ -320,7 +340,8 @@ class CallNetworkStressTest {
         val res = async { r.calls.initiateCall("254712345678") }
         r.settle()
         assertEquals(CallManager.OUTBOUND_OFFLINE, res.await().exceptionOrNull()!!.message)
-        assertEquals(CallManager.OUTBOUND_OFFLINE, r.state.error)
+        assertEquals(CallOutcome.Failed(CallManager.OUTBOUND_OFFLINE), r.state.outcome)
+        assertEquals(WrapAction.TryAgain, r.state.wrapActions().first())
         assertEquals(0, r.count("connect"))
     }
 
