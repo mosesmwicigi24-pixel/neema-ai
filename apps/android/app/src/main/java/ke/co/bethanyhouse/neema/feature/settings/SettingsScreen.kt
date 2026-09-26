@@ -95,7 +95,7 @@ fun SettingsScreen(dash: DashboardViewModel) {
     val vm: SettingsViewModel = viewModel { SettingsViewModel(dash) }
     // Unsaved standing orders, offer and local fields come back after Android restarts the app.
     ke.co.bethanyhouse.neema.feature.reports.KeepUiState(vm)
-    ke.co.bethanyhouse.neema.feature.reports.TrackShown(vm.life)
+    ke.co.bethanyhouse.neema.core.util.TrackShown(vm.life)
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()
     val c = Neema.colors
     val startScroll = LocalSettingsPreview.current.scroll
@@ -299,7 +299,8 @@ private fun CardLoadProblem(vm: SettingsViewModel, card: String, title: String):
 private fun TranslationCard(vm: SettingsViewModel) {
     val state by vm.translation.collectAsStateWithLifecycle()
     val c = Neema.colors
-    fun money(v: Double) = if (v > 0 && v < 0.01) "under $0.01" else "$" + "%.2f".format(v)
+    // The web's toFixed(2): always a point, whatever the phone's language.
+    fun money(v: Double) = if (v > 0 && v < 0.01) "under $0.01" else "$" + String.format(java.util.Locale.US, "%.2f", v)
     SectionCard(
         "Translation for the team",
         "Shows an English line under any message that is not English or Swahili — in both directions, so you can " +
@@ -570,7 +571,8 @@ private fun SkuPickerDialog(catalog: List<CatalogItem>, selected: List<String>, 
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Choose products") },
+        // The web's modal overlay (bg-black/50), as every dialog in the app dims.
+        title = { ke.co.bethanyhouse.neema.core.ui.components.WebModalDim(); ke.co.bethanyhouse.neema.feature.agents.FlatDialogWindow(); Text("Choose products") },
         text = {
             Column {
                 SearchField(query, { query = it }, placeholder = "Search name or SKU…")
@@ -643,7 +645,11 @@ private fun DateButton(id: String, value: String?, emptyLabel: String, clearable
                 }) { Text("OK") }
             },
             dismissButton = { TextButton(onClick = { open = false }) { Text("Cancel") } },
-        ) { DatePicker(state) }
+        ) {
+            ke.co.bethanyhouse.neema.core.ui.components.WebModalDim()
+            ke.co.bethanyhouse.neema.feature.agents.FlatDialogWindow()
+            DatePicker(state)
+        }
     }
 }
 
