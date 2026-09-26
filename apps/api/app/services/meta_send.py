@@ -345,6 +345,7 @@ async def _video_post_context(post_id: str) -> dict:
     if permalink.startswith("/"):
         permalink = f"https://www.facebook.com{permalink}"
     return {"post_id": post_id, "title": (title or "Video post")[:200],
+            "caption": title[:1500],
             "permalink": permalink, "thumb": thumb,
             "media_type": "video", "has_video": True}
 
@@ -478,6 +479,9 @@ async def fetch_post_context(post_id: str, channel: str = "facebook") -> dict:
         return {
             "post_id":    post_id,
             "title":      title[:200],
+            # The caption WHOLE (2026-09-26): a giveaway's rule can sit past
+            # the 200-char title the inbox card shows.
+            "caption":    (d.get("caption") or "").strip()[:1500],
             "permalink":  d.get("permalink") or "",
             "thumb":      thumb or "",
             "media_type": "video" if is_video else ("photo" if mt else ""),
@@ -497,6 +501,9 @@ async def fetch_post_context(post_id: str, channel: str = "facebook") -> dict:
     return {
         "post_id":    post_id,
         "title":      title[:200],
+        # The caption WHOLE (2026-09-26): a giveaway's rule can sit past the
+        # 200-char title the inbox card shows.
+        "caption":    (d.get("message") or att.get("title") or att.get("description") or "").strip()[:1500],
         "permalink":  d.get("permalink_url") or "",
         "thumb":      thumb or "",
         # So the inbox can offer inline playback for a reel/video vs a photo.
