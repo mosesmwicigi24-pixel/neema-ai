@@ -572,7 +572,7 @@ private fun SkuPickerDialog(catalog: List<CatalogItem>, selected: List<String>, 
     AlertDialog(
         onDismissRequest = onDismiss,
         // The web's modal overlay (bg-black/50), as every dialog in the app dims.
-        title = { ke.co.bethanyhouse.neema.core.ui.components.WebModalDim(); ke.co.bethanyhouse.neema.feature.agents.FlatDialogWindow(); Text("Choose products") },
+        title = { ke.co.bethanyhouse.neema.core.ui.components.WebModalDim(); Text("Choose products") },
         text = {
             Column {
                 SearchField(query, { query = it }, placeholder = "Search name or SKU…")
@@ -647,7 +647,6 @@ private fun DateButton(id: String, value: String?, emptyLabel: String, clearable
             dismissButton = { TextButton(onClick = { open = false }) { Text("Cancel") } },
         ) {
             ke.co.bethanyhouse.neema.core.ui.components.WebModalDim()
-            ke.co.bethanyhouse.neema.feature.agents.FlatDialogWindow()
             DatePicker(state)
         }
     }

@@ -250,30 +250,6 @@ fun SelectField(
 }
 
 /**
- * Call inside a dialog's content. Compose raises its dialog window's root
- * (DialogLayout) to 8dp with a zero-alpha outline, so a phone draws no shadow
- * from it — the card's own look, over the web's plain bg-black/50, is all
- * there is. The screenshot renderer ignores the outline's alpha and paints a
- * large dark halo instead, but only on a frame after the window's first
- * layout; whether that frame happens before the snapshot depended on
- * unrelated work elsewhere in the test JVM (Compose's lazy-list prefetch
- * timing), so the same dialog rendered with or without the halo depending on
- * which tests ran first. At elevation 0 the halo can never appear, and
- * nothing changes on a device.
- */
-@Composable
-fun FlatDialogWindow() {
-    val view = androidx.compose.ui.platform.LocalView.current
-    SideEffect {
-        (view.parent as? androidx.compose.ui.window.DialogWindowProvider)?.let { p ->
-            (p as? android.view.View)?.elevation = 0f
-            p.window.setElevation(0f)
-            p.window.decorView.elevation = 0f
-        }
-    }
-}
-
-/**
  * The web's Modal: a titled card with a scrolling body and a button row.
  * Wider than an AlertDialog so the role editor's permission grid fits a phone.
  * It lays itself out inside the system bars and above the keyboard (the body
@@ -293,7 +269,6 @@ fun FormDialog(
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
         ke.co.bethanyhouse.neema.core.ui.components.WebModalDim()
-        FlatDialogWindow()
         Surface(
             shape = RoundedCornerShape(16.dp),
             color = Neema.colors.bg2,
