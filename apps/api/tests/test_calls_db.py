@@ -375,3 +375,11 @@ def test_the_call_shows_in_the_customers_thread_with_its_brief(env, world):
     assert item["type"] == "system_event" and item["text"] == "Incoming call · 2:05"
     assert item["agent_name"] == "Ann Wanjiru" and item["event_reason"] == "Wants two cassocks, size 52."
     assert item["call"]["insights"]["next_action"] == "Send the price for two cassocks"
+
+
+def test_an_outbound_call_our_side_could_not_connect_is_failed(env, world):
+    cid = env.client.post("/api/admin/calls/connect", json={"to": "254722000009", "sdp": "v=0"},
+                          headers=_as(world["ann"])).json()["call_id"]
+    r = env.client.post(f"/api/admin/calls/{cid}/terminate", json={"reason": "failed"}, headers=_as(world["ann"]))
+    assert r.json()["outcome"] == "failed"
+    assert _get(env, cid, world["ann"])["status"] == "failed"

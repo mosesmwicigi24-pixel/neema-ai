@@ -1180,14 +1180,15 @@ async def get_conversation_activity(
                         else (Call.wa_id == wa_id))
         calls = (await db.execute(c_q.order_by(Call.started_at.desc())
                                   .limit(20))).scalars().all()
+        from app.services import call_log as _call_log
         for c in calls:
-            dur = None
-            if c.answered_at and c.ended_at:
+            secs = getattr(c, "duration", None)
+            if secs is None and c.answered_at and c.ended_at:
                 secs = int((c.ended_at - c.answered_at).total_seconds())
-                dur = f"{secs // 60}:{secs % 60:02d}"
             events.append({
                 "id": f"call-{c.id}", "kind": "call",
-                "label": f"Call {c.status}" + (f" · {dur}" if dur else ""),
+                "label": _call_label({"status": _call_log.normalize_status(c.status),
+                                      "direction": getattr(c, "direction", None), "duration": secs}),
                 "detail": name_map.get(str(c.agent_id)) if c.agent_id else None,
                 "at": c.started_at.isoformat() if c.started_at else None,
             })
@@ -2704,7 +2705,9 @@ async def calls_terminate(
 ):
     """Hang up, decline or cancel. What it meant is decided by where the call is:
     a ringing inbound call is declined (for the whole team — the caller hears it
-    end), our ringing outbound call is cancelled, a live call is completed."""
+    end), our ringing outbound call is cancelled (or failed, with
+    `{"reason": "failed"}` when our side couldn't connect), a live call is
+    completed."""
     from app.services import wa_calling, call_log
     from app.database import AsyncSessionLocal
     try:
@@ -2714,8 +2717,12 @@ async def calls_terminate(
     async with AsyncSessionLocal() as db:
         c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
         status, direction = (c.status, c.direction) if c else (None, None)
+    reason = str((body or {}).get("reason") or "")
     info = None
-    if status == "ringing" and direction == "outbound":
+    if status == "ringing" and direction == "outbound" and reason == "failed":
+        # Our side couldn't connect the media before they answered.
+        info = await call_log.mark_failed(call_id)
+    elif status == "ringing" and direction == "outbound":
         info = await call_log.mark_cancelled(call_id, agent.id)
     elif status == "ringing":
         info = await call_log.mark_declined(call_id, agent.id)
@@ -2813,7 +2820,7 @@ async def calls_upload_recording(
     c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
     if c is None:
         # A recording implies the call happened; keep a row so it can be transcribed.
-        c = Call(call_id=call_id, status="ended")
+        c = Call(call_id=call_id, status="completed")
         db.add(c)
     c.recording_url = recording_url
     c.transcript_status = "pending" if auto else "recorded"
