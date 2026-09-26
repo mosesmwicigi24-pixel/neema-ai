@@ -16,7 +16,7 @@ import ke.co.bethanyhouse.neema.core.util.AppPrefs
 import ke.co.bethanyhouse.neema.core.util.Fmt
 import ke.co.bethanyhouse.neema.core.ws.LiveSocket
 import ke.co.bethanyhouse.neema.core.ws.str
-import ke.co.bethanyhouse.neema.feature.orders.SingleFlight
+import ke.co.bethanyhouse.neema.core.util.SingleFlight
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
@@ -112,6 +112,9 @@ data class CallUiState(
  *    "ringing" row can't ring a call that is already over;
  *  - the poll cadence changes as soon as ringing starts (see [start]), so
  *    a call answered on a colleague's phone stops this one within 2.5s;
+ *  - an `outbound_answer` that beats connect's reply (slow, or timed out and
+ *    found by [findPlacedCall]) is kept and applied once the id is known —
+ *    the web dropped it, leaving a customer who picked up in silence;
  *  - ringing stops after [RING_TIMEOUT_MS] even if every end signal was lost
  *    (the server treats a call still ringing after 2 minutes as missed).
  *
@@ -211,6 +214,13 @@ class CallManager internal constructor(
     private var ringTimeoutJob: Job? = null
     /** Running while a "disconnected" peer has its chance to recover. */
     private var graceJob: Job? = null
+    /**
+     * The customer's SDP answer to OUR call, when it arrived before we knew
+     * the call's id (connect's reply was slow, or timed out and the row had
+     * to be looked up): applied the moment the id is known, so a customer who
+     * picked up quickly isn't left in silence.
+     */
+    private var earlyAnswer: Pair<String, String>? = null
     /** An incoming call was ignored because another call was on screen: look again once it's over. */
     private var missedWhileBusy = false
     private var started = false
@@ -346,12 +356,19 @@ class CallManager internal constructor(
                 if (phase != CallPhase.Idle && id != _state.value.callId) missedWhileBusy = true
                 startRinging(id, evt.str("from") ?: "", evt.str("name"))
             }
-            "outbound_answer" -> if (evt.str("call_id") == activeId && activeId != null) {
-                // The customer accepted OUR call — apply their SDP answer to connect.
-                logD("outbound answered")
+            "outbound_answer" -> {
+                val id = evt.str("call_id") ?: return
                 val sdp = evt.str("sdp") ?: return
-                val p = peer ?: return
-                ui.launch { runCatching { p.setRemote(SdpType.Answer, sdp) } }
+                val s = _state.value
+                if (id == activeId) {
+                    // The customer accepted OUR call — apply their SDP answer to connect.
+                    logD("outbound answered")
+                    val p = peer ?: return
+                    ui.launch { runCatching { p.setRemote(SdpType.Answer, sdp) } }
+                } else if (activeId == null && s.outbound && s.callId == "pending" && s.phase == CallPhase.Connecting) {
+                    // Ours, most likely, but connect hasn't told us its id yet.
+                    earlyAnswer = id to sdp
+                }
             }
             "call_ended" -> {
                 logD("WS event: $evt")
@@ -589,13 +606,14 @@ class CallManager internal constructor(
         resetJob?.cancel(); resetJob = null
         if (s.phase == CallPhase.Idle) return@withContext
         val id = s.callId
-        val terminate = s.phase != CallPhase.Ringing && s.phase != CallPhase.Ended && id != null && id != "pending"
+        val terminateId = id?.takeIf { s.phase != CallPhase.Ringing && s.phase != CallPhase.Ended && it != "pending" }
         cleanup()
         id?.let { markEnded(it) }
         activeId = null
+        earlyAnswer = null
         update { CallUiState() }
-        if (terminate) withTimeoutOrNull(timeoutMs) {
-            try { api.terminate(id!!) } catch (e: CancellationException) { throw e } catch (_: Exception) {}
+        if (terminateId != null) withTimeoutOrNull(timeoutMs) {
+            try { api.terminate(terminateId) } catch (e: CancellationException) { throw e } catch (_: Exception) {}
         }
     }
 
@@ -738,6 +756,7 @@ class CallManager internal constructor(
     suspend fun initiateCall(to: String, name: String? = null): Result<Unit> = withContext(main) {
         if (phase != CallPhase.Idle) return@withContext Result.failure(CallError("Already in a call"))
         resetJob?.cancel()
+        earlyAnswer = null
         update {
             CallUiState(phase = CallPhase.Connecting, callId = "pending", from = to.removePrefix("+"), name = name, outbound = true)
         }
@@ -773,6 +792,10 @@ class CallManager internal constructor(
             }
             activeId = id
             update { if (it.callId == "pending") it.copy(callId = id) else it }
+            earlyAnswer?.let { (early, sdp) ->
+                earlyAnswer = null
+                if (early == id) { logD("outbound answered (early)"); runCatching { p.setRemote(SdpType.Answer, sdp) } }
+            }
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e

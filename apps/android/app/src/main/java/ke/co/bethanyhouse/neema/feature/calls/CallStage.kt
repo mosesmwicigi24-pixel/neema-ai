@@ -70,15 +70,15 @@ import ke.co.bethanyhouse.neema.app.DashboardViewModel
 import ke.co.bethanyhouse.neema.core.ui.theme.ChannelColors
 import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 
-// CallStage.tsx's inline palette: see [CallInk].
+// CallStage.tsx's inline palette (core Palette.Call).
 private val WaGreen = ChannelColors.WhatsApp
-private val CardText = CallInk.Text
-private val SubText = CallInk.StageSubText
-private val PillText = CallInk.StagePillText
+private val CardText = Palette.Call.Text
+private val SubText = Palette.Call.StageSubText
+private val PillText = Palette.Call.StagePillText
 private val PillBg = ChannelColors.WhatsApp.copy(alpha = 0.14f)
-private val Red = CallInk.StageRed
-private val Amber = CallInk.StageAmber
-private val LabelGrey = CallInk.StageLabel
+private val Red = Palette.Call.StageRed
+private val Amber = Palette.Call.StageAmber
+private val LabelGrey = Palette.Call.StageLabel
 
 private val CssEaseOut = CubicBezierEasing(0f, 0f, 0.58f, 1f)
 private val CssEaseInOut = CubicBezierEasing(0.42f, 0f, 0.58f, 1f)
@@ -164,7 +164,7 @@ fun CallCard(c: CallUiState, actions: CallActions) {
             .fillMaxSize()
             .drawBehind {
                 // radial-gradient(130% 100% at 50% 0%, #0e5c3a 0%, #06110b 60%)
-                drawTopEllipseGradient(1.3f, 1f, 0f to CallInk.StageGlow, 0.6f to CallInk.StageInk, 1f to CallInk.StageInk)
+                drawTopEllipseGradient(1.3f, 1f, 0f to Palette.Call.StageGlow, 0.6f to Palette.Call.StageInk, 1f to Palette.Call.StageInk)
             }
             // The card owns the content area: swallow taps meant for the screen below.
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {},
@@ -183,7 +183,7 @@ fun CallCard(c: CallUiState, actions: CallActions) {
                 .widthIn(max = 448.dp)
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(32.dp))
-                .background(CallInk.StageGlass.copy(alpha = 0.6f))
+                .background(Palette.Call.StageGlass.copy(alpha = 0.6f))
                 .border(1.dp, ChannelColors.WhatsApp.copy(alpha = 0.18f), RoundedCornerShape(32.dp))
                 .padding(
                     start = if (narrow) 20.dp else 40.dp, end = if (narrow) 20.dp else 40.dp,
@@ -207,11 +207,11 @@ fun CallCard(c: CallUiState, actions: CallActions) {
                     contentAlignment = Alignment.Center,
                 ) {
                     // The initial fills the circle at any font scale (it is a picture, not text to read).
-                    Text(initial, color = CallInk.StageInitial, fontSize = initialSize, fontWeight = FontWeight.SemiBold)
+                    Text(initial, color = Palette.Call.StageInitial, fontSize = initialSize, fontWeight = FontWeight.SemiBold)
                 }
                 if (live) Box(
                     Modifier.align(Alignment.BottomEnd).padding(8.dp).size(26.dp).clip(CircleShape)
-                        .background(CallInk.StageInk).padding(5.dp).clip(CircleShape)
+                        .background(Palette.Call.StageInk).padding(5.dp).clip(CircleShape)
                         .background(if (c.reconnecting) Amber else WaGreen),
                 )
             }
@@ -232,7 +232,7 @@ fun CallCard(c: CallUiState, actions: CallActions) {
             }
             if (c.phase == CallPhase.Connecting) {
                 Spacer(Modifier.height(24.dp))
-                Text("Connecting…", color = CallInk.Soft, fontSize = 14.sp)
+                Text("Connecting…", color = Palette.Call.Soft, fontSize = 14.sp)
             }
             if (live) {
                 Spacer(Modifier.height(if (short) 16.dp else 24.dp))
@@ -246,7 +246,7 @@ fun CallCard(c: CallUiState, actions: CallActions) {
                     // The network blipped: no bouncing bars while no audio flows.
                     Box(Modifier.height(30.dp))
                     Spacer(Modifier.height(16.dp))
-                    StatusPill("Reconnecting…", dot = Amber, bg = Amber.copy(alpha = 0.14f), textColor = CallInk.Gold)
+                    StatusPill("Reconnecting…", dot = Amber, bg = Amber.copy(alpha = 0.14f), textColor = Palette.Call.Gold)
                 } else {
                     Waveform()
                     Spacer(Modifier.height(16.dp))
@@ -259,11 +259,11 @@ fun CallCard(c: CallUiState, actions: CallActions) {
             }
             if (c.busy) {
                 Spacer(Modifier.height(16.dp))
-                Text("Saving the callback…", color = CallInk.Soft, fontSize = 14.sp, textAlign = TextAlign.Center)
+                Text("Saving the callback…", color = Palette.Call.Soft, fontSize = 14.sp, textAlign = TextAlign.Center)
             }
             if (c.phase == CallPhase.Ended) {
                 Spacer(Modifier.height(16.dp))
-                Text(c.note ?: "Call ended", color = CallInk.StageEnded, fontSize = 14.sp, textAlign = TextAlign.Center)
+                Text(c.note ?: "Call ended", color = Palette.Call.StageEnded, fontSize = 14.sp, textAlign = TextAlign.Center)
             }
         }
 
@@ -291,13 +291,13 @@ fun CallCard(c: CallUiState, actions: CallActions) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     CallButton(
-                        if (c.muted) LabelGrey else CallInk.StageControl,
+                        if (c.muted) LabelGrey else Palette.Call.StageControl,
                         if (c.muted) "Unmute" else "Mute",
                         if (c.muted) CallIcons.MicOff else CallIcons.Mic,
                         onClick = actions.toggleMute,
                     )
                     CallButton(
-                        if (c.speaker) LabelGrey else CallInk.StageControl,
+                        if (c.speaker) LabelGrey else Palette.Call.StageControl,
                         if (c.speaker) "Speaker on" else "Speaker",
                         CallIcons.Speaker,
                         onClick = actions.toggleSpeaker,

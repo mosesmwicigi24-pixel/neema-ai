@@ -5,7 +5,7 @@ import app.cash.paparazzi.Paparazzi
 import ke.co.bethanyhouse.neema.core.model.Order
 import ke.co.bethanyhouse.neema.feature.orders.ORDER_STATUSES
 import ke.co.bethanyhouse.neema.feature.orders.OrdersViewModel
-import ke.co.bethanyhouse.neema.feature.orders.SingleFlight
+import ke.co.bethanyhouse.neema.core.util.SingleFlight
 import ke.co.bethanyhouse.neema.feature.orders.amount
 import ke.co.bethanyhouse.neema.feature.orders.filterOrders
 import ke.co.bethanyhouse.neema.feature.orders.orderStats

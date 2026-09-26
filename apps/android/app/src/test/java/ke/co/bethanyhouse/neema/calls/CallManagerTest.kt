@@ -734,4 +734,42 @@ class CallManagerTest {
         advanceTimeBy(125_000); runCurrent()
         assertEquals(CallPhase.InCall, r.state.phase)
     }
+
+    // ── Round 10: an answer that beats connect's reply ────────────────────────
+    @Test fun anOutboundAnswerThatArrivesBeforeConnectRepliesIsStillApplied() = rig { r ->
+        val gate = CompletableDeferred<Unit>()
+        r.api.connectGate = gate
+        val placed = async { r.calls.initiateCall("254712345678", "Fr. Peter Kamau") }
+        r.settle()
+        // Meta rang them and they picked up before our POST came back.
+        r.frame("type" to "outbound_answer", "call_id" to "wacid.out1", "sdp" to "v=0 their-answer")
+        assertFalse(r.media.peer.ops.any { it.startsWith("setRemote") })
+        gate.complete(Unit); r.settle()
+        assertTrue(placed.await().isSuccess)
+        assertTrue("setRemote(Answer,v=0 their-answer)" in r.media.peer.ops)
+        r.media.peer.onEvent(PeerEvent.Connected); r.settle()
+        assertEquals(CallPhase.InCall, r.state.phase)
+    }
+
+    @Test fun anEarlyAnswerForAnotherCallIsNotAppliedToOurs() = rig { r ->
+        val gate = CompletableDeferred<Unit>()
+        r.api.connectGate = gate
+        val placed = async { r.calls.initiateCall("254712345678", null) }
+        r.settle()
+        r.frame("type" to "outbound_answer", "call_id" to "wacid.colleague", "sdp" to "v=0 not-ours")
+        gate.complete(Unit); r.settle()
+        assertTrue(placed.await().isSuccess)
+        assertFalse(r.media.peer.ops.any { it.startsWith("setRemote") })
+    }
+
+    @Test fun signOutMidCallTerminatesTheLiveCallOnly() = rig { r ->
+        r.ring(); r.calls.answer(); r.settle()
+        r.media.peer.onEvent(PeerEvent.Connected); r.settle()
+        r.calls.endForSignOut()
+        assertEquals(CallPhase.Idle, r.state.phase)
+        assertTrue("terminate wacid.1" in r.api.log)
+        r.ring("wacid.2")
+        r.calls.endForSignOut()
+        assertFalse("a ringing call is let go, not declined", "terminate wacid.2" in r.api.log)
+    }
 }

@@ -6,10 +6,10 @@ import ke.co.bethanyhouse.neema.feature.orders.touchCell
 import androidx.compose.runtime.remember
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import ke.co.bethanyhouse.neema.core.util.AppClock
-import ke.co.bethanyhouse.neema.feature.orders.LocalMinute
-import ke.co.bethanyhouse.neema.feature.orders.MinuteTicker
-import ke.co.bethanyhouse.neema.feature.orders.RestoreUi
-import ke.co.bethanyhouse.neema.feature.orders.liveAgo
+import ke.co.bethanyhouse.neema.core.util.LocalMinute
+import ke.co.bethanyhouse.neema.core.util.MinuteTicker
+import ke.co.bethanyhouse.neema.core.util.RestoreUi
+import ke.co.bethanyhouse.neema.core.util.liveAgo
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -43,12 +43,12 @@ import ke.co.bethanyhouse.neema.app.DashboardViewModel
 import ke.co.bethanyhouse.neema.core.model.Deal
 import ke.co.bethanyhouse.neema.core.model.PlannedAction
 import ke.co.bethanyhouse.neema.core.ui.components.ErrorState
+import ke.co.bethanyhouse.neema.core.ui.components.WebModalDim
 import ke.co.bethanyhouse.neema.feature.orders.InlineError
 import ke.co.bethanyhouse.neema.feature.orders.StaleBanner
 import ke.co.bethanyhouse.neema.core.ui.components.Loading
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import ke.co.bethanyhouse.neema.core.ui.theme.Palette
-import ke.co.bethanyhouse.neema.feature.orders.SalesInk
 import ke.co.bethanyhouse.neema.feature.orders.listSegment
 import androidx.compose.foundation.lazy.itemsIndexed
 import ke.co.bethanyhouse.neema.core.util.Fmt
@@ -101,7 +101,7 @@ fun DealsScreen(dash: DashboardViewModel) {
     // agent. Send, Veto, Guidance, Won and Lost show for everyone, as on the web.
     val vm: DealsViewModel = viewModel { DealsViewModel(dash) }
     RestoreUi(vm)
-    ke.co.bethanyhouse.neema.feature.reports.TrackShown(vm.life)
+    ke.co.bethanyhouse.neema.core.util.TrackShown(vm.life)
     val deals by vm.deals.collectAsStateWithLifecycle()
     val wonCount by vm.wonCount.collectAsStateWithLifecycle()
     val actions by vm.actions.collectAsStateWithLifecycle()
@@ -127,7 +127,7 @@ fun DealsScreen(dash: DashboardViewModel) {
 
     // The page is the web's own #f6f7f2, a shade off the shell's parchment.
     MinuteTicker {
-    BoxWithConstraints(Modifier.fillMaxSize().background(if (c.isDark) c.surface else SalesInk.DealsPage)) {
+    BoxWithConstraints(Modifier.fillMaxSize().background(if (c.isDark) c.surface else Palette.DealsPage)) {
         // Three stage columns (and the queue's buttons beside its text) need a
         // real tablet width: at ~600dp they squeezed a card's buttons to nothing.
         val wide = maxWidth >= 840.dp
@@ -301,13 +301,13 @@ private fun ActionRow(
     val needs = a.status == "needs_approval"
     val bg = when {
         c.isDark -> if (needs) c.amberDim else c.bg3
-        needs -> SalesInk.NeedsBg
-        else -> SalesInk.QueuedBg
+        needs -> Palette.NeedsBg
+        else -> Palette.QueuedBg
     }
     val border = when {
         c.isDark -> if (needs) c.amber.copy(alpha = 0.4f) else c.border
-        needs -> SalesInk.NeedsBorder
-        else -> SalesInk.QueuedBorder
+        needs -> Palette.NeedsBorder
+        else -> Palette.QueuedBorder
     }
     val shape = RoundedCornerShape(12.dp)
     val body: @Composable ColumnScope.() -> Unit = {
@@ -324,7 +324,7 @@ private fun ActionRow(
             fontSize = 12.sp,
         )
         if (!a.reason.isNullOrBlank()) {
-            Text(a.reason, fontSize = 12.sp, color = if (c.isDark) c.textMid else SalesInk.Slate600,
+            Text(a.reason, fontSize = 12.sp, color = if (c.isDark) c.textMid else Palette.Slate600,
                 maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
         }
         if (!a.draft.isNullOrBlank()) {
@@ -468,7 +468,7 @@ private fun DealCard(
             Text(liveAgo(d.updatedAt), fontSize = 10.sp, color = if (c.isDark) c.muted else Palette.Sage300)
         }
         if (!d.title.isNullOrBlank()) {
-            Text(d.title, fontSize = 11.sp, color = if (c.isDark) c.textMid else SalesInk.Slate600,
+            Text(d.title, fontSize = 11.sp, color = if (c.isDark) c.textMid else Palette.Slate600,
                 maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
         }
         if (!d.blocking.isNullOrBlank()) {
@@ -492,7 +492,7 @@ private fun DealCard(
             )
             if (guidanceError != null) InlineError(guidanceError, Modifier.padding(top = 4.dp))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                SmallButton(if (busy) "Saving…" else "Save", bg = SalesInk.Slate800, fg = Color.White, enabled = !busy, fontSize = 10, hPad = 10.dp, vPad = 4.dp, onClick = onSave)
+                SmallButton(if (busy) "Saving…" else "Save", bg = Palette.Slate800, fg = Color.White, enabled = !busy, fontSize = 10, hPad = 10.dp, vPad = 4.dp, onClick = onSave)
                 SmallButton("Cancel", bg = Color.Transparent, fg = slate(), enabled = true, fontSize = 10, hPad = 8.dp, vPad = 4.dp,
                     weight = FontWeight.Normal, onClick = onCancel)
             }
@@ -509,7 +509,7 @@ private fun DealCard(
                     bg = if (c.isDark) c.bg4 else Palette.Stone50, fg = slate(), enabled = !busy, fontSize = 10,
                     hPad = 8.dp, vPad = 4.dp, weight = FontWeight.Normal, onClick = onEdit,
                 )
-                SmallButton("Won", bg = if (c.isDark) c.greenDim else SalesInk.WonBg, fg = if (c.isDark) c.green else Palette.Moss700,
+                SmallButton("Won", bg = if (c.isDark) c.greenDim else Palette.WonBg, fg = if (c.isDark) c.green else Palette.Moss700,
                     enabled = !busy, fontSize = 10, hPad = 8.dp, vPad = 4.dp, weight = FontWeight.Normal, onClick = onWon)
                 SmallButton("Lost", bg = if (c.isDark) c.bg4 else Palette.Stone50, fg = if (c.isDark) c.muted else Palette.Slate400, enabled = !busy, fontSize = 10,
                     hPad = 8.dp, vPad = 4.dp, weight = FontWeight.Normal, onClick = onLost)
@@ -527,6 +527,8 @@ private fun DraftDialog(
     onDismiss: () -> Unit, onSend: () -> Unit,
 ) {
     BasicAlertDialog(onDismissRequest = onDismiss) {
+        // The web's modal overlay, bg-black/50 (the platform's own dim is 0.6).
+        WebModalDim()
         DraftDialogCard(action, text, onText, busy, checking, error, onDismiss, onSend)
     }
 }

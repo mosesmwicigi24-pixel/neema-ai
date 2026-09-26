@@ -13,8 +13,8 @@ import ke.co.bethanyhouse.neema.feature.leads.LeadsScreen
 import ke.co.bethanyhouse.neema.feature.leads.LeadsViewModel
 import ke.co.bethanyhouse.neema.feature.orders.OrdersScreen
 import ke.co.bethanyhouse.neema.feature.orders.OrdersViewModel
-import ke.co.bethanyhouse.neema.feature.orders.RestoreUi
-import ke.co.bethanyhouse.neema.feature.orders.SavesUi
+import ke.co.bethanyhouse.neema.core.util.RestoreUi
+import ke.co.bethanyhouse.neema.core.util.SavesUi
 import ke.co.bethanyhouse.neema.testing.AppFrame
 import ke.co.bethanyhouse.neema.testing.FakeNeema
 import ke.co.bethanyhouse.neema.testing.dashboard
@@ -61,6 +61,25 @@ class SalesLifecycleTest {
         assertEquals("peter", b.search.value)
         assertEquals(2, b.page.value)
         assertEquals(a.selectedId.value, b.selectedId.value)
+    }
+
+    /** Round 10: the ❌ from round 9 — where the list was scrolled comes back too. */
+    @Test fun ordersScrollSurvivesProcessDeathUntilApplied() {
+        val a = OrdersViewModel(dash())
+        a.scroll = 9 to 42
+        assertBundleSafe(a.saveUi())
+        val b = OrdersViewModel(dash())
+        processDeath(a, b)
+        assertEquals(9 to 42, b.pendingScroll.value)
+        // A second death before the orders came in still remembers it.
+        b.scroll = 0 to 0
+        assertEquals(9, b.saveUi()["scrollIndex"]); assertEquals(42, b.saveUi()["scrollOffset"])
+        b.scrollRestored()
+        assertNull(b.pendingScroll.value)
+        // Never scrolled: nothing to apply.
+        val c = OrdersViewModel(dash())
+        c.restoreUi(OrdersViewModel(dash()).saveUi())
+        assertNull(c.pendingScroll.value)
     }
 
     @Test fun rotationNeverReplaysAnOlderCopyOverTheLiveViewModel() {

@@ -5,7 +5,10 @@ import androidx.lifecycle.viewModelScope
 import ke.co.bethanyhouse.neema.app.DashboardViewModel
 import ke.co.bethanyhouse.neema.app.ToastType
 import ke.co.bethanyhouse.neema.core.model.Order
-import ke.co.bethanyhouse.neema.feature.reports.ScreenLife
+import ke.co.bethanyhouse.neema.core.util.ScreenLife
+import ke.co.bethanyhouse.neema.core.util.SavesUi
+import ke.co.bethanyhouse.neema.core.util.SingleFlight
+import ke.co.bethanyhouse.neema.core.util.str
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -106,15 +109,31 @@ class OrdersViewModel(private val dash: DashboardViewModel) : ViewModel(), Saves
     // ── Process death: the filter, search, page and the open order come back ──
     override var uiAttached = false
 
-    override fun saveUi(): Map<String, Any?> = mapOf(
-        "filter" to filter.value, "search" to search.value, "page" to page.value, "selected" to _selectedId.value,
-    )
+    /** The list's scroll (first visible item, its offset), kept current by the screen. */
+    var scroll: Pair<Int, Int> = 0 to 0
+
+    private val _pendingScroll = MutableStateFlow<Pair<Int, Int>?>(null)
+    /** A scroll restored after process death, applied by the screen once the orders are in. */
+    val pendingScroll: StateFlow<Pair<Int, Int>?> = _pendingScroll.asStateFlow()
+    fun scrollRestored() { _pendingScroll.value = null }
+
+    override fun saveUi(): Map<String, Any?> {
+        // Not applied yet (the orders are still loading): that is still where the agent was.
+        val at = _pendingScroll.value ?: scroll
+        return mapOf(
+            "filter" to filter.value, "search" to search.value, "page" to page.value, "selected" to _selectedId.value,
+            "scrollIndex" to at.first, "scrollOffset" to at.second,
+        )
+    }
 
     override fun restoreUi(saved: Map<String, Any?>) {
         saved.str("filter")?.let { if (it == "all" || it in ORDER_STATUSES) filter.value = it }
         saved.str("search")?.let { search.value = it }
         (saved["page"] as? Int)?.let { page.value = it.coerceAtLeast(1) }
         _selectedId.value = saved.str("selected")
+        val index = (saved["scrollIndex"] as? Int)?.coerceAtLeast(0) ?: 0
+        val offset = (saved["scrollOffset"] as? Int)?.coerceAtLeast(0) ?: 0
+        if (index > 0 || offset > 0) { scroll = index to offset; _pendingScroll.value = index to offset }
     }
 
     fun refresh() {

@@ -59,8 +59,8 @@ object Tones {
     val Blue = Tone(Palette.Blue700, Palette.Blue50, Palette.Blue200, Palette.Blue400)
     val Emerald = Tone(Palette.Emerald700, Palette.Emerald50, Palette.Emerald200, Palette.Emerald400)
     val Red = Tone(Palette.Red700, Palette.Red50, Palette.Red200, Palette.Red400)
-    val Sky = Tone(SalesInk.Sky700, SalesInk.Sky50, SalesInk.Sky200, SalesInk.Sky400)
-    val Green = Tone(SalesInk.Green700, Palette.Green50, SalesInk.Green200, SalesInk.Green400)
+    val Sky = Tone(Palette.Sky700, Palette.Sky50, Palette.Sky200, Palette.Sky400)
+    val Green = Tone(Palette.Green700, Palette.Green50, Palette.Green200, Palette.Green400)
 }
 
 /** Our own triage statuses, in the web's order (OrderStatus). */
@@ -120,8 +120,8 @@ fun hubMeta(order: Order): StatusMeta? {
 /**
  * The phone line under an order's name, or null when it would only repeat
  * the name. The API sends no `contact_name` (admin.py `list_orders`), so the
- * name shown is the formatted phone itself and the web prints it twice; the
- * line appears only when a real name sits above it.
+ * name shown is the bare wa_id (mapOrder's `contact_name ?? wa_id`) and this
+ * line is its formatted form, as on the web.
  */
 fun phoneLine(order: Order, displayedName: String): String? =
     ke.co.bethanyhouse.neema.core.util.Fmt.formatPhone(order.waId).takeIf { it.isNotEmpty() && it != displayedName }
@@ -305,7 +305,7 @@ fun Modifier.pressedOn(interaction: MutableInteractionSource): Modifier = indica
 /** CH_BG — the orders (and leads) list's flat channel colours. */
 internal val CH_BG = mapOf(
     "whatsapp" to ChannelColors.WhatsApp,
-    "messenger" to SalesInk.Messenger,
+    "messenger" to Palette.Messenger,
     "instagram" to ChannelColors.Instagram,
     "facebook" to ChannelColors.Facebook,
     "email" to Palette.Indigo500,

@@ -5,14 +5,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import ke.co.bethanyhouse.neema.app.DashboardViewModel
 import ke.co.bethanyhouse.neema.app.ToastType
-import ke.co.bethanyhouse.neema.feature.reports.ScreenLife
+import ke.co.bethanyhouse.neema.core.util.ScreenLife
 import ke.co.bethanyhouse.neema.feature.orders.FailKind
 import ke.co.bethanyhouse.neema.feature.orders.lowerFirst
 import ke.co.bethanyhouse.neema.feature.orders.salesFailure
-import ke.co.bethanyhouse.neema.feature.orders.SalesInk
-import ke.co.bethanyhouse.neema.feature.orders.SingleFlight
-import ke.co.bethanyhouse.neema.feature.orders.SavesUi
-import ke.co.bethanyhouse.neema.feature.orders.str
+import ke.co.bethanyhouse.neema.core.util.SingleFlight
+import ke.co.bethanyhouse.neema.core.util.SavesUi
+import ke.co.bethanyhouse.neema.core.util.str
 import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 import kotlinx.coroutines.CancellationException
 import java.util.Locale
@@ -42,9 +41,9 @@ data class LeadStage(
 val BASE_STAGES = listOf(
     LeadStage("new", "New", Palette.Stone600, Palette.Stone50, Palette.Stone200, Palette.Stone400),
     LeadStage("contacted", "Contacted", Palette.Blue700, Palette.Blue50, Palette.Blue200, Palette.Blue500),
-    LeadStage("qualified", "Qualified", SalesInk.Violet700, Palette.Violet50, Palette.Violet200, SalesInk.Violet500),
+    LeadStage("qualified", "Qualified", Palette.Violet700, Palette.Violet50, Palette.Violet200, Palette.Violet500),
     LeadStage("proposal", "Proposal", Palette.Amber700, Palette.Amber50, Palette.Amber200, Palette.Amber500),
-    LeadStage("negotiation", "Negotiating", SalesInk.Orange700, SalesInk.Orange50, SalesInk.Orange200, SalesInk.Orange500),
+    LeadStage("negotiation", "Negotiating", Palette.Orange700, Palette.Orange50, Palette.Orange200, Palette.Orange500),
     LeadStage("won", "Won", Palette.Emerald700, Palette.Emerald50, Palette.Emerald200, Palette.Emerald500),
     LeadStage("lost", "Lost", Palette.Red600, Palette.Red50, Palette.Red200, Palette.Red400),
 )
@@ -52,7 +51,7 @@ val BASE_STAGES = listOf(
 /** Canonical columns plus the operator-added stages, which sit between Negotiating and Won. */
 fun buildStages(customs: List<String>): List<LeadStage> {
     val defs = customs.filter { it.isNotBlank() }.map {
-        LeadStage(it, it, SalesInk.Yellow700, SalesInk.Yellow50, SalesInk.Yellow200, SalesInk.Yellow500)
+        LeadStage(it, it, Palette.Yellow700, Palette.Yellow50, Palette.Yellow200, Palette.Yellow500)
     }
     val won = BASE_STAGES.indexOfFirst { it.id == "won" }
     return BASE_STAGES.take(won) + defs + BASE_STAGES.drop(won)
@@ -526,7 +525,7 @@ class LeadsViewModel(private val dash: DashboardViewModel) : ViewModel(), SavesU
                         when {
                             read && now == null -> gone(lead.id)
                             // The board was just re-read: it already shows what was stored.
-                            read && editLanded(edit, now!!) -> saved(lead.id, edit, fresh = true)
+                            read && now != null && editLanded(edit, now) -> saved(lead.id, edit, fresh = true)
                             read -> sheetFailed(lead.id, "Not saved — ${f.message().lowerFirst()}")
                             else -> sheetFailed(lead.id, "No answer from the server — your changes may not have saved. Save again to be sure.")
                         }

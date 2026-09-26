@@ -220,8 +220,8 @@ class PcmMixer internal constructor(private val a: InputStream?, private val b: 
 
     /** True when neither side captured a single sample. */
     val isEmpty: Boolean by lazy {
-        if (!aDone) { pendingA = a!!.read(); if (pendingA < 0) aDone = true }
-        if (!bDone) { pendingB = b!!.read(); if (pendingB < 0) bDone = true }
+        if (!aDone) { pendingA = a?.read() ?: -1; if (pendingA < 0) aDone = true }
+        if (!bDone) { pendingB = b?.read() ?: -1; if (pendingB < 0) bDone = true }
         aDone && bDone
     }
 
