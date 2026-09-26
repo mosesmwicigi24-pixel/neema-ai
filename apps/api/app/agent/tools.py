@@ -1283,6 +1283,25 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
         "unmatched": pushed.get("unmatched") or [],
         "note_on_order": order_note,
     }
+    # AN INTERNATIONAL ORDER TELLS THE TEAM ITSELF (2026-09-26): the customer
+    # pays by a transfer route a colleague confirms with them — the note and
+    # the ping go out here, so Neema stays on the thread instead of a
+    # handoff that muted her at the very moment of payment.
+    if (ctx.currency or "KES") != "KES":
+        told = await _team_note(
+            ctx, kind="international_order",
+            title="💱 International order — confirm the transfer route",
+            text=(f"💱 INTERNATIONAL ORDER #{pushed.get('order_number')} — quoted "
+                  f"{result['say_total_as']}. The customer pays by transfer (Western "
+                  "Union / MoneyGram / Mukuru): please confirm the route and the amount "
+                  "with them here. Neema stays on the thread."),
+            body=f"order #{pushed.get('order_number')} — {ctx.wa_id}")
+        result["team_told"] = told
+        result["next_step"] = ("Give the order number and the order link (it shows the amount "
+                               "and the payment options for their country); ask which transfer "
+                               "method suits them — Western Union, MoneyGram or Mukuru — and say a "
+                               "colleague confirms the route and the amount with them. Stay in the "
+                               "conversation; never present the KES M-Pesa link as their way to pay.")
     if ctx.redis is not None:
         try:
             await ctx.redis.set(idem_key, json.dumps(result, default=str), ex=6 * 3600)
@@ -1657,6 +1676,43 @@ async def _add_tags(args: dict, ctx: ToolContext) -> dict:
     flag_modified(user, "state")
     await ctx.db.commit()
     return {"ok": True, "tags": state["tags"]}
+
+
+async def _team_note(ctx: ToolContext, *, kind: str, title: str, text: str, body: str) -> bool:
+    """Tell the team something about this thread WITHOUT muting Neema: a note in
+    the conversation (visible in the inbox) and the dashboard ping — the same
+    shape check_availability and raise_complaint use. Best-effort."""
+    try:
+        from sqlalchemy import or_
+        from app.models.conversation import Conversation
+        from app.models.message import Message, MsgDirection, MsgSender
+        conv = (await ctx.db.execute(select(Conversation).where(
+            Conversation.channel == ctx.channel,
+            or_(Conversation.external_id == ctx.wa_id, Conversation.wa_id == ctx.wa_id),
+        ))).scalars().first()
+        if conv is None:
+            return False
+        ctx.db.add(Message(
+            channel=conv.channel, wa_id=conv.wa_id,
+            external_id=getattr(conv, "external_id", None),
+            person_id=conv.person_id, conversation_id=conv.id,
+            direction=MsgDirection.outbound, sender=MsgSender.human_agent,
+            text=text, media_type="note",
+        ))
+        await ctx.db.commit()
+        if ctx.redis is not None:
+            try:
+                import json as _json
+                await ctx.redis.publish("ws:channel:agents:all", _json.dumps({
+                    "event": "notification", "type": kind, "title": title,
+                    "body": body, "conv_id": str(conv.id),
+                }))
+            except Exception:
+                pass
+        return True
+    except Exception:
+        _log.info("team note (%s) not recorded", kind, exc_info=True)
+        return False
 
 
 async def _check_availability(args: dict, ctx: ToolContext) -> dict:
