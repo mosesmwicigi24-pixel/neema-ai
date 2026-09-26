@@ -1632,58 +1632,75 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             line += f' "{pctx["title"]}"'
         if source_post.get("comment"):
             line += f'; their comment there was: "{source_post["comment"]}"'
-        # History wisdom: a caption-less video post identified once stays
-        # identified — later replies price the SAME product, never a re-guess.
-        # On the very first contact, the deterministic ladder (caption
-        # slug/alias, image fingerprint vs our own catalogue photos) resolves
-        # and records it before the model ever has to read the frame.
-        try:
-            _known = await _post_identity(redis, channel,
-                                          {**pctx, "post_id": source_post.get("post_id") or ""})
-        except Exception:
+        # A CAMPAIGN POST (owner, 2026-09-26): the item in it is given away by
+        # the caption's rule — never identified for a price, never sold from
+        # this post, and the frame is never read for a product.
+        _campaign_cap = post_caption(pctx)
+        _campaign_post = bool(_campaign_cap) and is_campaign_post(_campaign_cap)
+        if _campaign_post:
             _known = {}
-        _gate_post_product = str((_known or {}).get("name") or "")
-        # What the post SELLS, when it is more than one row: a hub set row
-        # (its contents from the hub's description), a combination the
-        # caption presents as one outfit, or a caption that merely LISTS
-        # several items (owner, 2026-09-21: the price of a set is its total).
-        _catalog: list = []
-        try:
-            from app.services import n8n_bridge as _svc_cat
-            _catalog = await _svc_cat.catalog_items(db, redis)
-        except Exception:
-            _catalog = []
-        if _known.get("name"):
-            from app.services.post_catalog import identity_trusted as _trusted_id
-            if _trusted_id(_known):
-                line += (f". Our records identify this post's product as: "
-                         f"{_known['name']} — price THAT product; do not "
-                         "re-identify it from the image")
-                line += _set_context(_known, _catalog)
-            else:
-                # A model's earlier read, or a record from before provenance:
-                # a lead, not a fact (owner, 2026-09-21). The image decides.
-                line += (f". An earlier reply under this post priced: {_known['name']} "
-                         "— a lead, not a record: CONFIRM it against the caption and "
-                         "the image before you rely on it (search_catalog it, compare "
-                         "what you see). If the photo plainly shows something else, "
-                         "price what you see; if you cannot tell, give the two closest "
-                         "options or ask which — never a price on a guess")
-            if _known.get("seen"):
-                line += (f"; as it appears in the post: {_known['seen']} — name it "
-                         "to the customer in those plain words, colour and trim "
-                         "included, never the catalogue label alone")
-        elif pctx.get("title"):
-            line += _listed_items_context(pctx["title"], _catalog)
-        line += (". Unless they say otherwise, their questions refer to the product "
-                 "in that post — identify it, find it with search_catalog, and "
-                 "answer about THAT item. Do not ask what they are looking for.)")
+            line = ('(Context — this customer reached us from our Facebook/Instagram post '
+                    f'"{_campaign_cap[:700]}"')
+            if source_post.get("comment"):
+                line += f'; their comment there was: "{source_post["comment"]}"'
+            line += (". THIS POST IS A CAMPAIGN / GIVEAWAY: the item in it is given away by "
+                     "the caption's rule, not sold from this post. Never price it, never take "
+                     "an order for it here, and never state a date, a count or a winner the "
+                     "caption does not. You are the HOST. If they ask to BUY it, or another "
+                     "item, find that item with search_catalog and serve them warmly.)")
+        else:
+            # History wisdom: a caption-less video post identified once stays
+            # identified — later replies price the SAME product, never a re-guess.
+            # On the very first contact, the deterministic ladder (caption
+            # slug/alias, image fingerprint vs our own catalogue photos) resolves
+            # and records it before the model ever has to read the frame.
+            try:
+                _known = await _post_identity(redis, channel,
+                                              {**pctx, "post_id": source_post.get("post_id") or ""})
+            except Exception:
+                _known = {}
+            _gate_post_product = str((_known or {}).get("name") or "")
+            # What the post SELLS, when it is more than one row: a hub set row
+            # (its contents from the hub's description), a combination the
+            # caption presents as one outfit, or a caption that merely LISTS
+            # several items (owner, 2026-09-21: the price of a set is its total).
+            _catalog: list = []
+            try:
+                from app.services import n8n_bridge as _svc_cat
+                _catalog = await _svc_cat.catalog_items(db, redis)
+            except Exception:
+                _catalog = []
+            if _known.get("name"):
+                from app.services.post_catalog import identity_trusted as _trusted_id
+                if _trusted_id(_known):
+                    line += (f". Our records identify this post's product as: "
+                             f"{_known['name']} — price THAT product; do not "
+                             "re-identify it from the image")
+                    line += _set_context(_known, _catalog)
+                else:
+                    # A model's earlier read, or a record from before provenance:
+                    # a lead, not a fact (owner, 2026-09-21). The image decides.
+                    line += (f". An earlier reply under this post priced: {_known['name']} "
+                             "— a lead, not a record: CONFIRM it against the caption and "
+                             "the image before you rely on it (search_catalog it, compare "
+                             "what you see). If the photo plainly shows something else, "
+                             "price what you see; if you cannot tell, give the two closest "
+                             "options or ask which — never a price on a guess")
+                if _known.get("seen"):
+                    line += (f"; as it appears in the post: {_known['seen']} — name it "
+                             "to the customer in those plain words, colour and trim "
+                             "included, never the catalogue label alone")
+            elif pctx.get("title"):
+                line += _listed_items_context(pctx["title"], _catalog)
+            line += (". Unless they say otherwise, their questions refer to the product "
+                     "in that post — identify it, find it with search_catalog, and "
+                     "answer about THAT item. Do not ask what they are looking for.)")
         lead_ctx.append(line)
         if public_comment and thread_parent:
             lead_ctx.append(_thread_parent_context(thread_parent))
         if (settings.tier2_vision and not img_block and pctx.get("thumb")
                 and not any(m["role"] == "assistant" for m in messages)
-                and not identity_trusted_record(_known)):
+                and not identity_trusted_record(_known) and not _campaign_post):
             # The photo is for IDENTIFYING the post's product. A trusted
             # record already names it (and how it looks) — the image would
             # only be re-read, at image-token prices, to say the same.
@@ -2916,9 +2933,48 @@ async def _thread_parent(parent_id: str) -> dict:
 
 
 _CAMPAIGN_RE = re.compile(
-    r"\b(give\s*-?\s*aways?|raffle|competition|contest|campaign|winners?|\bwin\b|"
-    r"lucky\s+draw|draw\s+(?:on|date|day)|stand\s+a\s+chance|shinda|mshindi|"
-    r"washindi|bahati\s+nasibu|zawadi\s+ya\s+bure)\b",
+    r"\b(giv(?:e|es|en|ing)\s*-?\s*aways?|raffle|competition|contest|winners?|"
+    r"win\s+(?:a|an|this|these|the|one|yourself|free)\b|winning\s+(?:entry|comment)|"
+    r"lucky\s+(?:draw|winner|pastor|reverend|bishop|person|one|servant|man|woman|commenter|entrant)|"
+    r"draw\s+(?:on|date|day)|stand\s+a\s+chance|"
+    # the owner's own words (2026-09-26): "gifting pastors, reverends, bishops
+    # a shoe… one person will get the shoe for free — the only cost is shipping"
+    r"(?:gift(?:ing)?|donat(?:e|ing))\s+(?:or\s+(?:gift(?:ing)?|donat(?:e|ing))\s+)?"
+    r"(?:a\s+|one\s+|our\s+|the\s+|to\s+)?"
+    r"(?:pastors?|reverends?|bishops?|priests?|ministers?|clergy|servants?|men\s+of\s+god|"
+    r"women\s+of\s+god|winners?)|"
+    r"(?:get|gets|receive|receives|take|takes|have|has|walk\s+away\s+with)\s+(?:\w+\s+){0,4}?"
+    r"(?:for\s+free|free\s+of\s+charge|at\s+no\s+cost)|"
+    r"only\s+(?:cost|charge|fee|payment)\s+(?:is|will\s+be|being)\s+(?:for\s+)?(?:the\s+)?"
+    r"(?:shipping|delivery|postage|courier|transport)|"
+    r"only\s+pay\s+(?:for\s+)?(?:the\s+)?(?:shipping|delivery|postage|courier|transport)|"
+    r"pay\s+(?:for\s+)?(?:the\s+)?(?:shipping|delivery|postage|courier|transport)\s+only|"
+    r"one\s+(?:lucky\s+)?(?:person|pastor|reverend|bishop|priest|minister|servant|winner|"
+    r"commenter|entrant|participant|of\s+you|of\s+them|man\s+of\s+god|woman\s+of\s+god)"
+    r"\s+(?:will|shall|is\s+going\s+to|gets?|to)\b|"
+    r"entr(?:y|ies)\s+(?:close|closes|end|ends)|to\s+enter\b|"
+    r"how\s+to\s+(?:enter|participate|take\s+part)|"
+    r"shinda|kushinda|(?:u|a|wa|m)tashinda|mshindi|washindi|shindano|kampeni|droo|"
+    r"bahati\s+nasibu|zawadi\s+ya\s+bure|(?:a|u|wa|m)tapata\s+(?:\w+\s+){0,3}?bure)\b",
+    re.IGNORECASE)
+# The SOFT markers — "campaign", "giving one reverend this cassock",
+# "blessing a pastor" — read as a giveaway only under a caption that does
+# not sell: a SALES campaign ("Easter sales campaign — cassocks 10% off",
+# "season's campaign: every cassock ordered comes with a free collar") is
+# a shop post with a slogan, and must still sell.
+_CAMPAIGN_SOFT_RE = re.compile(
+    r"\b(campaigns?|"
+    r"(?:giv(?:e|es|en|ing)|bless(?:ing)?)\s+(?:one|a)\s+(?:lucky\s+)?"
+    r"(?:pastors?|reverends?|bishops?|priests?|ministers?|servants?|winners?|"
+    r"man\s+of\s+god|woman\s+of\s+god))\b",
+    re.IGNORECASE)
+_NOT_CAMPAIGN_RE = re.compile(
+    r"(?:sales?|promo(?:tion(?:al)?)?|discount|marketing|offer|clearance|price)\s+campaigns?",
+    re.IGNORECASE)
+_SELLS_RE = re.compile(
+    r"(?:%|percent)\s*off|discount|\boffer\b|\bsale\b|\border(?:ed|s|ing)?\b|"
+    r"\b(?:kes|ksh|usd)\s*\.?\s*\d|\$\s*\d|\bprice[sd]?\b|\bbei\b|\bagiza\b|"
+    r"comes?\s+with|in\s+stock|available\s+in|new\s+arrivals?|shop\s+now|buy\s+now",
     re.IGNORECASE)
 
 
@@ -2926,12 +2982,60 @@ def is_campaign_post(caption: str | None) -> bool:
     """A post that runs a GIVEAWAY, a draw, a competition (owner, 2026-09-26:
     "one person will get the shoe for free — the only cost is shipping").
     Its comments are entries and cheers, never orders: the host answers
-    them, the shopkeeper does not."""
-    return bool(_CAMPAIGN_RE.search(" ".join(str(caption or "").split())))
+    them, the shopkeeper does not. Read from the caption WHOLE (see
+    `post_caption`) — the rule may sit past the title the inbox shows."""
+    cap = " ".join(str(caption or "").split())
+    if not cap:
+        return False
+    cap = _NOT_CAMPAIGN_RE.sub(" ", cap)
+    if _CAMPAIGN_RE.search(cap):
+        return True
+    return bool(_CAMPAIGN_SOFT_RE.search(cap)) and not _SELLS_RE.search(cap)
+
+
+def post_caption(pctx: dict | None) -> str:
+    """The post's words, WHOLE: the full caption when the context carries it
+    (`fetch_post_context`, 2026-09-26), else the 200-char title."""
+    p = pctx or {}
+    return str(p.get("caption") or "").strip() or str(p.get("title") or "").strip()
+
+
+# Under a campaign post the inbox opens only for an entrant who speaks of
+# BUYING — the bishop planning a cassock, never every entry (owner,
+# 2026-09-26: the campaign is mobilisation, not a pitch).
+_CAMPAIGN_BUY_RE = re.compile(
+    r"\b(buy|buying|purchase|purchasing|order|ordering|price|prices|cost|how\s+much|"
+    r"nunua|kununua|ninunue|bei|agiza|pesa\s+ngapi)\b",
+    re.IGNORECASE)
+
+
+def _host_reading(reading: dict, text: str) -> dict:
+    """The reading the HOST acts on under a campaign post. Spam stays spam.
+    A "negative"/"mixed" reading keeps only on strict evidence — the plain
+    negative regex or a grievance cue in the words ("I never received my
+    last order" under a giveaway is still a grievance); "lovely shoe but I
+    wear 44" is an entry. Every other comment with a word or a digit in it
+    ("Size 42", "I'm Pastor Stephen from Eldoret") is the host's to answer;
+    a bare emoji or "amen" keeps the light thank-you."""
+    r = dict(reading or {})
+    t = (text or "").strip()
+    if r.get("intent") == "spam":
+        return r
+    keep_kind = r.get("kind") in ("question", "request")
+    if r.get("intent") == "negative" or r.get("kind") in ("complaint", "mixed"):
+        if looks_negative(t) or _GRIEVANCE_CUE_RE.search(t):
+            return r
+        r["intent"], r["severity"] = "high", 0
+        r["kind"] = r["kind"] if keep_kind else "other"
+        return r
+    if r.get("intent") in ("low", "goodwill") and re.search(r"[A-Za-z0-9]", t):
+        r["intent"] = "high"
+        r["kind"] = r["kind"] if keep_kind else "other"
+    return r
 
 
 def _campaign_context(caption: str) -> str:
-    cap = " ".join(str(caption or "").split())[:400]
+    cap = " ".join(str(caption or "").split())[:700]
     return ("(THIS POST IS A CAMPAIGN / GIVEAWAY — its caption: \"" + cap + "\". You are the "
             "HOST of the campaign, not a shopkeeper. Welcome them by name and title; "
             "confirm what they told you — their name, their role, their size, their town — "
@@ -3448,6 +3552,18 @@ _SW_GOODWILL_POOL = [
     "Asante{name} 🙏 Ukarimu wako unatutia nguvu sana.",
     "Mungu akubariki{name} 🙏 Maneno kama haya yanatupeleka mbali.",
 ]
+# Under a CAMPAIGN post with no model answer (over the cap, or the turn
+# failed): the host's thank-you — never the giveaway item's price, never a
+# pitch, never "which item?" (owner, 2026-09-26).
+_CAMPAIGN_ACK_POOL = [
+    "Thank you for joining in{name} 🙏 We've received your comment — all the best! 💛",
+    "Bless you{name}! 🙏 Your comment is received, and we're so glad you joined in 💛",
+    "Thank you{name} 🙏 We've seen your comment — thank you for joining in, and all the best! 💛",
+]
+_SW_CAMPAIGN_ACK_POOL = [
+    "Asante kwa kujiunga nasi{name} 🙏 Tumepokea ujumbe wako — kila la heri! 💛",
+    "Mungu akubariki{name}! 🙏 Tumeona ujumbe wako, na tunafurahi umejiunga nasi 💛",
+]
 
 
 # ── A SET IS PRICED AS ITS TOTAL (owner, 2026-09-21) ─────────────────────────
@@ -3599,7 +3715,7 @@ def _comment_public_reply(answer: str, dm_sent: bool, name_tag: str, seed: str,
                           swahili: bool = False, made_to_order: bool = False,
                           ask_which: bool = False, set_items: str = "",
                           bundle: bool = False, kind: str = "other",
-                          ask: str = "") -> str:
+                          ask: str = "", campaign: bool = False) -> str:
     """The PUBLIC comment text, given the agent's answer and whether the DM landed.
 
     THIS FUNCTION CANNOT PRODUCE A LINK, by construction: it takes no URL. Meta
@@ -3620,6 +3736,16 @@ def _comment_public_reply(answer: str, dm_sent: bool, name_tag: str, seed: str,
     the no-answer fallbacks, where inviting a message is all we have."""
     if answer:
         return answer
+    if campaign:
+        # A CAMPAIGN POST (owner, 2026-09-26): with no model answer the thread
+        # hears the host's thank-you — never the giveaway item's price, never
+        # "which item?". A question or a request still promises a person.
+        if kind == "request":
+            return (_pick(_SW_REQUEST_ACK_POOL if swahili else _REQUEST_ACK_POOL, seed)
+                    .replace("{name}", name_tag).replace("{ask}", (ask or "").strip() or "what you asked for"))
+        if kind == "question":
+            return _pick(_SW_QUESTION_ACK_POOL if swahili else _QUESTION_ACK_POOL, seed).replace("{name}", name_tag)
+        return _pick(_SW_CAMPAIGN_ACK_POOL if swahili else _CAMPAIGN_ACK_POOL, seed).replace("{name}", name_tag)
     # No answer — we're over the per-post cap, or the agent turn failed. We do NOT
     # know what this person said, so we do NOT sell to them: pitching blind is how
     # "this is wrong" was answered with "Continue on WhatsApp to get yours". A
@@ -4232,6 +4358,10 @@ async def _resolve_post_product(redis, channel: str, ext: str,
     caption's lead words — so the public CTA still lands on the exact
     storefront product page, never the bare wa.me fallback. Appends the
     matched hub rows into `sink` (the same seen_products list)."""
+    if is_campaign_post(post_caption(post_ctx)):
+        # A CAMPAIGN POST (owner, 2026-09-26) sells nothing: no identity to
+        # resolve for a canned line, no storefront link to hand out.
+        return
     known = await _post_identity(redis, channel, post_ctx)
     title = (post_ctx.get("title") or "").strip()
     from app.database import AsyncSessionLocal
@@ -4492,14 +4622,17 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # A CAMPAIGN POST (owner, 2026-09-26): its comments are entries and cheers.
     # The host answers every one with words in it — the canned thanks and the
     # complaint lines are for shop posts.
-    _caption = ((comment.get("post_context") or {}).get("title") or "").strip()
-    if _caption and is_campaign_post(_caption) and reading["intent"] != "spam":
-        reading = dict(reading, campaign=_caption)
-        if reading["intent"] in ("low", "goodwill") and len(re.findall(r"[A-Za-z']+", comment_text)) >= 2:
-            reading["intent"], reading["kind"] = "high", "other"
+    _caption = post_caption(comment.get("post_context"))
+    campaign = bool(_caption) and is_campaign_post(_caption)
+    if campaign:
+        reading = _host_reading(dict(reading, campaign=_caption), comment_text)
     intent = reading["intent"]
     kind, severity, ask = reading["kind"], int(reading.get("severity") or 0), reading.get("ask") or ""
     plan = plan_comment_actions(intent)
+    if campaign and intent == "high":
+        # An entrant hears the host in public; their inbox opens only when
+        # they speak of buying (owner, 2026-09-26: mobilisation, not a pitch).
+        plan = dict(plan, dm=bool(_CAMPAIGN_BUY_RE.search(comment_text)))
 
     # ── LIVE BROADCAST ───────────────────────────────────────────────────────
     # During a live stream the room is full of people ARRIVING. classify_comment
@@ -4638,6 +4771,8 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # result gets recorded as the post's identity for every later comment.
     media = ({"type": "image", "url": thumb}
              if thumb and not is_live and not _trusted else None)
+    if campaign:
+        media = None            # a giveaway's frame is never read for a product to price
 
     # THE FREE PATH (owner's affordability push, 2026-08-18). The single most
     # common comment is a naked "How much?"/"Bei gani?" — and on a post our
@@ -4651,7 +4786,7 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # stay in the commenter's tongue.
     # Checked BEFORE the cap counter: a free reply must not spend the post's
     # daily model budget (the counter increments on every call).
-    free_ask = _trusted and is_bare_price_ask(prompt_text)
+    free_ask = _trusted and is_bare_price_ask(prompt_text) and not campaign
     skip_model = free_ask or await _post_over_cap(redis, post_id) \
         or await _person_over_cap(redis, post_id, ext)
 
@@ -4716,10 +4851,13 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
         # under it prices the same product instead of re-guessing the frame.
         # GUARDED: a model guess that contradicts the caption — or differs from
         # an identity already on record — must never poison that record.
-        if is_live:
+        if is_live or campaign:
             # A broadcast shows many products over an hour; it HAS no single
-            # identity, and pinning one makes every later comment wrong.
-            _log.info("post %s is live — not recording a product identity", post_id)
+            # identity, and pinning one makes every later comment wrong. A
+            # campaign post gives its item away — a row the host named for
+            # one entrant is never the post's identity either.
+            _log.info("post %s is %s — not recording a product identity", post_id,
+                      "live" if is_live else "a campaign")
         elif _post_identity_compatible(_known_product, post_ctx.get("title"), matched,
                                        comment_text=comment_text, saw_image=bool(media)):
             # Recorded as the MODEL's read (source "model" unless the row came
@@ -4791,6 +4929,11 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
         elif not asks_it:
             matched = {k: v for k, v in matched.items()
                        if k not in ("price", "price_kes", "price_usd")}
+    if campaign:
+        # THE GIVEAWAY ITEM IS NEVER PRICED OR SOLD BY A CANNED LINE (owner,
+        # 2026-09-26), and "which item?" is never asked under a post that
+        # names its own.
+        product_name, matched, ask_which = "", {}, False
     # The no-model line names the item AS SEEN when our records describe it —
     # a SET keeps the hub's name: "This is our Cassock Set" (owner's shape).
     if product_name and _known_product.get("seen") \
@@ -4841,6 +4984,7 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
                                         product_known=bool(product_name),
                                         product_name=product_name,
                                         price_text=price_text,
+                                        campaign=campaign,
                                         goodwill=(intent == "goodwill"),
                                         per_piece=per_piece, first_contact=first,
                                         swahili=swahili, made_to_order=made_to_order,
@@ -4859,14 +5003,17 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # 2026-09-22). A cheer needs no one; "which item?" is a real question back.
     # A draft HELD by the reviewer goes to a colleague with the reasons.
     if not answer and intent != "goodwill" and not ask_which and not (product_name and price_text):
-        try:
-            await _route_comment_to_human(
-                channel, ext, comment_text,
-                kind=(kind if kind in ("request", "question") else "other"),
-                severity=0, ask=ask, answered=public_text, redis=redis,
-                issues=held_issues or None)
-        except Exception as exc:
-            _log.warning("route-to-human failed for comment %s: %s", cid, exc)
+        # Under a CAMPAIGN post an entry over the cap needs no colleague — the
+        # host's thank-you is the answer; a question or a request still does.
+        if not campaign or kind in ("request", "question"):
+            try:
+                await _route_comment_to_human(
+                    channel, ext, comment_text,
+                    kind=(kind if kind in ("request", "question") else "other"),
+                    severity=0, ask=ask, answered=public_text, redis=redis,
+                    issues=held_issues or None)
+            except Exception as exc:
+                _log.warning("route-to-human failed for comment %s: %s", cid, exc)
 
     # Save our public reply THREADED to the comment it answers, so the inbox shows
     # comment → reply the way Facebook does (reply_to = this comment id).

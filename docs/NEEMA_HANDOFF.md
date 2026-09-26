@@ -323,7 +323,26 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   `_GRIEVANCE_CUE_RE`, `_DISPLEASURE_HINT_RE` — displeasure words and the
   shape of something that happened: came, arrived, too small, didn't — all
   silent) is a misread: `_settle_reading` makes it high/other — a person to
-  answer, never to apologise to. Tests: `tests/test_campaign_posts.py`. Comments: `_person_over_cap` (`meta_comment_person_cap` 6 full
+  answer, never to apologise to. Tests: `tests/test_campaign_posts.py`.
+- **The campaign fix fires on the real post** (pass 6, 2026-09-26): the post
+  context now carries the caption WHOLE (`fetch_post_context` → `caption`,
+  1500 chars, beside the 200-char `title` the inbox card shows; cache key
+  `meta:postctx:v2:`), and `runtime.post_caption` is what the engine and
+  `run_turn` read. `_CAMPAIGN_RE` knows the owner's own words (gifting
+  pastors, one person will get it for free, the only cost is shipping,
+  giving away, lucky pastor, to enter, kampeni, shindano, atapata … bure);
+  a SALES campaign ("Easter sales campaign 10% off", a bare "campaign"
+  beside a price or "order now") stays a shop post. Under a campaign post
+  `_host_reading` decides: spam stays spam; a model "negative"/"mixed"
+  keeps only on strict evidence (`looks_negative` / `_GRIEVANCE_CUE_RE`);
+  every other comment with a word or a digit ("Size 42") is the host's;
+  a bare emoji keeps the light thanks. The giveaway item is never sold: no
+  free priced path, no post-product resolve, no identity recorded, no post
+  image read, the canned no-answer line is `_CAMPAIGN_ACK_POOL` (a
+  question/request still promises a person), and the DM opens only when the
+  entrant speaks of buying (`_CAMPAIGN_BUY_RE`). `run_turn`'s source-post
+  line says the item is given away by the caption's rule, never "price
+  THAT product". Comments: `_person_over_cap` (`meta_comment_person_cap` 6 full
   model replies per person per post per day; the free priced path is decided
   first and never spends it). The prompt's PACING rule; `/api/health`
   `cooling` (economy, cooled, silenced, lifted, duplicate). Switch:
