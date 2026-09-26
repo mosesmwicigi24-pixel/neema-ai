@@ -374,6 +374,10 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
             turn_text = (message.get("text") or "").strip() or (sticker or "")
             turn_media = ({"type": "image", "url": media_url, "caption": turn_text}
                           if media_url and media_type == "image" else None)
+            if turn_media is None and media_url and media_type == "audio":
+                # A voice note is a turn: transcribed on the send path
+                # (runtime._run_and_send_meta), so the webhook stays fast.
+                turn_media = {"type": "audio", "url": media_url}
             if (turn_text or turn_media) and conv.intercept_mode == InterceptMode.ai:
                 replies.append((sender, turn_text, mid, page_id, turn_media))
             elif turn_text and conv.intercept_mode == InterceptMode.human:

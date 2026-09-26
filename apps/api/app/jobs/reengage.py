@@ -139,6 +139,20 @@ async def _handle(redis, conv: Conversation, msg: Message, *, send: bool) -> dic
     if is_wa and not to:                   # defensive: WhatsApp row without a number
         res["skipped"] = "no wa_id"
         return res
+    # LEFT ALONE ON PURPOSE (owner, 2026-09-26): a thread Neema paced, paused
+    # or the guard silenced is not "waiting on us" — an outreach there is the
+    # very chase the pacing exists to avoid.
+    if redis is not None:
+        try:
+            from app.agent import cooling as _cool
+            from app.agent.domain import is_paused as _guard_paused
+            if (await _cool.is_cooled(redis, conv.channel, to)
+                    or await redis.get(f"agent:pause:{conv.channel}:{to}")
+                    or await _guard_paused(redis, conv.channel, to)):
+                res["skipped"] = "left alone (paced / paused)"
+                return res
+        except Exception:
+            pass
 
     # Double-send guard (only matters for a live send).
     if send and redis is not None:
