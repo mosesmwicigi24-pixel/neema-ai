@@ -12,7 +12,17 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -67,6 +77,86 @@ fun ToastView(toast: Toast, mobile: Boolean, modifier: Modifier = Modifier) {
         }
         Spacer(Modifier.width(8.dp))
         Text(toast.message, color = look.text, fontSize = 14.sp, fontWeight = FontWeight.Medium, lineHeight = 20.sp)
+    }
+}
+
+// ── Connectivity banner (app-only: the web leans on the browser's own) ──────
+
+/**
+ * A slim bar across the top of the content while the device has no network:
+ * whatever is on screen stays (it's what was last loaded), and the bar says
+ * so. When the network returns it turns moss, says "Back online" and folds
+ * away after 2.5 s.
+ */
+@Composable
+fun ConnectivityBanner(online: Boolean, backOnline: Boolean, modifier: Modifier = Modifier) {
+    AnimatedVisibility(
+        visible = !online || backOnline, modifier = modifier,
+        enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut(),
+    ) { ConnectivityBar(offline = !online) }
+}
+
+/** True for 2.5 s after [online] turns true again (not on first composition). */
+@Composable
+fun rememberBackOnline(online: Boolean): Boolean {
+    var wasOffline by remember { mutableStateOf(!online) }
+    var backOnline by remember { mutableStateOf(false) }
+    LaunchedEffect(online) {
+        if (!online) { wasOffline = true; backOnline = false }
+        else if (wasOffline) {
+            wasOffline = false; backOnline = true
+            kotlinx.coroutines.delay(2_500); backOnline = false
+        }
+    }
+    return backOnline
+}
+
+/** The bar itself: amber while offline, moss once back. */
+@Composable
+internal fun ConnectivityBar(offline: Boolean, modifier: Modifier = Modifier) {
+    val dark = Neema.colors.isDark
+    val bg: Color; val line: Color; val title: Color; val body: Color; val iconBg: Color; val iconTint: Color
+    if (offline) {
+        bg = if (dark) Color(0xFF2A1805) else Color(0xFFFFFBEB)
+        line = if (dark) Color(0xFF78350F) else Color(0xFFFDE68A)
+        title = if (dark) Color(0xFFFCD34D) else Color(0xFF92400E)
+        body = if (dark) Color(0xFFD6B26A) else Color(0xFFB45309)
+        // A solid amber badge, the twin of "Back online"'s moss one.
+        iconBg = Color(0xFFF59E0B)
+        iconTint = Color.White
+    } else {
+        bg = if (dark) Color(0xFF12230B) else Color(0xFFF1F8EB)
+        line = if (dark) Color(0xFF2F5A1A) else Color(0xFFCDE5BB)
+        title = if (dark) Color(0xFF9CCD65) else Color(0xFF3F7A22)
+        body = title
+        iconBg = Color(0xFF589B31)
+        iconTint = Color.White
+    }
+    Column(modifier.fillMaxWidth().background(bg)) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(24.dp).clip(CircleShape).background(iconBg), contentAlignment = Alignment.Center) {
+                androidx.compose.material3.Icon(
+                    if (offline) ke.co.bethanyhouse.neema.core.ui.theme.WebIcons.WifiOff else ke.co.bethanyhouse.neema.core.ui.theme.WebIcons.Check,
+                    null, tint = iconTint, modifier = Modifier.size(if (offline) 14.dp else 12.dp),
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            if (offline) {
+                Column(Modifier.weight(1f)) {
+                    Text("You're offline", color = title, fontSize = 13.sp, lineHeight = 17.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Showing what was last loaded. Check your connection.",
+                        color = body, fontSize = 12.sp, lineHeight = 16.sp,
+                    )
+                }
+            } else {
+                Text("Back online", color = title, fontSize = 13.sp, lineHeight = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            }
+        }
+        HorizontalDivider(color = line)
     }
 }
 

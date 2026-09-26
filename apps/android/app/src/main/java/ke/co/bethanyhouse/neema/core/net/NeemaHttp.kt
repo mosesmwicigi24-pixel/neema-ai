@@ -21,18 +21,35 @@ import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
-import java.net.SocketTimeoutException
+import java.io.InterruptedIOException
 import java.util.concurrent.TimeUnit
 
-/** Thrown for any non-2xx answer; [status] is the HTTP code (0 = network). */
-class ApiException(val status: Int, val method: String, val path: String, val body: String) :
-    IOException("$method $path → $status: $body") {
+/**
+ * Thrown for any non-2xx answer; [status] is the HTTP code (0 = the request
+ * never got an answer: offline, connection refused or dropped, timed out).
+ *
+ * [retryAfterSeconds] is a 429/503's `Retry-After` (seconds form) when sent.
+ * [malformed] marks a 2xx whose body could not be read as what was asked
+ * for (a captive portal's page, a cut-off answer); [status] is then the
+ * code that came back.
+ */
+class ApiException(
+    val status: Int,
+    val method: String,
+    val path: String,
+    val body: String,
+    val retryAfterSeconds: Long? = null,
+    val malformed: Boolean = false,
+) : IOException("$method $path → $status: ${body.take(500)}") {
+    /** The request ran out of time (the 30 s ceiling, or the long client's). */
+    val timedOut: Boolean get() = status == 0 && body.startsWith("timed out")
+
     /**
      * The server's `detail` when it sent one (FastAPI convention): a plain
      * string from `HTTPException(detail=…)`, or — for a request pydantic
      * rejected (422) — a list of `{loc, msg, type}` errors, read as their
-     * messages. Anything else (a proxy's HTML page, "Internal Server Error")
-     * is shown trimmed.
+     * messages. A plain-text answer ("Internal Server Error") is shown
+     * trimmed; a proxy's HTML page never is: it reads as no detail at all.
      */
     val detail: String
         get() = runCatching {
@@ -45,8 +62,37 @@ class ApiException(val status: Int, val method: String, val path: String, val bo
                 is JsonObject -> (d["message"] as? JsonPrimitive)?.content
                     ?: (d["error"] as? JsonPrimitive)?.content ?: d.toString()
             }
-        }.getOrNull() ?: body.trim().take(200)
+        }.getOrNull() ?: body.trim().let { if (looksLikeHtml(it)) "" else it.take(200) }
+
+    companion object {
+        /** A web page rather than an API answer (a proxy's error page, a captive portal). */
+        fun looksLikeHtml(text: String): Boolean {
+            val t = text.trimStart().take(64).lowercase()
+            return t.startsWith("<!doctype") || t.startsWith("<html") || t.startsWith("<head") ||
+                t.startsWith("<body") || t.startsWith("<?xml") || (t.startsWith("<") && text.contains("</"))
+        }
+    }
 }
+
+/**
+ * Tests only: a hook [NeemaHttp] awaits before each request, in the caller's
+ * coroutine (so a test's virtual clock drives it). The fake backend uses it
+ * to delay a request or hold it until released. Production has none.
+ */
+interface RequestGate {
+    /** [path] is the part after `/api`, without the query string. */
+    suspend fun beforeRequest(method: String, path: String)
+}
+
+/**
+ * The auth server could not be asked (offline, timed out, 5xx, 429): the
+ * session may be perfectly good, so this must never read as "signed out".
+ * [status] is 0 for no answer, else the auth server's code.
+ */
+class RefreshUnavailable(val status: Int, val timedOut: Boolean, message: String) : IOException(message)
+
+/** How much of an error body is kept (plenty for any FastAPI `detail`). */
+const val MAX_ERROR_BODY: Long = 64 * 1024
 
 val NeemaJson: Json = Json {
     ignoreUnknownKeys = true
@@ -63,7 +109,9 @@ val NeemaJson: Json = Json {
  * single session-expired signal when the server stops accepting us.
  *
  * Token handling lives in [TokenProvider] (the auth layer): it refreshes
- * proactively before expiry and once more on a 401 before giving up.
+ * proactively before expiry and once more on a 401 before giving up. Only
+ * a refresh the server actually refused expires the session; one it could
+ * not answer (offline, 5xx) fails this request and keeps the session.
  */
 class NeemaHttp(
     val baseUrl: String = BuildConfig.NEEMA_BASE_URL,
@@ -95,14 +143,17 @@ class NeemaHttp(
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .build()
 
+    private val gate: RequestGate? = interceptor as? RequestGate
+
     private val _sessionExpired = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     /** Fires when a request came back 401 and a refresh could not rescue it. */
     val sessionExpired: SharedFlow<Unit> = _sessionExpired.asSharedFlow()
 
     private val jsonType = "application/json".toMediaType()
 
-    suspend fun raw(method: String, path: String, body: RequestBody? = null, upload: Boolean = false): String =
-        withContext(io) {
+    suspend fun raw(method: String, path: String, body: RequestBody? = null, upload: Boolean = false): String {
+        try { gate?.beforeRequest(method, gatePath(path)) } catch (e: IOException) { throw networkError(e, method, path, upload) }
+        return withContext(io) {
             val url = if (path.startsWith("http")) path else "$apiBase$path"
             fun build(token: String?): Request = Request.Builder()
                 .url(url)
@@ -112,8 +163,8 @@ class NeemaHttp(
                 .build()
 
             val c = if (upload) uploadClient else client
-            val used = tokens.validAccessToken()
-            var res = execute(c, build(used), method, path)
+            val used = authStep(method, path) { tokens.validAccessToken() }
+            var res = execute(c, build(used), method, path, upload)
             // FastAPI 0.115's HTTPBearer answers a request with NO token 403
             // "Not authenticated", not 401. That only happens once the token ran
             // out and could not be refreshed: the same dead session.
@@ -121,9 +172,12 @@ class NeemaHttp(
                 res.close()
                 tokens.onRejected(used)
                 // One rescue attempt: the token may have expired between the
-                // proactive check and the server's clock.
-                val fresh = tokens.forceRefresh()
-                if (fresh != null) res = execute(c, build(fresh), method, path)
+                // proactive check and the server's clock. Requests rejected
+                // together share that one refresh (the auth layer serialises
+                // it). A refresh the auth server could not answer is an
+                // outage, not a signed-out agent: it fails this request only.
+                val fresh = authStep(method, path) { tokens.forceRefresh() }
+                if (fresh != null) res = execute(c, build(fresh), method, path, upload)
                 if (fresh == null || res.code == 401) {
                     res.close()
                     _sessionExpired.tryEmit(Unit)
@@ -131,20 +185,44 @@ class NeemaHttp(
                 }
             }
             res.use { r ->
-                val text = r.body?.string().orEmpty()
-                if (!r.isSuccessful) throw ApiException(r.code, method, path, text)
-                text
+                if (!r.isSuccessful) {
+                    // An error page can be anything (a proxy's multi-megabyte
+                    // HTML dump): only its head is worth keeping.
+                    val text = runCatching { r.peekBody(MAX_ERROR_BODY).string() }.getOrDefault("")
+                    throw ApiException(r.code, method, path, text, retryAfterSeconds = retryAfter(r))
+                }
+                // The connection can still drop while the body streams in.
+                try { r.body?.string().orEmpty() } catch (e: IOException) { throw networkError(e, method, path, upload) }
             }
         }
-
-    private fun execute(c: OkHttpClient, req: Request, method: String, path: String): Response = try {
-        c.newCall(req).execute()
-    } catch (e: SocketTimeoutException) {
-        throw ApiException(0, method, path, "timed out after 30s")
-    } catch (e: IOException) {
-        if (e is ApiException) throw e
-        throw ApiException(0, method, path, e.message ?: "network error")
     }
+
+    private fun gatePath(path: String): String =
+        (if (path.startsWith("http")) path.substringAfter("://").substringAfter('/').let { "/$it" }.removePrefix("/api") else path)
+            .substringBefore('?')
+
+    private suspend fun <T> authStep(method: String, path: String, step: suspend () -> T): T = try {
+        step()
+    } catch (e: RefreshUnavailable) {
+        throw ApiException(e.status, method, path, if (e.timedOut) "timed out after 30s" else (e.message ?: "network error"))
+    }
+
+    private fun execute(c: OkHttpClient, req: Request, method: String, path: String, upload: Boolean): Response = try {
+        c.newCall(req).execute()
+    } catch (e: IOException) {
+        throw networkError(e, method, path, upload)
+    }
+
+    private fun networkError(e: IOException, method: String, path: String, upload: Boolean): ApiException = when (e) {
+        is ApiException -> e
+        // SocketTimeoutException (connect/read/write) and OkHttp's call
+        // timeout (a bare InterruptedIOException "timeout") alike.
+        is InterruptedIOException -> ApiException(0, method, path, if (upload) "timed out after 10 min" else "timed out after 30s")
+        else -> ApiException(0, method, path, e.message ?: "network error")
+    }
+
+    /** `Retry-After: <seconds>` (the HTTP-date form is rare enough to ignore). */
+    private fun retryAfter(r: Response): Long? = r.header("Retry-After")?.trim()?.toLongOrNull()?.coerceIn(0, 3600)
 
     fun jsonBody(value: JsonElement): RequestBody = value.toString().toRequestBody(jsonType)
 
@@ -165,7 +243,13 @@ class NeemaHttp(
 
     inline fun <reified T> decode(text: String): T {
         if (T::class == Unit::class) return Unit as T
-        if (text.isNotBlank()) return NeemaJson.decodeFromString(serializer<T>(), text)
+        if (text.isNotBlank()) return try {
+            NeemaJson.decodeFromString(serializer<T>(), text)
+        } catch (e: IllegalArgumentException) {
+            // SerializationException is one: a captive portal's page, a cut-off
+            // answer, a shape the app doesn't know. A readable failure, not a crash.
+            throw ApiException(200, "", "(response)", text.take(MAX_ERROR_BODY.toInt()), malformed = true)
+        }
         // An empty 2xx (a 204, or a handler that returned None) is a success:
         // read it as null, else as an empty object / list, never as a failure.
         val ser = serializer<T>()
@@ -179,7 +263,12 @@ class NeemaHttp(
 interface TokenProvider {
     /** A token good for at least a few minutes, refreshing first if needed. */
     suspend fun validAccessToken(): String?
-    /** Refresh now regardless of expiry; null when the session is gone. */
+    /**
+     * Refresh now regardless of expiry; null when the server refused (the
+     * session is gone). Throws [RefreshUnavailable] when the auth server could
+     * not be asked — the session is not known to be gone. [validAccessToken]
+     * may throw it too, for a token already expired.
+     */
     suspend fun forceRefresh(): String?
     /** The server refused this token — never hand it out again as "still valid". */
     fun onRejected(token: String?)

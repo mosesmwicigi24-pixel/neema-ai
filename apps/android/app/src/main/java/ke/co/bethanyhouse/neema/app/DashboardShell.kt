@@ -77,6 +77,8 @@ fun DashboardShell(
     val immersive by dash.immersive.collectAsStateWithLifecycle()
     val notifications by dash.container.notifications.items.collectAsStateWithLifecycle()
     val connected by dash.container.socket.connected.collectAsStateWithLifecycle()
+    val online by dash.online.collectAsStateWithLifecycle()
+    val backOnline = rememberBackOnline(online)
 
     // Permissions resolve once /me and the team list land; re-derive the nav then.
     val items = remember(me, agents, summary, orders, session) { dash.navItems() }
@@ -142,7 +144,7 @@ fun DashboardShell(
         Scaffold(
             topBar = {
                 if (!wide && !immersive) MobileHeader(
-                    title = view.label, connected = connected, dark = dark, bell = unreadBell,
+                    title = view.label, connected = connected || !online, dark = dark, bell = unreadBell,
                     onMenu = { scope.launch { drawer.open() } },
                     onBell = { showBell = true }, onTheme = { dash.setDark(!dark) },
                 )
@@ -154,7 +156,16 @@ fun DashboardShell(
             containerColor = MaterialTheme.colorScheme.background,
             contentWindowInsets = if (immersive) WindowInsets(0) else ScaffoldDefaults.contentWindowInsets,
         ) { pad ->
-            Box(Modifier.fillMaxSize().padding(pad)) {
+            Column(Modifier.fillMaxSize().padding(pad)) {
+            // Immersive views (an open thread) run to the top edge and pad for the
+            // status bar themselves: the banner takes that padding and the view
+            // below is told the status bar is already accounted for.
+            val banner = !online || backOnline
+            ConnectivityBanner(online, backOnline, if (immersive) Modifier.statusBarsPadding() else Modifier)
+            Box(
+                Modifier.fillMaxWidth().weight(1f)
+                    .then(if (immersive && banner) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier),
+            ) {
                 when (view) {
                     ViewId.Conversations -> ConversationsScreen(dash)
                     ViewId.Calls -> CallsScreen(dash)
@@ -168,9 +179,11 @@ fun DashboardShell(
                     ViewId.Settings -> SettingsScreen(dash)
                     ViewId.Profile -> ProfileScreen(dash)
                 }
-                if (wide && !connected) OfflineDot(Modifier.align(Alignment.TopEnd).padding(10.dp))
+                // Online but the live socket is down: it is on its way back.
+                if (wide && !connected && online) OfflineDot(Modifier.align(Alignment.TopEnd).padding(10.dp))
                 // An incoming/active call takes over the content area.
                 CallStage(dash)
+            }
             }
         }
     }

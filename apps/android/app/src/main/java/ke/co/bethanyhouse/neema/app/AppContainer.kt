@@ -47,6 +47,12 @@ class AppContainer(val context: Context, val config: ContainerConfig = Container
 
     /** True while any activity of the app is visible (set by NeemaApplication). */
     val foreground = kotlinx.coroutines.flow.MutableStateFlow(false)
+    /**
+     * Whether the device has a network at all (NeemaApplication follows the
+     * system's default network). True until told otherwise, so a device that
+     * never reports doesn't show a false offline banner.
+     */
+    val online = kotlinx.coroutines.flow.MutableStateFlow(true)
     val snapshots = SnapshotCache(context)
     val notifications = NotificationCenter(context, appScope, socket, prefs, config.prefs?.invoke("neema_notifications"))
     val calls = CallManager(

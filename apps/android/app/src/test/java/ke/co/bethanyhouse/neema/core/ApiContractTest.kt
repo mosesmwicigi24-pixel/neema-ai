@@ -287,7 +287,7 @@ class ApiContractTest {
         fake.on("GET", "/admin/agents", code = 500, body = "Internal Server Error")
         assertEquals("Internal Server Error", expectApi { api.agents.list() }.detail)
         fake.on("GET", "/admin/agents", code = 502, body = "  <html><body>502 Bad Gateway</body></html>\n")
-        assertEquals("<html><body>502 Bad Gateway</body></html>", expectApi { api.agents.list() }.detail)
+        assertEquals("a proxy page is never shown as a detail", "", expectApi { api.agents.list() }.detail)
     }
 
     @Test

@@ -20,7 +20,9 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.builtins.ListSerializer
@@ -82,6 +84,8 @@ class DashboardViewModel(
 ) : ViewModel() {
     /** True while the app is on screen — polls pause in the background. */
     val foreground: StateFlow<Boolean> get() = container.foreground
+    /** The device has a network (the shell's offline banner). */
+    val online: StateFlow<Boolean> get() = container.online
     val api: NeemaApi get() = container.api
 
     val session: StateFlow<Session?> = container.sessionStore.session
@@ -162,8 +166,20 @@ class DashboardViewModel(
                 }
             }
         }
+        // Keyed by who is signed in, not by the session object: a token refresh
+        // or a profile update saves a new Session for the same agent, and
+        // must not reload snapshots and restart every poll.
         viewModelScope.launch {
-            session.collect { s -> if (s != null) onSignedIn() else stopPolling() }
+            var last: String? = null
+            session.map { it?.agentId }.distinctUntilChanged().collect { id ->
+                if (id == null) { stopPolling(); last = null; return@collect }
+                // Someone else signed in without a sign-out in between (a
+                // restored session, a re-login as another agent): nothing of
+                // the previous agent's may stay on screen.
+                if (last != null && last != id) clearAgentState()
+                last = id
+                onSignedIn()
+            }
         }
         // Frames sent while the socket was down (a dead network, a restart of
         // the API, the app backgrounded without live mode) are gone for good:
@@ -214,9 +230,12 @@ class DashboardViewModel(
     }
 
     fun refetchMe(attempt: Int = 1) {
+        val who = scope
         viewModelScope.launch {
             runCatching { api.profile.me() }
                 .onSuccess {
+                    // Signed out (or in as someone else) while it was in flight.
+                    if (scope != who || who == null) return@onSuccess
                     _me.value = it
                     container.snapshots.write(scope, "me", Agent.serializer(), it)
                     // A NextAuth sign-in (route.ts) carries no role: /admin/me is where it
@@ -227,25 +246,36 @@ class DashboardViewModel(
                         role = it.role.takeIf { nextAuth }, isSuperuser = it.isSuperuser.takeIf { nextAuth },
                     )
                 }
-                .onFailure { if (attempt < 3) { delay(attempt * 500L); refetchMe(attempt + 1) } }
+                .onFailure { e ->
+                    // A dead session is the dialog's business; retrying can't help.
+                    val expired = (e as? ke.co.bethanyhouse.neema.core.net.ApiException)?.status == 401
+                    if (attempt < 3 && !expired && scope == who) { delay(attempt * 500L); refetchMe(attempt + 1) }
+                }
         }
     }
 
-    private suspend fun refetchAgentsNow() {
-        val list = api.agents.list()
-        _agents.value = list
-        container.snapshots.write(scope, "agents", ListSerializer(Agent.serializer()), list)
+    /**
+     * Fetch, then publish only if the same agent is still signed in: a slow
+     * answer that lands after a sign-out or a switch of agent is dropped.
+     */
+    private suspend inline fun <T> forCurrentAgent(fetch: () -> T, publish: (String, T) -> Unit) {
+        val who = scope ?: return
+        val value = fetch()
+        if (scope == who) publish(who, value)
     }
-    private suspend fun refetchOrdersNow() {
-        val list = api.orders.list()
+
+    private suspend fun refetchAgentsNow() = forCurrentAgent({ api.agents.list() }) { who, list ->
+        _agents.value = list
+        container.snapshots.write(who, "agents", ListSerializer(Agent.serializer()), list)
+    }
+    private suspend fun refetchOrdersNow() = forCurrentAgent({ api.orders.list() }) { who, list ->
         lastOrdersFetch = clock()
         _orders.value = list
-        container.snapshots.write(scope, "orders", ListSerializer(Order.serializer()), list)
+        container.snapshots.write(who, "orders", ListSerializer(Order.serializer()), list)
     }
-    private suspend fun refetchCatalogNow() {
-        val list = api.catalog.list()
+    private suspend fun refetchCatalogNow() = forCurrentAgent({ api.catalog.list() }) { who, list ->
         _catalog.value = list
-        container.snapshots.write(scope, "catalog", ListSerializer(CatalogItem.serializer()), list)
+        container.snapshots.write(who, "catalog", ListSerializer(CatalogItem.serializer()), list)
     }
 
     fun refetchAgents() { viewModelScope.launch { runCatching { refetchAgentsNow() } } }
@@ -337,11 +367,11 @@ class DashboardViewModel(
 
     fun toast(message: String, type: ToastType = ToastType.Success) { _toasts.tryEmit(Toast(message, type)) }
 
-    /** Friendly message for a failed call, for toasts. */
-    fun errorText(t: Throwable): String =
-        (t as? ke.co.bethanyhouse.neema.core.net.ApiException)?.let {
-            if (it.status == 0) "Network problem — check your connection" else it.detail
-        } ?: (t.message ?: "Something went wrong")
+    /**
+     * Friendly message for a failed call, for toasts and inline errors: every
+     * status, offline and timeouts, in words for people ([ErrorText]).
+     */
+    fun errorText(t: Throwable): String = ke.co.bethanyhouse.neema.core.net.ErrorText.of(t)
 
     fun onReauthenticated() {
         sessionExpired.value = false
@@ -353,12 +383,19 @@ class DashboardViewModel(
         container.calls.hangup()
         container.auth.logout()
         container.notifications.clear()
+        clearAgentState()
+        pendingLink = null
+    }
+
+    /** Forget everything that belonged to the signed-in agent. */
+    private fun clearAgentState() {
         _me.value = null; _agents.value = emptyList(); _orders.value = emptyList(); _catalog.value = emptyList()
         inboxSummary.value = null
         openConvKey.value = null
         callsFocusKey.value = null
-        pendingLink = null
         sessionExpired.value = false
+        immersive.value = false
+        lastOrdersFetch = 0L
         _view.value = ViewId.Conversations
     }
 }

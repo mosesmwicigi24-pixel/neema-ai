@@ -44,14 +44,23 @@ class NeemaApplication : Application() {
     }
 
     /**
-     * The network came back: retry the socket now instead of waiting out a
-     * backoff of up to 30 s (a no-op when connected or closed on purpose).
+     * Follow the default network: the shell's offline banner reads
+     * [AppContainer.online], and when the network comes back the socket
+     * retries now instead of waiting out a backoff of up to 30 s (a no-op
+     * when connected or closed on purpose).
      */
     private fun watchNetwork() {
         runCatching {
-            getSystemService(ConnectivityManager::class.java)?.registerDefaultNetworkCallback(
+            val cm = getSystemService(ConnectivityManager::class.java) ?: return
+            container.online.value = cm.activeNetwork != null
+            cm.registerDefaultNetworkCallback(
                 object : ConnectivityManager.NetworkCallback() {
-                    override fun onAvailable(network: Network) = container.socket.nudge()
+                    override fun onAvailable(network: Network) {
+                        container.online.value = true
+                        container.socket.nudge()
+                    }
+                    // The default network went and no other took its place.
+                    override fun onLost(network: Network) { container.online.value = cm.activeNetwork != null && cm.activeNetwork != network }
                 },
             )
         }
