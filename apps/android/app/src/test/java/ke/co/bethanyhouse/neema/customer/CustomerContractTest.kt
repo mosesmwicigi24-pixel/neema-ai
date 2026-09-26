@@ -257,7 +257,8 @@ class CustomerContractTest {
         assertEquals("channel=whatsapp", calls("PATCH", peterPath).last().query)
         assertEquals("""{"email":"new@x.org"}""", calls("PATCH", peterPath).last().body)
         assertEquals("peter.kamau@stmarks.or.ke", vm.profile.value!!.email)
-        assertEquals("Failed to save", toasts.last().message)
+        // crm.py's only 404 here: no user and no conversation for the key — merged or removed meanwhile.
+        assertEquals("Failed to save — this customer's profile is gone (it may have been merged into another). Refreshing.", toasts.last().message)
         assertEquals(ToastType.Error, toasts.last().type)
     }
 
@@ -299,7 +300,8 @@ class CustomerContractTest {
         assertEquals("""{"merge_with":"254799000111"}""", u.body)
         fake.on("POST", "/admin/customers/[^/]+/unmerge", code = 404, body = """{"detail":"No active merge to undo for this pair"}""")
         vm.unmerge("254799000111")
-        assertEquals("Failed to unmerge", toasts.last().message)
+        // Nothing left to undo: a colleague already unmerged it — not a failure.
+        assertEquals("Already unmerged — refreshed to show where it stands.", toasts.last().message)
     }
 
     // ── Production enquiry (get_conversation_enquiry / push / decline) ──────
@@ -343,10 +345,12 @@ class CustomerContractTest {
         assertEquals("new", vm.enquiry.value!!.status)
         fake.on("POST", path, code = 502, body = """{"detail":"Hub rejected the order: 500 Server Error"}""")
         vm.pushProduction()
-        assertEquals("Couldn't send to production", toasts.last().message)
+        // The hub's exception text is not for people.
+        assertEquals("Couldn't send to production — the hub didn't accept it. Try again in a moment.", toasts.last().message)
         fake.on("POST", path, code = 404, body = """{"detail":"Enquiry not found"}""")
         vm.pushProduction()
-        assertEquals("Couldn't send to production", toasts.last().message)
+        assertEquals("This made-to-order request no longer exists — someone may have removed it.", toasts.last().message)
+        assertNull(vm.enquiry.value)
         assertFalse(vm.pushing.value)
     }
 
@@ -382,7 +386,7 @@ class CustomerContractTest {
         assertEquals("""{"to":"254712345678"}""", calls("POST", "/admin/calls/request-permission").single().body)
         fake.on("POST", "/admin/calls/request-permission", code = 400, body = """{"detail":"A valid phone number is required."}""")
         vm.call(CustomerFixtures.PETER)
-        assertEquals("Couldn't send the call request", toasts.last().message)
+        assertEquals("Couldn't send the call request — a valid phone number is required.", toasts.last().message)
     }
 
     @Test fun answerViaNeemaReadsTheServersErrors() {

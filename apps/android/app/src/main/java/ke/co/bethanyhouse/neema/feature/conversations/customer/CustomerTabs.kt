@@ -69,13 +69,21 @@ fun ProfileTab(
     val askAnswer by vm.askAnswer.collectAsState()
     val answerBusy by vm.answerBusy.collectAsState()
     val answerStatus by vm.answerStatus.collectAsState()
+    val askDraft by vm.askDraft.collectAsState()
+    val answerDraft by vm.answerDraft.collectAsState()
+    val drafts by vm.drafts.collectAsState()
 
-    NeemaBox("Ask Neema… “what were his sizes?”", "Ask", askBusy, askAnswer) { q, _ -> vm.ask(q) }
+    NeemaBox("Ask Neema… “what were his sizes?”", "Ask", askBusy, askAnswer, askDraft, { vm.askDraft.value = it }) { vm.ask() }
     if (ctx.canReply) {
-        NeemaBox("Team answer… “yes, we make it — KES 3,500, ~5 days”", "Neema delivers", answerBusy, answerStatus) { f, clear ->
-            vm.answerViaNeema(f, clear)
-        }
+        NeemaBox("Team answer… “yes, we make it — KES 3,500, ~5 days”", "Neema delivers", answerBusy, answerStatus,
+            answerDraft, { vm.answerDraft.value = it }) { vm.answerViaNeema() }
     }
+    // A field whose save failed reopens with what the agent typed.
+    @Composable
+    fun Field(label: String, field: String, value: String, onSave: (String) -> Unit, placeholder: String,
+              keyboardType: KeyboardType = KeyboardType.Text) =
+        EditableField(label, value, onSave, placeholder, ctx.canEdit, keyboardType,
+            restore = drafts[field], onRestored = { vm.takeDraft(field) })
 
     CrmSection("Contact Details") {
         p.leadSource?.takeIf { it.isNotEmpty() }?.let { src ->
@@ -94,20 +102,20 @@ fun ProfileTab(
                 ?: ad.sourceType?.ifEmpty { null } ?: "ad"
             InfoRow("Came via", "📣 $what", hint = "First-touch ad attribution captured from the webhook")
         }
-        EditableField("Name", p.name ?: "", { vm.saveName(it, onNameChange) }, "Full name", ctx.canEdit)
-        EditableField("Role", p.role ?: "", { v -> vm.saveField("role", v) { it.copy(role = v) } }, "Bishop / Pastor / Founder…", ctx.canEdit)
-        EditableField("Ministry", p.organization ?: "", { v -> vm.saveField("organization", v) { it.copy(organization = v) } },
-            "Church / ministry / organization", ctx.canEdit)
-        EditableField("Email", p.email ?: "", { v -> vm.saveField("email", v) { it.copy(email = v) } }, "email@example.com",
-            ctx.canEdit, KeyboardType.Email)
-        EditableField("Phone", p.phone ?: "", { v -> vm.saveField("phone", v) { it.copy(phone = v) } }, "+254...",
-            ctx.canEdit, KeyboardType.Phone)
-        EditableField("Country", p.country ?: "", { v -> vm.saveField("country", v) { it.copy(country = v) } }, "Resolved from phone", ctx.canEdit)
-        EditableField("Location", p.location ?: "", { v -> vm.saveField("location", v) { it.copy(location = v) } }, "City / Estate", ctx.canEdit)
+        Field("Name", "name", p.name ?: "", { vm.saveName(it, onNameChange) }, "Full name")
+        Field("Role", "role", p.role ?: "", { v -> vm.saveField("role", v) { it.copy(role = v) } }, "Bishop / Pastor / Founder…")
+        Field("Ministry", "organization", p.organization ?: "", { v -> vm.saveField("organization", v) { it.copy(organization = v) } },
+            "Church / ministry / organization")
+        Field("Email", "email", p.email ?: "", { v -> vm.saveField("email", v) { it.copy(email = v) } }, "email@example.com",
+            KeyboardType.Email)
+        Field("Phone", "phone", p.phone ?: "", { v -> vm.saveField("phone", v) { it.copy(phone = v) } }, "+254...",
+            KeyboardType.Phone)
+        Field("Country", "country", p.country ?: "", { v -> vm.saveField("country", v) { it.copy(country = v) } }, "Resolved from phone")
+        Field("Location", "location", p.location ?: "", { v -> vm.saveField("location", v) { it.copy(location = v) } }, "City / Estate")
         p.parish?.name?.takeIf { it.isNotEmpty() }?.let { name ->
             InfoRow("Parish", "⛪ $name" + (p.parish.location?.takeIf { it.isNotEmpty() }?.let { " · $it" } ?: ""))
         }
-        EditableField("Age", p.age?.takeIf { it != 0 }?.toString() ?: "", { vm.saveAge(it) }, "e.g. 35", ctx.canEdit, KeyboardType.Number)
+        Field("Age", "age", p.age?.takeIf { it != 0 }?.toString() ?: "", { vm.saveAge(it) }, "e.g. 35", KeyboardType.Number)
     }
 
     PipelineSection(vm, ctx)
@@ -121,7 +129,9 @@ private fun PipelineSection(vm: CustomerViewModel, ctx: PanelCtx) {
     val p = ctx.profile
     val c = Neema.colors
     val editorOpen by vm.stageEditorOpen.collectAsState()
-    var newStage by remember { mutableStateOf("") }
+    val newStage by vm.newStage.collectAsState()
+    val stagesSaving by vm.stagesSaving.collectAsState()
+    val stageBusy by vm.stageBusy.collectAsState()
     val customs = ctx.customStages
     // Customs render between Proposal and Won, and count toward forward progress.
     val stages = listOf("new", "contacted", "qualified", "proposal") + customs + listOf("won", "lost")
@@ -141,7 +151,8 @@ private fun PipelineSection(vm: CustomerViewModel, ctx: PanelCtx) {
                 )
             }
         }
-        PipelineStepper(stages, forward, ctx.stage, ctx.canEdit) { vm.setStage(it) }
+        // A move in flight: the next tap waits for it (the VM ignores it too).
+        PipelineStepper(stages, forward, ctx.stage, ctx.canEdit && !stageBusy) { vm.setStage(it) }
         Spacer(Modifier.height(4.dp))
         // Operator-added stage labels — global, admin-saved (the server refuses others).
         if (!ctx.isAdmin) return@CrmSection
@@ -152,20 +163,19 @@ private fun PipelineSection(vm: CustomerViewModel, ctx: PanelCtx) {
                     customs.forEach { s ->
                         RemovableChip(
                             s, if (c.isDark) PIPE_GOLD else Color(0xFF8A6D1F), if (c.isDark) PIPE_GOLD.dim(0.15f) else Color(0xFFFDF8EC),
-                            if (c.isDark) PIPE_GOLD.dim(0.5f) else Color(0xFFE3CF9B),
+                            if (c.isDark) PIPE_GOLD.dim(0.5f) else Color(0xFFE3CF9B), enabled = !stagesSaving,
                         ) {
                             vm.saveCustomStages(customs.filter { it != s })
                         }
                     }
                 }
             }
-            val add = {
-                if (newStage.isNotBlank()) { vm.saveCustomStages(customs + newStage.trim()); newStage = "" }
-            }
+            // The label stays in the box until the server kept it (a refused save loses nothing).
+            val add = { if (!stagesSaving) vm.addCustomStage() }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                SmallInput(newStage, { newStage = it.take(18) }, "Stage label (e.g. Sampling)…", Modifier.weight(1f),
+                SmallInput(newStage, { vm.newStage.value = it.take(18) }, "Stage label (e.g. Sampling)…", Modifier.weight(1f),
                     fontSize = 10.sp, onDone = add)
-                TintButton("Add", PIPE_GOLD_SOLID, add, filled = true)
+                TintButton(if (stagesSaving) "…" else "Add", PIPE_GOLD_SOLID, add, filled = true, enabled = !stagesSaving)
                 TextButton(onClick = { vm.stageEditorOpen.value = false }) { Text("Done", fontSize = 10.sp, color = c.muted) }
             }
         } else {
@@ -196,7 +206,8 @@ private fun RemovableChip(text: String, fg: Color, bg: Color, border: Color, ena
 @Composable
 private fun TagsSection(vm: CustomerViewModel, ctx: PanelCtx) {
     val c = Neema.colors
-    var tagInput by remember { mutableStateOf("") }
+    // In the ViewModel: a tag whose save failed comes back here.
+    val tagInput by vm.tagInput.collectAsState()
     CrmSection("Tags") {
         if (ctx.profile.tags.isNotEmpty()) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -209,9 +220,9 @@ private fun TagsSection(vm: CustomerViewModel, ctx: PanelCtx) {
             Text("No tags", fontSize = 11.sp, color = c.muted, fontStyle = FontStyle.Italic)
         }
         if (ctx.canEdit) {
-            val add = { if (tagInput.isNotBlank()) { vm.addTag(tagInput); tagInput = "" } }
+            val add = { vm.addTag() }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                SmallInput(tagInput, { tagInput = it }, "Add tag…", Modifier.weight(1f), onDone = add)
+                SmallInput(tagInput, { vm.tagInput.value = it }, "Add tag…", Modifier.weight(1f), onDone = add)
                 NeutralButton("+", add, Modifier.width(36.dp), height = 36.dp)
             }
         }
@@ -262,7 +273,11 @@ private fun IdentitySection(vm: CustomerViewModel, ctx: PanelCtx, onOpenIdentity
     val uri = LocalUriHandler.current
     val showMerge by vm.showMerge.collectAsState()
     val sugs by vm.mergeSugs.collectAsState()
-    var mergeQuery by remember { mutableStateOf("") }
+    val sugsError by vm.mergeSugsError.collectAsState()
+    val merging by vm.merging.collectAsState()
+    val unmerging by vm.unmerging.collectAsState()
+    // In the ViewModel: kept through a failed merge, cleared once it went through.
+    val mergeQuery by vm.mergeQuery.collectAsState()
     val slate = if (c.isDark) c.textMid else Color(0xFF1E293B)
     // The web's filled slate (#1e293b) buttons; on dark, the palette's deep blue keeps white text legible.
     val slateFill = if (c.isDark) c.border2 else Color(0xFF1E293B)
@@ -358,10 +373,12 @@ private fun IdentitySection(vm: CustomerViewModel, ctx: PanelCtx, onOpenIdentity
                     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(Fmt.formatPhone(mid), fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = c.text, modifier = Modifier.weight(1f))
                         if (ctx.canEdit) {
+                            val busy = mid in unmerging
                             Text(
-                                "Unmerge", fontSize = 9.sp, fontWeight = FontWeight.SemiBold, color = slate,
+                                if (busy) "Unmerging…" else "Unmerge", fontSize = 9.sp, fontWeight = FontWeight.SemiBold,
+                                color = if (busy) c.muted else slate,
                                 modifier = Modifier.clip(RoundedCornerShape(4.dp)).border(1.dp, c.border2, RoundedCornerShape(4.dp))
-                                    .clickable { vm.unmerge(mid) }.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    .clickable(enabled = !busy) { vm.unmerge(mid) }.padding(horizontal = 8.dp, vertical = 4.dp),
                             )
                         }
                     }
@@ -391,12 +408,20 @@ private fun IdentitySection(vm: CustomerViewModel, ctx: PanelCtx, onOpenIdentity
                 }
                 // Evidence-backed candidates — one tap, no typing.
                 when {
+                    // The scan failed (offline, a 5xx): say so, with a retry — never "no duplicates".
+                    sugsError != null -> Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("$sugsError You can still merge manually below.", fontSize = 10.sp, fontStyle = FontStyle.Italic,
+                            color = c.muted, modifier = Modifier.weight(1f))
+                        Text("Retry", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = slate,
+                            modifier = Modifier.clip(RoundedCornerShape(4.dp)).clickable { vm.retryMergeScan() }
+                                .padding(horizontal = 8.dp, vertical = 6.dp))
+                    }
                     sugs == null -> Text("Scanning for likely duplicates…", fontSize = 10.sp, fontStyle = FontStyle.Italic,
                         color = c.muted, modifier = Modifier.padding(bottom = 8.dp))
                     sugs!!.isEmpty() -> Text("No likely duplicates found — you can still merge manually below.", fontSize = 10.sp,
                         fontStyle = FontStyle.Italic, color = c.muted, modifier = Modifier.padding(bottom = 8.dp))
                     else -> Column(Modifier.padding(bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        sugs!!.forEach { s -> MergeCandidate(s, slateFill) { vm.merge(s.mergeWith) { mergeQuery = "" } } }
+                        sugs!!.forEach { s -> MergeCandidate(s, slateFill, enabled = !merging) { vm.merge(s.mergeWith) } }
                     }
                 }
                 Text(
@@ -407,11 +432,12 @@ private fun IdentitySection(vm: CustomerViewModel, ctx: PanelCtx, onOpenIdentity
                     },
                     fontSize = 10.sp, lineHeight = 15.sp, color = c.text, modifier = Modifier.padding(bottom = 10.dp),
                 )
-                SmallInput(mergeQuery, { mergeQuery = it }, "e.g. 254700123456", Modifier.fillMaxWidth().padding(bottom = 10.dp),
-                    keyboardType = KeyboardType.Phone, onDone = { vm.merge(mergeQuery) { mergeQuery = "" } })
+                SmallInput(mergeQuery, { vm.mergeQuery.value = it }, "e.g. 254700123456", Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                    keyboardType = KeyboardType.Phone, onDone = { vm.merge() })
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    TintButton("⊕ Merge now", slateFill, { vm.merge(mergeQuery) { mergeQuery = "" } }, Modifier.weight(1f), filled = true)
-                    NeutralButton("Cancel", { vm.toggleMerge(false); mergeQuery = "" })
+                    TintButton(if (merging) "Merging…" else "⊕ Merge now", slateFill, { vm.merge() }, Modifier.weight(1f), filled = true,
+                        enabled = !merging)
+                    NeutralButton("Cancel", { vm.toggleMerge(false); vm.mergeQuery.value = "" })
                 }
             }
         }
@@ -419,7 +445,7 @@ private fun IdentitySection(vm: CustomerViewModel, ctx: PanelCtx, onOpenIdentity
 }
 
 @Composable
-private fun MergeCandidate(s: MergeSuggestion, fill: Color, onMerge: () -> Unit) {
+private fun MergeCandidate(s: MergeSuggestion, fill: Color, enabled: Boolean = true, onMerge: () -> Unit) {
     val c = Neema.colors
     val strong = s.strength == "strong"
     Row(
@@ -448,7 +474,7 @@ private fun MergeCandidate(s: MergeSuggestion, fill: Color, onMerge: () -> Unit)
             }
         }
         Spacer(Modifier.width(8.dp))
-        TintButton("Merge", fill, onMerge, filled = true)
+        TintButton("Merge", fill, onMerge, filled = true, enabled = enabled)
     }
 }
 

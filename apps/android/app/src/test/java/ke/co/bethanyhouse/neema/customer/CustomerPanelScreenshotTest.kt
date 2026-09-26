@@ -288,6 +288,50 @@ class CustomerPanelScreenshotTest {
         tall()
     }
 
+    // ── Round 5: a flaky network ────────────────────────────────────────────
+
+    /** Offline at first open: the chat's fallback, with why and a Retry above it. */
+    @Test fun offlineFallback() {
+        fake.on("GET", "/admin/customers/${CustomerFixtures.PETER}") { _, _ -> CustomerFixtures.Net.offline() }
+        tall()
+    }
+
+    /** A refresh that failed over a loaded profile: the profile stays, the banner says so (dark). */
+    @Test fun refreshFailedDark() = tall(dark = true, prepare = {
+        fake.on("GET", "/admin/customers/${CustomerFixtures.PETER}") { _, _ -> CustomerFixtures.Net.timeout() }
+        it.refresh()
+    })
+
+    /** The duplicate scan could not run: said as such, with a Retry — never "no duplicates". */
+    @Test fun mergeScanFailed() {
+        fake.on("GET", "/admin/customers/[^/]+/merge_suggestions") { _, _ -> CustomerFixtures.Net.offline() }
+        tall(prepare = { it.toggleMerge(true); it.mergeQuery.value = "254700999888" })
+    }
+
+    /** Requests on the wire: stage buttons, Call, template, Merge and Push all wait (no double taps). */
+    @Test fun actionsInFlight() = tall(prepare = { vm ->
+        Dispatchers.setMain(StandardTestDispatcher())
+        vm.setStage("won")
+        vm.call(CustomerFixtures.PETER)
+        vm.sendTemplate(CustomerFixtures.PETER)
+        vm.toggleMerge(true)
+        vm.merge("254799000222")
+        vm.pushProduction()
+    })
+
+    /** A field whose save failed offline reopens with what the agent typed; so does the tag box. */
+    @Test fun failedSaveKeepsWhatWasTyped() = tall(prepare = { vm ->
+        fake.on("PATCH", "/admin/customers/[^/]+") { _, _ -> CustomerFixtures.Net.offline() }
+        vm.saveField("email", "fr.peter@stmarks-nyeri.or.ke") { it.copy(email = "fr.peter@stmarks-nyeri.or.ke") }
+        vm.tagInput.value = "easter-2027"
+        vm.addTag()
+    })
+
+    @Test fun offlineTabletPane() {
+        fake.on("GET", "/admin/customers/${CustomerFixtures.PETER}") { _, _ -> CustomerFixtures.Net.offline() }
+        tabletPane(dark = false)
+    }
+
     // ── The two frames ──────────────────────────────────────────────────────
 
     /** Phones: a bottom sheet with its own "Customer Profile" header; the panel hides its own. */

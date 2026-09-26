@@ -176,7 +176,7 @@ class CustomerViewModelTest {
         fake.on("PATCH", "/admin/customers/.*", code = 500, body = """{"detail":"db down"}""")
         vm.saveField("location", "Mombasa") { it.copy(location = "Mombasa") }
         assertEquals("Nyeri", vm.profile.value!!.location)
-        assertEquals("Failed to save", lastToast()!!.message)
+        assertEquals("Failed to save — the server had a problem. Try again in a moment.", lastToast()!!.message)
         assertEquals(ToastType.Error, lastToast()!!.type)
         assertFalse(vm.saving.value)
     }
@@ -297,13 +297,13 @@ class CustomerViewModelTest {
         fake.on("PUT", "/admin/settings/pipeline-stages", code = 422, body = """{"detail":"At most 4 custom stages"}""")
         vm.saveCustomStages(listOf("a", "b", "c", "d", "e"))
         assertEquals("At most 4 custom stages.", lastToast()!!.message)
-        // …anything else (a pydantic list, a 500) stays generic.
+        // …anything else (a pydantic list, a 500) says what kind of failure it was, in plain words.
         fake.on("PUT", "/admin/settings/pipeline-stages", code = 422, body = """{"detail":[{"loc":["body"],"msg":"field required","type":"missing"}]}""")
         vm.saveCustomStages(listOf("a"))
-        assertEquals("Couldn't save pipeline stages.", lastToast()!!.message)
+        assertEquals("Couldn't save pipeline stages — the server didn't accept that.", lastToast()!!.message)
         fake.on("PUT", "/admin/settings/pipeline-stages", code = 500, body = "Internal Server Error")
         vm.saveCustomStages(listOf("a"))
-        assertEquals("Couldn't save pipeline stages.", lastToast()!!.message)
+        assertEquals("Couldn't save pipeline stages — the server had a problem. Try again in a moment.", lastToast()!!.message)
         assertEquals(listOf("measuring"), vm.customStages.value)
     }
 
@@ -378,7 +378,7 @@ class CustomerViewModelTest {
         assertEquals("Failed to merge profiles — that's this same profile", lastToast()!!.message)
         fake.on("POST", "/admin/customers/[^/]+/merge", code = 500, body = "Internal Server Error")
         vm.merge("254700000000")
-        assertEquals("Failed to merge profiles", lastToast()!!.message)
+        assertEquals("Failed to merge profiles — the server had a problem. Try again in a moment.", lastToast()!!.message)
         assertTrue(vm.showMerge.value)
     }
 
@@ -391,7 +391,7 @@ class CustomerViewModelTest {
         assertEquals(2, calls("GET", "/admin/customers/${CustomerFixtures.PETER}").size)
         fake.on("POST", "/admin/customers/[^/]+/unmerge", code = 409, body = "{}")
         vm.unmerge("254799000111")
-        assertEquals("Failed to unmerge", lastToast()!!.message)
+        assertEquals("Failed to unmerge — it changed meanwhile. Refreshing.", lastToast()!!.message)
     }
 
     // ── Made-to-order enquiry ───────────────────────────────────────────────
@@ -425,7 +425,7 @@ class CustomerViewModelTest {
         val vm = vm()
         vm.pushProduction()
         assertEquals("new", vm.enquiry.value!!.status)
-        assertEquals("Couldn't send to production", lastToast()!!.message)
+        assertEquals("Couldn't send to production — the hub didn't accept it. Try again in a moment.", lastToast()!!.message)
         assertFalse(vm.pushing.value)
     }
 
@@ -440,7 +440,7 @@ class CustomerViewModelTest {
         fake.on("POST", "/admin/production/${CustomerFixtures.ENQUIRY_ID}/decline", code = 500, body = "{}")
         vm2.declineProduction()
         assertEquals("new", vm2.enquiry.value!!.status)
-        assertEquals("Couldn't dismiss", lastToast()!!.message)
+        assertEquals("Couldn't dismiss — the server had a problem. Try again in a moment.", lastToast()!!.message)
     }
 
     // ── Reach-out: invite, template, call ───────────────────────────────────
@@ -477,7 +477,7 @@ class CustomerViewModelTest {
         assertFalse(vm.templateBusy.value)
         fake.on("POST", "/admin/whatsapp-invite", code = 500, body = "{}")
         vm.sendTemplate(CustomerFixtures.PETER)
-        assertEquals("Couldn't send the template", lastToast()!!.message)
+        assertEquals("Couldn't send the template — the server had a problem. Try again in a moment.", lastToast()!!.message)
         assertEquals(ToastType.Error, lastToast()!!.type)
         assertFalse(vm.templateBusy.value)
     }
@@ -501,7 +501,7 @@ class CustomerViewModelTest {
 
         fake.on("POST", "/admin/calls/request-permission", code = 500, body = "{}")
         vm.call(CustomerFixtures.PETER)
-        assertEquals("Couldn't send the call request", lastToast()!!.message)
+        assertEquals("Couldn't send the call request — the server had a problem. Try again in a moment.", lastToast()!!.message)
     }
 
     @Test fun aBlockedMicrophoneIsTheAgentsProblemNotTheCustomers() {

@@ -165,9 +165,10 @@ private fun ColumnScope.PanelBody(
     BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
         val pinEnquiry = maxHeight >= PIN_ENQUIRY_MIN_HEIGHT
         Column(Modifier.fillMaxSize()) {
-            PullToRefreshBox(isRefreshing = refreshing, onRefresh = { vm.load(showSpinner = false) }, modifier = Modifier.weight(1f)) {
+            PullToRefreshBox(isRefreshing = refreshing, onRefresh = { vm.refresh() }, modifier = Modifier.weight(1f)) {
                 // The tab body's surface runs to the bottom even when a tab is short, as on the web.
                 Column(Modifier.fillMaxSize().background(c.surface).verticalScroll(rememberScrollState())) {
+                    LoadErrorBanner(vm, refreshing)
                     Hero(vm, ctx, saving, conversation, onOpenIdentity)
                     HorizontalDivider(color = c.hairline)
                     QuickStats(ctx)
@@ -189,6 +190,32 @@ private fun ColumnScope.PanelBody(
     }
 }
 
+/**
+ * The last profile GET failed: say why above what is still shown (the last good
+ * profile, or the fallback from the chat row), with a Retry. The web shows the
+ * fallback silently, so an agent offline in a matatu could not tell it apart
+ * from a customer with no history.
+ */
+@Composable
+private fun LoadErrorBanner(vm: CustomerViewModel, refreshing: Boolean) {
+    val error by vm.loadError.collectAsState()
+    val msg = error ?: return
+    val c = Neema.colors
+    val amber = if (c.isDark) Color(0xFFFCD34D) else Color(0xFF92400E)
+    Row(
+        Modifier.fillMaxWidth().background(if (c.isDark) Color(0xFFF59E0B).copy(alpha = 0.12f) else Color(0xFFFFFBEB))
+            .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(msg, fontSize = 11.sp, lineHeight = 15.sp, color = amber, modifier = Modifier.weight(1f))
+        Spacer(Modifier.width(8.dp))
+        TextButton(onClick = { vm.refresh() }, enabled = !refreshing, contentPadding = PaddingValues(horizontal = 10.dp)) {
+            Text(if (refreshing) "Retrying…" else "Retry", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = amber)
+        }
+    }
+    HorizontalDivider(color = if (c.isDark) Color(0xFFF59E0B).copy(alpha = 0.3f) else Color(0xFFFCD34D))
+}
+
 /** Below this the made-to-order card scrolls with the panel instead of being pinned. */
 private val PIN_ENQUIRY_MIN_HEIGHT = 860.dp
 
@@ -206,6 +233,8 @@ private fun Hero(
     val c = Neema.colors
     val uri = LocalUriHandler.current
     val templateBusy by vm.templateBusy.collectAsState()
+    val inviteBusy by vm.inviteBusy.collectAsState()
+    val callBusy by vm.callBusy.collectAsState()
     // A dialable phone — never a web visitor's `web_<hash>` key (see realPhoneDigits).
     val phoneDigits = realPhoneDigits(p.phone)
     // A website chat visitor with no phone on file: say so, never a number made from the hash.
@@ -335,13 +364,13 @@ private fun Hero(
                 Hint("Send this customer a WhatsApp invite (delivers the approved template to their number)") {
                     Row(
                         Modifier.clip(RoundedCornerShape(4.dp)).background(WA_GREEN).border(1.dp, Color(0xFF1DA851), RoundedCornerShape(4.dp))
-                            .clickable { vm.inviteToWhatsApp(phoneDigits) { url -> runCatching { uri.openUri(url) } } }
+                            .clickable(enabled = !inviteBusy) { vm.inviteToWhatsApp(phoneDigits) { url -> runCatching { uri.openUri(url) } } }
                             .padding(horizontal = 6.dp, vertical = 2.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         ChannelBadge("whatsapp", 20.dp)
                         Spacer(Modifier.width(4.dp))
-                        Text("Invite to WhatsApp", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                        Text(if (inviteBusy) "Sending invite…" else "Invite to WhatsApp", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
                     }
                 }
             }
@@ -356,14 +385,19 @@ private fun Hero(
             Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = { vm.call(phoneDigits) },
+                    // One call at a time: a second tap while dialling would say "Already in a call".
+                    enabled = !callBusy,
                     modifier = Modifier.weight(1f).height(36.dp),
                     shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = WA_GREEN, contentColor = Color.White),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = WA_GREEN, contentColor = Color.White,
+                        disabledContainerColor = WA_GREEN.copy(alpha = 0.55f), disabledContentColor = Color.White,
+                    ),
                     contentPadding = PaddingValues(horizontal = 8.dp),
                 ) {
                     Icon(Icons.Default.Call, null, modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Call", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Text(if (callBusy) "Calling…" else "Call", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 }
                 OutlinedButton(
                     onClick = { vm.sendTemplate(phoneDigits) },
@@ -452,7 +486,7 @@ private fun EnquiryCard(vm: CustomerViewModel, canProduce: Boolean, inline: Bool
                     Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         TintButton(if (pushing) "Sending…" else "→ Push to production", c.gold, { vm.pushProduction() },
                             Modifier.weight(1f), filled = true, enabled = !pushing && e.pushable)
-                        NeutralButton("Dismiss", { vm.declineProduction() }, textColor = c.textMid)
+                        NeutralButton("Dismiss", { vm.declineProduction() }, textColor = c.textMid, enabled = !pushing)
                     }
                     if (!e.pushable) {
                         Text("No linked hub product — set this order up in the hub manually.", fontSize = 9.sp, color = c.muted,
@@ -469,19 +503,21 @@ private fun EnquiryCard(vm: CustomerViewModel, canProduce: Boolean, inline: Bool
 private fun QuickActions(vm: CustomerViewModel, ctx: PanelCtx) {
     if (!ctx.canEdit) return
     val c = Neema.colors
+    // A stage move in flight: an impatient second tap on Advance must not skip a stage.
+    val busy by vm.stageBusy.collectAsState()
     HorizontalDivider(color = c.hairline)
     Column(Modifier.fillMaxWidth().background(c.bg2).padding(horizontal = 16.dp, vertical = 12.dp)) {
         Text("QUICK ACTIONS", fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp, color = c.textMid,
             modifier = Modifier.padding(bottom = 8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            TintButton("✓ Mark Won", Color(0xFF047857).themed(), { vm.setStage("won") }, Modifier.weight(1f))
-            TintButton("✕ Mark Lost", Color(0xFFDC2626).themed(), { vm.setStage("lost") }, Modifier.weight(1f))
+            TintButton("✓ Mark Won", Color(0xFF047857).themed(), { vm.setStage("won") }, Modifier.weight(1f), enabled = !busy)
+            TintButton("✕ Mark Lost", Color(0xFFDC2626).themed(), { vm.setStage("lost") }, Modifier.weight(1f), enabled = !busy)
         }
         Spacer(Modifier.height(6.dp))
         NeutralButton("→ Advance Stage", {
             // Next along the forward path (custom stages included); Lost re-opens at Won, as on the web.
             val next = nextStage(ctx.stage, ctx.customStages)
             if (next != ctx.stage) vm.setStage(next)
-        }, Modifier.fillMaxWidth())
+        }, Modifier.fillMaxWidth(), enabled = !busy)
     }
 }

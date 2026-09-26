@@ -19,6 +19,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -258,6 +259,9 @@ fun EditableField(
     placeholder: String,
     enabled: Boolean,
     keyboardType: KeyboardType = KeyboardType.Text,
+    /** Text of a save that did not land: the editor reopens with it (then [onRestored] takes it). */
+    restore: String? = null,
+    onRestored: () -> Unit = {},
 ) {
     val c = Neema.colors
     var editing by remember { mutableStateOf(false) }
@@ -265,6 +269,13 @@ fun EditableField(
     // brings a new value mid-edit must not wipe what the agent is typing.
     var draft by remember { mutableStateOf(value) }
     val focus = remember { FocusRequester() }
+    LaunchedEffect(restore) {
+        if (restore != null) {
+            draft = restore
+            editing = true
+            onRestored()
+        }
+    }
     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp).heightIn(min = 32.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, fontSize = 10.sp, color = c.textMid, modifier = Modifier.width(64.dp))
         if (editing) {
@@ -327,7 +338,7 @@ fun TintButton(
     height: Dp = 32.dp,
 ) {
     Box(
-        modifier.height(height).clip(RoundedCornerShape(8.dp))
+        modifier.height(height).alpha(if (enabled || filled) 1f else 0.55f).clip(RoundedCornerShape(8.dp))
             .background(if (filled) (if (enabled) color else color.copy(alpha = 0.55f)) else color.dim(0.1f))
             .then(if (filled) Modifier else Modifier.border(1.dp, color.dim(0.35f), RoundedCornerShape(8.dp)))
             .clickable(enabled = enabled, onClick = onClick)
@@ -340,11 +351,18 @@ fun TintButton(
 
 /** The web's quiet outline button (#f8fafc fill, #b5da8b border, slate text): Advance Stage, add-tag "+". */
 @Composable
-fun NeutralButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, height: Dp = 32.dp, textColor: Color = Color.Unspecified) {
+fun NeutralButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    height: Dp = 32.dp,
+    textColor: Color = Color.Unspecified,
+    enabled: Boolean = true,
+) {
     val c = Neema.colors
     Box(
-        modifier.height(height).clip(RoundedCornerShape(8.dp)).background(c.surface)
-            .border(1.dp, c.border, RoundedCornerShape(8.dp)).clickable(onClick = onClick).padding(horizontal = 10.dp),
+        modifier.height(height).alpha(if (enabled) 1f else 0.55f).clip(RoundedCornerShape(8.dp)).background(c.surface)
+            .border(1.dp, c.border, RoundedCornerShape(8.dp)).clickable(enabled = enabled, onClick = onClick).padding(horizontal = 10.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(text, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = textColor.takeOrElse { c.text }, maxLines = 1)
@@ -358,17 +376,19 @@ fun NeemaBox(
     actionLabel: String,
     busy: Boolean,
     result: String?,
-    onSubmit: (String, clear: () -> Unit) -> Unit,
+    /** Held by the ViewModel: a failure, a tab switch or a reload never loses it. */
+    text: String,
+    onText: (String) -> Unit,
+    onSubmit: () -> Unit,
 ) {
     val c = Neema.colors
-    var text by remember { mutableStateOf("") }
-    val submit = { onSubmit(text) { text = "" } }
+    val submit = { onSubmit() }
     Column(
         Modifier.fillMaxWidth().padding(bottom = 16.dp).clip(RoundedCornerShape(12.dp)).background(c.bg2)
             .border(1.dp, c.hairline, RoundedCornerShape(12.dp)).padding(10.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            SmallInput(text, { text = it }, placeholder, Modifier.weight(1f), onDone = { if (!busy && text.isNotBlank()) submit() })
+            SmallInput(text, onText, placeholder, Modifier.weight(1f), onDone = { if (!busy && text.isNotBlank()) submit() })
             TintButton(if (busy) "…" else actionLabel, c.gold, { submit() }, filled = true, enabled = !busy && text.isNotBlank())
         }
         if (result != null) {
