@@ -297,7 +297,16 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   BUYER (one question — the recipient's role — then recommendations by role,
   leading with what needs no size). `is_closer` never gates an ask wearing
   a pleasantry ("God bless, how much is the stole?"). The re-engagement
-  sweep leaves a paced, paused or guard-silenced thread alone. Comments: `_person_over_cap` (`meta_comment_person_cap` 6 full
+  sweep leaves a paced, paused or guard-silenced thread alone. NEVER A
+  GENERIC HOLD (owner 2026-09-26): a final turn with no words, or a loop
+  that ran out of iterations, gets one more call for the reply in words
+  from what was gathered (`runtime._reply_in_words`, tools present but not
+  callable) before any stock line; the prompt opens SELL LIKE A CONSULTANT
+  with BEFORE YOU WRITE — THE CONSULTANT'S READ (what they asked, what we
+  know, what the hub says, where they are: trust → clarity → recommendation
+  → add-on → purchase → close) and ends with BEFORE IT GOES OUT — THE CHECK
+  (every product, price, quantity, size, shipping detail and recommendation
+  backed by a tool or the thread; never invented). Comments: `_person_over_cap` (`meta_comment_person_cap` 6 full
   model replies per person per post per day; the free priced path is decided
   first and never spends it). The prompt's PACING rule; `/api/health`
   `cooling` (economy, cooled, silenced, lifted, duplicate). Switch:

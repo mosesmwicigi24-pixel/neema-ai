@@ -1109,6 +1109,34 @@ _SW_REVIEW_HOLD_DM_PRICE = ("Ngoja nihakikishe bidhaa kamili na bei sahihi 🙏 
                             "atakuthibitishia hapa hivi karibuni.")
 
 
+async def _reply_in_words(llm, sys_blocks, messages: list, tools: list) -> str:
+    """The reply itself, in words, from what the turn has already gathered:
+    one call on the loop's own cached prefix, tools present but not callable
+    (`tool_choice: none`). '' on any failure — the caller's fallback stands."""
+    try:
+        _kw: dict = {"tools": list(tools or [])}
+        if _kw["tools"]:
+            _kw["tool_choice"] = "none"
+        last = messages[-1] if messages else None
+        nudge = {"role": "user", "content": (
+            "(Write your reply to the customer now, in words, from what you have "
+            "already found — the facts above are the only facts. No tool call.)")}
+        msgs = list(messages)
+        # never two user turns in a row: fold the nudge into a trailing tool-result turn
+        if last and last.get("role") == "user" and isinstance(last.get("content"), list):
+            msgs[-1] = {"role": "user", "content": list(last["content"]) + [
+                {"type": "text", "text": nudge["content"]}]}
+        elif last and last.get("role") == "user":
+            msgs[-1] = {"role": "user", "content": f"{last.get('content')}\n\n{nudge['content']}"}
+        else:
+            msgs.append(nudge)
+        resp = await llm.complete(system=sys_blocks, messages=msgs, **_kw)
+        return (resp.text or "").strip()
+    except Exception as exc:
+        _log.info("reply-in-words call failed: %s", exc)
+        return ""
+
+
 async def _gate_turn_reply(reply: str, *, user_text: str, transcript: list, tool_log: list,
                            ctx, currency: str, channel: str, public_comment: bool,
                            llm, sys_blocks, redis, db, key: str, post_product: str = "",
@@ -1753,7 +1781,15 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         messages.append({"role": "assistant", "content": resp.assistant_content})
 
         if not resp.tool_calls:
-            reply = resp.text or "One moment — let me check on that for you."
+            reply = resp.text or ""
+            if not reply:
+                # NEVER A GENERIC HOLD (owner, 2026-09-26): the writer ended
+                # with no words — ask once for the reply itself, in words,
+                # from everything already gathered, before any stock line.
+                reply = await _reply_in_words(llm, sys_blocks, messages, tools)
+                if reply:
+                    messages.append({"role": "assistant", "content": [{"type": "text", "text": reply}]})
+            reply = reply or "One moment — let me check on that for you."
             break
 
         results = []
@@ -1784,8 +1820,11 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             })
         messages.append({"role": "user", "content": results})
     else:
-        # Ran out of iterations — return the last text if any, else a safe fallback.
-        reply = resp.text or "Let me get a colleague to help you with this."
+        # Ran out of iterations: the tools have gathered what they could. One
+        # last call, words only, turns that into the customer's answer —
+        # never "let me get a colleague" when the facts are already in hand.
+        reply = resp.text or await _reply_in_words(llm, sys_blocks, messages, tools) \
+            or "Let me get a colleague to help you with this."
 
     # THE GATE BEFORE POSTING (owner, 2026-09-25) — EVERY channel: the reply
     # is verified against this turn's ground truth before anyone sends it;
