@@ -376,7 +376,6 @@ class ConversationsViewModelTest {
         assertEquals(1, msgs.count { it.body == "On its way Friday" })
         assertEquals("srv-1", msgs.last().id)
         assertEquals("", vm.composer.value.replyText)
-        assertFalse(vm.composer.value.sending)
     }
 
     @Test fun sendReply_deliveryFailure_restoresTheTextAndSaysWhy() {
@@ -447,7 +446,7 @@ class ConversationsViewModelTest {
         vm.transfer(Fixtures.AGENT2_ID, "Grace Wanjiru")
         assertEquals("\"${Fixtures.AGENT2_ID}\"", lastBody("POST", "/admin/conversations/c2/transfer")!!["agent_id"].toString())
         assertEquals("Transferred to Grace Wanjiru", toasts.last().message)
-        assertEquals("", vm.thread.value.convBusy)
+        assertTrue(vm.thread.value.busy.isEmpty())
     }
 
     @Test fun intercept_conflict_saysAlreadyClaimed() {
@@ -482,8 +481,9 @@ class ConversationsViewModelTest {
         assertFalse(vm.dialogs.value.clearConfirm)
     }
 
+    /** Refused (a 4xx): nothing was saved, so the note goes back in its box. */
     @Test fun noteFailure_putsTheNoteBack() {
-        fake.on("POST", "/admin/conversations/[^/]+/note", code = 500, body = """{"detail":"x"}""")
+        fake.on("POST", "/admin/conversations/[^/]+/note", code = 422, body = """{"detail":"text is required"}""")
         val (_, vm) = vm()
         vm.select("c1")
         vm.setNoteText("Keep me"); vm.saveNote()

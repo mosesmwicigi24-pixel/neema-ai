@@ -69,7 +69,17 @@ internal fun sortThread(list: List<ThreadMsg>): List<ThreadMsg> = list.sortedBy 
  */
 internal fun buildThreadRows(sorted: List<ThreadMsg>, unreadSnap: Int): List<TRow> {
     val rows = ArrayList<TRow>(sorted.size + 8)
-    val dividerIdx = if (unreadSnap > 0) maxOf(0, sorted.size - unreadSnap) else -1
+    // "Before the first unread message" (the web's intent): the unread ones are the
+    // customer's last N messages. Counting from the end of the WHOLE thread (as the
+    // web does) slid the divider onto the agent's own replies the moment one was sent.
+    val dividerIdx = if (unreadSnap > 0) {
+        val inbound = sorted.indices.filter { sorted[it].inbound && !sorted[it].isSystem }
+        when {
+            inbound.size >= unreadSnap -> inbound[inbound.size - unreadSnap]
+            inbound.isNotEmpty() -> inbound.first()
+            else -> maxOf(0, sorted.size - unreadSnap)
+        }
+    } else -1
 
     // A comment thread reads like Facebook: the POST once, the comments under it.
     val postHeadFor = HashMap<String, PostContext>()
@@ -136,11 +146,14 @@ internal fun buildThreadRows(sorted: List<ThreadMsg>, unreadSnap: Int): List<TRo
 
 internal class ThreadCallbacks(
     val onView: (Viewer) -> Unit,
-    val onRecover: (String, (String?) -> Unit) -> Unit,
+    val onRecover: (String, (Recovery) -> Unit) -> Unit,
     val onReply: (ThreadMsg) -> Unit,
     val fetchVideo: suspend (String, String?) -> String?,
     val onRetry: () -> Unit,
     val onLoadOlder: () -> Unit,
+    /** A "Not sent" bubble: send it again / take the words back to edit. */
+    val onRetrySend: (String) -> Unit = {},
+    val onEditFailed: (String) -> Unit = {},
 )
 
 @Composable
@@ -157,6 +170,10 @@ internal fun ThreadMessages(
     brokenVideos: Set<String>,
     cb: ThreadCallbacks,
     modifier: Modifier = Modifier,
+    /** Why the thread failed to load (no connection, server down…). */
+    errorText: String? = null,
+    /** The older page failed: offer a tap instead of waiting on a scroll that can't come. */
+    olderError: Boolean = false,
 ) {
     val sorted = remember(messages) { sortThread(messages) }
     val rows = remember(sorted, unreadSnap) { buildThreadRows(sorted, unreadSnap).asReversed() }
@@ -169,7 +186,7 @@ internal fun ThreadMessages(
     val nearTop by remember(state, rows.size) {
         derivedStateOf { (state.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= rows.size - 3 }
     }
-    LaunchedEffect(nearTop, hasMore, rows.size) { if (nearTop && hasMore && rows.isNotEmpty()) cb.onLoadOlder() }
+    LaunchedEffect(nearTop, hasMore, rows.size) { if (nearTop && hasMore && rows.isNotEmpty() && !olderError) cb.onLoadOlder() }
 
     Box(modifier.background(if (Neema.colors.isDark) Neema.colors.bg else Color(0xFFF5F7F2))) {
         when {
@@ -178,6 +195,9 @@ internal fun ThreadMessages(
             }
             error && messages.isEmpty() -> Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                 Text("Couldn't load this conversation.", fontSize = 14.sp, color = Color(0xFFB45309))
+                errorText?.takeIf { it != "Couldn't load this conversation." }?.let {
+                    Text(it, fontSize = 12.sp, color = Neema.colors.muted, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp, start = 24.dp, end = 24.dp))
+                }
                 Spacer(Modifier.height(8.dp))
                 Button(onClick = cb.onRetry, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF59E0B))) { Text("Try again", fontSize = 12.sp) }
             }
@@ -195,6 +215,10 @@ internal fun ThreadMessages(
                 if (hasMore) item(key = "older") {
                     Box(Modifier.fillMaxWidth().padding(4.dp), contentAlignment = Alignment.Center) {
                         if (loadingOlder) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = Color(0xFFC5D5BC))
+                        else if (olderError) Text(
+                            "Couldn't load older messages — tap to retry", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Color(0xFFB45309),
+                            modifier = Modifier.clip(RoundedCornerShape(50)).clickable(onClickLabel = "Retry loading older messages", onClick = cb.onLoadOlder).padding(horizontal = 10.dp, vertical = 4.dp),
+                        )
                         else Text("↑ scroll for older messages", fontSize = 10.sp, color = Color(0xFFA8A29E))
                     }
                 }
@@ -256,7 +280,11 @@ private fun ThreadRowView(row: TRow, channel: String?, recovered: Map<String, St
                 }
                 Spacer(Modifier.height(4.dp))
                 Text(row.msg.body, fontSize = 12.sp, lineHeight = 17.sp, color = Color(0xFF92400E))
-                Text(row.msg.createdAt?.let { Fmt.timeAgo(it) } ?: "", fontSize = 10.sp, color = Color(0xFFFBBF24), modifier = Modifier.padding(top = 4.dp))
+                Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (row.msg.sendState == "sending") { Icon(Icons.Filled.Schedule, "Saving", Modifier.size(10.dp), tint = Color(0xFFFBBF24)); Spacer(Modifier.width(4.dp)) }
+                    Text(if (row.msg.sendState == "sending") "Saving…" else row.msg.createdAt?.let { Fmt.timeAgo(it) } ?: "", fontSize = 10.sp, color = Color(0xFFFBBF24))
+                }
+                if (row.msg.sendState == "failed") FailedLine(row.msg, Color(0xFFB91C1C), cb, Modifier.padding(top = 4.dp))
             }
         }
         is TBubble -> MessageBubble(row.msg, row.album, channel, recovered, brokenVideos, cb)
@@ -328,6 +356,7 @@ private fun MessageBubble(msg: ThreadMsg, album: List<ThreadMsg>?, channel: Stri
     val density = LocalDensity.current
     val threshold = with(density) { 55.dp.toPx() }
     var drag by remember { mutableFloatStateOf(0f) }
+    Column(Modifier.fillMaxWidth()) {
     Row(
         Modifier.fillMaxWidth()
             .pointerInput(msg.id) {
@@ -377,10 +406,22 @@ private fun MessageBubble(msg: ThreadMsg, album: List<ThreadMsg>?, channel: Stri
                     Modifier.padding(top = 4.dp, start = if (isMedia) 4.dp else 0.dp, end = if (isMedia) 4.dp else 0.dp).align(if (inbound) Alignment.Start else Alignment.End),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    if (msg.id.startsWith("optimistic-")) Icon(Icons.Filled.Schedule, "Sending", Modifier.size(10.dp), tint = fg.copy(alpha = 0.6f))
+                    when {
+                        msg.sendState == "failed" -> Icon(Icons.Filled.ErrorOutline, "Not sent", Modifier.size(12.dp), tint = if (msg.sender == "ai") Color(0xFFFCA5A5) else Color(0xFF991B1B))
+                        msg.id.startsWith("optimistic-") -> Icon(Icons.Filled.Schedule, "Sending", Modifier.size(10.dp), tint = fg.copy(alpha = 0.6f))
+                    }
                     Text(
-                        msg.createdAt?.let { Fmt.timeAgo(it) } ?: "", fontSize = 10.sp,
-                        color = if (inbound) Color(0xFFB5C9A8) else fg.copy(alpha = 0.6f),
+                        when (msg.sendState) {
+                            "sending" -> "Sending…"
+                            "failed" -> "Not sent"
+                            else -> msg.createdAt?.let { Fmt.timeAgo(it) } ?: ""
+                        },
+                        fontSize = 10.sp, fontWeight = if (msg.sendState == "failed") FontWeight.SemiBold else null,
+                        color = when {
+                            msg.sendState == "failed" -> if (msg.sender == "ai") Color(0xFFFCA5A5) else Color(0xFF991B1B)
+                            inbound -> Color(0xFFB5C9A8)
+                            else -> fg.copy(alpha = 0.6f)
+                        },
                     )
                     // Reply to this message — a threaded quote (native on WhatsApp).
                     if (inbound && msg.body.isNotBlank()) {
@@ -389,6 +430,26 @@ private fun MessageBubble(msg: ThreadMsg, album: List<ThreadMsg>?, channel: Stri
                 }
             }
         }
+    }
+    // Under a bubble that didn't go: why, and what to do about it. Nothing is lost.
+    if (msg.sendState == "failed") FailedLine(msg, if (c.isDark) Color(0xFFF87171) else Color(0xFFB91C1C), cb, Modifier.fillMaxWidth().padding(top = 2.dp), end = true)
+    }
+}
+
+/** "Not delivered — … · Retry · Edit" under a send that didn't go. */
+@Composable
+private fun FailedLine(msg: ThreadMsg, color: Color, cb: ThreadCallbacks, modifier: Modifier = Modifier, end: Boolean = false) {
+    Row(modifier, horizontalArrangement = if (end) Arrangement.End else Arrangement.Start, verticalAlignment = Alignment.CenterVertically) {
+        Text(msg.sendError ?: "Not sent", fontSize = 11.sp, lineHeight = 15.sp, color = color, modifier = Modifier.weight(1f, fill = false), textAlign = if (end) TextAlign.End else TextAlign.Start)
+        Spacer(Modifier.width(8.dp))
+        Text(
+            "Retry", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF589B31),
+            modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClickLabel = "Send it again") { cb.onRetrySend(msg.id) }.padding(horizontal = 6.dp, vertical = 4.dp),
+        )
+        Text(
+            "Edit", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Neema.colors.muted,
+            modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClickLabel = "Edit the message") { cb.onEditFailed(msg.id) }.padding(horizontal = 6.dp, vertical = 4.dp),
+        )
     }
 }
 

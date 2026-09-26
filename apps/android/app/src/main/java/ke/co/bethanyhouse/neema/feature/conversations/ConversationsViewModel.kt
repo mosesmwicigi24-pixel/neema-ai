@@ -65,6 +65,13 @@ data class InboxUi(
      * quiet "Couldn't load — Retry" once one has failed.
      */
     val loadError: Boolean = false,
+    /** Why the last page-one load failed, in plain words (no connection, server down…). */
+    val errorText: String? = null,
+    /**
+     * The next page failed. Auto-paging stops (it would retry in a tight loop
+     * while offline) until the agent taps Retry or a refresh succeeds.
+     */
+    val moreError: Boolean = false,
 )
 
 /** List chrome: search box text, filter panel, bulk selection. */
@@ -84,14 +91,23 @@ data class ThreadUi(
     val hasMore: Map<String, Boolean> = emptyMap(),
     val loading: Boolean = false,
     val error: Boolean = false,
-    val loadingOlder: Boolean = false,
+    /** Why the open thread failed to load, in plain words. */
+    val errorText: String? = null,
+    /** The conversation whose older page is being fetched ("" = none). */
+    val olderLoading: String = "",
+    /** The conversation whose older page failed — offers a tap to retry. */
+    val olderError: String = "",
     /** Unread count when each thread was opened — places the "N new" divider. */
     val unreadSnapshot: Map<String, Int> = emptyMap(),
     val window: ConversationWindow? = null,
     val activity: List<ActivityEvent> = emptyList(),
     val activityOpen: Boolean = false,
-    /** "" | "intercept" | "release" | "pause" — exactly-once control clicks. */
-    val convBusy: String = "",
+    /**
+     * Per conversation: "intercept" | "release" | "pause" while that control is
+     * in flight — exactly-once clicks, and a slow claim on one thread never
+     * greys out the controls of the next one opened.
+     */
+    val busy: Map<String, String> = emptyMap(),
     /** Media re-fetched from Meta this session, by message id. */
     val recovered: Map<String, String> = emptyMap(),
     /**
@@ -112,7 +128,6 @@ data class ComposerUi(
     val txPreview: TxPreview? = null,
     val txBusy: Boolean = false,
     val quoted: Quoted? = null,
-    val sending: Boolean = false,
     val draftVisible: Boolean = false,
     val draftExpanded: Boolean = false,
     val draftText: String = "",
@@ -120,6 +135,40 @@ data class ComposerUi(
     val generatingDraft: Boolean = false,
     val media: List<PickedMedia> = emptyList(),
     val uploading: Boolean = false,
+)
+
+/** The control in flight on [id], or "". */
+fun ThreadUi.busyFor(id: String): String = busy[id] ?: ""
+
+/** What a reply / approval / note is, while it is on its way. */
+internal enum class OutKind { Reply, Approve, Note }
+
+/**
+ * A send that has left the composer and is not yet confirmed. It lives until
+ * the server's own row for it turns up (or it is edited away): a timeout
+ * never loses the words and never becomes a second send.
+ */
+internal data class Outgoing(
+    val localId: String,
+    val convId: String,
+    val kind: OutKind,
+    /** What goes to the server — in the customer's language when translated. */
+    val text: String,
+    val replyToId: String? = null,
+    val origText: String? = null,
+    val origLang: String? = null,
+    /** What the agent typed, for Edit. */
+    val typed: String = text,
+    val quoted: Quoted? = null,
+    /** The thread's server rows when it was sent: its own row is a NEW one. */
+    val known: Set<String>,
+    /** The answer never came (timeout, dropped connection): checking the server. */
+    val checking: Boolean = false,
+    /** The last check has been made: an answer without its row settles it as failed. */
+    val exhausted: Boolean = false,
+    val failed: Boolean = false,
+    /** Sent again by the agent: a second failure keeps the bubble, never re-opens the box. */
+    val retried: Boolean = false,
 )
 
 data class DialogUi(
@@ -186,6 +235,18 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
     private var windowJob: Job? = null
     private var activityJob: Job? = null
 
+    /** Sends on their way, by bubble id (touched on the main thread only). */
+    private val outgoing = LinkedHashMap<String, Outgoing>()
+    /** Each thread's composer while another thread is open: text, quote, files, draft. */
+    private val stash = HashMap<String, ComposerUi>()
+    /** The newest load of each thread: an older answer landing last never flips its flags. */
+    private val loadSeq = HashMap<String, Int>()
+    private var localSeq = 0
+    /** Drafts generated for a thread the agent had left: shown when it is opened again. */
+    private val heldDrafts = HashMap<String, String>()
+    /** A deep link that failed for want of a connection: tried again on reconnect. */
+    private var retryOpenKey: String? = null
+
     private val fg get() = dash.foreground
 
     init {
@@ -195,7 +256,11 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                 val id = s?.agentId ?: return@collect
                 if (seededFor == id) return@collect
                 seededFor = id
-                seed(id)
+                // The snapshot is a file read: off the main thread (synchronous in tests).
+                val snap = withContext(dash.container.config.io) {
+                    runCatching { dash.container.snapshots.read(id, SNAP_KEY, ConversationPage.serializer()) }.getOrNull()
+                }
+                seed(snap)
                 refresh()
             }
         }
@@ -238,9 +303,8 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
 
     // ═══════════════════════════ The paged list (useInbox) ═══════════════════════════
 
-    private fun seed(agentId: String) {
-        val snap = dash.container.snapshots.read(agentId, SNAP_KEY, ConversationPage.serializer()) ?: return
-        if (snap.items.isEmpty()) return
+    private fun seed(snap: ConversationPage?) {
+        if (snap == null || snap.items.isEmpty()) return
         val rows = snap.items.map { it.normalized() }
         upsert(rows)
         _inbox.update { s ->
@@ -264,7 +328,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         recentRefresh = viewModelScope.launch { delay(CATCH_UP_WINDOW_MS) }
         val f = _inbox.value.filters
         val key = filterKeyOf(f)
-        _inbox.value.let { if (it.orderKey != key || it.orderIds.isEmpty()) _inbox.update { s -> s.copy(loading = true, loadError = false) } }
+        _inbox.value.let { if (it.orderKey != key || it.orderIds.isEmpty()) _inbox.update { s -> s.copy(loading = true, loadError = false, errorText = null) } }
 
         viewModelScope.launch {
             runCatching { api.conversations.summary() }.onSuccess { s ->
@@ -277,7 +341,11 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 // Only the live filter's own failure counts; a superseded one says nothing.
-                if (seq == firstSeq) _inbox.update { it.copy(loading = false, loadError = key == filterKeyOf(it.filters)) }
+                // The rows already on screen stay; the list says why it couldn't refresh.
+                if (seq == firstSeq) _inbox.update {
+                    val live = key == filterKeyOf(it.filters)
+                    it.copy(loading = false, loadError = live, errorText = if (live) listErrorText(e) else it.errorText)
+                }
                 return@launch
             }
             // Superseded by a newer refresh, or the filters moved on.
@@ -303,7 +371,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                 // Scrolled further this session: page one on top, the rest kept below.
                 _inbox.update { it.copy(orderKey = key, orderIds = fresh + o.orderIds.filter { id -> id !in top }) }
             }
-            _inbox.update { it.copy(freshLoaded = true, loading = false, loadError = false) }
+            _inbox.update { it.copy(freshLoaded = true, loading = false, loadError = false, errorText = null, moreError = false) }
             if (key == DEFAULT_KEY) {
                 val id = myId
                 withContext(Dispatchers.IO) { dash.container.snapshots.write(id, SNAP_KEY, ConversationPage.serializer(), res) }
@@ -316,14 +384,19 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         }
     }
 
-    /** The next page of people. */
-    fun loadMore() {
+    /**
+     * The next page of people. Scrolling calls it on its own; after a failure
+     * only an explicit Retry ([force]) or a successful refresh pages again —
+     * otherwise a dead network would be asked for the same page in a loop.
+     */
+    fun loadMore(force: Boolean = false) {
         val c = cursor ?: return
         if (_inbox.value.loadingMore || dash.session.value == null) return
+        if (_inbox.value.moreError && !force) return
         val seq = ++moreSeq
         val f = _inbox.value.filters
         val key = filterKeyOf(f)
-        _inbox.update { it.copy(loadingMore = true) }
+        _inbox.update { it.copy(loadingMore = true, moreError = false) }
         viewModelScope.launch {
             try {
                 val res = inboxApi.page(f, PAGE, c)
@@ -336,7 +409,8 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                 cursor = res.nextCursor
                 pages += 1
             } catch (e: Exception) {
-                if (e is CancellationException) throw e // scrolling again retries
+                if (e is CancellationException) throw e
+                if (seq == moreSeq) _inbox.update { it.copy(moreError = true) }
             } finally {
                 if (seq == moreSeq) _inbox.update { it.copy(loadingMore = false) }
             }
@@ -352,7 +426,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         val key = filterKeyOf(next)
         if (_inbox.value.orderKey != key) {
             cursor = null; pages = 0; revealed = emptyList()
-            _inbox.update { it.copy(hasMore = false, orderKey = key, orderIds = emptyList(), loadError = false) }
+            _inbox.update { it.copy(hasMore = false, orderKey = key, orderIds = emptyList(), loadError = false, errorText = null, moreError = false) }
         }
         refresh()
     }
@@ -457,15 +531,32 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
     fun releaseSelected() {
         val ids = selectedHeldIds()
         if (ids.isEmpty()) { dash.toast("None of those are held by a human", ToastType.Warning); return }
+        if (_list.value.bulkBusy) return
         _list.update { it.copy(bulkBusy = true) }
         viewModelScope.launch {
-            val results = ids.map { id -> async { runCatching { inboxApi.release(id) }.isSuccess } }.awaitAll()
-            val failed = results.count { !it }
-            val ok = ids.size - failed
+            // Each release says whether it happened; one that got no answer is
+            // asked about (a release is idempotent, and the row tells the truth).
+            val errors = ids.map { id ->
+                async {
+                    try { inboxApi.release(id); null } catch (e: Exception) {
+                        if (e is CancellationException) throw e
+                        when {
+                            conversationGone(e) -> { dropGone(id); null }
+                            fateOf(e) == Fate.Unknown -> {
+                                val row = runCatching { inboxApi.get(id) }.getOrNull()
+                                if (row?.interceptMode == "ai") { upsert(listOf(row)); null } else e
+                            }
+                            else -> e
+                        }
+                    }
+                }
+            }.awaitAll()
+            val failed = errors.filterNotNull()
+            val ok = ids.size - failed.size
             _list.update { it.copy(bulkBusy = false) }
             exitSelect()
             refresh()
-            if (failed > 0) dash.toast("Released $ok — $failed failed", ToastType.Error)
+            if (failed.isNotEmpty()) dash.toast("Released $ok — ${failed.size} failed. ${whyFailed(failed.first(), "Try again.")}", ToastType.Error)
             else dash.toast("$ok conversation${if (ok == 1) "" else "s"} released back to Neema")
         }
     }
@@ -481,7 +572,30 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
             _thread.update { it.copy(unreadSnapshot = it.unreadSnapshot + (id to conv.unread)) }
             patchRows { c -> if (c.id == id) c.copy(unread = 0) else c }
         }
-        val changed = _thread.value.activeId != id
+        val prev = _thread.value.activeId
+        val changed = prev != id
+        // Each customer keeps their own composer: what was typed for one person
+        // must never be sent to the next one opened. The same person's other
+        // channels share it — a quote grabbed on WhatsApp can be answered on
+        // their Facebook thread (as a text prefix), as on the web.
+        if (changed) {
+            val txMode = _composer.value.txMode
+            val samePerson = prev.isNotEmpty() && composerKey(prev) == composerKey(id)
+            val next = if (samePerson) _composer.value else {
+                if (prev.isNotEmpty()) stash[composerKey(prev)] = _composer.value
+                stash.remove(composerKey(id)) ?: ComposerUi()
+            }
+            // A draft belongs to one thread, and one left behind may be stale (a
+            // newer one may have been written meanwhile): only a draft the agent
+            // opened or edited comes back with its own thread.
+            val keepDraft = !samePerson && next.draftVisible && (next.draftExpanded || next.draftEditing)
+            _composer.value = next.copy(
+                txMode = txMode, txPreview = null, txBusy = false,
+                draftVisible = keepDraft, draftExpanded = keepDraft && next.draftExpanded,
+                draftEditing = keepDraft && next.draftEditing, draftText = if (keepDraft) next.draftText else "",
+            )
+            heldDrafts.remove(id)?.let { d -> _composer.update { it.copy(draftText = d, draftVisible = true, draftExpanded = true, draftEditing = false) } }
+        }
         _thread.update { it.copy(activeId = id, threadOpen = openThread || it.threadOpen, window = if (changed) null else it.window, activity = if (changed) emptyList() else it.activity) }
         watched = id
         loadMessages(id)
@@ -491,10 +605,10 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
     fun closeThread() = _thread.update { it.copy(threadOpen = false) }
 
     private fun onActiveChanged(id: String) {
-        // Reset the draft; a human-held thread fetches the latest AI draft (pill only).
+        // A human-held thread fetches the latest AI draft (pill only) unless the
+        // agent's own open draft came back with the thread.
         draftJob?.cancel()
-        _composer.update { it.copy(draftVisible = false, draftExpanded = false, draftText = "", draftEditing = false, txPreview = null) }
-        fetchLatestDraft(id)
+        if (!_composer.value.draftVisible) fetchLatestDraft(id)
         refreshWindow()
         loadActivity()
         scheduleTranslate()
@@ -551,7 +665,12 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                     api.conversations.resolve(key, refPart)
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
-                    dash.toast("Could not look up that chat.", ToastType.Error); return@launch
+                    // No connection: the link is kept and opened once we're back.
+                    if (statusOf(e) == 0) {
+                        retryOpenKey = openKey
+                        dash.toast("Couldn't open that chat — no connection. It will open when you're back online.", ToastType.Error)
+                    } else dash.toast("Could not look up that chat.", ToastType.Error)
+                    return@launch
                 }
                 if (id == null) {
                     dash.toast("No conversation yet — they haven't messaged. Use Invite to WhatsApp.", ToastType.Warning)
@@ -573,8 +692,15 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         _inbox.value.cache.values.find(::matches)?.let { select(it.id); return }
         // Paged: absence here is not absence. Ask for THAT channel and THAT id.
         viewModelScope.launch {
-            val hit = runCatching { inboxApi.page(InboxQuery(channel = channel, q = externalId), 5).items }
-                .getOrNull()?.map { it.normalized() }?.find(::matches)
+            val items = try {
+                inboxApi.page(InboxQuery(channel = channel, q = externalId), 5).items
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                // A failed lookup is not an answer: never claim there is no conversation.
+                dash.toast("Couldn't open that conversation. ${whyFailed(e, "Try again.")}", ToastType.Error)
+                return@launch
+            }
+            val hit = items.map { it.normalized() }.find(::matches)
             if (hit != null) { reveal(listOf(hit)); select(hit.id) }
             else dash.toast("No conversation on that channel yet.", ToastType.Warning)
         }
@@ -590,21 +716,38 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         if (convId == _thread.value.activeId && after != before) refreshWindow()
     }
 
+    /**
+     * The server's newest page for [convId]: merged in (a fresh open replaces,
+     * keeping only this device's own bubbles), then any send still on its way
+     * is settled against it.
+     */
+    private fun applyServer(convId: String, msgs: List<ThreadMsg>, replace: Boolean = false) {
+        setMsgs(convId) { cur -> if (replace) mergeServer(cur.filter { it.isLocal }, msgs) else mergeServer(cur, msgs) }
+        settle(convId, msgs)
+    }
+
     fun loadMessages(convId: String, silent: Boolean = false) {
         if (convId.isEmpty()) return
-        if (!silent) _thread.update { it.copy(loading = true, error = false) }
+        val seq = (loadSeq[convId] ?: 0) + 1
+        if (!silent) { loadSeq[convId] = seq; _thread.update { it.copy(loading = true, error = false, errorText = null) } }
+        // Only this thread's newest open touches the spinner and error — and only
+        // while it is still the thread on screen.
+        fun mine() = !silent && loadSeq[convId] == seq && _thread.value.activeId == convId
         viewModelScope.launch {
             try {
                 val msgs = inboxApi.messages(convId)
-                // A fresh open replaces; a silent refresh merges so older pages survive.
-                setMsgs(convId) { cur -> if (silent) mergeServer(cur, msgs) else mergeServer(cur.filter { it.isLocal }, msgs) }
+                applyServer(convId, msgs, replace = !silent)
                 if (!silent) _thread.update { it.copy(hasMore = it.hasMore + (convId to (msgs.count { m -> !m.isSystem } >= THREAD_PAGE))) }
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
+                if (conversationGone(e)) { dropGone(convId); return@launch }
                 // "No messages yet" over a failed fetch would read as an empty conversation.
-                if (!silent) { _thread.update { it.copy(error = true) }; dash.toast("Failed to load messages", ToastType.Error) }
+                if (mine()) {
+                    _thread.update { it.copy(error = true, errorText = whyFailed(e, "Couldn't load this conversation.")) }
+                    dash.toast("Failed to load messages", ToastType.Error)
+                }
             } finally {
-                if (!silent) _thread.update { it.copy(loading = false) }
+                if (!silent && loadSeq[convId] == seq && _thread.value.activeId == convId) _thread.update { it.copy(loading = false) }
             }
         }
     }
@@ -613,19 +756,21 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
     fun loadOlder() {
         val t = _thread.value
         val convId = t.activeId
-        if (convId.isEmpty() || t.loadingOlder || t.hasMore[convId] != true) return
+        if (convId.isEmpty() || t.olderLoading == convId || t.hasMore[convId] != true) return
         val oldest = (t.messages[convId] ?: emptyList()).firstOrNull { !it.isSystem && !it.isLocal } ?: return
         val before = oldest.createdAt ?: return
-        _thread.update { it.copy(loadingOlder = true) }
+        _thread.update { it.copy(olderLoading = convId, olderError = if (it.olderError == convId) "" else it.olderError) }
         viewModelScope.launch {
             try {
                 val older = inboxApi.messages(convId, before = before)
                 _thread.update { it.copy(hasMore = it.hasMore + (convId to (older.count { m -> !m.isSystem } >= THREAD_PAGE))) }
                 if (older.isNotEmpty()) setMsgs(convId) { mergeThread(it, older) }
             } catch (e: Exception) {
-                if (e is CancellationException) throw e // quiet — scrolling again retries
+                if (e is CancellationException) throw e
+                // Scrolling at the very top changes nothing that would ask again: offer a tap.
+                _thread.update { it.copy(olderError = convId) }
             } finally {
-                _thread.update { it.copy(loadingOlder = false) }
+                _thread.update { if (it.olderLoading == convId) it.copy(olderLoading = "") else it }
             }
         }
     }
@@ -660,14 +805,27 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         if (open) loadActivity()
     }
 
-    fun recoverMedia(messageId: String, onDone: (String?) -> Unit) {
+    /**
+     * Fetch an expired attachment back from Meta. Only the server's 404 means
+     * Meta no longer has it; a dropped connection or a busy server is "try
+     * again", never "gone for good".
+     */
+    fun recoverMedia(messageId: String, onDone: (Recovery) -> Unit) {
+        val convId = _thread.value.activeId
         viewModelScope.launch {
-            val url = runCatching { api.conversations.recoverMedia(messageId).mediaUrl }.getOrNull()?.takeIf { it.isNotBlank() }
-            if (url != null) {
-                _thread.update { it.copy(recovered = it.recovered + (messageId to url)) }
-                _thread.value.activeId.takeIf { it.isNotEmpty() }?.let { loadMessages(it, silent = true) }
+            val out = try {
+                val url = api.conversations.recoverMedia(messageId).mediaUrl?.takeIf { it.isNotBlank() }
+                if (url != null) Recovery.Found(url) else Recovery.Gone
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                if (statusOf(e) == 404 || statusOf(e) == 422) Recovery.Gone
+                else Recovery.Failed(whyFailed(e, "Couldn't fetch it — try again."))
             }
-            onDone(url)
+            if (out is Recovery.Found) {
+                _thread.update { it.copy(recovered = it.recovered + (messageId to out.url)) }
+                if (convId.isNotEmpty()) loadMessages(convId, silent = true)
+            }
+            onDone(out)
         }
     }
 
@@ -682,6 +840,8 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
      */
     private fun catchUp() {
         if (dash.session.value == null || catchUpJob?.isActive == true) return
+        // A deep link that failed offline opens now.
+        retryOpenKey?.let { k -> retryOpenKey = null; if (dash.openConvKey.value == null) dash.openConvKey.value = k }
         catchUpJob = viewModelScope.launch {
             if (recentRefresh?.isActive != true) refresh()
             val id = _thread.value.activeId
@@ -702,6 +862,42 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                 if (_thread.value.activeId == id && !_composer.value.draftVisible) _composer.update { it.copy(draftText = d, draftVisible = true) }
             }
         }
+    }
+
+    /** Change [convId]'s composer — the live one when it is open, else the one it left behind. */
+    private fun editComposer(convId: String, t: (ComposerUi) -> ComposerUi) {
+        if (convId.isEmpty()) return
+        val active = _thread.value.activeId
+        val key = composerKey(convId)
+        if (active.isNotEmpty() && composerKey(active) == key) _composer.update(t)
+        else stash[key] = t(stash[key] ?: ComposerUi())
+    }
+
+    /** Whose composer a thread uses: the person's (all their channels share one), else the thread's own. */
+    private fun composerKey(convId: String): String = _inbox.value.cache[convId]?.personId?.let { "p:$it" } ?: convId
+
+    /**
+     * Someone deleted the conversation (the server's 404): take it off the
+     * list, close it if open, and say so once.
+     */
+    private fun dropGone(convId: String) {
+        val had = _inbox.value.cache[convId] ?: return
+        _inbox.update { it.copy(cache = it.cache - convId, orderIds = it.orderIds - convId) }
+        revealed = revealed - convId
+        if (had.personId == null) stash.remove(convId)
+        outgoing.values.removeAll { it.convId == convId }
+        if (watched == convId) watched = null
+        _thread.update {
+            val open = it.activeId == convId
+            it.copy(
+                messages = it.messages - convId,
+                activeId = if (open) "" else it.activeId, threadOpen = if (open) false else it.threadOpen,
+                error = if (open) false else it.error, loading = if (open) false else it.loading,
+                window = if (open) null else it.window, activity = if (open) emptyList() else it.activity,
+            )
+        }
+        if (_thread.value.activeId.isEmpty()) _composer.update { ComposerUi(txMode = it.txMode) }
+        dash.toast("${inboxName(had)}'s conversation was deleted — it has been removed from your inbox.", ToastType.Warning)
     }
 
     /**
@@ -816,61 +1012,96 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
 
     // ═══════════════════════════ Conversation actions ═══════════════════════════
 
-    private fun busy(kind: String, block: suspend () -> Unit) {
-        if (_thread.value.convBusy.isNotEmpty()) return
-        _thread.update { it.copy(convBusy = kind) }
+    /** One control at a time per conversation; another thread's controls stay live. */
+    private fun busy(id: String, kind: String, block: suspend () -> Unit) {
+        if (id.isEmpty() || _thread.value.busyFor(id).isNotEmpty()) return
+        _thread.update { it.copy(busy = it.busy + (id to kind)) }
         viewModelScope.launch {
-            try { block() } finally { _thread.update { it.copy(convBusy = "") } }
+            try { block() } finally { _thread.update { it.copy(busy = it.busy - id) } }
         }
     }
 
     private fun status(e: Throwable) = (e as? ApiException)?.status ?: 0
 
-    fun intercept(id: String) = busy("intercept") {
-        try {
-            inboxApi.intercept(id)
-            refresh()
-            dash.toast("Conversation claimed — you now control replies")
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            dash.toast(if (status(e) == 409) "Already claimed by another agent" else "Failed to claim conversation", ToastType.Error)
-        }
+    /** "Failed to pause. No connection — check your internet and try again." — the web's words, then why. */
+    private fun failMsg(fail: String, e: Throwable, useDetail: Boolean = false): String {
+        val why = whyFailed(e, "", useDetail)
+        return if (why.isEmpty()) fail else "$fail. $why"
     }
 
-    fun release(id: String) = busy("release") {
+    /**
+     * An ownership change that got no answer: the server may have made it.
+     * These calls are idempotent, so the row is the truth — read it, show it,
+     * and report what actually happened.
+     */
+    private suspend fun truthOf(id: String): Conversation? =
+        try { inboxApi.get(id).also { upsert(listOf(it)) } } catch (e: Exception) { if (e is CancellationException) throw e; null }
+
+    /**
+     * Run one ownership control: success says [ok]; a conflict shows the
+     * current truth and [conflict]; no answer asks the server whether [done]
+     * holds before saying anything; a deleted conversation is removed.
+     */
+    private suspend fun control(id: String, ok: String, fail: String, conflict: String?, done: (Conversation) -> Boolean, call: suspend () -> Unit): Boolean {
         try {
-            inboxApi.release(id)
-            refresh()
-            dash.toast("Conversation released back to AI")
+            call()
         } catch (e: Exception) {
             if (e is CancellationException) throw e
-            dash.toast("Failed to release", ToastType.Error)
+            when {
+                conversationGone(e) -> { dropGone(id); return false }
+                status(e) == 409 && conflict != null -> {
+                    truthOf(id); refresh()
+                    dash.toast(conflict, ToastType.Error); return false
+                }
+                fateOf(e) != Fate.NotSent -> {
+                    val row = truthOf(id)
+                    if (row == null) {
+                        // Couldn't ask either: never call it failed when it may not have.
+                        dash.toast("Couldn't confirm that went through — no answer from the server. The inbox shows the latest as soon as you're back online.", ToastType.Warning)
+                        return false
+                    }
+                    if (!done(row)) { refresh(); dash.toast(failMsg(fail, e), ToastType.Error); return false }
+                    // It happened after all.
+                }
+                else -> {
+                    // A state conflict: show the current truth along with the reason.
+                    if (status(e) == 409) { truthOf(id); refresh() }
+                    dash.toast(failMsg(fail, e, useDetail = status(e) in setOf(400, 403, 409, 422)), ToastType.Error); return false
+                }
+            }
         }
+        refresh()
+        dash.toast(ok)
+        return true
     }
 
-    fun pause(id: String) = busy("pause") {
-        try {
-            inboxApi.pause(id)
-            refresh()
-            dash.toast("Paused — Neema holds all replies until you resume")
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            dash.toast(if (status(e) == 409) "Handled by another agent — they must pause it" else "Failed to pause", ToastType.Error)
-        }
+    fun intercept(id: String) = busy(id, "intercept") {
+        val me = myId
+        control(
+            id, "Conversation claimed — you now control replies", "Failed to claim conversation", "Already claimed by another agent",
+            done = { it.interceptMode == "human" && it.assignedAgentId == me },
+        ) { inboxApi.intercept(id) }
+    }
+
+    fun release(id: String) = busy(id, "release") {
+        control(id, "Conversation released back to AI", "Failed to release", null, done = { it.interceptMode == "ai" }) { inboxApi.release(id) }
+    }
+
+    fun pause(id: String) = busy(id, "pause") {
+        control(
+            id, "Paused — Neema holds all replies until you resume", "Failed to pause", "Handled by another agent — they must pause it",
+            done = { it.interceptMode == "paused" },
+        ) { inboxApi.pause(id) }
     }
 
     fun transfer(agentId: String, agentName: String?) {
         val id = _thread.value.activeId.ifEmpty { return }
-        busy("release") {
-            try {
-                inboxApi.transfer(id, agentId)
-                _dialogs.update { it.copy(transfer = false) }
-                refresh()
-                dash.toast("Transferred to ${agentName ?: "agent"}")
-            } catch (e: Exception) {
-                if (e is CancellationException) throw e
-                dash.toast("Failed to transfer", ToastType.Error)
-            }
+        busy(id, "release") {
+            val ok = control(
+                id, "Transferred to ${agentName ?: "agent"}", "Failed to transfer", null,
+                done = { it.assignedAgentId == agentId },
+            ) { inboxApi.transfer(id, agentId) }
+            if (ok) _dialogs.update { it.copy(transfer = false) }
         }
     }
 
@@ -879,47 +1110,43 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
     fun setNoteText(v: String) = _dialogs.update { it.copy(noteText = v) }
     fun showClear(v: Boolean) = _dialogs.update { it.copy(clearConfirm = v) }
 
+    /** An internal note: the bubble shows at once and is confirmed like a reply. */
     fun saveNote() {
         val convId = _thread.value.activeId
         val text = _dialogs.value.noteText.trim()
         if (text.isEmpty() || convId.isEmpty()) return
-        val optimistic = ThreadMsg(
-            id = "optimistic-note-${AppClock.now()}", direction = "outbound", sender = "human_agent",
-            text = text, isNote = true, createdAt = nowIso(),
-        )
-        setMsgs(convId) { it + optimistic }
-        _dialogs.update { it.copy(note = false, noteText = "") }
-        dash.toast("Note saved")
-        viewModelScope.launch {
-            try {
-                api.conversations.addNote(convId, text)
-            } catch (e: Exception) {
-                if (e is CancellationException) throw e
-                setMsgs(convId) { l -> l.filterNot { it.id.startsWith("optimistic-note-") } }
-                _dialogs.update { it.copy(note = true, noteText = text) }
-                dash.toast("Failed to save note", ToastType.Error)
-                return@launch
-            }
-            // Saved. A failed refetch must not read as a failed save (a retry would
-            // write the note twice) — the optimistic bubble stays until the next poll.
-            runCatching { inboxApi.messages(convId) }.onSuccess { msgs -> setMsgs(convId) { mergeServer(it, msgs) } }
+        val o = Outgoing(localId = "optimistic-note-${AppClock.now()}-${++localSeq}", convId = convId, kind = OutKind.Note, text = text, known = knownIds(convId))
+        outgoing[o.localId] = o
+        setMsgs(convId) {
+            it + ThreadMsg(id = o.localId, direction = "outbound", sender = "human_agent", text = text, isNote = true, createdAt = nowIso(), sendState = "sending")
         }
+        _dialogs.update { it.copy(note = false, noteText = "") }
+        viewModelScope.launch { deliver(o.localId) }
     }
 
     fun clearHistory() {
         val convId = _thread.value.activeId.ifEmpty { return }
+        if (_dialogs.value.clearing) return
         _dialogs.update { it.copy(clearing = true) }
         viewModelScope.launch {
             try {
-                api.conversations.clearHistory(convId)
+                try {
+                    api.conversations.clearHistory(convId)
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    // No answer: a clear is idempotent — an empty thread says it happened.
+                    if (fateOf(e) == Fate.NotSent || runCatching { inboxApi.messages(convId) }.getOrNull()?.none { !it.isSystem } != true) throw e
+                }
                 setMsgs(convId) { emptyList() }
                 _dialogs.update { it.copy(clearConfirm = false) }
                 refresh()
                 dash.toast("Chat history cleared")
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
+                if (conversationGone(e)) { _dialogs.update { it.copy(clearConfirm = false) }; dropGone(convId); return@launch }
                 dash.toast(
-                    if (status(e) == 403) "You don't have permission to clear chat history" else "Failed to clear history",
+                    if (status(e) == 403) "You don't have permission to clear chat history"
+                    else failMsg("Failed to clear history", e),
                     ToastType.Error,
                 )
             } finally {
@@ -992,61 +1219,250 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
 
     fun clearQuote() = _composer.update { it.copy(quoted = null) }
 
+    /**
+     * Send the reply. The bubble shows at once ("sending…") and the box
+     * clears; the words are never lost after that:
+     *  - delivered → the server's row replaces the bubble;
+     *  - refused (the channel said no, a 4xx, no connection at all) → the
+     *    text goes back in the box, or — if the agent has moved on — the
+     *    bubble turns "Not sent" with Retry / Edit;
+     *  - no answer (a timeout, a dropped connection, a gateway error) → it
+     *    may have reached the customer: the bubble stays "sending…" while the
+     *    thread is re-read, and only a server that shows no such row turns it
+     *    "Not sent". A retry checks once more before sending again.
+     */
     fun sendReply() {
         val c = _composer.value
         val convId = _thread.value.activeId
-        if (c.replyText.isBlank() || convId.isEmpty() || c.sending) return
+        if (c.replyText.isBlank() || convId.isEmpty()) return
         val conv = activeConv()
-        _composer.update { it.copy(sending = true) }
+        // Same channel → a native threaded reply. A quote from ANOTHER channel
+        // can't be threaded, so it rides as a text prefix.
+        val quoted = c.quoted
+        val sameChannel = quoted != null && quoted.channel == (conv?.channel ?: "whatsapp")
+        val replyToId = if (sameChannel) quoted?.msgId else null
+        val prefix = if (quoted != null && !sameChannel)
+            "↩ Re (${channelLabel(quoted.channel)}): \"${quoted.text.take(180)}\"\n\n" else ""
+        val text = prefix + c.replyText
+        val wantTx = txOn()
+        val preview = c.txPreview
+        val o = Outgoing(
+            localId = "optimistic-${AppClock.now()}-${++localSeq}", convId = convId, kind = OutKind.Reply,
+            text = text, replyToId = replyToId, typed = c.replyText, quoted = quoted, known = knownIds(convId),
+        )
+        outgoing[o.localId] = o
+        setMsgs(convId) {
+            it + ThreadMsg(
+                id = o.localId, direction = "outbound", sender = "human_agent", text = text, createdAt = nowIso(),
+                replyTo = if (replyToId != null && quoted != null)
+                    QuotedRef(replyToId, quoted.text, quoted.sender, quoted.mediaType, quoted.mediaUrl) else null,
+                sendState = "sending",
+            )
+        }
+        // The box is free at once: a second tap has nothing to send twice.
+        txJob?.cancel()
+        _composer.update { it.copy(replyText = "", quoted = null, txPreview = null, txBusy = false) }
         viewModelScope.launch {
-            // Same channel → a native threaded reply. A quote from ANOTHER channel
-            // can't be threaded, so it rides as a text prefix.
-            val quoted = c.quoted
-            val sameChannel = quoted != null && quoted.channel == (conv?.channel ?: "whatsapp")
-            val replyToId = if (sameChannel) quoted?.msgId else null
-            val prefix = if (quoted != null && !sameChannel)
-                "↩ Re (${channelLabel(quoted.channel)}): \"${quoted.text.take(180)}\"\n\n" else ""
-            val text = prefix + c.replyText
-            var sendText = text
-            var origText: String? = null
-            var origLang: String? = null
-            if (txOn()) {
+            if (wantTx) {
                 // Toggle ON → the customer receives their language; the English rides
                 // along as the gray line. Any failure falls open to sending English.
                 try {
                     val src = text.trim()
-                    val p = _composer.value.txPreview
-                    val tx = if (p != null && p.src == src) p.text to p.lang
+                    val tx = if (preview != null && preview.src == src) preview.text to preview.lang
                     else api.conversations.translateReply(convId, src).let { it.text to it.lang }
-                    if (tx.first.isNotBlank() && tx.first.trim() != src) { sendText = tx.first; origText = src; origLang = tx.second }
+                    if (tx.first.isNotBlank() && tx.first.trim() != src) {
+                        outgoing[o.localId]?.let { cur -> outgoing[o.localId] = cur.copy(text = tx.first, origText = src, origLang = tx.second) }
+                        setMsgs(convId) { l -> l.map { m -> if (m.id == o.localId) m.copy(text = tx.first, translation = src, translatedFrom = tx.second) else m } }
+                    }
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
                 }
             }
-            val optimistic = ThreadMsg(
-                id = "optimistic-${AppClock.now()}", direction = "outbound", sender = "human_agent",
-                text = sendText, translation = origText, translatedFrom = origLang, createdAt = nowIso(),
-                replyTo = if (replyToId != null && quoted != null)
-                    QuotedRef(replyToId, quoted.text, quoted.sender, quoted.mediaType, quoted.mediaUrl) else null,
-            )
-            setMsgs(convId) { it + optimistic }
-            _composer.update { it.copy(replyText = "", quoted = null, txPreview = null) }
-            try {
-                inboxApi.reply(convId, sendText, replyToId, origText, origLang)
-            } catch (e: Exception) {
-                if (e is CancellationException) throw e
-                setMsgs(convId) { l -> l.filterNot { it.id.startsWith("optimistic-") } }
-                _composer.update { it.copy(replyText = text, quoted = quoted, sending = false) }
-                dash.toast(((e as? ApiException)?.detail ?: e.message)?.take(160)?.ifBlank { null } ?: "Failed to send message", ToastType.Error)
-                return@launch
-            }
-            _composer.update { it.copy(sending = false) }
-            // Delivered. The server's row replaces the optimistic bubble (mergeServer);
-            // if the refetch fails the send still succeeded — never restore the text
-            // (a second tap would message the customer twice).
-            runCatching { inboxApi.messages(convId) }.onSuccess { msgs -> setMsgs(convId) { l -> mergeServer(l, msgs) } }
-            refresh()
+            deliver(o.localId)
         }
+    }
+
+    /** The server rows a thread already shows: a send's own row is a NEW one. */
+    private fun knownIds(convId: String): Set<String> =
+        _thread.value.messages[convId].orEmpty().filterNot { it.isLocal }.mapTo(HashSet()) { it.id }
+
+    private fun bubble(convId: String, localId: String, state: String?, error: String? = null) =
+        setMsgs(convId) { l -> l.map { if (it.id == localId) it.copy(sendState = state, sendError = error) else it } }
+
+    private fun dropBubble(convId: String, localId: String) = setMsgs(convId) { l -> l.filterNot { it.id == localId } }
+
+    private fun whoOf(convId: String): String = _inbox.value.cache[convId]?.let(::inboxName) ?: "this customer"
+
+    private fun noun(k: OutKind) = when (k) { OutKind.Reply -> "Reply"; OutKind.Approve -> "AI draft"; OutKind.Note -> "Note" }
+
+    /** Post one send and decide what its answer means. */
+    private suspend fun deliver(localId: String) {
+        val o = outgoing[localId] ?: return
+        val err: Exception? = try {
+            when (o.kind) {
+                OutKind.Reply -> inboxApi.reply(o.convId, o.text, o.replyToId, o.origText, o.origLang)
+                OutKind.Approve -> api.conversations.approveDraft(o.convId, o.text.ifEmpty { null })
+                OutKind.Note -> api.conversations.addNote(o.convId, o.text)
+            }
+            null
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            e
+        }
+        when {
+            err == null || fateOf(err) == Fate.Done -> sent(o)
+            conversationGone(err) -> dropGone(o.convId)
+            fateOf(err) == Fate.Unknown -> reconcile(localId, err)
+            else -> notSent(localId, err)
+        }
+    }
+
+    /** Delivered: the server's row replaces the bubble. A failed refetch is still a success. */
+    private suspend fun sent(o: Outgoing) {
+        outgoing.remove(o.localId)
+        bubble(o.convId, o.localId, null)
+        when (o.kind) {
+            OutKind.Approve -> dash.toast("AI draft approved & sent")
+            OutKind.Note -> dash.toast("Note saved")
+            OutKind.Reply -> {}
+        }
+        try { applyServer(o.convId, inboxApi.messages(o.convId)) } catch (e: Exception) { if (e is CancellationException) throw e }
+        if (o.kind != OutKind.Note) refresh()
+    }
+
+    /**
+     * The server refused it (or it never left the phone): nothing went out.
+     * The words go back where they were typed when that is safe — the thread
+     * is open and that box is empty — else the bubble says "Not sent".
+     */
+    private fun notSent(localId: String, e: Throwable) {
+        val o = outgoing[localId] ?: return
+        val active = _thread.value.activeId == o.convId
+        if (statusOf(e) == 409) viewModelScope.launch { truthOf(o.convId); refresh() }
+        val why = when (o.kind) {
+            OutKind.Reply -> whyFailed(e, "Failed to send message", useDetail = true)
+            OutKind.Approve -> failMsg("Failed to approve draft", e)
+            OutKind.Note -> failMsg("Failed to save note", e)
+        }
+        val back = active && !o.retried && when (o.kind) {
+            OutKind.Reply -> _composer.value.replyText.isBlank()
+            OutKind.Approve -> !_composer.value.draftVisible
+            OutKind.Note -> !_dialogs.value.note
+        }
+        if (back) {
+            outgoing.remove(localId)
+            dropBubble(o.convId, localId)
+            restore(o)
+        } else markFailed(o, why)
+        dash.toast(if (active) why else "${noun(o.kind)} to ${whoOf(o.convId)} not sent — $why", ToastType.Error)
+    }
+
+    /** Put a send's words back where they were written. */
+    private fun restore(o: Outgoing) = when (o.kind) {
+        OutKind.Reply -> editComposer(o.convId) { c ->
+            c.copy(replyText = if (c.replyText.isBlank()) o.typed else o.typed + "\n" + c.replyText, quoted = c.quoted ?: o.quoted)
+        }
+        OutKind.Approve -> editComposer(o.convId) { it.copy(draftVisible = true, draftExpanded = true, draftEditing = false, draftText = o.text) }
+        OutKind.Note -> _dialogs.update { it.copy(note = true, noteText = if (it.noteText.isBlank()) o.text else it.noteText) }
+    }
+
+    private fun markFailed(o: Outgoing, why: String) {
+        outgoing[o.localId] = o.copy(failed = true)
+        bubble(o.convId, o.localId, "failed", why)
+    }
+
+    /**
+     * No answer: re-read the thread a few times (the server may still be
+     * delivering) before deciding. Offline, the check waits for the next
+     * successful read (a poll, the catch-up on reconnect).
+     */
+    private suspend fun reconcile(localId: String, e: Throwable) {
+        outgoing[localId]?.let { outgoing[localId] = it.copy(checking = true, exhausted = false, failed = false) } ?: return
+        val convId = outgoing[localId]!!.convId
+        for ((i, wait) in RECONCILE_DELAYS_MS.withIndex()) {
+            delay(wait)
+            val cur = outgoing[localId] ?: return
+            if (i == RECONCILE_DELAYS_MS.lastIndex) outgoing[localId] = cur.copy(exhausted = true)
+            val msgs = try { inboxApi.messages(convId) } catch (x: Exception) { if (x is CancellationException) throw x; null } ?: continue
+            applyServer(convId, msgs)
+            if (outgoing[localId] == null) return
+        }
+    }
+
+    /**
+     * Match sends still on their way against the server's rows: a NEW row
+     * with the same words (a note, a reply, a draft sent) confirms it; a
+     * checked send the server still hasn't got is "Not sent".
+     */
+    private fun settle(convId: String, msgs: List<ThreadMsg>) {
+        val mine = outgoing.values.filter { it.convId == convId }
+        if (mine.isEmpty()) return
+        val claimed = HashSet<String>()
+        for (o in mine) {
+            val hit = msgs.firstOrNull { s -> s.id !in o.known && s.id !in claimed && matches(o, s) }
+            if (hit != null) {
+                claimed += hit.id
+                outgoing.remove(o.localId)
+                dropBubble(convId, o.localId)
+                // Checked and found: the same outcome a prompt answer would have had.
+                if (o.checking && !o.failed) {
+                    when (o.kind) {
+                        OutKind.Approve -> dash.toast("AI draft approved & sent")
+                        OutKind.Note -> dash.toast("Note saved")
+                        OutKind.Reply -> {}
+                    }
+                    if (o.kind != OutKind.Note) refresh()
+                }
+            } else if (o.checking && o.exhausted && !o.failed) {
+                markFailed(o, "Not delivered — the server never got it.")
+                dash.toast("${noun(o.kind)} to ${whoOf(convId)} didn't go through — tap Retry on it to send again.", ToastType.Error)
+            }
+        }
+    }
+
+    private fun matches(o: Outgoing, s: ThreadMsg): Boolean {
+        if (s.isSystem || s.inbound || s.isLocal) return false
+        val same = s.body.trim() == o.text.trim()
+        return when (o.kind) {
+            OutKind.Reply -> !s.isNote && s.sender == "human_agent" && same
+            OutKind.Approve -> !s.isNote && s.sender == "ai" && (o.text.isBlank() || same)
+            OutKind.Note -> s.isNote && same
+        }
+    }
+
+    /**
+     * Retry a "Not sent" bubble. One whose first attempt got no answer is
+     * looked for on the server first — it may have gone after all — and is
+     * not sent again while the server can't be asked.
+     */
+    fun retrySend(localId: String) {
+        val o = outgoing[localId] ?: return
+        if (!o.failed) return
+        outgoing[localId] = o.copy(failed = false, retried = true)
+        bubble(o.convId, localId, "sending")
+        viewModelScope.launch {
+            if (o.checking) {
+                val msgs = try { inboxApi.messages(o.convId) } catch (e: Exception) { if (e is CancellationException) throw e; null }
+                if (msgs == null) {
+                    outgoing[localId]?.let { markFailed(it, "Still no connection — try again in a moment.") }
+                    dash.toast("Still can't reach the server — nothing was sent twice.", ToastType.Error)
+                    return@launch
+                }
+                applyServer(o.convId, msgs)
+                val cur = outgoing[localId] ?: run { dash.toast("It had already gone through — not sent twice."); return@launch }
+                outgoing[localId] = cur.copy(checking = false, exhausted = false, known = cur.known + msgs.map { it.id })
+            }
+            deliver(localId)
+        }
+    }
+
+    /** "Edit" on a "Not sent" bubble: the words go back to the box (or the note / draft) and the bubble goes. */
+    fun editFailed(localId: String) {
+        val o = outgoing[localId] ?: return
+        if (!o.failed) return
+        outgoing.remove(localId)
+        dropBubble(o.convId, localId)
+        restore(o)
     }
 
     // ── AI drafts ──
@@ -1058,48 +1474,55 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         it.copy(replyText = it.draftText, draftVisible = false, draftExpanded = false, draftText = "", draftEditing = false)
     }.also { scheduleTranslate() }
 
+    /** Send the AI draft (as edited). Confirmed exactly like a typed reply. */
     fun approveDraft() {
         val convId = _thread.value.activeId.ifEmpty { return }
+        // One approval in flight per thread: a double tap never sends the draft twice.
+        if (outgoing.values.any { it.convId == convId && it.kind == OutKind.Approve && !it.failed }) return
         val textToSend = _composer.value.draftText
-        val optimistic = ThreadMsg(
-            id = "optimistic-${AppClock.now()}", direction = "outbound", sender = "ai",
-            text = textToSend, createdAt = nowIso(),
+        val o = Outgoing(
+            localId = "optimistic-${AppClock.now()}-${++localSeq}", convId = convId, kind = OutKind.Approve,
+            text = textToSend, known = knownIds(convId),
         )
-        setMsgs(convId) { it + optimistic }
+        outgoing[o.localId] = o
+        setMsgs(convId) { it + ThreadMsg(id = o.localId, direction = "outbound", sender = "ai", text = textToSend, createdAt = nowIso(), sendState = "sending") }
         dismissDraft()
-        viewModelScope.launch {
-            try {
-                api.conversations.approveDraft(convId, textToSend.ifEmpty { null })
-            } catch (e: Exception) {
-                if (e is CancellationException) throw e
-                setMsgs(convId) { l -> l.filterNot { it.id.startsWith("optimistic-") } }
-                _composer.update { it.copy(draftVisible = true, draftExpanded = true, draftText = textToSend) }
-                dash.toast("Failed to approve draft", ToastType.Error)
-                return@launch
-            }
-            // Sent. A failed refetch must not bring the draft back for a second send.
-            dash.toast("AI draft approved & sent")
-            runCatching { inboxApi.messages(convId) }.onSuccess { msgs -> setMsgs(convId) { mergeServer(it, msgs) } }
-            refresh()
-        }
+        viewModelScope.launch { deliver(o.localId) }
     }
 
+    /**
+     * A fresh AI draft (a whole AI turn, on the long client). It lands on the
+     * thread that asked for it, even if the agent has moved on meanwhile.
+     */
     fun generateDraft() {
         val convId = _thread.value.activeId.ifEmpty { return }
-        _composer.update { it.copy(generatingDraft = true) }
+        if (_composer.value.generatingDraft) return
+        editComposer(convId) { it.copy(generatingDraft = true) }
         viewModelScope.launch {
             try {
                 val d = api.conversations.generateDraft(convId)
                 if (!d.isNullOrBlank()) {
-                    // The agent asked for it — open immediately.
-                    _composer.update { it.copy(draftText = d, draftVisible = true, draftExpanded = true, draftEditing = false) }
-                    dash.toast("Draft generated")
+                    if (_thread.value.activeId == convId) {
+                        // The agent asked for it — open immediately.
+                        _composer.update { it.copy(draftText = d, draftVisible = true, draftExpanded = true, draftEditing = false) }
+                        dash.toast("Draft generated")
+                    } else {
+                        // A draft belongs to its thread: it waits there, never in another's box.
+                        heldDrafts[convId] = d
+                        dash.toast("Draft ready for ${whoOf(convId)} — open their chat to review it.")
+                    }
                 }
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
-                dash.toast("Failed to generate draft", ToastType.Error)
+                if (conversationGone(e)) { dropGone(convId); return@launch }
+                dash.toast(
+                    // 502 here is the model failing, not the network.
+                    if (statusOf(e) == 502) "Failed to generate draft. Neema couldn't write one just now — try again."
+                    else failMsg("Failed to generate draft", e),
+                    ToastType.Error,
+                )
             } finally {
-                _composer.update { it.copy(generatingDraft = false) }
+                editComposer(convId) { it.copy(generatingDraft = false) }
             }
         }
     }
@@ -1160,28 +1583,49 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
     fun removeMedia(id: String) = _composer.update { c -> c.copy(media = c.media.filterNot { it.id == id }) }
     fun clearMedia() = _composer.update { it.copy(media = emptyList()) }
 
-    /** Send sequentially; each file carries its OWN caption (or none). */
+    /**
+     * Send sequentially; each file carries its OWN caption (or none). A file
+     * that fails stays in the tray with its caption and the reason; one whose
+     * upload got no answer (a 150 MB video timing out, a connection dropping
+     * halfway) is looked for in the thread before it is called failed — and
+     * again before a retry uploads it a second time.
+     */
     fun sendMedia() {
         val convId = _thread.value.activeId
         val items = _composer.value.media
         if (items.isEmpty() || convId.isEmpty() || _composer.value.uploading) return
-        _composer.update { it.copy(uploading = true) }
+        editComposer(convId) { it.copy(uploading = true, media = it.media.map { m -> m.copy(error = null) }) }
         viewModelScope.launch {
             val sent = mutableListOf<ThreadMsg>()
+            val sentIds = HashSet<String>()
+            val known = HashSet(knownIds(convId))
             var failed = 0
             try {
-                for (it in items) {
+                for (item in items) {
+                    // A file whose last attempt ended without an answer may be there already.
+                    if (item.unconfirmed) {
+                        findUpload(convId, item, known)?.let { hit -> sent += hit; sentIds += item.id; known += hit.id; continue }
+                    }
                     try {
-                        sent += inboxApi.upload(cr, convId, it)
+                        val m = inboxApi.upload(cr, convId, item)
+                        sent += m; sentIds += item.id; known += m.id
                     } catch (e: Exception) {
                         if (e is CancellationException) throw e
+                        if (conversationGone(e)) { dropGone(convId); return@launch }
+                        val unknown = fateOf(e) == Fate.Unknown
+                        if (unknown) {
+                            findUpload(convId, item, known)?.let { hit -> sent += hit; sentIds += item.id; known += hit.id; continue }
+                        }
                         failed++
-                        dash.toast("${it.name}: ${uploadErrorOf(e)}", ToastType.Error)
+                        val why = if (statusOf(e) == 401) "your session expired — sign in again, then tap Send" else uploadErrorOf(e)
+                        editComposer(convId) { c -> c.copy(media = c.media.map { if (it.id == item.id) it.copy(error = why, unconfirmed = unknown) else it }) }
+                        dash.toast("${item.name}: $why", ToastType.Error)
                     }
                 }
                 if (sent.isNotEmpty()) {
                     setMsgs(convId) { mergeThread(it, sent) }
-                    clearMedia()
+                    // Only what went out leaves the tray; a failed file waits for a retry.
+                    editComposer(convId) { c -> c.copy(media = c.media.filterNot { it.id in sentIds }) }
                     refresh()
                     dash.toast(
                         when {
@@ -1193,8 +1637,25 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                     )
                 }
             } finally {
-                _composer.update { it.copy(uploading = false) }
+                editComposer(convId) { it.copy(uploading = false) }
             }
+        }
+    }
+
+    /** The thread's new outbound file matching [item] (its kind and caption), if the server has it. */
+    private suspend fun findUpload(convId: String, item: PickedMedia, known: Set<String>): ThreadMsg? {
+        val msgs = try { inboxApi.messages(convId) } catch (e: Exception) { if (e is CancellationException) throw e; return null }
+        val kind = when {
+            item.mime.startsWith("image/") -> "image"
+            item.mime.startsWith("video/") || item.name.substringAfterLast('.', "").lowercase() in setOf("mov", "hevc", "mp4", "m4v") -> "video"
+            item.mime.startsWith("audio/") -> "audio"
+            else -> null
+        }
+        val cap = item.caption.trim()
+        return msgs.firstOrNull { s ->
+            s.id !in known && !s.inbound && !s.isSystem && !s.isNote && s.sender == "human_agent" && s.mediaType != null &&
+                (kind == null || s.mediaType == kind || s.mediaType.startsWith("$kind/")) &&
+                (cap.isEmpty() || s.body.trim() == cap || s.mediaCaption?.trim() == cap)
         }
     }
 
@@ -1247,25 +1708,68 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
 
     // ═══════════════════════════ Reach-out (Ask Neema, invite, call) ═══════════════════════════
 
+    /** Read-only: a failure just says why, and the question stays in the box. */
     suspend fun askNeema(question: String): String = try {
         api.askNeema(_thread.value.activeId, question).answer
     } catch (e: Exception) {
         if (e is CancellationException) throw e
-        "Couldn't check right now — try again."
+        when {
+            conversationGone(e) -> "This conversation no longer exists."
+            statusOf(e) == 0 && timedOut(e) -> "Neema took too long to answer — try again."
+            statusOf(e) == 0 || statusOf(e) == 401 || statusOf(e) == 429 -> whyFailed(e, "")
+            else -> "Couldn't check right now — try again."
+        }
     }
 
-    /** Neema delivers the confirmed FACTS in her own voice; the thread stays in AI mode. */
-    suspend fun answerViaNeema(facts: String): Pair<Boolean, String> = try {
-        true to "Neema sent: “${api.answerViaNeema(_thread.value.activeId, facts).sent}”"
+    /**
+     * Neema delivers the confirmed FACTS in her own voice; the thread stays in
+     * AI mode. This one reaches the customer, so a lost answer is checked: a
+     * NEW message from Neema in the thread means it went; otherwise the agent
+     * is told it may still be on its way — never "failed", which invites a
+     * second send.
+     */
+    suspend fun answerViaNeema(facts: String): Pair<Boolean, String> {
+        val convId = _thread.value.activeId
+        val known = knownIds(convId)
+        return try {
+            true to "Neema sent: “${api.answerViaNeema(convId, facts).sent}”"
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            val msg = (e as? ApiException)?.detail ?: e.message ?: ""
+            when {
+                fateOf(e) == Fate.Unknown -> {
+                    val hit = try { inboxApi.messages(convId) } catch (x: Exception) { if (x is CancellationException) throw x; null }
+                        ?.lastOrNull { it.id !in known && !it.inbound && !it.isSystem && !it.isNote && it.sender == "ai" }
+                    if (hit != null) {
+                        loadMessages(convId, silent = true)
+                        true to "Neema sent: “${hit.body}”"
+                    } else false to "No answer from the server — Neema may still be sending it. Watch the thread before sending it again."
+                }
+                conversationGone(e) -> false to "This conversation no longer exists."
+                status(e) == 409 || msg.lowercase().contains("window") ->
+                    false to "Outside the messaging window — reply yourself when they next write."
+                statusOf(e) == 0 || statusOf(e) == 401 || statusOf(e) == 429 -> false to whyFailed(e, "")
+                else -> false to "Couldn't send right now — try again."
+            }
+        }
+    }
+
+    /** How a WhatsApp invite went. */
+    sealed interface InviteResult {
+        data object Sent : InviteResult
+        /** Refused (not configured, a bad number, Meta said no) — open WhatsApp by hand instead. */
+        data object Refused : InviteResult
+        /** No answer: the template may have gone — don't send it twice. */
+        data class Unknown(val message: String) : InviteResult
+    }
+
+    suspend fun invite(phone: String, name: String?): InviteResult = try {
+        api.whatsappInvite(phone, name); InviteResult.Sent
     } catch (e: Exception) {
         if (e is CancellationException) throw e
-        val msg = (e as? ApiException)?.detail ?: e.message ?: ""
-        false to (if (status(e) == 409 || msg.lowercase().contains("window"))
-            "Outside the messaging window — reply yourself when they next write."
-        else "Couldn't send right now — try again.")
+        if (fateOf(e) == Fate.Unknown) InviteResult.Unknown("No answer from the server — the invite may still go through. Check with the customer before sending another.")
+        else InviteResult.Refused
     }
-
-    suspend fun invite(phone: String, name: String?): Boolean = runCatching { api.whatsappInvite(phone, name) }.isSuccess
 
     /**
      * Business-initiated WhatsApp call; no permission yet → ask for it automatically.
@@ -1292,6 +1796,11 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
 
     companion object {
         const val MB = 1024L * 1024L
+        /**
+         * After a send got no answer: re-read the thread at these intervals
+         * (the server may still be delivering it) before calling it failed.
+         */
+        val RECONCILE_DELAYS_MS = listOf(2_000L, 8_000L, 20_000L)
         /** A burst of frames becomes one list refetch this long after the first. */
         const val SOCKET_REFRESH_MS = 1_500L
         const val CATCH_UP_WINDOW_MS = 2_000L
@@ -1305,6 +1814,15 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         /** WhatsApp first (it can transact), then the social channels. */
         val CHAN_ORDER = listOf("whatsapp", "messenger", "facebook", "instagram", "tiktok", "email", "sms")
     }
+}
+
+/** Fetching an expired attachment back from Meta. */
+sealed interface Recovery {
+    data class Found(val url: String) : Recovery
+    /** Meta no longer has it. */
+    data object Gone : Recovery
+    /** Couldn't ask (no connection, server trouble): try again. */
+    data class Failed(val why: String) : Recovery
 }
 
 /** The customer's detected language — free, from translations cached on inbound rows. */

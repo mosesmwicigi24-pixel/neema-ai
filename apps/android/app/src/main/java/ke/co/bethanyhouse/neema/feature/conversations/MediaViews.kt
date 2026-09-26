@@ -79,8 +79,10 @@ internal fun RevealToggle(open: Boolean, showLabel: String, hideLabel: String, i
  * to fetch the original back from Meta.
  */
 @Composable
-internal fun MediaFallback(kind: String, messageId: String?, inbound: Boolean, onRecover: (String, (String?) -> Unit) -> Unit, onRecovered: (String) -> Unit) {
+internal fun MediaFallback(kind: String, messageId: String?, inbound: Boolean, onRecover: (String, (Recovery) -> Unit) -> Unit, onRecovered: (String) -> Unit) {
     var state by remember(messageId) { mutableStateOf("idle") }
+    // A failed attempt (no connection, server trouble) says why and keeps the button.
+    var why by remember(messageId) { mutableStateOf<String?>(null) }
     val label = if (kind == "video") "Video" else "Photo"
     // An inbound bubble is dark in dark mode: its ink flips to light.
     val dark = inbound && ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.isDark
@@ -93,17 +95,27 @@ internal fun MediaFallback(kind: String, messageId: String?, inbound: Boolean, o
     ) {
         Text("${if (kind == "video") "🎬" else "📷"} $label sent", fontSize = 12.sp, fontWeight = FontWeight.Medium)
         Text(
-            if (state == "gone") "Meta no longer has this file — ask the customer to resend." else "Preview link expired.",
+            when {
+                state == "gone" -> "Meta no longer has this file — ask the customer to resend."
+                why != null -> "Couldn't fetch it — $why"
+                else -> "Preview link expired."
+            },
             fontSize = 11.sp, color = if (inbound && !dark) Color.Black.copy(alpha = 0.5f) else Color.White.copy(alpha = 0.7f),
         )
         if (messageId != null && state != "gone") {
             Text(
-                if (state == "loading") "Fetching…" else "Recover from Meta",
+                when { state == "loading" -> "Fetching…"; why != null -> "Try again"; else -> "Recover from Meta" },
                 modifier = Modifier.alpha(if (state == "loading") 0.6f else 1f).clip(RoundedCornerShape(50))
                     .background(if (inbound) InboundTintBg else Color.White.copy(alpha = 0.2f))
                     .clickable(enabled = state != "loading") {
-                        state = "loading"
-                        onRecover(messageId) { url -> if (url != null) { state = "idle"; onRecovered(url) } else state = "gone" }
+                        state = "loading"; why = null
+                        onRecover(messageId) { r ->
+                            when (r) {
+                                is Recovery.Found -> { state = "idle"; onRecovered(r.url) }
+                                Recovery.Gone -> state = "gone"
+                                is Recovery.Failed -> { state = "idle"; why = r.why.replaceFirstChar { it.lowercase() } }
+                            }
+                        }
                     }
                     .padding(horizontal = 8.dp, vertical = 3.dp),
                 fontSize = 10.sp, fontWeight = FontWeight.Medium,
@@ -117,7 +129,7 @@ internal fun MediaFallback(kind: String, messageId: String?, inbound: Boolean, o
 @Composable
 internal fun ImageBubble(
     src: String, analysis: String?, caption: String?, inbound: Boolean, messageId: String?,
-    onView: (Viewer) -> Unit, onRecover: (String, (String?) -> Unit) -> Unit,
+    onView: (Viewer) -> Unit, onRecover: (String, (Recovery) -> Unit) -> Unit,
 ) {
     var url by remember(src) { mutableStateOf(src) }
     var broken by remember(src) { mutableStateOf(false) }
@@ -155,7 +167,7 @@ internal fun ImageBubble(
 @Composable
 internal fun VideoBubble(
     src: String, caption: String?, inbound: Boolean, messageId: String?, brokenIds: Set<String>,
-    onView: (Viewer) -> Unit, onRecover: (String, (String?) -> Unit) -> Unit,
+    onView: (Viewer) -> Unit, onRecover: (String, (Recovery) -> Unit) -> Unit,
 ) {
     var url by remember(src) { mutableStateOf(src) }
     val context = LocalContext.current

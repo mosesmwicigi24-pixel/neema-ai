@@ -207,7 +207,26 @@ internal fun ConversationList(
         val nearEnd by remember { derivedStateOf { (state.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= state.layoutInfo.totalItemsCount - 6 } }
         // Also tops up a page that doesn't fill the pane (nothing to scroll).
         LaunchedEffect(nearEnd, inbox.hasMore, inbox.loadingMore, rows.size) {
-            if (nearEnd && inbox.hasMore && !inbox.loadingMore) vm.loadMore()
+            if (nearEnd && inbox.hasMore && !inbox.loadingMore && !inbox.moreError) vm.loadMore()
+        }
+        // Rows on screen but the refresh failed: they stay, and the list says it's showing saved rows.
+        if (inbox.loadError && rows.isNotEmpty()) {
+            Row(
+                Modifier.fillMaxWidth().background(if (c.isDark) Color(0xFF451A03).copy(alpha = 0.35f) else Color(0xFFFFFBEB))
+                    .padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    if (inbox.errorText?.startsWith("No connection") == true) "No connection — showing saved conversations."
+                    else "Couldn't refresh — showing saved conversations.",
+                    fontSize = 12.sp, lineHeight = 16.sp, color = if (c.isDark) Color(0xFFFBBF24) else Color(0xFF92400E), modifier = Modifier.weight(1f),
+                )
+                Text(
+                    "Retry", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Green,
+                    modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClickLabel = "Retry loading conversations", onClick = vm::refresh)
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            }
         }
         PullToRefreshBox(isRefreshing = inbox.loading && rows.isNotEmpty(), onRefresh = vm::refresh, modifier = Modifier.weight(1f)) {
             LazyColumn(state = state, modifier = Modifier.fillMaxSize()) {
@@ -219,13 +238,18 @@ internal fun ConversationList(
                             inbox.loading -> EmptyText("Loading…")
                             // The web would say "Loading…" forever after a failure; say
                             // what happened and offer the one useful thing.
-                            inbox.loadError -> Row(verticalAlignment = Alignment.CenterVertically) {
-                                EmptyText("Couldn't load — ")
-                                Text(
-                                    "Retry", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Green,
-                                    modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClickLabel = "Retry loading conversations", onClick = vm::refresh)
-                                        .padding(horizontal = 4.dp, vertical = 2.dp),
-                                )
+                            inbox.loadError -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    EmptyText("Couldn't load — ")
+                                    Text(
+                                        "Retry", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Green,
+                                        modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClickLabel = "Retry loading conversations", onClick = vm::refresh)
+                                            .padding(horizontal = 4.dp, vertical = 2.dp),
+                                    )
+                                }
+                                inbox.errorText?.let {
+                                    Text(it, fontSize = 12.sp, color = Color(0xFF8A9E80), textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 4.dp, start = 24.dp, end = 24.dp))
+                                }
                             }
                             !inbox.freshLoaded -> EmptyText("Loading…")
                             else -> EmptyText("No conversations found")
@@ -238,7 +262,10 @@ internal fun ConversationList(
                 if (rows.isNotEmpty() && (inbox.loadingMore || inbox.hasMore)) item(key = "more") {
                     Box(Modifier.fillMaxWidth().padding(vertical = 16.dp), contentAlignment = Alignment.Center) {
                         if (inbox.loadingMore) Text("Loading more…", fontSize = 12.sp, color = Color(0xFFB5C9A8))
-                        else TextButton(onClick = vm::loadMore) { Text("Load more conversations", fontSize = 12.sp, color = Green) }
+                        else if (inbox.moreError) TextButton(onClick = { vm.loadMore(force = true) }) {
+                            Text("Couldn't load more — Retry", fontSize = 12.sp, color = Green)
+                        }
+                        else TextButton(onClick = { vm.loadMore() }) { Text("Load more conversations", fontSize = 12.sp, color = Green) }
                     }
                 }
             }

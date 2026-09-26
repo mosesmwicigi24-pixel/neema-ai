@@ -164,7 +164,7 @@ fun ConversationsScreen(dash: DashboardViewModel) {
     }
 
     // ── Dialogs ──
-    if (dialogs.transfer) TransferDialog(dash, active, thread.convBusy.isNotEmpty(), onPick = { id, name -> vm.transfer(id, name) }) { vm.showTransfer(false) }
+    if (dialogs.transfer) TransferDialog(dash, active, active != null && thread.busyFor(active.id).isNotEmpty(), onPick = { id, name -> vm.transfer(id, name) }) { vm.showTransfer(false) }
     if (dialogs.note) NoteDialog(dialogs.noteText, vm::setNoteText, vm::saveNote) { vm.showNote(false) }
     if (dialogs.clearConfirm) AlertDialog(
         onDismissRequest = { vm.showClear(false) },
@@ -271,7 +271,7 @@ private fun ThreadPane(
     // keyboard without counting the nav bar twice when the keyboard is up.
     Column(modifier.then(if (!wide) Modifier.windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars)) else Modifier.imePadding())) {
         ThreadHeader(
-            conv = conv, siblings = siblings, perms = perms, convBusy = thread.convBusy, wide = wide,
+            conv = conv, siblings = siblings, perms = perms, convBusy = thread.busyFor(conv.id), wide = wide,
             actions = actions, menu = menu,
             // Regular agents see who holds it; admins never see the lock.
             locked = if (ownedByOther && !perms.isAdminOrSuper) conv.assignedAgentName?.split(" ")?.firstOrNull() ?: "Locked" else null,
@@ -288,7 +288,8 @@ private fun ThreadPane(
             messages = thread.messages[conv.id] ?: emptyList(),
             unreadSnap = thread.unreadSnapshot[conv.id] ?: 0,
             hasMore = thread.hasMore[conv.id] == true,
-            loading = thread.loading, error = thread.error, loadingOlder = thread.loadingOlder,
+            loading = thread.loading, error = thread.error, loadingOlder = thread.olderLoading == conv.id,
+            errorText = thread.errorText, olderError = thread.olderError == conv.id,
             recovered = thread.recovered, brokenVideos = brokenVideos,
             cb = remember(vm) {
                 ThreadCallbacks(
@@ -298,6 +299,8 @@ private fun ThreadPane(
                     fetchVideo = { postId, ch -> runCatching { dash.api.conversations.postVideo(postId, ch) }.getOrNull() },
                     onRetry = { vm.thread.value.activeId.takeIf { it.isNotEmpty() }?.let { vm.loadMessages(it) } },
                     onLoadOlder = vm::loadOlder,
+                    onRetrySend = vm::retrySend,
+                    onEditFailed = vm::editFailed,
                 )
             },
             modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -596,8 +599,12 @@ internal fun InviteDialog(dash: DashboardViewModel, vm: ConversationsViewModel, 
                 WebBtn(if (busy) "Sending…" else "Send invite", BtnVariant.Primary, {
                     busy = true
                     scope.launch {
-                        if (vm.invite(digits, conv.name)) {
+                        val r = vm.invite(digits, conv.name)
+                        if (r == ConversationsViewModel.InviteResult.Sent) {
                             dash.toast("WhatsApp invite sent ✓")
+                        } else if (r is ConversationsViewModel.InviteResult.Unknown) {
+                            // It may have gone: opening WhatsApp too would invite them twice.
+                            dash.toast(r.message, ToastType.Warning)
                         } else {
                             // Fallback: open WhatsApp manually if the template send fails.
                             val first = conv.name?.trim()?.split(Regex("\\s+"))?.firstOrNull().orEmpty()
