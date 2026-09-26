@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
 import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
@@ -24,7 +25,7 @@ import ke.co.bethanyhouse.neema.app.DashboardShell
 import ke.co.bethanyhouse.neema.app.DashboardViewModel
 import ke.co.bethanyhouse.neema.app.LoginScreen
 import ke.co.bethanyhouse.neema.app.SessionExpiredDialog
-import ke.co.bethanyhouse.neema.app.ViewId
+import ke.co.bethanyhouse.neema.app.DeepLink
 import ke.co.bethanyhouse.neema.core.notify.Notifier
 import ke.co.bethanyhouse.neema.core.ui.theme.NeemaTheme
 
@@ -38,15 +39,21 @@ class MainActivity : ComponentActivity() {
         installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        if (Build.VERSION.SDK_INT >= 33) askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
-        // A recreated activity (process restore) must not replay the launch intent.
-        if (savedInstanceState == null) handleIntent(intent)
+        // A recreated activity (process restore) must not replay the launch
+        // intent, nor must a relaunch from Recents (which re-delivers it).
+        val fromHistory = intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0
+        if (savedInstanceState == null && !fromHistory) handleIntent(intent)
 
         setContent {
             val dark by dash.dark.collectAsStateWithLifecycle()
             val session by dash.session.collectAsStateWithLifecycle()
             val expired by dash.sessionExpired.collectAsStateWithLifecycle()
             val size = calculateWindowSizeClass(this)
+            // Ask for notifications once, after the first sign-in (a login
+            // screen asking out of nowhere reads as spam). Denied is final:
+            // alerts still reach the bell and the toast in the app, and
+            // Profile links to the system settings — no nagging.
+            LaunchedEffect(session != null) { if (session != null) maybeAskForNotifications() }
             NeemaTheme(dark = dark) {
                 Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
                     val s = session
@@ -65,6 +72,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun maybeAskForNotifications() {
+        if (Build.VERSION.SDK_INT < 33 || Notifier.canPost(this)) return
+        val prefs = dash.container.prefs.raw
+        if (prefs.getBoolean(ASKED_NOTIFICATIONS, false)) return
+        prefs.edit().putBoolean(ASKED_NOTIFICATIONS, true).apply()
+        askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleIntent(intent)
@@ -77,20 +92,24 @@ class MainActivity : ComponentActivity() {
      */
     private fun handleIntent(intent: Intent?) {
         intent ?: return
-        intent.getStringExtra(Notifier.EXTRA_OPEN_CONV)?.let { dash.openConversationFor(it) }
-        intent.getStringExtra(Notifier.EXTRA_VIEW)?.let { ViewId.fromWeb(it)?.let(dash::navigate) }
+        // A tap on an alert (Notifier.post): its conversation or view.
+        val conv = intent.getStringExtra(Notifier.EXTRA_OPEN_CONV)
+        val view = intent.getStringExtra(Notifier.EXTRA_VIEW)
+        val notification = intent.getStringExtra(Notifier.EXTRA_NOTIFICATION)
+        if (conv != null || view != null || notification != null) dash.openFromNotification(conv, view, notification)
         if (intent.getStringExtra(Notifier.EXTRA_CALL_ACTION) != null) {
             NeemaApplication.instance.container.calls.handleIntent(intent)
         }
-        val uri: Uri = intent.data ?: return
-        dash.applyDeepLink(
-            open = uri.getQueryParameter("open"),
-            ref = uri.getQueryParameter("ref"),
-            view = uri.getQueryParameter("view"),
-            caller = uri.getQueryParameter("caller"),
-        )
         // Consumed once, like the web stripping the query string: a config
-        // change or relaunch from recents must not replay it.
+        // change must not replay it.
+        listOf(Notifier.EXTRA_OPEN_CONV, Notifier.EXTRA_VIEW, Notifier.EXTRA_NOTIFICATION).forEach(intent::removeExtra)
+        val uri: Uri = intent.data ?: return
+        // Signed out, the dashboard keeps it and replays it after sign-in.
+        dash.applyDeepLink(DeepLink.of { runCatching { uri.getQueryParameter(it) }.getOrNull() })
         intent.data = null
+    }
+
+    private companion object {
+        const val ASKED_NOTIFICATIONS = "asked_post_notifications"
     }
 }

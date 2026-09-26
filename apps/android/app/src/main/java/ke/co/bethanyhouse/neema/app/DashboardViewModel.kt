@@ -10,6 +10,7 @@ import ke.co.bethanyhouse.neema.core.model.CatalogItem
 import ke.co.bethanyhouse.neema.core.model.InboxSummary
 import ke.co.bethanyhouse.neema.core.model.Order
 import ke.co.bethanyhouse.neema.core.perm.Perms
+import ke.co.bethanyhouse.neema.core.util.AppClock
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.delay
@@ -54,6 +55,16 @@ enum class ViewId(val label: String) {
             "profile" -> Profile
             else -> null
         }
+    }
+}
+
+/** The dashboard's query parameters (open + ref, view + caller), from a URL or a notification. */
+data class DeepLink(val open: String?, val ref: String?, val view: String?, val caller: String?) {
+    val isEmpty: Boolean get() = open.isNullOrBlank() && view.isNullOrBlank()
+
+    companion object {
+        /** From a dashboard URL's (https or neema://) query parameters. */
+        fun of(param: (String) -> String?) = DeepLink(param("open"), param("ref"), param("view"), param("caller"))
     }
 }
 
@@ -120,6 +131,20 @@ class DashboardViewModel(
 
     private var pollers = mutableListOf<Job>()
 
+    /** When orders last arrived (a poll that just ran makes a catch-up redundant). */
+    @Volatile private var lastOrdersFetch = 0L
+
+    /** "Now" for the catch-up freshness check; tests drive it by hand. */
+    internal var clock: () -> Long = AppClock::now
+
+    /** A deep link that arrived signed out — page.tsx's sessionStorage "neema:deeplink". */
+    private var pendingLink: DeepLink? = null
+
+    private companion object {
+        /** Orders fetched this recently need no catch-up on reconnect. */
+        const val CATCH_UP_FRESH_MS = 5_000L
+    }
+
     init {
         viewModelScope.launch {
             container.http.sessionExpired.collect { if (session.value != null) sessionExpired.value = true }
@@ -140,6 +165,17 @@ class DashboardViewModel(
         viewModelScope.launch {
             session.collect { s -> if (s != null) onSignedIn() else stopPolling() }
         }
+        // Frames sent while the socket was down (a dead network, a restart of
+        // the API, the app backgrounded without live mode) are gone for good:
+        // catch up on what the socket would have told us. The web has no such
+        // hook — its polls eventually notice.
+        viewModelScope.launch {
+            container.socket.reconnected.collect {
+                if (session.value == null) return@collect
+                _inboxRefresh.tryEmit(Unit)
+                if (clock() - lastOrdersFetch > CATCH_UP_FRESH_MS) refetchOrders()
+            }
+        }
     }
 
     private fun onSignedIn() {
@@ -150,6 +186,8 @@ class DashboardViewModel(
         container.snapshots.read(sc, "catalog", ListSerializer(CatalogItem.serializer()))?.let { _catalog.value = it }
         container.snapshots.read(sc, "me", Agent.serializer())?.let { _me.value = it }
         refetchMe()
+        // A link that arrived at the login screen, replayed once signed in.
+        pendingLink?.let { pendingLink = null; applyDeepLink(it) }
         stopPolling()
         pollers += poll(180_000) { refetchAgentsNow() }
         pollers += poll(300_000) { refetchCatalogNow() }
@@ -199,6 +237,7 @@ class DashboardViewModel(
     }
     private suspend fun refetchOrdersNow() {
         val list = api.orders.list()
+        lastOrdersFetch = clock()
         _orders.value = list
         container.snapshots.write(scope, "orders", ListSerializer(Order.serializer()), list)
     }
@@ -265,13 +304,34 @@ class DashboardViewModel(
      * otherwise `?view=<name>` switches view, and `?view=calls&caller=<wa_id>`
      * also focuses the call console on that customer. Unknown views are ignored.
      */
-    fun applyDeepLink(open: String?, ref: String?, view: String?, caller: String?) {
+    fun applyDeepLink(open: String?, ref: String?, view: String?, caller: String?) =
+        applyDeepLink(DeepLink(open, ref, view, caller))
+
+    /**
+     * Signed out, the link is kept and replayed right after sign-in (the web
+     * stashes it in sessionStorage across the /login redirect). A newer link
+     * replaces an older one; sign-out drops it.
+     */
+    fun applyDeepLink(link: DeepLink) {
+        if (link.isEmpty) return
+        if (session.value == null) { pendingLink = link; return }
+        val (open, ref, view, caller) = link
         val v = ViewId.fromWeb(view)
         when {
             !open.isNullOrBlank() -> openConversationFor(if (!ref.isNullOrBlank()) "$open|$ref" else open)
             v == ViewId.Calls && !caller.isNullOrBlank() -> focusCalls(caller)
             v != null -> navigate(v)
         }
+    }
+
+    /**
+     * A tap on one of our system notifications (Notifier's extras): mark the
+     * bell entry read, then go where it points — through [applyDeepLink], so
+     * a tap that finds the agent signed out waits for sign-in too.
+     */
+    fun openFromNotification(convKey: String?, view: String?, notificationId: String?) {
+        notificationId?.let { container.notifications.markRead(it) }
+        applyDeepLink(DeepLink(open = convKey, ref = null, view = view, caller = null))
     }
 
     fun toast(message: String, type: ToastType = ToastType.Success) { _toasts.tryEmit(Toast(message, type)) }
@@ -296,6 +356,7 @@ class DashboardViewModel(
         inboxSummary.value = null
         openConvKey.value = null
         callsFocusKey.value = null
+        pendingLink = null
         sessionExpired.value = false
         _view.value = ViewId.Conversations
     }

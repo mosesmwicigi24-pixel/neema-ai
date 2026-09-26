@@ -19,6 +19,14 @@ import ke.co.bethanyhouse.neema.R
  *
  * During a call the [CallManager] re-promotes the service with the
  * microphone type (see [startForCall]) so Android keeps capturing audio.
+ *
+ * Process death: the service is START_STICKY, so Android recreates the
+ * process and calls [onStartCommand] with a null intent. Creating the process
+ * runs NeemaApplication.onCreate, whose [LiveLifecycle] reopens the socket from
+ * the stored session. If by then nobody is signed in or live mode was turned
+ * off, the service promotes itself (Android requires it) and stops at once
+ * without asking to be restarted again. [BootReceiver] brings it back after
+ * a reboot or an app update.
  */
 class LiveService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
@@ -48,13 +56,28 @@ class LiveService : Service() {
                     else ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
                 ServiceCompat.startForeground(this, NOTIF_ID, n, plain)
             }
-            .onFailure { stopSelf() }
+            .onFailure { stopSelf(); return START_NOT_STICKY }
+        if (!stillWanted(inCall)) {
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return START_NOT_STICKY
+        }
         return START_STICKY
+    }
+
+    /** A sticky restart after sign-out, or with live mode since switched off, must not linger. */
+    private fun stillWanted(inCall: Boolean): Boolean {
+        val c = (application as? ke.co.bethanyhouse.neema.NeemaApplication)?.container ?: return true
+        return wanted(c.sessionStore.current != null, c.prefs.backgroundLive.value, inCall)
     }
 
     companion object {
         private const val NOTIF_ID = 1001
         private const val EXTRA_IN_CALL = "in_call"
+
+        /** Should the service run: signed in, and live mode on (or a call is up). */
+        fun wanted(signedIn: Boolean, backgroundLive: Boolean, inCall: Boolean = false): Boolean =
+            signedIn && (backgroundLive || inCall)
 
         fun start(ctx: Context) = launch(ctx, false)
         fun startForCall(ctx: Context) = launch(ctx, true)

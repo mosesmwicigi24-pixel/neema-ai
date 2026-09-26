@@ -14,6 +14,8 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- BootReceiver: restart LiveService after a reboot (normal permission, no prompt). -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
@@ -63,6 +65,17 @@
             android:name=".core.notify.LiveService"
             android:exported="false"
             android:foregroundServiceType="remoteMessaging|dataSync|microphone" />
+
+        <!-- Reboot / app update kill the process: bring the live connection back
+             when signed in with "Stay connected in background" on. -->
+        <receiver
+            android:name=".core.notify.BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <provider
             android:name="androidx.core.content.FileProvider"

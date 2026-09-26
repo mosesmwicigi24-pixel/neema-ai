@@ -97,12 +97,13 @@ fun DashboardShell(
     val openNotification: (AppNotification) -> Unit = { n ->
         dash.container.notifications.markRead(n.id)
         // The web only marks the row read; where the alert names a customer
-        // (or an order) the app also takes the agent there.
-        val target = n.convKey != null || n.type == "order_update"
-        if (target) {
+        // (or an order) the app also takes the agent there — the same target
+        // as tapping its phone notification.
+        val view = ke.co.bethanyhouse.neema.core.notify.NotificationCenter.viewFor(n)?.let(ViewId::fromWeb)
+        if (n.convKey != null || view != null) {
             showBell = false
             scope.launch { drawer.close() }
-            if (n.convKey != null) dash.openConversationFor(n.convKey) else dash.navigate(ViewId.Orders)
+            if (n.convKey != null) dash.openConversationFor(n.convKey) else if (view != null) dash.navigate(view)
         }
     }
     val panel = @Composable { modifier: Modifier, maxList: Dp ->

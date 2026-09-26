@@ -100,10 +100,142 @@ class LiveSocketTest {
     }
 
     @Test
-    fun aRefusedHandshakeKeepsRetrying() = runTest {
+    fun aRefusedHandshakeKeepsRetryingBackingOffTo30Seconds() = runTest {
+        val s = socket()
+        s.connect("a1")
+        // 2 s like the web, then 4, 8, 16, 30, 30 … while the server stays away.
+        for ((i, wait) in listOf(2_000L, 4_000L, 8_000L, 16_000L, 30_000L, 30_000L).withIndex()) {
+            factory.last.fail()
+            advanceTimeBy(wait - 1); runCurrent()
+            assertEquals("retry ${i + 1} waits ${wait}ms", i + 1, factory.sockets.size)
+            advanceTimeBy(2); runCurrent()
+            assertEquals(i + 2, factory.sockets.size)
+        }
+        assertEquals(listOf(2_000L, 4_000L, 8_000L, 16_000L, 30_000L, 30_000L), (1..6).map(s::backoff))
+    }
+
+    @Test
+    fun anOpenSocketResetsTheBackoff() = runTest {
         socket().connect("a1")
-        repeat(3) { factory.last.fail(); advanceTimeBy(2_001); runCurrent() }
-        assertEquals(4, factory.sockets.size)
+        repeat(4) { factory.last.fail(); advanceTimeBy(40_000); runCurrent() }
+        factory.last.open()
+        factory.last.fail()
+        advanceTimeBy(2_001); runCurrent()
+        assertEquals("back to 2 s after a good connection", 6, factory.sockets.size)
+    }
+
+    @Test
+    fun nudgeSkipsALongBackoff() = runTest {
+        val s = socket()
+        s.connect("a1")
+        repeat(5) { factory.last.fail(); advanceTimeBy(40_000); runCurrent() }
+        factory.last.fail() // now 30 s away
+        s.nudge() // the network came back / the app came to the front
+        assertEquals(7, factory.sockets.size)
+        factory.last.fail()
+        advanceTimeBy(2_001); runCurrent()
+        assertEquals("and the backoff starts over", 8, factory.sockets.size)
+    }
+
+    // ── The "reconnected" signal: frames may have been missed ───────────────
+
+    private fun TestScope.reconnects(s: LiveSocket): MutableList<Unit> {
+        val got = mutableListOf<Unit>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { s.reconnected.toList(got) }
+        return got
+    }
+
+    @Test
+    fun theFirstOpenIsNotAReconnect() = runTest {
+        val s = socket(); val got = reconnects(s)
+        s.connect("a1"); factory.last.open()
+        assertTrue(got.isEmpty())
+    }
+
+    @Test
+    fun everyReopenAfterADropSignalsAReconnect() = runTest {
+        val s = socket(); val got = reconnects(s)
+        s.connect("a1"); factory.last.open()
+        factory.last.fail(); advanceTimeBy(2_001); runCurrent()
+        assertTrue("not until it is actually open again", got.isEmpty())
+        factory.last.open()
+        assertEquals(1, got.size)
+        factory.last.serverClose(); advanceTimeBy(2_001); runCurrent(); factory.last.open()
+        assertEquals(2, got.size)
+    }
+
+    @Test
+    fun failedRetriesSignalOnceWhenTheyFinallyConnect() = runTest {
+        val s = socket(); val got = reconnects(s)
+        s.connect("a1"); factory.last.open()
+        repeat(3) { factory.last.fail(); advanceTimeBy(40_000); runCurrent() }
+        factory.last.open()
+        assertEquals(1, got.size)
+    }
+
+    @Test
+    fun reopeningAfterABackgroundCloseIsAReconnect() = runTest {
+        val s = socket(); val got = reconnects(s)
+        s.connect("a1"); factory.last.open()
+        s.disconnect() // backgrounded without live mode
+        s.connect("a1"); factory.last.open()
+        assertEquals("frames were missed while closed", 1, got.size)
+    }
+
+    @Test
+    fun aNewAgentOrANewSignInIsNotAReconnect() = runTest {
+        val s = socket(); val got = reconnects(s)
+        s.connect("a1"); factory.last.open()
+        s.connect("a2"); factory.last.open()
+        s.signOut()
+        s.connect("a2"); factory.last.open()
+        assertTrue(got.isEmpty())
+    }
+
+    @Test
+    fun afterSignOutNothingReconnects() = runTest {
+        val s = socket()
+        s.connect("a1"); factory.last.open()
+        s.signOut()
+        factory.last.fail(); s.nudge()
+        advanceTimeBy(120_000); runCurrent()
+        assertEquals(1, factory.sockets.size)
+        assertFalse(s.connected.value)
+    }
+
+    @Test
+    fun aReplacedSocketThatOpensLateIsCancelledAndIgnored() = runTest {
+        val s = socket(); val got = reconnects(s)
+        s.connect("a1"); val stale = factory.last
+        s.connect("a2"); val live = factory.last
+        stale.open()
+        assertTrue("the stale handshake is torn down", stale.cancelled)
+        assertFalse(s.connected.value)
+        live.open()
+        assertTrue(s.connected.value)
+        assertTrue(got.isEmpty())
+    }
+
+    @Test
+    fun aReplacedSocketStillDrainingDoesNotDoubleFrames() = runTest {
+        val s = socket()
+        val got = mutableListOf<JsonObject>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { s.events.toList(got) }
+        s.connect("a1"); val old = factory.last; old.open()
+        old.fail(); advanceTimeBy(2_001); runCurrent(); factory.last.open()
+        old.frame("""{"type":"new_message","conversationId":"c1"}""")
+        factory.last.frame("""{"type":"new_message","conversationId":"c1"}""")
+        assertEquals(1, got.size)
+    }
+
+    @Test
+    fun aBurstOfFramesArrivesInOrder() = runTest {
+        val s = socket()
+        val got = mutableListOf<JsonObject>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { s.events.toList(got) }
+        s.connect("a1"); factory.last.open()
+        repeat(200) { factory.last.frame("""{"type":"new_message","conversationId":"c$it"}""") }
+        assertEquals((0 until 200).map { "c$it" }, got.map { it.str("conversationId") })
     }
 
     @Test

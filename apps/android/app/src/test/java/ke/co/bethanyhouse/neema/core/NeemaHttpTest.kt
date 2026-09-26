@@ -156,4 +156,34 @@ class NeemaHttpTest {
         http.raw("GET", "https://neema.test/api/media/x.jpg")
         assertEquals("/media/x.jpg", fake.calls.single().path)
     }
+
+    /** Calls' carry-over: api.calls.uploadRecording(id, UploadFile.of(file, …)) survives a token refresh. */
+    @Test
+    fun aFileBackedRecordingIsResentWholeAfterA401() = runBlocking {
+        tokens.refreshTo = "tok-2"
+        val f = java.io.File.createTempFile("wacid", ".m4a").apply {
+            deleteOnExit(); writeBytes(ByteArray(64 * 1024) { (it % 239).toByte() })
+        }
+        val sizes = mutableListOf<Int>()
+        fake.on("POST", "/admin/calls/wacid.9/recording") { req, body ->
+            sizes += body!!.length
+            if (req.header("Authorization") == "Bearer tok-2") 200 to """{"ok":true,"will_transcribe":false}"""
+            else 401 to """{"detail":"Token expired"}"""
+        }
+        val api = ke.co.bethanyhouse.neema.core.api.NeemaApi(http)
+        val res = api.calls.uploadRecording("wacid.9", ke.co.bethanyhouse.neema.core.api.UploadFile.of(f, "wacid.9.m4a", "audio/mp4"))
+        assertEquals(false, res.willTranscribe)
+        assertEquals("sent twice (401, then the retry)", 2, sizes.size)
+        assertEquals("the retry re-read the whole file", sizes[0], sizes[1])
+        assertTrue(sizes[0] > 64 * 1024)
+    }
+
+    @Test
+    fun aMissingRecordingFileIsANetworkStyleErrorNotACrash() {
+        val gone = java.io.File("/nonexistent/neema/rec.m4a")
+        fake.on("POST", "/admin/calls/x/recording", body = "{}")
+        val api = ke.co.bethanyhouse.neema.core.api.NeemaApi(http)
+        val e = expectApi { api.calls.uploadRecording("x", ke.co.bethanyhouse.neema.core.api.UploadFile.of(gone, mimeType = "audio/mp4")) }
+        assertEquals(0, e.status)
+    }
 }
