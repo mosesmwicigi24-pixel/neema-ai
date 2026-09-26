@@ -4,8 +4,16 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import ke.co.bethanyhouse.neema.app.DashboardViewModel
 import ke.co.bethanyhouse.neema.app.ToastType
-import ke.co.bethanyhouse.neema.core.net.ApiException
 import ke.co.bethanyhouse.neema.feature.agents.TeamApi
+import ke.co.bethanyhouse.neema.feature.agents.UNCERTAIN_SAVE
+import ke.co.bethanyhouse.neema.feature.reports.BUSY_TEXT
+import ke.co.bethanyhouse.neema.feature.reports.attempt
+import ke.co.bethanyhouse.neema.feature.reports.friendlyError
+import ke.co.bethanyhouse.neema.feature.reports.httpStatus
+import ke.co.bethanyhouse.neema.feature.reports.masking
+import ke.co.bethanyhouse.neema.feature.reports.mayHaveApplied
+import ke.co.bethanyhouse.neema.feature.reports.quietly
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,10 +29,18 @@ val NOTIF_PREFS = listOf(
     NotifPref("daily_summary", "Daily summary", "Morning digest of activity", true),
 )
 
+/** What a password change with no answer says: it can't be read back, and setting it again is harmless. */
+internal const val PASSWORD_UNCERTAIN =
+    "No answer from the server, so your password may not have changed — what you typed is kept. Check your connection and tap Change Password again."
+
 /**
  * ProfileView.tsx: edit your name/email, change your password, and personal
  * preferences. Saves go to PATCH /admin/me, then /me is refetched so the shell
  * (top bar avatar, permissions) follows.
+ *
+ * Every failure keeps the form open with what was typed (the forms close only
+ * through `onDone`), a save with no answer is checked against the server
+ * before it is called a failure, and a typed password is never shown back.
  */
 class ProfileViewModel(private val dash: DashboardViewModel) : ViewModel() {
     private val team = TeamApi(dash.api.http)
@@ -36,9 +52,18 @@ class ProfileViewModel(private val dash: DashboardViewModel) : ViewModel() {
     private val _refreshing = MutableStateFlow(false)
     val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
 
+    private val _loadError = MutableStateFlow<String?>(null)
+    /**
+     * Why the profile couldn't be read, while there is nothing to show
+     * (signed in offline: no /me and no team row). The screen shows it with a
+     * Retry instead of "Loading profile…" forever.
+     */
+    val loadError: StateFlow<String?> = _loadError.asStateFlow()
+
     /** null = follow the server's value; set while an availability change is in flight. */
     private val _availableOverride = MutableStateFlow<Boolean?>(null)
     val availableOverride: StateFlow<Boolean?> = _availableOverride.asStateFlow()
+    private var settingAvailable = false
 
     /**
      * The web keeps these in component state only. Here they persist on the
@@ -47,20 +72,67 @@ class ProfileViewModel(private val dash: DashboardViewModel) : ViewModel() {
     private val _notifs = MutableStateFlow(NOTIF_PREFS.associate { it.key to prefs.getBoolean("notif_${it.key}", it.default) })
     val notifs: StateFlow<Map<String, Boolean>> = _notifs.asStateFlow()
 
+    init {
+        if (dash.me.value == null) viewModelScope.launch { load() }
+        viewModelScope.launch { dash.me.collect { if (it != null) _loadError.value = null } }
+    }
+
+    /** /me straight from the server (so its failure is known), then the shell's copy and the team row. */
+    private suspend fun load(): Throwable? {
+        val failed = attempt { dash.api.profile.me() }.exceptionOrNull()
+        if (failed == null) {
+            _loadError.value = null
+            dash.refetchMe()
+        } else if (dash.me.value == null) {
+            _loadError.value = friendlyError(failed, fallback = "The server couldn't send your profile just now.")
+        }
+        quietly { dash.refreshAgents() }
+        return failed
+    }
+
     fun toggleNotif(key: String) {
         val next = !(_notifs.value[key] ?: false)
         _notifs.value = _notifs.value + (key to next)
         prefs.edit().putBoolean("notif_$key", next).apply()
     }
 
+    /** Pull-to-refresh and the Retry button: the spinner lasts until /me and the team row have landed. */
     fun refresh() {
+        if (_refreshing.value) return
         viewModelScope.launch {
             _refreshing.value = true
-            dash.refetchMe()
-            // The spinner lasts until the team row (where the profile's name,
-            // role and permissions are read from) has actually landed.
-            ke.co.bethanyhouse.neema.feature.reports.quietly { dash.refreshAgents() }
-            _refreshing.value = false
+            try {
+                val failed = load()
+                if (failed != null && dash.me.value != null)
+                    dash.toast("Couldn't refresh your profile. ${friendlyError(failed)}", ToastType.Error)
+            } finally { _refreshing.value = false }
+        }
+    }
+
+    /** Runs [write] under the saving flag; a second tap while it is on the wire does nothing. */
+    private fun save(
+        failText: (Exception) -> String,
+        uncertain: String,
+        verify: (suspend () -> Boolean)?,
+        write: suspend () -> Unit,
+        done: suspend () -> Unit,
+    ) {
+        if (_saving.value) return
+        _saving.value = true
+        viewModelScope.launch {
+            try {
+                try {
+                    write()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    ke.co.bethanyhouse.neema.feature.reports.stillHere()
+                    if (e.mayHaveApplied() && verify != null && attempt { verify() }.getOrDefault(false)) { done(); return@launch }
+                    dash.toast(if (e.mayHaveApplied()) uncertain else failText(e), ToastType.Error)
+                    return@launch
+                }
+                done()
+            } finally { _saving.value = false }
         }
     }
 
@@ -70,35 +142,35 @@ class ProfileViewModel(private val dash: DashboardViewModel) : ViewModel() {
         val myId = dash.me.value?.id ?: dash.session.value?.agentId
         if (dash.agents.value.any { it.id != myId && it.email.trim().equals(email.trim(), ignoreCase = true) })
             return dash.toast("Another agent already uses that email", ToastType.Error)
-        if (_saving.value) return
-        viewModelScope.launch {
-            _saving.value = true
-            try {
-                dash.api.profile.update(name = name.trim(), email = email.trim())
+        save(
+            failText = { failText(it, "Failed to update profile — that email may already be in use") },
+            uncertain = UNCERTAIN_SAVE,
+            // No answer: if /me now reads what was typed, the save went through.
+            verify = { dash.api.profile.me().let { it.name == name.trim() && it.email.equals(email.trim(), ignoreCase = true) } },
+            write = { dash.api.profile.update(name = name.trim(), email = email.trim()) },
+            done = {
                 dash.refetchMe()
                 dash.refetchAgents()
                 onDone()
                 dash.toast("Profile updated")
-            } catch (e: Exception) {
-                dash.toast(failText(e, "Failed to update profile — that email may already be in use"), ToastType.Error)
-            } finally { _saving.value = false }
-        }
+            },
+        )
     }
 
     fun changePassword(password: String, confirm: String, onDone: () -> Unit) {
         if (password != confirm) return dash.toast("Passwords don't match", ToastType.Error)
         if (password.length < 8) return dash.toast("Password must be at least 8 characters", ToastType.Error)
-        if (_saving.value) return
-        viewModelScope.launch {
-            _saving.value = true
-            try {
-                dash.api.profile.update(password = password)
+        save(
+            // Whatever the server said, the password itself never appears in it.
+            failText = { failText(it, "Failed to change password").masking(password) },
+            uncertain = PASSWORD_UNCERTAIN,
+            verify = null,
+            write = { dash.api.profile.update(password = password) },
+            done = {
                 onDone()
                 dash.toast("Password changed successfully")
-            } catch (e: Exception) {
-                dash.toast(failText(e, "Failed to change password"), ToastType.Error)
-            } finally { _saving.value = false }
-        }
+            },
+        )
     }
 
     /**
@@ -106,16 +178,19 @@ class ProfileViewModel(private val dash: DashboardViewModel) : ViewModel() {
      * refused write comes back as a bare "Internal Server Error".
      */
     private fun failText(e: Exception, serverError: String): String {
-        val status = (e as? ApiException)?.status
+        val status = e.httpStatus()
         return when {
             status == 409 -> "Another agent already uses that email"
-            status != null && status >= 500 -> serverError
-            else -> dash.errorText(e).ifBlank { serverError }
+            status == 429 -> BUSY_TEXT
+            status == 500 || status == 501 -> serverError
+            else -> friendlyError(e, serverError)
         }
     }
 
     /** Online / away for the signed-in agent — the same flag the Team screen toggles. */
     fun setAvailable(agentId: String, available: Boolean) {
+        if (settingAvailable) return
+        settingAvailable = true
         _availableOverride.value = available
         viewModelScope.launch {
             try {
@@ -123,10 +198,19 @@ class ProfileViewModel(private val dash: DashboardViewModel) : ViewModel() {
                 dash.refetchMe()
                 dash.refetchAgents()
                 dash.toast(if (available) "You're available" else "You're away")
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
+                ke.co.bethanyhouse.neema.feature.reports.stillHere()
                 _availableOverride.value = null
-                dash.toast("Failed to update availability", ToastType.Error)
-            }
+                if (e.mayHaveApplied()) {
+                    // It may have flipped: show what the server has instead of guessing.
+                    val truth = attempt { dash.api.profile.me().isAvailable }.getOrNull()
+                    dash.refetchMe()
+                    if (truth != available) dash.toast("Couldn't reach the server — availability unchanged", ToastType.Error)
+                    else dash.toast(if (available) "You're available" else "You're away")
+                } else dash.toast(ke.co.bethanyhouse.neema.feature.agents.availabilityFailure(e), ToastType.Error)
+            } finally { settingAvailable = false }
         }
     }
 

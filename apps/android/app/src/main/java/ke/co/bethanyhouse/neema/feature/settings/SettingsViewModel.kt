@@ -10,8 +10,15 @@ import ke.co.bethanyhouse.neema.core.model.Campaign
 import ke.co.bethanyhouse.neema.core.model.OfferSetting
 import ke.co.bethanyhouse.neema.core.model.TranslationSetting
 import ke.co.bethanyhouse.neema.core.net.ApiException
+import ke.co.bethanyhouse.neema.feature.agents.UNCERTAIN_SAVE
+import ke.co.bethanyhouse.neema.feature.reports.BUSY_TEXT
 import ke.co.bethanyhouse.neema.feature.reports.ScreenLife
-import kotlinx.coroutines.async
+import ke.co.bethanyhouse.neema.feature.reports.attempt
+import ke.co.bethanyhouse.neema.feature.reports.friendlyError
+import ke.co.bethanyhouse.neema.feature.reports.httpStatus
+import ke.co.bethanyhouse.neema.feature.reports.mayHaveApplied
+import ke.co.bethanyhouse.neema.feature.reports.readableDetail
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -177,6 +184,20 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel() {
     val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
 
     /**
+     * Why a live card couldn't be read, by card ("directives", "translation",
+     * "offer", "stages"). The web leaves such a card on "Loading…" forever
+     * (or, for standing orders, unlocks an empty box whose save would wipe
+     * the real ones); here the card says why and offers Retry.
+     */
+    private val _loadErrors = MutableStateFlow<Map<String, String>>(emptyMap())
+    val loadErrors: StateFlow<Map<String, String>> = _loadErrors.asStateFlow()
+
+    private fun loadFailed(card: String, e: Throwable) {
+        _loadErrors.update { it + (card to friendlyError(e, fallback = "The server couldn't send this setting just now.")) }
+    }
+    private fun loaded(card: String) { _loadErrors.update { it - card } }
+
+    /**
      * SettingsView reads its four live cards on mount. This ViewModel outlives
      * the screen, so each return to it re-reads them — except a card with
      * unsaved typing: the web's remount throws a half-written standing order
@@ -193,58 +214,126 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel() {
     private suspend fun reread() {
         coroutineScope {
             if (_directives.value == directivesBase) launch { loadDirectives() }
-            launch { runCatching { _translation.value = api.getTranslation() } }
+            launch { loadTranslation() }
             if (_draft.value == draftBase) launch { loadOffer() }
-            launch { runCatching { _stages.value = api.getPipelineStages() } }
+            launch { loadStages() }
         }
     }
 
     private suspend fun loadAll() {
         // Each card loads on its own; one failing must not blank the others.
-        val a = viewModelScope.async { loadDirectives() }
-        val b = viewModelScope.async { runCatching { _translation.value = api.getTranslation() } }
-        val c = viewModelScope.async { loadOffer() }
-        val d = viewModelScope.async { runCatching { _stages.value = api.getPipelineStages() }.onFailure { if (_stages.value == null) _stages.value = emptyList() } }
-        a.await(); b.await(); c.await(); d.await()
+        coroutineScope {
+            launch { loadDirectives() }
+            launch { loadTranslation() }
+            launch { loadOffer() }
+            launch { loadStages() }
+        }
     }
 
     fun refresh() {
+        if (_refreshing.value) return
         viewModelScope.launch {
             _refreshing.value = true
-            loadAll()
-            _refreshing.value = false
+            try { loadAll() } finally { _refreshing.value = false }
         }
+    }
+
+    private val retrying = mutableSetOf<String>()
+
+    /** A card's Retry: reads that one card again (a second tap while it is on the wire does nothing). */
+    fun retry(card: String) {
+        if (!retrying.add(card)) return
+        viewModelScope.launch {
+            try {
+                when (card) {
+                    "directives" -> loadDirectives()
+                    "translation" -> loadTranslation()
+                    "offer" -> loadOffer()
+                    "stages" -> loadStages()
+                }
+            } finally { retrying -= card }
+        }
+    }
+
+    private suspend fun loadTranslation() {
+        attempt { api.getTranslation() }
+            .onSuccess { _translation.value = it; loaded("translation") }
+            // A card already showing the switch keeps it; only an empty one says why.
+            .onFailure { if (_translation.value == null) loadFailed("translation", it) }
+    }
+
+    private suspend fun loadStages() {
+        attempt { api.getPipelineStages() }
+            .onSuccess { _stages.value = it; loaded("stages") }
+            // Never fall back to "no custom stages": adding one to that would
+            // replace the real list with a single stage.
+            .onFailure { if (_stages.value == null) loadFailed("stages", it) }
+    }
+
+    /**
+     * What a save that failed says. [adminOnly] is the web's words for a 403;
+     * a timeout never reaches here (the caller re-reads the truth first).
+     */
+    private fun saveFailure(e: Throwable, adminOnly: String, fallback: String): String = when (e.httpStatus()) {
+        403 -> adminOnly
+        429 -> BUSY_TEXT
+        422 -> (e as ApiException).readableDetail() ?: fallback
+        else -> friendlyError(e, fallback)
     }
 
     // ── Standing orders ───────────────────────────────────────────────────────
 
+    /**
+     * Deliberate fix: the web unlocks the box even when this read fails, so an
+     * admin on a dropped connection sees an empty box, and saving it would
+     * wipe the standing orders Neema is following. Here the box stays locked
+     * until the real text has arrived, and the card says why, with Retry.
+     */
     private suspend fun loadDirectives() {
         try {
             val r = api.getDirectives()
             _directives.value = r.directives
             if (r.maxChars > 0) _maxChars.value = r.maxChars
-        } catch (_: Exception) {
-            // The web still unlocks the box so an admin can write fresh orders.
+            directivesBase = _directives.value
+            _directivesLoaded.value = true
+            loaded("directives")
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            ke.co.bethanyhouse.neema.feature.reports.stillHere()
+            // Already loaded once: the box keeps what it holds.
+            if (!_directivesLoaded.value) loadFailed("directives", e)
         }
-        directivesBase = _directives.value
-        _directivesLoaded.value = true
     }
 
     fun setDirectives(v: String) { _directives.value = v.take(_maxChars.value) }
 
     fun saveDirectives() {
         if (_savingDirectives.value || !_directivesLoaded.value) return
+        _savingDirectives.value = true
+        val text = _directives.value
         viewModelScope.launch {
-            _savingDirectives.value = true
             try {
-                val r = api.putDirectives(_directives.value)
+                val r = api.putDirectives(text)
                 (r["directives"] as? JsonPrimitive)?.content?.let { _directives.value = it }
                 directivesBase = _directives.value
                 dash.toast("Standing orders saved — Neema follows them within ~5 minutes")
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                // The API never refuses the text itself (it trims and cuts to max_chars); a
-                // refusal is the admin check. A dropped connection says so instead.
-                dash.toast(if ((e as? ApiException)?.status == 0) dash.errorText(e) else "Couldn't save (admin only)", ToastType.Error)
+                ke.co.bethanyhouse.neema.feature.reports.stillHere()
+                // No answer: read what the server holds now. If it is what was sent, it saved.
+                val landed = e.mayHaveApplied() &&
+                    attempt { api.getDirectives().directives.trim() == text.trim().take(_maxChars.value).trim() }.getOrDefault(false)
+                if (landed) {
+                    directivesBase = text
+                    dash.toast("Standing orders saved — Neema follows them within ~5 minutes")
+                } else dash.toast(
+                    // The API never refuses the text itself (it trims and cuts to
+                    // max_chars); a refusal is the admin check. The typed text stays.
+                    if (e.mayHaveApplied()) UNCERTAIN_SAVE else saveFailure(e, "Couldn't save (admin only)", "Couldn't save the standing orders — try again."),
+                    ToastType.Error,
+                )
             } finally { _savingDirectives.value = false }
         }
     }
@@ -264,9 +353,19 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel() {
                     if (next) "Translation on — foreign messages get an English line from the next thread you open"
                     else "Translation off — no new translations will be bought. Ones already saved stay visible."
                 )
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _translation.update { it?.copy(enabled = !next) }   // put it back; nothing was saved
-                dash.toast(if ((e as? ApiException)?.status == 0) dash.errorText(e) else "Couldn't change that (admin only)", ToastType.Error)
+                ke.co.bethanyhouse.neema.feature.reports.stillHere()
+                if (e.mayHaveApplied()) {
+                    // No answer: it may have switched. Show the server's setting, not a guess.
+                    val truth = attempt { api.getTranslation() }.getOrNull()
+                    if (truth != null) _translation.value = truth else _translation.update { it?.copy(enabled = !next) }
+                    if (truth?.enabled != next) dash.toast("Couldn't reach the server — translation is still ${if (next) "off" else "on"}", ToastType.Error)
+                } else {
+                    _translation.update { it?.copy(enabled = !next) }   // put it back; nothing was saved
+                    dash.toast(saveFailure(e, "Couldn't change that (admin only)", "Couldn't change that — try again."), ToastType.Error)
+                }
             } finally { savingTranslation = false }
         }
     }
@@ -278,10 +377,16 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel() {
             val r = api.getOffer()
             _offer.value = r
             _draft.value = r.campaign ?: blankCampaign()
-        } catch (_: Exception) {
-            // Leave it loading rather than show a wrong state.
+            draftBase = _draft.value
+            loaded("offer")
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            ke.co.bethanyhouse.neema.feature.reports.stillHere()
+            // Never show a wrong state: an unread card says why (with Retry); a
+            // card already showing the offer keeps it.
+            if (_offer.value == null) { draftBase = _draft.value; loadFailed("offer", e) }
         }
-        draftBase = _draft.value
     }
 
     /** "For 1 month" is the common case, so a new offer ends a month from today. */
@@ -298,32 +403,31 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel() {
         val max = _offer.value?.maxPercent?.toInt()?.takeIf { it > 0 } ?: 70
         // What the server would answer with a 422 — said without the round trip, and naming the field.
         campaign?.let { offerProblem(it, max) }?.let { return dash.toast(it, ToastType.Error) }
+        _savingOffer.value = true
         viewModelScope.launch {
-            _savingOffer.value = true
             try {
                 val r = api.putOffer(campaign)
-                _offer.update { it?.copy(campaign = r.campaign, running = r.running, says = r.says) }
-                _draft.value = r.campaign ?: blankCampaign()
-                draftBase = _draft.value
-                val saved = r.campaign
-                dash.toast(
-                    when {
-                        saved == null -> "Offer ended — Neema stops mentioning it from her next reply"
-                        r.running && r.says.isNotBlank() -> "Offer live — Neema will say: ${r.says}"
-                        // Saved but not live today: `says` is empty, so "Neema will say: " would promise nothing.
-                        saved.startsOn?.let { runCatching { LocalDate.parse(it) }.getOrNull() }?.isAfter(AppClock.today()) == true ->
-                            "Offer saved — Neema starts mentioning it on ${ke.co.bethanyhouse.neema.core.util.Fmt.date(saved.startsOn)}"
-                        else -> "Offer saved, but its last day has passed — Neema won't mention it"
-                    }
-                )
+                offerSaved(r.campaign, r.running, r.says)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
+                ke.co.bethanyhouse.neema.feature.reports.stillHere()
+                // No answer: read the offer back. If it is the one sent (or gone,
+                // when ending it), the save landed; either way the card shows the truth.
+                val now = if (e.mayHaveApplied()) attempt { api.getOffer() }.getOrNull() else null
+                if (now != null && sameOffer(now.campaign, campaign)) {
+                    _offer.value = now
+                    offerSaved(now.campaign, now.running, now.says)
+                    return@launch
+                }
                 val ex = e as? ApiException
                 dash.toast(
-                    when (ex?.status) {
-                        0 -> dash.errorText(e)
-                        403 -> "Couldn't save that offer (admin only)"
+                    when {
+                        e.mayHaveApplied() -> UNCERTAIN_SAVE
+                        ex?.status == 403 -> "Couldn't save that offer (admin only)"
                         // promotions.set_campaign's own reason ("a campaign needs a name, 1-70%, …").
-                        422 -> "Couldn't save that offer — ${ex.detail}"
+                        ex?.status == 422 -> ex.readableDetail()?.let { "Couldn't save that offer — $it" } ?: OFFER_SAVE_FAILED
+                        ex?.status == 0 || ex?.status == 401 || ex?.status == 429 || ex?.status in 502..504 -> friendlyError(e)
                         else -> OFFER_SAVE_FAILED
                     },
                     ToastType.Error,
@@ -332,12 +436,47 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel() {
         }
     }
 
+    /** The server kept [saved]: the card, the draft and the toast follow it. */
+    private fun offerSaved(saved: Campaign?, running: Boolean, says: String) {
+        _offer.update { it?.copy(campaign = saved, running = running, says = says) }
+        _draft.value = saved ?: blankCampaign()
+        draftBase = _draft.value
+        dash.toast(
+            when {
+                saved == null -> "Offer ended — Neema stops mentioning it from her next reply"
+                running && says.isNotBlank() -> "Offer live — Neema will say: $says"
+                // Saved but not live today: `says` is empty, so "Neema will say: " would promise nothing.
+                saved.startsOn?.let { runCatching { LocalDate.parse(it) }.getOrNull() }?.isAfter(AppClock.today()) == true ->
+                    "Offer saved — Neema starts mentioning it on ${ke.co.bethanyhouse.neema.core.util.Fmt.date(saved.startsOn)}"
+                else -> "Offer saved, but its last day has passed — Neema won't mention it"
+            }
+        )
+    }
+
+    /** Whether the stored offer is the one [sent] (the server may tidy lists and whitespace). */
+    private fun sameOffer(stored: Campaign?, sent: Campaign?): Boolean = when {
+        sent == null -> stored == null
+        stored == null -> false
+        else -> stored.name.trim() == sent.name.trim() && stored.percent == sent.percent &&
+            stored.scope == sent.scope && stored.endsOn == sent.endsOn &&
+            stored.startsOn.orEmpty() == sent.startsOn.orEmpty() &&
+            stored.categories.map { it.trim().lowercase() }.toSet() == sent.categories.filter { it.isNotBlank() }.map { it.trim().lowercase() }.toSet() &&
+            stored.skus.map { it.trim().lowercase() }.toSet() == sent.skus.filter { it.isNotBlank() }.map { it.trim().lowercase() }.toSet()
+    }
+
     // ── Pipeline stages ───────────────────────────────────────────────────────
 
-    fun addStage(label: String): Boolean {
+    /**
+     * Sends [label] as a new stage; answers whether it went. [onSaved] runs
+     * once the server has kept it — the screen clears the typed label only
+     * then, so a failed save leaves it in the box to try again.
+     */
+    fun addStage(label: String, onSaved: () -> Unit = {}): Boolean {
         val l = label.trim().take(PIPELINE_LABEL_MAX).trim()
         if (l.isEmpty()) return false
-        val cur = _stages.value ?: emptyList()
+        // Not read yet: adding to "nothing" would replace the real list.
+        val cur = _stages.value ?: return false
+        if (_savingStages.value) return false
         if (l.lowercase() in PIPELINE_CANONICAL) {
             dash.toast("“$l” is already a built-in stage", ToastType.Warning); return false
         }
@@ -347,31 +486,52 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel() {
         if (cur.size >= PIPELINE_CUSTOM_MAX) {
             dash.toast("At most $PIPELINE_CUSTOM_MAX custom stages", ToastType.Error); return false
         }
-        saveStages(cur + l)
+        saveStages(cur + l, onSaved)
         return true
     }
 
-    fun removeStage(label: String) = saveStages((_stages.value ?: emptyList()) - label)
+    fun removeStage(label: String) { _stages.value?.let { saveStages(it - label) } }
 
-    private fun saveStages(next: List<String>) {
+    private fun saveStages(next: List<String>, onSaved: () -> Unit = {}) {
         if (_savingStages.value) return
+        _savingStages.value = true
         viewModelScope.launch {
-            _savingStages.value = true
             try {
                 // The server drops blanks, duplicates and the built-in names; show what it kept.
                 _stages.value = api.putPipelineStages(next).stages
+                onSaved()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                val status = (e as? ApiException)?.status
+                ke.co.bethanyhouse.neema.feature.reports.stillHere()
+                // No answer: read the list back. The server's cleaning is
+                // idempotent, so a list equal to what we sent (as it would keep it) means it saved.
+                val now = if (e.mayHaveApplied()) attempt { api.getPipelineStages() }.getOrNull() else null
+                if (now != null) _stages.value = now
+                if (now != null && now.map { it.lowercase() } == cleanStages(next).map { it.lowercase() }) { onSaved(); return@launch }
+                val status = e.httpStatus()
                 dash.toast(
-                    when (status) {
-                        403 -> "Only an admin can change pipeline stages."
-                        422 -> (e as ApiException).detail
+                    when {
+                        e.mayHaveApplied() -> UNCERTAIN_SAVE
+                        status == 403 -> "Only an admin can change pipeline stages."
+                        status == 422 -> (e as ApiException).readableDetail() ?: "Couldn't save pipeline stages."
+                        status == 0 || status == 401 || status == 429 || status in 502..504 -> friendlyError(e)
                         else -> "Couldn't save pipeline stages."
                     },
                     ToastType.Error,
                 )
             } finally { _savingStages.value = false }
         }
+    }
+
+    /** crm.py put_pipeline_stages's cleaning: trim, cut to 18, drop blanks, built-ins and repeats. */
+    private fun cleanStages(list: List<String>): List<String> {
+        val out = mutableListOf<String>()
+        list.forEach { s ->
+            val label = s.trim().take(PIPELINE_LABEL_MAX)
+            if (label.isNotEmpty() && label.lowercase() !in PIPELINE_CANONICAL && out.none { it.equals(label, true) }) out += label
+        }
+        return out
     }
 
     // ── Local-only sections ───────────────────────────────────────────────────

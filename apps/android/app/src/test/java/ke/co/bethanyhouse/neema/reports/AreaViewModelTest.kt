@@ -64,12 +64,17 @@ class AreaViewModelTest {
         assertTrue(toasts.none { it.type == ToastType.Error })
     }
 
-    @Test fun reports_loadFailure_showsEmptyNotLoading_andToasts() {
+    /**
+     * Deliberate fix: the web falls back to an empty list, so a failed download
+     * reads as a true "0 conversations". Here there is no list and the screen
+     * says why, with Retry; the server's "boom" is not a sentence for people.
+     */
+    @Test fun reports_loadFailure_showsTheReasonNotZeros() {
         val f = fake()
         f.on("GET", "/admin/conversations", code = 500, body = """{"detail":"boom"}""")
         val vm = ReportsViewModel(dash(f))
-        assertEquals(emptyList<Any>(), vm.allConvs.value)
-        assertEquals("Could not load conversations for this report.", toasts.single { it.type == ToastType.Error }.message)
+        assertNull(vm.allConvs.value)
+        assertEquals("Could not load conversations for this report.", vm.loadError.value)
     }
 
     @Test fun reports_refreshFailure_keepsTheRowsAlreadyShown() {

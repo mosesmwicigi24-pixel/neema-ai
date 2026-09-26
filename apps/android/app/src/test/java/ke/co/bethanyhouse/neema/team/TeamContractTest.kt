@@ -5,6 +5,7 @@ import ke.co.bethanyhouse.neema.core.perm.Perms
 import ke.co.bethanyhouse.neema.core.util.Fmt
 import ke.co.bethanyhouse.neema.feature.agents.AgentsViewModel
 import ke.co.bethanyhouse.neema.feature.agents.RoleForm
+import ke.co.bethanyhouse.neema.feature.agents.UNCERTAIN_SAVE
 import ke.co.bethanyhouse.neema.testing.FakeNeema
 import ke.co.bethanyhouse.neema.testing.Fixtures
 import ke.co.bethanyhouse.neema.testing.fixtures.TeamFixtures
@@ -124,11 +125,13 @@ class TeamContractTest : AreaTest() {
         assertEquals(1, done)
     }
 
-    @Test fun editOfAnAgentSomeoneElseRemovedShowsTheServersReason() {
+    /** Someone else removed them: the list is re-read, the dialog closes, and the toast names who is gone. */
+    @Test fun editOfAnAgentSomeoneElseRemovedSaysSo() {
         fake.on("PATCH", "/admin/agents/[^/]+", code = 404, body = """{"detail":"Agent not found"}""")
         vm.savePassword(agent(Fixtures.AGENT3_ID), "n3wpassword", "n3wpassword", onDone)
-        assertEquals("Agent not found", lastToast()?.message)
-        assertEquals(0, done)
+        assertEquals("Brian Otieno was removed by someone else", lastToast()?.message)
+        assertEquals(1, done)
+        assertTrue(fake.calls.any { it.method == "GET" && it.path == "/admin/agents" })
     }
 
     // ── DELETE /admin/agents/{id}: the server guards nothing ─────────────────
@@ -179,10 +182,12 @@ class TeamContractTest : AreaTest() {
         assertEquals(1, done)
     }
 
-    @Test fun assigningARoleSomeoneJustDeletedShowsNotFound() {
+    /** The role went, not the agent: roles are re-read and the dialog stays open to pick another. */
+    @Test fun assigningARoleSomeoneJustDeletedSaysSo() {
         vm.saveAssign(agent(Fixtures.AGENT3_ID), "role_gone", null, onDone)
-        assertEquals("Role not found", lastToast()?.message)
+        assertEquals("That role was deleted by someone else — pick another", lastToast()?.message)
         assertEquals(0, done)
+        assertTrue(fake.calls.any { it.method == "GET" && it.path == "/admin/roles" })
     }
 
     // ── /admin/roles ─────────────────────────────────────────────────────────
@@ -213,16 +218,20 @@ class TeamContractTest : AreaTest() {
         assertEquals(0, done)
     }
 
-    @Test fun deletingARoleAlreadyGoneShowsNotFound() {
+    /** Already gone is what was asked for: the dialog closes and the list is re-read. */
+    @Test fun deletingARoleAlreadyGoneCountsAsDone() {
         fake.on("DELETE", "/admin/roles/[^/]+", code = 404, body = """{"detail":"Role not found"}""")
         vm.deleteRole(vm.roles.value.first { it.id == "trainee" }, onDone)
-        assertEquals("Role not found", lastToast()?.message)
+        assertEquals("That role was already deleted", lastToast()?.message)
+        assertEquals(1, done)
     }
 
+    /** No answer, and the re-read shows the role unchanged: the form stays open, saying it may not have saved. */
     @Test fun aNetworkDropSaysSo() {
         fake.on("PATCH", "/admin/roles/[^/]+") { _, _ -> throw java.io.IOException("reset") }
         vm.saveRole(vm.roles.value.first { it.id == "sales" }, RoleForm("Sales"), onDone)
-        assertEquals("Network problem — check your connection", lastToast()?.message)
+        assertEquals(UNCERTAIN_SAVE, lastToast()?.message)
+        assertEquals(0, done)
     }
 
     @Test fun canStillManageTheTeamFromTheListRow() {

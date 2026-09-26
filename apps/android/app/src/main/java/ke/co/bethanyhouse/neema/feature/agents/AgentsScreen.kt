@@ -74,6 +74,8 @@ fun AgentsScreen(dash: DashboardViewModel) {
     val saving by vm.saving.collectAsStateWithLifecycle()
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()
     val availability by vm.availability.collectAsStateWithLifecycle()
+    val agentsError by vm.agentsError.collectAsStateWithLifecycle()
+    val rolesError by vm.rolesError.collectAsStateWithLifecycle()
     LaunchedEffect(agents) { vm.reconcile(agents) }
 
     val canRoles = dash.can(Perms.MANAGE_ROLES)
@@ -155,7 +157,14 @@ fun AgentsScreen(dash: DashboardViewModel) {
             }
 
             if (tab == "agents") {
-                if (agents.isEmpty()) {
+                if (agents.isEmpty() && agentsError != null) {
+                    item(key = "error") {
+                        ke.co.bethanyhouse.neema.feature.reports.LoadProblem(
+                            title = "Couldn't load the team",
+                            message = agentsError!!, retrying = refreshing, onRetry = vm::refresh,
+                        )
+                    }
+                } else if (agents.isEmpty()) {
                     item(key = "empty") {
                         Box(Modifier.fillMaxWidth().padding(vertical = 64.dp), contentAlignment = Alignment.Center) {
                             Text("No agents yet.", fontSize = 14.sp, color = c.textDim)
@@ -183,7 +192,14 @@ fun AgentsScreen(dash: DashboardViewModel) {
                 if (rolesLoading && roles.isEmpty()) {
                     item(key = "loading") { Loading(Modifier.height(160.dp)) }
                 } else {
-                    if (roles.isEmpty()) {
+                    if (roles.isEmpty() && rolesError != null) {
+                        item(key = "roleserror") {
+                            ke.co.bethanyhouse.neema.feature.reports.LoadProblem(
+                                title = "Couldn't load the roles",
+                                message = rolesError!!, retrying = refreshing, onRetry = vm::refresh,
+                            )
+                        }
+                    } else if (roles.isEmpty()) {
                         item(key = "noroles") {
                             EmptyState("No roles yet", "Create one with New Role.", icon = Icons.Outlined.VerifiedUser)
                         }
@@ -676,13 +692,16 @@ private fun RoleEditorDialog(editing: CustomRole?, saving: Boolean, onDismiss: (
     var description by rememberSaveable(key) { mutableStateOf(editing?.description ?: "") }
     var color by rememberSaveable(key) { mutableStateOf(editing?.color ?: ROLE_COLORS[0]) }
     var perms by rememberSaveable(key) { mutableStateOf(editing?.permissions ?: emptyList()) }
+    // One id per opened editor: a retry after a timeout updates the role the
+    // first attempt may have created instead of adding a second one.
+    val draftId = rememberSaveable(key) { "role_${AppClock.now()}" }
     FormDialog(
         title = if (editing == null) "New Role" else "Edit Role — ${editing.name}",
         onDismiss = onDismiss,
         buttons = {
             TeamButton(
                 if (saving) "Saving…" else if (editing == null) "Create Role" else "Save Role",
-                { onSave(RoleForm(name, description, color, perms)) },
+                { onSave(RoleForm(name, description, color, perms, id = draftId.takeIf { editing == null })) },
                 variant = BtnVariant.Primary, enabled = !saving,
             )
             TeamButton("Cancel", onDismiss)

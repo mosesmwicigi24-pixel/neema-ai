@@ -57,10 +57,13 @@ class SettingsContractTest : AreaTest() {
         assertEquals("Couldn't save (admin only)", lastToast()?.message)
     }
 
+    /** No answer and the server still holds the old text: say it may not have saved, and keep what was typed. */
     @Test fun directivesOfflineSaysSo() {
         fake.on("PUT", "/admin/settings/directives") { _, _ -> throw java.io.IOException("reset") }
+        vm.setDirectives("Push copes this week.")
         vm.saveDirectives()
-        assertEquals("Network problem — check your connection", lastToast()?.message)
+        assertEquals(ke.co.bethanyhouse.neema.feature.agents.UNCERTAIN_SAVE, lastToast()?.message)
+        assertEquals("Push copes this week.", vm.directives.value)
     }
 
     // ── /admin/settings/pipeline-stages ──────────────────────────────────────

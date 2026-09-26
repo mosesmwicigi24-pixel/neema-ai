@@ -239,6 +239,7 @@ private fun StandingOrdersCard(vm: SettingsViewModel) {
         "Standing Orders",
         "Live steering — Neema reads this before every reply. Emphasis only; pricing & payment rules always win.",
     ) {
+        CardLoadProblem(vm, "directives", "Couldn't load the standing orders")
         OutlinedTextField(
             value = text, onValueChange = vm::setDirectives, enabled = loaded,
             minLines = 4, maxLines = 10,
@@ -263,6 +264,21 @@ private fun StandingOrdersCard(vm: SettingsViewModel) {
     }
 }
 
+/**
+ * A live card whose read failed: the reason and a Retry for that card alone.
+ * Answers whether it is showing (so the card can skip its "Loading…").
+ */
+@Composable
+private fun CardLoadProblem(vm: SettingsViewModel, card: String, title: String): Boolean {
+    val errors by vm.loadErrors.collectAsStateWithLifecycle()
+    val why = errors[card] ?: return false
+    ke.co.bethanyhouse.neema.feature.reports.LoadProblem(
+        title = title, message = why, onRetry = { vm.retry(card) },
+        modifier = Modifier.padding(bottom = 10.dp),
+    )
+    return true
+}
+
 // ── Translation ───────────────────────────────────────────────────────────────
 
 @Composable
@@ -275,6 +291,7 @@ private fun TranslationCard(vm: SettingsViewModel) {
         "Shows an English line under any message that is not English or Swahili — in both directions, so you can " +
             "follow a whole conversation. Customers never see it.",
     ) {
+        if (CardLoadProblem(vm, "translation", "Couldn't load the translation setting")) return@SectionCard
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 val s = state
@@ -319,7 +336,7 @@ private fun OfferCard(vm: SettingsViewModel, dash: DashboardViewModel) {
     ) {
         val s = state
         if (s == null) {
-            Text("Loading…", fontSize = 12.sp, color = c.muted)
+            if (!CardLoadProblem(vm, "offer", "Couldn't load the offer")) Text("Loading…", fontSize = 12.sp, color = c.muted)
             return@SectionCard
         }
         val campaign = s.campaign
@@ -621,9 +638,11 @@ private fun PipelineStagesCard(vm: SettingsViewModel) {
     ) {
         val list = stages
         if (list == null) {
-            Text("Loading…", fontSize = 12.sp, color = c.muted)
+            if (!CardLoadProblem(vm, "stages", "Couldn't load the pipeline stages")) Text("Loading…", fontSize = 12.sp, color = c.muted)
             return@SectionCard
         }
+        // The typed label is cleared only once the server has kept it; a failed save leaves it to retry.
+        fun add() { val sent = newStage; vm.addStage(sent) { if (newStage == sent) newStage = "" } }
         // The order a lead moves through, customs in place.
         Text(
             (CANONICAL_BEFORE + list + listOf("Won")).joinToString(" → ") + " / Lost",
@@ -653,7 +672,7 @@ private fun PipelineStagesCard(vm: SettingsViewModel) {
                     value = newStage, onValueChange = { newStage = it.take(PIPELINE_LABEL_MAX) }, singleLine = true,
                     placeholder = { Text("Stage label (e.g. Sampling)…", fontSize = 13.sp, color = c.muted) },
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { if (vm.addStage(newStage)) newStage = "" }),
+                    keyboardActions = KeyboardActions(onDone = { add() }),
                     shape = RoundedCornerShape(10.dp),
                     textStyle = LocalTextStyle.current.copy(fontSize = 14.sp),
                     supportingText = { Text("${newStage.length}/$PIPELINE_LABEL_MAX", fontSize = 10.sp) },
@@ -661,7 +680,7 @@ private fun PipelineStagesCard(vm: SettingsViewModel) {
                 )
                 Spacer(Modifier.width(6.dp))
                 Button(
-                    onClick = { if (vm.addStage(newStage)) newStage = "" },
+                    onClick = { add() },
                     enabled = newStage.isNotBlank() && !saving,
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFA97C14), contentColor = Color.White),

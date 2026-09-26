@@ -9,8 +9,15 @@ import ke.co.bethanyhouse.neema.app.ToastType
 import ke.co.bethanyhouse.neema.core.model.Agent
 import ke.co.bethanyhouse.neema.core.model.CustomRole
 import ke.co.bethanyhouse.neema.core.net.ApiException
+import ke.co.bethanyhouse.neema.feature.reports.BUSY_TEXT
 import ke.co.bethanyhouse.neema.feature.reports.ScreenLife
+import ke.co.bethanyhouse.neema.feature.reports.attempt
+import ke.co.bethanyhouse.neema.feature.reports.friendlyError
+import ke.co.bethanyhouse.neema.feature.reports.httpStatus
+import ke.co.bethanyhouse.neema.feature.reports.masking
+import ke.co.bethanyhouse.neema.feature.reports.mayHaveApplied
 import ke.co.bethanyhouse.neema.feature.reports.quietly
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,7 +35,23 @@ data class RoleForm(
     val description: String = "",
     val color: String = ROLE_COLORS[0],
     val permissions: List<String> = emptyList(),
+    /**
+     * A new role's id, fixed when its editor opens. roles.py create_role
+     * upserts by id, so re-sending after a timeout updates the role the first
+     * try may have made instead of adding a twin.
+     */
+    val id: String? = null,
 )
+
+/** The availability switch's failure: the web's words, unless the phone is offline or signed out. */
+internal fun availabilityFailure(e: Throwable): String = when (e.httpStatus()) {
+    0, 401, 429 -> friendlyError(e)
+    else -> "Failed to update availability"
+}
+
+/** What a write that got no answer says when it can't tell whether it landed. */
+internal const val UNCERTAIN_SAVE =
+    "No answer from the server, so this may not have saved — what you typed is kept. Check your connection and try again."
 
 /**
  * Team management (AgentsView.tsx): agents come from the dashboard's shared
@@ -36,6 +59,14 @@ data class RoleForm(
  * changed, like the web, and reports through the dashboard's toasts.
  * Dialog callbacks ([onDone]) fire only on success so a failed save keeps
  * the form open with what was typed.
+ *
+ * On a phone network three failures get more than a toast:
+ * - No answer (a timeout, a dropped connection): the write may have landed,
+ *   so the truth is re-read, and if it shows the change the save counts as
+ *   done; otherwise the form stays open, input intact, and says so.
+ * - 404: someone else deleted the agent or role — the list is re-read (the
+ *   row disappears) and the toast says who is gone.
+ * - A cancelled write (signing out mid-save) says nothing at all.
  */
 class AgentsViewModel(private val dash: DashboardViewModel) : ViewModel() {
     private val team = TeamApi(dash.api.http)
@@ -45,6 +76,14 @@ class AgentsViewModel(private val dash: DashboardViewModel) : ViewModel() {
 
     private val _rolesLoading = MutableStateFlow(true)
     val rolesLoading: StateFlow<Boolean> = _rolesLoading.asStateFlow()
+
+    private val _rolesError = MutableStateFlow<String?>(null)
+    /** Why the roles couldn't be read; the Roles tab shows it (with Retry) rather than "No roles yet". */
+    val rolesError: StateFlow<String?> = _rolesError.asStateFlow()
+
+    private val _agentsError = MutableStateFlow<String?>(null)
+    /** Why the team couldn't be read when this screen asked; shown instead of "No agents yet." while the list is empty. */
+    val agentsError: StateFlow<String?> = _agentsError.asStateFlow()
 
     private val _saving = MutableStateFlow(false)
     val saving: StateFlow<Boolean> = _saving.asStateFlow()
@@ -59,6 +98,9 @@ class AgentsViewModel(private val dash: DashboardViewModel) : ViewModel() {
     private val _availability = MutableStateFlow<Map<String, Boolean>>(emptyMap())
     val availability: StateFlow<Map<String, Boolean>> = _availability.asStateFlow()
 
+    /** Agents whose availability change is on the wire: a second tap waits for the first. */
+    private val toggling = mutableSetOf<String>()
+
     /**
      * The team (availability, last seen, active chats) is the dashboard's
      * 3-minute poll, which pauses in the background and refetches on return
@@ -70,56 +112,114 @@ class AgentsViewModel(private val dash: DashboardViewModel) : ViewModel() {
         viewModelScope, dash.foreground, catchUpOnForeground = false,
         catchUp = {
             coroutineScope {
-                launch { quietly { dash.refreshAgents() } }
-                launch { quietly { _roles.value = dash.api.roles.list() } }
+                launch { loadAgents() }
+                launch { quietly { _roles.value = dash.api.roles.list(); _rolesError.value = null } }
             }
         },
     )
 
-    init { viewModelScope.launch { fetchRoles() } }
+    init {
+        viewModelScope.launch { fetchRoles() }
+        // The sign-in read of the team failed (offline at start): ask now rather than wait 3 minutes.
+        if (dash.agents.value.isEmpty()) viewModelScope.launch { loadAgents() }
+        viewModelScope.launch { dash.agents.collect { if (it.isNotEmpty()) _agentsError.value = null } }
+    }
+
+    private suspend fun loadAgents(): Throwable? =
+        attempt { dash.refreshAgents() }
+            .onSuccess { _agentsError.value = null }
+            .onFailure { _agentsError.value = friendlyError(it, fallback = "The server couldn't send the team just now.") }
+            .exceptionOrNull()
 
     private suspend fun fetchRoles() {
         _rolesLoading.value = true
-        try { _roles.value = dash.api.roles.list() }
-        catch (e: Exception) { dash.toast("Failed to load roles", ToastType.Error) }
-        finally { _rolesLoading.value = false }
+        try {
+            _roles.value = dash.api.roles.list()
+            _rolesError.value = null
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            ke.co.bethanyhouse.neema.feature.reports.stillHere()
+            _rolesError.value = friendlyError(e, fallback = "The server couldn't send the roles just now.")
+            dash.toast("Failed to load roles", ToastType.Error)
+        } finally { _rolesLoading.value = false }
     }
 
-    /** Pull-to-refresh: the spinner lasts until the team and the roles have both landed. */
+    /** Pull-to-refresh (and the Retry buttons): the spinner lasts until the team and the roles have both landed. */
     fun refresh() {
+        if (_refreshing.value) return
         viewModelScope.launch {
             _refreshing.value = true
-            coroutineScope {
-                launch { quietly { dash.refreshAgents() } }
-                launch { fetchRoles() }
-            }
-            _refreshing.value = false
+            try {
+                var failed: Throwable? = null
+                coroutineScope {
+                    launch { failed = loadAgents() }
+                    launch { fetchRoles() }
+                }
+                // Agents on screen stay; the pull says it couldn't reach the server.
+                failed?.takeIf { dash.agents.value.isNotEmpty() }?.let {
+                    dash.toast("Couldn't refresh the team. ${friendlyError(it)}", ToastType.Error)
+                }
+            } finally { _refreshing.value = false }
         }
     }
 
     /**
-     * Runs [block] with the shared saving flag, toasting any failure.
-     * [fallbackError] replaces the server's words entirely (the web's fixed
-     * "Failed to remove"); [serverError] is what a 5xx says instead of the bare
-     * "Internal Server Error" body the API sends when the database refuses a
-     * write (admin.py has no handler for IntegrityError).
+     * One write under the shared saving flag (a second tap while it is in
+     * flight does nothing). [write] is the request; [done] the success path
+     * (refetch, close the dialog, toast).
+     *
+     * - A timeout or dropped connection runs [verify] (a fresh read); true
+     *   means the write landed after all, so [done] runs.
+     * - A 404 goes to [onGone], which answers whether it dealt with it.
+     * - Otherwise [fallbackError] replaces the server's words entirely (the
+     *   web's fixed "Failed to remove"); [serverError] is what a 5xx says
+     *   instead of the bare "Internal Server Error" the API sends when the
+     *   database refuses a write (admin.py has no handler for IntegrityError).
+     * - [secret] (a typed password) is masked out of anything shown.
      */
-    private fun save(fallbackError: String? = null, serverError: String = "Something went wrong — please try again", block: suspend () -> Unit) {
+    private fun save(
+        fallbackError: String? = null,
+        serverError: String = "Something went wrong — please try again",
+        secret: String = "",
+        verify: (suspend () -> Boolean)? = null,
+        onGone: (suspend (ApiException) -> Boolean)? = null,
+        write: suspend () -> Unit,
+        done: suspend () -> Unit,
+    ) {
         if (_saving.value) return
+        _saving.value = true
         viewModelScope.launch {
-            _saving.value = true
-            try { block() }
-            catch (e: Exception) { dash.toast(fallbackError ?: failText(e, serverError), ToastType.Error) }
-            finally { _saving.value = false }
+            try {
+                try {
+                    write()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    ke.co.bethanyhouse.neema.feature.reports.stillHere()
+                    if (e.mayHaveApplied()) {
+                        if (verify != null && attempt { verify() }.getOrDefault(false)) { done(); return@launch }
+                        dash.toast(UNCERTAIN_SAVE, ToastType.Error)
+                        return@launch
+                    }
+                    if (e is ApiException && e.status == 404 && onGone != null && onGone(e)) return@launch
+                    // The web's fixed words are for a refusal, not for "you're offline" or "sign in again".
+                    val fixed = fallbackError?.takeUnless { e.httpStatus() == 0 || e.httpStatus() == 401 }
+                    dash.toast((fixed ?: failText(e, serverError)).masking(secret), ToastType.Error)
+                    return@launch
+                }
+                done()
+            } finally { _saving.value = false }
         }
     }
 
     private fun failText(e: Exception, serverError: String): String {
-        val status = (e as? ApiException)?.status ?: return dash.errorText(e)
+        val status = e.httpStatus() ?: return friendlyError(e, serverError)
         return when {
             status == 409 -> "An agent with that email already exists"
-            status >= 500 -> serverError
-            else -> dash.errorText(e)
+            status == 429 -> BUSY_TEXT
+            status in 500..501 -> serverError
+            else -> friendlyError(e, serverError)
         }
     }
 
@@ -130,6 +230,20 @@ class AgentsViewModel(private val dash: DashboardViewModel) : ViewModel() {
     private fun emailTaken(email: String, exceptId: String? = null): Boolean =
         dash.agents.value.any { it.id != exceptId && it.email.trim().equals(email.trim(), ignoreCase = true) }
 
+    /** The team as the server has it now (the dashboard's list follows). */
+    private suspend fun freshAgents(): List<Agent> { dash.refreshAgents(); return dash.agents.value }
+
+    /** A 404 on [agent]: someone else removed them. The list is re-read so their card goes, and the dialog with it. */
+    private fun agentGone(agent: Agent, onDone: () -> Unit): suspend (ApiException) -> Boolean = { e ->
+        if (e.detail.contains("Role not found", ignoreCase = true)) false
+        else {
+            quietly { dash.refreshAgents() }
+            onDone()
+            dash.toast("${agent.name.ifBlank { "This agent" }} was removed by someone else", ToastType.Error)
+            true
+        }
+    }
+
     // ── Agent CRUD ────────────────────────────────────────────────────────────
 
     fun createAgent(name: String, email: String, password: String, roleId: String, onDone: () -> Unit) {
@@ -137,33 +251,55 @@ class AgentsViewModel(private val dash: DashboardViewModel) : ViewModel() {
             return dash.toast("Name, email and password are required", ToastType.Error)
         if (password.length < 8) return dash.toast("Password must be ≥8 characters", ToastType.Error)
         if (emailTaken(email)) return dash.toast("An agent with that email already exists", ToastType.Error)
-        save(serverError = "Couldn't create the agent — that email may already be in use") {
-            dash.api.agents.create(name.trim(), email.trim(), password, toDbRole(roleId))
-            dash.refetchAgents()
-            onDone()
-            dash.toast("Agent created")
-        }
+        save(
+            serverError = "Couldn't create the agent — that email may already be in use",
+            secret = password,
+            // No answer: if the address is on the team now, the create went through.
+            verify = { freshAgents().any { it.email.trim().equals(email.trim(), ignoreCase = true) } },
+            write = { dash.api.agents.create(name.trim(), email.trim(), password, toDbRole(roleId)) },
+            done = {
+                dash.refetchAgents()
+                onDone()
+                dash.toast("Agent created")
+            },
+        )
     }
 
     fun saveEdit(agent: Agent, name: String, email: String, onDone: () -> Unit) {
         if (name.isBlank() || email.isBlank()) return dash.toast("Name and email required", ToastType.Error)
         if (emailTaken(email, exceptId = agent.id)) return dash.toast("An agent with that email already exists", ToastType.Error)
-        save(serverError = "Couldn't update the agent — that email may already be in use") {
-            team.updateAgent(agent.id, buildJsonObject { put("name", name.trim()); put("email", email.trim()) })
-            dash.refetchAgents()
-            onDone()
-            dash.toast("Agent updated")
-        }
+        save(
+            serverError = "Couldn't update the agent — that email may already be in use",
+            verify = {
+                freshAgents().find { it.id == agent.id }
+                    ?.let { it.name == name.trim() && it.email.equals(email.trim(), ignoreCase = true) } == true
+            },
+            onGone = agentGone(agent, onDone),
+            write = { team.updateAgent(agent.id, buildJsonObject { put("name", name.trim()); put("email", email.trim()) }) },
+            done = {
+                dash.refetchAgents()
+                onDone()
+                dash.toast("Agent updated")
+            },
+        )
     }
 
+    /**
+     * No [verify]: a password can't be read back. Setting the same one again
+     * is harmless, so a save with no answer keeps both fields for another go.
+     */
     fun savePassword(agent: Agent, password: String, confirm: String, onDone: () -> Unit) {
         if (password.length < 8) return dash.toast("Password must be ≥8 characters", ToastType.Error)
         if (password != confirm) return dash.toast("Passwords do not match", ToastType.Error)
-        save {
-            team.updateAgent(agent.id, buildJsonObject { put("password", password) })
-            onDone()
-            dash.toast("Password updated")
-        }
+        save(
+            secret = password,
+            onGone = agentGone(agent, onDone),
+            write = { team.updateAgent(agent.id, buildJsonObject { put("password", password) }) },
+            done = {
+                onDone()
+                dash.toast("Password updated")
+            },
+        )
     }
 
     /**
@@ -193,15 +329,29 @@ class AgentsViewModel(private val dash: DashboardViewModel) : ViewModel() {
         doDelete(agent, onDone)
     }
 
-    private fun doDelete(agent: Agent, onDone: () -> Unit) = save("Failed to remove") {
-        dash.api.agents.delete(agent.id)
-        dash.refetchAgents()
-        onDone()
-        dash.toast("Agent removed")
-    }
+    private fun doDelete(agent: Agent, onDone: () -> Unit) = save(
+        fallbackError = "Failed to remove",
+        // No answer: gone from the team means the delete went through.
+        verify = { freshAgents().none { it.id == agent.id } },
+        // Someone else removed them first: what was asked for is done.
+        onGone = {
+            quietly { dash.refreshAgents() }
+            onDone()
+            dash.toast("${agent.name.ifBlank { "This agent" }} was already removed")
+            true
+        },
+        write = { dash.api.agents.delete(agent.id) },
+        done = {
+            dash.refetchAgents()
+            onDone()
+            dash.toast("Agent removed")
+        },
+    )
 
     fun toggleOnline(agent: Agent, current: Boolean) {
+        if (agent.id in toggling) return
         val next = !current
+        toggling += agent.id
         _availability.update { it + (agent.id to next) }
         viewModelScope.launch {
             try {
@@ -209,10 +359,27 @@ class AgentsViewModel(private val dash: DashboardViewModel) : ViewModel() {
                 dash.refetchAgents()
                 // The dashboard also polls /me; keep the signed-in agent's own row in step.
                 if (agent.id == dash.me.value?.id) dash.refetchMe()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _availability.update { it - agent.id }
-                dash.toast("Failed to update availability", ToastType.Error)
-            }
+                ke.co.bethanyhouse.neema.feature.reports.stillHere()
+                when {
+                    // It may have flipped: show the server's value rather than guess.
+                    e.mayHaveApplied() -> {
+                        val truth = attempt { freshAgents().find { it.id == agent.id }?.isAvailable }.getOrNull()
+                        _availability.update { it - agent.id }
+                        if (truth != next) dash.toast("Couldn't reach the server — availability unchanged", ToastType.Error)
+                    }
+                    e.httpStatus() == 404 -> {
+                        _availability.update { it - agent.id }
+                        agentGone(agent) {}(e as ApiException)
+                    }
+                    else -> {
+                        _availability.update { it - agent.id }
+                        dash.toast(availabilityFailure(e), ToastType.Error)
+                    }
+                }
+            } finally { toggling -= agent.id }
         }
     }
 
@@ -231,49 +398,95 @@ class AgentsViewModel(private val dash: DashboardViewModel) : ViewModel() {
      */
     fun saveAssign(agent: Agent, roleId: String, customPermissions: List<String>?, onDone: () -> Unit) {
         if (roleId.isEmpty()) return dash.toast("Please select a role", ToastType.Error)
-        save {
-            team.assignRole(agent.id, roleId, customPermissions)
-            dash.refetchAgents()
-            if (agent.id == dash.me.value?.id) dash.refetchMe()
-            onDone()
-            dash.toast("Role assigned")
-        }
+        val gone = agentGone(agent, onDone)
+        save(
+            verify = {
+                freshAgents().find { it.id == agent.id }
+                    ?.let { it.customRoleId == roleId && it.customPermissions == customPermissions } == true
+            },
+            onGone = { e ->
+                if (e.detail.contains("Role not found", ignoreCase = true)) {
+                    // The role went, not the agent: re-read the roles and let them pick another.
+                    quietly { _roles.value = dash.api.roles.list() }
+                    dash.toast("That role was deleted by someone else — pick another", ToastType.Error)
+                    true
+                } else gone(e)
+            },
+            write = { team.assignRole(agent.id, roleId, customPermissions) },
+            done = {
+                dash.refetchAgents()
+                if (agent.id == dash.me.value?.id) dash.refetchMe()
+                onDone()
+                dash.toast("Role assigned")
+            },
+        )
     }
 
     // ── Role CRUD ─────────────────────────────────────────────────────────────
 
+    /** The roles as the server has them now. */
+    private suspend fun freshRoles(): List<CustomRole> = dash.api.roles.list().also { _roles.value = it }
+
     /** [editing] null = create a new role. */
     fun saveRole(editing: CustomRole?, form: RoleForm, onDone: () -> Unit) {
         if (form.name.isBlank()) return dash.toast("Role name required", ToastType.Error)
-        save {
-            if (editing == null) {
-                dash.api.roles.create(
-                    id = "role_${AppClock.now()}",
-                    name = form.name, description = form.description,
-                    color = form.color, permissions = form.permissions,
-                )
-                dash.toast("Role created")
-            } else {
-                dash.api.roles.update(editing.id, buildJsonObject {
-                    put("name", form.name)
-                    put("description", form.description)
-                    put("color", form.color)
-                    putJsonArray("permissions") { form.permissions.forEach { add(JsonPrimitive(it)) } }
-                })
-                dash.toast("Role updated")
-            }
-            fetchRoles()
-            // Agents on this role carry its permissions in their rows.
-            dash.refetchAgents()
-            onDone()
-        }
+        val newId = form.id ?: "role_${AppClock.now()}"
+        val id = editing?.id ?: newId
+        save(
+            verify = {
+                freshRoles().find { it.id == id }?.let {
+                    it.name == form.name && it.description == form.description &&
+                        it.color.equals(form.color, ignoreCase = true) && it.permissions.toSet() == form.permissions.toSet()
+                } == true
+            },
+            onGone = {
+                quietly { freshRoles() }
+                onDone()
+                dash.toast("That role was deleted by someone else", ToastType.Error)
+                true
+            },
+            write = {
+                if (editing == null) {
+                    dash.api.roles.create(
+                        id = newId,
+                        name = form.name, description = form.description,
+                        color = form.color, permissions = form.permissions,
+                    )
+                } else {
+                    dash.api.roles.update(editing.id, buildJsonObject {
+                        put("name", form.name)
+                        put("description", form.description)
+                        put("color", form.color)
+                        putJsonArray("permissions") { form.permissions.forEach { add(JsonPrimitive(it)) } }
+                    })
+                }
+            },
+            done = {
+                dash.toast(if (editing == null) "Role created" else "Role updated")
+                fetchRoles()
+                // Agents on this role carry its permissions in their rows.
+                dash.refetchAgents()
+                onDone()
+            },
+        )
     }
 
-    fun deleteRole(role: CustomRole, onDone: () -> Unit) = save {
-        dash.api.roles.delete(role.id)
-        fetchRoles()
-        dash.refetchAgents()
-        onDone()
-        dash.toast("Role deleted")
-    }
+    fun deleteRole(role: CustomRole, onDone: () -> Unit) = save(
+        verify = { freshRoles().none { it.id == role.id } },
+        // Someone else deleted it first: what was asked for is done.
+        onGone = {
+            quietly { freshRoles() }
+            dash.refetchAgents()
+            onDone()
+            dash.toast("That role was already deleted")
+            true
+        },
+        write = { dash.api.roles.delete(role.id) },
+        done = {
+            fetchRoles()
+            dash.refetchAgents()
+            onDone()
+            dash.toast("Role deleted")
+        },
+    )
 }

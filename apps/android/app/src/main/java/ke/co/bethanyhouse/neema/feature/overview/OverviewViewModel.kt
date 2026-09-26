@@ -9,6 +9,9 @@ import ke.co.bethanyhouse.neema.core.model.Attribution
 import ke.co.bethanyhouse.neema.core.model.Conversation
 import ke.co.bethanyhouse.neema.core.model.Stats
 import ke.co.bethanyhouse.neema.feature.reports.quietly
+import ke.co.bethanyhouse.neema.feature.reports.attempt
+import ke.co.bethanyhouse.neema.feature.reports.friendlyError
+import ke.co.bethanyhouse.neema.app.ToastType
 import ke.co.bethanyhouse.neema.core.ws.str
 import ke.co.bethanyhouse.neema.feature.reports.Coalescer
 import ke.co.bethanyhouse.neema.feature.reports.ScreenLife
@@ -42,6 +45,13 @@ class OverviewViewModel(private val dash: DashboardViewModel) : ViewModel() {
 
     private val _statsLoading = MutableStateFlow(true)
     val statsLoading: StateFlow<Boolean> = _statsLoading.asStateFlow()
+
+    private val _statsError = MutableStateFlow<String?>(null)
+    /**
+     * Why the server's headline counts couldn't be read, while the cards show
+     * the phone's own estimate instead; null once they arrive.
+     */
+    val statsError: StateFlow<String?> = _statsError.asStateFlow()
 
     private val _attrib = MutableStateFlow<Attribution?>(null)
     val attrib: StateFlow<Attribution?> = _attrib.asStateFlow()
@@ -103,7 +113,7 @@ class OverviewViewModel(private val dash: DashboardViewModel) : ViewModel() {
     /** The poll's pair: server stats and the human-held threads. */
     private suspend fun loadLive() {
         coroutineScope {
-            launch { quietly { _stats.value = dash.api.stats.overview() } }
+            launch { quietly { _stats.value = dash.api.stats.overview(); _statsError.value = null } }
             launch { loadHuman() }
         }
     }
@@ -116,44 +126,58 @@ class OverviewViewModel(private val dash: DashboardViewModel) : ViewModel() {
         }
     }
 
-    private suspend fun loadAll() {
+    /** Loads everything; answers why the headline figures failed, or null. */
+    private suspend fun loadAll(): Throwable? {
         _statsLoading.value = true
-        runCatching { dash.api.stats.overview() }
-            .onSuccess { _stats.value = it }
-            .onFailure {
-                // A failed pull-to-refresh keeps the figures already on screen
-                // (like the web's 30 s poll); only a first load falls back.
-                if (_stats.value == null) loadFallback()
-            }
+        val failed = attempt { dash.api.stats.overview() }
+            .onSuccess { _stats.value = it; _statsError.value = null }
+            .exceptionOrNull()
+        if (failed != null && _stats.value == null) {
+            // A failed pull-to-refresh keeps the figures already on screen
+            // (like the web's 30 s poll); only a first load falls back — and,
+            // unlike the web, says the cards are an estimate, and why.
+            _statsError.value = friendlyError(failed, fallback = "The server couldn't count them just now.")
+            loadFallback()
+        }
         _statsLoading.value = false
-        runCatching { dash.api.attribution() }.onSuccess { _attrib.value = it }
+        attempt { dash.api.attribution() }.onSuccess { _attrib.value = it }
         loadHuman()
         // The web's feed reads `humanRows ?? conversations`: with no human tab,
         // the intercepts come from the inbox's own rows.
         if (_humanRows.value == null && _fallbackConvs.value.isEmpty()) loadFallback()
+        return failed
     }
 
     private suspend fun loadFallback() {
-        runCatching { dash.api.conversations.page(InboxQuery(), limit = 50) }
+        attempt { dash.api.conversations.page(InboxQuery(), limit = 50) }
             .onSuccess { _fallbackConvs.value = it.items }
     }
 
     private suspend fun loadHuman() {
-        runCatching { dash.api.conversations.page(InboxQuery(tab = "human"), limit = 10) }
+        attempt { dash.api.conversations.page(InboxQuery(tab = "human"), limit = 10) }
             .onSuccess { _humanRows.value = it.items }
     }
 
-    /** Pull-to-refresh: the three calls, plus the orders, team and catalogue the fallbacks read — the spinner lasts until all land. */
+    /**
+     * Pull-to-refresh (and the notice's Retry): the three calls, plus the
+     * orders, team and catalogue the fallbacks read — the spinner lasts until
+     * all land. A refresh that couldn't reach the server says so; the
+     * figures already on screen stay.
+     */
     fun refresh() {
+        if (_refreshing.value) return
         viewModelScope.launch {
             _refreshing.value = true
-            coroutineScope {
-                launch { quietly { dash.refreshOrders() } }
-                launch { quietly { dash.refreshAgents() } }
-                launch { quietly { dash.refreshCatalog() } }
-                loadAll()
-            }
-            _refreshing.value = false
+            try {
+                val failed = coroutineScope {
+                    launch { quietly { dash.refreshOrders() } }
+                    launch { quietly { dash.refreshAgents() } }
+                    launch { quietly { dash.refreshCatalog() } }
+                    loadAll()
+                }
+                if (failed != null && _stats.value != null)
+                    dash.toast("Couldn't refresh the figures. ${friendlyError(failed)}", ToastType.Error)
+            } finally { _refreshing.value = false }
         }
     }
 }

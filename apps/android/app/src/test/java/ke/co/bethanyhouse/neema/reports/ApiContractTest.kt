@@ -180,8 +180,12 @@ class ApiContractTest {
             val f = fake()
             f.on("GET", "/admin/conversations", code = code, body = body)
             val vm = ReportsViewModel(dash(f))
-            assertEquals(emptyList<Any>(), vm.allConvs.value)
-            assertEquals(listOf("Could not load conversations for this report."), toasts.filter { it.type == ToastType.Error }.map { it.message })
+            // No list, never zeros: the screen shows the reason with Retry (no markup, no stock text).
+            assertNull(vm.allConvs.value)
+            assertEquals(
+                if (code == 502) "The server is unavailable right now — try again in a moment." else "Could not load conversations for this report.",
+                vm.loadError.value,
+            )
         }
     }
 

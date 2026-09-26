@@ -141,6 +141,7 @@ fun CatalogScreen(
     val audit by vm.audit.collectAsStateWithLifecycle()
     val auditOpen by vm.auditOpen.collectAsStateWithLifecycle()
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()
+    val catalogError by vm.catalogError.collectAsStateWithLifecycle()
     val c = Neema.colors
 
     val categories = remember(catalog) { catalogCategories(catalog) }
@@ -230,7 +231,15 @@ fun CatalogScreen(
                         row.forEach { item -> ProductCard(item = item, onOpen = { detail = item }) }
                     }
                 }
-                if (filtered.isEmpty()) {
+                if (catalog.isEmpty() && catalogError != null) {
+                    // Nothing loaded and the last read failed: "No items found" would be untrue.
+                    item(key = "error") {
+                        ke.co.bethanyhouse.neema.feature.reports.LoadProblem(
+                            title = "Couldn't load the catalogue",
+                            message = catalogError!!, retrying = refreshing, onRetry = vm::retry,
+                        )
+                    }
+                } else if (filtered.isEmpty()) {
                     item(key = "empty") {
                         Column(Modifier.fillMaxWidth().padding(vertical = 64.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             Text("📦", fontSize = 30.sp)
