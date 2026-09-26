@@ -258,7 +258,7 @@ class CallManagerTest {
     }
 
     @Test fun answerFailureShowsCopyThenHangsUp() = rig { r ->
-        r.api.offerError = ApiException(404, "GET", "/admin/calls/wacid.1/offer", """{"detail":"call offer expired or not found"}""")
+        r.api.offerError = ApiException(503, "GET", "/admin/calls/wacid.1/offer", """{"detail":"calling unavailable"}""")
         r.ring()
         r.calls.answer(); r.settle()
         assertEquals("Couldn't connect the call", r.state.error)

@@ -209,7 +209,7 @@ class CallApiContractTest {
         fake.on("POST", CallsFixtures.route(C1, "answer"), code = 502, body = """{"detail":"accept failed: boom"}""")
         assertEquals("Couldn't connect the call", CallManager.answerError(runCatching { api.answer(C1, "sdp") }.exceptionOrNull()!!))
         fake.on("GET", CallsFixtures.route(C1, "offer"), code = 404, body = """{"detail":"call offer expired or not found"}""")
-        assertEquals("Couldn't connect the call", CallManager.answerError(runCatching { api.offer(C1) }.exceptionOrNull()!!))
+        assertEquals(CallManager.CALL_GONE,CallManager.answerError(runCatching { api.offer(C1) }.exceptionOrNull()!!))
         fake.on("GET", CallsFixtures.route(C1, "offer"), code = 503, body = """{"detail":"calling unavailable"}""")
         assertEquals("Couldn't connect the call", CallManager.answerError(runCatching { api.offer(C1) }.exceptionOrNull()!!))
     }

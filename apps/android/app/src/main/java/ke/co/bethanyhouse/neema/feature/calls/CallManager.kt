@@ -31,12 +31,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
+import java.io.File
 
 /** idle | ringing | connecting | in_call | ended (lib/callContext.tsx). */
 enum class CallPhase { Idle, Ringing, Connecting, InCall, Ended }
@@ -54,6 +56,10 @@ data class CallUiState(
     val note: String? = null,
     /** True while we placed the call (ringing THEM). */
     val outbound: Boolean = false,
+    /** The network blipped mid-call: ICE is trying to recover (see [CallManager.ICE_GRACE_MS]). */
+    val reconnecting: Boolean = false,
+    /** A request the card is waiting on (saving a callback): its buttons are disabled. */
+    val busy: Boolean = false,
 )
 
 /**
@@ -107,6 +113,20 @@ data class CallUiState(
  *    a call answered on a colleague's phone stops this one within 2.5s;
  *  - ringing stops after [RING_TIMEOUT_MS] even if every end signal was lost
  *    (the server treats a call still ringing after 2 minutes as missed).
+ *
+ * Network failures (a phone network drops calls the web never sees):
+ *  - a "disconnected" peer is a blip, not the end: the call shows
+ *    "Reconnecting…" and ends only if ICE has not recovered within
+ *    [ICE_GRACE_MS] (the web hangs up on the first blip);
+ *  - hang-up ends the call on this phone at once; the terminate request
+ *    follows in the background and is retried while the server can't be
+ *    reached (the web waited up to 30s for it, the card frozen meanwhile);
+ *  - an answer or outbound call whose request timed out may still have gone
+ *    through: an answer waits for the media to connect before calling it
+ *    failed, an outbound call looks for the row the server wrote;
+ *  - the callback note says the callback was saved only once the server said
+ *    so; otherwise it says it is still trying, and retries;
+ *  - recordings are kept on disk until uploaded ([RecordingOutbox]).
  */
 class CallManager internal constructor(
     private val api: CallApi,
@@ -124,6 +144,8 @@ class CallManager internal constructor(
     private val main: CoroutineDispatcher,
     io: CoroutineDispatcher,
     private val now: () -> Long,
+    /** Where recordings wait until the server has them. */
+    outboxDir: File = java.nio.file.Files.createTempDirectory("neema-call-rec").toFile(),
 ) {
     constructor(
         context: Context,
@@ -149,10 +171,12 @@ class CallManager internal constructor(
         main = Dispatchers.Main,
         io = Dispatchers.IO,
         now = System::currentTimeMillis,
+        outboxDir = File(context.filesDir, "call-recordings"),
     )
 
     private val ui = CoroutineScope(scope.coroutineContext + main)
     private val bg = CoroutineScope(scope.coroutineContext + io)
+    private val outbox = RecordingOutbox(outboxDir, now)
 
     private val _state = MutableStateFlow(CallUiState())
     val state: StateFlow<CallUiState> = _state.asStateFlow()
@@ -174,6 +198,8 @@ class CallManager internal constructor(
     private var timerJob: Job? = null
     private var resetJob: Job? = null
     private var ringTimeoutJob: Job? = null
+    /** Running while a "disconnected" peer has its chance to recover. */
+    private var graceJob: Job? = null
     /** An incoming call was ignored because another call was on screen: look again once it's over. */
     private var missedWhileBusy = false
     private var started = false
@@ -201,12 +227,14 @@ class CallManager internal constructor(
         // background — and when the app comes back on screen.
         ui.launch {
             var was = connected.value
-            connected.collect { c -> if (c && !was) pollOnce(); was = c }
+            connected.collect { c -> if (c && !was) { pollOnce(); drainRecordings() }; was = c }
         }
         ui.launch {
             var was = foreground.value
-            foreground.collect { fg -> if (fg && !was) pollOnce(); was = fg }
+            foreground.collect { fg -> if (fg && !was) { pollOnce(); drainRecordings() }; was = fg }
         }
+        // Recordings a previous session could not upload.
+        drainRecordings()
 
         // Fallback path: poll the call log for a fresh "ringing" call, so the card
         // appears even if the WS event was missed. 2.5s only while RINGING (hang-up
@@ -316,7 +344,8 @@ class CallManager internal constructor(
             // The caller hung up (row no longer "ringing") — tear the card down.
             val cur = calls.find { it.callId == activeId }
             if (calls.any { it.isFreshInboundRing(t) && it.callId != activeId }) missedWhileBusy = true
-            if (cur != null && cur.status != "ringing") {
+            // Saving a callback: the server marks the row itself; the card ends with its note.
+            if (cur != null && cur.status != "ringing" && !_state.value.busy) {
                 // Answered on another phone, or the caller gave up.
                 cleanup(); activeId = null
                 update { CallUiState() }
@@ -371,7 +400,7 @@ class CallManager internal constructor(
                 s.phase == CallPhase.Idle && id != null -> ui.launch {
                     ringer.cancelIncoming()
                     endedAt[id] = now()
-                    try { api.terminate(id) } catch (e: CancellationException) { throw e } catch (_: Exception) {}
+                    terminateSoon(id)
                 }
             }
             else -> Unit   // "show": the activity is up; CallStage renders the call
@@ -425,21 +454,32 @@ class CallManager internal constructor(
         recCallId = null
         bg.launch {
             val file = try { r.stop() } catch (e: Exception) { null } ?: return@launch
-            try {
-                if (callId == null || callId == "pending") return@launch
-                if (file.length() < MIN_RECORDING_BYTES) return@launch   // skip near-silent / empty recordings
-                // Streamed from disk: an hour-long call never sits in memory.
-                api.uploadRecording(callId, UploadFile.of(file, "$callId.m4a", "audio/mp4"))
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                logW("recording upload failed", e)
-            } finally { file.delete() }
+            if (callId == null || callId == "pending" || file.length() < MIN_RECORDING_BYTES) {
+                file.delete()   // skip near-silent / empty recordings
+                return@launch
+            }
+            // Kept on disk until the server has it: an upload that fails now
+            // (often the very network drop that ended the call) is retried later.
+            if (outbox.put(callId, file)) drain()
+        }
+    }
+
+    /** Uploads the recordings still waiting (see [RecordingOutbox]). */
+    private fun drainRecordings() { bg.launch { drain() } }
+
+    private suspend fun drain() {
+        if (!signedInFn()) return
+        outbox.drain { id, f ->
+            // Streamed from disk: an hour-long call never sits in memory.
+            try { api.uploadRecording(id, UploadFile.of(f, "$id.m4a", "audio/mp4")) }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { logW("recording upload failed", e); throw e }
         }
     }
 
     // ── Teardown ─────────────────────────────────────────────────────────────
     private fun cleanup() {
+        graceJob?.cancel(); graceJob = null
         stopRecording()
         peer?.let { p -> peer = null; runCatching { p.close() } }
         micWaiter?.let { w -> micWaiter = null; _micRequest.value = false; w.complete(false) }
@@ -451,7 +491,7 @@ class CallManager internal constructor(
         cleanup()
         activeId?.let { endedAt[it] = now() }
         activeId = null
-        update { it.copy(phase = CallPhase.Ended, note = noteText ?: it.note) }
+        update { it.copy(phase = CallPhase.Ended, note = noteText ?: it.note, reconnecting = false, busy = false) }
         resetJob?.cancel()
         resetJob = ui.launch {
             delay(if (noteText != null) 1_600 else 1_000)
@@ -461,27 +501,76 @@ class CallManager internal constructor(
 
     private val live: Boolean get() = phase != CallPhase.Idle && phase != CallPhase.Ended
 
+    /**
+     * Ends the call on this phone at once (a second tap finds it over), then
+     * tells the server in the background — a slow or unreachable server never
+     * keeps a live-looking card on screen.
+     */
     fun hangup() {
         ui.launch {
-            if (!live) return@launch
+            if (!live || _state.value.busy) return@launch
             val id = _state.value.callId
             cleanup()
-            if (id != null && id != "pending") {
-                try { api.terminate(id) } catch (e: CancellationException) { throw e } catch (_: Exception) { /* gone */ }
-            }
             finish()
+            if (id != null && id != "pending") terminateSoon(id)
         }
     }
 
+    /**
+     * POST /terminate, retried a couple of times while the server can't be
+     * reached — otherwise the customer's phone keeps ringing, or the call stays
+     * up on their side, until Meta times it out.
+     */
+    private fun terminateSoon(id: String) {
+        ui.launch {
+            for (attempt in 0..TERMINATE_RETRY_MS.size) {
+                try { api.terminate(id); return@launch }
+                catch (e: CancellationException) { throw e }
+                catch (e: Exception) {
+                    // 502 "terminate failed": Meta says the call is already over, or couldn't be reached.
+                    if (!RecordingOutbox.isTransient(e) || attempt == TERMINATE_RETRY_MS.size) return@launch
+                    delay(TERMINATE_RETRY_MS[attempt])
+                }
+            }
+        }
+    }
+
+    /**
+     * Decline now, call them back later. The card waits for the server (its
+     * buttons disabled) so "Callback saved" is only said once it is; a request
+     * that never got an answer keeps retrying in the background.
+     */
     fun callback() {
         ui.launch {
-            if (!live) return@launch
-            val id = _state.value.callId
+            val s = _state.value
+            if (!live || s.busy) return@launch
+            val id = s.callId
             cleanup()
-            if (id != null && id != "pending") {
-                try { api.callback(id) } catch (e: CancellationException) { throw e } catch (_: Exception) { /* recorded UI-side */ }
+            if (id == null || id == "pending") { finish(CALLBACK_SAVED); return@launch }
+            update { it.copy(busy = true) }
+            val note = try {
+                api.callback(id); CALLBACK_SAVED
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logW("callback failed", e)
+                if (RecordingOutbox.isTransient(e) && e.statusOrNull() != 401) { callbackSoon(id); CALLBACK_RETRYING }
+                else CALLBACK_FAILED
             }
-            finish("Callback saved — find them under Calls")
+            if (_state.value.callId != id) return@launch   // the card has moved on
+            finish(note)
+        }
+    }
+
+    /** Background retries of POST /callback (idempotent: terminate + mark it callback). */
+    private fun callbackSoon(id: String) {
+        ui.launch {
+            for (wait in TERMINATE_RETRY_MS) {
+                delay(wait)
+                try { api.callback(id); return@launch }
+                catch (e: CancellationException) { throw e }
+                catch (e: Exception) { if (!RecordingOutbox.isTransient(e)) return@launch }
+            }
         }
     }
 
@@ -490,7 +579,7 @@ class CallManager internal constructor(
         ui.launch {
             val s = _state.value
             val callId = s.callId ?: return@launch
-            if (s.phase != CallPhase.Ringing) return@launch
+            if (s.phase != CallPhase.Ringing || s.busy) return@launch
             update { it.copy(error = null, phase = CallPhase.Connecting) }
             ringer.stopRinging(); ringer.cancelIncoming()
             fun stillMine() = _state.value.callId == callId && (phase == CallPhase.Connecting || phase == CallPhase.InCall)
@@ -518,13 +607,24 @@ class CallManager internal constructor(
             } catch (e: Exception) {
                 logW("answer failed", e)
                 if (!stillMine()) return@launch
+                if (e.isAmbiguous("/answer")) {
+                    // The accept may have reached Meta even though its answer never
+                    // came back: if the media connects, the call went through.
+                    withTimeoutOrNull(ANSWER_CONFIRM_MS) {
+                        state.first { it.callId != callId || it.phase != CallPhase.Connecting }
+                    }
+                    if (!stillMine() || phase == CallPhase.InCall) return@launch
+                }
                 update { it.copy(error = answerError(e)) }
                 delay(1_800)
                 if (_state.value.callId != callId || !live) return@launch
+                // Connected after all (the error was about a request whose work was done).
+                if (phase == CallPhase.InCall) { update { it.copy(error = null) }; return@launch }
                 // 409 "call already answered": a colleague won the redis lock and is
                 // talking to the customer. The web's hangup() here terminated THEIR
-                // call; only tear down this device's side.
-                if (e.isTakenElsewhere()) finish() else hangup()
+                // call; only tear down this device's side. A 404 offer: the caller
+                // is gone, there is nothing to terminate.
+                if (e.isTakenElsewhere() || e.isOfferGone()) finish() else hangup()
             }
         }
     }
@@ -559,6 +659,7 @@ class CallManager internal constructor(
             CallUiState(phase = CallPhase.Connecting, callId = "pending", from = to.removePrefix("+"), name = name, outbound = true)
         }
         fun stillMine() = _state.value.outbound && _state.value.callId == "pending" && phase == CallPhase.Connecting
+        val startedAfter = now() - CLOCK_SKEW_MS
         try {
             val cfg = api.iceConfig()
             recEnabled = cfg.record != false
@@ -572,7 +673,16 @@ class CallManager internal constructor(
             p.setLocal(SdpType.Offer, offer)
             awaitGathering(p)
             if (peer !== p) return@withContext Result.success(Unit)
-            val id = api.connect(to, p.localSdp ?: offer, name?.takeIf { it.isNotEmpty() })
+            val id = try {
+                api.connect(to, p.localSdp ?: offer, name?.takeIf { it.isNotEmpty() })
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // No answer came back, but Meta may be ringing the customer now:
+                // find the row calls_connect wrote before calling it a failure.
+                if (!e.isAmbiguous("/admin/calls/connect")) throw e
+                findPlacedCall(to, startedAfter) ?: throw e
+            }
             if (peer !== p) {
                 // Hung up while Meta was placing it: don't leave their phone ringing.
                 try { api.terminate(id) } catch (e: CancellationException) { throw e } catch (_: Exception) {}
@@ -585,7 +695,8 @@ class CallManager internal constructor(
             throw e
         } catch (e: Exception) {
             logW("outbound call failed", e)
-            val friendly = outboundError(e)
+            // A connect that timed out and left no row: it may yet ring them.
+            val friendly = if (e.isAmbiguous("/admin/calls/connect") && e.isTimeout()) UNCONFIRMED_CALL else outboundError(e)
             if (!stillMine()) return@withContext Result.failure(CallError(friendly))
             update { it.copy(error = friendly) }
             resetJob?.cancel()
@@ -609,21 +720,64 @@ class CallManager internal constructor(
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { Result.failure(e) }
 
+    /**
+     * The outbound row calls_connect records once Meta placed the call: to this
+     * customer, still ringing, started since we asked. Looked for twice (the
+     * server may still be finishing the request that timed out on us).
+     */
+    private suspend fun findPlacedCall(to: String, since: Long): String? {
+        val wa = to.filter { it.isDigit() }
+        repeat(2) { i ->
+            if (i > 0) delay(PLACED_LOOKUP_GAP_MS)
+            val rows = try { api.list() } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+            rows?.firstOrNull {
+                it.direction == "outbound" && it.status == "ringing" && it.waId == wa &&
+                    !endedAt.containsKey(it.callId) && (Fmt.millis(it.startedAt) ?: 0L) >= since
+            }?.let { return it.callId }
+        }
+        return null
+    }
+
     // ── Peer connection plumbing ─────────────────────────────────────────────
     private fun newPeer(cfg: IceConfig): CallPeer {
         var self: CallPeer? = null
         val p = media.createPeer(cfg) { ev ->
             ui.launch {
-                if (self == null || peer !== self) return@launch
+                val me = self
+                if (me == null || peer !== me) return@launch
                 when (ev) {
-                    PeerEvent.Connected -> setInCall()
-                    PeerEvent.Ended -> finish()
+                    PeerEvent.Connected -> {
+                        graceJob?.cancel(); graceJob = null
+                        if (_state.value.reconnecting) update { it.copy(reconnecting = false) }
+                        setInCall()
+                    }
+                    PeerEvent.Interrupted -> onInterrupted(me)
+                    PeerEvent.Ended -> finish(if (_state.value.reconnecting) CONNECTION_LOST else null)
                 }
             }
         }
         self = p
         peer = p
         return p
+    }
+
+    /**
+     * The media path dropped. A phone on a moving network loses it for a few
+     * seconds all the time and ICE brings it back by itself; the web ended the
+     * call on the first blip. Hold on for [ICE_GRACE_MS], then give up.
+     */
+    private fun onInterrupted(p: CallPeer) {
+        if (phase != CallPhase.InCall && phase != CallPhase.Connecting) return
+        if (graceJob?.isActive == true) return
+        update { it.copy(reconnecting = true) }
+        graceJob = ui.launch {
+            delay(ICE_GRACE_MS)
+            if (peer !== p) return@launch
+            val id = _state.value.callId
+            graceJob = null
+            finish(CONNECTION_LOST)
+            if (id != null && id != "pending") terminateSoon(id)
+        }
     }
 
     private fun setInCall() {
@@ -658,22 +812,64 @@ class CallManager internal constructor(
         const val RING_TIMEOUT_MS = 120_000L
 
         const val TAKEN_ELSEWHERE = "Another agent already answered this call"
+        const val CALL_GONE = "This call has already ended"
+        const val ANSWER_OFFLINE = "No connection — couldn't answer the call"
+        const val ANSWER_SLOW = "The server took too long — couldn't connect the call"
+        const val OUTBOUND_OFFLINE = "No connection — couldn't place the call"
+        const val OUTBOUND_SLOW = "The server took too long — couldn't place the call"
+        /** connect timed out and no placed call turned up: it may still be ringing them. */
+        const val UNCONFIRMED_CALL = "Couldn't confirm the call went through — check Calls before trying again"
+        const val SESSION_EXPIRED = "Your session expired — sign in again"
+        const val CALLBACK_SAVED = "Callback saved — find them under Calls"
+        const val CALLBACK_RETRYING = "Callback not saved yet — retrying"
+        const val CALLBACK_FAILED = "Couldn't save the callback"
+        const val CONNECTION_LOST = "Connection lost — call ended"
+
+        /** How long a "disconnected" call may take to recover before it is ended. */
+        const val ICE_GRACE_MS = 10_000L
+        /** How long an answer whose request timed out may take to connect anyway. */
+        const val ANSWER_CONFIRM_MS = 8_000L
+        /** Waits between the terminate / callback retries. */
+        val TERMINATE_RETRY_MS = longArrayOf(2_000L, 5_000L)
+        const val PLACED_LOOKUP_GAP_MS = 3_000L
+        /** The server's clock vs this phone's, when matching the row an outbound call created. */
+        const val CLOCK_SKEW_MS = 120_000L
+
+        private fun Throwable.statusOrNull() = (this as? ApiException)?.status
+
+        /** The request left but no answer came back: it may have done its work. */
+        private fun Throwable.isAmbiguous(pathEnd: String) =
+            this is ApiException && status == 0 && path.endsWith(pathEnd)
+
+        private fun Throwable.isTimeout() = this is ApiException && status == 0 && body.startsWith("timed out")
+        private fun Throwable.isOffline() = this is ApiException && status == 0 && !isTimeout()
 
         /** POST /admin/calls/{id}/answer's 409 (routers/admin.py calls_answer: "call already answered"). */
         private fun Throwable.isTakenElsewhere() =
             this is ApiException && status == 409 && path.endsWith("/answer")
 
+        /** GET /offer's 404 "call offer expired or not found": the caller hung up. */
+        private fun Throwable.isOfferGone() =
+            this is ApiException && status == 404 && path.endsWith("/offer")
+
         /** answer()'s catch in lib/callContext.tsx (plus the 409 a colleague's answer causes). */
         internal fun answerError(e: Throwable): String = when {
             e is MicBlocked -> MIC_BLOCKED
             e.isTakenElsewhere() -> TAKEN_ELSEWHERE
+            e.isOfferGone() -> CALL_GONE
+            e.isTimeout() -> ANSWER_SLOW
+            e.isOffline() -> ANSWER_OFFLINE
+            e.statusOrNull() == 401 -> SESSION_EXPIRED
             else -> "Couldn't connect the call"
         }
 
-        /** initiateCall()'s catch in lib/callContext.tsx. */
+        /** initiateCall()'s catch in lib/callContext.tsx. Never says "permission" but for the 409 (callers key on it). */
         internal fun outboundError(e: Throwable): String = when {
             e is MicBlocked -> MIC_BLOCKED
             e is ApiException && e.status == 409 -> NO_CALL_PERMISSION
+            e.isTimeout() -> OUTBOUND_SLOW
+            e.isOffline() -> OUTBOUND_OFFLINE
+            e.statusOrNull() == 401 -> SESSION_EXPIRED
             else -> "Couldn't place the call"
         }
     }

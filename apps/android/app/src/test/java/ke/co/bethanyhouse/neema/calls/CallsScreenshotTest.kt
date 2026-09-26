@@ -105,7 +105,7 @@ class CallsScreenshotTest {
     @Test fun transcriptPending() = console { it.toggleTranscript(CallsFixtures.C3) }
     @Test fun transcriptRecorded() = console { it.toggleTranscript(CallsFixtures.C5) }
     @Test fun transcriptFailed() = console { it.toggleTranscript(CallsFixtures.C6) }
-    @Test fun transcriptLoading() = console(fake = fake().also { it.on("GET", CallsFixtures.route(CallsFixtures.C5, "transcript"), code = 500, body = "{}") }) {
+    @Test fun transcriptLoadFailed() = console(fake = fake().also { it.on("GET", CallsFixtures.route(CallsFixtures.C5, "transcript"), code = 500, body = "{}") }) {
         it.toggleTranscript(CallsFixtures.C5)
     }
     @Test fun transcriptNotEnabled() = console(

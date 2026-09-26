@@ -160,6 +160,7 @@ fun CallsScreen(
     val vm: CallsViewModel = viewModel { CallsViewModel(dash) }
     val calls by vm.calls.collectAsStateWithLifecycle()
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()
+    val loadError by vm.loadError.collectAsStateWithLifecycle()
     val missedOnly by vm.missedOnly.collectAsStateWithLifecycle()
     val selected by vm.selected.collectAsStateWithLifecycle()
     val transcript by vm.transcript.collectAsStateWithLifecycle()
@@ -195,7 +196,7 @@ fun CallsScreen(
                         modifier = Modifier.widthIn(max = 560.dp).weight(1f, fill = false).fillMaxWidth(),
                         vm = vm, shown = shown, total = list?.size ?: 0, missed = missed, missedOnly = missedOnly,
                         selectedId = sel?.id, openTranscript = transcript,
-                        readiness = readiness,
+                        readiness = readiness, loadError = loadError, refreshing = refreshing,
                         onOpenConversation = { dash.openConversationFor(it) },
                     )
                 }
@@ -221,6 +222,8 @@ private fun CallLog(
     selectedId: String?,
     openTranscript: TranscriptUi?,
     readiness: CallReadiness,
+    loadError: String?,
+    refreshing: Boolean,
     onOpenConversation: (String) -> Unit,
 ) {
     // One card, as the web draws it: the log is at most 200 rows (the API's
@@ -265,11 +268,23 @@ private fun CallLog(
                 }
             }
             if (!readiness.ready) ReadinessBanner(readiness)
+            // The log couldn't be refreshed: what we had stays, with the reason and a way to try again.
+            if (loadError != null && !shown.isNullOrEmpty()) LoadErrorBanner(loadError, refreshing, vm::refresh)
             when {
                 shown == null -> Text(
                     "Loading…", color = Muted, fontSize = 14.sp, textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 40.dp),
                 )
+                shown.isEmpty() && loadError != null -> Column(
+                    Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 48.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text("Couldn't load calls", color = Soft, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.height(6.dp))
+                    Text(loadError, color = Muted, fontSize = 13.sp, textAlign = TextAlign.Center)
+                    Spacer(Modifier.height(16.dp))
+                    RetryButton(refreshing, vm::refresh)
+                }
                 shown.isEmpty() -> Column(
                     Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 56.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -391,7 +406,15 @@ private fun TranscriptPanel(t: TranscriptUi, vm: CallsViewModel) {
     val pad = Modifier.padding(start = 68.dp, end = 24.dp, bottom = 16.dp)
     val data = t.data
     if (data == null) {
-        Text("Loading…", color = Muted, fontSize = 12.sp, modifier = pad)
+        val err = t.loadErr
+        if (err == null) Text("Loading…", color = Muted, fontSize = 12.sp, modifier = pad)
+        else Row(pad, verticalAlignment = Alignment.CenterVertically) {
+            Text("$err ", color = RedC, fontSize = 12.sp, modifier = Modifier.weight(1f, fill = false))
+            Text(
+                "Retry", color = Green, fontSize = 12.sp, textDecoration = TextDecoration.Underline,
+                modifier = Modifier.clickable { vm.retryTranscript() }.padding(vertical = 4.dp),
+            )
+        }
         return
     }
     val st = data.status
@@ -444,6 +467,43 @@ private fun TranscriptPanel(t: TranscriptUi, vm: CallsViewModel) {
             Spacer(Modifier.height(8.dp))
             RecordingPlayer(recordingUrl(it))
         }
+    }
+}
+
+/** The log is showing what it last had because a refresh failed. */
+@Composable
+private fun LoadErrorBanner(message: String, refreshing: Boolean, onRetry: () -> Unit) {
+    Row(
+        Modifier
+            .padding(start = 24.dp, end = 24.dp, bottom = 12.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0x1AF2555A))
+            .border(1.dp, Color(0x40F2555A), RoundedCornerShape(12.dp))
+            .padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("Showing the last call log", color = TextC, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Text(message, color = Sage, fontSize = 12.sp, lineHeight = 17.sp)
+        }
+        Spacer(Modifier.width(8.dp))
+        RetryButton(refreshing, onRetry)
+    }
+}
+
+/** A small pill that retries a failed load; a spinner while it runs (no double taps). */
+@Composable
+private fun RetryButton(busy: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier.clip(RoundedCornerShape(50)).background(Color(0x2925D366))
+            .border(1.dp, Color(0x4D25D366), RoundedCornerShape(50))
+            .clickable(enabled = !busy, onClickLabel = "Retry", onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (busy) CircularProgressIndicator(Modifier.size(14.dp), color = Green, strokeWidth = 2.dp)
+        else Text("Retry", color = Green, fontSize = 12.sp, fontWeight = FontWeight.Medium)
     }
 }
 

@@ -47,7 +47,13 @@ class NeemaCallApi(private val api: NeemaApi) : CallApi {
 enum class PeerEvent {
     /** connectionState "connected", or iceConnectionState "connected" / "completed". */
     Connected,
-    /** connectionState "failed" / "disconnected" / "closed". */
+    /**
+     * connectionState "disconnected": the network blipped (a tunnel, a cell
+     * handover, Wi-Fi to mobile data). ICE keeps checking and often recovers
+     * on its own, so this is not the end of the call yet.
+     */
+    Interrupted,
+    /** connectionState "failed" / "closed": the media path is gone for good. */
     Ended,
 }
 

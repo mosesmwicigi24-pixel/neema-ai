@@ -88,8 +88,9 @@ internal class WebRtcMedia(private val context: Context) : CallMedia {
                     Log.d(TAG, "connectionState: $newState")
                     when (newState) {
                         PeerConnection.PeerConnectionState.CONNECTED -> onEvent(PeerEvent.Connected)
+                        // A blip, not the end: CallManager gives ICE a grace period to recover.
+                        PeerConnection.PeerConnectionState.DISCONNECTED -> onEvent(PeerEvent.Interrupted)
                         PeerConnection.PeerConnectionState.FAILED,
-                        PeerConnection.PeerConnectionState.DISCONNECTED,
                         PeerConnection.PeerConnectionState.CLOSED -> onEvent(PeerEvent.Ended)
                         else -> Unit
                     }

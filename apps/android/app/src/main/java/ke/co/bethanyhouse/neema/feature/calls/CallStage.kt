@@ -44,6 +44,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
@@ -189,7 +190,8 @@ fun CallCard(c: CallUiState, actions: CallActions) {
                 }
                 if (live) Box(
                     Modifier.align(Alignment.BottomEnd).padding(8.dp).size(26.dp).clip(CircleShape)
-                        .background(Color(0xFF06110B)).padding(5.dp).clip(CircleShape).background(WaGreen),
+                        .background(Color(0xFF06110B)).padding(5.dp).clip(CircleShape)
+                        .background(if (c.reconnecting) Amber else WaGreen),
                 )
             }
             Spacer(Modifier.height(24.dp))
@@ -219,13 +221,24 @@ fun CallCard(c: CallUiState, actions: CallActions) {
                     letterSpacing = 5.28.sp, style = TextStyle(fontFeatureSettings = "tnum"),
                 )
                 Spacer(Modifier.height(16.dp))
-                Waveform()
-                Spacer(Modifier.height(16.dp))
-                StatusPill("Connected")
+                if (c.reconnecting) {
+                    // The network blipped: no bouncing bars while no audio flows.
+                    Box(Modifier.height(30.dp))
+                    Spacer(Modifier.height(16.dp))
+                    StatusPill("Reconnecting…", dot = Amber, bg = Color(0x24EF9F27), textColor = Color(0xFFF5C451))
+                } else {
+                    Waveform()
+                    Spacer(Modifier.height(16.dp))
+                    StatusPill("Connected")
+                }
             }
             c.error?.let {
                 Spacer(Modifier.height(16.dp))
                 Text(it, color = Color(0xFFFCA5A5), fontSize = 14.sp, textAlign = TextAlign.Center)
+            }
+            if (c.busy) {
+                Spacer(Modifier.height(16.dp))
+                Text("Saving the callback…", color = Color(0xFFCFE9D9), fontSize = 14.sp, textAlign = TextAlign.Center)
             }
             if (c.phase == CallPhase.Ended) {
                 Spacer(Modifier.height(16.dp))
@@ -240,9 +253,11 @@ fun CallCard(c: CallUiState, actions: CallActions) {
                     horizontalArrangement = CenteredGap(48.dp),
                     verticalAlignment = Alignment.Bottom,
                 ) {
-                    CallButton(Red, "Decline", CallIcons.PhoneOff, onClick = actions.decline)
-                    CallButton(Amber, "Callback", CallIcons.Callback, size = ButtonSize.Small, onClick = actions.callback)
-                    CallButton(WaGreen, "Answer", CallIcons.Phone, size = ButtonSize.Big, onClick = actions.answer)
+                    // Disabled (dimmed) while a callback is being saved: no second request.
+                    val on = !c.busy
+                    CallButton(Red, "Decline", CallIcons.PhoneOff, enabled = on, onClick = actions.decline)
+                    CallButton(Amber, "Callback", CallIcons.Callback, size = ButtonSize.Small, enabled = on, onClick = actions.callback)
+                    CallButton(WaGreen, "Answer", CallIcons.Phone, size = ButtonSize.Big, enabled = on, onClick = actions.answer)
                 }
             }
             if (c.phase == CallPhase.Connecting || live) {
@@ -273,14 +288,14 @@ fun CallCard(c: CallUiState, actions: CallActions) {
 }
 
 @Composable
-private fun StatusPill(text: String) {
+private fun StatusPill(text: String, dot: Color = WaGreen, bg: Color = PillBg, textColor: Color = PillText) {
     Row(
-        Modifier.clip(RoundedCornerShape(50)).background(PillBg).padding(horizontal = 16.dp, vertical = 6.dp),
+        Modifier.clip(RoundedCornerShape(50)).background(bg).padding(horizontal = 16.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(8.dp).clip(CircleShape).background(WaGreen))
+        Box(Modifier.size(8.dp).clip(CircleShape).background(dot))
         Spacer(Modifier.width(8.dp))
-        Text(text, color = PillText, fontSize = 13.sp)
+        Text(text, color = textColor, fontSize = 13.sp)
     }
 }
 
@@ -334,13 +349,15 @@ private fun CallButton(
     label: String,
     icon: ImageVector,
     size: ButtonSize = ButtonSize.Normal,
+    enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     Column(
         Modifier
-            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .alpha(if (enabled) 1f else 0.45f)
+            .clickable(interactionSource = interaction, indication = null, enabled = enabled, onClick = onClick)
             .semantics { contentDescription = label },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {

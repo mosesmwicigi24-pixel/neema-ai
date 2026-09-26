@@ -30,6 +30,14 @@ class FakeCallApi : CallApi {
     /** When set, connect() waits for it (to hang up mid-placement). */
     var connectGate: CompletableDeferred<Unit>? = null
     var permissionError: Exception? = null
+    /** Failures handed out one per call, in order (then success): terminate / callback / upload. */
+    val terminateErrors = ArrayDeque<Exception>()
+    val callbackErrors = ArrayDeque<Exception>()
+    val uploadErrors = ArrayDeque<Exception>()
+    /** When set, answer() waits for it (to reply late, or never). */
+    var answerGate: CompletableDeferred<Unit>? = null
+    /** When set, callback() waits for it. */
+    var callbackGate: CompletableDeferred<Unit>? = null
     /** callId to (filename, mime type, bytes read from the streamed file). */
     val uploads = mutableListOf<Pair<String, Triple<String, String, Int>>>()
     var lastAnswerSdp: String? = null
@@ -43,9 +51,11 @@ class FakeCallApi : CallApi {
         log += "offer $callId"; offerError?.let { throw it }
         return CallOffer(callId, offerSdp, "254712345678")
     }
-    override suspend fun answer(callId: String, sdp: String) { log += "answer $callId"; lastAnswerSdp = sdp; answerError?.let { throw it } }
-    override suspend fun terminate(callId: String) { log += "terminate $callId" }
-    override suspend fun callback(callId: String) { log += "callback $callId" }
+    override suspend fun answer(callId: String, sdp: String) {
+        log += "answer $callId"; lastAnswerSdp = sdp; answerGate?.await(); answerError?.let { throw it }
+    }
+    override suspend fun terminate(callId: String) { log += "terminate $callId"; terminateErrors.removeFirstOrNull()?.let { throw it } }
+    override suspend fun callback(callId: String) { log += "callback $callId"; callbackGate?.await(); callbackErrors.removeFirstOrNull()?.let { throw it } }
     override suspend fun connect(to: String, sdp: String, name: String?): String {
         log += "connect $to"; lastConnect = Triple(to, sdp, name)
         connectGate?.await()
@@ -54,7 +64,7 @@ class FakeCallApi : CallApi {
     }
     override suspend fun requestPermission(to: String) { log += "request-permission $to"; permissionError?.let { throw it } }
     override suspend fun uploadRecording(callId: String, file: UploadFile) {
-        log += "recording $callId"; lastUploadStreamed = file.bytes == null; uploads += callId to Triple(file.filename, file.mimeType, file.length.toInt())
+        log += "recording $callId"; uploadErrors.removeFirstOrNull()?.let { throw it }; lastUploadStreamed = file.bytes == null; uploads += callId to Triple(file.filename, file.mimeType, file.length.toInt())
     }
 }
 
