@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -99,10 +101,13 @@ internal fun ConversationList(
                     }
                     TextButton(onClick = vm::exitSelect) { Text("Cancel", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = c.muted) }
                 } else {
-                    if (humanCount > 0) Text(
-                        "$humanCount live", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF856404),
-                        modifier = Modifier.clip(RoundedCornerShape(50)).background(Color(0xFFFFF3CD)).padding(horizontal = 8.dp, vertical = 2.dp),
-                    )
+                    if (humanCount > 0) {
+                        val lt = tint(Color(0xFFFFF3CD), Color(0xFF856404))
+                        Text(
+                            "$humanCount live", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = lt.fg, maxLines = 1, softWrap = false,
+                            modifier = Modifier.clip(RoundedCornerShape(50)).background(lt.bg).padding(horizontal = 8.dp, vertical = 2.dp),
+                        )
+                    }
                     IconButton(onClick = { vm.enterSelect() }, modifier = Modifier.size(36.dp)) {
                         Icon(Icons.Outlined.Checklist, "Select several (or press and hold a chat)", tint = c.muted, modifier = Modifier.size(18.dp))
                     }
@@ -115,40 +120,47 @@ internal fun ConversationList(
             }
             Spacer(Modifier.height(10.dp))
             // ── All / Unread / Read / Human / Yours ──
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            // Equal fifths while they fit (the web's flex-1); at a large font scale each
+            // tab keeps its whole label and count, and the row scrolls sideways instead.
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val fifth = (maxWidth - 16.dp) / 5
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 listOf("all", "unread", "read", "human", "yours").forEach { t ->
                     val active = f.tab == t
                     val accent = when (t) { "unread" -> Color(0xFF427425); "human" -> Color(0xFFB45309); "yours" -> Green; else -> Color(0xFF1C2917) }
                     val count = when (t) { "unread" -> unreadCount; "human" -> humanCount; "yours" -> yoursCount; else -> 0 }
                     Row(
-                        Modifier.weight(1f).height(28.dp).clip(RoundedCornerShape(8.dp))
+                        Modifier.widthIn(min = fifth).heightIn(min = 28.dp).clip(RoundedCornerShape(8.dp))
                             .background(if (active) accent else if (c.isDark) c.bg3 else Color(0xFFF5F6F3))
-                            .clickable { vm.setTab(t) },
+                            .clickable(onClickLabel = t.replaceFirstChar { it.uppercase() }) { vm.setTab(t) }
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center,
                     ) {
-                        Text(t.replaceFirstChar { it.uppercase() }, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = if (active) Color.White else Color(0xFF6B7E64), maxLines = 1)
+                        Text(t.replaceFirstChar { it.uppercase() }, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = if (active) Color.White else if (c.isDark) c.textMid else Color(0xFF6B7E64), maxLines = 1, softWrap = false)
                         if (count > 0) {
                             Spacer(Modifier.width(3.dp))
                             Text(
                                 if (count > 999) "999+" else "$count", fontSize = 10.sp, lineHeight = 10.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1,
+                                softWrap = false,
                                 modifier = Modifier.clip(RoundedCornerShape(50)).background(if (active) Color.White.copy(alpha = 0.25f) else accent).padding(horizontal = 5.dp, vertical = 2.dp),
                             )
                         }
                     }
                 }
             }
+            }
             Spacer(Modifier.height(8.dp))
             // ── Search (the server searches names, phones and everything said) ──
             Row(
-                Modifier.fillMaxWidth().height(32.dp).clip(RoundedCornerShape(8.dp))
+                Modifier.fillMaxWidth().heightIn(min = 32.dp).clip(RoundedCornerShape(8.dp))
                     .background(if (c.isDark) c.bg3 else Color(0xFFF5F6F3)).border(1.dp, if (c.isDark) c.border else Color(0xFFEDF0EA), RoundedCornerShape(8.dp))
-                    .padding(horizontal = 10.dp),
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(Icons.Filled.Search, null, tint = Color(0xFFB5C9A8), modifier = Modifier.size(14.dp))
                 Spacer(Modifier.width(8.dp))
                 Box(Modifier.weight(1f)) {
-                    if (listUi.search.isEmpty()) Text("Start typing to search", fontSize = 13.sp, color = Color(0xFFB5C9A8))
+                    if (listUi.search.isEmpty()) Text("Start typing to search", fontSize = 13.sp, color = if (c.isDark) c.muted else Color(0xFFB5C9A8), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     BasicTextField(
                         value = listUi.search, onValueChange = vm::setSearch, singleLine = true,
                         textStyle = TextStyle(fontSize = 13.sp, color = c.text), cursorBrush = SolidColor(Green),
@@ -166,22 +178,22 @@ internal fun ConversationList(
                     val count = channelCount(summary, all, id)
                     Box(Modifier.weight(1f)) {
                         Column(
-                            Modifier.fillMaxWidth().height(40.dp).clip(RoundedCornerShape(8.dp))
-                                .background(if (active) accent else accent.copy(alpha = 0.08f))
+                            Modifier.fillMaxWidth().heightIn(min = 40.dp).clip(RoundedCornerShape(8.dp))
+                                .background(if (active) accent else accent.copy(alpha = if (c.isDark) 0.14f else 0.08f))
                                 .border(1.dp, if (active) accent else accent.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
-                                .clickable(onClickLabel = label) { vm.setChannel(id) },
+                                .clickable(onClickLabel = label) { vm.setChannel(id) }.padding(vertical = 2.dp),
                             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
                         ) {
                             ChannelIcons.of(id)?.let { Icon(it, null, tint = if (active) Color.White else accent, modifier = Modifier.size(14.dp)) }
                                 ?: Box(Modifier.size(10.dp).clip(CircleShape).background(if (active) Color.White else accent))
                             Spacer(Modifier.height(2.dp))
-                            Text(short, fontSize = 8.sp, lineHeight = 8.sp, fontWeight = FontWeight.Bold, color = if (active) Color.White else accent)
+                            Text(short, fontSize = 8.sp, lineHeight = 8.sp, fontWeight = FontWeight.Bold, color = if (active) Color.White else ink(accent), maxLines = 1, softWrap = false)
                         }
                         if (count > 0) Box(
                             Modifier.align(Alignment.TopEnd).offset(4.dp, (-4).dp).defaultMinSize(minWidth = 14.dp, minHeight = 14.dp)
                                 .clip(RoundedCornerShape(50)).background(if (active) Color(0xFFEF4444) else accent).padding(horizontal = 3.dp),
                             contentAlignment = Alignment.Center,
-                        ) { Text("$count", fontSize = 8.sp, lineHeight = 8.sp, fontWeight = FontWeight.Bold, color = Color.White) }
+                        ) { Text(if (count > 999) "999+" else "$count", fontSize = 8.sp, lineHeight = 8.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1, softWrap = false) }
                     }
                 }
             }
@@ -273,7 +285,7 @@ internal fun ConversationList(
 
         // ── Bulk action bar — only while selecting ──
         if (listUi.selectMode) {
-            HorizontalDivider(color = Color(0xFFEDF0EA))
+            HorizontalDivider(color = if (c.isDark) c.border else Color(0xFFEDF0EA))
             Row(Modifier.fillMaxWidth().background(if (c.isDark) c.bg3 else Color(0xFFFBFCFA)).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(
@@ -288,7 +300,7 @@ internal fun ConversationList(
                 Button(
                     onClick = vm::releaseSelected, enabled = !listUi.bulkBusy && heldIds.isNotEmpty(),
                     colors = ButtonDefaults.buttonColors(containerColor = Green, contentColor = Color.White, disabledContainerColor = Green.copy(alpha = 0.4f), disabledContentColor = Color.White), shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp), modifier = Modifier.height(32.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp), modifier = Modifier.webHeight(32.dp),
                 ) { Text(if (listUi.bulkBusy) "Releasing…" else "Release" + if (heldIds.isNotEmpty()) " ${heldIds.size}" else "", fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
             }
         }
@@ -296,7 +308,7 @@ internal fun ConversationList(
 }
 
 @Composable
-private fun EmptyText(text: String) = Text(text, fontSize = 14.sp, color = Color(0xFFB5C9A8))
+private fun EmptyText(text: String) = Text(text, fontSize = 14.sp, color = if (Neema.colors.isDark) Neema.colors.muted else Color(0xFFB5C9A8))
 
 private fun channelCount(summary: InboxSummary?, all: Collection<ke.co.bethanyhouse.neema.core.model.Conversation>, id: String): Int {
     // The chips sum unread MESSAGES; the Unread tab counts conversations.
@@ -306,9 +318,10 @@ private fun channelCount(summary: InboxSummary?, all: Collection<ke.co.bethanyho
 
 @Composable
 private fun FilterPill(label: String, active: Boolean, onClick: () -> Unit) {
+    val t = tint(Color(0xFFE6F3D8), Color(0xFF699A32))
     Text(
-        label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = if (active) Color.White else Color(0xFF699A32),
-        modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(if (active) Green else Color(0xFFE6F3D8)).clickable(onClick = onClick)
+        label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = if (active) Color.White else t.fg,
+        modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(if (active) Green else t.bg).clickable(onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 4.dp),
     )
 }
@@ -350,7 +363,7 @@ private fun ConversationRow(g: RowGroup, activeId: String, me: String?, listUi: 
                     Modifier.padding(top = 12.dp, end = 12.dp).alpha(if (heldHere) 1f else 0.45f).size(18.dp)
                         .graphicsLayer { val s = if (picked) 1f else 0.92f; scaleX = s; scaleY = s }
                         .clip(RoundedCornerShape(6.dp))
-                        .background(if (picked) Green else Color.White)
+                        .background(if (picked) Green else c.bg2)
                         .border(1.dp, if (picked) Green else Color(0xFFCFDAC6), RoundedCornerShape(6.dp)),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -363,10 +376,10 @@ private fun ConversationRow(g: RowGroup, activeId: String, me: String?, listUi: 
                 conv.countryIso?.takeIf { it.length == 2 }?.let { iso ->
                     AsyncImage(
                         "https://flagcdn.com/w20/${iso.lowercase()}.png", iso, contentScale = ContentScale.Crop,
-                        modifier = Modifier.align(Alignment.TopEnd).offset(3.dp, (-2).dp).size(16.dp, 12.dp).clip(RoundedCornerShape(2.dp)).border(1.dp, Color.White, RoundedCornerShape(2.dp)),
+                        modifier = Modifier.align(Alignment.TopEnd).offset(3.dp, (-2).dp).size(16.dp, 12.dp).clip(RoundedCornerShape(2.dp)).border(1.dp, c.bg2, RoundedCornerShape(2.dp)),
                     )
                 }
-                if (hasUnread) Box(Modifier.align(Alignment.TopStart).offset((-2).dp, (-2).dp).size(10.dp).clip(CircleShape).background(Color.White).padding(2.dp).clip(CircleShape).background(ROW_ACCENT))
+                if (hasUnread) Box(Modifier.align(Alignment.TopStart).offset((-2).dp, (-2).dp).size(10.dp).clip(CircleShape).background(c.bg2).padding(2.dp).clip(CircleShape).background(ROW_ACCENT))
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
@@ -381,7 +394,7 @@ private fun ConversationRow(g: RowGroup, activeId: String, me: String?, listUi: 
                     Text(
                         g.lastAt?.let { Fmt.timeAgo(it) } ?: "", fontSize = 10.sp,
                         fontWeight = if (hasUnread) FontWeight.SemiBold else FontWeight.Normal,
-                        color = if (hasUnread) Color(0xFF427425) else Color(0xFFB5C9A8), modifier = Modifier.padding(start = 6.dp),
+                        color = if (hasUnread) ink(Color(0xFF427425)) else if (c.isDark) c.muted else Color(0xFFB5C9A8), maxLines = 1, softWrap = false, modifier = Modifier.padding(start = 6.dp),
                     )
                 }
                 Spacer(Modifier.height(3.dp))
@@ -393,9 +406,9 @@ private fun ConversationRow(g: RowGroup, activeId: String, me: String?, listUi: 
                         Box {
                             Text(
                                 CH_SHORT[s.channel] ?: st.label, fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                                color = if (open) Color.White else st.color,
-                                modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(if (open) st.color else st.color.copy(alpha = 0.08f))
-                                    .border(1.dp, if (open) st.color else st.color.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
+                                color = if (open) Color.White else ink(st.color), maxLines = 1,
+                                modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(if (open) st.color else st.color.copy(alpha = if (c.isDark) 0.16f else 0.08f))
+                                    .border(1.dp, if (open) st.color else st.color.copy(alpha = if (c.isDark) 0.45f else 0.2f), RoundedCornerShape(4.dp))
                                     .then(if (multi && !listUi.selectMode) Modifier.clickable(onClickLabel = "Open ${s.channel}") { onOpen(s.id) } else Modifier)
                                     .padding(horizontal = 6.dp, vertical = 1.dp),
                             )
@@ -404,16 +417,18 @@ private fun ConversationRow(g: RowGroup, activeId: String, me: String?, listUi: 
                     }
                     if (stage != null && stage != "new") {
                         val (sbg, sfg, sbd) = STAGE_CHIP[stage] ?: STAGE_CHIP.getValue("contacted")
+                        val st = tint(sbg, sfg, sbd)
                         Text(
-                            stage.replaceFirstChar { it.uppercase() }, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = sfg,
-                            modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(sbg).border(1.dp, sbd, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 1.dp),
+                            stage.replaceFirstChar { it.uppercase() }, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = st.fg, maxLines = 1,
+                            modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(st.bg).border(1.dp, st.border, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 1.dp),
                         )
                     }
                     conv.countryIso?.takeIf { it.isNotBlank() }?.let { iso ->
+                        val ct = tint(Color(0xFFFFEDD5), Color(0xFFC2410C), Color(0xFFFDBA74))
                         Text(
-                            Fmt.countryName(iso), fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFC2410C), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.widthIn(max = 110.dp).clip(RoundedCornerShape(4.dp)).background(Color(0xFFFFEDD5))
-                                .border(1.dp, Color(0xFFFDBA74), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 1.dp),
+                            Fmt.countryName(iso), fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = ct.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = 110.dp).clip(RoundedCornerShape(4.dp)).background(ct.bg)
+                                .border(1.dp, ct.border, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 1.dp),
                         )
                     }
                     if (chipConv.interceptMode != "ai") {
@@ -423,7 +438,7 @@ private fun ConversationRow(g: RowGroup, activeId: String, me: String?, listUi: 
                             Text(
                                 if (mine) "● Yours" else "🔒 ${chipConv.assignedAgentName?.split(" ")?.firstOrNull()?.ifBlank { null } ?: "Agent"}",
                                 fontSize = 10.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                color = if (mine) Color(0xFF427425) else Color(0xFFD97706), modifier = Modifier.widthIn(max = 100.dp),
+                                color = ink(if (mine) Color(0xFF427425) else Color(0xFFD97706)), modifier = Modifier.widthIn(max = 100.dp),
                             )
                         }
                     }

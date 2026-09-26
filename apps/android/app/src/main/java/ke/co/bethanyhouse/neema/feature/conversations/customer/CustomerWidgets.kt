@@ -338,14 +338,15 @@ fun TintButton(
     height: Dp = 32.dp,
 ) {
     Box(
-        modifier.height(height).alpha(if (enabled || filled) 1f else 0.55f).clip(RoundedCornerShape(8.dp))
+        modifier.heightIn(min = height).alpha(if (enabled || filled) 1f else 0.55f).clip(RoundedCornerShape(8.dp))
             .background(if (filled) (if (enabled) color else color.copy(alpha = 0.55f)) else color.dim(0.1f))
             .then(if (filled) Modifier else Modifier.border(1.dp, color.dim(0.35f), RoundedCornerShape(8.dp)))
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 10.dp),
+            .padding(horizontal = 10.dp, vertical = 4.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = if (filled) Color.White else color, maxLines = 1)
+        // Grows (and wraps) with the font scale rather than clipping the label.
+        Text(text, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = if (filled) Color.White else color, maxLines = 2, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
     }
 }
 
@@ -361,11 +362,11 @@ fun NeutralButton(
 ) {
     val c = Neema.colors
     Box(
-        modifier.height(height).alpha(if (enabled) 1f else 0.55f).clip(RoundedCornerShape(8.dp)).background(c.surface)
-            .border(1.dp, c.border, RoundedCornerShape(8.dp)).clickable(enabled = enabled, onClick = onClick).padding(horizontal = 10.dp),
+        modifier.heightIn(min = height).alpha(if (enabled) 1f else 0.55f).clip(RoundedCornerShape(8.dp)).background(c.surface)
+            .border(1.dp, c.border, RoundedCornerShape(8.dp)).clickable(enabled = enabled, onClick = onClick).padding(horizontal = 10.dp, vertical = 4.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = textColor.takeOrElse { c.text }, maxLines = 1)
+        Text(text, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = textColor.takeOrElse { c.text }, maxLines = 2, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
     }
 }
 

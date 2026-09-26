@@ -50,8 +50,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 // Bubble palette (the web's literal hex values).
-internal val InboundTint = Color(0xFF699A32)
-internal val InboundTintBg = Color(0xFFF0F9E8)
+internal val InboundTint: Color @androidx.compose.runtime.Composable get() = ink(Color(0xFF699A32))
+internal val InboundTintBg: Color @androidx.compose.runtime.Composable get() = if (ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.isDark) Color(0xFF699A32).copy(alpha = 0.16f) else Color(0xFFF0F9E8)
 
 /** The revealed transcript / analysis text inside an inbound bubble (light or dark page). */
 @Composable
@@ -119,7 +119,7 @@ internal fun MediaFallback(kind: String, messageId: String?, inbound: Boolean, o
                     }
                     .padding(horizontal = 8.dp, vertical = 3.dp),
                 fontSize = 10.sp, fontWeight = FontWeight.Medium,
-                color = if (inbound) Color(0xFF427425) else Color.White,
+                color = if (inbound) ink(Color(0xFF427425)) else Color.White,
             )
         }
     }

@@ -37,6 +37,7 @@ import ke.co.bethanyhouse.neema.core.model.Order
 import ke.co.bethanyhouse.neema.core.ui.components.Avatar
 import ke.co.bethanyhouse.neema.core.ui.components.Loading
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
+import ke.co.bethanyhouse.neema.feature.conversations.webHeight
 import ke.co.bethanyhouse.neema.core.util.Fmt
 import ke.co.bethanyhouse.neema.feature.conversations.isWebVisitor
 import kotlin.math.roundToInt
@@ -395,7 +396,7 @@ private fun Hero(
                     onClick = { vm.call(phoneDigits) },
                     // One call at a time: a second tap while dialling would say "Already in a call".
                     enabled = !callBusy,
-                    modifier = Modifier.weight(1f).height(36.dp),
+                    modifier = Modifier.weight(1f).webHeight(36.dp),
                     shape = RoundedCornerShape(8.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = WA_GREEN, contentColor = Color.White,
@@ -405,12 +406,12 @@ private fun Hero(
                 ) {
                     Icon(Icons.Default.Call, null, modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text(if (callBusy) "Calling…" else "Call", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Text(if (callBusy) "Calling…" else "Call", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 OutlinedButton(
                     onClick = { vm.sendTemplate(phoneDigits) },
                     enabled = !templateBusy,
-                    modifier = Modifier.weight(1f).height(36.dp),
+                    modifier = Modifier.weight(1f).webHeight(36.dp),
                     shape = RoundedCornerShape(8.dp),
                     colors = ButtonDefaults.outlinedButtonColors(containerColor = if (c.isDark) c.bg3 else Color(0xFFEEF2E8), contentColor = if (c.isDark) c.textMid else Color(0xFF3D5A30)),
                     border = androidx.compose.foundation.BorderStroke(1.dp, c.bg4),
@@ -418,7 +419,7 @@ private fun Hero(
                 ) {
                     Icon(Icons.Outlined.ChatBubbleOutline, null, modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text(if (templateBusy) "Sending…" else "Send template", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    Text(if (templateBusy) "Sending…" else "Send template", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                 }
             }
         }
@@ -448,12 +449,14 @@ private fun Tabs(active: CustomerTab, onSelect: (CustomerTab) -> Unit) {
         CustomerTab.entries.forEach { t ->
             val on = t == active
             Column(
-                Modifier.weight(1f).clickable { onSelect(t) },
+                Modifier.weight(1f).clickable(onClickLabel = t.label) { onSelect(t) },
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
+                // One line each, even at font scale 2.0 — the three labels never run together.
                 Text(
                     t.label.uppercase(), fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp,
-                    color = if (on) c.text else c.muted, modifier = Modifier.padding(vertical = 8.dp),
+                    color = if (on) c.text else c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
                 )
                 Box(Modifier.fillMaxWidth().height(2.dp).background(if (on) c.text else Color.Transparent))
             }
