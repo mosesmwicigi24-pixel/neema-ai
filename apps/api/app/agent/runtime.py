@@ -1872,11 +1872,20 @@ import asyncio  # noqa: E402
 _bg_tasks: set = set()
 
 
-async def _is_paused(redis, channel: str, key: str) -> bool:
+async def _is_paused(redis, channel: str, key: str, text: str | None = None) -> bool:
     """True while the agent has paused this contact (pause_conversation tool —
-    non-buying drift cooldown). Best-effort: no redis → not paused."""
+    non-buying drift cooldown). A BUYING SIGNAL lifts it (owner, 2026-09-26:
+    re-engage immediately on new buying intent): the person who was paused for
+    chatting and now asks for a cassock is a customer again. Best-effort: no
+    redis → not paused."""
     try:
         if redis is not None and await redis.get(f"agent:pause:{channel}:{key}"):
+            if text:
+                from app.agent.cooling import buying_signal as _buying
+                if _buying(text):
+                    await redis.delete(f"agent:pause:{channel}:{key}")
+                    _log.info("agent pause lifted for %s/%s — a buying signal", channel, key)
+                    return False
             _log.info("agent paused for %s/%s — skipping reply", channel, key)
             return True
     except Exception:
@@ -2052,7 +2061,7 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None,
 async def schedule_reply(redis, wa_id: str, text: str, dedup_id: str | None,
                          media: dict | None = None) -> bool:
     """Fire the agent for this inbound once. Returns False if already handled."""
-    if await _is_paused(redis, "whatsapp", wa_id):
+    if await _is_paused(redis, "whatsapp", wa_id, text):
         return False
     if media is None and await closer_gate(redis, "whatsapp", wa_id, text):
         return False
@@ -2068,7 +2077,8 @@ async def schedule_reply(redis, wa_id: str, text: str, dedup_id: str | None,
     # straight through (agent/cooling.py).
     try:
         from app.agent import cooling as _pace
-        if await _pace.should_defer(redis, "whatsapp", wa_id, text, bool(media)):
+        if await _pace.should_defer(redis, "whatsapp", wa_id, text, bool(media),
+                                    closer=is_closer(text or "")):
             async def _later(t, m):
                 await _run_and_send(redis, wa_id, t, m, deferred=True)
             if await _pace.slow_lane(redis, "whatsapp", wa_id, text, media, _later):
@@ -2285,7 +2295,7 @@ async def schedule_meta_reply(redis, channel: str, external_id: str, text: str,
     """Fire the agent for one inbound Messenger/IG message (text, photo, or
     both — the agent sees images natively). Deduped on the Meta message id so a
     redelivered webhook never double-replies."""
-    if await _is_paused(redis, channel, external_id):
+    if await _is_paused(redis, channel, external_id, text):
         return False
     if media is None and await closer_gate(redis, channel, external_id, text):
         return False
@@ -2301,7 +2311,8 @@ async def schedule_meta_reply(redis, channel: str, external_id: str, text: str,
     # straight through (agent/cooling.py).
     try:
         from app.agent import cooling as _pace
-        if await _pace.should_defer(redis, channel, external_id, text, bool(media)):
+        if await _pace.should_defer(redis, channel, external_id, text, bool(media),
+                                    closer=is_closer(text or "")):
             async def _later(t, m):
                 await _run_and_send_meta(redis, channel, external_id, t, page_id, m, deferred=True)
             if await _pace.slow_lane(redis, channel, external_id, text, media, _later):

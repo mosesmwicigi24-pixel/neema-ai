@@ -323,11 +323,13 @@ async def read_tally(redis) -> dict:
 
 # ── the verdict ──────────────────────────────────────────────────────────────
 
-async def should_defer(redis, channel: str, key: str, text: str, has_media: bool = False) -> bool:
+async def should_defer(redis, channel: str, key: str, text: str, has_media: bool = False,
+                       closer: bool = False) -> bool:
     """For the schedulers, before a turn is even created: a cooled thread's
     non-question chat rides the slow lane. A buying signal or a question goes
-    straight through (run_turn lifts or answers briefly). Never a closer."""
-    if not getattr(settings, "cooling_enabled", True) or redis is None:
+    straight through (run_turn lifts or answers briefly). Never a closer —
+    the closer gate owns "ok" and "thanks"."""
+    if not getattr(settings, "cooling_enabled", True) or redis is None or closer:
         return False
     if int(getattr(settings, "cooling_defer_minutes", 15) or 0) <= 0:
         return False
@@ -376,6 +378,11 @@ async def _run_lane(redis, channel: str, key: str, runner, secs: int) -> None:
     try:
         raw = await redis.lrange(_k("lane", channel, key), 0, -1)
         await redis.delete(_k("lane", channel, key), _k("lanelock", channel, key))
+        if not await is_cooled(redis, channel, key):
+            # A buying signal lifted the thread meanwhile and was answered with
+            # the whole history in hand — the buffered chat is not answered twice.
+            _log.info("pacing: slow lane for %s/%s dropped — the thread was lifted", channel, key)
+            return
     except Exception:
         return
     texts, media = [], None

@@ -373,6 +373,7 @@ def test_should_defer_only_a_cooled_threads_non_question_chat():
     assert asyncio.run(cl.should_defer(r, "whatsapp", "S", "hmm nice weather", False)) is False
     asyncio.run(cl.cool(r, "whatsapp", "S"))
     assert asyncio.run(cl.should_defer(r, "whatsapp", "S", "hmm nice weather", False)) is True
+    assert asyncio.run(cl.should_defer(r, "whatsapp", "S", "ok thanks", False, closer=True)) is False  # the closer gate's
     assert asyncio.run(cl.should_defer(r, "whatsapp", "S", "how much is a stole", False)) is False   # an item
     assert asyncio.run(cl.should_defer(r, "whatsapp", "S", "can you sing?", False)) is False        # a question
     assert asyncio.run(cl.should_defer(r, "whatsapp", "S", "look", True)) is False                  # a photo
@@ -404,6 +405,15 @@ def test_the_slow_lane_answers_everything_together_once(monkeypatch):
     assert slept == [15 * 60]
     assert not r.lists.get("cool:lane:messenger:P") and "cool:lanelock:messenger:P" not in r.store
     assert _tally(r)["deferred"] == 3
+    # a lane whose thread was lifted meanwhile answers nothing twice
+    r2 = _LaneRedis()
+    got.clear()
+
+    async def main2():
+        await cl.slow_lane(r2, "messenger", "Q", "story", None, runner)      # thread not cooled: lifted
+        await _aio.gather(*list(cl._LANE_TASKS))
+    _aio.run(main2())
+    assert got == []
 
 
 def test_the_schedulers_put_cooled_chat_on_the_slow_lane(monkeypatch):
@@ -444,6 +454,18 @@ def test_the_schedulers_put_cooled_chat_on_the_slow_lane(monkeypatch):
     assert ("wa", "just chatting along\nand more chatting", True) in ran
     assert ("messenger", "hmm nothing much", True) in ran
     assert ("wa", "what time do you close?", False) in ran
+
+
+def test_the_agent_pause_lifts_on_a_buying_signal():
+    r = _R()
+    r.store["agent:pause:whatsapp:254700"] = "1"
+    assert asyncio.run(rt._is_paused(r, "whatsapp", "254700")) is True                      # no text: paused
+    assert asyncio.run(rt._is_paused(r, "whatsapp", "254700", "lol nice one")) is True       # chat: paused
+    assert asyncio.run(rt._is_paused(r, "whatsapp", "254700", "how much is the cassock?")) is False
+    assert "agent:pause:whatsapp:254700" not in r.store                                    # lifted for good
+    src = inspect.getsource(rt.schedule_reply) + inspect.getsource(rt.schedule_meta_reply)
+    assert 'await _is_paused(redis, "whatsapp", wa_id, text)' in src
+    assert "await _is_paused(redis, channel, external_id, text)" in src
 
 
 def test_a_messenger_voice_note_is_the_message(monkeypatch):
