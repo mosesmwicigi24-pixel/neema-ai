@@ -150,7 +150,24 @@ class DashboardViewModel(
     val inboxRefresh: SharedFlow<Unit> = _inboxRefresh.asSharedFlow()
 
     private val _toasts = MutableSharedFlow<Toast>(extraBufferCapacity = 8)
+    /** Every toast as it is raised (tests and anything that logs them). */
     val toasts: SharedFlow<Toast> = _toasts.asSharedFlow()
+
+    private val _toast = MutableStateFlow(
+        saved.get<ArrayList<String>>(KEY_TOAST)?.takeIf { it.size == 2 }?.let { (msg, type) ->
+            Toast(msg, ToastType.entries.find { it.name == type } ?: ToastType.Info)
+        },
+    )
+    /**
+     * The toast on screen now (page.tsx's `toast` state): state, not an
+     * event, so a rotation or any other recreation of the activity shows the
+     * same toast instead of dropping one raised mid-way, and the saved state
+     * brings it back after a process death. See [toast].
+     */
+    val currentToast: StateFlow<Toast?> = _toast.asStateFlow()
+    private var toastTimer: Job? = null
+    /** Milliseconds for the toast countdown; tests drive it by hand. */
+    internal var toastClock: () -> Long = { System.nanoTime() / 1_000_000 }
 
     val sessionExpired = MutableStateFlow(false)
 
@@ -198,6 +215,11 @@ class DashboardViewModel(
         /** Whose view and history those are: another agent signing in starts on the inbox. */
         const val KEY_OWNER = "shell.owner"
         const val KEY_LINK = "shell.pendingLink"
+        const val KEY_TOAST = "shell.toast"
+        /** page.tsx showToast: gone after 3.5 s. */
+        const val TOAST_MS = 3_500L
+        /** A toast held while the app was away stays at least this long once back. */
+        const val TOAST_RETURN_MIN_MS = 1_500L
         /** Views remembered for back; each appears once, so this is plenty. */
         const val HISTORY_MAX = 10
         /**
@@ -475,6 +497,8 @@ class DashboardViewModel(
 
     // After the properties above exist (initialisers run in declaration order).
     init {
+        // A toast restored after a process death gets its time on screen again.
+        _toast.value?.let(::showToast)
         viewModelScope.launch { container.http.forbidden.collect { onForbidden() } }
         viewModelScope.launch {
             combine(_agents, _me, session) { _, _, _ -> }.collect { republishAccess() }
@@ -575,7 +599,43 @@ class DashboardViewModel(
         applyDeepLink(DeepLink(open = convKey, ref = null, view = view, caller = null))
     }
 
-    fun toast(message: String, type: ToastType = ToastType.Success) { _toasts.tryEmit(Toast(message, type)) }
+    /**
+     * page.tsx showToast: one toast at a time, replaced by the next, gone
+     * after 3.5 s. The 3.5 s count only while the app is in front — a toast
+     * raised in the background (a push alert, a save finishing after the
+     * agent switched away) waits for them, then gets what it had left (at
+     * least [TOAST_RETURN_MIN_MS]). Each toast gets its own full time: the
+     * web's earlier timer can clear a newer toast early, a web bug not kept.
+     */
+    fun toast(message: String, type: ToastType = ToastType.Success) {
+        val t = Toast(message, type)
+        _toasts.tryEmit(t)
+        showToast(t)
+    }
+
+    private fun showToast(t: Toast) {
+        _toast.value = t
+        saved[KEY_TOAST] = arrayListOf(t.message, t.type.name)
+        toastTimer?.cancel()
+        toastTimer = viewModelScope.launch {
+            val fg = container.foreground
+            var left = TOAST_MS
+            while (left > 0) {
+                fg.first { it }
+                val from = toastClock()
+                val away = withTimeoutOrNull(left) { fg.first { !it } }
+                left = if (away == null) 0 else maxOf(left - (toastClock() - from), TOAST_RETURN_MIN_MS)
+            }
+            dismissToast(t)
+        }
+    }
+
+    /** Clears [t] if it is still the one showing (a newer toast keeps its own time). */
+    internal fun dismissToast(t: Toast? = _toast.value) {
+        if (t == null || _toast.value?.id != t.id) return
+        _toast.value = null
+        saved.remove<Any>(KEY_TOAST)
+    }
 
     /**
      * Friendly message for a failed call, for toasts and inline errors: every
@@ -621,6 +681,8 @@ class DashboardViewModel(
     /** Forget everything that belonged to the signed-in agent. */
     private fun clearAgentState() {
         ordersRead.cancel()
+        // A toast about the last agent's work is not the next one's business.
+        toastTimer?.cancel(); dismissToast()
         _me.value = null; _agents.value = emptyList(); _orders.value = emptyList(); _catalog.value = emptyList()
         inboxSummary.value = null
         openConvKey.value = null

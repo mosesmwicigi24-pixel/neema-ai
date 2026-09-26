@@ -383,7 +383,9 @@ fun FilterChips(
 /**
  * The web's modal overlay: `bg-black/50`. Call it inside any dialog's
  * content: the platform's own dim comes from the window theme (0.6), not the
- * web's value. (The screenshot renderer draws its own dim and ignores this.)
+ * web's value. Pass 0 where the dialog draws the web's overlay itself
+ * (SessionExpiredDialog's bg-black/40). Screenshot tests render it too
+ * (testing/Harness.kt settleDialogWindows).
  */
 @Composable
 fun WebModalDim(amount: Float = 0.5f) {

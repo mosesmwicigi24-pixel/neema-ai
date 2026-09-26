@@ -358,8 +358,15 @@ fun SessionExpiredDialog(email: String, onSuccess: () -> Unit, onSignOut: () -> 
     val container = NeemaApplication.instance.container
     Dialog(
         onDismissRequest = {},
-        properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false, usePlatformDefaultWidth = false),
+        // Edge to edge: the card draws the web's own overlay (bg-black/40) over
+        // the whole screen, bars included, and pads itself for them.
+        properties = DialogProperties(
+            dismissOnBackPress = false, dismissOnClickOutside = false,
+            usePlatformDefaultWidth = false, decorFitsSystemWindows = false,
+        ),
     ) {
+        // So the window adds no dim of its own (on top of the card's, ~75%).
+        ke.co.bethanyhouse.neema.core.ui.components.WebModalDim(0f)
         SessionExpiredCard(email, login = { e, p -> container.auth.login(e, p) }, onSuccess = onSuccess, onSignOut = onSignOut)
     }
 }

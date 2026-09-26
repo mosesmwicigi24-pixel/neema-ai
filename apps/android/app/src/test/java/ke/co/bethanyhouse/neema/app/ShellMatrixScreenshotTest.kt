@@ -39,6 +39,9 @@ class ShellMatrixScreenshotTest {
     ) = devices.forEach { d ->
         val dash = ShellShots.live(paparazzi.context, d.dark, notifications = if (bell) ShellShots.frames else emptyList())
         dash.navigate(view)
+        // The alerts just pushed also raised a toast (it now waits to be seen);
+        // this shot is about the bell.
+        if (bell) dash.dismissToast()
         paparazzi.snapshotOn(d) {
             AppFrame(d.dark) {
                 DashboardShell(

@@ -51,7 +51,6 @@ import ke.co.bethanyhouse.neema.feature.settings.SettingsScreen
 import androidx.compose.foundation.border
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.unit.Dp
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -133,10 +132,10 @@ fun DashboardShell(
     // The phone's account menu lives in the drawer: it closes with it.
     LaunchedEffect(drawerShown) { if (!wide && !drawerShown && !initialAccountMenu) menuOpen = false }
 
-    // One toast at a time, replaced by the next, gone after 3.5 s (page.tsx showToast).
-    var toast by remember { mutableStateOf(initialToast) }
-    LaunchedEffect(Unit) { dash.toasts.collect { toast = it } }
-    LaunchedEffect(toast) { if (toast != null && initialToast == null) { delay(3_500); toast = null } }
+    // One toast at a time, replaced by the next, gone after 3.5 s in front
+    // (page.tsx showToast) — the dashboard holds it, so it survives recreation.
+    val liveToast by dash.currentToast.collectAsStateWithLifecycle()
+    val toast = initialToast ?: liveToast
 
     val openNotification: (AppNotification) -> Unit = { n ->
         dash.container.notifications.markRead(n.id)
