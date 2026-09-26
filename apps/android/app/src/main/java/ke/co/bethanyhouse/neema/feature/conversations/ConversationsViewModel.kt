@@ -1488,8 +1488,9 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
      * successful read (a poll, the catch-up on reconnect).
      */
     private suspend fun reconcile(localId: String, delays: List<Long> = RECONCILE_DELAYS_MS) {
-        outgoing[localId]?.let { outgoing[localId] = it.copy(checking = true, exhausted = false, failed = false) } ?: return
-        val convId = outgoing[localId]!!.convId
+        val start = outgoing[localId] ?: return
+        outgoing[localId] = start.copy(checking = true, exhausted = false, failed = false)
+        val convId = start.convId
         for ((i, wait) in delays.withIndex()) {
             delay(wait)
             val cur = outgoing[localId] ?: return
@@ -2069,10 +2070,11 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                     for (sm in c.media) {
                         val uri = runCatching { Uri.parse(sm.uri) }.getOrNull()
                         val readable = uri != null && runCatching { cr.openInputStream(uri)?.use { true } == true }.getOrDefault(false)
-                        val bytes = if (readable && sm.reencoded) compressImage(uri!!) else null
-                        if (!readable || (sm.reencoded && bytes == null)) { lost += sm.name; continue }
+                        if (uri == null || !readable) { lost += sm.name; continue }
+                        val bytes = if (sm.reencoded) compressImage(uri) else null
+                        if (sm.reencoded && bytes == null) { lost += sm.name; continue }
                         kept += PickedMedia(
-                            id = "${sm.name}-${sm.size}-${UUID.randomUUID().toString().take(6)}", uri = uri!!, name = sm.name, mime = sm.mime,
+                            id = "${sm.name}-${sm.size}-${UUID.randomUUID().toString().take(6)}", uri = uri, name = sm.name, mime = sm.mime,
                             size = bytes?.size?.toLong() ?: sm.size, bytes = bytes, caption = sm.caption, error = sm.error, unconfirmed = sm.unconfirmed,
                         )
                     }

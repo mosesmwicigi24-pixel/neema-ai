@@ -340,6 +340,8 @@ internal fun uploadable(mime: String, name: String): Boolean =
         ((mime.isEmpty() || mime == "application/octet-stream") &&
             name.substringAfterLast('.', "").lowercase() in setOf("mov", "hevc", "mp4", "m4v"))
 
+private val liveEvtSeq = java.util.concurrent.atomic.AtomicLong()
+
 /** buildSystemEventFromWs (lib/websocket.tsx): a live divider pill from `intercept_changed`. */
 internal fun systemEventFromWs(e: JsonObject): ThreadMsg? {
     val kind = e.s("eventKind") ?: return null
@@ -356,7 +358,9 @@ internal fun systemEventFromWs(e: JsonObject): ThreadMsg? {
         else -> kind
     }
     return ThreadMsg(
-        id = "live-evt-${AppClock.now()}",
+        // Unique even for two frames in one millisecond (or under a test's fixed
+        // clock): the id keys the thread's lazy list, where a repeat would crash it.
+        id = "live-evt-$kind-${AppClock.now()}-${liveEvtSeq.incrementAndGet()}",
         type = "system_event", direction = "outbound", sender = "ai",
         text = label, createdAt = nowIso(),
         eventKind = kind, eventReason = e.s("eventReason"), agentName = agent,
@@ -441,7 +445,7 @@ class InboxApi(private val http: NeemaHttp) {
             val o = e as? JsonObject ?: return@mapIndexedNotNull null
             val label = o.s("label") ?: return@mapIndexedNotNull null
             ActivityEvent(id = o.s("id") ?: "ev-$i", kind = o.s("kind") ?: "", label = label, detail = o.s("detail"), at = o.s("at"))
-        }
+        }.distinctBy { it.id } // the id keys the log's lazy list: a repeat would crash it
     }
 
     /**

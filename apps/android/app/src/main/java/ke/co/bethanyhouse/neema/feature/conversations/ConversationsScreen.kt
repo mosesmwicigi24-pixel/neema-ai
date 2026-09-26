@@ -1,5 +1,7 @@
 package ke.co.bethanyhouse.neema.feature.conversations
 
+import ke.co.bethanyhouse.neema.core.ui.components.WebModalDim
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -126,7 +128,7 @@ fun ConversationsScreen(dash: DashboardViewModel) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("💬", fontSize = 36.sp)
                     Spacer(Modifier.height(8.dp))
-                    Text("Select a conversation", fontSize = 14.sp, color = if (Neema.colors.isDark) Neema.colors.muted else Hue.SagePale)
+                    Text("Select a conversation", fontSize = 14.sp, color = if (Neema.colors.isDark) Neema.colors.muted else Palette.SagePale)
                 }
             }
         } else {
@@ -173,9 +175,10 @@ fun ConversationsScreen(dash: DashboardViewModel) {
 
     // ── Customer panel as a sheet (phones, narrower tablets) ──
     if (customerSheet && active != null) {
-        ModalBottomSheet(onDismissRequest = { customerSheet = false }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        // The web's mobile CRM drawer backdrop: bg-black/40.
+        ModalBottomSheet(onDismissRequest = { customerSheet = false }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), scrimColor = Color.Black.copy(alpha = 0.4f)) {
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Customer Profile", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Text("Customer Profile", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 IconButton(onClick = { customerSheet = false }) { Icon(Icons.Filled.Close, "Close", tint = Palette.Moss600) }
             }
             HorizontalDivider(color = hairline())
@@ -201,7 +204,7 @@ fun ConversationsScreen(dash: DashboardViewModel) {
     if (dialogs.note) NoteDialog(dialogs.noteText, vm::setNoteText, vm::saveNote) { vm.showNote(false) }
     if (dialogs.clearConfirm) AlertDialog(
         onDismissRequest = { vm.showClear(false) },
-        title = { Text("Clear Chat History") },
+        title = { WebModalDim(); Text("Clear Chat History") },
         text = {
             Text(
                 "This will permanently delete all messages in this conversation. The conversation record and customer profile will be kept. This cannot be undone.",
@@ -378,14 +381,14 @@ private fun ThreadPane(
             val dark = Neema.colors.isDark
             HorizontalDivider(color = hairline())
             Row(
-                Modifier.fillMaxWidth().background(if (dark) Neema.colors.bg2 else Hue.SageBanner).padding(16.dp),
+                Modifier.fillMaxWidth().background(if (dark) Neema.colors.bg2 else Palette.SageBanner).padding(16.dp),
                 horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("🔒", fontSize = 16.sp); Spacer(Modifier.width(8.dp))
                 Text(
                     androidx.compose.ui.text.buildAnnotatedString {
                         append("Handled by ")
-                        pushStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold, color = if (dark) Hue.MossNight else Palette.Moss600))
+                        pushStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold, color = if (dark) Palette.MossNight else Palette.Moss600))
                         append(conv.assignedAgentName ?: "another agent"); pop()
                         append(" — ask them to release or transfer it to you")
                     },
@@ -408,10 +411,10 @@ private fun SideRail(label: String, count: Int = 0, flipArrow: Boolean = false, 
         Modifier.width(32.dp).fillMaxHeight().background(Neema.colors.bg2).border(0.5.dp, hairline()).clickable(onClickLabel = "Show ${label.lowercase()}", onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
     ) {
-        Icon(if (flipArrow) Icons.AutoMirrored.Filled.KeyboardArrowLeft else Icons.AutoMirrored.Filled.KeyboardArrowRight, "Show ${label.lowercase()}", tint = Hue.SagePale)
+        Icon(if (flipArrow) Icons.AutoMirrored.Filled.KeyboardArrowLeft else Icons.AutoMirrored.Filled.KeyboardArrowRight, "Show ${label.lowercase()}", tint = Palette.SagePale)
         Spacer(Modifier.height(4.dp))
         Spacer(Modifier.height(8.dp))
-        Text(label.uppercase(), fontSize = 9.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 2.sp, color = if (Neema.colors.isDark) Neema.colors.muted else Hue.SagePale, maxLines = 1, softWrap = false, modifier = Modifier.verticalLabel())
+        Text(label.uppercase(), fontSize = 9.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 2.sp, color = if (Neema.colors.isDark) Neema.colors.muted else Palette.SagePale, maxLines = 1, softWrap = false, modifier = Modifier.verticalLabel())
         if (count > 0) {
             Spacer(Modifier.height(12.dp))
             Box(Modifier.size(18.dp).clip(CircleShape).background(Palette.Amber100).border(1.dp, Palette.Amber300, CircleShape), contentAlignment = Alignment.Center) {
@@ -440,20 +443,20 @@ private fun ActivityPane(events: List<ActivityEvent>, open: Boolean, width: andr
 private val DOT_COLOR = mapOf(
     "escalated" to (Palette.Amber100 to Palette.Amber300),
     "flag" to (Palette.Red100 to Palette.Red300),
-    "intercept" to (Hue.Purple100 to Hue.Purple300),
-    "release" to (Hue.Blue100 to Hue.Blue300),
-    "transfer" to (Hue.Indigo100 to Hue.Indigo300),
-    "approve_draft" to (Hue.Green100 to Hue.Green300),
+    "intercept" to (Palette.Purple100 to Palette.Purple300),
+    "release" to (Palette.Blue100 to Palette.Blue300),
+    "transfer" to (Palette.Indigo100 to Palette.Indigo300),
+    "approve_draft" to (Palette.Green100 to Palette.Green300),
     "pause" to (Palette.Stone200 to Palette.Stone400),
-    "checkin_planned" to (Hue.Sky100 to Hue.Sky300),
-    "checkin_sent" to (Hue.Sky200 to Hue.Sky400),
+    "checkin_planned" to (Palette.Sky100 to Palette.Sky300),
+    "checkin_sent" to (Palette.Sky200 to Palette.Sky400),
     "checkin_vetoed" to (Palette.Stone100 to Palette.Stone300),
     "checkin_failed" to (Palette.Red100 to Palette.Red300),
-    "deal" to (Hue.Emerald100 to Palette.Emerald300),
+    "deal" to (Palette.Emerald100 to Palette.Emerald300),
     "promise" to (Palette.Amber100 to Palette.Amber300),
-    "order" to (Hue.Green100 to Hue.Green400),
-    "call" to (Hue.Teal100 to Hue.Teal300),
-    "tool" to (Hue.Lime50 to Hue.Lime300),
+    "order" to (Palette.Green100 to Palette.Green400),
+    "call" to (Palette.Teal100 to Palette.Teal300),
+    "tool" to (Palette.Lime50 to Palette.Lime300),
 )
 
 /** The person-scoped journey: pickups, check-ins, deals, orders and calls. */
@@ -479,7 +482,7 @@ private fun ActivityList(events: List<ActivityEvent>, modifier: Modifier) {
                 Spacer(Modifier.width(8.dp))
                 Column(Modifier.padding(bottom = 12.dp)) {
                     Text(e.label, fontSize = 11.sp, fontWeight = FontWeight.Medium, lineHeight = 15.sp)
-                    e.detail?.takeIf { it.isNotEmpty() }?.let { Text(it, fontSize = 10.sp, color = Hue.SageDetail, lineHeight = 14.sp, modifier = Modifier.padding(top = 2.dp)) }
+                    e.detail?.takeIf { it.isNotEmpty() }?.let { Text(it, fontSize = 10.sp, color = Palette.SageDetail, lineHeight = 14.sp, modifier = Modifier.padding(top = 2.dp)) }
                     Text(Fmt.timeAgo(e.at), fontSize = 10.sp, color = Palette.Stone400, modifier = Modifier.padding(top = 2.dp))
                 }
             }
@@ -496,7 +499,7 @@ internal fun TransferDialog(dash: DashboardViewModel, conv: Conversation?, busy:
     val available = agents.filter { it.isAvailable && it.id != conv?.assignedAgentId }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Transfer Conversation") },
+        title = { WebModalDim(); Text("Transfer Conversation") },
         text = {
             Column {
                 Text("Select an agent to transfer this conversation to:", fontSize = 14.sp, color = Palette.Sage400)
@@ -536,7 +539,7 @@ internal fun ModalButtons(content: @Composable RowScope.() -> Unit) {
 internal fun NoteDialog(text: String, onText: (String) -> Unit, onSave: () -> Unit, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add Note") },
+        title = { WebModalDim(); Text("Add Note") },
         text = {
             OutlinedTextField(
                 value = text, onValueChange = onText, label = { Text("Note") }, minLines = 4,
@@ -559,8 +562,8 @@ private fun ResultBox(text: String) {
     val c = Neema.colors
     Text(
         text, fontSize = 13.sp, color = c.text,
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(if (c.isDark) c.bg3 else Hue.SageResult)
-            .border(1.dp, if (c.isDark) c.border else Hue.SageResultRim, RoundedCornerShape(8.dp)).padding(10.dp),
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(if (c.isDark) c.bg3 else Palette.SageResult)
+            .border(1.dp, if (c.isDark) c.border else Palette.SageResultRim, RoundedCornerShape(8.dp)).padding(10.dp),
     )
 }
 
@@ -580,7 +583,7 @@ internal fun AskNeemaDialog(vm: ConversationsViewModel, initialQuestion: String 
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Ask Neema") },
+        title = { WebModalDim(); Text("Ask Neema") },
         text = {
             Column {
                 OutlinedTextField(
@@ -616,7 +619,7 @@ internal fun AnswerViaNeemaDialog(vm: ConversationsViewModel, initialFacts: Stri
     val scope = rememberCoroutineScope()
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Neema delivers") },
+        title = { WebModalDim(); Text("Neema delivers") },
         text = {
             Column {
                 OutlinedTextField(facts, { facts = it }, placeholder = { Text("Team answer… “yes, we make it — KES 3,500, ~5 days”") }, minLines = 2, modifier = Modifier.fillMaxWidth())
@@ -657,7 +660,7 @@ internal fun InviteDialog(dash: DashboardViewModel, vm: ConversationsViewModel, 
     val digits = phone.filter { it.isDigit() }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Invite to WhatsApp") },
+        title = { WebModalDim(); Text("Invite to WhatsApp") },
         text = {
             Column {
                 Text("Send this customer a WhatsApp invite (delivers the approved template to their number).", fontSize = 13.sp, color = Palette.Sage400)

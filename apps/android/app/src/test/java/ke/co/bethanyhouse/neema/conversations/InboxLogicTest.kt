@@ -2,12 +2,12 @@ package ke.co.bethanyhouse.neema.conversations
 
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import ke.co.bethanyhouse.neema.core.api.InboxQuery
 import ke.co.bethanyhouse.neema.core.model.Conversation
+import ke.co.bethanyhouse.neema.core.ui.theme.NeemaMono
 import ke.co.bethanyhouse.neema.feature.conversations.*
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -27,7 +27,7 @@ class InboxLogicTest {
             s.fontWeight == FontWeight.Bold -> "b"
             s.fontStyle == FontStyle.Italic -> "i"
             s.textDecoration == TextDecoration.LineThrough -> "s"
-            s.fontFamily == FontFamily.Monospace -> "code"
+            s.fontFamily == NeemaMono -> "code"
             else -> "?"
         }
         kind to text.substring(r.start, r.end)
@@ -156,6 +156,35 @@ class InboxLogicTest {
         assertNull(systemEventFromWs(buildJsonObject { put("type", "intercept_changed") }))
         val e = systemEventFromWs(buildJsonObject { put("eventKind", "escalated"); put("eventReason", JsonPrimitive("media")) })!!
         assertTrue(e.id.startsWith("live-evt-")); assertEquals("system_event", e.type); assertEquals("media", e.eventReason)
+    }
+
+    /** waText.tsx: `<code className="font-mono text-[0.95em]">` — DM Mono (the web's --font-mono), a touch smaller. */
+    @Test fun waText_codeIsDmMonoAtWebSize() {
+        val a = formatWa("size `XL-42`")
+        val code = a.spanStyles.single().item
+        assertEquals(NeemaMono, code.fontFamily)
+        assertEquals(androidx.compose.ui.unit.TextUnit(0.95f, androidx.compose.ui.unit.TextUnitType.Em), code.fontSize)
+    }
+
+    /**
+     * Live pills key the thread's lazy list: two frames of different kinds in one
+     * millisecond (always, under a test's fixed clock) used to share an id, and a
+     * repeated key throws inside LazyColumn.
+     */
+    @Test fun liveEvents_haveUniqueIdsEvenInOneMillisecond() {
+        val ids = listOf("escalated", "intercept", "escalated").map { k ->
+            systemEventFromWs(buildJsonObject { put("type", "intercept_changed"); put("eventKind", k) })!!.id
+        }
+        assertEquals(3, ids.toSet().size)
+        assertTrue(ids.all { it.startsWith("live-evt-") })
+    }
+
+    @Test fun threadRows_neverRepeatAKey() {
+        // The same server row delivered twice (a replayed frame appended past the dedupe).
+        val list = sortThread(listOf(m("u1", 1, "hi"), m("u1", 1, "hi"), m("u2", 2, "there")))
+        val rows = buildThreadRows(list, unreadSnap = 1)
+        assertEquals(rows.map { it.key }.distinct(), rows.map { it.key })
+        assertEquals(listOf("u1", "new-divider", "u2"), rows.map { it.key })
     }
 
     // ── Thread rows (the thread JSX) ──
