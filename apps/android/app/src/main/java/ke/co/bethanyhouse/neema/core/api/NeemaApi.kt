@@ -203,8 +203,10 @@ class NeemaApi(val http: NeemaHttp) {
         suspend fun sendReply(
             id: String, text: String, replyTo: String? = null,
             originalText: String? = null, originalLang: String? = null,
+            clientMsgId: String? = null,
         ): Message = http.post("/admin/conversations/$id/reply", buildJsonObject {
             put("text", text)
+            if (clientMsgId != null) put("client_msg_id", clientMsgId)
             if (replyTo != null) put("reply_to", replyTo)
             if (originalText != null) put("original_text", originalText)
             if (originalLang != null) put("original_lang", originalLang)

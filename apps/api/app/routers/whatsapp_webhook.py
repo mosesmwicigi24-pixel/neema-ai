@@ -86,6 +86,10 @@ async def process_payload(request: Request, raw: bytes, sig: str | None) -> Resp
         await _tap_inbound_wamids(payload, redis)
     except Exception as exc:
         _log.warning("WA wamid tap failed (continuing): %s", exc)
+    try:
+        await _tap_call_permission(payload, redis)
+    except Exception as exc:
+        _log.warning("WA call-permission tap failed (continuing): %s", exc)
     from app.services import wa_native
     n, failed = await wa_native.handle_webhook(payload, redis)
     if n or failed:
@@ -95,6 +99,23 @@ async def process_payload(request: Request, raw: bytes, sig: str | None) -> Resp
         # redelivers them. Never acked-and-lost.
         return Response(status_code=502)
     return PlainTextResponse("EVENT_RECEIVED")
+
+
+async def _tap_call_permission(payload: dict, redis) -> None:
+    """A customer answered our call-permission request (the interactive
+    `call_permission_reply` message): remember it and tell every agent, so the
+    one waiting to call sees "Allowed — call now" the moment they tap Allow."""
+    from app.services import call_log
+    for entry in payload.get("entry", []):
+        for change in entry.get("changes", []):
+            if change.get("field") != "messages":
+                continue
+            for m in (change.get("value") or {}).get("messages", []):
+                inter = m.get("interactive") or {}
+                if m.get("type") != "interactive" or inter.get("type") != "call_permission_reply":
+                    continue
+                await call_log.note_permission_reply(
+                    redis, str(m.get("from") or ""), inter.get("call_permission_reply") or {})
 
 
 async def _tap_inbound_wamids(payload: dict, redis) -> None:
@@ -158,34 +179,30 @@ async def _handle_calls(request: Request, payload: dict) -> None:
                 # Our OUTBOUND call was accepted: the customer's SDP ANSWER arrives
                 # as a connect event with sdp_type=answer. Relay it to the browser
                 # that placed the call so it can complete the WebRTC connection.
+                from app.services import call_log
                 if event == "connect" and sdp_type == "answer":
-                    if redis is not None:
-                        await redis.publish("ws:channel:calls", json.dumps({
-                            "type": "outbound_answer", "call_id": cid,
-                            "sdp": (call.get("session") or {}).get("sdp"),
-                        }))
-                        _log.warning("WA outbound call %s answered by customer", cid)
-                    try:
-                        from app.services import call_log
-                        await call_log.mark_answered(cid, None)
-                    except Exception:
-                        pass
+                    # Our OUTBOUND call was accepted: the customer's SDP ANSWER.
+                    # Relay it to the device that placed the call so it can
+                    # complete the WebRTC connection, then tell every agent.
+                    await call_log.publish(redis, {
+                        "type": "outbound_answer", "call_id": cid,
+                        "sdp": (call.get("session") or {}).get("sdp"),
+                    })
+                    _log.warning("WA outbound call %s answered by customer", cid)
+                    moved = await call_log.mark_answered(cid, None)
+                    if moved is not None:
+                        await call_log.publish(redis, {"type": "call_answered", "call_id": cid, **moved})
                     continue
 
                 if event == "connect":
                     _log.info("WA incoming call %s from %s", cid, call.get("from"))
-                    try:
-                        from app.services import call_log
-                        await call_log.record_ringing(cid, call.get("from"),
-                                                      _contacts.get(str(call.get("from"))))
-                    except Exception:
-                        pass
+                    frm = call.get("from")
                     if redis is not None:
                         # Stash the SDP offer + metadata for the accept step.
                         await redis.set(
                             f"wa:call:offer:{cid}",
                             json.dumps({
-                                "from": call.get("from"),
+                                "from": frm,
                                 "to": call.get("to"),
                                 "phone_number_id": phone_number_id,
                                 "sdp": (call.get("session") or {}).get("sdp"),
@@ -193,23 +210,40 @@ async def _handle_calls(request: Request, payload: dict) -> None:
                             }),
                             ex=300,
                         )
-                        await redis.publish("ws:channel:calls", json.dumps({
-                            "type": "incoming_call", "call_id": cid,
-                            "from": call.get("from"),
-                            "name": _contacts.get(str(call.get("from"))),
-                            "at": call.get("timestamp"),
-                        }))
-                        _log.warning("WA published incoming_call ring for %s", cid)
+                    # Ring first — every millisecond before an agent sees the call
+                    # is the customer listening to silence — then log it and send
+                    # the row (the person / chat links) as an update.
+                    await call_log.publish(redis, {
+                        "type": "incoming_call", "call_id": cid,
+                        "from": frm,
+                        "name": _contacts.get(str(frm)),
+                        "at": call.get("timestamp"),
+                        "channel": "whatsapp",
+                    })
+                    _log.warning("WA published incoming_call ring for %s", cid)
+                    await call_log.record_ringing(cid, frm, _contacts.get(str(frm)))
+                    await call_log.publish_update(redis, cid)
                 elif event == "terminate":
                     _log.info("WA call %s terminated (status=%s, dur=%ss)",
                               cid, call.get("status"), (call.get("duration") or "?"))
-                    try:
-                        from app.services import call_log
-                        await call_log.mark_ended(cid, duration=call.get("duration"))
-                    except Exception:
-                        pass
-                    if redis is not None:
-                        await redis.publish("ws:channel:calls", json.dumps({
-                            "type": "call_ended", "call_id": cid,
-                            "status": call.get("status"), "duration": call.get("duration"),
-                        }))
+                    info = await call_log.mark_ended(cid, duration=call.get("duration"))
+                    if info is None:
+                        # Already closed on our side (declined, callback, the stale
+                        # sweep): still say so — a screen that missed that event
+                        # must stop ringing now.
+                        try:
+                            from app.database import AsyncSessionLocal
+                            async with AsyncSessionLocal() as db:
+                                r = await call_log.row(db, cid)
+                        except Exception:
+                            r = None
+                        info = {"call_id": cid, "outcome": (r or {}).get("status") or "completed",
+                                "duration": (r or {}).get("duration") or call.get("duration"),
+                                "direction": (r or {}).get("direction"),
+                                "agent_id": (r or {}).get("agent_id"),
+                                "agent_name": (r or {}).get("agent_name")}
+                    info.pop("wa_id", None)
+                    await call_log.publish(redis, {
+                        "type": "call_ended", **info, "call_id": cid,
+                        "status": call.get("status"),
+                    })

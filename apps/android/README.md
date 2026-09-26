@@ -45,7 +45,7 @@ app/src/main/java/ke/co/bethanyhouse/neema/
 │   ├── auth/             sign-in, token refresh, encrypted session storage
 │   ├── model/            wire models (types/index.ts + api.ts interfaces)
 │   ├── net/              HTTP client (30s ceiling, refresh-on-401, session expiry)
-│   ├── ws/               live WebSocket (/ws/{agent_id}), ping + reconnect
+│   ├── ws/               live WebSocket (/ws/{agent_id}?token=…), ping + reconnect
 │   ├── notify/           bell, system notifications, background LiveService
 │   ├── perm/ util/ ui/   permissions, formatters, theme, shared components
 └── feature/<view>/       one package per dashboard view

@@ -465,9 +465,14 @@ class InboxApi(private val http: NeemaHttp) {
      * failed (Graph refused, window closed, page token) — surfaced as a throw
      * so a failed send never vanishes silently.
      */
-    suspend fun reply(id: String, text: String, replyTo: String?, originalText: String?, originalLang: String?) {
+    suspend fun reply(
+        id: String, text: String, replyTo: String?, originalText: String?, originalLang: String?,
+        /** The outbox bubble's id: a resend after a lost answer is recognised, never sent twice. */
+        clientMsgId: String? = null,
+    ) {
         val body = buildJsonObject {
             put("text", text)
+            if (clientMsgId != null) put("client_msg_id", clientMsgId)
             if (replyTo != null) put("reply_to", replyTo)
             if (originalText != null) put("original_text", originalText)
             if (originalLang != null) put("original_lang", originalLang)

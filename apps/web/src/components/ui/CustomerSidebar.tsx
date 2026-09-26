@@ -16,7 +16,9 @@ import {
     displayName,
 } from "@/lib/utils";
 import type { Conversation, Order } from "@/types";
-import { whatsappApi, callsApi, askNeema, answerViaNeema, settingsApi } from "@/lib/api";
+import { whatsappApi, callsApi, askNeema, answerViaNeema, settingsApi, type ApiCall } from "@/lib/api";
+import { useWs } from "@/lib/websocket";
+import { callStatus, fmtCallDuration, upsertCall, CALL_ICON_PATH } from "@/lib/callStatus";
 import { useCall } from "@/lib/callContext";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -149,6 +151,9 @@ interface Props {
     className?: string;
     /** Hide the built-in "Customer" header bar — useful when a parent drawer provides its own header */
     hideHeader?: boolean;
+    /** Put text in the reply composer (never sends) — e.g. asking a Messenger
+     *  customer for their WhatsApp number so we can call them there. */
+    onPrefillReply?: (text: string) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -675,6 +680,176 @@ function EditableField({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Calling — the last calls with this customer, and the "call on WhatsApp
+// instead" sheet for channels with no business calling API
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface MetaSheetStyle { label: string; gradient: string; /** Behind white text (readable end of the gradient). */ ink: string; }
+
+// Messenger and Instagram have NO business calling API (docs/CALLING_UX.md §1):
+// their Call button offers a WhatsApp call, styled in the platform's own look.
+const META_CALL_SHEET: Record<string, MetaSheetStyle> = {
+    messenger: { label: "Messenger", gradient: "linear-gradient(135deg, #0084FF 0%, #A033FF 100%)",
+                 ink: "linear-gradient(135deg, #0066E0 0%, #8A1FEA 100%)" },
+    facebook: { label: "Messenger", gradient: "linear-gradient(135deg, #0084FF 0%, #A033FF 100%)",
+                ink: "linear-gradient(135deg, #0066E0 0%, #8A1FEA 100%)" },
+    // White text never sits on the yellow end: it reads left-to-right over purple → pink.
+    instagram: { label: "Instagram", gradient: "linear-gradient(45deg, #FEDA75 0%, #FA7E1E 25%, #D62976 50%, #962FBF 75%, #4F5BD5 100%)",
+                 ink: "linear-gradient(90deg, #4F5BD5 0%, #962FBF 30%, #D62976 65%, #FA7E1E 100%)" },
+};
+
+function MetaCallSheet({ meta, first, name, callDigits, busy, onCall, onAsk, onInvited, onToast, onClose }: {
+    meta: MetaSheetStyle;
+    first: string;
+    name: string | null;
+    callDigits: string;
+    busy: boolean;
+    onCall: () => void;
+    onAsk?: (text: string) => void;
+    onInvited: (phone: string) => void;
+    onToast: (msg: string, type?: "success" | "error" | "warning") => void;
+    onClose: () => void;
+}) {
+    const [phone, setPhone] = useState("");
+    const [sending, setSending] = useState(false);
+    const digits = phone.replace(/\D/g, "");
+    // The same invite the "Invite to WhatsApp" chip sends (approved template,
+    // wa.me fallback when the template can't go).
+    const invite = async () => {
+        if (digits.length < 7 || digits.length > 15) return onToast("Enter their WhatsApp number with the country code", "warning");
+        setSending(true);
+        try {
+            await whatsappApi.invite(phone, name || "");
+            onToast(`WhatsApp invite sent ✓ — you can call ${first} there`);
+        } catch {
+            const text = `Hello${first !== "them" ? " " + first : ""}, this is Bethany House. ` +
+                "Continuing our chat here on WhatsApp so we can call you.";
+            window.open(`https://wa.me/${digits}?text=${encodeURIComponent(text)}`, "_blank", "noopener");
+        } finally { setSending(false); }
+        onInvited(phone);
+    };
+    return (
+        <div role="region" aria-label="Call on WhatsApp instead" className="mt-2 rounded-xl overflow-hidden"
+            style={{ border: "1px solid #e2e8f0", backgroundColor: "#fff" }}>
+            <div className="flex items-center justify-between pl-3 py-0.5 text-white"
+                style={{ background: meta.ink, textShadow: "0 1px 2px rgba(0,0,0,0.35)" }}>
+                <span className="text-xs font-bold">{meta.label}</span>
+                <button type="button" onClick={onClose} aria-label="Close"
+                    className="w-11 h-11 rounded-full flex items-center justify-center hover:bg-white/15">
+                    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                </button>
+            </div>
+            <div className="px-3 py-3">
+                <p className="text-xs leading-relaxed" style={{ color: "#1e293b" }}>
+                    {meta.label} doesn&apos;t let businesses take calls. Call {first} on WhatsApp instead.
+                </p>
+                {callDigits ? (
+                    <>
+                    <button type="button" onClick={onCall} disabled={busy}
+                        className="mt-2.5 w-full h-11 rounded-lg text-xs font-semibold text-white inline-flex items-center justify-center gap-1.5 disabled:opacity-60"
+                        style={{ backgroundColor: "#008069" }}>
+                        <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="flex-shrink-0">
+                            <path d={CALL_ICON_PATH.live} />
+                        </svg>
+                        {busy ? "On a call" : "Call on WhatsApp"}
+                    </button>
+                    <div className="mt-1 text-center text-[11px] tabular-nums" style={{ color: "#64748b" }}>+{callDigits}</div>
+                    </>
+                ) : (
+                    <>
+                        {onAsk && (
+                            <button type="button"
+                                onClick={() => onAsk(`Hi ${first !== "them" ? first : "there"}! We can't take calls here on ${meta.label} — could you share your WhatsApp number so we can call you there?`)}
+                                className="mt-2.5 w-full h-11 rounded-lg text-xs font-semibold text-white"
+                                style={{ background: meta.ink, textShadow: "0 1px 2px rgba(0,0,0,0.3)" }}>
+                                Ask for their WhatsApp number
+                            </button>
+                        )}
+                        <div className="mt-2.5 text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#64748b" }}>
+                            Have their number?
+                        </div>
+                        <div className="mt-1 flex gap-1.5">
+                            <input type="tel" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)}
+                                placeholder="+254…" aria-label="Their WhatsApp number"
+                                className="flex-1 min-w-0 h-11 rounded-lg px-2 text-xs outline-none focus:ring-2 focus:ring-emerald-600"
+                                style={{ border: "1px solid #cbd5e1", color: "#16270c" }} />
+                            <button type="button" onClick={invite} disabled={sending}
+                                className="h-11 px-3 rounded-lg text-xs font-semibold text-white disabled:opacity-60"
+                                style={{ backgroundColor: "#008069" }}>
+                                {sending ? "Sending…" : "Invite to WhatsApp"}
+                            </button>
+                        </div>
+                    </>
+                )}
+            </div>
+        </div>
+    );
+}
+
+// The last three calls with this customer — outcome in words, when, how long,
+// and whether the team still owes them a call. Live: rows merge in place.
+function SidebarCalls({ waId }: { waId: string }) {
+    const ws = useWs();
+    const [calls, setCalls] = useState<ApiCall[] | null>(null);
+    const callsRef = React.useRef<ApiCall[] | null>(null);
+    useEffect(() => { callsRef.current = calls; }, [calls]);
+    const load = useCallback(() => {
+        callsApi.list({ wa_id: waId, limit: 3 })
+            .then(setCalls)
+            .catch(() => setCalls((c) => c ?? []));
+    }, [waId]);
+    useEffect(() => { load(); }, [load]);   // keyed by waId at the call site: a new customer starts empty
+    useEffect(() => {
+        if (!ws) return;
+        let t: ReturnType<typeof setTimeout> | null = null;
+        const on = (e: { type?: string; call?: ApiCall; call_id?: string }) => {
+            if (e?.type === "call_update" && e.call && (e.call.wa_id || "").replace(/^\+/, "") === waId) {
+                const row = e.call;
+                setCalls((prev) => (prev ? upsertCall(prev, row).slice(0, 3) : prev));
+            } else if (e?.type === "call_ended" && callsRef.current?.some((c) => c.call_id === e.call_id)) {
+                if (t) clearTimeout(t);
+                t = setTimeout(load, 600);
+            }
+        };
+        ws.on("event", on);
+        return () => { ws.off("event", on); if (t) clearTimeout(t); };
+    }, [ws, waId, load]);
+
+    if (!calls || calls.length === 0) return null;
+    const owed = calls.some((c) => c.follow_up_open);
+    return (
+        <div className="mt-3">
+            <div className="flex items-center gap-1.5 mb-1">
+                <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#334155" }}>Calls</span>
+                {owed && (
+                    <span className="text-[10px] font-semibold rounded-full px-1.5 py-0.5" style={{ backgroundColor: "#fee2e2", color: "#b91c1c" }}>
+                        Follow-up open
+                    </span>
+                )}
+            </div>
+            <ul className="space-y-0.5">
+                {calls.map((c) => {
+                    const st = callStatus(c);
+                    return (
+                        <li key={c.call_id} className="flex items-center gap-1.5 text-xs" style={{ minHeight: 24 }}>
+                            <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke={st.light} strokeWidth={2.2}
+                                strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                <path d={CALL_ICON_PATH[st.icon]} />
+                            </svg>
+                            <span className="font-semibold" style={{ color: st.light }}>{st.word}</span>
+                            {c.duration ? <span style={{ color: "#64748b" }}>· {fmtCallDuration(c.duration)}</span> : null}
+                            {c.agent_name ? <span className="truncate" style={{ color: "#64748b" }}>· {c.agent_name.split(" ")[0]}</span> : null}
+                            <span className="ml-auto flex-shrink-0" style={{ color: "#94a3b8" }}>{c.started_at ? timeAgo(c.started_at) : ""}</span>
+                            {c.follow_up_open && <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: "#dc2626" }} title="Follow-up open" />}
+                        </li>
+                    );
+                })}
+            </ul>
+        </div>
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Main component
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -687,9 +862,11 @@ export function CustomerSidebar({
     onOpenIdentity,
     className,
     hideHeader,
+    onPrefillReply,
 }: Props) {
     const callCtx = useCall();
     const [templateBusy, setTemplateBusy] = useState(false);
+    const [callSheetOpen, setCallSheetOpen] = useState(false);
     const [activeTab, setActiveTab] = useState<
         "profile" | "insights" | "activity"
     >("profile");
@@ -1215,41 +1392,48 @@ export function CustomerSidebar({
                 </div>
 
                 {/* Reach-out actions — Call (WhatsApp voice) + Send template (to
-                    re-open a chat / request call permission). Shown for a customer
-                    with a valid phone. */}
+                    re-open a chat). WhatsApp is the only channel with a business
+                    calling API: on a Messenger / Instagram chat the Call button
+                    opens a sheet that offers a WhatsApp call instead. The call
+                    card itself handles every outcome, including "hasn't allowed
+                    calls yet" (it offers Send call request — never sent for them). */}
                 {(() => {
+                    const valid = (d: string) => d.length >= 7 && d.length <= 15;
                     const digits = (profile.phone || "").replace(/\D/g, "");
-                    if (digits.length < 7 || digits.length > 15) return null;
+                    const waIdentity = (profile.channels || []).find((c) => c.channel === "whatsapp")?.identifier || "";
+                    const waDigits = (conversation.channel === "whatsapp"
+                        ? conversation.wa_id || conversation.external_id || ""
+                        : waIdentity).replace(/\D/g, "");
+                    const callDigits = valid(waDigits) ? waDigits : valid(digits) ? digits : "";
+                    const meta = META_CALL_SHEET[conversation.channel as string];
+                    if (!callDigits && !meta) return null;
+                    const busy = !!callCtx && callCtx.phase !== "idle" && callCtx.phase !== "ended";
+                    const startCall = async () => {
+                        if (!callCtx) return onToast("Calling unavailable", "error");
+                        // A real WhatsApp thread id lets the card's "Open chat" go straight back here.
+                        const convId = conversation.channel === "whatsapp" && !String(conversation.id).startsWith("call:")
+                            ? conversation.id : null;
+                        const r = await callCtx.initiateCall(callDigits, profile.name, convId);
+                        if (!r.ok) onToast(r.error || "Couldn't place the call", "error");
+                    };
                     return (
+                        <>
                         <div className="flex gap-2 mt-3">
                             <button
                                 type="button"
-                                onClick={async () => {
-                                    if (!callCtx) return onToast("Calling unavailable", "error");
-                                    const r = await callCtx.initiateCall(digits, profile.name);
-                                    if (r.ok) return;
-                                    // No call permission yet → request it automatically,
-                                    // so the agent's next click can go through.
-                                    if ((r.error || "").toLowerCase().includes("permission")) {
-                                        try {
-                                            await callsApi.requestPermission(digits);
-                                            onToast(`Asked ${profile.name?.split(" ")[0] || "them"} for permission to call — you can call once they tap Allow.`);
-                                        } catch {
-                                            onToast("Couldn't send the call request", "error");
-                                        }
-                                    } else {
-                                        onToast(r.error || "Couldn't place the call", "error");
-                                    }
-                                }}
-                                title="Call this customer on WhatsApp"
-                                className="flex-1 inline-flex items-center justify-center gap-1.5 h-9 rounded-lg text-xs font-semibold text-white transition-transform hover:brightness-95 active:scale-95"
-                                style={{ backgroundColor: "#25D366" }}
+                                disabled={busy}
+                                onClick={() => (meta ? setCallSheetOpen((v) => !v) : startCall())}
+                                aria-expanded={meta ? callSheetOpen : undefined}
+                                title={meta ? `${meta.label} can't take calls — call on WhatsApp instead` : "Call this customer on WhatsApp"}
+                                className="flex-1 inline-flex items-center justify-center gap-1.5 h-11 rounded-lg text-xs font-semibold text-white transition-transform hover:brightness-95 active:scale-95 disabled:opacity-60"
+                                style={{ background: meta ? meta.ink : "#008069" }}
                             >
                                 <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                                     <path d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
                                 </svg>
-                                Call
+                                {busy ? "On a call" : "Call"}
                             </button>
+                            {valid(digits) && (
                             <button
                                 type="button"
                                 disabled={templateBusy}
@@ -1262,8 +1446,8 @@ export function CustomerSidebar({
                                         onToast("Couldn't send the template", "error");
                                     } finally { setTemplateBusy(false); }
                                 }}
-                                title="Send the approved WhatsApp template (re-opens the chat / requests call permission)"
-                                className="flex-1 inline-flex items-center justify-center gap-1.5 h-9 rounded-lg text-xs font-semibold transition-transform hover:brightness-95 active:scale-95 disabled:opacity-60"
+                                title="Send the approved WhatsApp template (re-opens the chat)"
+                                className="flex-1 inline-flex items-center justify-center gap-1.5 h-11 rounded-lg text-xs font-semibold transition-transform hover:brightness-95 active:scale-95 disabled:opacity-60"
                                 style={{ backgroundColor: "#eef2e8", color: "#3d5a30", border: "1px solid #cee6b2" }}
                             >
                                 <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
@@ -1271,7 +1455,24 @@ export function CustomerSidebar({
                                 </svg>
                                 {templateBusy ? "Sending…" : "Send template"}
                             </button>
+                            )}
                         </div>
+                        {meta && callSheetOpen && (
+                            <MetaCallSheet
+                                meta={meta}
+                                first={(profile.name || "").trim().split(/\s+/)[0] || "them"}
+                                name={profile.name}
+                                callDigits={callDigits}
+                                busy={busy}
+                                onCall={() => { setCallSheetOpen(false); startCall(); }}
+                                onAsk={onPrefillReply ? (text) => { setCallSheetOpen(false); onPrefillReply(text); } : undefined}
+                                onInvited={(phone) => { setCallSheetOpen(false); if (!valid(digits)) patch({ phone }); }}
+                                onToast={onToast}
+                                onClose={() => setCallSheetOpen(false)}
+                            />
+                        )}
+                        {callDigits && <SidebarCalls key={callDigits} waId={callDigits} />}
+                        </>
                     );
                 })()}
             </div>

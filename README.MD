@@ -276,9 +276,11 @@ hub's plugin migrates — see `docs/HUB_BRIDGE_MIGRATION.md`.
 
 ### WebSocket
 ```
-wss://your-domain.com/ws/{agent_id}
+wss://your-domain.com/ws/{agent_id}?token={access_token}
 ```
-Receives real-time events: `new_message`, `intercept_changed`, `order_updated`.
+Opens only for that agent's current access token (a refresh token, another
+agent's token or a removed agent is refused with close code 4401). Receives
+real-time events: `new_message`, `intercept_changed`, `order_updated`.
 
 ---
 

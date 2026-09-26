@@ -148,3 +148,45 @@ def test_schedule_runs_process_when_enabled(monkeypatch):
 
     asyncio.run(go())
     assert ran.get("cid") == "wacid.9"
+
+
+# ── structured post-call brief ───────────────────────────────────────────────
+
+def test_analyse_call_returns_summary_and_insights(monkeypatch):
+    reply = ('Here you go:\n```json\n{"summary": "Wants 2 cassocks, size 52.", '
+             '"intent": "Buy cassocks for ordination", "products": ["Cassock, black, size 52 x2"], '
+             '"objections": "Price feels high", "commitments": [], '
+             '"next_action": "Send the KES 9,000 quote", '
+             '"follow_up_message": "Hi Pastor, here is the quote.", "sentiment": "positive"}\n```')
+
+    class _FakeLLM:
+        async def complete(self, *, system, messages, tools, **kw):
+            return types.SimpleNamespace(text=reply)
+
+    monkeypatch.setattr("app.agent.runtime.build_llm", lambda model=None, **kw: _FakeLLM())
+    summary, insights = asyncio.run(ct.analyse_call("Nataka cassock mbili…"))
+    assert summary == "Wants 2 cassocks, size 52."
+    assert insights["products"] == ["Cassock, black, size 52 x2"]
+    assert insights["objections"] == ["Price feels high"]        # a string becomes a list
+    assert "commitments" not in insights                          # empty → left out, never invented
+    assert insights["next_action"] == "Send the KES 9,000 quote"
+
+
+def test_analyse_call_falls_back_to_plain_text(monkeypatch):
+    class _FakeLLM:
+        async def complete(self, *, system, messages, tools, **kw):
+            return types.SimpleNamespace(text="Customer asked about stoles.")
+
+    monkeypatch.setattr("app.agent.runtime.build_llm", lambda model=None, **kw: _FakeLLM())
+    assert asyncio.run(ct.analyse_call("…")) == ("Customer asked about stoles.", None)
+
+
+def test_the_crm_note_carries_the_next_step():
+    assert ct._note_text("Wants stoles.", {"next_action": "Send photos"}) == "Wants stoles.\nNext: Send photos"
+    assert ct._note_text("Wants stoles.", None) == "Wants stoles."
+
+
+def test_meta_call_errors_become_reasons_an_agent_can_act_on():
+    from app.services.wa_calling import friendly_error
+    assert "can't take calls" in friendly_error('{"error":{"code":138001}}')
+    assert friendly_error("boom") == "Couldn't reach the customer on WhatsApp right now."

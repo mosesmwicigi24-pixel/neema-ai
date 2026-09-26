@@ -26,7 +26,7 @@ import { MobileHeader, MobileBottomNav } from "@/components/ui/MobileNav";
 import { SessionExpiredModal } from "@/components/ui/SessionExpiredModal";
 import { pushNotification } from "@/components/ui/Notifications";
 
-import { CallStage } from "@/components/CallStage";
+import { CallStage, CallBar } from "@/components/CallStage";
 
 // ── Code splitting: ship the inbox, stream the rest ───────────────────────────
 // The dashboard used to be ONE 303 KB chunk holding all eleven views, so an
@@ -720,13 +720,19 @@ export default function NeemaDashboard(): React.ReactElement {
                     />
                 )}
                 <main
-                    className="relative flex flex-1 overflow-hidden"
+                    className="relative flex flex-col flex-1 overflow-hidden"
                     style={{ marginTop: isMobile ? 56 : 0 }}
                 >
-                    {viewComponents[view]}
+                    {/* A minimised call (and "{First} allowed calls") sits in the
+                        flow above the view, so it never covers the view's header. */}
+                    <CallBar />
+                    <div className="relative flex flex-1 min-h-0 overflow-hidden">
+                        {viewComponents[view]}
+                    </div>
                     {/* Incoming/active call takes over the content area — sidebar
-                        stays visible, matching the Figma. */}
-                    <CallStage />
+                        stays visible, matching the Figma. "Chat" / "Open chat"
+                        on the card opens the customer's thread here. */}
+                    <CallStage onOpenConversation={openConversationFor} />
                 </main>
                 {isMobile && (
                     <MobileBottomNav

@@ -43,7 +43,10 @@ class AppContainer(val context: Context, val config: ContainerConfig = Container
     val auth = AuthRepository(sessionStore, config.baseUrl, config.interceptor, config.authBackoffMs, config.io)
     val http = NeemaHttp(config.baseUrl, auth, config.interceptor, config.io)
     val api = NeemaApi(http)
-    val socket = LiveSocket(config.wsFactory ?: http.wsClient, config.baseUrl, appScope)
+    val socket = LiveSocket(
+        config.wsFactory ?: http.wsClient, config.baseUrl, appScope,
+        token = { sessionStore.session.value?.accessToken },
+    )
 
     /** True while any activity of the app is visible (set by NeemaApplication). */
     val foreground = kotlinx.coroutines.flow.MutableStateFlow(false)
