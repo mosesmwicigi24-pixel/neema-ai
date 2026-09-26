@@ -30,6 +30,10 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -102,7 +106,18 @@ fun OrdersScreen(dash: DashboardViewModel) {
 
     BoxWithConstraints(Modifier.fillMaxSize().background(c.bg)) {
         val wide = maxWidth >= 600.dp
-        PullToRefreshBox(isRefreshing = refreshing, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize()) {
+        // A wide tablet shows the order beside the list instead of in a sheet over it.
+        val twoPane = maxWidth >= 1000.dp
+        // Phones (and big text): the row's amount moves up beside the name.
+        val compactRows = textRoom(if (twoPane) maxWidth - PANE_WIDTH else maxWidth) < 480.dp
+        val cols = when {
+            wide -> 4
+            textRoom(maxWidth) < 240.dp -> 1
+            else -> 2
+        }
+        val selected = selectedId?.let { id -> orders.find { it.id == id } }
+        Row(Modifier.fillMaxSize()) {
+        PullToRefreshBox(isRefreshing = refreshing, onRefresh = vm::refresh, modifier = Modifier.weight(1f).fillMaxHeight()) {
             LazyColumn(
                 Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(if (wide) 24.dp else 16.dp),
@@ -110,34 +125,33 @@ fun OrdersScreen(dash: DashboardViewModel) {
             ) {
                 // ── Header ─────────────────────────────────────────────────
                 item(key = "header") {
-                    Row(Modifier.fillMaxWidth().padding(bottom = 24.dp), verticalAlignment = Alignment.Top) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Orders", fontSize = 20.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp, color = c.text)
-                            Row(Modifier.padding(top = 2.dp)) {
-                                // Never loaded: no counts — "0 total" would be a claim.
-                                Text(if (unknown) (if (loadError != null) "Not loaded" else "Loading…") else "${orders.size} total", fontSize = 14.sp, color = c.textDim)
+                    SideOrStacked(
+                        Modifier.fillMaxWidth().padding(bottom = 24.dp),
+                        start = {
+                            Column {
+                                Text("Orders", fontSize = 20.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp, color = c.text)
                                 val pending = statusCounts["pending"] ?: 0
-                                if (pending > 0) {
-                                    Text("· $pending pending", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = c.amber,
-                                        modifier = Modifier.padding(start = 6.dp))
-                                }
+                                // One run of text: "· 12 pending" wraps as a phrase, never letter by letter.
+                                Text(
+                                    buildAnnotatedString {
+                                        // Never loaded: no counts — "0 total" would be a claim.
+                                        append(if (unknown) (if (loadError != null) "Not loaded" else "Loading…") else "${orders.size} total")
+                                        if (pending > 0) {
+                                            withStyle(SpanStyle(color = c.amber, fontWeight = FontWeight.Medium)) {
+                                                append("  · $pending pending")
+                                            }
+                                        }
+                                    },
+                                    fontSize = 14.sp, color = c.textDim, style = Tabular, modifier = Modifier.padding(top = 2.dp),
+                                )
                             }
-                        }
-                        Column(
-                            Modifier.clip(RoundedCornerShape(12.dp)).background(c.bg2)
-                                .border(1.dp, c.bg4, RoundedCornerShape(12.dp))
-                                .padding(horizontal = 16.dp, vertical = 10.dp),
-                            horizontalAlignment = Alignment.End,
-                        ) {
-                            Text("Total Revenue", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = c.textDim, modifier = Modifier.padding(bottom = 2.dp))
-                            Text(if (unknown) "—" else money(totalRevenue), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = c.gold2)
-                        }
-                    }
+                        },
+                        end = { stacked -> RevenueCard(if (unknown) "—" else money(totalRevenue), stacked) },
+                    )
                 }
 
                 // ── Status summary cards (tap = filter) ────────────────────
                 item(key = "cards") {
-                    val cols = if (wide) 4 else 2
                     Column(Modifier.padding(bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         ORDER_STATUSES.chunked(cols).forEach { rowStatuses ->
                             Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -162,8 +176,8 @@ fun OrdersScreen(dash: DashboardViewModel) {
                         if (filter != "all") {
                             Spacer(Modifier.width(8.dp))
                             Box(
-                                Modifier.height(36.dp).clip(RoundedCornerShape(12.dp)).background(c.gold2)
-                                    .clickable { vm.setFilter("all") }.padding(horizontal = 12.dp),
+                                Modifier.minimumInteractiveComponentSize().heightIn(min = 36.dp).clip(RoundedCornerShape(12.dp)).background(c.gold2)
+                                    .clickable(onClickLabel = "Clear the status filter") { vm.setFilter("all") }.padding(horizontal = 12.dp),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Text("${STATUS_META[filter]?.label ?: filter} ✕", fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
@@ -202,7 +216,11 @@ fun OrdersScreen(dash: DashboardViewModel) {
                         // One bordered card around the whole list, drawn a slice per row
                         // so it stays whole as the rows scroll.
                         Column(Modifier.fillMaxWidth().listSegment(first, last, border = c.bg4, fill = c.bg2)) {
-                            OrderRow(dash, order, isUpdating = updating == order.id, onClick = { vm.select(order) })
+                            OrderRow(
+                                dash, order, isUpdating = updating == order.id, compact = compactRows,
+                                highlighted = twoPane && selected?.id == order.id,
+                                onClick = { vm.select(order) },
+                            )
                             if (!last) HorizontalDivider(color = if (c.isDark) c.bg3 else Color(0xFFF0F9EC))
                         }
                     }
@@ -217,15 +235,31 @@ fun OrdersScreen(dash: DashboardViewModel) {
                 item(key = "bottom-space") { Spacer(Modifier.height(24.dp)) }
             }
         }
-    }
+        // ── Order detail, beside the list on a wide tablet ─────────────────
+        if (twoPane && selected != null) {
+            val shape = RoundedCornerShape(16.dp)
+            Box(
+                Modifier.width(PANE_WIDTH).fillMaxHeight().padding(top = 24.dp, bottom = 24.dp, end = 24.dp)
+                    .clip(shape).background(c.bg2).border(1.dp, c.bg4, shape),
+            ) {
+                Column(Modifier.padding(top = 16.dp)) {
+                    OrderDetail(
+                        dash = dash, order = selected,
+                        busy = updating == selected.id,
+                        onStatus = { next -> vm.updateStatus(selected.id, next) },
+                        onClose = { vm.select(null) },
+                    )
+                }
+            }
+        }
+        }
 
     // ── Order detail ───────────────────────────────────────────────────────
-    val selected = selectedId?.let { id -> orders.find { it.id == id } }
     if (selectedId != null && selected == null) {
         // The row vanished under a refetch — nothing left to show.
         LaunchedEffect(selectedId) { vm.select(null) }
     }
-    if (selected != null) {
+    if (selected != null && !twoPane) {
         ModalBottomSheet(
             onDismissRequest = { vm.select(null) },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -238,6 +272,38 @@ fun OrdersScreen(dash: DashboardViewModel) {
                 onStatus = { next -> vm.updateStatus(selected.id, next) },
                 onClose = { vm.select(null) },
             )
+        }
+    }
+    }
+}
+
+/** How wide the order pane is beside the list on a wide tablet. */
+private val PANE_WIDTH = 440.dp
+
+/**
+ * The header's revenue pill (`rounded-xl px-4 py-2.5 text-right`). Stacked
+ * under the title on a narrow screen it spans the width: label left, figure right.
+ */
+@Composable
+private fun RevenueCard(amount: String, stacked: Boolean) {
+    val c = Neema.colors
+    val shape = RoundedCornerShape(12.dp)
+    val box = Modifier.clip(shape).background(c.bg2).border(1.dp, c.bg4, shape).padding(horizontal = 16.dp, vertical = 10.dp)
+    val label: @Composable (Modifier) -> Unit = { m ->
+        Text("Total Revenue", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = c.textDim, modifier = m)
+    }
+    val figure: @Composable () -> Unit = {
+        Text(amount.unbroken(), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = c.gold2, style = Tabular, textAlign = TextAlign.End)
+    }
+    if (stacked) {
+        Row(box.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            label(Modifier.weight(1f).padding(end = 12.dp))
+            figure()
+        }
+    } else {
+        Column(box, horizontalAlignment = Alignment.End) {
+            label(Modifier.padding(bottom = 2.dp))
+            figure()
         }
     }
 }
@@ -258,14 +324,23 @@ private fun StatusCard(meta: StatusMeta, count: Int, revenue: Double, active: Bo
             Text(meta.label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = toneText(meta.tone))
         }
         Spacer(Modifier.height(8.dp))
-        Text(if (known) count.toString() else "—", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = c.text)
-        if (revenue > 0) Text(money(revenue), fontSize = 12.sp, color = c.textDim, modifier = Modifier.padding(top = 2.dp))
+        Text(if (known) count.toString() else "—", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = c.text, style = Tabular)
+        if (revenue > 0) Text(money(revenue).unbroken(), fontSize = 12.sp, color = c.textDim, style = Tabular, modifier = Modifier.padding(top = 2.dp))
     }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun OrderRow(dash: DashboardViewModel, order: Order, isUpdating: Boolean, onClick: () -> Unit) {
+private fun OrderRow(
+    dash: DashboardViewModel,
+    order: Order,
+    isUpdating: Boolean,
+    onClick: () -> Unit,
+    /** A phone (or big text): the amount sits beside the name so the name keeps its room. */
+    compact: Boolean = false,
+    /** The order open in the tablet's side pane. */
+    highlighted: Boolean = false,
+) {
     val c = Neema.colors
     val uri = LocalUriHandler.current
     // The HUB is the authority once an order is pushed there; `status` is our
@@ -279,111 +354,208 @@ private fun OrderRow(dash: DashboardViewModel, order: Order, isUpdating: Boolean
     }
     val extraItems = order.items.size - 2
 
+    val hubNumber: @Composable (Modifier) -> Unit = { m ->
+        // The REAL hub order number — never a slice of a timestamp.
+        Text(
+            order.hubOrderNumber?.takeIf { it.isNotBlank() } ?: "not in hub",
+            modifier = m.clip(RoundedCornerShape(4.dp)).background(c.bg3).padding(horizontal = 4.dp, vertical = 2.dp),
+            fontSize = 10.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = c.gold2,
+        )
+    }
+    val hubLink: @Composable (Modifier) -> Unit = { m ->
+        if (hubHref != null) {
+            Text(
+                "Open in hub ↗",
+                modifier = m.clip(RoundedCornerShape(4.dp))
+                    .border(1.dp, if (c.isDark) c.border else Color(0xFFCFE3BD), RoundedCornerShape(4.dp))
+                    .clickable { runCatching { uri.openUri(hubHref) } }
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = c.gold2,
+            )
+        }
+    }
+    val pushFailed: @Composable (Modifier) -> Unit = { m ->
+        if (order.hubPushStatus == "failed") {
+            // The web shows the error as a tooltip; a tap reads it out here.
+            Badge(
+                "push failed", Tones.Red,
+                m.clickable {
+                    dash.toast(order.hubLastError?.takeIf { it.isNotBlank() } ?: "The push to the hub failed", ToastType.Error)
+                },
+            )
+        }
+    }
+    val summary: @Composable (Modifier) -> Unit = { m ->
+        if (itemSummary.isNotEmpty()) {
+            // The separator travels with the summary, so a wrap never leaves it dangling.
+            Text(
+                buildAnnotatedString {
+                    withStyle(SpanStyle(color = if (c.isDark) c.border else Color(0xFFE7E5E4))) { append("·  ") }
+                    append(itemSummary + if (extraItems > 0) " +$extraItems more" else "")
+                },
+                fontSize = 12.sp, color = if (c.isDark) c.textMid else Color(0xFF78716C), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = m,
+            )
+        }
+    }
+    val amount: @Composable () -> Unit = {
+        Text(money(order.amount, order.currency).unbroken(), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = c.text,
+            style = Tabular, maxLines = 1, textAlign = TextAlign.End)
+    }
+    val spinner: @Composable (Modifier) -> Unit = { m ->
+        if (isUpdating) CircularProgressIndicator(m.size(16.dp), strokeWidth = 2.dp, color = c.gold2)
+    }
+
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        Modifier.fillMaxWidth()
+            .background(if (highlighted) (if (c.isDark) c.bg3 else Color(0xFFF7FBF2)) else Color.Transparent)
+            .clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = if (compact) Alignment.Top else Alignment.CenterVertically,
     ) {
         Avatar(name, size = 38.dp)
         Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            // Row 1: name + channel + status
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = c.text, maxLines = 1,
-                    overflow = TextOverflow.Ellipsis, modifier = Modifier.align(Alignment.CenterVertically))
-                if (order.channel.isNotBlank()) Box(Modifier.align(Alignment.CenterVertically)) { OrderChannelPill(order.channel) }
-                Badge(meta.label, meta.tone, Modifier.align(Alignment.CenterVertically))
-            }
-            Spacer(Modifier.height(3.dp))
-            // Row 2: hub order number, hub link, push failure, phone, items
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                // The REAL hub order number — never a slice of a timestamp.
-                Text(
-                    order.hubOrderNumber?.takeIf { it.isNotBlank() } ?: "not in hub",
-                    modifier = Modifier.align(Alignment.CenterVertically).clip(RoundedCornerShape(4.dp))
-                        .background(c.bg3).padding(horizontal = 4.dp, vertical = 2.dp),
-                    fontSize = 10.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = c.gold2,
+        if (compact) {
+            Column(Modifier.weight(1f)) {
+                // Row 1: name … amount, the figure right-aligned. When both can't
+                // fit whole, the amount takes its own line — a phone number is
+                // never cut to "+254 711 2…" to make room for it.
+                SideOrStacked(
+                    gap = 2.dp,
+                    start = {
+                        Text(name.unbroken(), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = c.text, maxLines = 1,
+                            overflow = TextOverflow.Ellipsis)
+                    },
+                    end = { stacked ->
+                        Row(
+                            if (stacked) Modifier.fillMaxWidth() else Modifier.padding(start = 8.dp),
+                            horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            spinner(Modifier.padding(end = 6.dp))
+                            amount()
+                        }
+                    },
                 )
-                if (hubHref != null) {
-                    Text(
-                        "Open in hub ↗",
-                        modifier = Modifier.align(Alignment.CenterVertically).clip(RoundedCornerShape(4.dp))
-                            .border(1.dp, if (c.isDark) c.border else Color(0xFFCFE3BD), RoundedCornerShape(4.dp))
-                            .clickable { runCatching { uri.openUri(hubHref) } }
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                        fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = c.gold2,
-                    )
+                // Row 2: channel, status, hub number, hub link, push failure.
+                FlowRow(
+                    Modifier.padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    if (order.channel.isNotBlank()) Box(Modifier.align(Alignment.CenterVertically)) { OrderChannelPill(order.channel) }
+                    Badge(meta.label, meta.tone, Modifier.align(Alignment.CenterVertically))
+                    hubNumber(Modifier.align(Alignment.CenterVertically))
+                    hubLink(Modifier.align(Alignment.CenterVertically))
+                    pushFailed(Modifier.align(Alignment.CenterVertically))
                 }
-                if (order.hubPushStatus == "failed") {
-                    // The web shows the error as a tooltip; a tap reads it out here.
-                    Badge(
-                        "push failed", Tones.Red,
-                        Modifier.align(Alignment.CenterVertically).clickable {
-                            dash.toast(order.hubLastError?.takeIf { it.isNotBlank() } ?: "The push to the hub failed", ToastType.Error)
-                        },
-                    )
+                // Row 3: phone and the items, one line.
+                val phone = phoneLine(order, name)
+                if (phone != null || itemSummary.isNotEmpty()) {
+                    Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        phone?.let {
+                            Text(it.unbroken(), fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = c.textDim, maxLines = 1)
+                            Spacer(Modifier.width(6.dp))
+                        }
+                        summary(Modifier.weight(1f, fill = false))
+                    }
                 }
-                phoneLine(order, name)?.let { phone ->
-                    Text(phone, fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = c.textDim,
-                        modifier = Modifier.align(Alignment.CenterVertically))
-                }
-                if (itemSummary.isNotEmpty()) {
-                    // The separator travels with the summary, so a wrap never leaves it dangling.
-                    Text(
-                        buildAnnotatedString {
-                            withStyle(SpanStyle(color = if (c.isDark) c.border else Color(0xFFE7E5E4))) { append("·  ") }
-                            append(itemSummary + if (extraItems > 0) " +$extraItems more" else "")
-                        },
-                        fontSize = 12.sp, color = if (c.isDark) c.textMid else Color(0xFF78716C), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.widthIn(max = 232.dp).align(Alignment.CenterVertically),
-                    )
-                }
+                // Row 4: time
+                Text(Fmt.timeAgo(order.createdAt), fontSize = 10.sp, color = c.textDim, modifier = Modifier.padding(top = 2.dp))
             }
-            // Row 3: time
-            Text(Fmt.timeAgo(order.createdAt), fontSize = 10.sp, color = c.textDim, modifier = Modifier.padding(top = 2.dp))
-        }
-        Spacer(Modifier.width(12.dp))
-        Column(horizontalAlignment = Alignment.End) {
-            Text(money(order.amount, order.currency), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = c.text)
-            Text(order.currency.ifBlank { "KES" }, fontSize = 10.sp, color = c.textDim, modifier = Modifier.padding(top = 2.dp))
-            if (isUpdating) {
-                CircularProgressIndicator(Modifier.padding(top = 4.dp).size(16.dp), strokeWidth = 2.dp, color = c.gold2)
+        } else {
+            Column(Modifier.weight(1f)) {
+                // Row 1: name + channel + status
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = c.text, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis, modifier = Modifier.align(Alignment.CenterVertically))
+                    if (order.channel.isNotBlank()) Box(Modifier.align(Alignment.CenterVertically)) { OrderChannelPill(order.channel) }
+                    Badge(meta.label, meta.tone, Modifier.align(Alignment.CenterVertically))
+                }
+                Spacer(Modifier.height(3.dp))
+                // Row 2: hub order number, hub link, push failure, phone, items
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    hubNumber(Modifier.align(Alignment.CenterVertically))
+                    hubLink(Modifier.align(Alignment.CenterVertically))
+                    pushFailed(Modifier.align(Alignment.CenterVertically))
+                    phoneLine(order, name)?.let { phone ->
+                        Text(phone, fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = c.textDim,
+                            modifier = Modifier.align(Alignment.CenterVertically))
+                    }
+                    summary(Modifier.widthIn(max = 232.dp).align(Alignment.CenterVertically))
+                }
+                // Row 3: time
+                Text(Fmt.timeAgo(order.createdAt), fontSize = 10.sp, color = c.textDim, modifier = Modifier.padding(top = 2.dp))
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(horizontalAlignment = Alignment.End) {
+                amount()
+                Text(order.currency.ifBlank { "KES" }, fontSize = 10.sp, color = c.textDim, modifier = Modifier.padding(top = 2.dp))
+                spinner(Modifier.padding(top = 4.dp))
             }
         }
     }
 }
 
-/** Numbered pages, a window of at most five around the current one. */
+/**
+ * Numbered pages, a window of at most five around the current one. Each
+ * button is a 32dp square in a 48dp touch cell; where the row can't also hold
+ * the "Showing" line (a phone), the buttons get their own centred row.
+ */
 @Composable
 internal fun Pager(page: Int, totalPages: Int, total: Int, onPage: (Int) -> Unit) {
     val c = Neema.colors
-    Row(Modifier.fillMaxWidth().padding(top = 16.dp, start = 4.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            "Showing ${(page - 1) * PAGE_SIZE + 1}–${minOf(page * PAGE_SIZE, total)} of $total",
-            fontSize = 12.sp, color = c.textDim, modifier = Modifier.weight(1f),
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            PageButton("‹", selected = false, enabled = page > 1) { onPage(maxOf(1, page - 1)) }
-            for (pg in pageWindow(page, totalPages)) {
-                PageButton(pg.toString(), selected = page == pg, enabled = true) { onPage(pg) }
+    BoxWithConstraints(Modifier.fillMaxWidth().padding(top = 16.dp, start = 4.dp, end = 4.dp)) {
+        val window = pageWindow(page, totalPages)
+        val count = window.size + 2
+        val inline = maxWidth >= 48.dp * count + 180.dp * LocalDensity.current.fontScale
+        val cell = minOf(48.dp, maxWidth / count)
+        val showing: @Composable (Modifier) -> Unit = { m ->
+            Text(
+                "Showing ${(page - 1) * PAGE_SIZE + 1}–${minOf(page * PAGE_SIZE, total)} of $total",
+                fontSize = 12.sp, color = c.textDim, style = Tabular, modifier = m,
+            )
+        }
+        val buttons: @Composable () -> Unit = {
+            Row {
+                PageButton("‹", "Previous page", cell, selected = false, enabled = page > 1) { onPage(maxOf(1, page - 1)) }
+                for (pg in window) {
+                    PageButton(pg.toString(), "Page $pg", cell, selected = page == pg, enabled = true) { onPage(pg) }
+                }
+                PageButton("›", "Next page", cell, selected = false, enabled = page < totalPages) { onPage(minOf(totalPages, page + 1)) }
             }
-            PageButton("›", selected = false, enabled = page < totalPages) { onPage(minOf(totalPages, page + 1)) }
+        }
+        if (inline) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                showing(Modifier.weight(1f))
+                buttons()
+            }
+        } else {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                showing(Modifier.padding(bottom = 4.dp))
+                buttons()
+            }
         }
     }
 }
 
 @Composable
-private fun PageButton(label: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
+private fun PageButton(label: String, description: String, cell: Dp, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val c = Neema.colors
     val shape = RoundedCornerShape(8.dp)
     // disabled:opacity-30 fades the whole button, border and fill included.
     Box(
-        Modifier.size(28.dp).alpha(if (enabled) 1f else 0.3f).clip(shape)
-            .background(if (selected) c.gold else c.bg2)
-            .border(1.dp, if (selected) c.gold else c.border, shape)
-            .clickable(enabled = enabled, onClick = onClick),
+        Modifier.size(cell).clip(RoundedCornerShape(12.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .semantics { contentDescription = description; if (selected) this.selected = true },
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = if (selected) Color.White else c.gold2)
+        Box(
+            Modifier.size(32.dp).alpha(if (enabled) 1f else 0.3f).clip(shape)
+                .background(if (selected) c.gold else c.bg2)
+                .border(1.dp, if (selected) c.gold else c.border, shape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = if (selected) Color.White else c.gold2,
+                style = Tabular, maxLines = 1)
+        }
     }
 }
 
@@ -422,11 +594,21 @@ internal fun OrderDetail(
             Avatar(name, size = 40.dp)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(name, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = c.text)
-                phoneLine(order, name)?.let { Text(it, fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = c.textDim) }
+                // The badge sits at the right while the name fits beside it, else under it —
+                // a phone number never splits across lines to make room.
+                FlowRow(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween, verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        if (order.contactName.isNullOrBlank()) name.unbroken() else name,
+                        fontSize = 14.sp, fontWeight = FontWeight.Bold, color = c.text,
+                        modifier = Modifier.align(Alignment.CenterVertically).padding(end = 8.dp),
+                    )
+                    Badge(meta.label, meta.tone, Modifier.align(Alignment.CenterVertically), fontSize = 12, radius = 8.dp, hPad = 8.dp, vPad = 4.dp)
+                }
+                phoneLine(order, name)?.let { Text(it.unbroken(), fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = c.textDim) }
             }
-            Spacer(Modifier.width(12.dp))
-            Badge(meta.label, meta.tone, fontSize = 12, radius = 8.dp, hPad = 8.dp, vPad = 4.dp)
         }
         Spacer(Modifier.height(16.dp))
 
@@ -504,11 +686,12 @@ internal fun OrderDetail(
             } else {
                 order.items.forEach { item ->
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-                        Row(Modifier.weight(1f)) {
-                            Text(item.name, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = c.text, modifier = Modifier.weight(1f, fill = false))
+                        // The SKU follows the name, or drops under it when the line is full.
+                        FlowRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(item.name, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = c.text)
                             if (!item.sku.isNullOrBlank()) {
-                                Spacer(Modifier.width(6.dp))
-                                Text(item.sku, fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = c.textDim)
+                                Text(item.sku, fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = c.textDim,
+                                    modifier = Modifier.align(Alignment.CenterVertically))
                             }
                         }
                         Spacer(Modifier.width(8.dp))
@@ -516,10 +699,10 @@ internal fun OrderDetail(
                             // A line whose price this build can't read shows its
                             // quantity alone, never a made-up "KES 0".
                             if (item.priceKnown) {
-                                Text(money(item.lineTotal, order.currency), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.text)
-                                Text("${money(item.effectiveUnit, order.currency)} × ${qtyText(item.effectiveQty)}", fontSize = 10.sp, color = c.textDim)
+                                Text(money(item.lineTotal, order.currency).unbroken(), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.text, style = Tabular)
+                                Text("${money(item.effectiveUnit, order.currency).unbroken()} × ${qtyText(item.effectiveQty)}", fontSize = 10.sp, color = c.textDim, style = Tabular)
                             } else {
-                                Text("× ${qtyText(item.effectiveQty)}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.text)
+                                Text("× ${qtyText(item.effectiveQty)}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.text, style = Tabular)
                             }
                         }
                     }
@@ -529,7 +712,7 @@ internal fun OrderDetail(
             HorizontalDivider(color = c.bg4)
             Row(Modifier.fillMaxWidth().padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Total", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = c.text, modifier = Modifier.weight(1f))
-                Text(money(order.amount, order.currency), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = c.gold2)
+                Text(money(order.amount, order.currency).unbroken(), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = c.gold2, style = Tabular)
             }
         }
         Spacer(Modifier.height(16.dp))
@@ -575,13 +758,14 @@ internal fun OrderDetail(
 @Composable
 internal fun ModalTitleBar(title: String, onClose: () -> Unit) {
     val c = Neema.colors
-    Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = c.text, modifier = Modifier.weight(1f))
+    Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = c.text, modifier = Modifier.weight(1f).padding(vertical = 8.dp))
+        // A 16dp ✕ in a 48dp touch target.
         Box(
-            Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = onClose),
+            Modifier.size(48.dp).clip(CircleShape).clickable(onClick = onClose),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF9CA3AF), modifier = Modifier.size(16.dp))
+            Icon(Icons.Default.Close, contentDescription = "Close", tint = if (c.isDark) c.muted else Color(0xFF9CA3AF), modifier = Modifier.size(16.dp))
         }
     }
     HorizontalDivider(color = if (c.isDark) c.hairline else Color(0xFFF3F4F6))
@@ -614,7 +798,8 @@ fun WebBtn(
     }
     val shape = RoundedCornerShape(8.dp)
     Row(
-        modifier.height(36.dp).alpha(if (enabled) 1f else 0.4f).clip(shape).background(bg).border(1.dp, border, shape)
+        // 36dp to the eye (the web's h-9), 48dp to the finger.
+        modifier.minimumInteractiveComponentSize().heightIn(min = 36.dp).alpha(if (enabled) 1f else 0.4f).clip(shape).background(bg).border(1.dp, border, shape)
             .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,

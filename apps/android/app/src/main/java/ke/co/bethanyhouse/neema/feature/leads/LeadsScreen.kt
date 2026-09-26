@@ -40,14 +40,18 @@ import ke.co.bethanyhouse.neema.feature.orders.ChannelGlyphs
 import ke.co.bethanyhouse.neema.feature.orders.CompactSearchField
 import ke.co.bethanyhouse.neema.feature.orders.WebBtn
 import ke.co.bethanyhouse.neema.feature.orders.WebDragHandle
+import ke.co.bethanyhouse.neema.feature.orders.Tabular
+import ke.co.bethanyhouse.neema.feature.orders.unbroken
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import ke.co.bethanyhouse.neema.core.util.Fmt
 import java.util.Locale
 
-/** `fmtCurrency` — "KES 1,234". */
-private fun money(n: Double): String = Fmt.currency(n)
+/** `fmtCurrency` — "KES 1,234", never split between "KES" and the digits. */
+private fun money(n: Double): String = Fmt.currency(n).unbroken()
 
 // Dark mode: the pale Tailwind tints would glare, so they become washes of the dot colour.
 @Composable private fun LeadStage.bgC(): Color = if (Neema.colors.isDark) dot.copy(alpha = 0.14f) else bg
@@ -126,6 +130,7 @@ fun LeadsScreen(dash: DashboardViewModel) {
 
     BoxWithConstraints(Modifier.fillMaxSize().background(c.bg)) {
         val wide = maxWidth >= 600.dp
+        val boardWidth = maxWidth
         Column(Modifier.fillMaxSize()) {
             // ── Header ─────────────────────────────────────────────────────
             val headerText: @Composable () -> Unit = {
@@ -134,7 +139,7 @@ fun LeadsScreen(dash: DashboardViewModel) {
                     Text(
                         if (unknown) (if (loadError != null) "Not loaded" else "Loading…")
                         else "${leads.size} leads · Pipeline ${money(pipelineValue)} · Won ${money(wonValue)}",
-                        fontSize = 14.sp, color = c.textDim, modifier = Modifier.padding(top = 2.dp),
+                        fontSize = 14.sp, color = c.textDim, style = Tabular, modifier = Modifier.padding(top = 2.dp),
                     )
                 }
             }
@@ -155,8 +160,8 @@ fun LeadsScreen(dash: DashboardViewModel) {
 
                 // ── Stage filter pills ─────────────────────────────────────
                 LazyRow(
-                    // px-6 py-3 on every width, as the web has it.
-                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
+                    // px-6 py-3 as the web has it; the pills' 48dp touch cells carry most of the py-3.
+                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 2.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     item(key = "all") {
@@ -193,7 +198,15 @@ fun LeadsScreen(dash: DashboardViewModel) {
                         ErrorState(err, onRetry = vm::load, modifier = Modifier.padding(top = 32.dp))
                     }
                 } else {
-                    val colWidth = 210.dp
+                    // Columns fill the width: as many whole ~260dp columns as fit plus a
+                    // third of the next (so it reads as "scroll for more"); all of them
+                    // edge to edge when they fit.
+                    val avail = boardWidth - 32.dp
+                    val gap = 12.dp
+                    val target = 260.dp
+                    val whole = ((avail + gap) / (target + gap)).toInt().coerceAtLeast(1)
+                    val colWidth = if (stages.size <= whole) (avail - gap * (stages.size - 1)) / stages.size.coerceAtLeast(1)
+                        else (avail - gap * whole) / (whole + 0.35f)
                     LazyRow(
                         Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(16.dp),
@@ -258,15 +271,16 @@ private fun StagePill(label: String, selected: Boolean, stage: LeadStage?, onCli
         else -> Color(0xFF78716C)
     }
     Row(
-        Modifier.height(28.dp).clip(shape).background(bg).border(1.dp, border, shape)
-            .clickable(onClick = onClick).padding(horizontal = 12.dp),
+        // 28dp to the eye (h-7), 48dp to the finger; grows with large text.
+        Modifier.minimumInteractiveComponentSize().heightIn(min = 28.dp).clip(shape).background(bg).border(1.dp, border, shape)
+            .clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (stage != null) {
             Box(Modifier.size(6.dp).clip(CircleShape).background(stage.dot))
             Spacer(Modifier.width(6.dp))
         }
-        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = fg)
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = fg, style = Tabular, maxLines = 1)
     }
 }
 
@@ -295,8 +309,8 @@ private fun StageColumn(
             Text(stage.label, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = stage.textC(),
                 modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             Column(horizontalAlignment = Alignment.End) {
-                Text(stageLeads.size.toString(), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = stage.textC())
-                if (stageValue > 0) Text(money(stageValue), fontSize = 10.sp, color = stage.textC().copy(alpha = 0.7f))
+                Text(stageLeads.size.toString(), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = stage.textC(), style = Tabular)
+                if (stageValue > 0) Text(money(stageValue), fontSize = 10.sp, color = stage.textC().copy(alpha = 0.7f), style = Tabular, maxLines = 1)
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -342,7 +356,7 @@ private fun LeadCard(
                 Text(Fmt.formatPhone(lead.handle), fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = c.textDim,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Text("${lead.leadScore}/100", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = c.textDim)
+            Text("${lead.leadScore}/100", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = c.textDim, style = Tabular, maxLines = 1)
         }
         Spacer(Modifier.height(8.dp))
 
@@ -362,7 +376,7 @@ private fun LeadCard(
                 lead.channels.take(3).forEach { ChannelIcon(it) }
             }
             if (lead.totalSpent > 0) {
-                Text(money(lead.totalSpent), fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = c.gold2)
+                Text(money(lead.totalSpent), fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = c.gold2, style = Tabular, maxLines = 1)
             }
         }
 
@@ -384,7 +398,7 @@ private fun LeadCard(
         val next = if (stageIdx != -1 && stageIdx < stages.size - 1 && stages[stageIdx + 1].id != "lost") stages[stageIdx + 1] else null
         if (prev != null || next != null) {
             HorizontalDivider(color = c.bg3, modifier = Modifier.padding(top = 8.dp))
-            Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (prev != null) {
                     MoveButton("← ${prev.label}", bg = if (c.isDark) c.bg else Color(0xFFF0F9EC), fg = c.textDim, Modifier.weight(1f), enabled = !busy) { onMove(prev.id) }
                 }
@@ -398,13 +412,17 @@ private fun LeadCard(
 
 @Composable
 private fun MoveButton(label: String, bg: Color, fg: Color, modifier: Modifier, enabled: Boolean = true, onClick: () -> Unit) {
-    // text-[9px] rounded py-1
-    val shape = RoundedCornerShape(4.dp)
+    // The web's rounded py-1 chip, but a touch-sized one: the web shows it on
+    // hover at 9px; here it is always there and is the card's main action, so
+    // it reads at 11sp and takes a 48dp touch cell (32dp to the eye).
+    val shape = RoundedCornerShape(6.dp)
     Text(
         label,
-        modifier = modifier.clip(shape).background(bg).border(1.dp, Neema.colors.border, shape)
-            .clickable(enabled = enabled, onClick = onClick).padding(vertical = 4.dp),
-        fontSize = 9.sp, lineHeight = 13.5.sp, color = fg.copy(alpha = if (enabled) 1f else 0.45f), textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis,
+        modifier = modifier.minimumInteractiveComponentSize().heightIn(min = 32.dp).clip(shape).background(bg)
+            .border(1.dp, Neema.colors.border, shape)
+            .clickable(enabled = enabled, onClick = onClick).wrapContentHeight(Alignment.CenterVertically)
+            .padding(horizontal = 4.dp, vertical = 6.dp),
+        fontSize = 11.sp, lineHeight = 15.sp, color = fg.copy(alpha = if (enabled) 1f else 0.45f), textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis,
     )
 }
 
@@ -435,34 +453,42 @@ internal fun LeadDetail(
         unfocusedBorderColor = c.border, focusedBorderColor = c.gold,
     )
 
+    // The fields scroll; Save / Cancel stay pinned under them, so with the
+    // keyboard up (the sheet shrinks to the space above it) they are still
+    // one tap away instead of scrolled out of sight.
+    Column(Modifier.fillMaxWidth().imePadding()) {
     Column(
-        Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 28.dp),
+        Modifier.fillMaxWidth().weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(verticalAlignment = Alignment.Top) {
             Avatar(Fmt.displayName(lead.name, lead.handle), size = 44.dp)
             Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
+            Column(Modifier.weight(1f).padding(top = 2.dp)) {
                 Text(lead.name?.takeIf { it.isNotBlank() } ?: "Unknown customer", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = c.text)
-                Text(Fmt.formatPhone(lead.handle), fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = c.textDim)
+                Text(Fmt.formatPhone(lead.handle).unbroken(), fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = c.textDim)
                 val extra = listOfNotNull(lead.email?.takeIf { it.isNotBlank() }, lead.location?.takeIf { it.isNotBlank() })
                 if (extra.isNotEmpty()) Text(extra.joinToString(" · "), fontSize = 11.sp, color = c.muted)
+                TextButton(
+                    onClick = onOpenChat, contentPadding = PaddingValues(horizontal = 0.dp, vertical = 4.dp),
+                    colors = ButtonDefaults.textButtonColors(contentColor = c.gold2),
+                ) { Text("Open chat →", fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
             }
-            TextButton(onClick = onOpenChat) { Text("Open chat") }
-            Text(
-                "✕", fontSize = 18.sp, color = Color(0xFFA8A29E),
-                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onClose).padding(horizontal = 8.dp, vertical = 4.dp),
-            )
+            // A plain ✕ as on the web, in a 48dp touch target that TalkBack names.
+            IconButton(onClick = onClose, modifier = Modifier.offset(x = 12.dp, y = (-8).dp)) {
+                Icon(Icons.Filled.Close, contentDescription = "Close", tint = if (c.isDark) c.muted else Color(0xFFA8A29E), modifier = Modifier.size(20.dp))
+            }
         }
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(12.dp))
 
         FieldLabel("Lead Stage")
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             stages.forEach { s ->
                 val on = s.id == stage
                 val shape = RoundedCornerShape(8.dp)
                 Text(
                     s.label,
-                    modifier = Modifier.clip(shape)
+                    // 48dp to the finger; the chips keep the web's px-2.5 py-1.5 look.
+                    modifier = Modifier.minimumInteractiveComponentSize().clip(shape)
                         .background(if (on) s.bgC() else c.bg2)
                         .border(1.dp, if (on) s.borderC() else if (c.isDark) c.hairline else Color(0xFFE7E5E4), shape)
                         .clickable(enabled = !saving) { stage = s.id }
@@ -507,7 +533,7 @@ internal fun LeadDetail(
                     pair.forEach { (label, value) ->
                         Column(Modifier.weight(1f)) {
                             Text(label, fontSize = 10.sp, color = c.textDim)
-                            Text(value, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = c.text)
+                            Text(value, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = c.text, style = Tabular)
                         }
                     }
                 }
@@ -522,10 +548,13 @@ internal fun LeadDetail(
                 Text(facts.joinToString(" · "), fontSize = 11.sp, color = c.textMid)
             }
         }
-        Spacer(Modifier.height(16.dp))
-
+        Spacer(Modifier.height(12.dp))
+    }
+    // ── Pinned footer: the save error and the buttons ──────────────────────
+    HorizontalDivider(color = if (c.isDark) c.hairline else Color(0xFFF3F4F6))
+    Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 20.dp)) {
         if (error != null) {
-            InlineError(error, Modifier.padding(bottom = 12.dp))
+            InlineError(error, Modifier.padding(bottom = 4.dp))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             WebBtn(
@@ -535,6 +564,7 @@ internal fun LeadDetail(
             )
             WebBtn("Cancel", BtnVariant.Outline, onClick = onClose)
         }
+    }
     }
 }
 

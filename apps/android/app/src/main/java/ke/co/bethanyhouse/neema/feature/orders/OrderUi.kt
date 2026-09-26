@@ -25,7 +25,9 @@ import ke.co.bethanyhouse.neema.core.model.Order
 import ke.co.bethanyhouse.neema.core.model.OrderItem
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -165,6 +167,25 @@ val OrderItem.lineTotal: Double get() = if (total > 0) total else effectiveUnit 
 /** The order's money: `o.total || o.subtotal`. */
 val Order.amount: Double get() = if (total != 0.0) total else subtotal
 
+/**
+ * Money and counts line up in columns: tabular (fixed-width) figures, so
+ * "KES 1,284,750" over "KES 99,999" aligns digit for digit.
+ */
+val Tabular = TextStyle(fontFeatureSettings = "tnum")
+
+/**
+ * A figure that must never break inside itself ("KES" on one line, the digits
+ * on the next): the spaces become no-break spaces.
+ */
+fun String.unbroken(): String = replace(' ', '\u00A0')
+
+/**
+ * How much room there is for text at the user's font size: the width in
+ * "1.0-scale" dp. A 411dp phone at 200% text has the room of a 205dp one.
+ */
+@Composable
+fun textRoom(width: Dp): Dp = width / androidx.compose.ui.platform.LocalDensity.current.fontScale
+
 @Composable
 fun toneBg(t: Tone): Color = if (Neema.colors.isDark) t.dot.copy(alpha = 0.14f) else t.bg
 
@@ -249,19 +270,59 @@ fun CompactSearchField(
         value = value, onValueChange = onChange, singleLine = true, textStyle = style,
         cursorBrush = SolidColor(c.gold),
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-        modifier = modifier.height(height).clip(shape).background(c.bg2).border(1.dp, c.border, shape),
+        modifier = modifier.heightIn(min = height).clip(shape).background(c.bg2).border(1.dp, c.border, shape),
         decorationBox = { inner ->
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.CenterStart) {
+            Box(Modifier.fillMaxWidth().heightIn(min = height), contentAlignment = Alignment.CenterStart) {
                 Icon(
                     Icons.Default.Search, contentDescription = null,
                     tint = if (c.isDark) c.muted else iconTint,
                     modifier = Modifier.padding(start = iconStart).size(iconSize),
                 )
-                Box(Modifier.padding(start = textStart, end = 12.dp)) {
-                    if (value.isEmpty()) Text(placeholder, style = style.copy(color = c.muted), maxLines = 1)
+                Box(Modifier.padding(start = textStart, end = 12.dp, top = 4.dp, bottom = 4.dp)) {
+                    if (value.isEmpty()) {
+                        Text(placeholder, style = style.copy(color = c.muted), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    }
                     inner()
                 }
             }
         },
     )
+}
+
+/**
+ * Two blocks side by side when both fit at their natural width (the web's
+ * `flex justify-between`), else stacked full-width — so a large font or a
+ * narrow phone never squeezes the first into a letter-per-line column.
+ * [end] is told which layout it is in, so it can re-arrange itself.
+ */
+@Composable
+fun SideOrStacked(
+    modifier: Modifier = Modifier,
+    gap: Dp = 12.dp,
+    start: @Composable () -> Unit,
+    end: @Composable (stacked: Boolean) -> Unit,
+) {
+    androidx.compose.ui.layout.SubcomposeLayout(modifier) { cs ->
+        val gapPx = gap.roundToPx()
+        val s = subcompose("start", start).first()
+        val eSide = subcompose("endSide") { end(false) }.first()
+        val need = s.maxIntrinsicWidth(androidx.compose.ui.unit.Constraints.Infinity) +
+            eSide.maxIntrinsicWidth(androidx.compose.ui.unit.Constraints.Infinity) + gapPx
+        val loose = cs.copy(minWidth = 0, minHeight = 0)
+        if (need <= cs.maxWidth) {
+            val e = eSide.measure(loose)
+            val sp = s.measure(loose.copy(maxWidth = (cs.maxWidth - e.width - gapPx).coerceAtLeast(0)))
+            layout(cs.maxWidth, maxOf(sp.height, e.height)) {
+                sp.place(0, 0)
+                e.place(cs.maxWidth - e.width, 0)
+            }
+        } else {
+            val sp = s.measure(loose)
+            val e = subcompose("endStacked") { end(true) }.first().measure(loose.copy(minWidth = cs.maxWidth))
+            layout(cs.maxWidth, sp.height + gapPx + e.height) {
+                sp.place(0, 0)
+                e.place(0, sp.height + gapPx)
+            }
+        }
+    }
 }

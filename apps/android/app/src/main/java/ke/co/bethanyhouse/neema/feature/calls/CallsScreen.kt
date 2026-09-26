@@ -21,6 +21,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
@@ -32,6 +34,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
@@ -55,6 +58,8 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -183,6 +188,9 @@ fun CallsScreen(
     BoxWithConstraints(Modifier.fillMaxSize().background(Neema.colors.surface)) {
         val wide = maxWidth >= 840.dp
         val sidePad = if (maxWidth >= 640.dp) 24.dp else 16.dp   // px-4 sm:px-6
+        // Little room for text (a small phone, big text): each row puts its time
+        // on the name line, and the readiness prompt its button under the words.
+        val compact = maxWidth / LocalDensity.current.fontScale < 400.dp
         // Phone: the caller panel replaces the log; back returns to it.
         BackHandler(enabled = sel != null && !wide) { vm.select(null) }
 
@@ -196,7 +204,7 @@ fun CallsScreen(
                         modifier = Modifier.widthIn(max = 560.dp).weight(1f, fill = false).fillMaxWidth(),
                         vm = vm, shown = shown, total = list?.size ?: 0, missed = missed, missedOnly = missedOnly,
                         selectedId = sel?.id, openTranscript = transcript,
-                        readiness = readiness, loadError = loadError, refreshing = refreshing,
+                        readiness = readiness, loadError = loadError, refreshing = refreshing, compact = compact,
                         onOpenConversation = { dash.openConversationFor(it) },
                     )
                 }
@@ -224,6 +232,7 @@ private fun CallLog(
     readiness: CallReadiness,
     loadError: String?,
     refreshing: Boolean,
+    compact: Boolean = false,
     onOpenConversation: (String) -> Unit,
 ) {
     // One card, as the web draws it: the log is at most 200 rows (the API's
@@ -246,7 +255,8 @@ private fun CallLog(
                 .border(1.dp, Color(0x2425D366), cardShape),
         ) {
             // Header: title, total, and the missed badge (a filter toggle).
-            Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 16.dp), verticalAlignment = Alignment.Top) {
+            val inset = if (compact) 16.dp else 24.dp
+            Row(Modifier.fillMaxWidth().padding(start = inset, end = inset, top = 24.dp, bottom = 16.dp), verticalAlignment = Alignment.Top) {
                 Column(Modifier.weight(1f)) {
                     Text("Calls", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Medium)
                     Spacer(Modifier.height(2.dp))
@@ -255,8 +265,10 @@ private fun CallLog(
                 if (missed > 0) {
                     Text(
                         "$missed missed" + if (missedOnly) " ✕" else "",
-                        color = Color(0xFFFF8A8D), fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                        color = Color(0xFFFF8A8D), fontSize = 12.sp, fontWeight = FontWeight.Medium, style = TextStyle(fontFeatureSettings = "tnum"),
                         modifier = Modifier
+                            .offset(y = (-10).dp)
+                            .minimumInteractiveComponentSize()
                             .clip(RoundedCornerShape(50))
                             .background(if (missedOnly) Color(0x59F2555A) else Color(0x29F2555A))
                             .border(1.dp, if (missedOnly) Color(0x99F2555A) else Color.Transparent, RoundedCornerShape(50))
@@ -267,9 +279,9 @@ private fun CallLog(
                     )
                 }
             }
-            if (!readiness.ready) ReadinessBanner(readiness)
+            if (!readiness.ready) ReadinessBanner(readiness, compact, inset)
             // The log couldn't be refreshed: what we had stays, with the reason and a way to try again.
-            if (loadError != null && !shown.isNullOrEmpty()) LoadErrorBanner(loadError, refreshing, vm::refresh)
+            if (loadError != null && !shown.isNullOrEmpty()) LoadErrorBanner(loadError, refreshing, vm::refresh, inset)
             when {
                 shown == null -> Text(
                     "Loading…", color = Muted, fontSize = 14.sp, textAlign = TextAlign.Center,
@@ -307,8 +319,9 @@ private fun CallLog(
                             onToggleTranscript = { vm.toggleTranscript(c.callId) },
                             onOpenConversation = onOpenConversation,
                             ago = vm.ago(c.startedAt),
+                            compact = compact,
                         )
-                        if (openTranscript?.callId == c.callId) TranscriptPanel(openTranscript, vm)
+                        if (openTranscript?.callId == c.callId) TranscriptPanel(openTranscript, vm, compact)
                     }
                 }
             }
@@ -325,6 +338,7 @@ private fun CallRow(
     onToggleTranscript: () -> Unit,
     onOpenConversation: (String) -> Unit,
     ago: String,
+    compact: Boolean = false,
 ) {
     val o = OUTCOME[c.status] ?: OUTCOME.getValue("ended")
     val who = rowWho(c)
@@ -335,14 +349,15 @@ private fun CallRow(
             .fillMaxWidth()
             .background(if (selected) Color(0x1425D366) else Color.Transparent)
             .then(if (!c.waId.isNullOrEmpty()) Modifier.clickable(onClick = onSelect) else Modifier)
-            .padding(horizontal = 24.dp, vertical = 14.dp),
+            .padding(start = if (compact) 16.dp else 24.dp, end = if (compact) 8.dp else 20.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 12.dp),
     ) {
         Box(Modifier.size(40.dp).clip(CircleShape).background(avatarColor(who)), contentAlignment = Alignment.Center) {
-            Text(initials.ifEmpty { "?" }, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            // Initials are a picture inside a fixed circle: they don't grow with the font scale.
+            Text(initials.ifEmpty { "?" }, color = Color.White, fontSize = with(LocalDensity.current) { 13.dp.toSp() }, fontWeight = FontWeight.Medium, maxLines = 1)
         }
-        Column(Modifier.weight(1f)) {
+        Column(Modifier.weight(1f).padding(vertical = 6.dp)) {
             Text(who, color = TextC, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             // flex items-center gap-1.5
             Row(
@@ -355,25 +370,30 @@ private fun CallRow(
                 // than dropping a whole part; an en space is the web's 6px gap at 12px.
                 Text(statusLine(o, c), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
+            // Little room: the time drops under the outcome, and the name keeps the line.
+            if (compact) Text(ago, color = Dim, fontSize = 11.sp, maxLines = 1, modifier = Modifier.padding(top = 1.dp))
         }
-        Text(ago, color = Dim, fontSize = 11.sp)
-        if (c.hasRecording) {
-            RoundIcon(
-                icon = CallIcons.Transcript, iconSize = 15.dp,
-                label = if (hasNote) "Call summary & transcript" else "Call recording — transcribe & summarise",
-                bg = when { open -> Color(0x3825D366); hasNote -> Color(0x1F25D366); else -> Color(0x0FFFFFFF) },
-                tint = if (open || hasNote) Green else Sage,
-                border = Color(0x1AFFFFFF),
-                onClick = onToggleTranscript,
-            )
-        }
-        if (!c.waId.isNullOrEmpty()) {
-            RoundIcon(
-                icon = CallIcons.Chat, iconSize = 16.dp,
-                label = "Open the conversation in Neema",
-                bg = Color(0x2925D366), tint = Green, border = Color(0x4D25D366),
-                onClick = { onOpenConversation(c.waId!!) },
-            )
+        if (!compact) Text(ago, color = Dim, fontSize = 11.sp, maxLines = 1)
+        // The two 48dp touch cells sit flush: their 34dp circles still read 14dp apart.
+        Row {
+            if (c.hasRecording) {
+                RoundIcon(
+                    icon = CallIcons.Transcript, iconSize = 15.dp,
+                    label = if (hasNote) "Call summary & transcript" else "Call recording — transcribe & summarise",
+                    bg = when { open -> Color(0x3825D366); hasNote -> Color(0x1F25D366); else -> Color(0x0FFFFFFF) },
+                    tint = if (open || hasNote) Green else Sage,
+                    border = Color(0x1AFFFFFF),
+                    onClick = onToggleTranscript,
+                )
+            }
+            if (!c.waId.isNullOrEmpty()) {
+                RoundIcon(
+                    icon = CallIcons.Chat, iconSize = 16.dp,
+                    label = "Open the conversation in Neema",
+                    bg = Color(0x2925D366), tint = Green, border = Color(0x4D25D366),
+                    onClick = { onOpenConversation(c.waId!!) },
+                )
+            }
         }
     }
 }
@@ -389,8 +409,9 @@ private fun statusLine(o: Outcome, c: Call) = buildAnnotatedString {
 
 @Composable
 private fun RoundIcon(icon: ImageVector, iconSize: Dp, label: String, bg: Color, tint: Color, border: Color, onClick: () -> Unit) {
+    // 34dp to the eye (the web's circle), 48dp to the finger.
     Box(
-        Modifier.size(34.dp).clip(CircleShape).background(bg).border(1.dp, border, CircleShape).clickable(onClick = onClick),
+        Modifier.minimumInteractiveComponentSize().size(34.dp).clip(CircleShape).background(bg).border(1.dp, border, CircleShape).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) { Icon(icon, label, tint = tint, modifier = Modifier.size(iconSize)) }
 }
@@ -402,8 +423,9 @@ private fun RoundIcon(icon: ImageVector, iconSize: Dp, label: String, bg: Color,
  * plus playback of the recording.
  */
 @Composable
-private fun TranscriptPanel(t: TranscriptUi, vm: CallsViewModel) {
-    val pad = Modifier.padding(start = 68.dp, end = 24.dp, bottom = 16.dp)
+private fun TranscriptPanel(t: TranscriptUi, vm: CallsViewModel, compact: Boolean = false) {
+    // Under the row's text: its inset + the 40dp avatar + the gap.
+    val pad = if (compact) Modifier.padding(start = 64.dp, end = 16.dp, bottom = 16.dp) else Modifier.padding(start = 68.dp, end = 24.dp, bottom = 16.dp)
     val data = t.data
     if (data == null) {
         val err = t.loadErr
@@ -412,7 +434,7 @@ private fun TranscriptPanel(t: TranscriptUi, vm: CallsViewModel) {
             Text("$err ", color = RedC, fontSize = 12.sp, modifier = Modifier.weight(1f, fill = false))
             Text(
                 "Retry", color = Green, fontSize = 12.sp, textDecoration = TextDecoration.Underline,
-                modifier = Modifier.clickable { vm.retryTranscript() }.padding(vertical = 4.dp),
+                modifier = Modifier.minimumInteractiveComponentSize().clickable { vm.retryTranscript() }.padding(horizontal = 4.dp, vertical = 4.dp),
             )
         }
         return
@@ -433,7 +455,8 @@ private fun TranscriptPanel(t: TranscriptUi, vm: CallsViewModel) {
         if (st == "done" && !data.transcript.isNullOrEmpty()) {
             Text(
                 (if (t.showFull) "Hide" else "Show") + " full transcript" + (data.language?.takeIf { it.isNotEmpty() }?.let { " · $it" } ?: ""),
-                color = Muted, fontSize = 11.sp, modifier = Modifier.clickable { vm.toggleFull() }.padding(vertical = 2.dp),
+                color = Muted, fontSize = 11.sp,
+                modifier = Modifier.heightIn(min = 40.dp).clickable { vm.toggleFull() }.wrapContentHeight(Alignment.CenterVertically).padding(vertical = 2.dp),
             )
             if (t.showFull) Text(data.transcript!!, color = Sage, fontSize = 12.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 6.dp))
         }
@@ -445,9 +468,9 @@ private fun TranscriptPanel(t: TranscriptUi, vm: CallsViewModel) {
                 if (t.busy) "Starting…" else "Transcribe & summarise",
                 color = Ink, fontSize = 12.sp, fontWeight = FontWeight.Medium,
                 // opacity: busy ? 0.6 : 1 — the whole button, label included.
-                modifier = Modifier.alpha(if (t.busy) 0.6f else 1f).clip(RoundedCornerShape(8.dp)).background(Green)
+                modifier = Modifier.minimumInteractiveComponentSize().alpha(if (t.busy) 0.6f else 1f).clip(RoundedCornerShape(8.dp)).background(Green)
                     .clickable(enabled = !t.busy) { vm.runTranscribe() }
-                    .padding(horizontal = 14.dp, vertical = 7.dp),
+                    .padding(horizontal = 14.dp, vertical = 9.dp),
             )
         }
         if (st == "failed") {
@@ -455,7 +478,7 @@ private fun TranscriptPanel(t: TranscriptUi, vm: CallsViewModel) {
                 Text("Transcription failed. ", color = RedC, fontSize = 12.sp)
                 Text(
                     "Retry", color = Green, fontSize = 12.sp, textDecoration = TextDecoration.Underline,
-                    modifier = Modifier.clickable(enabled = !t.busy) { vm.runTranscribe() },
+                    modifier = Modifier.minimumInteractiveComponentSize().clickable(enabled = !t.busy) { vm.runTranscribe() }.padding(horizontal = 4.dp),
                 )
             }
         }
@@ -472,10 +495,10 @@ private fun TranscriptPanel(t: TranscriptUi, vm: CallsViewModel) {
 
 /** The log is showing what it last had because a refresh failed. */
 @Composable
-private fun LoadErrorBanner(message: String, refreshing: Boolean, onRetry: () -> Unit) {
+private fun LoadErrorBanner(message: String, refreshing: Boolean, onRetry: () -> Unit, inset: Dp = 24.dp) {
     Row(
         Modifier
-            .padding(start = 24.dp, end = 24.dp, bottom = 12.dp)
+            .padding(start = inset, end = inset, bottom = 12.dp)
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(Color(0x1AF2555A))
@@ -496,7 +519,7 @@ private fun LoadErrorBanner(message: String, refreshing: Boolean, onRetry: () ->
 @Composable
 private fun RetryButton(busy: Boolean, onClick: () -> Unit) {
     Box(
-        Modifier.clip(RoundedCornerShape(50)).background(Color(0x2925D366))
+        Modifier.minimumInteractiveComponentSize().clip(RoundedCornerShape(50)).background(Color(0x2925D366))
             .border(1.dp, Color(0x4D25D366), RoundedCornerShape(50))
             .clickable(enabled = !busy, onClickLabel = "Retry", onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 6.dp),
@@ -575,7 +598,7 @@ private fun PlayerBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
-            Modifier.size(30.dp).clip(CircleShape).background(Green).clickable(onClick = onToggle),
+            Modifier.minimumInteractiveComponentSize().size(30.dp).clip(CircleShape).background(Green).clickable(onClick = onToggle),
             contentAlignment = Alignment.Center,
         ) {
             if (buffering) CircularProgressIndicator(Modifier.size(14.dp), color = Ink, strokeWidth = 2.dp)
@@ -588,7 +611,7 @@ private fun PlayerBar(
             colors = SliderDefaults.colors(thumbColor = Green, activeTrackColor = Green, inactiveTrackColor = Color(0x33FFFFFF)),
             modifier = Modifier.weight(1f).padding(horizontal = 8.dp).heightIn(max = 32.dp),
         )
-        Text(label, color = Muted, fontSize = 11.sp)
+        Text(label, color = Muted, fontSize = 11.sp, style = TextStyle(fontFeatureSettings = "tnum"), maxLines = 1)
     }
 }
 
@@ -651,7 +674,7 @@ private fun CallerPanel(
 @Composable
 private fun StripButton(text: String, onClick: () -> Unit) {
     Row(
-        Modifier.clip(RoundedCornerShape(50)).background(Color(0x2425D366))
+        Modifier.minimumInteractiveComponentSize().clip(RoundedCornerShape(50)).background(Color(0x2425D366))
             .border(1.dp, Color(0x4D25D366), RoundedCornerShape(50))
             .clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -667,7 +690,7 @@ private fun StripButton(text: String, onClick: () -> Unit) {
  * heads-up instead of waking the lock screen).
  */
 @Composable
-private fun ReadinessBanner(r: CallReadiness) {
+private fun ReadinessBanner(r: CallReadiness, compact: Boolean = false, inset: Dp = 24.dp) {
     val ctx = LocalContext.current
     val (title, body, button) = if (!r.notifications) Triple(
         "Calls can't ring in the background",
@@ -691,7 +714,7 @@ private fun ReadinessBanner(r: CallReadiness) {
     }
     Row(
         Modifier
-            .padding(start = 24.dp, end = 24.dp, bottom = 16.dp)
+            .padding(start = inset, end = inset, bottom = 16.dp)
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(Color(0x1AF5A623))
@@ -699,18 +722,27 @@ private fun ReadinessBanner(r: CallReadiness) {
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(Icons.Filled.NotificationsActive, null, tint = Color(0xFFF5C451), modifier = Modifier.size(18.dp))
+        Icon(
+            Icons.Filled.NotificationsActive, null, tint = Color(0xFFF5C451),
+            modifier = Modifier.size(18.dp).then(if (compact) Modifier.align(Alignment.Top).padding(top = 1.dp) else Modifier),
+        )
         Spacer(Modifier.width(12.dp))
+        val action: @Composable () -> Unit = {
+            Text(
+                button, color = Ink, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier.minimumInteractiveComponentSize().clip(RoundedCornerShape(50)).background(Color(0xFFF5A623))
+                    .clickable { open() }.padding(horizontal = 14.dp, vertical = 7.dp),
+            )
+        }
         Column(Modifier.weight(1f)) {
             Text(title, color = TextC, fontSize = 13.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(2.dp))
             Text(body, color = Sage, fontSize = 12.sp, lineHeight = 17.sp)
+            if (compact) action()
         }
-        Spacer(Modifier.width(12.dp))
-        Text(
-            button, color = Ink, fontSize = 12.sp, fontWeight = FontWeight.Medium,
-            modifier = Modifier.clip(RoundedCornerShape(50)).background(Color(0xFFF5A623))
-                .clickable { open() }.padding(horizontal = 14.dp, vertical = 7.dp),
-        )
+        if (!compact) {
+            Spacer(Modifier.width(12.dp))
+            action()
+        }
     }
 }
