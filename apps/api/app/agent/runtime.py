@@ -1389,12 +1389,15 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             # The hub's own names are church goods by definition: an item we
             # sell whose name carries an everyday word never reads as off-domain.
             _guard_names: list = []
-            try:
-                from app.services import n8n_bridge as _svc_g
-                _guard_names = [p.get("name") for p in (await _svc_g.catalog_items(db, redis))
-                                if p.get("name")]
-            except Exception:
-                _guard_names = []
+            if _dom.off_domain_in(user_text or ""):
+                # only a message carrying such a word needs the names — the
+                # common turn fetches nothing
+                try:
+                    from app.services import n8n_bridge as _svc_g
+                    _guard_names = [p.get("name") for p in (await _svc_g.catalog_items(db, redis))
+                                    if p.get("name")]
+                except Exception:
+                    _guard_names = []
             _verdict = await _dom.guard_turn(
                 redis, channel=channel, key=key, text=user_text or "", transcript=messages,
                 public_comment=public_comment, swahili=looks_swahili(user_text or ""),
