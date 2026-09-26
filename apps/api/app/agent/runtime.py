@@ -1233,7 +1233,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                    media: dict | None = None,
                    *, channel: str = "whatsapp", external_id: str | None = None,
                    public_comment: bool = False, read_only: bool = False,
-                   scribe_only: bool = False,
+                   scribe_only: bool = False, deferred: bool = False,
                    product_sink: list | None = None,
                    comment_reading: dict | None = None,
                    comment_post_id: str | None = None,
@@ -1386,9 +1386,22 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     if not read_only and not scribe_only and _gate_applies(user_text):
         try:
             from app.agent import domain as _dom
+            # The hub's own names are church goods by definition: an item we
+            # sell whose name carries an everyday word never reads as off-domain.
+            _guard_names: list = []
+            if _dom.off_domain_in(user_text or ""):
+                # only a message carrying such a word needs the names — the
+                # common turn fetches nothing
+                try:
+                    from app.services import n8n_bridge as _svc_g
+                    _guard_names = [p.get("name") for p in (await _svc_g.catalog_items(db, redis))
+                                    if p.get("name")]
+                except Exception:
+                    _guard_names = []
             _verdict = await _dom.guard_turn(
                 redis, channel=channel, key=key, text=user_text or "", transcript=messages,
-                public_comment=public_comment, swahili=looks_swahili(user_text or ""))
+                public_comment=public_comment, swahili=looks_swahili(user_text or ""),
+                names=_guard_names)
         except Exception as exc:
             _log.warning("church-goods guard failed open for %s/%s: %s", channel, key, exc)
             _verdict = None
@@ -1407,6 +1420,50 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             return _verdict["reply"]
         if _verdict and _verdict.get("action") == "note":
             tail += _verdict["note"]
+
+    # PACING (owner, 2026-09-26: "some people want to chat with neema non-stop
+    # … enhance cooling off without betraying the quality of the sales"). Read
+    # BEFORE any token is bought: a duplicate text or a cooled thread is
+    # silence; the cool-off line goes out once; an economy turn runs on the
+    # light model with a pacing note. A buying signal, a cart, an order or a
+    # complaint keeps the thread warm — see agent/cooling.py.
+    if not read_only and not scribe_only and not public_comment and _gate_applies(user_text):
+        try:
+            from app.agent import cooling as _pace
+            from app.agent.review import transcript_text as _tt
+            # our last line ended with a question → their reply is an answer
+            _ours = [t for r, t in _tt(messages, limit=8) if r == "assistant"]
+            _answering = bool(_ours) and _ours[-1].rstrip().endswith("?")
+            _pv = await _pace.decide(
+                redis, db, channel=channel, key=key, text=user_text or "",
+                has_media=bool(media), closer=is_closer(user_text or ""),
+                swahili=looks_swahili(user_text or ""), customer_name=customer_name or "",
+                answering=_answering, deferred=deferred)
+        except Exception as exc:
+            _log.warning("pacing failed open for %s/%s: %s", channel, key, exc)
+            _pv = None
+        if _pv and _pv.get("action") in ("silence", "defer"):
+            # "defer" lands here only where there is no slow lane (the website,
+            # ManyChat): the schedulers put such a message on the lane instead.
+            if turn_facts is not None:
+                turn_facts.update({"tools": [], "held": [], "review": "pacing",
+                                   "pacing": _pv.get("why") or "silence"})
+            return ""
+        if _pv and _pv.get("action") == "cool":
+            try:
+                await _flag_guard(db, channel, key, _pv.get("flag") or "Neema paced this conversation.")
+            except Exception:
+                pass
+            if turn_facts is not None:
+                turn_facts.update({"tools": [], "held": [], "review": "pacing", "pacing": "cool"})
+            return _pv["reply"]
+        if _pv and _pv.get("action") == "economy":
+            if getattr(llm, "_model", None) == settings.tier2_model:
+                llm = build_llm(model=settings.tier2_model_light,
+                                purpose=getattr(llm, "purpose", "turn"))
+            tail += _pv.get("note") or ""
+            if turn_facts is not None:
+                turn_facts["pacing"] = "economy"
 
     # Their OWN money, at today's rate (services/fx; owner, 2026-09-25): a
     # "how much in rands?" gets a FACT to convert with — and the gate verifies
@@ -1815,11 +1872,20 @@ import asyncio  # noqa: E402
 _bg_tasks: set = set()
 
 
-async def _is_paused(redis, channel: str, key: str) -> bool:
+async def _is_paused(redis, channel: str, key: str, text: str | None = None) -> bool:
     """True while the agent has paused this contact (pause_conversation tool —
-    non-buying drift cooldown). Best-effort: no redis → not paused."""
+    non-buying drift cooldown). A BUYING SIGNAL lifts it (owner, 2026-09-26:
+    re-engage immediately on new buying intent): the person who was paused for
+    chatting and now asks for a cassock is a customer again. Best-effort: no
+    redis → not paused."""
     try:
         if redis is not None and await redis.get(f"agent:pause:{channel}:{key}"):
+            if text:
+                from app.agent.cooling import buying_signal as _buying
+                if _buying(text):
+                    await redis.delete(f"agent:pause:{channel}:{key}")
+                    _log.info("agent pause lifted for %s/%s — a buying signal", channel, key)
+                    return False
             _log.info("agent paused for %s/%s — skipping reply", channel, key)
             return True
     except Exception:
@@ -1949,7 +2015,8 @@ async def _is_echo(db, channel: str, key: str, reply: str,
     return " ".join((last or "").lower().split()) == t
 
 
-async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None) -> None:
+async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None,
+                        *, deferred: bool = False) -> None:
     from app.database import AsyncSessionLocal
     from app.services import n8n_bridge as svc
     try:
@@ -1958,7 +2025,8 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None)
         model = settings.tier2_model if media else route_model(text)
         async with AsyncSessionLocal() as db:
             reply = await run_turn(db, redis, wa_id, text,
-                                   build_llm(model=model, purpose="whatsapp"), media=media)
+                                   build_llm(model=model, purpose="whatsapp"), media=media,
+                                   deferred=deferred)
             if not (reply or "").strip():
                 _log.info("silence for %s: nothing to send (a closer, or a held acknowledgement)", wa_id)
                 return
@@ -1993,7 +2061,7 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None)
 async def schedule_reply(redis, wa_id: str, text: str, dedup_id: str | None,
                          media: dict | None = None) -> bool:
     """Fire the agent for this inbound once. Returns False if already handled."""
-    if await _is_paused(redis, "whatsapp", wa_id):
+    if await _is_paused(redis, "whatsapp", wa_id, text):
         return False
     if media is None and await closer_gate(redis, "whatsapp", wa_id, text):
         return False
@@ -2004,6 +2072,19 @@ async def schedule_reply(redis, wa_id: str, text: str, dedup_id: str | None,
                 return False
         except Exception:
             pass  # if the dedup store is down, better to reply than to go silent
+    # PACING's slow lane (owner, 2026-09-26): a cooled thread's chat is
+    # answered together, once, in a while — a question or an item goes
+    # straight through (agent/cooling.py).
+    try:
+        from app.agent import cooling as _pace
+        if await _pace.should_defer(redis, "whatsapp", wa_id, text, bool(media),
+                                    closer=is_closer(text or "")):
+            async def _later(t, m):
+                await _run_and_send(redis, wa_id, t, m, deferred=True)
+            if await _pace.slow_lane(redis, "whatsapp", wa_id, text, media, _later):
+                return True
+    except Exception:
+        pass
     task = asyncio.create_task(_run_and_send(redis, wa_id, text, media))
     _bg_tasks.add(task)
     task.add_done_callback(_bg_tasks.discard)
@@ -2118,15 +2199,34 @@ async def silenced_since(redis, channel: str, external_id: str):
         return None
 
 
+async def _hear_voice_note(text: str, media: dict | None) -> tuple[str, dict | None]:
+    """A VOICE NOTE IS THE MESSAGE (owner, 2026-09-26: image/voice
+    conversations). A Messenger/Instagram audio attachment is transcribed with
+    the configured whisper backend, exactly as WhatsApp's voice notes are, and
+    its words become the turn; with no backend (or a note that could not be
+    read) it stays the attachment the prompt knows how to handle."""
+    if not (media and media.get("type") == "audio" and media.get("url")):
+        return text, media
+    try:
+        from app.services.meta_media import transcribe_audio_url
+        said = await transcribe_audio_url(media["url"])
+    except Exception:
+        said = None
+    if said:
+        return (f"{text}\n{said}" if (text or "").strip() else said).strip(), None
+    return ((text or "").strip() or "(the customer sent a voice note)"), None
+
+
 async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
                              page_id: str | None = None,
-                             media: dict | None = None) -> bool:
+                             media: dict | None = None, *, deferred: bool = False) -> bool:
     """Generate + send one Meta reply. Returns True only when it actually
     reached the customer (so the sweep counts real sends, not attempts)."""
     from app.database import AsyncSessionLocal
     from app.services.meta_send import send_to_channel, send_typing_on
     from app.services import n8n_bridge as svc
     reply = ""
+    text, media = await _hear_voice_note(text, media)
     try:
         # Human presence: "typing…" in their Messenger while the turn composes.
         # Meta-only edge — TikTok (which also rides this path natively) has no
@@ -2142,7 +2242,7 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
             reply = await run_turn(db, redis, wa_id=external_id, user_text=text,
                                    llm=build_llm(model=model, purpose=channel),
                                    channel=channel, external_id=external_id,
-                                   media=media)
+                                   media=media, deferred=deferred)
             if not (reply or "").strip():
                 _log.info("silence on %s for %s: nothing to send (a closer, or a held "
                           "acknowledgement)", channel, external_id)
@@ -2195,7 +2295,7 @@ async def schedule_meta_reply(redis, channel: str, external_id: str, text: str,
     """Fire the agent for one inbound Messenger/IG message (text, photo, or
     both — the agent sees images natively). Deduped on the Meta message id so a
     redelivered webhook never double-replies."""
-    if await _is_paused(redis, channel, external_id):
+    if await _is_paused(redis, channel, external_id, text):
         return False
     if media is None and await closer_gate(redis, channel, external_id, text):
         return False
@@ -2206,6 +2306,19 @@ async def schedule_meta_reply(redis, channel: str, external_id: str, text: str,
                 return False
         except Exception:
             pass
+    # PACING's slow lane (owner, 2026-09-26): a cooled thread's chat is
+    # answered together, once, in a while — a question or an item goes
+    # straight through (agent/cooling.py).
+    try:
+        from app.agent import cooling as _pace
+        if await _pace.should_defer(redis, channel, external_id, text, bool(media),
+                                    closer=is_closer(text or "")):
+            async def _later(t, m):
+                await _run_and_send_meta(redis, channel, external_id, t, page_id, m, deferred=True)
+            if await _pace.slow_lane(redis, channel, external_id, text, media, _later):
+                return True
+    except Exception:
+        pass
     # A BURST IS ONE TURN (cost audit, 2026-09-26): "Hi" / "I want a cassock" /
     # "black" in ten seconds used to be three model turns and three
     # overlapping replies. Like WhatsApp (wa_native's debounce), the messages
@@ -4189,6 +4302,25 @@ async def _order_link(redis, channel: str, ext: str, product: str = "") -> str:
     return f"{base}/api/o/{ref}" if base else target
 
 
+async def _person_over_cap(redis, post_id: str, ext: str) -> bool:
+    """True once THIS person has spent `meta_comment_person_cap` full agent
+    replies under this post today (owner, 2026-09-26: some people comment
+    non-stop). Beyond it a bare price ask on an identified post still gets the
+    free priced line, and anything else the warm canned line — the post's
+    other commenters keep the model."""
+    if not redis or not post_id or not ext:
+        return False
+    from datetime import datetime, timezone
+    try:
+        key = f"meta:personcap:{post_id}:{ext}:{datetime.now(timezone.utc):%Y%m%d}"
+        n = await redis.incr(key)
+        if n == 1:
+            await redis.expire(key, 2 * 24 * 3600)
+        return n > int(getattr(settings, "meta_comment_person_cap", 6) or 6)
+    except Exception:
+        return False
+
+
 async def _post_over_cap(redis, post_id: str) -> bool:
     """True once this post has spent `meta_comment_agent_cap` full agent replies
     TODAY — beyond that, buying comments still get a warm reply, just a lighter
@@ -4395,7 +4527,8 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # Checked BEFORE the cap counter: a free reply must not spend the post's
     # daily model budget (the counter increments on every call).
     free_ask = _trusted and is_bare_price_ask(prompt_text)
-    skip_model = free_ask or await _post_over_cap(redis, post_id)
+    skip_model = free_ask or await _post_over_cap(redis, post_id) \
+        or await _person_over_cap(redis, post_id, ext)
 
     answer = ""
     seen_products: list = []          # the catalogue rows the agent actually priced
