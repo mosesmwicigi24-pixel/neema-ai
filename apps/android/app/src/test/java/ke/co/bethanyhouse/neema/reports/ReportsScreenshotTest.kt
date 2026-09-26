@@ -43,10 +43,10 @@ class ReportsScreenshotTest {
         val f = FakeNeema.withFixtures().also { if (empty) ReportsFixtures.installEmpty(it) else ReportsFixtures.install(it) }
         if (!canExport) { f.on("GET", "/admin/me", body = VIEWER); f.on("GET", "/admin/agents", body = "[$VIEWER]") }
         val dash = dashboard(paparazzi.context, f, role = if (canExport) "admin" else "agent", superuser = canExport)
-        val vm = ReportsViewModel(dash).apply {
+        val vm = ReportsViewModel(dash, ReportsFixtures.clock).apply {
             this.tab.value = tab; this.range.value = range; customFrom.value = from; customTo.value = to
         }
-        paparazzi.snapshot { AppFrame(dark) { PageSlice(page) { ReportsScreen(dash, vm, ReportsFixtures.clock) } } }
+        paparazzi.snapshot { AppFrame(dark) { PageSlice(page) { ReportsScreen(dash, vm) } } }
     }
 
     @Test fun overview30d() = shot()
@@ -72,8 +72,8 @@ class ReportsScreenshotTest {
         // Main never runs: the full-list fetch is still in flight.
         Dispatchers.setMain(StandardTestDispatcher())
         val dash = dashboard(paparazzi.context, FakeNeema.withFixtures().also(ReportsFixtures::install))
-        val vm = ReportsViewModel(dash)
-        paparazzi.snapshot { AppFrame { ReportsScreen(dash, vm, ReportsFixtures.clock) } }
+        val vm = ReportsViewModel(dash, ReportsFixtures.clock)
+        paparazzi.snapshot { AppFrame { ReportsScreen(dash, vm) } }
     }
 
     @Test fun tabletOverview() { paparazzi.unsafeUpdateConfig(TABLET); shot() }

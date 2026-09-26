@@ -31,6 +31,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import ke.co.bethanyhouse.neema.core.ui.theme.Brand
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
+import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 
 /**
  * Where the Team screen opens: a tab, a dialog ("create", "edit:<id>",
@@ -57,10 +58,8 @@ val LocalTeamPreview = staticCompositionLocalOf { TeamPreview() }
 enum class BtnVariant { Primary, Danger, Ghost, Default, Amber, Secondary, Outline }
 
 /** SBtn danger by day: #fff5f5 fill, #c0392b text, #fecaca border. */
-private val DangerFillLight = Color(0xFFFFF5F5)
-private val DangerBorderLight = Color(0xFFFECACA)
-/** Tailwind gray-300, the web's outline border. */
-private val Gray300 = Color(0xFFD1D5DB)
+private val DangerFillLight = ke.co.bethanyhouse.neema.feature.reports.AreaPalette.DangerWash
+private val DangerBorderLight = Palette.Red200
 
 /** (fill, content, border) for [variant] on the current theme. */
 @Composable
@@ -76,7 +75,7 @@ fun btnColors(variant: BtnVariant): Triple<Color, Color, Color> {
         // White on amber-500 is 2.1:1; the brand navy on it reads at 7:1.
         BtnVariant.Amber -> Triple(Brand.Amber, Brand.Navy, Brand.Amber)
         BtnVariant.Secondary -> Triple(c.bg2, c.text, c.hairline)
-        BtnVariant.Outline -> Triple(Color.Transparent, c.text, if (c.isDark) c.border else Gray300)
+        BtnVariant.Outline -> Triple(Color.Transparent, c.text, if (c.isDark) c.border else Palette.Gray300)
     }
 }
 
@@ -92,44 +91,7 @@ fun contentOn(fill: Color): Color {
     }
     val white = contrast(Color.White, fill)
     // White stays unless it falls under 3:1 — the role chips are the web's white-on-colour.
-    return if (white >= 3f || white >= contrast(TextOnLight, fill)) Color.White else TextOnLight
-}
-
-/**
- * Switch colours whose "off" state still reads: the theme default draws an
- * off switch by night as a navy thumb on a navy track (under 1.5:1). Off is a
- * grey-green thumb and outline on the page surface; on is unchanged.
- */
-@Composable
-fun neemaSwitchColors(): SwitchColors {
-    val c = Neema.colors
-    return SwitchDefaults.colors(
-        uncheckedThumbColor = c.muted,
-        uncheckedBorderColor = c.muted,
-        uncheckedTrackColor = if (c.isDark) c.bg else c.surface,
-    )
-}
-
-/** The brand's #1c2917 text. */
-private val TextOnLight = Color(0xFF1C2917)
-
-/**
- * Pads the bottom by however much of the on-screen keyboard overlaps this
- * element, so a scrolling form shrinks above the keyboard and the focused
- * field scrolls into view. (The app draws edge to edge, so the window no
- * longer resizes for the keyboard; the shell's own bottom bar is already
- * outside this element, which is why the overlap, not the whole keyboard
- * height, is what counts.)
- */
-@Composable
-fun Modifier.keyboardAware(): Modifier {
-    val density = LocalDensity.current
-    val ime = WindowInsets.ime.getBottom(density)
-    val root = LocalView.current.rootView
-    var gap by remember { mutableIntStateOf(0) }
-    return this
-        .onGloballyPositioned { gap = (root.height - it.boundsInWindow().bottom).toInt().coerceAtLeast(0) }
-        .padding(bottom = with(density) { (ime - gap).coerceAtLeast(0).toDp() })
+    return if (white >= 3f || white >= contrast(Palette.Ink, fill)) Color.White else Palette.Ink
 }
 
 /** True when [width] holds fewer than [minDp] dp of text at the current font scale. */

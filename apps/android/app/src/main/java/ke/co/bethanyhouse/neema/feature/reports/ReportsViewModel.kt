@@ -8,15 +8,33 @@ import ke.co.bethanyhouse.neema.core.model.Conversation
 import ke.co.bethanyhouse.neema.core.model.ConversationPage
 import ke.co.bethanyhouse.neema.core.net.NeemaHttp
 import ke.co.bethanyhouse.neema.core.net.NeemaJson
+import ke.co.bethanyhouse.neema.app.AppContainer
+import ke.co.bethanyhouse.neema.core.model.Agent
+import ke.co.bethanyhouse.neema.core.model.Order
+import ke.co.bethanyhouse.neema.core.util.AppClock
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
+import java.io.File
+import java.time.Clock
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 
 /** The web's `Range`. */
 enum class ReportRange(val key: String, val label: String) {
@@ -67,11 +85,38 @@ internal suspend fun quietly(block: suspend () -> Unit) {
 }
 
 /**
+ * Where CPU-heavy derivation runs: [Dispatchers.Default] in the app, inline
+ * when the container's I/O is synchronous (tests), so a screenshot or a
+ * behaviour test sees the result in the same frame.
+ */
+internal val AppContainer.cpu: CoroutineDispatcher
+    get() = if (config.io === Dispatchers.Unconfined) Dispatchers.Unconfined else Dispatchers.Default
+
+/** The app's "now" as a [Clock] (pinned in tests through AppClock), in the phone's zone. */
+internal object AppClockClock : Clock() {
+    override fun getZone(): ZoneId = ZoneId.systemDefault()
+    override fun withZone(zone: ZoneId?): Clock = fixed(instant(), zone)
+    override fun instant(): Instant = AppClock.instant()
+    override fun millis(): Long = AppClock.now()
+}
+
+/**
  * Reports aggregate a date range over EVERY conversation, so — like the web —
  * this screen fetches the full (un-paged) list itself, only while it is open.
  * Computing from the inbox's loaded rows would report on one page.
+ *
+ * The list runs to ~14,000 rows, so nothing is aggregated in composition:
+ * each row's timestamp is parsed once when the list lands, and the report for
+ * the chosen range is built on a background thread ([report]); changing the
+ * range keeps the last report on screen until the new one is ready.
  */
-class ReportsViewModel(private val dash: DashboardViewModel) : ViewModel() {
+@OptIn(ExperimentalCoroutinesApi::class)
+class ReportsViewModel(
+    private val dash: DashboardViewModel,
+    /** "Now" for the date range, the per-day charts and "3h ago" (fixed in tests). */
+    val clock: Clock = AppClockClock,
+) : ViewModel() {
+    private val cpu = dash.container.cpu
 
     private val _allConvs = MutableStateFlow<List<Conversation>?>(null)
     /** null while loading — never show zeros that look like real figures. */
@@ -108,7 +153,59 @@ class ReportsViewModel(private val dash: DashboardViewModel) : ViewModel() {
         viewModelScope, dash.foreground, catchUpOnForeground = false, catchUp = { load().join() },
     )
 
+    /** Every conversation with its date parsed once (not once per range change). */
+    private val datedConvs = _allConvs.map { list -> list?.let(::datedConversations) }.flowOn(cpu)
+
+    private val datedOrders = dash.orders.map(::datedOrders).flowOn(cpu)
+
+    private data class Inputs(
+        val convs: List<Dated<Conversation>>?, val orders: List<Dated<Order>>, val agents: List<Agent>,
+        val range: ReportRange, val from: LocalDate?, val to: LocalDate?,
+    )
+
+    /**
+     * The report for the chosen range, built off the main thread; null until
+     * the first one is ready (the screen shows its loading state, never zeros).
+     */
+    val report: StateFlow<Report?> =
+        combine(
+            datedConvs, datedOrders, dash.agents, range,
+            combine(customFrom, customTo) { f, t -> f to t },
+        ) { convs, orders, agents, r, (f, t) -> Inputs(convs, orders, agents, r, f, t) }
+            .mapLatest { i ->
+                i.convs?.let { buildReportDated(it, i.orders, i.agents, i.range, i.from, i.to, clock.millis(), clock.zone) }
+            }
+            .flowOn(cpu)
+            .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    private val _exporting = MutableStateFlow(false)
+    /** A CSV is being written: a second tap doesn't start another. */
+    val exporting: StateFlow<Boolean> = _exporting.asStateFlow()
+
     init { load() }
+
+    /**
+     * Writes the report's orders as CSV into [dir] on the I/O thread (streamed
+     * row by row, never one giant string), then hands the file to [onReady]
+     * back on the main thread, for the share sheet. A write failure is a
+     * toast; a tap while one is being written is ignored.
+     */
+    fun exportCsv(dir: File, onReady: (File, ReportRange) -> Unit) {
+        val r = report.value ?: return
+        if (_exporting.value) return
+        val range = range.value
+        _exporting.value = true
+        viewModelScope.launch {
+            try {
+                val file = withContext(dash.container.config.io) { writeReportCsv(dir, r.orders, range) }
+                onReady(file, range)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                dash.toast(exportFailureText(e), ToastType.Error)
+            } finally { _exporting.value = false }
+        }
+    }
 
     private suspend fun fetch() {
         try {

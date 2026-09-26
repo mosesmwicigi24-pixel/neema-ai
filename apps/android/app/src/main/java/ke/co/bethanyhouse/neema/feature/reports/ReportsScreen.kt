@@ -39,9 +39,11 @@ import ke.co.bethanyhouse.neema.core.model.Conversation
 import ke.co.bethanyhouse.neema.core.model.Order
 import ke.co.bethanyhouse.neema.core.ui.components.Panel
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
+import ke.co.bethanyhouse.neema.core.ui.theme.Palette
+import androidx.compose.foundation.lazy.LazyColumn
 import ke.co.bethanyhouse.neema.core.util.Fmt
 import java.io.File
-import java.time.Clock
+
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.time.LocalDate
@@ -57,13 +59,13 @@ import java.util.Locale
  */
 private class Hue(val text: Color, val bg: Color, val nightText: Color)
 
-private val EmeraldHue = Hue(Color(0xFF047857), Color(0xFFECFDF5), Color(0xFF34D399))
-private val BlueHue = Hue(Color(0xFF1D4ED8), Color(0xFFEFF6FF), Color(0xFF60A5FA))
-private val RedHue = Hue(Color(0xFFDC2626), Color(0xFFFEF2F2), Color(0xFFF87171))
-private val AmberHue = Hue(Color(0xFFB45309), Color(0xFFFFFBEB), Color(0xFFFBBF24))
+private val EmeraldHue = Hue(Palette.Emerald700, Palette.Emerald50, Palette.Emerald400)
+private val BlueHue = Hue(Palette.Blue700, Palette.Blue50, Palette.Blue400)
+private val RedHue = Hue(Palette.Red600, Palette.Red50, Palette.Red400)
+private val AmberHue = Hue(Palette.Amber700, Palette.Amber50, Palette.Amber400)
 // The web's own greens: open #427425 on #f0f9ec; anything else #699a32 on #e6f3d8.
-private val OpenHue = Hue(Color(0xFF427425), Color(0xFFF0F9EC), Color(0xFF9CCD65))
-private val QuietHue = Hue(Color(0xFF699A32), Color(0xFFE6F3D8), Color(0xFF8A9E80))
+private val OpenHue = Hue(Palette.Moss700, Palette.Moss50, Palette.Willow400)
+private val QuietHue = Hue(Palette.Willow600, Palette.Willow100, Palette.Sage400)
 
 @Composable
 private fun Badge(text: String, hue: Hue) {
@@ -86,14 +88,13 @@ internal fun capitalizeWords(s: String): String =
 fun ReportsScreen(
     dash: DashboardViewModel,
     vm: ReportsViewModel = viewModel { ReportsViewModel(dash) },
-    /** "Now" for the date range and the per-day charts (fixed in tests). */
-    clock: Clock = Clock.systemDefaultZone(),
 ) {
     TrackShown(vm.life)
     val allConvs by vm.allConvs.collectAsStateWithLifecycle()
+    val report by vm.report.collectAsStateWithLifecycle()
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()
+    val exporting by vm.exporting.collectAsStateWithLifecycle()
     val agents by dash.agents.collectAsStateWithLifecycle()
-    val orders by dash.orders.collectAsStateWithLifecycle()
     val tab by vm.tab.collectAsStateWithLifecycle()
     val range by vm.range.collectAsStateWithLifecycle()
     val customFrom by vm.customFrom.collectAsStateWithLifecycle()
@@ -102,9 +103,8 @@ fun ReportsScreen(
     val context = LocalContext.current
 
     // Never show zeros that look like real figures while the data is loading.
-    val convs = allConvs
     val loadError by vm.loadError.collectAsStateWithLifecycle()
-    if (convs == null && loadError != null) {
+    if (allConvs == null && loadError != null) {
         // The first download failed: say why and offer another go — a report
         // of zeros here would read as the truth.
         Box(Modifier.fillMaxSize().background(c.bg).padding(16.dp), contentAlignment = Alignment.Center) {
@@ -122,7 +122,9 @@ fun ReportsScreen(
         }
         return
     }
-    if (convs == null) {
+    // Still downloading, or the first report is being built off the main thread.
+    val r = report
+    if (r == null) {
         Box(Modifier.fillMaxSize().background(c.bg).padding(16.dp), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(24.dp))
@@ -133,102 +135,125 @@ fun ReportsScreen(
         return
     }
 
-    val report = remember(convs, orders, agents, range, customFrom, customTo, clock) {
-        buildReport(convs, orders, agents, range, customFrom, customTo, clock.millis(), clock.zone)
-    }
+    // The visible table's rows, built once per report / tab — not on every
+    // recomposition — with the agent lookup indexed rather than searched per row.
+    val table = remember(r, tab, agents) { tableFor(tab, r, agents, vm.clock.millis()) }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(c.bg)) {
         val wide = maxWidth >= 600.dp
+        val pad = if (wide) 24.dp else 16.dp
+        val panelWidth = maxWidth - pad * 2
         PullToRefreshBox(isRefreshing = refreshing, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize()) {
-            Column(
-                Modifier.fillMaxSize().verticalScroll(rememberScrollState())
-                    .padding(if (wide) 24.dp else 16.dp),
-            ) {
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(pad)) {
                 // ── Header ───────────────────────────────────────────────
                 // Title left, range + export right (wide); stacked on a phone.
-                val title: @Composable () -> Unit = {
-                    Column {
-                        Text("Reports", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = c.text)
-                        Text(
-                            "${range.label} · ${report.convs.size} conversations",
-                            fontSize = 14.sp, color = c.textDim, modifier = Modifier.padding(top = 2.dp),
-                        )
-                    }
-                }
-                val controls: @Composable () -> Unit = {
-                    RangeControls(
-                        range = range,
-                        customFrom = customFrom, customTo = customTo,
-                        onRange = { vm.range.value = it },
-                        onFrom = { vm.customFrom.value = it },
-                        onTo = { vm.customTo.value = it },
-                        onExport = {
-                            runCatching { exportCsv(context, report.orders, range) }
-                                .onSuccess { dash.toast("Report exported") }
-                                .onFailure { dash.toast(exportFailureText(it), ToastType.Error) }
-                        },
-                    )
-                }
-                if (wide) Row(verticalAlignment = Alignment.Top) {
-                    Box(Modifier.weight(1f)) { title() }
-                    Spacer(Modifier.width(16.dp))
-                    controls()
-                } else {
-                    title()
-                    Spacer(Modifier.height(12.dp))
-                    controls()
-                }
-                Spacer(Modifier.height(if (wide) 24.dp else 16.dp))
-
-                // ── Tabs ─────────────────────────────────────────────────
-                // The web's tab strip: a hairline under the whole width, not just the tabs.
-                Box(Modifier.fillMaxWidth()) {
-                    HorizontalDivider(color = c.bg4, modifier = Modifier.align(Alignment.BottomStart))
-                    PrimaryScrollableTabRow(
-                        selectedTabIndex = tab.ordinal,
-                        edgePadding = 0.dp,
-                        containerColor = Color.Transparent,
-                        contentColor = c.gold2,
-                        divider = {},
-                    ) {
-                        ReportTab.entries.forEach { t ->
-                            Tab(
-                                selected = tab == t,
-                                onClick = { vm.tab.value = t },
-                                selectedContentColor = c.gold2,
-                                unselectedContentColor = if (c.isDark) c.muted else c.border2,
-                                text = { Text(t.label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) },
+                item(key = "header", contentType = "header") {
+                    val title: @Composable () -> Unit = {
+                        Column {
+                            Text("Reports", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = c.text)
+                            Text(
+                                "${range.label} · ${r.convs.size} conversations",
+                                fontSize = 14.sp, color = c.textDim, modifier = Modifier.padding(top = 2.dp),
                             )
                         }
                     }
+                    val controls: @Composable () -> Unit = {
+                        RangeControls(
+                            range = range,
+                            customFrom = customFrom, customTo = customTo,
+                            exporting = exporting,
+                            onRange = { vm.range.value = it },
+                            onFrom = { vm.customFrom.value = it },
+                            onTo = { vm.customTo.value = it },
+                            onExport = {
+                                // Written on the I/O thread; only the share sheet opens here.
+                                vm.exportCsv(File(context.cacheDir, "reports")) { file, forRange ->
+                                    runCatching { shareCsv(context, file, forRange) }
+                                        .onSuccess { dash.toast("Report exported") }
+                                        .onFailure { dash.toast(exportFailureText(it), ToastType.Error) }
+                                }
+                            },
+                        )
+                    }
+                    Column(Modifier.padding(bottom = if (wide) 24.dp else 16.dp)) {
+                        if (wide) Row(verticalAlignment = Alignment.Top) {
+                            Box(Modifier.weight(1f)) { title() }
+                            Spacer(Modifier.width(16.dp))
+                            controls()
+                        } else {
+                            title()
+                            Spacer(Modifier.height(12.dp))
+                            controls()
+                        }
+                    }
                 }
-                Spacer(Modifier.height(16.dp))
 
-                when (tab) {
-                    ReportTab.Overview -> OverviewTab(report, wide)
-                    ReportTab.Conversations -> ReportTable(
-                        header = "${report.convs.size} conversations in period",
-                        cols = listOf("Customer", "Channel", "Status", "Mode", "Last Activity", "Agent"),
-                        rows = report.convs.take(50).map { conv -> conversationRow(conv, agents, clock.millis()) },
-                        wide = wide,
-                    )
-                    ReportTab.Orders -> ReportTable(
-                        header = "${report.orders.size} orders · ${Fmt.currency(report.revenue)} total",
-                        cols = listOf("Customer", "Phone", "Amount", "Status", "Date"),
-                        rows = report.orders.take(20).map { orderRow(it) },
-                        wide = wide,
-                    )
-                    ReportTab.Agents -> ReportTable(
-                        header = "Agent Performance",
-                        cols = listOf("Agent", "Role", "Conversations", "Revenue", "Status"),
-                        rows = report.agentStats.map { agentRow(it) },
-                        wide = wide,
-                    )
+                // ── Tabs ─────────────────────────────────────────────────
+                // The web's tab strip: a hairline under the whole width, not just the tabs.
+                item(key = "tabs", contentType = "tabs") {
+                    Box(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+                        HorizontalDivider(color = c.bg4, modifier = Modifier.align(Alignment.BottomStart))
+                        PrimaryScrollableTabRow(
+                            selectedTabIndex = tab.ordinal,
+                            edgePadding = 0.dp,
+                            containerColor = Color.Transparent,
+                            contentColor = c.gold2,
+                            divider = {},
+                        ) {
+                            ReportTab.entries.forEach { t ->
+                                Tab(
+                                    selected = tab == t,
+                                    onClick = { vm.tab.value = t },
+                                    selectedContentColor = c.gold2,
+                                    unselectedContentColor = if (c.isDark) c.muted else c.border2,
+                                    text = { Text(t.label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) },
+                                )
+                            }
+                        }
+                    }
                 }
-                Spacer(Modifier.height(24.dp))
+
+                if (table == null) {
+                    item(key = "overview", contentType = "overview") { OverviewTab(r, wide) }
+                } else {
+                    reportTable(tab.name, table, wide, panelWidth)
+                }
+                item(key = "end", contentType = "end") { Spacer(Modifier.height(24.dp)) }
             }
         }
     }
+}
+
+/** The table for [tab] (null for Overview): the web's first 50 conversations, first 20 orders, every agent. */
+internal fun tableFor(tab: ReportTab, r: Report, agents: List<Agent>, now: Long): TableModel? = when (tab) {
+    ReportTab.Overview -> null
+    ReportTab.Conversations -> {
+        // `agents.find(...)`: the first agent with the id, as the web picks it.
+        val names = HashMap<String, String>(agents.size * 2)
+        agents.forEach { names.putIfAbsent(it.id, it.name) }
+        val shown = r.convs.take(50)
+        TableModel(
+            "${r.convs.size} conversations in period",
+            listOf("Customer", "Channel", "Status", "Mode", "Last Activity", "Agent"),
+            shown.map { conv -> conversationRow(conv, names, now) },
+            uniqueKeys(shown.map { "c:${it.id}" }),
+        )
+    }
+    ReportTab.Orders -> {
+        val shown = r.orders.take(20)
+        TableModel(
+            "${r.orders.size} orders · ${Fmt.currency(r.revenue)} total",
+            listOf("Customer", "Phone", "Amount", "Status", "Date"),
+            shown.map { orderRow(it) },
+            uniqueKeys(shown.map { "o:${it.id}" }),
+        )
+    }
+    ReportTab.Agents -> TableModel(
+        "Agent Performance",
+        listOf("Agent", "Role", "Conversations", "Revenue", "Status"),
+        r.agentStats.map { agentRow(it) },
+        uniqueKeys(r.agentStats.map { "a:${it.agent.id}" }),
+    )
 }
 
 // ── Computation ─────────────────────────────────────────────────────────────
@@ -263,6 +288,31 @@ internal fun buildReport(
     all: List<Conversation>, orders: List<Order>, agents: List<Agent>,
     range: ReportRange, customFrom: LocalDate?, customTo: LocalDate?,
     now: Long = AppClock.now(), zone: ZoneId = ZoneId.systemDefault(),
+): Report = buildReportDated(datedConversations(all), datedOrders(orders), agents, range, customFrom, customTo, now, zone)
+
+/** A row with its timestamp parsed once ([NO_DATE] when it has none or it doesn't parse). */
+class Dated<T>(val item: T, val at: Long)
+
+internal const val NO_DATE = Long.MIN_VALUE
+
+/** Conversations dated as the web's `mapConversation` dates them (last message, else creation). */
+internal fun datedConversations(all: List<Conversation>): List<Dated<Conversation>> =
+    all.map { Dated(it, Fmt.millis(it.reportAt()) ?: NO_DATE) }
+
+internal fun datedOrders(orders: List<Order>): List<Dated<Order>> =
+    orders.map { Dated(it, Fmt.millis(it.createdAt) ?: NO_DATE) }
+
+/**
+ * [buildReport] over rows whose dates are already parsed: one pass per
+ * figure, per-day buckets by binary search over the day boundaries, and
+ * agent performance from per-agent / per-customer indexes instead of a scan
+ * of every conversation and order for each agent — 10,000 conversations,
+ * 1,000 orders and 200 agents build in a few milliseconds.
+ */
+internal fun buildReportDated(
+    all: List<Dated<Conversation>>, orders: List<Dated<Order>>, agents: List<Agent>,
+    range: ReportRange, customFrom: LocalDate?, customTo: LocalDate?,
+    now: Long, zone: ZoneId,
 ): Report {
     val day = 86_400_000L
     // Date range (the web's daysAgo(): same time of day, n days back).
@@ -275,40 +325,64 @@ internal fun buildReport(
                 customTo.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() - 1
         else -> now - 30 * day to now
     }
-    fun inRange(iso: String?): Boolean = Fmt.millis(iso)?.let { it in from..to } ?: false
-    fun localDay(iso: String?): LocalDate? = Fmt.millis(iso)?.let { Instant.ofEpochMilli(it).atZone(zone).toLocalDate() }
+    fun inRange(at: Long): Boolean = at != NO_DATE && at in from..to
 
-    val convs = all.filter { inRange(it.reportAt()) }
-    val fOrders = orders.filter { inRange(it.createdAt) }
+    val datedConvs = all.filter { inRange(it.at) }
+    val datedFOrders = orders.filter { inRange(it.at) }
+    val convs = datedConvs.map { it.item }
+    val fOrders = datedFOrders.map { it.item }
     val revenue = fOrders.filter { it.status != "cancelled" }.sumOf { it.total }
 
-    // Per-day charts: at most 14 bars ending on the range's last day.
+    // Per-day charts: at most 14 bars ending on the range's last day. Each
+    // row lands in its local day by binary search over the days' start
+    // instants (DST-safe, no per-row calendar maths).
     val days = when (range) { ReportRange.D7 -> 7; ReportRange.D30 -> 14; else -> 30 }
     val n = minOf(days, 14)
     val toDay = Instant.ofEpochMilli(to).atZone(zone).toLocalDate()
     val dayList = (0 until n).map { i -> toDay.minusDays((n - 1 - i).toLong()) }
-    val convDays = convs.groupingBy { localDay(it.reportAt()) }.eachCount()
-    val orderDays = fOrders.groupBy { localDay(it.createdAt) }
+    val starts = LongArray(n + 1) { i ->
+        (if (i < n) dayList[i] else toDay.plusDays(1)).atStartOfDay(zone).toInstant().toEpochMilli()
+    }
+    fun bucket(at: Long): Int {
+        if (at < starts[0] || at >= starts[n]) return -1
+        val i = java.util.Arrays.binarySearch(starts, at)
+        return if (i >= 0) i else -i - 2
+    }
+    val convCounts = IntArray(n)
+    datedConvs.forEach { d -> bucket(d.at).takeIf { it >= 0 }?.let { convCounts[it]++ } }
+    // Summed in list order per day, exactly as the web's reduce adds them.
+    val orderSums = DoubleArray(n)
+    datedFOrders.forEach { d -> bucket(d.at).takeIf { it >= 0 }?.let { orderSums[it] += d.item.total } }
     fun wk(d: LocalDate) = d.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.ENGLISH)
-    val convByDay = dayList.map { BarPoint(wk(it), (convDays[it] ?: 0).toDouble()) }
-    val orderByDay = dayList.map { d -> BarPoint(wk(d), orderDays[d].orEmpty().sumOf { it.total }) }
+    val convByDay = dayList.mapIndexed { i, d -> BarPoint(wk(d), convCounts[i].toDouble()) }
+    val orderByDay = dayList.mapIndexed { i, d -> BarPoint(wk(d), orderSums[i]) }
 
     // Agent performance: threads they hold, and orders from those customers.
+    // Indexed once — never every conversation and order scanned per agent.
+    val byAgent = HashMap<String, MutableList<Conversation>>()
+    convs.forEach { conv -> conv.assignedAgentId?.let { byAgent.getOrPut(it) { ArrayList() } += conv } }
+    val ordersByCustomer = HashMap<String, MutableList<Int>>()
+    fOrders.forEachIndexed { i, o -> if (o.waId.isNotEmpty()) ordersByCustomer.getOrPut(o.waId) { ArrayList() } += i }
     val agentStats = agents.map { a ->
-        val mine = convs.filter { it.assignedAgentId == a.id }
-        val waIds = mine.mapNotNull { it.waId }.toSet()
-        val rev = fOrders.filter { it.waId.isNotEmpty() && it.waId in waIds }.sumOf { it.total }
+        val mine = byAgent[a.id].orEmpty()
+        val waIds = mine.mapNotNullTo(HashSet()) { it.waId }
+        // The same orders the web's filter keeps, added in the same (list) order.
+        val idx = waIds.flatMap { ordersByCustomer[it].orEmpty() }.sorted()
+        var rev = 0.0
+        idx.forEach { rev += fOrders[it].total }
         AgentStat(a, mine.size, rev)
     }.sortedByDescending { it.handled }
 
+    var human = 0; var ai = 0
+    convs.forEach { when (it.interceptMode) { "human" -> human++; "ai" -> ai++ } }
+    var pending = 0; var confirmed = 0; var delivered = 0; var cancelled = 0
+    fOrders.forEach {
+        when (it.status) { "pending" -> pending++; "confirmed" -> confirmed++; "delivered" -> delivered++; "cancelled" -> cancelled++ }
+    }
     return Report(
         convs = convs, orders = fOrders, revenue = revenue,
-        humanConvs = convs.count { it.interceptMode == "human" },
-        aiConvs = convs.count { it.interceptMode == "ai" },
-        pending = fOrders.count { it.status == "pending" },
-        confirmed = fOrders.count { it.status == "confirmed" },
-        delivered = fOrders.count { it.status == "delivered" },
-        cancelled = fOrders.count { it.status == "cancelled" },
+        humanConvs = human, aiConvs = ai,
+        pending = pending, confirmed = confirmed, delivered = delivered, cancelled = cancelled,
         convByDay = convByDay, orderByDay = orderByDay, agentStats = agentStats,
     )
 }
@@ -323,6 +397,7 @@ private fun RangeControls(
     onRange: (ReportRange) -> Unit,
     onFrom: (LocalDate) -> Unit,
     onTo: (LocalDate) -> Unit,
+    exporting: Boolean,
     onExport: () -> Unit,
 ) {
     val c = Neema.colors
@@ -354,8 +429,12 @@ private fun RangeControls(
         // checks export_reports), so this does too.
         run {
             Button(
-                onClick = onExport, shape = RoundedCornerShape(8.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = c.gold, contentColor = MaterialTheme.colorScheme.onPrimary),
+                onClick = onExport, enabled = !exporting, shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = c.gold, contentColor = MaterialTheme.colorScheme.onPrimary,
+                    // Writing the file: the button stays itself, just quieter, while a second tap is ignored.
+                    disabledContainerColor = c.gold.copy(alpha = 0.7f), disabledContentColor = MaterialTheme.colorScheme.onPrimary,
+                ),
                 contentPadding = PaddingValues(horizontal = 14.dp), modifier = Modifier.heightIn(min = 38.dp),
             ) {
                 Icon(Icons.Outlined.Download, null, modifier = Modifier.size(16.dp))
@@ -487,7 +566,7 @@ private fun ChartTitle(text: String) {
 
 // ── Table rows ──────────────────────────────────────────────────────────────
 
-private fun conversationRow(conv: Conversation, agents: List<Agent>, now: Long): List<Cell> = listOf(
+private fun conversationRow(conv: Conversation, agentNames: Map<String, String>, now: Long): List<Cell> = listOf(
     textCell(Fmt.displayName(conv.name, conv.waId)),
     // `<span className="capitalize">{c.channel || "whatsapp"}</span>`
     textCell(capitalizeWords(conv.channel.ifEmpty { "whatsapp" })),
@@ -500,7 +579,7 @@ private fun conversationRow(conv: Conversation, agents: List<Agent>, now: Long):
     },
     textCell(Fmt.timeAgo(conv.reportAt(), now)),
     // `?.name || "—"`: an agent with a blank name reads "—" too.
-    textCell(agents.find { it.id == conv.assignedAgentId }?.name?.takeIf { it.isNotEmpty() } ?: "—"),
+    textCell(conv.assignedAgentId?.let(agentNames::get)?.takeIf { it.isNotEmpty() } ?: "—"),
 )
 
 private fun orderStatusHue(status: String): Hue = when (status) {
@@ -538,7 +617,7 @@ private fun agentRow(s: AgentStat): List<Cell> = listOf(
         val c = Neema.colors
         val on = s.agent.isAvailable
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(6.dp).clip(CircleShape).background(if (on) c.gold else Color(0xFFD6D3D1)))
+            Box(Modifier.size(6.dp).clip(CircleShape).background(if (on) c.gold else Palette.Stone300))
             Spacer(Modifier.width(4.dp))
             Text(if (on) "Online" else "Offline", fontSize = 10.sp, fontWeight = FontWeight.Medium, color = if (on) c.gold else c.border2)
         }
@@ -562,23 +641,39 @@ internal fun csvField(s: String): String =
  * Fields are RFC-4180 quoted when they need it -- the web writes them bare, so
  * a customer called "Kamau, Peter" split into two columns there.
  */
-internal fun reportCsv(orders: List<Order>): String {
-    val header = "Date,Customer,Amount,Status\n"
-    val rows = orders.joinToString("\n") { o ->
+internal fun reportCsv(orders: List<Order>): String = buildString { writeCsv(this, orders) }
+
+/** The CSV written straight to [out], one row at a time (10,000 orders never become one string). */
+internal fun writeCsv(out: Appendable, orders: List<Order>) {
+    out.append("Date,Customer,Amount,Status\n")
+    orders.forEachIndexed { i, o ->
+        if (i > 0) out.append('\n')
         val phone = o.contactPhone?.takeIf { it.isNotBlank() } ?: o.waId
-        listOf(Fmt.date(o.createdAt), Fmt.displayName(o.contactName, phone), plain(o.total), o.status)
-            .joinToString(",") { csvField(it) }
+        out.append(csvField(Fmt.date(o.createdAt))).append(',')
+            .append(csvField(Fmt.displayName(o.contactName, phone))).append(',')
+            .append(csvField(plain(o.total))).append(',')
+            .append(csvField(o.status))
     }
-    return header + rows
 }
 
 internal fun csvFileName(range: ReportRange) = "neema-report-${range.key}.csv"
 
-/** Writes the CSV into [dir] (created if needed); throws an IOException when the phone can't store it. */
+/**
+ * Streams the CSV into [dir] (created if needed) through a buffered writer;
+ * throws an IOException when the phone can't store it. Written to a temporary
+ * name first, so a failure halfway never leaves a truncated report to share.
+ */
 internal fun writeReportCsv(dir: File, orders: List<Order>, range: ReportRange): File {
     if (!dir.isDirectory && !dir.mkdirs()) throw java.io.IOException("can't create ${dir.name}")
     val file = File(dir, csvFileName(range))
-    file.writeText(reportCsv(orders))
+    val part = File(dir, file.name + ".part")
+    try {
+        part.bufferedWriter(Charsets.UTF_8, 64 * 1024).use { writeCsv(it, orders) }
+        if (!part.renameTo(file)) {
+            file.delete()
+            if (!part.renameTo(file)) throw java.io.IOException("can't save ${file.name}")
+        }
+    } finally { part.delete() }
     return file
 }
 
@@ -592,8 +687,7 @@ internal fun exportFailureText(e: Throwable): String = when (e) {
     else -> "Couldn't export the report — try again."
 }
 
-private fun exportCsv(context: Context, orders: List<Order>, range: ReportRange) {
-    val file = writeReportCsv(File(context.cacheDir, "reports"), orders, range)
+private fun shareCsv(context: Context, file: File, range: ReportRange) {
     val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
     val send = Intent(Intent.ACTION_SEND).apply {
         type = "text/csv"

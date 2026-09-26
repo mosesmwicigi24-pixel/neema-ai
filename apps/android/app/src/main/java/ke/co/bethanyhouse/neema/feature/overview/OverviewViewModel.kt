@@ -17,6 +17,7 @@ import ke.co.bethanyhouse.neema.core.ws.str
 import ke.co.bethanyhouse.neema.feature.reports.Coalescer
 import ke.co.bethanyhouse.neema.feature.reports.ScreenLife
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -111,8 +112,22 @@ class OverviewViewModel(private val dash: DashboardViewModel) : ViewModel() {
         }
     }
 
-    /** The poll's pair: server stats and the human-held threads. */
+    /** Held while a stats + intercepts read is in flight. */
+    private val live = Mutex()
+
+    /**
+     * The poll's pair: server stats and the human-held threads. Single-flight:
+     * the 30 s poll, an event and a return to the screen landing together
+     * cost one pair of requests — a caller arriving while one is in flight
+     * relies on it rather than stacking a second. The read runs in the
+     * caller's coroutine, so leaving the screen still cancels it.
+     */
     private suspend fun loadLive() {
+        if (!live.tryLock()) return
+        try { fetchLive() } finally { live.unlock() }
+    }
+
+    private suspend fun fetchLive() {
         coroutineScope {
             launch {
                 attempt { dash.api.stats.overview() }

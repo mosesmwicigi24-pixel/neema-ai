@@ -56,6 +56,7 @@ import ke.co.bethanyhouse.neema.core.ui.components.ALL_CHANNELS
 import ke.co.bethanyhouse.neema.core.ui.components.Panel
 import ke.co.bethanyhouse.neema.core.ui.components.channelStyle
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
+import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 import ke.co.bethanyhouse.neema.core.util.Fmt
 import ke.co.bethanyhouse.neema.feature.reports.AxisLabels
 import ke.co.bethanyhouse.neema.feature.reports.BigNumber
@@ -77,7 +78,7 @@ private val AccentGreen @Composable get() = Neema.colors.gold
 private val AccentEmerald @Composable get() = Neema.colors.gold2
 private val AccentBlue @Composable get() = Neema.colors.blue
 private val AccentOrange @Composable get() = Neema.colors.amber
-private val AccentViolet @Composable get() = if (Neema.colors.isDark) Color(0xFF7085C2) else Color(0xFF4D66B3)
+private val AccentViolet @Composable get() = if (Neema.colors.isDark) Neema.colors.indigo else Palette.Indigo500
 
 /** Port of components/views/OverviewView.tsx — the Analytics screen. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -228,8 +229,8 @@ data class ActivityEntry(val id: String, val user: String, val action: String, v
 
 internal fun activityFeed(orders: List<Order>, human: List<Conversation>, agents: List<Agent>): List<ActivityEntry> {
     val out = mutableListOf<ActivityEntry>()
-    // Recent orders
-    orders.sortedByDescending { Fmt.millis(it.createdAt) ?: 0 }.take(4).forEach { o ->
+    // Recent orders — each date parsed once, not once per comparison of the sort.
+    orders.map { it to (Fmt.millis(it.createdAt) ?: 0L) }.sortedByDescending { it.second }.take(4).map { it.first }.forEach { o ->
         out += ActivityEntry(
             // mapOrder() makes contact_phone the wa_id: an unnamed buyer shows their number, never "Unknown".
             "order-${o.id}", Fmt.displayName(o.contactName, o.contactPhone?.takeIf { it.isNotBlank() } ?: o.waId), "placed an order",
@@ -240,14 +241,15 @@ internal fun activityFeed(orders: List<Order>, human: List<Conversation>, agents
     // mapConversation() dates a thread with no messages yet from its creation,
     // so the web's `c.last_message_at` test only drops a thread with neither.
     human.filter { it.interceptMode == "human" && !(it.lastMessageAt ?: it.createdAt).isNullOrEmpty() }
-        .sortedByDescending { Fmt.millis(it.lastMessageAt ?: it.createdAt) ?: 0 }.take(3).forEach { conv ->
+        .map { it to (Fmt.millis(it.lastMessageAt ?: it.createdAt) ?: 0L) }.sortedByDescending { it.second }.take(3).map { it.first }
+        .forEach { conv ->
             out += ActivityEntry(
                 "conv-${conv.id}", agents.find { it.id == conv.assignedAgentId }?.name ?: "An agent",
                 "intercepted conversation with", Fmt.displayName(conv.name, conv.waId),
                 (conv.lastMessageAt ?: conv.createdAt)!!, "⚡",
             )
         }
-    return out.sortedByDescending { Fmt.millis(it.at) ?: 0 }.take(8)
+    return out.map { it to (Fmt.millis(it.at) ?: 0L) }.sortedByDescending { it.second }.take(8).map { it.first }
 }
 
 data class DayBar(val label: String, val value: Double, val isToday: Boolean)
@@ -283,7 +285,7 @@ private fun qtyText(q: Double): String = if (q == Math.floor(q)) q.toLong().toSt
 
 /** The web's #2c4e18 (totals, today, top-product revenue); the bright moss by night. */
 @Composable
-private fun strong(): Color = if (Neema.colors.isDark) Neema.colors.gold2 else Color(0xFF2C4E18)
+private fun strong(): Color = if (Neema.colors.isDark) Neema.colors.gold2 else Palette.Moss800
 
 /**
  * Rank numbers. The web's #b5da8b is ~1.6:1 on white — too faint to read —
@@ -341,7 +343,7 @@ private fun AttributionPanel(a: Attribution, wide: Boolean) {
             trailing = { Text("${a.totals.leads} attributed lead${if (a.totals.leads == 1) "" else "s"}", fontSize = 11.sp, color = c.muted) },
         )
         Spacer(Modifier.height(10.dp))
-        val slate = Color(0xFF64748B)
+        val slate = Palette.Slate500
         if (wide) {
             Row(Modifier.padding(vertical = 6.dp)) {
                 listOf("Source" to 1.2f, "Post" to 2f, "Leads" to 0.7f, "Orders" to 0.7f, "Revenue (KES)" to 1.2f).forEachIndexed { i, (h, w) ->
@@ -363,7 +365,7 @@ private fun AttributionPanel(a: Attribution, wide: Boolean) {
                 HorizontalDivider(color = c.hairline.copy(alpha = 0.5f))
             }
             if (a.unattributed.orders > 0) {
-                val grey = Color(0xFF94A3B8)
+                val grey = Palette.Slate400
                 Row(Modifier.padding(vertical = 8.dp)) {
                     Text("unattributed", fontSize = 12.sp, fontStyle = FontStyle.Italic, color = grey, modifier = Modifier.weight(1.2f))
                     Text("—", fontSize = 12.sp, color = grey, modifier = Modifier.weight(2f))
@@ -394,7 +396,7 @@ private fun AttributionPanel(a: Attribution, wide: Boolean) {
 @Composable
 private fun AttributionCard(source: String, post: String, mono: Boolean, leads: String, orders: String, revenue: String, dim: Boolean) {
     val c = Neema.colors
-    val fg = if (dim) Color(0xFF94A3B8) else c.text
+    val fg = if (dim) Palette.Slate400 else c.text
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(c.bg).padding(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -403,7 +405,7 @@ private fun AttributionCard(source: String, post: String, mono: Boolean, leads: 
             )
             Text(revenue, fontSize = 13.sp, fontWeight = if (dim) FontWeight.Normal else FontWeight.SemiBold, color = fg)
         }
-        Text(post, fontSize = 11.sp, color = if (dim) fg else Color(0xFF64748B), fontFamily = if (mono) FontFamily.Monospace else null, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(post, fontSize = 11.sp, color = if (dim) fg else Palette.Slate500, fontFamily = if (mono) FontFamily.Monospace else null, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Spacer(Modifier.height(4.dp))
         Text("Leads $leads  ·  Orders $orders", fontSize = 11.sp, color = if (dim) fg else c.muted)
     }
@@ -419,7 +421,7 @@ private fun RevenueChart(bars: List<DayBar>, modifier: Modifier) {
     val todayColor = if (c.isDark) c.gold else AccentEmerald
     // By night a wash of the moss strong enough to read against the navy panel.
     val restColor = if (c.isDark) c.gold.copy(alpha = 0.45f) else c.bg4
-    val pickedColor = Color(0xFF4ADE80)
+    val pickedColor = ke.co.bethanyhouse.neema.feature.reports.AreaPalette.Green400
     Panel(modifier, padding = PaddingValues(16.dp)) {
         PanelHeader(
             title = { PanelTitle("7-Day Revenue (KES)") },
@@ -469,10 +471,10 @@ private fun RevenueChart(bars: List<DayBar>, modifier: Modifier) {
 private fun OrderStatusPanel(s: Headline, modifier: Modifier) {
     val c = Neema.colors
     val items = listOf(
-        Triple("Delivered", s.deliveredOrders, Color(0xFF10B981) to Color(0xFF059669)),
-        Triple("Confirmed", s.confirmedOrders, Color(0xFF3B82F6) to Color(0xFF2563EB)),
-        Triple("Pending", s.pendingOrders, Color(0xFFFBBF24) to Color(0xFFD97706)),
-        Triple("Cancelled", s.cancelledOrders, Color(0xFFF87171) to Color(0xFFEF4444)),
+        Triple("Delivered", s.deliveredOrders, Palette.Emerald500 to Palette.Emerald600),
+        Triple("Confirmed", s.confirmedOrders, Palette.Blue500 to Palette.Blue600),
+        Triple("Pending", s.pendingOrders, Palette.Amber400 to Palette.Amber600),
+        Triple("Cancelled", s.cancelledOrders, Palette.Red400 to Palette.Red500),
     )
     Panel(modifier, padding = PaddingValues(16.dp)) {
         PanelTitle("Order Status")

@@ -59,11 +59,14 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import ke.co.bethanyhouse.neema.feature.agents.SideBySide
 import ke.co.bethanyhouse.neema.feature.agents.isCramped
-import ke.co.bethanyhouse.neema.feature.agents.keyboardAware
 import ke.co.bethanyhouse.neema.feature.agents.onGold
-import ke.co.bethanyhouse.neema.feature.agents.neemaSwitchColors
+import ke.co.bethanyhouse.neema.core.ui.components.neemaSwitchColors
+import ke.co.bethanyhouse.neema.core.ui.theme.Palette
+import ke.co.bethanyhouse.neema.core.ui.theme.ChannelColors
+import ke.co.bethanyhouse.neema.feature.reports.AreaPalette
+import androidx.compose.ui.graphics.SolidColor
 
-private val Amber700 = Color(0xFFB45309)
+private val Amber700 = Palette.Amber700
 
 /**
  * What starts open on Settings — a date picker ("ends" / "starts"), the
@@ -100,7 +103,7 @@ fun SettingsScreen(dash: DashboardViewModel) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             // The web's grid is one column on phones, two otherwise.
             val twoCols = maxWidth >= 720.dp
-            Column(Modifier.fillMaxSize().keyboardAware().verticalScroll(rememberScrollState(startScroll)).padding(16.dp)) {
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState(startScroll)).padding(16.dp)) {
                 Text("Settings", style = MaterialTheme.typography.headlineSmall, color = c.text)
                 Text("Platform configuration and integrations", fontSize = 12.sp, color = c.textDim)
                 Spacer(Modifier.height(18.dp))
@@ -159,7 +162,7 @@ private fun SectionCard(title: String, description: String? = null, content: @Co
 }
 
 /** Tailwind stone-600, the web's field-label colour. */
-private val Stone600 = Color(0xFF57534E)
+private val Stone600 = Palette.Stone600
 
 /** The web's SmallInput by day: #f3f9ec fill, #b5da8b border. */
 @Composable
@@ -675,11 +678,11 @@ private fun PipelineStagesCard(vm: SettingsViewModel) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(bottom = 8.dp)) {
                 list.forEach { s ->
                     Row(
-                        Modifier.clip(RoundedCornerShape(6.dp)).background(if (c.isDark) Color(0x26C89B3C) else Color(0xFFFDF8EC))
-                            .border(1.dp, if (c.isDark) Color(0x66C89B3C) else Color(0xFFE3CF9B), RoundedCornerShape(6.dp)).padding(start = 8.dp),
+                        Modifier.clip(RoundedCornerShape(6.dp)).background(if (c.isDark) AreaPalette.PipeGold.copy(alpha = 0.15f) else AreaPalette.PipeChipFill)
+                            .border(1.dp, if (c.isDark) AreaPalette.PipeGold.copy(alpha = 0.4f) else AreaPalette.PipeChipLine, RoundedCornerShape(6.dp)).padding(start = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(s, fontSize = 12.sp, color = if (c.isDark) Color(0xFFE3CF9B) else Color(0xFF8A6D1F))
+                        Text(s, fontSize = 12.sp, color = if (c.isDark) AreaPalette.PipeChipLine else AreaPalette.PipeChipInk)
                         // 32dp drawn; Compose widens the touch area to 48dp.
                         IconButton(onClick = { vm.removeStage(s) }, enabled = !saving, modifier = Modifier.size(32.dp)) {
                             Icon(Icons.Default.Close, "Remove $s", Modifier.size(14.dp), tint = c.muted)
@@ -705,7 +708,7 @@ private fun PipelineStagesCard(vm: SettingsViewModel) {
                     onClick = { add() },
                     enabled = newStage.isNotBlank() && !saving,
                     shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFA97C14), contentColor = Color.White),
+                    colors = ButtonDefaults.buttonColors(containerColor = AreaPalette.PipeGoldSolid, contentColor = Color.White),
                 ) { Text("Add", maxLines = 1) }
             }
         } else {
@@ -784,16 +787,16 @@ private fun AiCard(vm: SettingsViewModel) {
 private data class PlatformIcon(val icon: ImageVector?, val bg: Brush, val text: String? = null)
 
 private fun platformIcon(key: String): PlatformIcon = when (key) {
-    "whatsapp" -> PlatformIcon(Icons.AutoMirrored.Outlined.Chat, Brush.linearGradient(listOf(Color(0xFF25D366), Color(0xFF25D366))))
-    "messenger" -> PlatformIcon(Icons.Outlined.Forum, Brush.linearGradient(listOf(Color(0xFF0099FF), Color(0xFF0099FF))))
+    "whatsapp" -> PlatformIcon(Icons.AutoMirrored.Outlined.Chat, SolidColor(ChannelColors.WhatsApp))
+    "messenger" -> PlatformIcon(Icons.Outlined.Forum, SolidColor(AreaPalette.MessengerTile))
     "instagram" -> PlatformIcon(
         Icons.Outlined.PhotoCamera,
-        Brush.linearGradient(listOf(Color(0xFFF09433), Color(0xFFE6683C), Color(0xFFDC2743), Color(0xFFCC2366), Color(0xFFBC1888))),
+        Brush.linearGradient(AreaPalette.InstagramGradient),
     )
-    "mpesa" -> PlatformIcon(null, Brush.linearGradient(listOf(Color(0xFF00A651), Color(0xFF00A651))), "M-PESA")
-    "email" -> PlatformIcon(Icons.Outlined.Email, Brush.linearGradient(listOf(Color(0xFF4D66B3), Color(0xFF4D66B3))))
-    "slack" -> PlatformIcon(Icons.Outlined.Tag, Brush.linearGradient(listOf(Color(0xFF4A154B), Color(0xFF4A154B))))
-    else -> PlatformIcon(Icons.Outlined.TableChart, Brush.linearGradient(listOf(Color(0xFF0F9D58), Color(0xFF0F9D58))))
+    "mpesa" -> PlatformIcon(null, SolidColor(AreaPalette.MpesaGreen), "M-PESA")
+    "email" -> PlatformIcon(Icons.Outlined.Email, SolidColor(Palette.Indigo500))
+    "slack" -> PlatformIcon(Icons.Outlined.Tag, SolidColor(AreaPalette.SlackAubergine))
+    else -> PlatformIcon(Icons.Outlined.TableChart, SolidColor(AreaPalette.SheetsGreen))
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -821,7 +824,7 @@ private fun IntegrationsCard(vm: SettingsViewModel, twoCols: Boolean) {
                         }
                         if (integ.connected) SmallPillButton(
                             "Disconnect", c.red,
-                            if (c.isDark) c.redDim else Color(0xFFFFF5F5), if (c.isDark) c.red.copy(alpha = 0.3f) else Color(0xFFFECACA),
+                            if (c.isDark) c.redDim else AreaPalette.DangerWash, if (c.isDark) c.red.copy(alpha = 0.3f) else Palette.Red200,
                         ) { vm.toggleIntegration(integ.key) }
                         else SmallPillButton("Connect", c.gold, c.goldDim, c.border) { vm.toggleIntegration(integ.key) }
                     }
@@ -836,7 +839,7 @@ private fun IntegrationsCard(vm: SettingsViewModel, twoCols: Boolean) {
                         Column(Modifier.weight(1f)) {
                             Text(integ.name, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = c.text, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 16.sp)
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(Modifier.size(6.dp).clip(CircleShape).background(if (integ.connected) c.gold else Color(0xFFD6D3D1)))
+                                Box(Modifier.size(6.dp).clip(CircleShape).background(if (integ.connected) c.gold else Palette.Stone300))
                                 Spacer(Modifier.width(5.dp))
                                 Text(if (integ.connected) "Connected" else "Not connected", fontSize = 11.sp, fontWeight = FontWeight.Medium,
                                     color = if (integ.connected) c.gold else c.muted, maxLines = 1)
@@ -901,13 +904,13 @@ private fun SmallPillButton(text: String, fg: Color, bg: Color, border: Color, o
 private fun DangerZoneCard(vm: SettingsViewModel) {
     val c = Neema.colors
     val light = !c.isDark
-    val rowFill = if (light) Color(0xFFFEF2F2) else c.redDim
-    val rowEdge = if (light) Color(0xFFFEE2E2) else c.red.copy(alpha = 0.2f)
-    val labelColor = if (light) Color(0xFF991B1B) else c.red
-    val subColor = if (light) Color(0xFFEF4444) else c.red.copy(alpha = 0.75f)
-    val btnFill = if (light) Color(0xFFFEE2E2) else c.red.copy(alpha = 0.12f)
-    val btnText = if (light) Color(0xFFB91C1C) else c.red
-    val btnEdge = if (light) Color(0xFFFECACA) else c.red.copy(alpha = 0.3f)
+    val rowFill = if (light) Palette.Red50 else c.redDim
+    val rowEdge = if (light) Palette.Red100 else c.red.copy(alpha = 0.2f)
+    val labelColor = if (light) Palette.Red800 else c.red
+    val subColor = if (light) Palette.Red500 else c.red.copy(alpha = 0.75f)
+    val btnFill = if (light) Palette.Red100 else c.red.copy(alpha = 0.12f)
+    val btnText = if (light) Palette.Red700 else c.red
+    val btnEdge = if (light) Palette.Red200 else c.red.copy(alpha = 0.3f)
     SectionCard("Danger Zone", "Irreversible actions. Proceed with caution.") {
         listOf(
             Triple("Clear conversation history", "Permanently delete messages older than 90 days", "Clear"),
