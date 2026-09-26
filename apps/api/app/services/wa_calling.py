@@ -121,3 +121,23 @@ def ice_servers() -> list[dict]:
         "username": "openrelayproject", "credential": "openrelayproject",
     })
     return servers
+
+
+# Meta's calling error codes (Graph `error.code`) → what the agent can do about it.
+# Unknown codes fall through to a plain "couldn't reach them" — never a promise.
+_CALL_ERRORS = {
+    "138001": "Their WhatsApp can't take calls right now (an old app version or an unsupported device).",
+    "138002": "Too many calls are already in progress — try again in a moment.",
+    "138003": "A call to this customer is already in progress.",
+    "138004": "The call couldn't connect — try again.",
+    "138005": "Too many calls to this customer in a short time — try again later or message them.",
+    "138007": "They didn't pick up in time.",
+}
+
+
+def friendly_error(msg: str) -> str:
+    """The agent-facing reason a connect failed, from Meta's error text."""
+    for code, text in _CALL_ERRORS.items():
+        if code in (msg or ""):
+            return text
+    return "Couldn't reach the customer on WhatsApp right now."

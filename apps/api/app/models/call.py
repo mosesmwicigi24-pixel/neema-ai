@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import String, Integer, DateTime, ForeignKey, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models import Base
@@ -10,7 +11,13 @@ from app.models import Base
 class Call(Base):
     """A WhatsApp voice call — one row per inbound call, its whole lifecycle.
 
-    status: ringing → answered → ended, or ringing → missed / declined. The
+    status (services/call_log.py owns the transitions):
+      ringing → answered → completed               (a call that connected)
+      ringing → missed                             (inbound, nobody answered)
+      ringing → declined | callback                (inbound, an agent turned it down)
+      ringing → no_answer | cancelled | failed     (outbound, never connected)
+    Rows written before 2026-09 say `ended` for `completed`; the API reports both
+    as `completed`. The
     webhook creates it on `connect` (ringing) and closes it on `terminate`; the
     softphone's answer marks it answered + records who picked up. Kept as its own
     table so the Calls view can show recents (like a phone), measure durations,
@@ -39,3 +46,10 @@ class Call(Base):
     summary          : Mapped[str | None]   = mapped_column(Text, nullable=True)          # LLM call brief
     # none | recorded | pending | processing | done | failed
     transcript_status: Mapped[str]          = mapped_column(String(20), default="none")
+    # Structured post-call brief from the transcript (services/call_transcribe.py):
+    # {intent, products[], objections[], commitments[], next_action,
+    #  follow_up_message, sentiment}. NULL until a transcript is summarised.
+    insights         : Mapped[dict | None]  = mapped_column(JSONB, nullable=True)
+    # A missed / callback call is an open follow-up until someone calls the
+    # customer back (a later connected call closes it too) or marks it done.
+    follow_up_done_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

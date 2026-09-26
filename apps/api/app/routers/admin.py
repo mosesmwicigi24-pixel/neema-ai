@@ -21,10 +21,12 @@ from app.services.conversation import (
 )
 from app.services import translate as translate_svc
 import jwt
+import logging
 from app.core.security import decode_token
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 router = APIRouter()
+_log = logging.getLogger("neema.admin")
 
 # Most recent messages returned when a chat is opened. The inbox renders every
 # message into the DOM (no virtualisation), and the thread query was unbounded,
@@ -951,6 +953,16 @@ async def get_thread(
             "agent_name":   agent_name,
         })
 
+    # ── 4b. Calls with this customer, inline where they happened ──────────────
+    # A call is part of the conversation: the agent coming back from one (or
+    # a colleague picking the thread up later) sees it — outcome, length, who
+    # took it and the brief — without leaving the chat. WhatsApp threads match
+    # on the number; Messenger / Instagram threads on the linked person.
+    try:
+        thread.extend(await _call_thread_items(db, conv_id))
+    except Exception as exc:
+        _log.warning("thread call items failed for %s: %s", conv_id, exc)
+
     # ── 5. Sort merged timeline by created_at ascending ───────────────────────
     thread.sort(key=lambda x: x["created_at"] or "")
 
@@ -966,6 +978,57 @@ async def get_thread(
         pass
 
     return thread
+
+
+async def _call_thread_items(db: AsyncSession, conv_id: str) -> list[dict]:
+    """The customer's calls as `system_event` thread items (event_kind "call")."""
+    from app.services import call_log
+    conv = (await db.execute(select(Conversation).where(Conversation.id == conv_id))).scalar_one_or_none()
+    if conv is None:
+        return []
+    wa = conv.external_id if conv.channel == "whatsapp" else None
+    conds = []
+    if wa:
+        conds.append(Call.wa_id == wa)
+    if getattr(conv, "person_id", None):
+        conds.append(Call.person_id == conv.person_id)
+    if not conds:
+        return []
+    rows = (await db.execute(
+        select(Call).where(or_(*conds)).order_by(Call.started_at.desc()).limit(50))).scalars().all()
+    items = []
+    for r in await call_log.serialize_rows(db, list(rows)):
+        items.append({
+            "id": f"call-{r['id']}",
+            "type": "system_event",
+            "direction": "outbound" if r["direction"] == "outbound" else "inbound",
+            "sender": "human_agent",
+            "text": _call_label(r),
+            "created_at": r["started_at"],
+            "event_kind": "call",
+            "event_reason": r.get("summary"),
+            "agent_name": r.get("agent_name"),
+            "call": r,
+        })
+    return items
+
+
+def _call_label(r: dict) -> str:
+    """The thread pill's words — the same the Calls view uses."""
+    d = r.get("duration")
+    dur = f" · {d // 60}:{d % 60:02d}" if d else ""
+    out = r.get("direction") == "outbound"
+    return {
+        "ringing": "Calling…" if out else "Incoming call",
+        "answered": "Call in progress",
+        "completed": ("Outgoing call" if out else "Incoming call") + dur,
+        "missed": "Missed call",
+        "declined": "Declined call",
+        "callback": "Missed call · call back",
+        "no_answer": "Outgoing call · no answer",
+        "cancelled": "Outgoing call · cancelled",
+        "failed": "Outgoing call · failed",
+    }.get(r.get("status") or "", "Call")
 
 
 @router.get("/conversations/{conv_id}/activity")
@@ -2407,14 +2470,45 @@ async def whatsapp_invite(
 
 
 # ── WhatsApp voice calling — the softphone's backend ─────────────────────────
+# services/call_log.py owns the statuses and the live events; these routes are
+# the agent's side of each transition. Every change reaches every agent at once
+# (ws:channel:calls), so two phones never disagree about a call.
+
+def _redis(request: Request):
+    return getattr(request.app.state, "redis", None)
+
+
+def _answered_by(value) -> str | None:
+    """The redis answer-lock holds "<agent id>|<agent name>" (older: the id)."""
+    if not value:
+        return None
+    v = value.decode() if isinstance(value, bytes) else str(value)
+    return v.split("|", 1)[1] if "|" in v else None
+
 
 @router.get("/calls/ice-config")
 async def calls_ice_config(agent: Agent = Depends(get_current_agent)):
-    """ICE servers (coturn + STUN) for the dashboard's RTCPeerConnection, plus
-    whether the softphone should record the call (server-side kill switch)."""
+    """ICE servers (coturn + STUN) for the softphone's RTCPeerConnection, plus
+    whether the softphone should record the call (server-side kill switch) and
+    whether recordings get transcribed (so the UI never promises a summary the
+    server won't write)."""
     from app.services.wa_calling import ice_servers
     from app.core.config import settings
-    return {"ice_servers": ice_servers(), "record": settings.call_recording_enabled}
+    return {"ice_servers": ice_servers(), "record": settings.call_recording_enabled,
+            "transcribe": bool(settings.whisper_enabled),
+            "auto_transcribe": bool(settings.whisper_enabled and settings.whisper_auto)}
+
+
+@router.get("/calls/permission")
+async def calls_permission(
+    wa_id: str,
+    request: Request,
+    agent: Agent = Depends(get_current_agent),
+):
+    """Whether this customer allowed business calls: granted | denied |
+    requested | unknown (never asked — a call may still go through)."""
+    from app.services import call_log
+    return await call_log.permission(_redis(request), wa_id.lstrip("+").strip())
 
 
 @router.get("/calls/{call_id}/offer")
@@ -2425,7 +2519,7 @@ async def calls_get_offer(
 ):
     """The caller's SDP offer, stashed by the webhook on `connect`. The softphone
     sets this as its remote description before building an answer."""
-    redis = getattr(request.app.state, "redis", None)
+    redis = _redis(request)
     if redis is None:
         raise HTTPException(status_code=503, detail="calling unavailable")
     raw = await redis.get(f"wa:call:offer:{call_id}")
@@ -2443,44 +2537,56 @@ async def calls_answer(
     request: Request,
     agent: Agent = Depends(get_current_agent),
 ):
-    """Accept the call with the softphone's SDP answer: pre_accept (establish
-    media) then accept (audio flows). One agent wins a call via a redis lock so
-    two dashboards can't both answer."""
+    """Accept the call with the softphone's SDP answer. One agent wins a call via
+    a redis lock so two phones can't both answer; the loser's 409 names the
+    winner, and every other phone stops ringing on the `call_answered` event."""
     sdp = (body or {}).get("sdp")
     if not sdp:
         raise HTTPException(status_code=400, detail="sdp answer is required")
-    redis = getattr(request.app.state, "redis", None)
+    from app.services import wa_calling, call_log
+    from app.database import AsyncSessionLocal
+    async with AsyncSessionLocal() as db:
+        st = (await db.execute(select(Call.status).where(Call.call_id == call_id))).scalar_one_or_none()
+    if st is not None and st not in call_log.LIVE:
+        # Over already (the caller gave up, a colleague declined it): say so
+        # instead of asking Meta to accept a call that no longer exists.
+        raise HTTPException(status_code=410, detail="This call has already ended.")
+    redis = _redis(request)
+    lock = f"wa:call:answered:{call_id}"
     if redis is not None:
-        won = await redis.set(f"wa:call:answered:{call_id}", str(agent.id), nx=True, ex=3600)
+        won = await redis.set(lock, f"{agent.id}|{agent.name or ''}", nx=True, ex=3600)
         if not won:
-            raise HTTPException(status_code=409, detail="call already answered")
-    from app.services import wa_calling
+            who = _answered_by(await redis.get(lock))
+            raise HTTPException(status_code=409,
+                                detail=f"call already answered by {who}" if who else "call already answered")
     try:
         # accept directly with the SDP answer. (pre_accept+accept back-to-back
         # raced and 502'd — accept alone establishes media fine.)
         await wa_calling.accept(call_id, sdp)
     except Exception as exc:
         if redis is not None:
-            await redis.delete(f"wa:call:answered:{call_id}")   # let another try
+            await redis.delete(lock)   # let another try
         raise HTTPException(status_code=502, detail=f"accept failed: {exc}")
-    try:
-        from app.services import call_log
-        await call_log.mark_answered(call_id, agent.id)
-    except Exception:
-        pass
+    moved = await call_log.mark_answered(call_id, agent.id)
+    await call_log.publish(redis, {
+        "type": "call_answered", "call_id": call_id,
+        "agent_id": str(agent.id), "agent_name": agent.name,
+        "direction": (moved or {}).get("direction") or "inbound",
+    })
     return {"ok": True, "call_id": call_id}
 
 
 @router.post("/calls/request-permission")
 async def calls_request_permission(
     body: dict,
+    request: Request,
     agent: Agent = Depends(get_current_agent),
 ):
     """Ask a customer for permission to call them (interactive
     call_permission_request). Needed before a business-initiated call to someone
-    who hasn't called us first."""
+    who hasn't allowed calls. Their answer arrives as `call_permission`."""
     from app.core.phone import is_plausible_phone
-    from app.services import wa_calling
+    from app.services import wa_calling, call_log
     to = str((body or {}).get("to") or "").lstrip("+").strip()
     if not is_plausible_phone(to):
         raise HTTPException(status_code=400, detail="A valid phone number is required.")
@@ -2488,7 +2594,9 @@ async def calls_request_permission(
         await wa_calling.request_call_permission(to)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"permission request failed: {exc}")
-    return {"ok": True}
+    perm = await call_log.set_permission(_redis(request), to, "requested")
+    await call_log.publish(_redis(request), {"type": "call_permission", **perm})
+    return {"ok": True, "permission": perm}
 
 
 @router.post("/calls/connect")
@@ -2500,9 +2608,10 @@ async def calls_connect(
 ):
     """Business-initiated call: the softphone hands us its SDP offer; we ask Meta
     to place the call. Returns {call_id}. The customer's SDP answer arrives on the
-    calls webhook and is relayed to the browser. Records an outbound Call row so
+    calls webhook and is relayed to the phone. Records an outbound Call row so
     it shows in the Calls log."""
     from app.core.phone import is_plausible_phone
+    from app.services import call_log
     to = str((body or {}).get("to") or "").lstrip("+").strip()
     sdp = (body or {}).get("sdp")
     name = str((body or {}).get("name") or "").strip() or None
@@ -2516,97 +2625,112 @@ async def calls_connect(
     except Exception as exc:
         msg = str(exc)
         if "138006" in msg:
+            # Meta's "no call permission": whatever we had on file is stale.
+            perm = await call_log.permission(_redis(request), to)
+            if perm.get("status") == "granted":
+                await call_log.set_permission(_redis(request), to, "unknown")
             raise HTTPException(status_code=409,
-                detail="This customer hasn't granted call permission yet. Send the "
-                       "WhatsApp template first, or wait until they message/call us.")
-        raise HTTPException(status_code=502, detail=f"call failed: {exc}")
+                detail="This customer hasn't allowed calls yet. Send them a call "
+                       "request — you can call as soon as they tap Allow.")
+        raise HTTPException(status_code=502, detail=f"call failed: {wa_calling.friendly_error(msg)}")
     call_id = ((resp.get("calls") or [{}])[0]).get("id")
     if not call_id:
         raise HTTPException(status_code=502, detail="Meta did not return a call id")
-    # Stash offer meta + record an outbound row (best-effort).
-    redis = getattr(request.app.state, "redis", None)
+    redis = _redis(request)
     if redis is not None:
-        import json as _json
-        await redis.set(f"wa:call:answered:{call_id}", str(agent.id), ex=3600)  # we own it
+        # We own it: nobody else can "answer" our outbound call.
+        await redis.set(f"wa:call:answered:{call_id}", f"{agent.id}|{agent.name or ''}", ex=3600)
     try:
         from app.services.identity import resolve_person_id_for_wa_id
-        from app.models.call import Call
         pid = await resolve_person_id_for_wa_id(db, to, source="whatsapp_call")
         db.add(Call(call_id=call_id, wa_id=to, caller_name=name, direction="outbound",
                     status="ringing", person_id=pid, agent_id=agent.id))
         await db.commit()
     except Exception:
         await db.rollback()
+    await call_log.publish_update(redis, call_id)
     return {"ok": True, "call_id": call_id}
 
 
 @router.get("/calls")
 async def list_calls(
+    request: Request,
     limit: int = 50,
+    wa_id: str | None = None,
+    view: str | None = None,
     db: AsyncSession = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
 ):
     """Recent WhatsApp calls (newest first) for the Calls view — like a phone's
-    recents. Joins the caller's person name/avatar when linked."""
-    from app.models.call import Call
-    from datetime import datetime, timezone, timedelta
-    # Lazy cleanup: a call still "ringing" after 2 min never got its terminate
-    # event — treat it as missed so it stops ringing the softphone.
-    stale = (await db.execute(
-        select(Call).where(Call.status == "ringing",
-                           Call.started_at < datetime.now(timezone.utc) - timedelta(minutes=2))
-    )).scalars().all()
-    if stale:
-        for s in stale:
-            s.status = "missed"
-            s.ended_at = datetime.now(timezone.utc)
-        await db.commit()
+    recents. `wa_id` narrows to one customer; `view=follow_up` to the missed and
+    callback calls nobody has returned yet."""
+    from app.services import call_log
+    await call_log.sweep_stale(db, _redis(request))
+    q = select(Call)
+    if wa_id:
+        q = q.where(Call.wa_id == wa_id.lstrip("+").strip())
+    if view == "follow_up":
+        q = q.where(Call.status.in_(call_log.FOLLOW_UP), Call.follow_up_done_at.is_(None))
     rows = (await db.execute(
-        select(Call).order_by(Call.started_at.desc()).limit(min(max(limit, 1), 200))
+        q.order_by(Call.started_at.desc()).limit(min(max(limit, 1), 200))
     )).scalars().all()
-    person_ids = [c.person_id for c in rows if c.person_id]
-    pmap: dict = {}
-    if person_ids:
-        for p in (await db.execute(select(Person).where(Person.id.in_(person_ids)))).scalars().all():
-            pmap[p.id] = p
-    agent_ids = [c.agent_id for c in rows if c.agent_id]
-    amap: dict = {}
-    if agent_ids:
-        for a in (await db.execute(select(Agent).where(Agent.id.in_(agent_ids)))).scalars().all():
-            amap[a.id] = a.name
-    out = []
-    for c in rows:
-        p = pmap.get(c.person_id)
-        out.append({
-            "id": str(c.id), "call_id": c.call_id, "wa_id": c.wa_id,
-            "name": c.caller_name or (p.display_name if p else None),
-            "direction": c.direction, "status": c.status, "duration": c.duration,
-            "agent_name": amap.get(c.agent_id),
-            "started_at": c.started_at.isoformat() if c.started_at else None,
-            "summary": c.summary,
-            "transcript_status": c.transcript_status,
-            "has_recording": bool(c.recording_url),
-        })
+    out = await call_log.serialize_rows(db, rows)
+    if view == "follow_up":
+        out = [r for r in out if r["follow_up_open"]]
     return out
+
+
+@router.get("/calls/{call_id}")
+async def get_call(
+    call_id: str,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """One call's current row — what a phone that lost its connection reads to
+    learn how the call on its screen really ended."""
+    from app.services import call_log
+    r = await call_log.row(db, call_id)
+    if r is None:
+        raise HTTPException(status_code=404, detail="Call not found")
+    return r
 
 
 @router.post("/calls/{call_id}/terminate")
 async def calls_terminate(
     call_id: str,
+    request: Request,
+    body: dict | None = None,
     agent: Agent = Depends(get_current_agent),
 ):
-    """Hang up or decline the call."""
-    from app.services import wa_calling
+    """Hang up, decline or cancel. What it meant is decided by where the call is:
+    a ringing inbound call is declined (for the whole team — the caller hears it
+    end), our ringing outbound call is cancelled, a live call is completed."""
+    from app.services import wa_calling, call_log
+    from app.database import AsyncSessionLocal
     try:
         await wa_calling.terminate(call_id)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"terminate failed: {exc}")
-    return {"ok": True, "call_id": call_id}
+    async with AsyncSessionLocal() as db:
+        c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
+        status, direction = (c.status, c.direction) if c else (None, None)
+    info = None
+    if status == "ringing" and direction == "outbound":
+        info = await call_log.mark_cancelled(call_id, agent.id)
+    elif status == "ringing":
+        info = await call_log.mark_declined(call_id, agent.id)
+    elif status == "answered":
+        info = await call_log.mark_ended(call_id)
+    if info is not None:
+        info.pop("wa_id", None)
+        await call_log.publish(_redis(request), {"type": "call_ended", **info})
+    return {"ok": True, "call_id": call_id, "outcome": (info or {}).get("outcome")}
 
 
 @router.post("/calls/{call_id}/callback")
 async def calls_callback(
     call_id: str,
+    request: Request,
     agent: Agent = Depends(get_current_agent),
 ):
     """Decline now, but flag the customer for a call-back — ends the ringing call
@@ -2616,7 +2740,36 @@ async def calls_callback(
         await wa_calling.terminate(call_id)
     except Exception:
         pass   # may already be gone; still record the intent
-    await call_log.mark_callback(call_id)
+    info = await call_log.mark_callback(call_id, agent.id)
+    if info is None:
+        # Already over (the caller gave up first): still owe them the call.
+        from app.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as db:
+            c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
+            if c is not None and c.status == "missed":
+                c.status = "callback"
+                c.agent_id = agent.id
+                await db.commit()
+        await call_log.publish_update(_redis(request), call_id)
+    else:
+        info.pop("wa_id", None)
+        await call_log.publish(_redis(request), {"type": "call_ended", **info})
+    return {"ok": True, "call_id": call_id}
+
+
+@router.post("/calls/{call_id}/follow-up-done")
+async def calls_follow_up_done(
+    call_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Clear a missed / callback call from the follow-up list (handled in chat,
+    or not worth a call)."""
+    from app.services import call_log
+    if not await call_log.mark_follow_up_done(db, call_id):
+        raise HTTPException(status_code=404, detail="Call not found")
+    await call_log.publish_update(_redis(request), call_id)
     return {"ok": True, "call_id": call_id}
 
 
@@ -2669,6 +2822,8 @@ async def calls_upload_recording(
     if auto:
         from app.services.call_transcribe import schedule_transcription
         schedule_transcription(call_id)
+    from app.services import call_log
+    await call_log.publish_update(getattr(request.app.state, "redis", None), call_id)
     return {"ok": True, "call_id": call_id, "will_transcribe": auto}
 
 
@@ -2678,8 +2833,7 @@ async def calls_get_transcript(
     db: AsyncSession = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
 ):
-    """The transcript + AI summary + status for a call (the Calls-view expander)."""
-    from app.models.call import Call
+    """The transcript + AI summary + insights + status for a call."""
     c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
     if c is None:
         raise HTTPException(status_code=404, detail="Call not found")
@@ -2688,6 +2842,7 @@ async def calls_get_transcript(
         "status": c.transcript_status,
         "transcript": c.transcript,
         "summary": c.summary,
+        "insights": c.insights,
         "language": c.transcript_lang,
         "has_recording": bool(c.recording_url),
         "recording_url": c.recording_url,
@@ -2697,13 +2852,14 @@ async def calls_get_transcript(
 @router.post("/calls/{call_id}/transcribe")
 async def calls_transcribe(
     call_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
 ):
     """Transcribe + summarise a recorded call on demand — the free path: spend the
     box's CPU only on the calls you care about. Needs a recording and Whisper on."""
     from app.core.config import settings
-    from app.models.call import Call
+    from app.services import call_log
     if not settings.whisper_enabled:
         raise HTTPException(
             status_code=409,
@@ -2720,4 +2876,5 @@ async def calls_transcribe(
     await db.commit()
     from app.services.call_transcribe import schedule_transcription
     schedule_transcription(call_id)
+    await call_log.publish_update(getattr(request.app.state, "redis", None), call_id)
     return {"ok": True, "call_id": call_id, "status": "pending"}
