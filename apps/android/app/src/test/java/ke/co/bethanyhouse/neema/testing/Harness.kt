@@ -95,6 +95,7 @@ private class TestResults : androidx.activity.result.ActivityResultRegistryOwner
  * placeholder) every run — Coil's async loads otherwise race the snapshot.
  */
 fun installTestImageLoader(context: Context) {
+    freezePlatformAnimations()
     coil.Coil.setImageLoader(
         coil.ImageLoader.Builder(context)
             .dispatcher(Dispatchers.Unconfined)
@@ -111,6 +112,21 @@ fun installTestImageLoader(context: Context) {
             }
             .build(),
     )
+}
+
+/**
+ * Platform animations (the dialog window's dim among them) run on real time in
+ * the renderer, so a snapshot caught them at a point that varied with machine
+ * load — dialog goldens flaked by a few percent. Duration scale 0 makes every
+ * platform animation jump to its end, as "Remove animations" does on a phone.
+ */
+fun freezePlatformAnimations() {
+    runCatching {
+        android.animation.ValueAnimator::class.java
+            .getDeclaredMethod("setDurationScale", Float::class.javaPrimitiveType)
+            .apply { isAccessible = true }
+            .invoke(null, 0f)
+    }
 }
 
 /** Theme + a ViewModel store, as MainActivity provides. */

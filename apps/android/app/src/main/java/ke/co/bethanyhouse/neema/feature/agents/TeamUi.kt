@@ -271,6 +271,7 @@ fun FormDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
+        ke.co.bethanyhouse.neema.core.ui.components.WebModalDim()
         Surface(
             shape = RoundedCornerShape(16.dp),
             color = Neema.colors.bg2,

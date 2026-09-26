@@ -380,6 +380,22 @@ fun FilterChips(
     }
 }
 
+/**
+ * The web's modal overlay: `bg-black/50`. Call it inside any dialog's
+ * content: the platform's own dim comes from the window theme (0.6), not the
+ * web's value. (The screenshot renderer draws its own dim and ignores this.)
+ */
+@Composable
+fun WebModalDim(amount: Float = 0.5f) {
+    val view = androidx.compose.ui.platform.LocalView.current
+    androidx.compose.runtime.SideEffect {
+        (view.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window?.let { w ->
+            w.addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            w.setDimAmount(amount)
+        }
+    }
+}
+
 @Composable
 fun ConfirmDialog(
     title: String,
@@ -391,7 +407,7 @@ fun ConfirmDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(title) },
+        title = { WebModalDim(); Text(title) },
         text = { Text(message) },
         confirmButton = {
             TextButton(onClick = { onConfirm(); onDismiss() }) {
