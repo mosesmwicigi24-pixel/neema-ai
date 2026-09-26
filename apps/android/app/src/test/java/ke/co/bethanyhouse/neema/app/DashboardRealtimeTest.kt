@@ -116,14 +116,14 @@ class DashboardRealtimeTest {
     }
 
     @Test
-    fun aBurstOfAlertsRefreshesOncePerAlertAndNeverDuplicates() {
+    fun aBurstOfAlertsIsOneRefreshAndNeverDuplicates() {
         val (dash, ws) = live()
         val refreshes = dash.inboxRefreshes()
         repeat(10) { i -> ws.last.frame("""{"event":"notification","type":"new_conversation","title":"New chat $i","body":"hi","wa_id":"2547$i"}""") }
         // The same frame twice (a double publish) is one alert.
         ws.last.frame("""{"event":"notification","type":"new_conversation","title":"New chat 9","body":"hi","wa_id":"25479"}""")
         advance(801)
-        assertEquals(10, refreshes())
+        assertEquals("round 8: one refetch per burst, not per alert", 1, refreshes())
         assertEquals(10, dash.container.notifications.items.value.size)
     }
 

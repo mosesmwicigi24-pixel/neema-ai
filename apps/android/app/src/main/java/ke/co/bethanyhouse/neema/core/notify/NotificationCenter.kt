@@ -69,9 +69,21 @@ class NotificationCenter(
     private fun load(): List<AppNotification> =
         runCatching { NeemaJson.decodeFromString(listSer, prefs.getString("items", "[]")!!) }.getOrDefault(emptyList())
 
+    /** A write of the bell to disk is queued and not yet started. */
+    private val writeQueued = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /**
+     * The bell updates at once; the disk copy follows on [scope], one write
+     * for however many changes landed before it ran (a burst of frames costs
+     * one JSON encode, not one per frame). It always writes the latest list.
+     */
     private fun save(list: List<AppNotification>) {
         _items.value = list
-        prefs.edit().putString("items", NeemaJson.encodeToString(listSer, list)).apply()
+        if (!writeQueued.compareAndSet(false, true)) return
+        scope.launch {
+            writeQueued.set(false)
+            prefs.edit().putString("items", NeemaJson.encodeToString(listSer, _items.value)).apply()
+        }
     }
 
     fun start(foreground: StateFlow<Boolean>) {
@@ -80,7 +92,7 @@ class NotificationCenter(
                 if (e.str("event") != "notification") return@collect
                 val n = fromFrame(e)
                 if (isRepeat(n)) return@collect
-                save((listOf(n) + _items.value).take(60))
+                save((listOf(n) + _items.value).take(MAX_ITEMS))
                 _incoming.tryEmit(n)
                 // In front, the toast and the bell are the alert: no second,
                 // duplicate one in the tray.
@@ -110,6 +122,9 @@ class NotificationCenter(
             sink.active()?.let { live -> tray.keys.retainAll(live) }
             tray.remove(a.id)
             tray[a.id] = n
+            // Where the system can't list what is still shown, forget the
+            // oldest: the bell itself only keeps the last MAX_ITEMS.
+            while (tray.size > MAX_ITEMS) tray.remove(tray.keys.first())
         }
         sink.post(a)
         refreshSummary()
@@ -168,6 +183,8 @@ class NotificationCenter(
 
     companion object {
         private const val REPEAT_WINDOW_MS = 3_000L
+        /** The bell keeps the last 60 (Notifications.tsx slices to 60). */
+        const val MAX_ITEMS = 60
 
         private fun summaryLine(n: AppNotification) = if (n.body.isBlank()) n.title else "${n.title} — ${n.body}"
 
