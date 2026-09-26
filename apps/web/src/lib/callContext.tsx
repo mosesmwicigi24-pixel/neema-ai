@@ -611,11 +611,17 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }, [enrich, endWith, endFromStatus, customerAnswered, answerLost]);
 
     // ── Media state → phase ──────────────────────────────────────────────────
+    // When the media path dropped (entering `reconnecting`): a dropped call's
+    // duration is the time it was really connected, not the grace spent waiting.
+    const droppedAtRef = useRef<number | null>(null);
     const loseConnection = useCallback(() => {
         const s = snapRef.current;
         const id = s.call?.callId;
+        const droppedAt = droppedAtRef.current;
+        droppedAtRef.current = null;
         if (!s.answeredAt) endWith("failed", { reason: "The call audio couldn't connect" });
-        else endWith("connection_lost");
+        else endWith("connection_lost", droppedAt
+            ? { duration: Math.max(0, Math.round((droppedAt - s.answeredAt) / 1000)) } : {});
         terminateInBackground(id);
     }, [endWith, terminateInBackground]);
 
@@ -623,6 +629,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
         if (pc !== pcRef.current) return;
         const s = snapRef.current;
         if (st === "connected") {
+            droppedAtRef.current = null;
             if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; }
             if (connectGuardRef.current) { clearTimeout(connectGuardRef.current); connectGuardRef.current = null; }
             if (s.phase === "connecting" || s.phase === "ringing_out" || s.phase === "reconnecting") {
@@ -631,6 +638,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
             }
         } else if (st === "disconnected") {
             if (s.phase !== "active") return;
+            droppedAtRef.current = Date.now();
             put({ phase: "reconnecting" });
             if (!reconnectTimerRef.current) {
                 reconnectTimerRef.current = setTimeout(() => {
@@ -638,6 +646,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
                     if (snapRef.current.phase !== "reconnecting" || pcRef.current !== pc) return;
                     // The browser said "offline" but the media path never dropped.
                     if (pc.connectionState === "connected" && navigator.onLine !== false) {
+                        droppedAtRef.current = null;
                         put({ phase: "active" });
                         return;
                     }

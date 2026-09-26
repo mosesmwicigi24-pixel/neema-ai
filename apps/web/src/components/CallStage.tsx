@@ -336,7 +336,9 @@ export function CallStage({ onOpenConversation }: { onOpenConversation?: (req: O
     const phase = c?.phase ?? "idle";
     const callId = c?.call?.callId;
     const minimised = !!c?.minimised;
-    const screenKey = `${phase}:${callId ?? ""}`;
+    // A wrap-up that changes its words (permission needed → request sent) is a
+    // new screen: the hold on the old one doesn't carry over.
+    const screenKey = `${phase}:${callId ?? ""}:${phase === "ended" ? c?.outcome ?? "" : ""}`;
     const audioOpen = audioOpenFor === screenKey;
     const setAudioOpen = (open: boolean) => setAudioOpenFor(open ? screenKey : null);
     const hold = holdFor === screenKey;
@@ -559,9 +561,13 @@ export function CallStage({ onOpenConversation }: { onOpenConversation?: (req: O
 
             {/* The controls. Pointing at (or tabbing through) them pauses a
                 wrap-up's auto-close — the rest of the card doesn't, or a
-                resting mouse would keep "Answered by Ann" up forever. */}
+                resting mouse would keep "Answered by Ann" up forever. Only a
+                pointer that MOVES here counts: the one resting where End / Decline
+                was a moment ago (the wrap-up's buttons appear under it) would
+                otherwise hold "Call cancelled" up until the agent nudged it. */}
             <div className="w-full max-w-lg mx-auto px-3 sm:px-4 pb-6 pt-2 md:pt-6"
-                onMouseEnter={() => setHold(true)} onMouseLeave={() => setHold(false)}
+                onMouseMove={(e) => { if (!hold && (e.movementX || e.movementY)) setHold(true); }}
+                onMouseLeave={() => setHold(false)}
                 onKeyDown={() => { if (!hold) setHold(true); }}>
                 {ringingHere && (
                     <div className="flex flex-col items-center gap-3">
