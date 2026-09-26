@@ -26,7 +26,8 @@ import java.io.IOException
 import java.io.InputStream
 import java.net.URLEncoder
 
-private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
+// Form-encoding writes spaces as "+", which is wrong inside a path segment; %20 is right in both.
+private fun enc(s: String) = URLEncoder.encode(s, "UTF-8").replace("+", "%20")
 private fun query(vararg pairs: Pair<String, String?>): String =
     pairs.filter { !it.second.isNullOrEmpty() }
         .joinToString("&") { "${it.first}=${enc(it.second!!)}" }
@@ -98,11 +99,13 @@ data class InboxQuery(
 class NeemaApi(val http: NeemaHttp) {
 
     // ── Ask / answer via Neema ──────────────────────────────────────────────
+    // Ask, answer and generate-draft run a whole AI turn server-side: give them
+    // the long-lived client so a slow model is never reported as a failure.
     suspend fun askNeema(convId: String, question: String): AnswerResponse =
-        http.post("/admin/conversations/$convId/ask", buildJsonObject { put("question", question) })
+        http.decode(http.raw("POST", "/admin/conversations/$convId/ask", http.encode(buildJsonObject { put("question", question) }), upload = true))
 
     suspend fun answerViaNeema(convId: String, facts: String): SentResponse =
-        http.post("/admin/conversations/$convId/answer", buildJsonObject { put("facts", facts) })
+        http.decode(http.raw("POST", "/admin/conversations/$convId/answer", http.encode(buildJsonObject { put("facts", facts) }), upload = true))
 
     val conversations = Conversations()
     val deals = Deals()
@@ -207,7 +210,7 @@ class NeemaApi(val http: NeemaHttp) {
             http.post("/admin/conversations/$id/approve-draft", buildJsonObject { put("text", text?.let(::JsonPrimitive) ?: JsonNull) })
         suspend fun latestDraft(id: String): String? = http.get<DraftResponse>("/admin/conversations/$id/latest-draft").draft
         suspend fun generateDraft(id: String): String? =
-            http.post<JsonObject, DraftResponse>("/admin/conversations/$id/generate-draft", JsonObject(emptyMap())).draft
+            http.decode<DraftResponse>(http.raw("POST", "/admin/conversations/$id/generate-draft", http.encode(JsonObject(emptyMap())), upload = true)).draft
         suspend fun addNote(id: String, text: String): Message =
             http.post("/admin/conversations/$id/note", buildJsonObject { put("text", text) })
 

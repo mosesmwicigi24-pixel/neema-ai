@@ -1,5 +1,7 @@
 package ke.co.bethanyhouse.neema.core.auth
 
+import ke.co.bethanyhouse.neema.core.util.AppClock
+
 import ke.co.bethanyhouse.neema.BuildConfig
 import ke.co.bethanyhouse.neema.core.net.NeemaJson
 import ke.co.bethanyhouse.neema.core.net.TokenProvider
@@ -225,7 +227,7 @@ class AuthRepository(
 
     override suspend fun validAccessToken(): String? {
         val s = store.current ?: return null
-        val left = jwtExp(s.accessToken) - System.currentTimeMillis() / 1000
+        val left = jwtExp(s.accessToken) - AppClock.now() / 1000
         // Same 5-minute buffer the web's jwt() callback uses.
         if (left > 300) return s.accessToken
         return forceRefresh() ?: s.accessToken.takeIf { left > 0 }
@@ -235,7 +237,7 @@ class AuthRepository(
         withContext(io) {
             val s = store.current ?: return@withContext null
             // Another caller may have refreshed while we waited for the lock.
-            if (jwtExp(s.accessToken) - System.currentTimeMillis() / 1000 > 300 &&
+            if (jwtExp(s.accessToken) - AppClock.now() / 1000 > 300 &&
                 s.accessToken != lastRejected
             ) return@withContext s.accessToken
             var fresh: Session? = null
@@ -248,7 +250,7 @@ class AuthRepository(
                 // NextAuth may hand back the very token the API just refused
                 // (its session callback doesn't always refresh): that is no rescue.
                 if (fresh != null && fresh.accessToken == s.accessToken &&
-                    (s.accessToken == lastRejected || jwtExp(s.accessToken) <= System.currentTimeMillis() / 1000)
+                    (s.accessToken == lastRejected || jwtExp(s.accessToken) <= AppClock.now() / 1000)
                 ) fresh = null
                 if (fresh != null || attempt == 3) break
                 if (backoffMs > 0) Thread.sleep(attempt * backoffMs)

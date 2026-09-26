@@ -1,5 +1,7 @@
 package ke.co.bethanyhouse.neema.app
 
+import ke.co.bethanyhouse.neema.core.util.AppClock
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -115,7 +117,7 @@ fun NotificationsPanel(
     onClear: () -> Unit,
     modifier: Modifier = Modifier,
     listMaxHeight: Dp = 360.dp,
-    now: Long = System.currentTimeMillis(),
+    now: Long = AppClock.now(),
 ) {
     val dark = Neema.colors.isDark
     val c = panelColors(dark)

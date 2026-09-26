@@ -1,5 +1,7 @@
 package ke.co.bethanyhouse.neema.core
 
+import ke.co.bethanyhouse.neema.core.util.AppClock
+
 import ke.co.bethanyhouse.neema.core.api.NeemaApi
 import ke.co.bethanyhouse.neema.core.api.UploadFile
 import ke.co.bethanyhouse.neema.core.model.Agent
@@ -67,7 +69,7 @@ class ApiContractTest {
         assertNull(me.customRoleId); assertNull(me.rolePermissions)
         assertEquals(Perms.ALL, Perms.of(me))
         // "+00:00" with microseconds parses to the same instant as "Z".
-        assertTrue(Fmt.millis(me.lastSeenAt)!! > System.currentTimeMillis() - 5 * 60_000)
+        assertTrue(Fmt.millis(me.lastSeenAt)!! > AppClock.now() - 5 * 60_000)
         // What the app caches never carries the hash.
         assertFalse(NeemaJson.encodeToString(Agent.serializer(), me).contains("password"))
     }

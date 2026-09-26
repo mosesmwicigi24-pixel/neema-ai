@@ -1,5 +1,7 @@
 package ke.co.bethanyhouse.neema.settings
 
+import ke.co.bethanyhouse.neema.core.util.AppClock
+
 import ke.co.bethanyhouse.neema.app.ToastType
 import ke.co.bethanyhouse.neema.core.model.Campaign
 import ke.co.bethanyhouse.neema.feature.settings.PIPELINE_LABEL_MAX
@@ -121,7 +123,7 @@ class SettingsViewModelTest : AreaTest() {
         fake.on("PUT", "/admin/settings/offer", body = """{"ok":true,"campaign":{"name":"Harvest Offer","percent":20,"scope":"all",
             "categories":[],"skus":[],"starts_on":null,"ends_on":"2026-10-25"},"running":true,"says":"Harvest Offer — 20% off everything"}""")
         // A new offer ends a month from today.
-        assertEquals(LocalDate.now().plusMonths(1).toString(), vm.draft.value.endsOn)
+        assertEquals(AppClock.today().plusMonths(1).toString(), vm.draft.value.endsOn)
         assertEquals(10.0, vm.draft.value.percent, 0.0)
         vm.editDraft { it.copy(name = "Harvest Offer", percent = 20.0, endsOn = "2026-10-25") }
         vm.saveOffer(vm.draft.value)

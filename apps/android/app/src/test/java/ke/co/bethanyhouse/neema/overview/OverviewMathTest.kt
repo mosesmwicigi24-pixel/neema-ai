@@ -137,14 +137,13 @@ class OverviewMathTest {
     @Test fun topProducts_byRevenue_excludingCancelled() {
         val top = topProducts(orders)
         assertEquals(
-            listOf("Clergy Shirt", "Alb — White, M", "Clergy Shirt — Black, 16 inch", "Stole — Green", "Roman Collar Tab"),
+            listOf("Clergy Shirt", "Alb — White, M", "Cassock — Purple, L", "Clergy Shirt — Black, 16 inch", "Stole — Green"),
             top.map { it.name },
         )
         // "Clergy Shirt" is two orders (3,500 + 25,000) merged by name. The agent's own order (o2)
-        // stores cart lines priced by `unit_price` with no `unit`/`total`; the web reads
-        // `total || unit_price(= i.unit) * qty` and so counts it as 0 — here too, until the
-        // wire model carries unit_price (a core request). It ranks 6th and is cut.
-        assertEquals(listOf(28500.0, 18000.0, 7000.0, 4800.0, 1000.0), top.map { it.revenue })
+        // stores cart lines priced by `unit_price` only; the web counts those as 0, but the core
+        // OrderItemsSerializer normalises them, so the cassock (12,500) now ranks third.
+        assertEquals(listOf(28500.0, 18000.0, 12500.0, 7000.0, 4800.0), top.map { it.revenue })
         // Stole: the cancelled pair is not counted, the single pending one is.
         assertEquals(1.0, top.first { it.name == "Stole — Green" }.qty, 0.0)
         assertEquals(4800.0, top.first { it.name == "Stole — Green" }.revenue, 0.0)

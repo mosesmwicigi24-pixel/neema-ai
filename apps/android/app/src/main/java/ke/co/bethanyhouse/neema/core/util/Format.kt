@@ -14,6 +14,9 @@ object Fmt {
     /** ISO-8601 (with or without offset) → epoch millis; null when unparseable. */
     fun millis(iso: String?): Long? {
         if (iso.isNullOrBlank()) return null
+        // SQL-style "YYYY-MM-DD HH:MM:SS" (some hub fields) is ISO with a space.
+        @Suppress("NAME_SHADOWING")
+        val iso = if (iso.length > 10 && iso[10] == ' ') iso.replaceRange(10, 11, "T") else iso
         return runCatching { OffsetDateTime.parse(iso).toInstant().toEpochMilli() }.getOrNull()
             ?: runCatching { Instant.parse(iso).toEpochMilli() }.getOrNull()
             // Naive timestamps from the API are UTC.
@@ -22,7 +25,7 @@ object Fmt {
     }
 
     /** "5m ago" — a missing date reads "—", never an epoch date. */
-    fun timeAgo(iso: String?, now: Long = System.currentTimeMillis()): String {
+    fun timeAgo(iso: String?, now: Long = AppClock.now()): String {
         val t = millis(iso) ?: return "—"
         if (t <= 0) return "—"
         val d = (now - t) / 1000
@@ -75,7 +78,7 @@ object Fmt {
     /** WhatsApp-style day header: Today / Yesterday / 12 Mar 2026. */
     fun dayLabel(iso: String?): String {
         val z = local(iso) ?: return ""
-        val today = LocalDate.now()
+        val today = AppClock.today()
         val d = z.toLocalDate()
         return when (d) {
             today -> "Today"

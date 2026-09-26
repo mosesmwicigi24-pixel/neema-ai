@@ -1,5 +1,7 @@
 package ke.co.bethanyhouse.neema.calls
 
+import ke.co.bethanyhouse.neema.core.util.AppClock
+
 import app.cash.paparazzi.Paparazzi
 import ke.co.bethanyhouse.neema.core.model.Call
 import ke.co.bethanyhouse.neema.core.model.CallOffer
@@ -108,7 +110,7 @@ class CallApiContractTest {
         // started_at is isoformat(): "…T09:20:13.482915+00:00" — parsed, not dropped.
         assertTrue(first.startedAt!!.endsWith("+00:00"))
         val t = Fmt.millis(first.startedAt)!!
-        assertTrue(kotlin.math.abs(System.currentTimeMillis() - 40 * 60_000L - t) < 60_000)
+        assertTrue(kotlin.math.abs(AppClock.now() - 40 * 60_000L - t) < 60_000)
         // The bare row calls_upload_recording creates: no wa_id, no name.
         val bare = rows.first { it.callId == CallsFixtures.C6 }
         assertNull(bare.waId); assertNull(bare.name)

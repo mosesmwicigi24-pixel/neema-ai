@@ -1,5 +1,7 @@
 package ke.co.bethanyhouse.neema.testing.fixtures
 
+import ke.co.bethanyhouse.neema.core.util.AppClock
+
 import ke.co.bethanyhouse.neema.testing.FakeNeema
 import ke.co.bethanyhouse.neema.testing.Fixtures
 import ke.co.bethanyhouse.neema.testing.Fixtures.ago
@@ -57,7 +59,7 @@ object InboxFixtures {
     fun windowClosed() = """{"mode":"closed","channel":"whatsapp","last_inbound_at":"${iso(60 * 24 * 3)}","expires_at":"${iso(60 * 24 * 2)}","human_agent_until":null,"reason":"Outside the messaging window — an approved template is the only way in"}"""
 
     /** Python's `datetime.isoformat()` of an aware UTC timestamp: microseconds and "+00:00", never "Z". */
-    fun iso(minutesAgo: Long): String = PY_ISO.format(OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(minutesAgo))
+    fun iso(minutesAgo: Long): String = PY_ISO.format(AppClock.instant().atOffset(ZoneOffset.UTC).minusMinutes(minutesAgo))
     fun isoIn(minutes: Long): String = iso(-minutes)
     private val PY_ISO: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSSSSxxx")
 

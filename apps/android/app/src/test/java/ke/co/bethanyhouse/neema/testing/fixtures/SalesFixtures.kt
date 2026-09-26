@@ -1,5 +1,7 @@
 package ke.co.bethanyhouse.neema.testing.fixtures
 
+import ke.co.bethanyhouse.neema.core.util.AppClock
+
 import ke.co.bethanyhouse.neema.testing.FakeNeema
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -43,10 +45,10 @@ object SalesFixtures {
     fun pyNaive(i: Instant): String = if (i.nano / 1000 == 0) PY_SECONDS.format(i) else PY_MICROS.format(i)
 
     /** [minutes] ago, as the server prints it (with microseconds). */
-    fun ago(minutes: Long): String = pyIso(Instant.now().minus(minutes, ChronoUnit.MINUTES).plusNanos(123_456_000))
+    fun ago(minutes: Long): String = pyIso(AppClock.instant().minus(minutes, ChronoUnit.MINUTES).plusNanos(123_456_000))
 
     fun inHours(h: Long, extraMin: Long = 20): String =
-        pyIso(Instant.now().plus(h * 60 + extraMin, ChronoUnit.MINUTES).plusNanos(654_321_000))
+        pyIso(AppClock.instant().plus(h * 60 + extraMin, ChronoUnit.MINUTES).plusNanos(654_321_000))
 
     /** A fixed creation time for the order detail (its "Date" cell prints the day); 0 µs → no fraction. */
     const val FIXED_AT = "2026-03-14T09:30:00+00:00"
@@ -219,7 +221,7 @@ object SalesFixtures {
      */
     fun patchedOrder(id: String, status: String): String =
         order(id, "254700000000", status, 1000.0, createdAt = FIXED_AT,
-            hub = mapOf("updated_at" to pyNaive(Instant.now().plusNanos(250_000_000))))
+            hub = mapOf("updated_at" to pyNaive(AppClock.instant().plusNanos(250_000_000))))
 
     // ── Deals & planned actions ─────────────────────────────────────────────
 

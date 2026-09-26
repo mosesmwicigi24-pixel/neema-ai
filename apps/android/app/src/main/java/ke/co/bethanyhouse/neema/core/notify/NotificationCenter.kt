@@ -1,5 +1,7 @@
 package ke.co.bethanyhouse.neema.core.notify
 
+import ke.co.bethanyhouse.neema.core.util.AppClock
+
 import android.content.Context
 import ke.co.bethanyhouse.neema.core.net.NeemaJson
 import ke.co.bethanyhouse.neema.core.ws.LiveSocket
@@ -97,13 +99,13 @@ class NotificationCenter(
 
     private fun fromFrame(e: JsonObject): AppNotification = AppNotification(
         // Unique even for a burst in one millisecond (the list keys on it).
-        id = "${System.currentTimeMillis()}-${seq.incrementAndGet()}-${(0..9999).random()}",
+        id = "${AppClock.now()}-${seq.incrementAndGet()}-${(0..9999).random()}",
         type = e.str("type") ?: "system",
         title = e.str("title") ?: "Neema",
         body = e.str("body") ?: "",
         convKey = e.str("conversationId") ?: e.str("conv_id") ?: e.str("convId") ?: e.str("wa_id"),
         // The frame's own `ts` (AgentNotification.ts) when it carries one, else arrival time.
-        at = ke.co.bethanyhouse.neema.core.util.Fmt.millis(e.str("ts"))?.takeIf { it > 0 } ?: System.currentTimeMillis(),
+        at = ke.co.bethanyhouse.neema.core.util.Fmt.millis(e.str("ts"))?.takeIf { it > 0 } ?: AppClock.now(),
     )
 
     fun markAllRead() = save(_items.value.map { it.copy(read = true) })

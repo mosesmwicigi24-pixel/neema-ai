@@ -1,5 +1,7 @@
 package ke.co.bethanyhouse.neema.conversations
 
+import ke.co.bethanyhouse.neema.core.util.AppClock
+
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.LinearGradient
@@ -268,8 +270,8 @@ class ConversationsScreenshotTest {
         vm.select("c1")
         // What the pickers hand back: names and types come from the URIs here.
         vm.addMedia(listOf("photo1.jpg", "Measurements.pdf", "fit.mp4").map { Uri.parse("content://media/$it") })
-        val end = System.currentTimeMillis() + 3000
-        while (vm.composer.value.media.size < 3 && System.currentTimeMillis() < end) Thread.sleep(5)
+        val end = AppClock.now() + 3000
+        while (vm.composer.value.media.size < 3 && AppClock.now() < end) Thread.sleep(5)
         vm.setMediaCaption(vm.composer.value.media.first().id, "The black one, 16 inch")
     }.snap()
 

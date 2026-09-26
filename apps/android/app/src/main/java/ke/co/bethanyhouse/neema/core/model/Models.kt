@@ -47,6 +47,8 @@ data class Conversation(
     val country: String? = null,
     @SerialName("country_iso") val countryIso: String? = null,
     @SerialName("flag_url") val flagUrl: String? = null,
+    // Read straight from customer JSONB: may be null, a bare string, or hold non-strings.
+    @Serializable(with = LenientStringListSerializer::class)
     val tags: List<String> = emptyList(),
 ) {
     /** Channel-native handle: wa_id for WhatsApp, PSID/IGSID otherwise. */
@@ -67,6 +69,7 @@ data class InboxSummary(
     val human: Int = 0,
     val yours: Int = 0,
     @SerialName("unread_messages") val unreadMessages: Map<String, Int> = emptyMap(),
+    @Serializable(with = LenientStringListSerializer::class)
     val tags: List<String> = emptyList(),
 )
 
@@ -275,6 +278,7 @@ data class CatalogItem(
     @SerialName("available_qty") val availableQty: Double? = null,
     val sku: String = "",
     val name: String = "",
+    @Serializable(with = LenientStringListSerializer::class)
     val aliases: List<String> = emptyList(),
     val price: Double = 0.0,
     val unit: String? = null,
@@ -358,8 +362,10 @@ data class OrderItem(
  * Anything that isn't an object is dropped rather than failing the list.
  */
 object OrderItemsSerializer : JsonTransformingSerializer<List<OrderItem>>(ListSerializer(OrderItem.serializer())) {
+    private val leadingNumber = Regex("^-?\\d+(?:\\.\\d+)?")
+    // n8n rows can carry text quantities ("2 pcs"): read the leading number.
     private fun num(e: JsonElement?): Double? = (e as? JsonPrimitive)?.let { p ->
-        if (p is JsonNull) null else p.content.trim().toDoubleOrNull()
+        if (p is JsonNull) null else p.content.trim().let { t -> t.toDoubleOrNull() ?: leadingNumber.find(t)?.value?.toDoubleOrNull() }
     }
 
     override fun transformDeserialize(element: JsonElement): JsonElement {
@@ -375,6 +381,21 @@ object OrderItemsSerializer : JsonTransformingSerializer<List<OrderItem>>(ListSe
                 (o["sku"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content?.let { put("sku", it) }
             }
         })
+    }
+}
+
+/**
+ * A list of strings that tolerates what hand-edited JSONB really holds: null
+ * (→ empty), a bare string (→ one item), and non-string entries (numbers are
+ * kept as text, nulls and objects dropped). One odd row must never fail a list.
+ */
+object LenientStringListSerializer : JsonTransformingSerializer<List<String>>(ListSerializer(String.serializer())) {
+    override fun transformDeserialize(element: JsonElement): JsonElement = when (element) {
+        is JsonArray -> JsonArray(element.mapNotNull { e ->
+            (e as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content?.takeIf { it.isNotBlank() }?.let(::JsonPrimitive)
+        })
+        is JsonPrimitive -> if (element is JsonNull || element.content.isBlank()) JsonArray(emptyList()) else JsonArray(listOf(JsonPrimitive(element.content)))
+        else -> JsonArray(emptyList())
     }
 }
 

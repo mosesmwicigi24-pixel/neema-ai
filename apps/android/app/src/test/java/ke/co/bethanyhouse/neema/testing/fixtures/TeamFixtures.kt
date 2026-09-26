@@ -1,5 +1,7 @@
 package ke.co.bethanyhouse.neema.testing.fixtures
 
+import ke.co.bethanyhouse.neema.core.util.AppClock
+
 import ke.co.bethanyhouse.neema.testing.FakeNeema
 import ke.co.bethanyhouse.neema.testing.Fixtures
 import kotlinx.serialization.json.Json
@@ -44,7 +46,7 @@ object TeamFixtures {
 
     /** Python's `datetime.isoformat()` of an aware UTC timestamp. */
     private val py = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSSSSxxx")
-    fun pyTs(minutesAgo: Long): String = OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(minutesAgo).format(py)
+    fun pyTs(minutesAgo: Long): String = AppClock.instant().atOffset(ZoneOffset.UTC).minusMinutes(minutesAgo).format(py)
 
     val allPerms = listOf(
         "view_conversations", "reply_conversations", "intercept_release", "close_conversations", "transfer_conversations",

@@ -1,5 +1,7 @@
 package ke.co.bethanyhouse.neema.core
 
+import ke.co.bethanyhouse.neema.core.util.AppClock
+
 import ke.co.bethanyhouse.neema.app.NavItem
 import ke.co.bethanyhouse.neema.app.ViewId
 import ke.co.bethanyhouse.neema.app.buildNavItems
@@ -39,7 +41,7 @@ class CoreRound2Test {
     fun dateTimeAndDayLabelShareTheWebMonths() {
         assertEquals("5 Sept 2026, 15:30", Fmt.dateTime("2026-09-05T12:30:00Z"))
         assertEquals("1 Sept 2025", Fmt.dayLabel("2025-09-01T12:00:00Z"))
-        assertEquals("Today", Fmt.dayLabel(java.time.Instant.now().toString()))
+        assertEquals("Today", Fmt.dayLabel(AppClock.instant().toString()))
     }
 
     @Test

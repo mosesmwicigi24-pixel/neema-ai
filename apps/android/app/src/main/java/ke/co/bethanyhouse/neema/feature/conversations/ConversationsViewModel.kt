@@ -1,5 +1,7 @@
 package ke.co.bethanyhouse.neema.feature.conversations
 
+import ke.co.bethanyhouse.neema.core.util.AppClock
+
 import android.content.ContentResolver
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -779,7 +781,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         val text = _dialogs.value.noteText.trim()
         if (text.isEmpty() || convId.isEmpty()) return
         val optimistic = ThreadMsg(
-            id = "optimistic-note-${System.currentTimeMillis()}", direction = "outbound", sender = "human_agent",
+            id = "optimistic-note-${AppClock.now()}", direction = "outbound", sender = "human_agent",
             text = text, isNote = true, createdAt = nowIso(),
         )
         setMsgs(convId) { it + optimistic }
@@ -919,7 +921,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                 }
             }
             val optimistic = ThreadMsg(
-                id = "optimistic-${System.currentTimeMillis()}", direction = "outbound", sender = "human_agent",
+                id = "optimistic-${AppClock.now()}", direction = "outbound", sender = "human_agent",
                 text = sendText, translation = origText, translatedFrom = origLang, createdAt = nowIso(),
                 replyTo = if (replyToId != null && quoted != null)
                     QuotedRef(replyToId, quoted.text, quoted.sender, quoted.mediaType, quoted.mediaUrl) else null,
@@ -957,7 +959,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         val convId = _thread.value.activeId.ifEmpty { return }
         val textToSend = _composer.value.draftText
         val optimistic = ThreadMsg(
-            id = "optimistic-${System.currentTimeMillis()}", direction = "outbound", sender = "ai",
+            id = "optimistic-${AppClock.now()}", direction = "outbound", sender = "ai",
             text = textToSend, createdAt = nowIso(),
         )
         setMsgs(convId) { it + optimistic }

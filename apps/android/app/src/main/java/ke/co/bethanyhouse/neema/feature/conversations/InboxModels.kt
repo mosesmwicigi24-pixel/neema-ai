@@ -1,5 +1,7 @@
 package ke.co.bethanyhouse.neema.feature.conversations
 
+import ke.co.bethanyhouse.neema.core.util.AppClock
+
 import android.content.ContentResolver
 import android.net.Uri
 import ke.co.bethanyhouse.neema.core.api.InboxQuery
@@ -265,7 +267,10 @@ internal fun appendWs(existing: List<ThreadMsg>, msg: ThreadMsg): List<ThreadMsg
 internal fun uploadErrorOf(e: Throwable): String {
     val api = e as? ke.co.bethanyhouse.neema.core.net.ApiException ?: return e.message?.ifBlank { null } ?: "failed"
     val d = api.detail.trim()
-    val readable = d.isNotEmpty() && !d.startsWith("<") && !d.startsWith("[") && !d.startsWith("{")
+    // A pydantic 422 list names form fields ("Field required") — not something a
+    // person uploading a photo can act on, so it gets the plain wording below.
+    val validationList = Regex("\"detail\"\\s*:\\s*\\[").containsMatchIn(api.body)
+    val readable = d.isNotEmpty() && !validationList && !d.startsWith("<") && !d.startsWith("[") && !d.startsWith("{")
     return when {
         readable && api.status != 0 -> d
         api.status == 413 -> "too large to upload"
@@ -313,14 +318,14 @@ internal fun systemEventFromWs(e: JsonObject): ThreadMsg? {
         else -> kind
     }
     return ThreadMsg(
-        id = "live-evt-${System.currentTimeMillis()}",
+        id = "live-evt-${AppClock.now()}",
         type = "system_event", direction = "outbound", sender = "ai",
         text = label, createdAt = nowIso(),
         eventKind = kind, eventReason = e.s("eventReason"), agentName = agent,
     )
 }
 
-internal fun nowIso(): String = java.time.Instant.now().toString()
+internal fun nowIso(): String = AppClock.instant().toString()
 
 /** Null-safe string read that also treats JSON null as absent. */
 internal fun JsonObject.s(key: String): String? =

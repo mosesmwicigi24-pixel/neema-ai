@@ -1,5 +1,7 @@
 package ke.co.bethanyhouse.neema.feature.agents
 
+import ke.co.bethanyhouse.neema.core.util.AppClock
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import ke.co.bethanyhouse.neema.app.DashboardViewModel
@@ -223,7 +225,7 @@ class AgentsViewModel(private val dash: DashboardViewModel) : ViewModel() {
         save {
             if (editing == null) {
                 dash.api.roles.create(
-                    id = "role_${System.currentTimeMillis()}",
+                    id = "role_${AppClock.now()}",
                     name = form.name, description = form.description,
                     color = form.color, permissions = form.permissions,
                 )

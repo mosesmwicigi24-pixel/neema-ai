@@ -100,9 +100,12 @@ class OrdersContractTest {
         assertEquals("Mitre — Gold embroidered", line.name)
         assertEquals("MIT-GLD", line.sku)
         assertEquals(1.0, line.effectiveQty, 0.0)
-        // `unit`/`total` are absent: the line's price is unknown to this model, so the
-        // detail shows its quantity alone instead of "KES 0" (see the round-3 report).
-        assertEquals(false, line.priceKnown)
+        // The agent's cart lines carry only `unit_price` (agent/tools.py); the core
+        // OrderItemsSerializer normalises it into `unit` and `total`, so the line is priced.
+        assertEquals(true, line.priceKnown)
+        assertEquals(85000.0, line.unit, 0.0)
+        assertEquals(85000.0, line.total, 0.0)
+        assertEquals(145000.0, o.items.sumOf { it.total }, 0.0)  // lines add up to the order
     }
 
     @Test fun cartSnapshotWithNoLinesDecodes() {

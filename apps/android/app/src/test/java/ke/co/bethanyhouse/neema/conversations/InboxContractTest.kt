@@ -1,5 +1,7 @@
 package ke.co.bethanyhouse.neema.conversations
 
+import ke.co.bethanyhouse.neema.core.util.AppClock
+
 import android.net.Uri
 import app.cash.paparazzi.Paparazzi
 import ke.co.bethanyhouse.neema.app.DashboardViewModel
@@ -100,7 +102,7 @@ class InboxContractTest {
         assertEquals(listOf("vip", "clergy"), peter.tags); assertEquals(3, peter.ordersCount)
         assertEquals(Fixtures.ME_ID, peter.assignedAgentId); assertEquals("human", peter.interceptMode)
         // Python's "+00:00" microsecond timestamps parse to the right instant.
-        assertTrue(kotlin.math.abs(System.currentTimeMillis() - 2 * 60_000 - ke.co.bethanyhouse.neema.core.util.Fmt.millis(peter.lastMessageAt)!!) < 60_000)
+        assertTrue(kotlin.math.abs(AppClock.now() - 2 * 60_000 - ke.co.bethanyhouse.neema.core.util.Fmt.millis(peter.lastMessageAt)!!) < 60_000)
     }
 
     @Test fun page_allFilters_omitsTheirKeys() = runBlocking {

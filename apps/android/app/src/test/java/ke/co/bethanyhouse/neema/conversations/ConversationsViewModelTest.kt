@@ -1,5 +1,7 @@
 package ke.co.bethanyhouse.neema.conversations
 
+import ke.co.bethanyhouse.neema.core.util.AppClock
+
 import app.cash.paparazzi.Paparazzi
 import ke.co.bethanyhouse.neema.app.DashboardViewModel
 import ke.co.bethanyhouse.neema.app.Toast
@@ -70,8 +72,8 @@ class ConversationsViewModelTest {
 
     /** `rows` is computed in place when I/O is synchronous; this only guards against regressions. */
     private fun ConversationsViewModel.rowsWhen(ok: (List<ke.co.bethanyhouse.neema.feature.conversations.RowGroup>) -> Boolean): List<ke.co.bethanyhouse.neema.feature.conversations.RowGroup> {
-        val end = System.currentTimeMillis() + 3000
-        while (!ok(rows.value) && System.currentTimeMillis() < end) Thread.sleep(5)
+        val end = AppClock.now() + 3000
+        while (!ok(rows.value) && AppClock.now() < end) Thread.sleep(5)
         return rows.value
     }
 
@@ -228,8 +230,8 @@ class ConversationsViewModelTest {
         fake.calls.clear()
         vm.refresh()
         // (It follows the snapshot write, which hops to the IO pool.)
-        val end = System.currentTimeMillis() + 3000
-        while (!fake.called("GET", "/admin/conversations/c6") && System.currentTimeMillis() < end) Thread.sleep(5)
+        val end = AppClock.now() + 3000
+        while (!fake.called("GET", "/admin/conversations/c6") && AppClock.now() < end) Thread.sleep(5)
         assertTrue(fake.called("GET", "/admin/conversations/c6"))
     }
 
@@ -324,7 +326,7 @@ class ConversationsViewModelTest {
         vm.select("c1")
         socket(dash, """{"type":"new_message","conversationId":"c1","id":"w1","direction":"inbound","sender":"user","text":"Hello again"}""")
         socket(dash, """{"type":"new_message","conversationId":"c1","id":"w1","direction":"inbound","sender":"user","text":"Hello again"}""")
-        val now = java.time.Instant.now()
+        val now = AppClock.instant()
         socket(dash, """{"type":"new_message","conversationId":"c1","id":"a-rand-1","direction":"outbound","sender":"ai","text":"","mediaType":"audio","mediaUrl":"https://x/a.ogg","created_at":"$now"}""")
         socket(dash, """{"type":"new_message","conversationId":"c1","id":"a-rand-2","direction":"outbound","sender":"ai","text":"","mediaType":"audio","mediaUrl":"https://x/a.ogg","created_at":"${now.plusSeconds(5)}"}""")
         // Another conversation's frame never lands in this thread.
@@ -361,7 +363,7 @@ class ConversationsViewModelTest {
     @Test fun sendReply_optimisticBubbleIsReplacedByTheServerRow() {
         var serverHasIt = false
         fake.on("GET", "/admin/conversations/[^/]+/messages") { _, _ ->
-            val extra = if (serverHasIt) """,{"id":"srv-1","type":"message","direction":"outbound","sender":"human_agent","text":"On its way Friday","created_at":"${java.time.Instant.now()}"}""" else ""
+            val extra = if (serverHasIt) """,{"id":"srv-1","type":"message","direction":"outbound","sender":"human_agent","text":"On its way Friday","created_at":"${AppClock.instant()}"}""" else ""
             200 to Fixtures.messages.trimEnd().removeSuffix("]") + extra + "]"
         }
         fake.on("POST", "/admin/conversations/c1/reply") { _, _ -> serverHasIt = true; 200 to """{"ok":true}""" }

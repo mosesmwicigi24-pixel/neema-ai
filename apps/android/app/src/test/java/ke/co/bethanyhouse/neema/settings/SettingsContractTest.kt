@@ -1,5 +1,7 @@
 package ke.co.bethanyhouse.neema.settings
 
+import ke.co.bethanyhouse.neema.core.util.AppClock
+
 import ke.co.bethanyhouse.neema.app.ToastType
 import ke.co.bethanyhouse.neema.core.util.Fmt
 import ke.co.bethanyhouse.neema.feature.settings.SettingsViewModel
@@ -145,7 +147,7 @@ class SettingsContractTest : AreaTest() {
     }
 
     @Test fun anOfferThatStartsLaterIsSavedNotLive() {
-        val start = LocalDate.now().plusDays(10).toString()
+        val start = AppClock.today().plusDays(10).toString()
         vm.editDraft { it.copy(startsOn = start) }
         vm.saveOffer(vm.draft.value)
         assertFalse(vm.offer.value!!.running)

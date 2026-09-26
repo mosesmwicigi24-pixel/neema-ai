@@ -1,5 +1,7 @@
 package ke.co.bethanyhouse.neema.feature.settings
 
+import ke.co.bethanyhouse.neema.core.util.AppClock
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import ke.co.bethanyhouse.neema.app.DashboardViewModel
@@ -259,7 +261,7 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel() {
     /** "For 1 month" is the common case, so a new offer ends a month from today. */
     private fun blankCampaign() = Campaign(
         name = "", percent = 10.0, scope = "all", categories = emptyList(), skus = emptyList(),
-        startsOn = null, endsOn = LocalDate.now().plusMonths(1).toString(),
+        startsOn = null, endsOn = AppClock.today().plusMonths(1).toString(),
     )
 
     fun editDraft(change: (Campaign) -> Campaign) { _draft.update(change) }
@@ -282,7 +284,7 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel() {
                         saved == null -> "Offer ended — Neema stops mentioning it from her next reply"
                         r.running && r.says.isNotBlank() -> "Offer live — Neema will say: ${r.says}"
                         // Saved but not live today: `says` is empty, so "Neema will say: " would promise nothing.
-                        saved.startsOn?.let { runCatching { LocalDate.parse(it) }.getOrNull() }?.isAfter(LocalDate.now()) == true ->
+                        saved.startsOn?.let { runCatching { LocalDate.parse(it) }.getOrNull() }?.isAfter(AppClock.today()) == true ->
                             "Offer saved — Neema starts mentioning it on ${ke.co.bethanyhouse.neema.core.util.Fmt.date(saved.startsOn)}"
                         else -> "Offer saved, but its last day has passed — Neema won't mention it"
                     }

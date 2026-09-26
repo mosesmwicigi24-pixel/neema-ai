@@ -1,5 +1,7 @@
 package ke.co.bethanyhouse.neema.core
 
+import ke.co.bethanyhouse.neema.core.util.AppClock
+
 import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
 import ke.co.bethanyhouse.neema.core.notify.AppNotification
@@ -78,7 +80,7 @@ class NotificationCenterTest {
     @Test
     fun aFrameTimestampIsKeptOtherwiseArrivalTime() {
         val (nc) = center()
-        val before = System.currentTimeMillis()
+        val before = AppClock.now()
         push("""{"event":"notification","type":"system","title":"late","body":"","ts":"2026-01-02T03:04:05Z"}""")
         push("""{"event":"notification","type":"system","title":"now","body":"","ts":"garbage"}""")
         val (now, late) = nc.items.value

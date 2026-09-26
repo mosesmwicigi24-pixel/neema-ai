@@ -1,5 +1,7 @@
 package ke.co.bethanyhouse.neema.testing
 
+import ke.co.bethanyhouse.neema.core.util.AppClock
+
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -20,7 +22,7 @@ object Fixtures {
     const val AGENT2_ID = "a1000000-0000-0000-0000-000000000002"
     const val AGENT3_ID = "a1000000-0000-0000-0000-000000000003"
 
-    fun ago(minutes: Long): String = Instant.now().minus(minutes, ChronoUnit.MINUTES).toString()
+    fun ago(minutes: Long): String = AppClock.instant().minus(minutes, ChronoUnit.MINUTES).toString()
 
     private val PY_ISO: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSSSSxxx")
 
@@ -29,7 +31,7 @@ object Fixtures {
      * of an aware UTC value — "2026-09-25T09:41:07.123456+00:00".
      */
     fun pyIso(minutesAgo: Long): String =
-        Instant.now().minus(minutesAgo, ChronoUnit.MINUTES).atOffset(ZoneOffset.UTC).format(PY_ISO)
+        AppClock.instant().minus(minutesAgo, ChronoUnit.MINUTES).atOffset(ZoneOffset.UTC).format(PY_ISO)
 
     /**
      * GET /admin/me — routers/admin.py `get_me` returns the ORM `Agent` row
@@ -259,7 +261,7 @@ object Fixtures {
     val deals get() = """{"deals":[
       {"id":"d1","conversation_id":"c1","customer":"Fr. Peter Kamau","wa_id":"254712345678","channel":"whatsapp","title":"2× Clergy Shirt (Black 16\")",
        "items":[{"name":"Clergy Shirt","qty":2,"price":3500}],"stage":"proposal","blocking":"Needs delivery date confirmed",
-       "next_action":{"kind":"follow_up","owner":"ai","due_at":"${Instant.now().plus(3, ChronoUnit.HOURS)}","note":"Confirm Nyeri delivery"},"guidance":"Offer free delivery","status":"open","updated_at":"${ago(12)}"},
+       "next_action":{"kind":"follow_up","owner":"ai","due_at":"${AppClock.instant().plus(3, ChronoUnit.HOURS)}","note":"Confirm Nyeri delivery"},"guidance":"Offer free delivery","status":"open","updated_at":"${ago(12)}"},
       {"id":"d2","conversation_id":"c2","customer":"Rev. Mary Achieng","wa_id":"254722000111","channel":"messenger","title":"Purple cassock",
        "items":[],"stage":"qualified","blocking":null,"next_action":null,"guidance":null,"status":"open","updated_at":"${ago(90)}"},
       {"id":"d3","conversation_id":"c6","customer":"Deacon James Mwangi","wa_id":"254733444555","channel":"whatsapp","title":"Made-to-measure alb",
@@ -298,7 +300,7 @@ object Fixtures {
         }
         f.on("GET", "/admin/conversations/summary", body = inboxSummary)
         f.on("GET", "/admin/conversations/[^/]+/messages", body = messages)
-        f.on("GET", "/admin/conversations/[^/]+/window", body = """{"mode":"open","channel":"whatsapp","last_inbound_at":"${ago(2)}","expires_at":"${Instant.now().plus(1438, ChronoUnit.MINUTES)}"}""")
+        f.on("GET", "/admin/conversations/[^/]+/window", body = """{"mode":"open","channel":"whatsapp","last_inbound_at":"${ago(2)}","expires_at":"${AppClock.instant().plus(1438, ChronoUnit.MINUTES)}"}""")
         f.on("GET", "/admin/conversations/[^/]+/latest-draft", body = """{"draft":null}""")
         f.on("GET", "/admin/conversations/[^/]+/activity", body = """{"events":[{"id":"ev1","kind":"order","label":"Order BH-1042 paid","detail":"KES 8,000 via M-Pesa","at":"${ago(30)}"},{"id":"ev2","kind":"intercept","label":"Picked up by Moses","at":"${ago(20)}"}]}""")
         f.on("GET", "/admin/calls", body = calls)

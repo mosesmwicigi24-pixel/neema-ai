@@ -385,14 +385,12 @@ class ApiContractTest {
      * `Map<String, String>` rejects them, and one such variant empties the
      * whole catalogue (and Analytics' fallback counts).
      */
-    @Ignore("Needs core: CatalogVariant.attributes must tolerate null values and a non-object (Models.kt)")
     @Test fun catalog_oddVariantAttributes_doNotSinkTheCatalogue() {
         NeemaJson.decodeFromString<CatalogVariant>("""{"attributes":{"Size":null}}""")
         NeemaJson.decodeFromString<CatalogVariant>("""{"attributes":[{"name":"Size","value":"M"}]}""")
     }
 
     /** The agent's cart lines carry `unit_price` (agent/cart.py), which OrderItem drops. */
-    @Ignore("Needs core: OrderItem.unitPrice (@SerialName(\"unit_price\")) and topProducts reading it")
     @Test fun topProducts_countsAgentCartLines() {
         val orders: List<Order> = NeemaJson.decodeFromString("[${ReportsFixtures.orders.joinToString(",")}]")
         assertEquals(12_500.0, topProducts(orders).first { it.name == "Cassock — Purple, L" }.revenue, 0.0)

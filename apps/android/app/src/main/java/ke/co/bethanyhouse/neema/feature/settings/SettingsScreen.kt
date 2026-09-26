@@ -1,5 +1,7 @@
 package ke.co.bethanyhouse.neema.feature.settings
 
+import ke.co.bethanyhouse.neema.core.util.AppClock
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -339,7 +341,7 @@ private fun OfferCard(vm: SettingsViewModel, dash: DashboardViewModel) {
             )
         }
         if (campaign != null && !s.running) {
-            val startsLater = campaign.startsOn?.let { runCatching { LocalDate.parse(it) }.getOrNull() }?.isAfter(LocalDate.now()) == true
+            val startsLater = campaign.startsOn?.let { runCatching { LocalDate.parse(it) }.getOrNull() }?.isAfter(AppClock.today()) == true
             Text(
                 if (startsLater) "This offer starts on ${Fmt.date(campaign.startsOn)} — it is saved, and Neema begins mentioning it that day."
                 else "This offer has passed its end date — it is saved, but Neema is not mentioning it.",

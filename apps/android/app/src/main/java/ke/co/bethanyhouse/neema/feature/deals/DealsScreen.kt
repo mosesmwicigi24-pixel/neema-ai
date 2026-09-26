@@ -1,5 +1,7 @@
 package ke.co.bethanyhouse.neema.feature.deals
 
+import ke.co.bethanyhouse.neema.core.util.AppClock
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -49,7 +51,7 @@ private val STAGES = listOf(
 )
 
 /** "due now" / "in 12m" / "in 5h" / "in 3d". */
-internal fun fmtDue(iso: String?, now: Long = System.currentTimeMillis()): String {
+internal fun fmtDue(iso: String?, now: Long = AppClock.now()): String {
     if (iso.isNullOrBlank()) return ""
     val t = Fmt.millis(iso) ?: return ""
     val d = t - now

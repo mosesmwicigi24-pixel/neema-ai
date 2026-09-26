@@ -1,5 +1,7 @@
 package ke.co.bethanyhouse.neema.feature.conversations
 
+import ke.co.bethanyhouse.neema.core.util.AppClock
+
 import android.Manifest
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -239,8 +241,8 @@ internal fun SmallBtn(label: String, bg: Color, fg: Color, onClick: () -> Unit, 
  */
 @Composable
 internal fun WindowStrip(win: ConversationWindow) {
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) { while (true) { delay(60_000); now = System.currentTimeMillis() } }
+    var now by remember { mutableLongStateOf(AppClock.now()) }
+    LaunchedEffect(Unit) { while (true) { delay(60_000); now = AppClock.now() } }
     fun left(iso: String?): String {
         val t = Fmt.millis(iso) ?: return ""
         val ms = t - now
@@ -281,7 +283,7 @@ private fun AttachButton(vm: ConversationsViewModel) {
     val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok -> if (ok) cameraUri?.let { vm.addMedia(listOf(it)) } }
     fun launchCamera() {
         val dir = File(context.cacheDir, "camera").apply { mkdirs() }
-        val file = File(dir, "photo_${System.currentTimeMillis()}.jpg")
+        val file = File(dir, "photo_${AppClock.now()}.jpg")
         val uri = FileProvider.getUriForFile(context, context.packageName + ".files", file)
         cameraUri = uri
         camera.launch(uri)

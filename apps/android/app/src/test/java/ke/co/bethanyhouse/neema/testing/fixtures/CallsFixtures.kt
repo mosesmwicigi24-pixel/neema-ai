@@ -1,5 +1,7 @@
 package ke.co.bethanyhouse.neema.testing.fixtures
 
+import ke.co.bethanyhouse.neema.core.util.AppClock
+
 import ke.co.bethanyhouse.neema.testing.FakeNeema
 import java.net.URLEncoder
 import java.time.Instant
@@ -53,7 +55,7 @@ object CallsFixtures {
 
     /** `datetime.isoformat()` of an aware UTC timestamp, [minutes] ago: `2026-09-25T09:20:13.482915+00:00`. */
     fun pyIso(minutes: Long): String =
-        Instant.now().minus(minutes, ChronoUnit.MINUTES).atOffset(ZoneOffset.UTC).format(PY_ISO)
+        AppClock.instant().minus(minutes, ChronoUnit.MINUTES).atOffset(ZoneOffset.UTC).format(PY_ISO)
 
     /** routers/admin.py `calls_upload_recording`: the served URL when MEDIA_PUBLIC_URL is set. */
     fun recordingUrl(tag: String) = "https://neema.bethanyhouse.co.ke/api/admin/media/call_${tag}0f3e9a2b7c4d41e8a6b5c3d2e1f0a9b8.m4a"

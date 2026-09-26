@@ -1,5 +1,7 @@
 package ke.co.bethanyhouse.neema.feature.reports
 
+import ke.co.bethanyhouse.neema.core.util.AppClock
+
 import android.content.Context
 import android.content.Intent
 import androidx.compose.foundation.background
@@ -238,7 +240,7 @@ internal fun Conversation.reportAt(): String? = lastMessageAt ?: createdAt
 internal fun buildReport(
     all: List<Conversation>, orders: List<Order>, agents: List<Agent>,
     range: ReportRange, customFrom: LocalDate?, customTo: LocalDate?,
-    now: Long = System.currentTimeMillis(), zone: ZoneId = ZoneId.systemDefault(),
+    now: Long = AppClock.now(), zone: ZoneId = ZoneId.systemDefault(),
 ): Report {
     val day = 86_400_000L
     // Date range (the web's daysAgo(): same time of day, n days back).

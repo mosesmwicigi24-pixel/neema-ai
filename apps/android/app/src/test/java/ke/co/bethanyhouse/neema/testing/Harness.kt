@@ -1,5 +1,7 @@
 package ke.co.bethanyhouse.neema.testing
 
+import ke.co.bethanyhouse.neema.core.util.AppClock
+
 import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -21,7 +23,7 @@ import kotlinx.coroutines.Dispatchers
 /** A JWT the auth layer accepts as valid for a year (signature is never checked client-side). */
 fun fakeJwt(sub: String = Fixtures.ME_ID, expiresInSec: Long = 365L * 24 * 3600): String {
     fun b64(s: String) = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(s.toByteArray())
-    val exp = System.currentTimeMillis() / 1000 + expiresInSec
+    val exp = AppClock.now() / 1000 + expiresInSec
     return "${b64("""{"alg":"HS256","typ":"JWT"}""")}.${b64("""{"sub":"$sub","exp":$exp,"type":"access"}""")}.sig"
 }
 

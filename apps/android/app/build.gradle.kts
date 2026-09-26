@@ -70,6 +70,14 @@ android {
             isUniversalApk = true
         }
     }
+    testOptions {
+        unitTests.all {
+            // Screenshot and date tests are deterministic: a pinned "now" (it
+            // still ticks) and a fixed zone, whatever day or machine runs them.
+            it.systemProperty("neema.clock.pin", "2026-09-25T09:00:00Z")
+            it.systemProperty("user.timezone", "Africa/Nairobi")
+        }
+    }
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }

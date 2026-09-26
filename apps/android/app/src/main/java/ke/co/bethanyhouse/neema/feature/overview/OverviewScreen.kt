@@ -1,5 +1,7 @@
 package ke.co.bethanyhouse.neema.feature.overview
 
+import ke.co.bethanyhouse.neema.core.util.AppClock
+
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -230,7 +232,7 @@ internal fun activityFeed(orders: List<Order>, human: List<Conversation>, agents
 data class DayBar(val label: String, val value: Double, val isToday: Boolean)
 
 /** Revenue per day from real orders over the last 7 days (cancelled excluded). */
-internal fun sevenDayRevenue(orders: List<Order>, today: LocalDate = LocalDate.now(), zone: ZoneId = ZoneId.systemDefault()): List<DayBar> {
+internal fun sevenDayRevenue(orders: List<Order>, today: LocalDate = AppClock.today(), zone: ZoneId = ZoneId.systemDefault()): List<DayBar> {
     val byDay = orders.filter { it.status != "cancelled" }
         .groupBy { o -> Fmt.millis(o.createdAt)?.let { Instant.ofEpochMilli(it).atZone(zone).toLocalDate() } }
     return (0 until 7).map { i ->
