@@ -275,8 +275,23 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   EN/SW, by name) and silence for `cooling_hours` (3) — the team flagged,
   the sweeper told — lifted by the first buying signal, which is answered;
   an identical text within `cooling_dup_seconds` (180) is not a new turn.
-  Closers belong to the closer gate; drafts, scribes and public comments are
-  never paced. Comments: `_person_over_cap` (`meta_comment_person_cap` 6 full
+  Three speeds, never a cut-off (owner: "slow, pause, or defer… re-engage
+  immediately on buying intent, a question, order information"): during the
+  cool-off a QUESTION is answered at once, briefly, on the light model
+  (`is_question`, EN/SW marks and first words); other chat rides the SLOW
+  LANE (`should_defer` in the schedulers → `slow_lane`: collected in
+  `cool:lane:`, answered together once after `cooling_defer_minutes` (15)
+  by the channel's own send path with `deferred=True`, which run_turn turns
+  into one brief line); a buying signal or business in play lifts it and is
+  answered in full. Closers belong to the closer gate; drafts, scribes,
+  public comments and system-composed turns (`_gate_applies`) are never
+  paced. Voice: a Messenger/Instagram voice note is transcribed on the send
+  path (`meta_media.transcribe_audio_url` → the whisper backend WhatsApp
+  already uses; `_hear_voice_note`) so the words are the turn; with no
+  backend it stays the attachment the prompt handles. The guard reads the
+  hub's own names (`names=`), so an item we sell never reads as off-domain.
+  Prompt: A DATE ON THE TABLE (urgent buyers — ready-piece check, honest
+  time, nearest ready alternative, close today, check-in the day before). Comments: `_person_over_cap` (`meta_comment_person_cap` 6 full
   model replies per person per post per day; the free priced path is decided
   first and never spends it). The prompt's PACING rule; `/api/health`
   `cooling` (economy, cooled, silenced, lifted, duplicate). Switch:

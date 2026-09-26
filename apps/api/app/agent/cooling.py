@@ -22,6 +22,13 @@ doing, not just how much:
   an IDENTICAL text within `cooling_dup_seconds` is not a new turn — the
       answer already on their screen stands.
 
+  a QUESTION during the cool-off ("can you sing?", "je, mko wapi?") is
+      answered at once, briefly, on the light model — a question is never
+      left hanging (owner: re-engage on "a question");
+  everything else during the cool-off rides the SLOW LANE: the messages are
+      collected and answered together, once, every `cooling_defer_minutes`,
+      briefly — slowed, never cut off (owner: "slow, pause, or defer").
+
 Closers ("thanks", "ok") count for nothing — the closer gate owns them.
 Public comments have their own per-post and per-person caps (runtime).
 Best-effort throughout: no redis, a redis error, anything odd → no verdict,
@@ -56,11 +63,27 @@ _BUY_RE = re.compile(
     r"ordination|graduation|set|seti|"
     r"sell|sells|selling|uza|unauza|mnauza|products?|bidhaa|items?|do you have|mnayo|"
     r"nataka|natafuta|i need|i want|looking for|"
-    r"located|location|shop|duka|address|visit|open|hours|branch|mko wapi|mahali"
+    r"located|location|shop|duka|address|visit|open|hours|branch|mko wapi|mahali|"
+    r"black|white|navy|blue|red|purple|green|gold|golden|silver|cream|maroon|grey|gray|"
+    r"nyeusi|nyeupe|bluu|bule|nyekundu|zambarau|kijani|dhahabu|fedha|"
+    r"small|medium|large|xl|xxl|inch|inches|cm|\d+|"
+    r"total|balance|amount|due|owe|pesa|shilling|shillings|dollars?|ksh|kes|usd"
     r")(?![a-z'])",
     re.IGNORECASE)
 _TITLES = {"pastor", "bishop", "rev", "reverend", "apostle", "prophet", "elder", "deacon", "dr",
            "archbishop", "fr", "father", "mama", "sister", "brother", "mr", "mrs", "ms"}
+
+
+_QUESTION_RE = re.compile(
+    r"\?|^(?:what|how|why|when|where|who|whom|which|can|could|would|will|do|does|did|is|are|"
+    r"was|were|have|has|should|may|je|nini|vipi|lini|wapi|nani|gani|mbona|kwa nini|ni)\b",
+    re.IGNORECASE)
+
+
+def is_question(text: str) -> bool:
+    """A question, by its mark or its first word (EN + SW)."""
+    t = " ".join(str(text or "").split())
+    return bool(t) and bool(_QUESTION_RE.search(t))
 
 
 def buying_signal(text: str, has_media: bool = False) -> bool:
@@ -267,7 +290,8 @@ def _day_key() -> str:
 
 
 async def record(redis, outcome: str, channel: str = "") -> None:
-    if redis is None or outcome not in ("economy", "cooled", "silenced", "lifted", "duplicate"):
+    if redis is None or outcome not in ("economy", "cooled", "silenced", "lifted", "duplicate",
+                                        "deferred", "question"):
         return
     try:
         key = _day_key()
@@ -299,46 +323,150 @@ async def read_tally(redis) -> dict:
 
 # ── the verdict ──────────────────────────────────────────────────────────────
 
+async def should_defer(redis, channel: str, key: str, text: str, has_media: bool = False) -> bool:
+    """For the schedulers, before a turn is even created: a cooled thread's
+    non-question chat rides the slow lane. A buying signal or a question goes
+    straight through (run_turn lifts or answers briefly). Never a closer."""
+    if not getattr(settings, "cooling_enabled", True) or redis is None:
+        return False
+    if int(getattr(settings, "cooling_defer_minutes", 15) or 0) <= 0:
+        return False
+    try:
+        if not await is_cooled(redis, channel, key):
+            return False
+    except Exception:
+        return False
+    if buying_signal(text, has_media) or is_question(text):
+        return False
+    return True
+
+
+_LANE_TASKS: set = set()
+
+
+async def slow_lane(redis, channel: str, key: str, text: str, media: dict | None, runner) -> bool:
+    """Put a cooled thread's message on the slow lane: buffered, and answered
+    together with whatever else arrives, once, after `cooling_defer_minutes`
+    — `runner(text, media)` is the channel's own send path, run with
+    deferred=True so the reply is one brief line. True when deferred."""
+    if redis is None:
+        return False
+    import asyncio
+    import json
+    secs = int(getattr(settings, "cooling_defer_minutes", 15) or 15) * 60
+    try:
+        await redis.rpush(_k("lane", channel, key), json.dumps({"text": text or "", "media": media}))
+        await redis.expire(_k("lane", channel, key), max(secs * 4, 3600))
+        started = await redis.set(_k("lanelock", channel, key), "1", nx=True, ex=secs + 120)
+    except Exception:
+        return False
+    await record(redis, "deferred", channel)
+    _log.info("pacing: %s/%s on the slow lane (answered in %d min)", channel, key, secs // 60)
+    if started:
+        task = asyncio.create_task(_run_lane(redis, channel, key, runner, secs))
+        _LANE_TASKS.add(task)
+        task.add_done_callback(_LANE_TASKS.discard)
+    return True
+
+
+async def _run_lane(redis, channel: str, key: str, runner, secs: int) -> None:
+    import asyncio
+    import json
+    await asyncio.sleep(secs)
+    try:
+        raw = await redis.lrange(_k("lane", channel, key), 0, -1)
+        await redis.delete(_k("lane", channel, key), _k("lanelock", channel, key))
+    except Exception:
+        return
+    texts, media = [], None
+    for r in raw or []:
+        try:
+            item = json.loads(r.decode() if isinstance(r, bytes) else r)
+        except Exception:
+            continue
+        if (item.get("text") or "").strip():
+            texts.append(item["text"].strip())
+        if item.get("media") and (media is None or item["media"].get("type") == "image"):
+            media = item["media"]
+    if not texts and not media:
+        return
+    try:
+        await runner("\n".join(texts), media)
+    except Exception as exc:
+        _log.warning("slow lane reply failed for %s/%s: %s", channel, key, exc)
+
+
 async def decide(redis, db, *, channel: str, key: str, text: str, has_media: bool = False,
-                 closer: bool = False, swahili: bool = False, customer_name: str = "") -> dict | None:
+                 closer: bool = False, swahili: bool = False, customer_name: str = "",
+                 answering: bool = False, deferred: bool = False) -> dict | None:
     """What pacing does with this turn, before the writer sees it:
 
     None — nothing: answer as always.
-    {"action": "silence"} — a duplicate text, or the thread is cooled and
-        this is not a buying signal; say nothing.
+    {"action": "silence", "why": "duplicate"} — the same words again within
+        minutes; the answer on their screen stands.
+    {"action": "defer", "why": "cooled"} — a cooled thread's non-question
+        chat: the schedulers put it on the slow lane (where there is no lane,
+        the caller stays silent).
     {"action": "cool", "reply"} — the one warm close; the thread is now
         cooled for `cooling_hours` (the caller flags the team).
-    {"action": "economy", "note"} — answer on the light model, briefly.
+    {"action": "economy", "note"} — answer on the light model, briefly: past
+        the economy line, a question during the cool-off, or the slow lane's
+        own batched turn (`deferred`).
     """
     if not getattr(settings, "cooling_enabled", True) or redis is None:
         return None
     if closer:
         return None                                   # the closer gate's business
-    if await is_duplicate(redis, channel, key, text):
-        await record(redis, "duplicate", channel)
-        _log.info("pacing: duplicate text within minutes for %s/%s — the answer stands", channel, key)
-        return {"action": "silence", "why": "duplicate"}
     buying = buying_signal(text, has_media)
+    # `answering`: our last line ended with a question — their reply ("black
+    # please", "yes, one") is the sale talking, however few its words.
+    sales = buying or answering
+    if deferred:
+        # The slow lane's own turn: one brief answer to everything they said.
+        return None if buying else {"action": "economy", "note": pacing_note(3), "hour": 0, "day": 0}
     if await is_cooled(redis, channel, key):
         if buying or await business_in_play(db, channel, key):
             await lift(redis, channel, key)
             await record(redis, "lifted", channel)
+            await is_duplicate(redis, channel, key, text)     # this ask is now answered
             _log.info("pacing: cool-off lifted for %s/%s — a buying signal", channel, key)
             return None
+        if is_question(text):
+            # A question is never left hanging: answered now, briefly.
+            if await is_duplicate(redis, channel, key, text):
+                await record(redis, "duplicate", channel)
+                return {"action": "silence", "why": "duplicate"}
+            await record(redis, "question", channel)
+            return {"action": "economy", "note": pacing_note(3), "hour": 0, "day": 0}
         await record(redis, "silenced", channel)
-        return {"action": "silence", "why": "cooled"}
+        return {"action": "defer", "why": "cooled"}
+    # A duplicate is held only when the earlier copy was ANSWERED — read after
+    # the cool-off check, so a silenced ask repeated still lifts the thread.
+    if await is_duplicate(redis, channel, key, text):
+        await record(redis, "duplicate", channel)
+        _log.info("pacing: duplicate text within minutes for %s/%s — the answer stands", channel, key)
+        return {"action": "silence", "why": "duplicate"}
+    if sales:
+        await note_drift(redis, channel, key, sales_content=True)
+        return None                                   # a buyer is never paced, never counted
+    # Only unprompted chat counts toward the hourly and daily lines.
     hour, day = await note_turn(redis, channel, key)
-    drift = await note_drift(redis, channel, key, sales_content=buying)
-    if buying:
-        return None                                   # a buyer is never paced
+    drift = await note_drift(redis, channel, key, sales_content=False)
     s = settings
+    if await business_in_play(db, channel, key):
+        # A sale in progress is never cooled and never made brief — except a
+        # whole day of pure chat past the cool-off line, which goes light.
+        if day > int(getattr(s, "cooling_cool_day", 40)):
+            await record(redis, "economy", channel)
+            return {"action": "economy", "note": pacing_note(drift), "hour": hour, "day": day}
+        return None
     over_cool = (hour > int(getattr(s, "cooling_cool_hour", 20))
                  or day > int(getattr(s, "cooling_cool_day", 40))
                  or drift >= int(getattr(s, "cooling_drift_turns", 5)))
     over_econ = (hour > int(getattr(s, "cooling_economy_hour", 10))
                  or day > int(getattr(s, "cooling_economy_day", 20))
                  or drift >= 3)
-    if over_cool and not await business_in_play(db, channel, key):
+    if over_cool:
         await cool(redis, channel, key)
         await record(redis, "cooled", channel)
         _log.info("pacing: %s/%s cooled for %dh (%d/h, %d/day, drift %d)", channel, key,

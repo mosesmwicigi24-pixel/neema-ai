@@ -73,6 +73,7 @@ async def health(request: Request):
         from app.agent.cooling import read_tally as _cool_tally
         c = await _cool_tally(getattr(request.app.state, "redis", None))
         out["cooling"] = {"economy": c.get("economy", 0), "cooled": c.get("cooled", 0),
+                          "deferred": c.get("deferred", 0), "question": c.get("question", 0),
                           "silenced": c.get("silenced", 0), "lifted": c.get("lifted", 0),
                           "duplicate": c.get("duplicate", 0)}
     except Exception:

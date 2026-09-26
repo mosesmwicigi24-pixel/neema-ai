@@ -299,6 +299,9 @@ class Settings(BaseSettings):
     cooling_drift_turns: int = 5
     cooling_hours: int = 3
     cooling_dup_seconds: int = 180
+    # The slow lane: a cooled thread's chat is collected and answered together,
+    # once, every this many minutes (0 = no lane: silence until they ask).
+    cooling_defer_minutes: int = 15
     # A person commenting many times under one post: this many full model
     # replies a day; beyond it, a bare price ask still gets the free priced
     # line on an identified post and anything else the warm canned line.

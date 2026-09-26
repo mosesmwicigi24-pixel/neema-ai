@@ -131,6 +131,43 @@ async def fetch_from_graph(mid: str) -> tuple[bytes, str, str] | None:
     return None
 
 
+async def transcribe_audio_url(cdn_url: str) -> str | None:
+    """A Messenger/Instagram voice note → its words, with the configured
+    whisper backend (services/call_transcribe; wa_native uses the same for
+    WhatsApp voice notes). None when no backend is configured or the note
+    could not be read — the caller then treats it as an attachment."""
+    if not cdn_url:
+        return None
+    if not (settings.whisper_enabled or settings.openai_api_key):
+        return None
+    import asyncio
+    import os
+    import tempfile
+    path = None
+    try:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            resp = await client.get(cdn_url)
+            if not resp.is_success or not resp.content:
+                return None
+            ctype = (resp.headers.get("content-type") or "").lower()
+            ext = ".mp4" if "mp4" in ctype else ".ogg" if "ogg" in ctype else ".m4a"
+            fd, path = tempfile.mkstemp(prefix="neema-voice-", suffix=ext)
+            with os.fdopen(fd, "wb") as f:
+                f.write(resp.content)
+        from app.services.wa_native import _transcribe_path_sync
+        text = await asyncio.to_thread(_transcribe_path_sync, path)
+        return (text or "").strip() or None
+    except Exception as exc:
+        _log.info("voice note transcription skipped: %s", exc)
+        return None
+    finally:
+        if path:
+            try:
+                os.remove(path)
+            except Exception:
+                pass
+
+
 async def _rehost(channel: str, mid: str, cdn_url: str, media_type: str) -> None:
     from app.database import AsyncSessionLocal
     try:

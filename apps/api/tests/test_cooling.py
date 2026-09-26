@@ -72,6 +72,9 @@ def test_a_buyer_is_read_as_a_buyer():
     for t in no:
         assert not cl.buying_signal(t), t
     assert cl.buying_signal("", has_media=True)              # a photo is an ask
+    # a colour, a size, a figure — the sale's own answers
+    for t in ("black please", "navy", "large", "2", "chest 42 length 58", "nyeusi moja"):
+        assert cl.buying_signal(t), t
 
 
 def test_a_chatter_gets_briefer_then_one_warm_close_then_silence(monkeypatch):
@@ -82,16 +85,20 @@ def test_a_chatter_gets_briefer_then_one_warm_close_then_silence(monkeypatch):
     r = _R()
     out = []
     for i in range(24):
-        v = asyncio.run(cl.decide(r, None, channel="whatsapp", key="254700", text=f"tell me story number {i} about yourself"))
+        w = "story " + " ".join(["la"] * (i + 1))
+        v = asyncio.run(cl.decide(r, None, channel="whatsapp", key="254700", text=f"tell me {w} about yourself"))
         out.append(v["action"] if v else None)
     assert out[:2] == [None, None]                       # two full turns of pure chat
     assert out[2:20] == ["economy"] * 18                 # then briefer, on the light model
     assert out[20] == "cool"                             # past the hourly line: the one warm close
-    assert out[21:] == ["silence"] * 3                   # then nothing
-    v = asyncio.run(cl.decide(r, None, channel="whatsapp", key="254700", text="tell me story number 5 about yourself"))
-    assert v["action"] == "silence"
+    assert out[21:] == ["defer"] * 3                     # then the slow lane
+    v = asyncio.run(cl.decide(r, None, channel="whatsapp", key="254700", text="tell me one more thing about yourself"))
+    assert v["action"] == "defer"
+    # a question during the cool-off is never left hanging: answered now, briefly
+    v = asyncio.run(cl.decide(r, None, channel="whatsapp", key="254700", text="can you sing?"))
+    assert v["action"] == "economy" and asyncio.run(cl.is_cooled(r, "whatsapp", "254700"))
     t = _tally(r)
-    assert t["economy"] == 18 and t["cooled"] == 1 and t["silenced"] >= 3
+    assert t["economy"] == 18 and t["cooled"] == 1 and t["silenced"] >= 3 and t["question"] == 1
     # the first buying signal lifts it, and that message is answered in full
     v = asyncio.run(cl.decide(r, None, channel="whatsapp", key="254700", text="how much is the cassock?"))
     assert v is None and _tally(r)["lifted"] == 1
@@ -108,15 +115,27 @@ def test_the_cool_close_says_how_to_resume():
         assert bad not in en.lower() and bad not in sw.lower()
 
 
-def test_business_in_play_keeps_the_thread_warm_whatever_the_count(monkeypatch):
+def test_business_in_play_is_never_paced_short_of_a_whole_day_of_chat(monkeypatch):
     _not_in_play(monkeypatch, True)
     monkeypatch.setattr(settings, "cooling_cool_hour", 3)
     monkeypatch.setattr(settings, "cooling_economy_hour", 2)
+    monkeypatch.setattr(settings, "cooling_cool_day", 6)
     r = _R()
-    acts = [(asyncio.run(cl.decide(r, None, channel="messenger", key="P1", text=f"and another thing number {i}")) or {}).get("action")
-            for i in range(8)]
+    acts = [(asyncio.run(cl.decide(r, None, channel="messenger", key="P1", text=f"and another thing about my day {w}")) or {}).get("action")
+            for w in "abcdefgh"]
     assert "cool" not in acts and "silence" not in acts
-    assert acts[2:] == ["economy"] * 6                  # briefer, never cut off
+    assert acts[:6] == [None] * 6                        # a sale in progress: full answers
+    assert acts[6:] == ["economy", "economy"]            # a whole day of chat past the line: light
+
+
+def test_an_answer_to_our_question_is_the_sale_talking(monkeypatch):
+    _not_in_play(monkeypatch)
+    monkeypatch.setattr(settings, "cooling_drift_turns", 3)
+    r = _R()
+    # "which colour would you like?" → "the dark one please" — no product word, still not drift
+    for t in ("the dark one please", "the second option", "for my husband", "just the one"):
+        assert asyncio.run(cl.decide(r, None, channel="whatsapp", key="A", text=t, answering=True)) is None
+    assert "cool:drift:whatsapp:A" not in r.store
 
 
 def test_a_buyer_is_never_paced_whatever_the_count(monkeypatch):
@@ -138,14 +157,14 @@ def test_drifting_small_talk_cools_even_under_the_hourly_line(monkeypatch):
     monkeypatch.setattr(settings, "cooling_cool_hour", 100)
     r = _R()
     acts = []
-    for i in range(6):
-        v = asyncio.run(cl.decide(r, None, channel="instagram", key="U", text=f"do you like football number {i}"))
+    for w in "abcdef":
+        v = asyncio.run(cl.decide(r, None, channel="instagram", key="U", text=f"I like football {w}"))
         acts.append((v or {}).get("action"))
-    assert acts == [None, None, "economy", "economy", "cool", "silence"]
+    assert acts == [None, None, "economy", "economy", "cool", "defer"]
     # a product word resets the drift: the sale stays warm
     r2 = _R()
-    for i in range(4):
-        asyncio.run(cl.decide(r2, None, channel="instagram", key="U", text=f"blah blah number {i}"))
+    for w in "abcd":
+        asyncio.run(cl.decide(r2, None, channel="instagram", key="U", text=f"blah blah {w}"))
     assert asyncio.run(cl.decide(r2, None, channel="instagram", key="U", text="what about a stole then")) is None
     assert r2.store.get("cool:drift:instagram:U") is None
 
@@ -156,6 +175,12 @@ def test_the_same_words_within_minutes_are_not_a_new_turn(monkeypatch):
     assert asyncio.run(cl.decide(r, None, channel="whatsapp", key="K", text="Did you get my message about the delivery")) is None
     v = asyncio.run(cl.decide(r, None, channel="whatsapp", key="K", text="did you get my message about the delivery"))
     assert v == {"action": "silence", "why": "duplicate"} and _tally(r)["duplicate"] == 1
+    # a silenced ask repeated during a cool-off still lifts it: nothing was on their screen
+    r3 = _R()
+    asyncio.run(cl.cool(r3, "whatsapp", "K"))
+    assert asyncio.run(cl.decide(r3, None, channel="whatsapp", key="K", text="hmm hmm hmm hmm")) == {"action": "defer", "why": "cooled"}
+    assert asyncio.run(cl.decide(r3, None, channel="whatsapp", key="K", text="how much is the cassock please")) is None
+    assert asyncio.run(cl.decide(r3, None, channel="whatsapp", key="K", text="how much is the cassock please")) == {"action": "silence", "why": "duplicate"}
     # short answers are never held: they may answer two different questions
     assert asyncio.run(cl.decide(r, None, channel="whatsapp", key="K", text="yes")) is None
     assert asyncio.run(cl.decide(r, None, channel="whatsapp", key="K", text="yes")) is None
@@ -170,8 +195,8 @@ def test_closers_and_the_switch_are_left_alone(monkeypatch):
         assert asyncio.run(cl.decide(r, None, channel="whatsapp", key="C", text="thanks", closer=True)) is None
     assert "cool:h:whatsapp:C" not in r.store
     monkeypatch.setattr(settings, "cooling_enabled", False)
-    for i in range(30):
-        assert asyncio.run(cl.decide(r, None, channel="whatsapp", key="C", text=f"story {i} of my life")) is None
+    for w in "abcdefghij":
+        assert asyncio.run(cl.decide(r, None, channel="whatsapp", key="C", text=f"story {w} of my life")) is None
     assert asyncio.run(cl.decide(None, None, channel="whatsapp", key="C", text="story of my life")) is None
 
 
@@ -241,11 +266,40 @@ def test_run_turn_sends_the_cool_close_and_then_nothing(monkeypatch):
     assert not calls and flagged == ["paced"] and facts["pacing"] == "cool"
 
     async def _silent(redis, db, **kw):
-        return {"action": "silence", "why": "cooled"}
+        return {"action": "defer", "why": "cooled"}
     monkeypatch.setattr(cl, "decide", _silent)
     facts = {}
     assert asyncio.run(rt.run_turn(_db(), _R(), "254700000001", "another story", _LLM(), turn_facts=facts)) == ""
     assert not calls and facts["pacing"] == "cooled"
+
+
+def test_system_composed_turns_are_never_paced(monkeypatch):
+    called = []
+
+    async def _spy(redis, db, **kw):
+        called.append(kw.get("text"))
+        return {"action": "defer", "why": "cooled"}
+    monkeypatch.setattr(cl, "decide", _spy)
+
+    class _LLM:
+        _model = settings.tier2_model
+        purpose = "job:cart-recovery"
+
+        async def complete(self, *, system, messages, tools, **kw):
+            return types.SimpleNamespace(text="Karibu tena!", tool_calls=[], assistant_content=[], usage={})
+    out = asyncio.run(rt.run_turn(_db(), _R(), "254700000001",
+                                  "(Internal: this customer built a cart and went quiet — write the nudge.)", _LLM()))
+    assert out == "Karibu tena!" and called == []
+
+
+def test_the_slow_lanes_own_turn_is_one_brief_answer(monkeypatch):
+    _not_in_play(monkeypatch)
+    r = _R()
+    asyncio.run(cl.cool(r, "whatsapp", "L"))
+    v = asyncio.run(cl.decide(r, None, channel="whatsapp", key="L", text="story one\nstory two", deferred=True))
+    assert v["action"] == "economy" and "PACING" in v["note"]
+    assert asyncio.run(cl.decide(r, None, channel="whatsapp", key="L", text="how much is a stole", deferred=True)) is None
+    assert "cool:h:whatsapp:L" not in r.store                # the lane's turn is not counted
 
 
 def test_run_turn_economy_swaps_to_the_light_model_with_a_pacing_note(monkeypatch):
@@ -282,12 +336,144 @@ def test_run_turn_economy_swaps_to_the_light_model_with_a_pacing_note(monkeypatc
 def test_pacing_never_touches_drafts_scribes_or_public_comments():
     src = inspect.getsource(rt.run_turn)
     i = src.index("from app.agent import cooling as _pace")
-    assert "if not read_only and not scribe_only and not public_comment:" in src[i - 200:i]
+    assert "if not read_only and not scribe_only and not public_comment and _gate_applies(user_text):" in src[i - 260:i]
     # read before any token is bought, after the church-goods guard
     assert src.index("_dom.guard_turn(") < i < src.index("for _ in range(_max_iter):")
 
 
 # ── comments: a per-person daily budget beside the per-post one ─────────────
+
+class _LaneRedis(_R):
+    def __init__(self):
+        super().__init__()
+        self.lists: dict = {}
+
+    async def rpush(self, k, v):
+        self.lists.setdefault(k, []).append(v)
+        return len(self.lists[k])
+
+    async def lrange(self, k, a, b):
+        return list(self.lists.get(k, []))
+
+    async def delete(self, *ks):
+        for k in ks:
+            self.store.pop(k, None)
+            self.lists.pop(k, None)
+
+
+def test_is_question_reads_marks_and_first_words():
+    for t in ("can you sing?", "je mko wapi", "what time do you close", "Do you have a shop", "unafunga saa ngapi?"):
+        assert cl.is_question(t), t
+    for t in ("I like football", "nice one", "God bless you", "hmm hmm"):
+        assert not cl.is_question(t), t
+
+
+def test_should_defer_only_a_cooled_threads_non_question_chat():
+    r = _R()
+    assert asyncio.run(cl.should_defer(r, "whatsapp", "S", "hmm nice weather", False)) is False
+    asyncio.run(cl.cool(r, "whatsapp", "S"))
+    assert asyncio.run(cl.should_defer(r, "whatsapp", "S", "hmm nice weather", False)) is True
+    assert asyncio.run(cl.should_defer(r, "whatsapp", "S", "how much is a stole", False)) is False   # an item
+    assert asyncio.run(cl.should_defer(r, "whatsapp", "S", "can you sing?", False)) is False        # a question
+    assert asyncio.run(cl.should_defer(r, "whatsapp", "S", "look", True)) is False                  # a photo
+    assert asyncio.run(cl.should_defer(None, "whatsapp", "S", "hmm nice weather", False)) is False
+
+
+def test_the_slow_lane_answers_everything_together_once(monkeypatch):
+    import asyncio as _aio
+    slept = []
+
+    async def _sleep(s):
+        slept.append(s)
+    monkeypatch.setattr(_aio, "sleep", _sleep)
+    monkeypatch.setattr(settings, "cooling_defer_minutes", 15)
+    r = _LaneRedis()
+    got = []
+
+    async def runner(text, media):
+        got.append((text, media))
+
+    async def main():
+        assert await cl.slow_lane(r, "messenger", "P", "story one", None, runner)
+        assert await cl.slow_lane(r, "messenger", "P", "story two", None, runner)
+        assert await cl.slow_lane(r, "messenger", "P", "", {"type": "image", "url": "u"}, runner)
+        assert len(cl._LANE_TASKS) == 1                     # one timer per thread
+        await _aio.gather(*list(cl._LANE_TASKS))
+    _aio.run(main())
+    assert got == [("story one\nstory two", {"type": "image", "url": "u"})]
+    assert slept == [15 * 60]
+    assert not r.lists.get("cool:lane:messenger:P") and "cool:lanelock:messenger:P" not in r.store
+    assert _tally(r)["deferred"] == 3
+
+
+def test_the_schedulers_put_cooled_chat_on_the_slow_lane(monkeypatch):
+    import asyncio as _aio
+
+    async def _sleep(s):
+        pass
+    monkeypatch.setattr(_aio, "sleep", _sleep)
+    ran = []
+
+    async def _run(redis, wa_id, text, media=None, *, deferred=False):
+        ran.append(("wa", text, deferred))
+
+    async def _run_meta(redis, channel, ext, text, page_id=None, media=None, *, deferred=False):
+        ran.append((channel, text, deferred))
+        return True
+
+    async def _no(*a, **kw):
+        return False
+    monkeypatch.setattr(rt, "_run_and_send", _run)
+    monkeypatch.setattr(rt, "_run_and_send_meta", _run_meta)
+    monkeypatch.setattr(rt, "_is_paused", _no)
+    monkeypatch.setattr(rt, "closer_gate", _no)
+    r = _LaneRedis()
+    asyncio.run(cl.cool(r, "whatsapp", "254700"))
+    asyncio.run(cl.cool(r, "messenger", "PS"))
+
+    async def main():
+        assert await rt.schedule_reply(r, "254700", "just chatting along", "m1")
+        assert await rt.schedule_reply(r, "254700", "and more chatting", "m2")
+        assert await rt.schedule_meta_reply(r, "messenger", "PS", "hmm nothing much", "m3")
+        assert ran == []                                     # nothing ran at once
+        await _aio.gather(*list(cl._LANE_TASKS))
+        # a question on a cooled thread goes straight through
+        await rt.schedule_reply(r, "254700", "what time do you close?", "m4")
+        await _aio.gather(*list(rt._bg_tasks))
+    _aio.run(main())
+    assert ("wa", "just chatting along\nand more chatting", True) in ran
+    assert ("messenger", "hmm nothing much", True) in ran
+    assert ("wa", "what time do you close?", False) in ran
+
+
+def test_a_messenger_voice_note_is_the_message(monkeypatch):
+    import app.services.meta_media as mm
+
+    async def _heard(url):
+        return "nataka kasoki mbili nyeusi" if url == "https://cdn/v.mp4" else None
+    monkeypatch.setattr(mm, "transcribe_audio_url", _heard)
+    text, media = asyncio.run(rt._hear_voice_note("", {"type": "audio", "url": "https://cdn/v.mp4"}))
+    assert text == "nataka kasoki mbili nyeusi" and media is None
+    text, media = asyncio.run(rt._hear_voice_note("see", {"type": "audio", "url": "https://cdn/v.mp4"}))
+    assert text == "see\nnataka kasoki mbili nyeusi"
+    text, media = asyncio.run(rt._hear_voice_note("", {"type": "audio", "url": "https://cdn/none"}))
+    assert text == "(the customer sent a voice note)" and media is None      # no backend: the attachment rule
+    img = {"type": "image", "url": "u", "caption": ""}
+    assert asyncio.run(rt._hear_voice_note("", img)) == ("", img)
+    import app.routers.meta_webhook as wh
+    assert 'turn_media = {"type": "audio", "url": media_url}' in inspect.getsource(wh)
+    assert "text, media = await _hear_voice_note(text, media)" in inspect.getsource(rt._run_and_send_meta)
+
+
+def test_the_guard_knows_the_hubs_names_and_urgent_buyers_get_a_date_led_reply():
+    src = inspect.getsource(rt.run_turn)
+    assert "names=_guard_names)" in src and "_svc_g.catalog_items(db, redis)" in src
+    p = build_system_prompt(currency="USD")
+    assert "A DATE ON THE TABLE (urgent buyers)" in p
+    assert "fire `check_availability` for a READY piece in that same turn" in p
+    assert "close TODAY" in p and 'Never say "that\'s not possible"' in p
+    assert "`schedule_check_in` on the day before their date" in p
+
 
 def test_a_person_commenting_non_stop_hits_a_daily_budget(monkeypatch):
     monkeypatch.setattr(settings, "meta_comment_person_cap", 3)
