@@ -70,6 +70,23 @@ class InboxPermissionsTest {
 
     private fun ConversationsViewModel.conv(id: String): Conversation = inbox.value.cache.getValue(id)
 
+    /** Core folds a burst of 403s into one refetch after a short window (NeemaHttp → dash.onForbidden()). */
+    private fun settleForbidden() { sched.advanceTimeBy(1_001) /* FORBIDDEN_WINDOW_MS + 1 */; sched.runCurrent() }
+
+    /** Like the web (currentAgent null until profileApi.me() answers): no record of this agent, no controls — whatever the session says. */
+    @Test fun noAgentRecordYet_noControls_evenForAnAdminSession() {
+        fake.on("GET", "/admin/me", code = 500, body = """{"detail":"down"}""")
+        fake.on("GET", "/admin/agents", code = 500, body = """{"detail":"down"}""")
+        val dash = dashboard(paparazzi.context, fake, "admin", true)
+        val vm = ConversationsViewModel(dash)
+        assertEquals(emptySet<String>(), shown(dash, vm.conv("c2")))
+        assertFalse(canEditPipelineStages(dash))
+        // The record lands (the next poll): the admin's controls appear.
+        fake.on("GET", "/admin/agents", body = InboxPersonaFixtures.agents(Persona.Admin))
+        sched.advanceTimeBy(180_001); sched.runCurrent()
+        assertEquals(setOf("intercept", "pause", "transfer", "note", "clear"), shown(dash, vm.conv("c2")))
+    }
+
     /** The controls a persona sees on a thread, by name — the table below speaks the same words. */
     private fun shown(dash: DashboardViewModel, c: Conversation): Set<String> {
         val t = threadControls(c, inboxPermsOf(dash))
@@ -184,7 +201,7 @@ class InboxPermissionsTest {
         fake.on("POST", "/admin/conversations/c2/intercept", code = 403, body = """{"detail":"Not allowed"}""")
         val meBefore = fake.callsTo("GET", "/admin/me").size
         val agentsBefore = fake.callsTo("GET", "/admin/agents").size
-        vm.intercept("c2")
+        vm.intercept("c2"); settleForbidden()
         assertTrue(fake.callsTo("GET", "/admin/me").size > meBefore)
         assertTrue(fake.callsTo("GET", "/admin/agents").size > agentsBefore)
         assertEquals(ToastType.Error, toasts.last().type)
@@ -197,7 +214,7 @@ class InboxPermissionsTest {
         val (dash, vm) = signIn(Persona.Admin)
         fake.on("DELETE", "/admin/conversations/[^/]+/messages", code = 403, body = """{"detail":"Only admins can clear chat history"}""")
         fake.on("GET", "/admin/agents", body = InboxPersonaFixtures.agents(Persona.Agent))
-        vm.select("c1"); vm.showClear(true); vm.clearHistory()
+        vm.select("c1"); vm.showClear(true); vm.clearHistory(); settleForbidden()
         assertEquals("You don't have permission to clear chat history", toasts.last().message)
         assertEquals(ToastType.Error, toasts.last().type)
         assertFalse(vm.dialogs.value.clearConfirm)
@@ -240,7 +257,7 @@ class InboxPermissionsTest {
         assertEquals(false to "Outside the messaging window — reply yourself when they next write.", runBlocking { vm.answerViaNeema("x") })
         val meBefore = fake.callsTo("GET", "/admin/me").size
         fake.on("POST", "/admin/conversations/c2/answer", code = 403, body = """{"detail":"Forbidden"}""")
-        assertEquals(false to "Couldn't send right now — try again.", runBlocking { vm.answerViaNeema("x") })
+        assertEquals(false to "Couldn't send right now — try again.", runBlocking { vm.answerViaNeema("x") }); settleForbidden()
         assertTrue(fake.callsTo("GET", "/admin/me").size > meBefore)
     }
 }
