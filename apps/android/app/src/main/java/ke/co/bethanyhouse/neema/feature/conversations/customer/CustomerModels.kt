@@ -270,7 +270,11 @@ data class ProductionEnquiry(
 data class EnquiryResponse(val enquiry: ProductionEnquiry? = null)
 
 @Serializable
-data class PushResponse(@SerialName("hub_order_number") val hubOrderNumber: String? = null)
+data class PushResponse(
+    @SerialName("hub_order_number") val hubOrderNumber: String? = null,
+    /** crm.py push_production is idempotent: a second push answers `already: true` with the first order. */
+    val already: Boolean = false,
+)
 
 internal fun JsonElement.display(): String = (this as? JsonPrimitive)?.contentOrNull ?: toString()
 

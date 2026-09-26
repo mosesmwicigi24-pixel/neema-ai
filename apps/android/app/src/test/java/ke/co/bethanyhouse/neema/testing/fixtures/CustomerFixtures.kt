@@ -194,6 +194,19 @@ object CustomerFixtures {
     /** crm.py push_production on an enquiry already pushed: {ok, already, hub_order_id, hub_order_number}. */
     const val alreadyPushed = """{"ok":true,"already":true,"hub_order_id":90555,"hub_order_number":"BH-2001"}"""
 
+    /**
+     * A phone network in Nairobi, for FakeNeema handlers: what OkHttp raises
+     * when there is no connection at all (nothing was sent), and when the answer
+     * never came in time (it may have been acted on). NeemaHttp turns both into
+     * status-0 ApiExceptions, exactly as on a device.
+     */
+    object Net {
+        fun offline(): Nothing = throw java.net.ConnectException("Failed to connect to neema.test/10.0.0.1:443")
+        fun timeout(): Nothing = throw java.net.SocketTimeoutException("timeout")
+        /** A proxy's HTML error page: never to be shown to anyone. */
+        const val HTML_502 = "<html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center><hr><center>nginx</center></body></html>"
+    }
+
     fun install(f: FakeNeema) {
         f.on("GET", "/admin/customers/$PETER", body = peter)
         f.on("GET", "/admin/customers/$MARY", body = mary)
