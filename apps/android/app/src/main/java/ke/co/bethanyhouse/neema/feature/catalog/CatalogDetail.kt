@@ -12,7 +12,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.font.FontFamily
+import ke.co.bethanyhouse.neema.core.ui.theme.NeemaMono
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -75,7 +75,7 @@ internal fun ProductDetail(item: CatalogItem) {
                         Text(v.label ?: v.name ?: v.sku ?: "—", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = c.text)
                         val attrs = v.attributes.entries.joinToString(" · ") { "${it.key}: ${it.value}" }
                         if (attrs.isNotEmpty()) Text(attrs, fontSize = 11.sp, color = c.muted)
-                        if (!v.sku.isNullOrBlank()) Text(v.sku, fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = faint())
+                        if (!v.sku.isNullOrBlank()) Text(v.sku, fontSize = 10.sp, fontFamily = NeemaMono, color = faint())
                     }
                     Column(horizontalAlignment = Alignment.End) {
                         Text(v.priceKes?.let { Fmt.currency(it) } ?: "—", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = c.text)
@@ -97,8 +97,8 @@ internal fun ProductDetail(item: CatalogItem) {
 
         Spacer(Modifier.height(16.dp))
         Row {
-            Text(item.sku, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = faint(), modifier = Modifier.weight(1f))
-            item.hubProductId?.let { Text("#$it", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = faint()) }
+            Text(item.sku, fontSize = 11.sp, fontFamily = NeemaMono, color = faint(), modifier = Modifier.weight(1f))
+            item.hubProductId?.let { Text("#$it", fontSize = 11.sp, fontFamily = NeemaMono, color = faint()) }
         }
         item.productType?.let { Text("Type: $it", fontSize = 11.sp, color = c.muted) }
         if (item.updatedAt != null) Text("Updated ${Fmt.timeAgo(item.updatedAt)}", fontSize = 11.sp, color = c.muted)

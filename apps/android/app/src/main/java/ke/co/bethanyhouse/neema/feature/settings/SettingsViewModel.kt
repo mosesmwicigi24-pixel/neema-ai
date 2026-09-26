@@ -13,7 +13,7 @@ import ke.co.bethanyhouse.neema.core.net.ApiException
 import ke.co.bethanyhouse.neema.feature.agents.UNCERTAIN_SAVE
 import ke.co.bethanyhouse.neema.feature.agents.refreshAfterForbidden
 import ke.co.bethanyhouse.neema.feature.reports.BUSY_TEXT
-import ke.co.bethanyhouse.neema.feature.reports.ScreenLife
+import ke.co.bethanyhouse.neema.core.util.ScreenLife
 import ke.co.bethanyhouse.neema.feature.reports.attempt
 import ke.co.bethanyhouse.neema.feature.reports.friendlyError
 import ke.co.bethanyhouse.neema.feature.reports.httpStatus
@@ -282,7 +282,7 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel(), ke.
         return when (e.httpStatus()) {
             403 -> adminOnly
             429 -> BUSY_TEXT
-            422 -> (e as ApiException).readableDetail() ?: fallback
+            422 -> (e as? ApiException)?.readableDetail() ?: fallback
             else -> friendlyError(e, fallback)
         }
     }
@@ -525,7 +525,7 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel(), ke.
                     when {
                         e.mayHaveApplied() -> UNCERTAIN_SAVE
                         status == 403 -> "Only an admin can change pipeline stages."
-                        status == 422 -> (e as ApiException).readableDetail() ?: "Couldn't save pipeline stages."
+                        status == 422 -> (e as? ApiException)?.readableDetail() ?: "Couldn't save pipeline stages."
                         status == 0 || status == 401 || status == 429 || status in 502..504 -> friendlyError(e)
                         else -> "Couldn't save pipeline stages."
                     },
@@ -576,7 +576,7 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel(), ke.
                 add(JsonPrimitive(it.responseDelayMs)); add(JsonPrimitive(it.escalationKeywords))
             })
         }
-        val connected = integrations.value.filter { it.connected != INTEGRATIONS.first { d -> d.key == it.key }.connected }
+        val connected = integrations.value.filter { it.connected != (INTEGRATIONS.firstOrNull { d -> d.key == it.key }?.connected ?: it.connected) }
         if (connected.isNotEmpty()) put("toggled", kotlinx.serialization.json.buildJsonArray { connected.forEach { add(JsonPrimitive(it.key)) } })
         val plain = integConfig.value.mapValues { (k, fields) ->
             val secret = INTEGRATIONS.find { it.key == k }?.fields.orEmpty().filter { it.secret }.map { it.key }.toSet()

@@ -28,7 +28,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.font.FontFamily
+import ke.co.bethanyhouse.neema.core.ui.theme.NeemaMono
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -141,7 +141,10 @@ internal fun buildThreadRows(sorted: List<ThreadMsg>, unreadSnap: Int): List<TRo
         if (row is TBubble) postHeadFor[msg.id]?.let { rows += TPostHead(it, "post-${msg.id}") }
         if (row != null) rows += row
     }
-    return rows
+    // Each row keys the lazy list, which throws on a repeated key: a message the
+    // server (or a socket replay) delivered twice under one id draws once.
+    val keys = HashSet<String>(rows.size * 2)
+    return if (rows.all { keys.add(it.key) }) rows else { keys.clear(); rows.filter { keys.add(it.key) } }
 }
 
 // ═══════════════════════════ Thread list ═══════════════════════════
@@ -205,7 +208,7 @@ internal fun ThreadMessages(
                 Button(onClick = cb.onRetry, colors = ButtonDefaults.buttonColors(containerColor = Palette.Amber500)) { Text("Try again", fontSize = 12.sp) }
             }
             messages.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("No messages yet", fontSize = 14.sp, color = Hue.SagePale)
+                Text("No messages yet", fontSize = 14.sp, color = Palette.SagePale)
             }
             else -> LazyColumn(
                 state = state, reverseLayout = true, modifier = Modifier.fillMaxSize(),
@@ -217,7 +220,7 @@ internal fun ThreadMessages(
                 }
                 if (hasMore) item(key = "older") {
                     Box(Modifier.fillMaxWidth().padding(4.dp), contentAlignment = Alignment.Center) {
-                        if (loadingOlder) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = Hue.SagePale)
+                        if (loadingOlder) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = Palette.SagePale)
                         else if (olderError) Text(
                             "Couldn't load older messages — tap to retry", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Palette.Amber700,
                             modifier = Modifier.clip(RoundedCornerShape(50)).clickable(onClickLabel = "Retry loading older messages", onClick = cb.onLoadOlder).padding(horizontal = 10.dp, vertical = 4.dp),
@@ -276,8 +279,8 @@ private fun ThreadRowView(row: TRow, channel: String?, recovered: Map<String, St
         is TPill -> {
             val (bg, bd, fg) = when (row.msg.eventKind) {
                 "release" -> Triple(Palette.Blue50, Palette.Blue200, Palette.Blue700)
-                "transfer" -> Triple(Hue.Indigo50, Hue.Indigo200, Hue.Indigo700)
-                "approve_draft" -> Triple(Palette.Green50, Hue.Green200, Hue.Green700)
+                "transfer" -> Triple(Palette.Indigo50, Palette.Indigo200, Palette.Indigo700)
+                "approve_draft" -> Triple(Palette.Green50, Palette.Green200, Palette.Green700)
                 else -> Triple(Palette.Stone100, Palette.Stone200, Palette.Stone600)
             }
             DividerPill(row.msg.body + (row.msg.createdAt?.let { " · ${Fmt.timeAgo(it)}" } ?: ""), line = Palette.Stone200, bg = bg, fg = fg, border = bd)
@@ -357,13 +360,13 @@ private fun MessageBubble(msg: ThreadMsg, album: List<ThreadMsg>?, channel: Stri
     val c = Neema.colors
     val bg = when {
         inbound -> if (c.isDark) c.bg2 else Color.White
-        msg.sender == "ai" -> Hue.Slate800
-        else -> Hue.BubbleGreen
+        msg.sender == "ai" -> Palette.Slate800
+        else -> Palette.BubbleGreen
     }
     val fg = when {
         inbound -> if (c.isDark) c.text else Palette.Ink
         msg.sender == "ai" -> Color.White
-        else -> Hue.BubbleInk
+        else -> Palette.BubbleInk
     }
     val mediaUrl = recovered[msg.id] ?: msg.mediaUrl
     val isMedia = msg.mediaType != null && msg.mediaType != "note" && mediaUrl != null
@@ -407,12 +410,12 @@ private fun MessageBubble(msg: ThreadMsg, album: List<ThreadMsg>?, channel: Stri
                 BubbleBody(msg, mediaUrl, album, channel, inbound, fg, brokenVideos, cb)
                 // Reading glass: the English under a foreign message (both directions).
                 if (!msg.translation.isNullOrBlank()) {
-                    val tc = when { inbound -> Palette.Stone500; msg.sender == "ai" -> Color.White.copy(alpha = 0.7f); else -> Hue.BubbleInk.copy(alpha = 0.7f) }
+                    val tc = when { inbound -> Palette.Stone500; msg.sender == "ai" -> Color.White.copy(alpha = 0.7f); else -> Palette.BubbleInk.copy(alpha = 0.7f) }
                     // `border-t border-dashed`: stone-200 / white/25 / #0a2e05/25.
                     val line = when {
                         inbound -> if (c.isDark) c.border else Palette.Stone200
                         msg.sender == "ai" -> Color.White.copy(alpha = 0.25f)
-                        else -> Hue.BubbleInk.copy(alpha = 0.25f)
+                        else -> Palette.BubbleInk.copy(alpha = 0.25f)
                     }
                     DashedRule(line, Modifier.padding(top = 6.dp))
                     Row(Modifier.padding(top = 4.dp)) {
@@ -488,7 +491,7 @@ private fun QuoteStrip(q: QuotedRef, inbound: Boolean, fg: Color) {
     }
     Row(
         Modifier.padding(bottom = 6.dp).clip(RoundedCornerShape(3.dp))
-            .background(if (inbound) (if (Neema.colors.isDark) Palette.Moss600.copy(alpha = 0.16f) else Hue.SageQuote) else Color.White.copy(alpha = 0.14f))
+            .background(if (inbound) (if (Neema.colors.isDark) Palette.Moss600.copy(alpha = 0.16f) else Palette.SageQuote) else Color.White.copy(alpha = 0.14f))
             .border(width = 0.dp, color = Color.Transparent),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -511,7 +514,7 @@ private fun BubbleBody(
 ) {
     val cctx = msg.commentContext
     val raw = msg.body
-    val link = if (inbound) (if (Neema.colors.isDark) Hue.Blue300 else Palette.Blue600) else if (msg.sender == "ai") Hue.Blue300 else Hue.Emerald900
+    val link = if (inbound) (if (Neema.colors.isDark) Palette.Blue300 else Palette.Blue600) else if (msg.sender == "ai") Palette.Blue300 else Palette.Emerald900
     // Our public reply to a comment: threaded (↳ indented) under the comment.
     if (cctx?.replyTo != null) {
         Row(Modifier.height(IntrinsicSize.Min)) {
@@ -681,7 +684,7 @@ internal fun ThreadHeader(
                 Text(name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 // A Meta thread has no wa_id (its key is a PSID): no empty second line under the name.
                 inboxHandle(conv).takeIf { it.isNotBlank() }?.let { h ->
-                    Text(h, fontSize = 12.sp, color = Palette.Sage300, fontFamily = if (isWebVisitor(conv.waId)) null else FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(h, fontSize = 12.sp, color = Palette.Sage300, fontFamily = if (isWebVisitor(conv.waId)) null else NeemaMono, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
             if (canCall) IconButton(onClick = onCall) { Icon(Icons.Filled.Call, "Call on WhatsApp", tint = ChannelColors.WhatsApp) }
@@ -772,8 +775,8 @@ internal fun WebBtn(
     val dark = Neema.colors.isDark
     val (bg, fg, bd) = when (variant) {
         BtnVariant.Primary -> Triple(Palette.Amber500, Color.White, Palette.Amber500)
-        BtnVariant.Secondary -> if (dark) Triple(Hue.Gray800, Palette.Gray200, Palette.Gray700) else Triple(Color.White, Palette.Gray700, Palette.Gray200)
-        BtnVariant.Danger -> if (dark) Triple(Hue.Red950.copy(alpha = 0.3f), Palette.Red400, Palette.Red800) else Triple(Palette.Red50, Palette.Red600, Palette.Red200)
+        BtnVariant.Secondary -> if (dark) Triple(Palette.Gray800, Palette.Gray200, Palette.Gray700) else Triple(Color.White, Palette.Gray700, Palette.Gray200)
+        BtnVariant.Danger -> if (dark) Triple(Palette.Red950.copy(alpha = 0.3f), Palette.Red400, Palette.Red800) else Triple(Palette.Red50, Palette.Red600, Palette.Red200)
         BtnVariant.Ghost -> Triple(Color.Transparent, if (dark) Palette.Gray400 else Palette.Gray500, Color.Transparent)
         BtnVariant.Outline -> Triple(Color.Transparent, if (dark) Palette.Gray200 else Palette.Gray700, if (dark) Palette.Gray600 else Palette.Gray300)
     }
@@ -794,11 +797,11 @@ internal fun WebBtn(
 internal fun InterceptBadge(mode: String) {
     val dark = Neema.colors.isDark
     val (bg, fg, bd, label) = when (mode) {
-        "human" -> if (dark) Quad(Hue.Amber950.copy(alpha = 0.4f), Palette.Amber400, Palette.Amber800, "Human")
+        "human" -> if (dark) Quad(Palette.Amber950.copy(alpha = 0.4f), Palette.Amber400, Palette.Amber800, "Human")
         else Quad(Palette.Amber50, Palette.Amber700, Palette.Amber200, "Human")
-        "paused" -> if (dark) Quad(Hue.Gray800, Palette.Gray400, Palette.Gray700, "Paused")
+        "paused" -> if (dark) Quad(Palette.Gray800, Palette.Gray400, Palette.Gray700, "Paused")
         else Quad(Palette.Gray100, Palette.Gray500, Palette.Gray200, "Paused")
-        else -> if (dark) Quad(Hue.Blue950.copy(alpha = 0.4f), Palette.Blue400, Hue.Blue800, "AI")
+        else -> if (dark) Quad(Palette.Blue950.copy(alpha = 0.4f), Palette.Blue400, Palette.Blue800, "AI")
         else Quad(Palette.Blue50, Palette.Blue700, Palette.Blue200, "AI")
     }
     Text(

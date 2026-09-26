@@ -12,7 +12,6 @@ import ke.co.bethanyhouse.neema.feature.agents.isCramped
 import ke.co.bethanyhouse.neema.feature.agents.contentOn
 import ke.co.bethanyhouse.neema.core.ui.components.neemaSwitchColors
 import ke.co.bethanyhouse.neema.core.ui.theme.Palette
-import ke.co.bethanyhouse.neema.feature.reports.AreaPalette
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -78,8 +77,8 @@ private fun BaseRoleBadge(role: String) {
     val c = Neema.colors
     val admin = role == "admin"
     val (fill, text, edge) = when {
-        admin && c.isDark -> Triple(AreaPalette.Purple500.copy(alpha = 0.2f), AreaPalette.Purple300, AreaPalette.Purple500.copy(alpha = 0.4f))
-        admin -> Triple(AreaPalette.Purple100, AreaPalette.Purple700, AreaPalette.Purple200)
+        admin && c.isDark -> Triple(Palette.Purple500.copy(alpha = 0.2f), Palette.Purple300, Palette.Purple500.copy(alpha = 0.4f))
+        admin -> Triple(Palette.Purple100, Palette.Purple700, Palette.Purple200)
         c.isDark -> Triple(c.goldDim, c.gold2, c.border)
         else -> Triple(c.bg3, c.gold2, c.bg4)
     }

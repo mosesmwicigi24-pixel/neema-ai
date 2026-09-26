@@ -88,6 +88,8 @@ internal fun capitalizeWords(s: String): String =
 fun ReportsScreen(
     dash: DashboardViewModel,
     vm: ReportsViewModel = viewModel { ReportsViewModel(dash) },
+    /** Open with the custom range's "from" / "to" date picker showing (tests). */
+    initialPicker: String? = null,
 ) {
     // Tab, range and custom dates come back after Android restarts the app.
     KeepUiState(vm)
@@ -178,6 +180,7 @@ fun ReportsScreen(
                     }
                     val controls: @Composable () -> Unit = {
                         RangeControls(
+                            initialPicker = initialPicker,
                             range = range,
                             customFrom = customFrom, customTo = customTo,
                             exporting = exporting,
@@ -407,6 +410,7 @@ internal fun buildReportDated(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RangeControls(
+    initialPicker: String?,
     range: ReportRange,
     customFrom: LocalDate?, customTo: LocalDate?,
     onRange: (ReportRange) -> Unit,
@@ -418,7 +422,7 @@ private fun RangeControls(
     val c = Neema.colors
     var menu by remember { mutableStateOf(false) }
     // The open date picker (and its pick, which the picker state saves) outlives a rotation.
-    var picking by androidx.compose.runtime.saveable.rememberSaveable(key = keptKey("reports.datePicker")) { mutableStateOf<String?>(null) } // "from" | "to"
+    var picking by androidx.compose.runtime.saveable.rememberSaveable(key = keptKey("reports.datePicker")) { mutableStateOf(initialPicker) } // "from" | "to"
 
     @OptIn(ExperimentalLayoutApi::class)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), itemVerticalAlignment = Alignment.CenterVertically) {
@@ -478,7 +482,11 @@ private fun RangeControls(
                 }) { Text("OK") }
             },
             dismissButton = { TextButton(onClick = { picking = null }) { Text("Cancel") } },
-        ) { DatePicker(state) }
+        ) {
+            // The web's modal overlay (bg-black/50), not the platform's 0.6.
+            ke.co.bethanyhouse.neema.core.ui.components.WebModalDim()
+            DatePicker(state)
+        }
     }
 }
 
@@ -605,10 +613,20 @@ private fun orderStatusHue(status: String): Hue = when (status) {
     else -> AmberHue
 }
 
+/**
+ * The web's `displayName(o.contact_name, o.contact_phone || o.wa_id)` after
+ * mapOrder(), which makes `contact_name` fall back to the wa_id: an unnamed
+ * buyer reads as their bare number ("254712345678"), in the table and the CSV.
+ */
+internal fun reportCustomer(o: Order): String = Fmt.displayName(o.customerName, reportPhone(o))
+
+/** mapOrder() sets `contact_phone` to the wa_id. */
+private fun reportPhone(o: Order): String = o.contactPhone?.takeIf { it.isNotEmpty() } ?: o.waId
+
 private fun orderRow(o: Order): List<Cell> {
-    val phone = o.contactPhone?.takeIf { it.isNotBlank() } ?: o.waId
+    val phone = reportPhone(o)
     return listOf(
-        textCell(Fmt.displayName(o.contactName, phone)),
+        textCell(reportCustomer(o)),
         textCell(Fmt.formatPhone(phone)),
         textCell(Fmt.currency(o.total)),
         { Badge(o.status, orderStatusHue(o.status)) },
@@ -664,9 +682,8 @@ internal fun writeCsv(out: Appendable, orders: List<Order>) {
     out.append("Date,Customer,Amount,Status\n")
     orders.forEachIndexed { i, o ->
         if (i > 0) out.append('\n')
-        val phone = o.contactPhone?.takeIf { it.isNotBlank() } ?: o.waId
         out.append(csvField(Fmt.date(o.createdAt))).append(',')
-            .append(csvField(Fmt.displayName(o.contactName, phone))).append(',')
+            .append(csvField(reportCustomer(o))).append(',')
             .append(csvField(plain(o.total))).append(',')
             .append(csvField(o.status))
     }

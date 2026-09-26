@@ -18,10 +18,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -32,6 +34,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
 import java.io.File
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -160,8 +163,20 @@ class ReportsViewModel(
 
     private data class Inputs(
         val convs: List<Dated<Conversation>>?, val orders: List<Dated<Order>>, val agents: List<Agent>,
-        val range: ReportRange, val from: LocalDate?, val to: LocalDate?,
+        val range: ReportRange, val from: LocalDate?, val to: LocalDate?, val today: LocalDate,
     )
+
+    private fun todayNow(): LocalDate = Instant.ofEpochMilli(clock.millis()).atZone(clock.zone).toLocalDate()
+
+    private val _today = MutableStateFlow(todayNow())
+    /**
+     * The phone's date. The web recomputes "now" on every render; here the
+     * report is rebuilt when its inputs change, so the date is one of them:
+     * re-read at each local midnight while the app is in front, and at once
+     * on coming back to it — a report left open overnight rolls its "last 7
+     * days" window and its per-day bars over to the new day.
+     */
+    val today: StateFlow<LocalDate> = _today.asStateFlow()
 
     /**
      * The report for the chosen range, built off the main thread; null until
@@ -170,8 +185,8 @@ class ReportsViewModel(
     val report: StateFlow<Report?> =
         combine(
             datedConvs, datedOrders, dash.agents, range,
-            combine(customFrom, customTo) { f, t -> f to t },
-        ) { convs, orders, agents, r, (f, t) -> Inputs(convs, orders, agents, r, f, t) }
+            combine(customFrom, customTo, _today) { f, t, d -> Triple(f, t, d) },
+        ) { convs, orders, agents, r, (f, t, d) -> Inputs(convs, orders, agents, r, f, t, d) }
             .mapLatest { i ->
                 i.convs?.let { buildReportDated(it, i.orders, i.agents, i.range, i.from, i.to, clock.millis(), clock.zone) }
             }
@@ -195,7 +210,22 @@ class ReportsViewModel(
      */
     val readyExport: StateFlow<ReadyExport?> = _readyExport.asStateFlow()
 
-    init { load() }
+    init {
+        load()
+        // The midnight roll-over (see [today]): checked at the next local
+        // midnight, and at least hourly so a changed clock or time zone is
+        // caught; nothing ticks while the app is in the background.
+        viewModelScope.launch {
+            dash.foreground.collectLatest { fg ->
+                while (fg) {
+                    _today.value = todayNow()
+                    val now = Instant.ofEpochMilli(clock.millis()).atZone(clock.zone)
+                    val midnight = now.toLocalDate().plusDays(1).atStartOfDay(clock.zone)
+                    delay((Duration.between(now, midnight).toMillis() + 1).coerceIn(1L, 3_600_000L))
+                }
+            }
+        }
+    }
 
     /**
      * Writes the report's orders as CSV into [dir] on the I/O thread (streamed

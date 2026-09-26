@@ -95,7 +95,6 @@ private class TestResults : androidx.activity.result.ActivityResultRegistryOwner
  * placeholder) every run — Coil's async loads otherwise race the snapshot.
  */
 fun installTestImageLoader(context: Context) {
-    freezePlatformAnimations()
     coil.Coil.setImageLoader(
         coil.ImageLoader.Builder(context)
             .dispatcher(Dispatchers.Unconfined)
@@ -112,20 +111,6 @@ fun installTestImageLoader(context: Context) {
             }
             .build(),
     )
-}
-
-/**
- * Platform (ValueAnimator) animations jump to their end, as "Remove
- * animations" does on a phone. (Not what made dialog goldens flake — see
- * [settleDialogWindows].)
- */
-fun freezePlatformAnimations() {
-    runCatching {
-        android.animation.ValueAnimator::class.java
-            .getDeclaredMethod("setDurationScale", Float::class.javaPrimitiveType)
-            .apply { isAccessible = true }
-            .invoke(null, 0f)
-    }
 }
 
 /**

@@ -1,5 +1,7 @@
 package ke.co.bethanyhouse.neema.feature.conversations
 
+import ke.co.bethanyhouse.neema.core.ui.components.WebModalDim
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -52,12 +54,12 @@ import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 
 // Bubble palette (the web's literal hex values).
 internal val InboundTint: Color @androidx.compose.runtime.Composable get() = ink(Palette.Willow600)
-internal val InboundTintBg: Color @androidx.compose.runtime.Composable get() = if (ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.isDark) Palette.Willow600.copy(alpha = 0.16f) else Hue.MossTint
+internal val InboundTintBg: Color @androidx.compose.runtime.Composable get() = if (ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.isDark) Palette.Willow600.copy(alpha = 0.16f) else Palette.MossTint
 
 /** The revealed transcript / analysis text inside an inbound bubble (light or dark page). */
 @Composable
 private fun revealInk(): Color =
-    if (ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.isDark) Color.White.copy(alpha = 0.7f) else Hue.ForestInk.copy(alpha = 0.7f)
+    if (ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.isDark) Color.White.copy(alpha = 0.7f) else Palette.ForestInk.copy(alpha = 0.7f)
 
 /** "Show transcript" / "Show image analysis" pill toggle. */
 @Composable
@@ -158,7 +160,7 @@ internal fun ImageBubble(
         if (!caption.isNullOrBlank() && !caption.startsWith("[")) {
             Text(
                 caption, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(horizontal = 4.dp),
-                color = if (inbound) (if (ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.isDark) ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.text else Hue.ForestText) else Color.White.copy(alpha = 0.9f),
+                color = if (inbound) (if (ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.isDark) ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.text else Palette.ForestText) else Color.White.copy(alpha = 0.9f),
             )
         }
     }
@@ -365,7 +367,7 @@ internal fun CommentContextCard(
     Column(
         Modifier.clip(RoundedCornerShape(8.dp))
             .background(if (dark) Palette.Moss600.copy(alpha = 0.10f) else if (inbound) Palette.Leaf else Color.White.copy(alpha = 0.15f))
-            .border(1.dp, if (dark) ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.border else if (inbound) Hue.SageRing else Color.White.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+            .border(1.dp, if (dark) ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.border else if (inbound) Palette.SageRing else Color.White.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
             .padding(8.dp),
     ) {
         Text(
@@ -373,7 +375,7 @@ internal fun CommentContextCard(
             color = if (inbound) InboundTint else Color.White.copy(alpha = 0.7f),
         )
         Spacer(Modifier.height(4.dp))
-        Text(title, fontSize = 11.sp, lineHeight = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, color = if (dark) ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.text else if (inbound) Hue.ForestInk else Color.White.copy(alpha = 0.9f))
+        Text(title, fontSize = 11.sp, lineHeight = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, color = if (dark) ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.text else if (inbound) Palette.ForestInk else Color.White.copy(alpha = 0.9f))
         Spacer(Modifier.height(6.dp))
         if (thumb.isNotEmpty() && thumbOk) {
             Box(
@@ -410,7 +412,10 @@ internal fun CommentContextCard(
 @Composable
 internal fun ViewerDialog(viewer: Viewer, onClose: () -> Unit, onVideoError: (String?) -> Unit) {
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.9f))) {
+        // The box below IS the web's overlay (Lightbox bg-black/85, the album
+        // viewer bg-black/90): no window dim under it, or it reads darker.
+        WebModalDim(0f)
+        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = if (viewer is Viewer.Album) 0.9f else 0.85f))) {
             when (viewer) {
                 is Viewer.Image -> ZoomableImage(viewer.url, onClose, Modifier.fillMaxSize())
                 is Viewer.Video -> VideoPlayer(viewer.url, Modifier.fillMaxSize().padding(vertical = 48.dp)) {

@@ -85,8 +85,8 @@ class OverviewMathTest {
             listOf("order-o1", "conv-r1", "order-o2", "order-o3", "order-o4", "conv-r5", "conv-r6"),
             feed.map { it.id },
         )
-        // Orders carry no contact_name on the wire: the buyer reads as their number (mapOrder).
-        assertEquals("+254 712 345 678", feed[0].user)
+        // Orders carry no contact_name on the wire: mapOrder makes it the wa_id, so the buyer reads as the bare number.
+        assertEquals("254712345678", feed[0].user)
         assertEquals("KES 8,000", feed[0].target)
         assertEquals("Moses Mwicigi", feed[1].user)
         assertEquals("intercepted conversation with", feed[1].action)
@@ -98,7 +98,7 @@ class OverviewMathTest {
         val o = orders.first { it.id == "o5" }.copy(createdAt = ReportsFixtures.ago(1))
         val c = convs.first { it.id == "r1" }.copy(assignedAgentId = "gone")
         val feed = activityFeed(listOf(o), listOf(c), agents)
-        assertEquals("+254 711 000 999", feed.first { it.id == "order-o5" }.user)
+        assertEquals("254711000999", feed.first { it.id == "order-o5" }.user)
         assertEquals("An agent", feed.first { it.id == "conv-r1" }.user)
     }
 

@@ -39,6 +39,7 @@ class ReportsScreenshotTest {
         empty: Boolean = false,
         canExport: Boolean = true,
         page: Int = 0,
+        picker: String? = null,
     ) {
         val f = FakeNeema.withFixtures().also { if (empty) ReportsFixtures.installEmpty(it) else ReportsFixtures.install(it) }
         if (!canExport) { f.on("GET", "/admin/me", body = VIEWER); f.on("GET", "/admin/agents", body = "[$VIEWER]") }
@@ -46,7 +47,7 @@ class ReportsScreenshotTest {
         val vm = ReportsViewModel(dash, ReportsFixtures.clock).apply {
             this.tab.value = tab; this.range.value = range; customFrom.value = from; customTo.value = to
         }
-        paparazzi.snapshot { AppFrame(dark) { PageSlice(page) { ReportsScreen(dash, vm) } } }
+        paparazzi.snapshot { AppFrame(dark) { PageSlice(page) { ReportsScreen(dash, vm, initialPicker = picker) } } }
     }
 
     @Test fun overview30d() = shot()
@@ -57,6 +58,14 @@ class ReportsScreenshotTest {
     @Test fun overview90d() = shot(range = ReportRange.D90)
     @Test fun customRange() = shot(range = ReportRange.Custom, from = LocalDate.of(2026, 9, 20), to = LocalDate.of(2026, 9, 22))
     @Test fun customRangeUnset() = shot(range = ReportRange.Custom)
+    /**
+     * The custom range's date picker, over the web's bg-black/50 dim. The
+     * picker rings the device's real "today" (it takes no clock), so these
+     * pick a month in the past that the real date can never enter again —
+     * the goldens don't drift from one day to the next.
+     */
+    @Test fun customRangePickerOpen() = shot(range = ReportRange.Custom, from = LocalDate.of(2025, 1, 10), to = LocalDate.of(2025, 1, 20), picker = "from")
+    @Test fun customRangePickerOpenDark() = shot(range = ReportRange.Custom, to = LocalDate.of(2025, 1, 20), dark = true, picker = "to")
     @Test fun conversations() = shot(tab = ReportTab.Conversations)
     @Test fun conversationsPage2() = shot(tab = ReportTab.Conversations, page = 1)
     @Test fun conversationsDark() = shot(tab = ReportTab.Conversations, dark = true)
