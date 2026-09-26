@@ -146,11 +146,20 @@ val checkReleaseKeeps by tasks.registering {
         // Classes with a generated serializer: @Serializable (no `with =`) on a
         // plain or data class — not an enum, sealed/abstract class or object.
         val decl = Regex("""@Serializable\s+(?:@[^\n]*\s+)*(?:(?:private|internal|public|data|open)\s+)*class\s+(\w+)""")
-        val models = sources.files.flatMap { f -> decl.findAll(f.readText()).map { it.groupValues[1] }.toList() }.toSet()
+        val pkg = Regex("""^package\s+([\w.]+)""", RegexOption.MULTILINE)
+        // (package, simple name) of each model; nested ones show as Outer$Name.
+        val models = sources.files.flatMap { f ->
+            val text = f.readText()
+            val p = pkg.find(text)?.groupValues?.get(1) ?: return@flatMap emptyList()
+            decl.findAll(text).map { p to it.groupValues[1] }.toList()
+        }.toSet()
         val problems = mutableListOf<String>()
         var checked = 0
-        for (name in models) {
-            val classes = kept.keys.filter { it.startsWith("ke.co.bethanyhouse.neema.") && (it.endsWith(".$name") || it.endsWith("$$name")) }
+        for ((p, name) in models) {
+            val classes = kept.keys.filter {
+                it.startsWith("$p.") && !it.substringAfter("$p.").contains('.') &&
+                    (it == "$p.$name" || it.endsWith("$$name"))
+            }
             for (c in classes) {
                 checked++
                 if ("$c\$\$serializer" !in kept) problems += "$c is kept but its \$\$serializer was removed"
