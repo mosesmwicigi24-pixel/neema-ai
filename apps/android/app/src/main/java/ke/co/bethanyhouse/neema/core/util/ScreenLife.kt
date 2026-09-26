@@ -4,6 +4,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -35,14 +38,24 @@ suspend fun quietly(block: suspend () -> Unit) {
  * trip. The web's `setTimeout(refetch, 800)` per event, without the storm.
  */
 class Coalescer(private val scope: CoroutineScope, private val windowMs: Long, private val block: suspend () -> Unit) {
+    private val lock = Any()
     private var pending: Job? = null
+    /** Runs never overlap: a kick during a slow run waits for it, so fetches can't stack. */
+    private val running = Mutex()
 
+    /** Safe from any thread (socket readers, the main thread) at any rate. */
     fun kick() {
-        if (pending?.isActive == true) return
-        pending = scope.launch {
-            delay(windowMs)
-            pending = null
-            quietly { block() }
+        synchronized(lock) {
+            if (pending?.isActive == true) return
+            // Recorded before it starts: on an immediate dispatcher the body
+            // may run (and clear `pending`) before launch() even returns.
+            val job = scope.launch(start = CoroutineStart.LAZY) {
+                delay(windowMs)
+                synchronized(lock) { pending = null }
+                running.withLock { quietly { block() } }
+            }
+            pending = job
+            job.start()
         }
     }
 }

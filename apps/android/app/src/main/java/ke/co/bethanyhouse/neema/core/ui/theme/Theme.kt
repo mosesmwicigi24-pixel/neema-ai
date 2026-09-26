@@ -11,12 +11,14 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
+import ke.co.bethanyhouse.neema.R
 
 /**
  * The dashboard palette (lib/themes.ts): moss-green on willow parchment by
@@ -43,7 +45,7 @@ val LightNeema = NeemaColors(
     bg = Color(0xFFF3F9EC), bg2 = Color(0xFFFFFFFF), bg3 = Color(0xFFE6F3D8), bg4 = Color(0xFFCEE6B2),
     border = Color(0xFFB5DA8B), border2 = Color(0xFF9CCD65),
     gold = Color(0xFF589B31), gold2 = Color(0xFF427425), goldDim = Color(0x1A589B31),
-    text = Color(0xFF1C2917), textDim = Color(0xFF699A32), textMid = Color(0xFF4F7425),
+    text = Color(0xFF16270C), textDim = Color(0xFF699A32), textMid = Color(0xFF4F7425),
     green = Color(0xFF589B31), greenDim = Color(0x1A589B31),
     red = Color(0xFFC0392B), redDim = Color(0x1AC0392B),
     blue = Color(0xFF2A48A2), blueDim = Color(0x1A2A48A2),
@@ -225,8 +227,24 @@ fun contentOn(bg: Color, ink: Color = Palette.Ink): Color {
     return if (onWhite < 4.5f && onInk >= 4.5f) ink else Color.White
 }
 
+/**
+ * Manrope, the web's UI sans (globals.css `--font-sans`, loaded at 400–800 in
+ * layout.tsx), bundled as static instances of the OFL variable font
+ * (assets/licenses/Manrope-OFL.txt). Every text style in the theme uses it,
+ * so any `Text` that takes its style from the theme is in Manrope; a raw
+ * `TextStyle(...)` handed to `style =` / `textStyle =` must name it (or merge
+ * onto `LocalTextStyle.current`), or it falls back to the system sans.
+ */
+val NeemaFont: FontFamily = FontFamily(
+    Font(R.font.manrope_regular, FontWeight.Normal),
+    Font(R.font.manrope_medium, FontWeight.Medium),
+    Font(R.font.manrope_semibold, FontWeight.SemiBold),
+    Font(R.font.manrope_bold, FontWeight.Bold),
+    Font(R.font.manrope_extrabold, FontWeight.ExtraBold),
+)
+
 /** Tabular (monospaced) figures, for amounts and counts that line up in columns. */
-val TabularNums = TextStyle(fontFeatureSettings = "tnum")
+val TabularNums = TextStyle(fontFamily = NeemaFont, fontFeatureSettings = "tnum")
 
 /**
  * This text size, grown with the system font scale only up to [maxScale].
@@ -256,28 +274,36 @@ object ChannelColors {
 }
 
 private val NeemaType = Typography(
-    headlineSmall = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.ExtraBold, fontSize = 22.sp),
-    titleLarge = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Bold, fontSize = 20.sp),
-    titleMedium = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Bold, fontSize = 16.sp),
-    titleSmall = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold, fontSize = 14.sp),
-    bodyLarge = TextStyle(fontFamily = FontFamily.SansSerif, fontSize = 15.sp, lineHeight = 21.sp),
-    bodyMedium = TextStyle(fontFamily = FontFamily.SansSerif, fontSize = 14.sp, lineHeight = 20.sp),
-    bodySmall = TextStyle(fontFamily = FontFamily.SansSerif, fontSize = 12.sp, lineHeight = 16.sp),
-    labelLarge = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold, fontSize = 14.sp),
-    labelMedium = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold, fontSize = 12.sp),
-    labelSmall = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold, fontSize = 11.sp),
+    headlineSmall = TextStyle(fontFamily = NeemaFont, fontWeight = FontWeight.ExtraBold, fontSize = 22.sp),
+    titleLarge = TextStyle(fontFamily = NeemaFont, fontWeight = FontWeight.Bold, fontSize = 20.sp),
+    titleMedium = TextStyle(fontFamily = NeemaFont, fontWeight = FontWeight.Bold, fontSize = 16.sp),
+    titleSmall = TextStyle(fontFamily = NeemaFont, fontWeight = FontWeight.SemiBold, fontSize = 14.sp),
+    bodyLarge = TextStyle(fontFamily = NeemaFont, fontSize = 15.sp, lineHeight = 21.sp),
+    bodyMedium = TextStyle(fontFamily = NeemaFont, fontSize = 14.sp, lineHeight = 20.sp),
+    bodySmall = TextStyle(fontFamily = NeemaFont, fontSize = 12.sp, lineHeight = 16.sp),
+    labelLarge = TextStyle(fontFamily = NeemaFont, fontWeight = FontWeight.SemiBold, fontSize = 14.sp),
+    labelMedium = TextStyle(fontFamily = NeemaFont, fontWeight = FontWeight.SemiBold, fontSize = 12.sp),
+    labelSmall = TextStyle(fontFamily = NeemaFont, fontWeight = FontWeight.SemiBold, fontSize = 11.sp),
+    // The M3 styles the theme doesn't restate still get the family.
+    displayLarge = Typography().displayLarge.copy(fontFamily = NeemaFont),
+    displayMedium = Typography().displayMedium.copy(fontFamily = NeemaFont),
+    displaySmall = Typography().displaySmall.copy(fontFamily = NeemaFont),
+    headlineLarge = Typography().headlineLarge.copy(fontFamily = NeemaFont),
+    headlineMedium = Typography().headlineMedium.copy(fontFamily = NeemaFont),
 )
 
 @Composable
 fun NeemaTheme(dark: Boolean, content: @Composable () -> Unit) {
     val c = if (dark) DarkNeema else LightNeema
+    // Dialogs (surfaceContainerHigh) and sheets (surfaceContainerLow) sit on
+    // var(--bg2) like ui.tsx's Modal: white by day, prussian-900 by night.
     val scheme = if (dark) darkColorScheme(
-        primary = c.gold, onPrimary = Color(0xFF04220F), primaryContainer = c.goldDim, onPrimaryContainer = c.gold2,
+        primary = c.gold, onPrimary = c.bg, primaryContainer = c.goldDim, onPrimaryContainer = c.gold2,
         secondary = c.blue, onSecondary = Color.White,
         tertiary = Brand.Amber, onTertiary = Color.White,
         background = c.bg, onBackground = c.text, surface = c.bg2, onSurface = c.text,
         surfaceVariant = c.bg4, onSurfaceVariant = c.textMid, surfaceContainer = c.bg2,
-        surfaceContainerHigh = c.bg4, surfaceContainerLow = c.bg3, surfaceContainerHighest = c.border,
+        surfaceContainerHigh = c.bg2, surfaceContainerLow = c.bg2, surfaceContainerHighest = c.border,
         outline = c.border2, outlineVariant = c.border, error = c.red, onError = Color.White,
     ) else lightColorScheme(
         primary = c.gold, onPrimary = Color.White, primaryContainer = c.bg3, onPrimaryContainer = c.gold2,
@@ -285,7 +311,7 @@ fun NeemaTheme(dark: Boolean, content: @Composable () -> Unit) {
         tertiary = Brand.Amber, onTertiary = Color.White,
         background = c.surface, onBackground = c.text, surface = c.bg2, onSurface = c.text,
         surfaceVariant = c.bg3, onSurfaceVariant = c.textMid, surfaceContainer = Color.White,
-        surfaceContainerHigh = Color(0xFFF1F5EC), surfaceContainerLow = c.surface, surfaceContainerHighest = c.bg3,
+        surfaceContainerHigh = c.bg2, surfaceContainerLow = c.bg2, surfaceContainerHighest = c.bg3,
         outline = c.border, outlineVariant = c.hairline, error = c.red, onError = Color.White,
     )
     CompositionLocalProvider(LocalNeemaColors provides c) {

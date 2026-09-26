@@ -100,8 +100,18 @@ class LiveSocket(
     private val maxReconnectDelayMs: Long = 30_000,
     private val pingEveryMs: Long = 25_000,
 ) {
-    private val _events = MutableSharedFlow<JsonObject>(extraBufferCapacity = 256)
+    /**
+     * Frames are parsed on OkHttp's reader thread and handed over without
+     * blocking it. The buffer absorbs a burst at peak (dozens of frames a
+     * second, a backlog flushed after a stall) while a collector on the main
+     * thread catches up: 1,024 small JSON objects is well under a megabyte.
+     */
+    private val _events = MutableSharedFlow<JsonObject>(extraBufferCapacity = EVENT_BUFFER)
     val events: SharedFlow<JsonObject> = _events.asSharedFlow()
+
+    /** Frames lost because a collector fell more than [EVENT_BUFFER] behind (should stay 0). */
+    @Volatile var droppedFrames: Long = 0L
+        private set
 
     private val _connected = MutableStateFlow(false)
     val connected: StateFlow<Boolean> = _connected.asStateFlow()
@@ -196,7 +206,12 @@ class LiveSocket(
                 if (webSocket !== ws) return
                 val obj = runCatching { NeemaJson.parseToJsonElement(text) as? JsonObject }.getOrNull() ?: return
                 if (obj["type"]?.jsonPrimitive?.contentOrNull == "pong") return
-                _events.tryEmit(obj)
+                if (!_events.tryEmit(obj)) {
+                    // A reconnect's catch-up (the `reconnected` refetch) is what
+                    // repairs this; say so where it can be seen.
+                    droppedFrames++
+                    runCatching { Log.w("LiveSocket", "frame dropped: a collector is ${EVENT_BUFFER}+ frames behind") }
+                }
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) = dropped(webSocket)
@@ -237,6 +252,10 @@ class LiveSocket(
 
     @Synchronized
     private fun reopen() { if (!closed && !_connected.value) open() }
+
+    companion object {
+        const val EVENT_BUFFER = 1_024
+    }
 }
 
 /** Convenience readers for the loosely-typed socket frames. */

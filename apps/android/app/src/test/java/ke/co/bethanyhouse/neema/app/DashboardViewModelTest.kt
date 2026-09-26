@@ -202,10 +202,10 @@ class DashboardViewModelTest {
         advance(799)
         assertEquals(0, refreshes)
         advance(2)
-        assertEquals(5, refreshes)
+        assertEquals("one refetch for the burst", 1, refreshes)
         ws.last.frame("""{"event":"notification","type":"system","title":"Released","body":"b"}""")
         advance(1_000)
-        assertEquals("other types don't refetch the inbox", 5, refreshes)
+        assertEquals("other types don't refetch the inbox", 1, refreshes)
     }
 
     @Test
