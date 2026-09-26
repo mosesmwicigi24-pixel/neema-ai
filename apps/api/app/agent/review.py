@@ -461,13 +461,30 @@ def colour_issues(ask: str, answer: str) -> list[dict]:
                      "do not make it and offer the nearest"}]
 
 
-def domain_issues(ask: str, answer: str) -> list[dict]:
+def gift_issues(answer: str, allow=()) -> list[dict]:
+    """THE GIFT IS NEVER DISCLAIMED (owner, 2026-09-26: "stop saying we do not
+    make shoes, hatuuzi viatu — that shoe is a gift"): under a campaign post a
+    reply that names the gift's words beside a plain decline — we do not sell,
+    make or stock it — is held, and the rewrite is told the item is a gift."""
+    if not allow:
+        return []
+    from app.agent.domain import declines, off_domain_in
+    t = answer or ""
+    if declines(t) and off_domain_in(t):
+        return [{"kind": "gift", "hard": True,
+                 "text": "it says we do not sell, make or have the campaign's gift item — the "
+                         "item in this post is a GIFT: never disclaimed, never priced, never "
+                         "sold; speak of it only as the gift and how to be considered"}]
+    return []
+
+
+def domain_issues(ask: str, answer: str, allow=()) -> list[dict]:
     """WE SELL CHURCH GOODS ONLY (owner, 2026-09-25): a reply that treats
     goods we do not sell as ours — asks a quantity or a packet of beans,
     prices them, lists them in an order — is held; a plain one-line decline
-    passes."""
+    passes. A campaign's gift (`allow`) is never such goods."""
     from app.agent.domain import treats_as_ours
-    goods = treats_as_ours(answer)
+    goods = treats_as_ours(answer, allow)
     if not goods:
         return []
     return [{"kind": "domain", "hard": True,
@@ -796,7 +813,7 @@ def rule_findings(comment: str, answer: str, seen: list,
                   known_figures: set[float] | frozenset[float] = frozenset(), *,
                   tool_results: list | None = None, transcript: list | None = None,
                   known_text: str = "", fx: dict | None = None,
-                  currency: str = "USD", mode: str = "dm") -> list[dict]:
+                  currency: str = "USD", mode: str = "dm", allow=()) -> list[dict]:
     """The deterministic findings on a draft, each with its weight:
     {"kind", "text", "hard"}. HARD findings — a figure from nowhere, the
     wrong item priced, a link no tool gave, an order status with no source —
@@ -852,7 +869,8 @@ def rule_findings(comment: str, answer: str, seen: list,
     if sold is not None:
         out.extend(variant_issues(comment, answer, sold, currency))
     out.extend(colour_issues(comment, answer))
-    out.extend(domain_issues(comment, answer))
+    out.extend(domain_issues(comment, answer, allow))
+    out.extend(gift_issues(answer, allow))
     if mode != "comment":
         sent = cards_sent(tool_results)
         if _NO_PHOTOS_RE.search(answer or ""):
@@ -955,7 +973,7 @@ async def reviewer_verdict(comment: str, answer: str, seen: list, *,
                            post_product: str = "", currency: str = "USD",
                            redis=None, transcript: list | None = None,
                            tool_results: list | None = None,
-                           mode: str = "comment") -> dict | None:
+                           mode: str = "comment", allow=()) -> dict | None:
     """One model line on the draft. None when the reviewer is off, the
     budget is stopped, or the model fails — the rules' verdict then stands."""
     if not settings.reply_review:
@@ -991,7 +1009,11 @@ async def reviewer_verdict(comment: str, answer: str, seen: list, *,
         "jobs, livestock, cosmetics, medicine — we sell church vestments, communion "
         "ware and church supplies ONLY. A one-line polite decline PASSES; guessing "
         "such goods at a customer whose word you do not know FAILS.\n"
-        "2. WRONG FIGURE — a price that is not the hub price of that row in the currency "
+        + ((f"THE GIFT — under this post, {', '.join(list(allow)[:4])} are the campaign's GIFT "
+            "item: one selected recipient receives it free. They are NOT goods we sell and NOT "
+            "goods to decline: a reply that speaks of them only as the gift PASSES; a reply "
+            "that says we do not sell, make or have them, or prices them, FAILS.\n") if allow else "")
+        + "2. WRONG FIGURE — a price that is not the hub price of that row in the currency "
         "shown, a total no tool returned, or an invented pack size, capacity, colour, "
         "material or delivery time.\n"
         "3. UNANSWERED — a question in their message gets no answer: where we are "
@@ -1049,7 +1071,7 @@ async def review_reply(comment: str, answer: str, seen: list, *,
                        redis=None, transcript: list | None = None,
                        tool_results: list | None = None, mode: str = "comment",
                        known_text: str = "", fx: dict | None = None,
-                       model_review: bool = True) -> dict:
+                       model_review: bool = True, allow=()) -> dict:
     """DOUBLE VERIFICATION of one draft: the rules (deterministic) AND the
     reviewer (a model's reading) both read it, and their findings merge —
     {"ok", "issues", "hard", "soft", "by"}. `hard` are the findings that may
@@ -1059,7 +1081,8 @@ async def review_reply(comment: str, answer: str, seen: list, *,
     one (owner, 2026-09-25)."""
     findings = rule_findings(comment, answer, seen, set(known_figures or ()),
                              tool_results=tool_results, transcript=transcript,
-                             known_text=known_text, fx=fx, currency=currency, mode=mode)
+                             known_text=known_text, fx=fx, currency=currency, mode=mode,
+                             allow=allow)
     hard = [f["text"] for f in findings if f["hard"]]
     soft = [f["text"] for f in findings if not f["hard"]]
     by = "rules" if findings else ""
@@ -1067,7 +1090,7 @@ async def review_reply(comment: str, answer: str, seen: list, *,
     if model_review:
         v = await reviewer_verdict(comment, answer, seen, post_product=post_product,
                                    currency=currency, redis=redis, transcript=transcript,
-                                   tool_results=tool_results, mode=mode)
+                                   tool_results=tool_results, mode=mode, allow=allow)
     if v is not None and not v["ok"]:
         soft.extend(v["issues"] or ["the reviewer rejected the draft"])
         by = (by + "+reviewer").strip("+")
@@ -1098,7 +1121,7 @@ def review_notes(issues: list[str]) -> str:
 
 def rewrite_block(issues: list[str], draft: str, seen: list, currency: str,
                   tool_results: list | None, mode: str = "comment",
-                  fx: dict | None = None, comment: str = "") -> str:
+                  fx: dict | None = None, comment: str = "", allow=()) -> str:
     """The reviewer's message to the writer for the ONE rewrite: the reasons,
     the facts (every hub row in hand, every other tool result), the draft —
     and the instruction to write the corrected reply only, from these facts,
@@ -1136,7 +1159,10 @@ def rewrite_block(issues: list[str], draft: str, seen: list, currency: str,
         "black); anything they asked for that we do not sell (food, phones, loans — we sell "
         "church vestments, communion ware and church supplies only) is declined in ONE short "
         "line, asked nothing about, and never added to the order; "
-        "keep the warmth and the closing question; write in their language.]"
+        + ((f"THE GIFT — {', '.join(list(allow)[:3])} in this post is a GIFT to one selected "
+            "recipient: never disclaimed (never 'we do not sell', never 'hatuuzi'), never priced, "
+            "never sold — speak of it only as the gift and how to be considered; ") if allow else "")
+        + "keep the warmth and the closing question; write in their language.]"
     )
 
 

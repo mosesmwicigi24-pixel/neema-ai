@@ -324,43 +324,53 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   shape of something that happened: came, arrived, too small, didn't — all
   silent) is a misread: `_settle_reading` makes it high/other — a person to
   answer, never to apologise to. Tests: `tests/test_campaign_posts.py`.
-- **The gifting campaign, hosted and converted** (2026-09-26, owner: "a
-  visibility and mobilisation campaign gifting one free pair of shoes to a
-  Pastor, Reverend or Bishop — not a voting or competition campaign; one
-  selected recipient receives the shoe completely free and only pays the
-  shipping"). The post context carries the caption WHOLE
-  (`fetch_post_context` → `caption`, 1500 chars, beside the 200-char
-  `title`; cache key `meta:postctx:v2:`); `runtime.post_caption` is what the
-  engine and `run_turn` read. `_CAMPAIGN_RE` knows the owner's words
-  (gifting pastors, one selected recipient, completely free, only pays the
-  shipping, giving away, to enter, kampeni, shindano, atapata … bure); the
-  soft markers ("campaign", "giving one reverend") count only under a
-  caption that sells nothing, so a sales campaign still sells.
-  `campaign_is_draw` (raffle, competition, vote, entries) decides the
-  language: otherwise `_campaign_facts` states the gifting framing — never
-  win/winner/lucky/vote/entry/'all the best'; say selected, the recipient,
-  gifting; never a date, a count, a criterion or a mechanism the caption
-  does not state. `_host_reading`: spam stays spam; a model
-  negative/mixed keeps only on strict evidence (a legitimacy question —
-  "is this real or a scam?" — is a question for the host); every other
-  comment with a word or a digit is the host's, with a `hint` when the
-  reader sensed displeasure; a bare emoji hears `_CAMPAIGN_ACK_POOL`.
-  `_campaign_context` (the reading) and `_campaign_turn_context` (run_turn,
-  with the post's identity so a pair of their own can be priced from the
-  hub) brief the host: welcome by name and title, confirm and SAVE, the rule
-  in one line as the caption gives it, invite them to do what the caption
-  asks, never an apology or 'something went wrong'; A SALE WITHOUT
-  MISREPRESENTING THE GIFT — a price ask, a pair of their own, more than
-  one, not clergy, another item — served from the hub in the same reply
-  with the gift stated as separate. Engine: no free priced path, no post
-  image, no identity recorded from a host's reply; the inbox opens only on
-  buying words (`_CAMPAIGN_BUY_RE`) and the link rides only when the answer
-  sold that item by its hub name (or a bare price ask); over the cap a
-  buying ask on a trusted identity gets `_CAMPAIGN_SELL_POOL` (the gift
-  stated as separate, the hub's price), everything else the host's
-  thank-you; a question/request or a held draft still promises and routes a
-  person. Tests: `tests/test_campaign_posts.py` (an engine harness with
-  every collaborator faked, 26 tests). Comments: `_person_over_cap` (`meta_comment_person_cap` 6 full
+- **The gifting campaign — the gift is a gift** (2026-09-26, owner: "a visibility
+  and mobilisation campaign gifting one free pair of shoes to a Pastor,
+  Reverend or Bishop — not a voting or competition campaign; one selected
+  recipient receives the shoe completely free and only pays the shipping";
+  then: "stop saying we do not make shoes, hatuuzi viatu. Go to the gift
+  only. Do not digress. That shoe is a gift"). The post context carries the
+  caption WHOLE (`fetch_post_context` → `caption`, 1500 chars, beside the
+  200-char `title`; cache key `meta:postctx:v2:`); `runtime.post_caption` is
+  what the engine and `run_turn` read. `_CAMPAIGN_RE` knows the owner's
+  words (gifting pastors, one selected recipient, completely free, only pays
+  the shipping, giving away, to enter, kampeni, shindano, atapata … bure);
+  soft markers ("campaign", "giving one reverend") count only under a caption
+  that sells nothing. `campaign_is_draw` (raffle, competition, vote, entries)
+  decides the language; otherwise `_campaign_facts` states the gifting
+  framing — never win/winner/lucky/vote/entry/'all the best'; the item is A
+  GIFT AND ONLY A GIFT: never priced, never sold, never disclaimed (never 'we
+  do not sell shoes', never 'hatuuzi viatu'); asked when or how: our team will
+  be selecting one recipient — follow us and watch for the details. The host's
+  brief (`_campaign_context`) carries the owner's own reply as the shape
+  ("Hello Pastor, welcome to Bethany House! 🙏 … Our team will be selecting one
+  recipient for this gift — completely free, you'd only cover the shipping.
+  Follow us and watch for the details on who's been selected. May we have your
+  name, church and town so we can reach you if you're the one chosen?"):
+  welcome by title, the gift in one line, follow us, ask for what the caption
+  asks, confirm and SAVE (capture_contact, save_parish, save_measurements);
+  asked the price or to buy — it is a gift, say so, nothing more; another item
+  THEY bring up may be picked up in one line, never a pivot.
+  `_campaign_turn_context` says the same in the inbox. THE GUARD AND THE
+  REVIEWER SET THE GIFT ASIDE: `domain.gift_terms(caption)` names the
+  do-not-sell words the caption gives away (with kin: shoe → shoes, viatu,
+  sneakers, sandals); `run_turn` computes `_campaign_allow` before the guard
+  (from the comment reading's `campaign`, or the DM's source post) and passes
+  it to `domain.guard_turn(allow=)` (never declined; a paused thread is lifted
+  the moment they write under the gift), to `review_reply(allow=)`
+  (`domain_issues` ignores the gift; `gift_issues` HOLDS a reply that
+  disclaims it — 'hatuuzi', 'we don't sell'), to the reviewer's prompt and
+  the rewrite block. `_host_reading`: spam stays spam; a model negative/mixed
+  keeps only on strict evidence (a legitimacy question is a question for the
+  host); every other comment with a word or a digit is the host's, with a
+  displeasure `hint`. Engine: no free priced path, no post image, no identity
+  recorded, no canned price ever; `_campaign_canned` answers the no-answer
+  paths — `_CAMPAIGN_GIFT_POOL` for a price/buying ask, the question/request
+  acks (a person routed), `_CAMPAIGN_ACK_POOL` for anyone joining in; the
+  inbox opens only when the answer served ANOTHER item by its whole hub name
+  (`_names_exactly` — the bishop's cassock), never 'Order here' for the gift.
+  Tests: `tests/test_campaign_posts.py` (an engine harness with every
+  collaborator faked; the guard and the reviewer under the allowance). Comments: `_person_over_cap` (`meta_comment_person_cap` 6 full
   model replies per person per post per day; the free priced path is decided
   first and never spends it). The prompt's PACING rule; `/api/health`
   `cooling` (economy, cooled, silenced, lifted, duplicate). Switch:

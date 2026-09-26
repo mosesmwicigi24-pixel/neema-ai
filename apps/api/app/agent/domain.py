@@ -168,13 +168,64 @@ def _clean(text: str) -> str:
     return t
 
 
-def off_domain_in(text: str) -> list[str]:
+# ── a campaign's GIFT (owner, 2026-09-26) ────────────────────────────────────
+# "Stop saying we do not make shoes, hatuuzi viatu. That shoe is a gift."
+# Under a post that gifts an item we do not sell — a pair of shoes to one
+# selected pastor — the gift's words are never goods to decline: gift_terms
+# names them from the caption (with their translations and plurals), and every
+# reader here takes `allow` to set them aside.
+_GIFT_KIN: tuple[tuple[str, ...], ...] = (
+    ("shoes", "viatu", "sneakers", "sandals"),
+    ("phone", "phones", "simu", "smartphone", "smartphones", "mobile phone", "mobile phones"),
+    ("laptop", "laptops", "computer", "computers"),
+    ("bicycle", "bicycles", "baiskeli"),
+    ("cow", "cows", "ng'ombe", "ngombe"), ("goat", "goats", "mbuzi"),
+    ("chicken", "chickens", "kuku"), ("pig", "pigs", "nguruwe"),
+    ("rice", "mchele", "wali"), ("maize", "mahindi"), ("sugar", "sukari"), ("flour", "unga"),
+    ("milk", "maziwa"), ("beans", "maharagwe", "maharage"),
+    ("cooking oil", "mafuta ya kupikia"), ("groceries", "cereals", "nafaka"),
+)
+
+
+def _stem(w: str) -> str:
+    """shoes → shoe, sandals → sandal, dresses → dress, viatu → viatu."""
+    w = w.lower()
+    if len(w) > 4 and w.endswith("ies"):
+        return w[:-3] + "y"
+    if len(w) > 4 and w.endswith(("ses", "xes", "zes", "ches", "shes")):
+        return w[:-2]
+    if len(w) > 3 and w.endswith("s") and not w.endswith("ss"):
+        return w[:-1]
+    return w
+
+
+def gift_terms(caption: str | None) -> tuple[str, ...]:
+    """The goods on our do-not-sell list that a campaign's caption gives away,
+    with their kin (shoe → shoes, viatu, sneakers, sandals): the words the
+    guard and the reviewer must never read as goods to decline under it."""
+    cap = " ".join(str(caption or "").split()).lower()
+    if not cap:
+        return ()
+    stems = {_stem(w) for w in re.findall(r"[a-z']+", cap)}
+    out: list[str] = []
+    for words in OFF_DOMAIN.values():
+        for t in words:
+            if t not in out and all(_stem(p) in stems for p in t.split()):
+                out.append(t)
+    for kin in _GIFT_KIN:
+        if any(k in out for k in kin):
+            out.extend(k for k in kin if k not in out)
+    return tuple(out)
+
+
+def off_domain_in(text: str, allow=()) -> list[str]:
     """The goods we do not sell that `text` names, in their own words, in
-    order, once each."""
+    order, once each — a campaign's gift (`allow`) set aside."""
+    skip = {" ".join(str(a or "").split()).lower() for a in (allow or ())}
     out: list[str] = []
     for m in _OFF_RE.finditer(_clean(text)):
         w = " ".join(m.group(0).split())
-        if w not in out:
+        if w not in out and w.lower() not in skip:
             out.append(w)
     return out
 
@@ -204,11 +255,12 @@ def asks(text: str) -> bool:
     return bool(_INTENT_RE.search(t)) or len(t.split()) <= 4
 
 
-def assess(text: str, names=()) -> dict:
+def assess(text: str, names=(), allow=()) -> dict:
     """ONE message read: the goods we do not sell it names, the church words
     it carries, and whether it asks. `off_only` is the whole verdict: it asks
-    for goods we do not sell and nothing church-related."""
-    off = off_domain_in(text)
+    for goods we do not sell and nothing church-related. A campaign's gift
+    (`allow`) is never among the goods."""
+    off = off_domain_in(text, allow)
     church = church_in(text, names)
     a = asks(text)
     return {"off": off, "church": church, "asks": a,
@@ -317,10 +369,11 @@ def declines(text: str) -> bool:
     return bool(_DECLINE_RE.search(text or ""))
 
 
-def treats_as_ours(text: str) -> list[str]:
+def treats_as_ours(text: str, allow=()) -> list[str]:
     """The goods we do not sell that a reply treats as ours — named without a
-    plain decline beside them (asked about, priced, listed in an order)."""
-    goods = off_domain_in(text)
+    plain decline beside them (asked about, priced, listed in an order). A
+    campaign's gift (`allow`) is never among them."""
+    goods = off_domain_in(text, allow)
     if not goods or declines(text):
         return []
     return goods
@@ -425,7 +478,7 @@ async def read_tally(redis) -> dict:
 
 async def guard_turn(redis, *, channel: str, key: str, text: str, transcript: list | None,
                      public_comment: bool = False, swahili: bool = False,
-                     names=()) -> dict | None:
+                     names=(), allow=()) -> dict | None:
     """What the guard does with this message, before the writer sees it:
 
     None — nothing: an ordinary message, or the guard is off.
@@ -437,10 +490,13 @@ async def guard_turn(redis, *, channel: str, key: str, text: str, transcript: li
     """
     if not getattr(settings, "church_goods_guard", True):
         return None
-    a = assess(text, names)
+    a = assess(text, names, allow)
     paused = await is_paused(redis, channel, key)
     if paused:
-        if a["church"] and not a["off"]:
+        # Church goods lift the pause — and so does a campaign post's thread
+        # (owner, 2026-09-26): one paused for "shoes" under the gift is a
+        # guest again the moment they write about the gift.
+        if (a["church"] or allow) and not a["off"]:
             await lift(redis, channel, key)
             await record(redis, "lifted", channel)
             _log.info("guard: pause lifted for %s/%s — they asked for church goods", channel, key)

@@ -324,16 +324,16 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "reassures: Nairobi workshop, worldwide DHL delivery.\n"
         "- CAMPAIGN / GIFTING POSTS (owner, 2026-09-26): a post that gifts an item to "
         "one selected person, runs a draw or a competition is HOSTED, not sold — the "
-        "reading context gives you the campaign's facts. A gifting campaign is not a "
-        "competition or a vote: no 'win', 'winner', 'lucky', 'vote', 'entry', 'all the "
-        "best' — say 'selected', 'the recipient', 'gifting'. Welcome them by name and "
-        "title, confirm what they told you (name, role, church, town, size) and save "
-        "it, say the rule in one line exactly as the caption gives it, invite them to "
-        "do what the caption asks, and never state a date, a count, a criterion or a "
-        "mechanism the caption does not. A wish to buy — the price, a pair of their "
-        "own, more than one, another item — is served from the hub in the same reply, "
-        "with the gift stated as separate. Never a complaint line, an apology or "
-        "'something went wrong' at someone joining in.\n"
+        "reading context gives you the campaign's facts and the shape of the reply. "
+        "The item in such a post is a GIFT and only a gift: never priced, never sold, "
+        "never disclaimed — never 'we do not sell shoes', never 'hatuuzi viatu' — the "
+        "church-goods rule does not apply to it; speak of the gift only and do not "
+        "digress. A gifting campaign is not a competition or a vote: no 'win', "
+        "'winner', 'lucky', 'vote', 'entry', 'all the best' — say 'selected', 'the "
+        "recipient', 'gift'. Welcome them by name and title, confirm and save what they "
+        "told you, the gift in one line, invite them to follow us, and ask for what the "
+        "caption asks so we can reach them if chosen. Never a complaint line, an apology "
+        "or 'something went wrong' at someone joining in.\n"
         "- WHEN THE POST IS NOT A PRODUCT — a journey, a milestone, an "
         "announcement, a celebration, a greeting, a thank-you (the caption tells "
         "you) — you are the HOST, not the shopkeeper. There is no product to "
@@ -1154,7 +1154,7 @@ async def _gate_turn_reply(reply: str, *, user_text: str, transcript: list, tool
                            llm, sys_blocks, redis, db, key: str, post_product: str = "",
                            swahili: bool = False, fx: dict | None = None,
                            closer: bool = False, tools: list | None = None,
-                           greeting: bool = False) -> tuple[str, list[str], str]:
+                           greeting: bool = False, allow: tuple = ()) -> tuple[str, list[str], str]:
     """DOUBLE VERIFICATION (owner, 2026-09-25: "change from gating to double
     verifying"). Every reply is read twice — by the rules and by the reviewer
     — and the reply that goes out is the best VERIFIED draft:
@@ -1193,7 +1193,7 @@ async def _gate_turn_reply(reply: str, *, user_text: str, transcript: list, tool
             user_text, text, seen, post_product=post_product, currency=currency,
             known_figures=known, redis=redis, transcript=transcript, tool_results=tool_log,
             mode=mode, known_text=known_text, fx=fx,
-            model_review=not (plain and _rv.plain_draft(text, seen)))
+            model_review=not (plain and _rv.plain_draft(text, seen)), allow=allow)
 
     v1 = await _verdict(reply)
     if v1["ok"]:
@@ -1205,7 +1205,7 @@ async def _gate_turn_reply(reply: str, *, user_text: str, transcript: list, tool
     if any("asked for" in i for i in issues) or not seen:
         await _facts_for_ask(ctx, user_text, tool_log)
     block = _rv.rewrite_block(issues, reply, seen, currency, tool_log, mode=mode, fx=fx,
-                              comment=user_text)
+                              comment=user_text, allow=allow)
     second, v2 = "", None
     # The rewrite rides the loop's own cache: the SAME tools and the same
     # system blocks make its prefix the one the turn already wrote (tools →
@@ -1423,6 +1423,25 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     except Exception:
         pass
 
+    # THE GIFT IS A GIFT (owner, 2026-09-26: "stop saying we do not make
+    # shoes, hatuuzi viatu — that shoe is a gift"): under a campaign post the
+    # gift's words are set aside for the church-goods guard and the reviewer,
+    # so a pair of shoes gifted to one pastor is never declined as goods we
+    # do not sell — in the thread, and in the inbox it opens.
+    _campaign_allow: tuple = ()
+    try:
+        _cap0 = str((comment_reading or {}).get("campaign") or "") if public_comment else ""
+        if not _cap0 and (is_meta or is_tiktok) and source_post and source_post.get("post_id"):
+            from app.routers.meta_webhook import _post_context as _pc0
+            _pctx0 = await _pc0(str(source_post["post_id"]), redis=redis,
+                                channel=("instagram" if channel == "instagram" else "facebook")) or {}
+            _c0 = post_caption(_pctx0)
+            _cap0 = _c0 if _c0 and is_campaign_post(_c0) else ""
+        if _cap0:
+            from app.agent import domain as _dom0
+            _campaign_allow = tuple(_dom0.gift_terms(_cap0))
+    except Exception:
+        _campaign_allow = ()
     # WE SELL CHURCH GOODS ONLY (owner, 2026-09-25; agent/domain): an ask for
     # goods we do not sell — beans, phones, loans — is declined in one line
     # and the thread is paused for twelve hours (silence, the team flagged),
@@ -1448,7 +1467,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             _verdict = await _dom.guard_turn(
                 redis, channel=channel, key=key, text=user_text or "", transcript=messages,
                 public_comment=public_comment, swahili=looks_swahili(user_text or ""),
-                names=_guard_names)
+                allow=_campaign_allow, names=_guard_names)
         except Exception as exc:
             _log.warning("church-goods guard failed open for %s/%s: %s", channel, key, exc)
             _verdict = None
@@ -1645,8 +1664,9 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         # slug/alias, image fingerprint vs our own catalogue photos) resolves
         # and records it before the model ever has to read the frame.
         try:
-            _known = await _post_identity(redis, channel,
-                                          {**pctx, "post_id": source_post.get("post_id") or ""})
+            # A campaign post has no product to identify: its item is a gift.
+            _known = {} if _campaign_post else await _post_identity(
+                redis, channel, {**pctx, "post_id": source_post.get("post_id") or ""})
         except Exception:
             _known = {}
         _gate_post_product = str((_known or {}).get("name") or "")
@@ -1663,7 +1683,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         if _campaign_post:
             # A CAMPAIGN POST (owner, 2026-09-26): the host's facts ride with
             # the post, and its item is priced only for a pair of their own.
-            line = _campaign_turn_context(_campaign_cap, source_post.get("comment") or "", _known)
+            line = _campaign_turn_context(_campaign_cap, source_post.get("comment") or "")
         else:
             if _known.get("name"):
                 from app.services.post_catalog import identity_trusted as _trusted_id
@@ -1864,7 +1884,8 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                 llm=llm, sys_blocks=sys_blocks, redis=redis, db=db, key=key,
                 post_product=_gate_post_product, swahili=looks_swahili(user_text or ""),
                 fx=_fx_rates, closer=is_closer(user_text or ""), tools=tools,
-                greeting=bool(_GREETING_RE.match((user_text or "").strip())))
+                greeting=bool(_GREETING_RE.match((user_text or "").strip())),
+                allow=_campaign_allow)
         except Exception as exc:
             _log.warning("reply gate failed open for %s: %s", key, exc)
     if turn_facts is not None:
@@ -3013,44 +3034,43 @@ def campaign_is_draw(caption: str | None) -> bool:
     return bool(_DRAW_RE.search(" ".join(str(caption or "").split())))
 
 
-def _campaign_turn_context(caption: str, comment: str, known: dict | None) -> str:
-    """run_turn's source-post line for a campaign post (owner, 2026-09-26): the
-    facts the host states, the post's item named so a pair of their own can be
-    priced from the hub — never as the gift — and the host's way of answering."""
+def _campaign_turn_context(caption: str, comment: str) -> str:
+    """run_turn's source-post line for a campaign post (owner, 2026-09-26):
+    the gift's facts, and the host's way of answering in the inbox."""
     cap = " ".join(str(caption or "").split())[:700]
     line = f'(Context — this customer reached us from our Facebook/Instagram post "{cap}"'
     if comment:
         line += f'; their comment there was: "{comment}"'
-    line += ". " + _campaign_facts(caption)
-    name = str((known or {}).get("name") or "").strip()
-    if name:
-        line += (f" The item in this post is our {name} — search_catalog it and price it "
-                 "only when they want one of their own; never as the gift.")
-    line += (" You are the HOST here as in the thread: confirm and save what they tell "
-             "you (capture_contact; the church with save_parish; a size with "
-             "save_measurements), say the rule in one "
-             "line as the caption gives it, and serve any wish to buy — this item, or "
-             "another — from the hub, saying plainly the gift is separate. Never an "
+    line += (". " + _campaign_facts(caption)
+             + " You are the HOST here as in the thread: welcome them by title, confirm and "
+             "save what they tell you (capture_contact; the church with save_parish; a size "
+             "with save_measurements), say the gift in one line and how to be considered, as "
+             "the caption says. Asked the price, or to buy it: it is a gift — say so warmly, "
+             "and nothing more about it. Another item THEY bring up (a cassock, a collar) may "
+             "be served from the hub in one warm line; never a pivot from the gift. Never an "
              "apology, never \"something went wrong\", never a generic hold.)")
     return line
 
 
 def _campaign_facts(caption: str | None) -> str:
     """The campaign's facts as the host states them — the owner's framing
-    (2026-09-26) unless the caption itself runs a draw."""
+    (2026-09-26: "that shoe is a gift. Go to the gift only. Do not digress")."""
     if campaign_is_draw(caption):
         return ("THIS POST RUNS A CAMPAIGN — a draw or a competition by its own caption: "
                 "use only the caption's words for how it works, and never a date, a count, "
-                "a criterion or a winner it does not state.")
-    return ("THIS POST IS A GIFTING CAMPAIGN — not a competition, a raffle or a vote: one "
-            "selected recipient (the caption says who) receives the item completely free, "
-            "paying only the shipping or delivery (unless the caption says otherwise). "
-            "Never say win, winner, prize, lucky, "
-            "vote, contest, entry, 'good luck' or 'all the best' — say 'selected', 'the "
-            "recipient', 'gifting'. Never a date, a count, a criterion or a mechanism the "
-            "caption does not state; asked when or how the recipient is chosen and the "
-            "caption is silent, say our team makes the selection and will reach the "
-            "recipient — no date.")
+                "a criterion or a winner it does not state. The item in it is a gift: never "
+                "priced, never sold, never disclaimed.")
+    return ("THIS POST IS A GIFTING CAMPAIGN — not a competition, a raffle or a vote: our "
+            "team will be selecting one recipient (the caption says who) for this gift — "
+            "completely free, they only cover the shipping (unless the caption says "
+            "otherwise). THE ITEM IN THIS POST IS A GIFT AND ONLY A GIFT: never priced, never "
+            "sold, never disclaimed — never say we do not sell, make or stock it, never "
+            "'hatuuzi viatu', never that it is not ours; the church-goods rule does not apply "
+            "to it. Speak of the gift only, and do not digress. Never say win, winner, prize, "
+            "lucky, vote, contest, entry, 'good luck' or 'all the best' — say 'selected', "
+            "'the recipient', 'gift'. Never a date, a count or a criterion the caption does "
+            "not state; asked when or how, say our team will be selecting one recipient — "
+            "follow us and watch for the details on who's been selected.")
 
 
 def post_caption(pctx: dict | None) -> str:
@@ -3110,27 +3130,27 @@ def _host_reading(reading: dict, text: str) -> dict:
 
 
 def _campaign_context(caption: str) -> str:
-    """The host's brief under a campaign post (owner, 2026-09-26): the facts,
-    how to answer, and how a sale is served without misrepresenting the gift."""
+    """The host's brief under a campaign post (owner, 2026-09-26): the gift's
+    facts, the owner's own reply as the shape, and what never to say."""
     cap = " ".join(str(caption or "").split())[:700]
     return ("(THIS POST IS A CAMPAIGN — its caption: \"" + cap + "\". You are its HOST, "
             "speaking for Bethany House — not a shopkeeper at a stall. " + _campaign_facts(caption) + " "
-            "HOW TO ANSWER: welcome them by name and title; confirm what they told you — "
-            "name, role, church, town, size — and SAVE it this turn (capture_contact for the "
-            "name, role and town; the church with save_parish; a shoe or garment size with "
-            "save_measurements); say the rule in ONE line exactly as "
-            "the caption gives it; if they have not yet given what the caption asks for, "
-            "invite them to, warmly; be specific to their words, confident, one question at "
-            "most; never a complaint line, never an apology, never \"something went wrong\", "
-            "never \"hold on\". "
-            "A SALE, WITHOUT MISREPRESENTING THE GIFT — the gift is separate from buying: when "
-            "they ask the price, want a pair now or in their size, are not clergy, want more "
-            "than one, or mention another item they plan to buy (a cassock, a collar), serve "
-            "them as a buyer in the same reply — search_catalog it, give the hub's price, and "
-            "invite them to message us to order — saying plainly the gift is separate ('this "
-            "pair is our gift to one selected minister; if you'd like your own now, it is [the "
-            "hub's price] — message us and we'll sort your size'). Never push a purchase on "
-            "someone simply joining in: one soft line at most, and only where it fits.)")
+            "THE SHAPE OF YOUR REPLY — the owner's own (2026-09-26): 'Hello Pastor, welcome to "
+            "Bethany House! 🙏 We're delighted to have you here. Our team will be selecting one "
+            "recipient for this gift — completely free, you'd only cover the shipping. Follow us "
+            "and watch for the details on who's been selected. May we have your name, church and "
+            "town so we can reach you if you're the one chosen?' — welcome them by name and "
+            "title; the gift in one line; the invitation to follow us; then ask, warmly, for "
+            "whatever the caption asks that they have not yet given (name, church, town, size), "
+            "so we can reach them if they are the one chosen. What they have given, confirm and "
+            "SAVE this turn (capture_contact for the name, role and town; the church with "
+            "save_parish; a shoe or garment size with save_measurements). Be specific to their "
+            "words, confident, one question at most, in their language. Asked the price, or to "
+            "buy it: it is a gift — say so warmly, restate how to be considered, and nothing "
+            "else about it. Another item THEY bring up (a cassock, a collar) may be picked up "
+            "in one warm line with an invitation to message us — never a pivot from the gift. "
+            "Never a complaint line, never an apology, never \"something went wrong\", never "
+            "\"hold on\".)")
 
 
 def _reading_context(reading: dict | None) -> str:
@@ -3653,15 +3673,33 @@ _SW_CAMPAIGN_ACK_POOL = [
     "Asante kwa kujiunga nasi{name} 🙏 Tumepokea ujumbe wako, na tunafurahi uko nasi 💛",
     "Mungu akubariki{name}! 🙏 Tumeona ujumbe wako — asante kwa kuwa sehemu ya hili 💛",
 ]
-# A buying ask under a campaign post with no model answer, on a trusted
-# identity: the gift stated as separate, then the hub's price and the door.
-_CAMPAIGN_SELL_POOL = [
-    "Thank you{name} 🙏 {product} in this post is our gift to one selected recipient. If you'd like your own now, it is {price}: message us with your size and we'll sort it out 💛",
-    "Bless you{name}! 🙏 {product} here goes as a gift to one selected recipient. If you'd like your own right away, it is {price} — message us with your size and we'll take it from there 💛",
+# A price or buying ask under a campaign with no model answer: the gift's
+# line — never a price, never "we do not sell it" (owner, 2026-09-26: "that
+# shoe is a gift. Go to the gift only").
+_CAMPAIGN_GIFT_POOL = [
+    "Thank you{name} 🙏 This is a gift, not a sale — our team will be selecting one recipient, completely free, with only the shipping to cover. Share what the post asks for, so we can reach you if you're the one chosen 💛",
+    "Bless you{name}! 🙏 This one is a gift — one selected recipient receives it completely free and only covers the shipping. Follow us and share what the post asks for, so we can reach you if you're chosen 💛",
 ]
-_SW_CAMPAIGN_SELL_POOL = [
-    "Asante{name} 🙏 {product} katika chapisho hili ni zawadi yetu kwa mtu mmoja atakayechaguliwa. Ukitaka yako sasa, ni {price}: tutumie ujumbe na size yako na tutakuhudumia 💛",
+_SW_CAMPAIGN_GIFT_POOL = [
+    "Asante{name} 🙏 Hii ni zawadi, si mauzo — timu yetu itamchagua mpokeaji mmoja, bure kabisa, atalipia usafirishaji tu. Tuandikie kile chapisho linauliza ili tukufikie ukichaguliwa 💛",
 ]
+
+
+def _campaign_canned(comment_text: str, kind: str, ask: str, name_tag: str, seed: str,
+                     swahili: bool = False) -> str:
+    """The thread's line under a campaign post when no model answer goes out
+    (over the cap, a failed turn, a held draft): the gift's line for a price or
+    buying ask, a person promised for a question or a request, the host's
+    thanks for anyone joining in — never a price, never "which item?", never
+    "we do not sell it" (owner, 2026-09-26)."""
+    if _CAMPAIGN_BUY_RE.search(comment_text or ""):
+        return _pick(_SW_CAMPAIGN_GIFT_POOL if swahili else _CAMPAIGN_GIFT_POOL, seed).replace("{name}", name_tag)
+    if kind == "request":
+        return (_pick(_SW_REQUEST_ACK_POOL if swahili else _REQUEST_ACK_POOL, seed)
+                .replace("{name}", name_tag).replace("{ask}", (ask or "").strip() or "what you asked for"))
+    if kind == "question":
+        return _pick(_SW_QUESTION_ACK_POOL if swahili else _QUESTION_ACK_POOL, seed).replace("{name}", name_tag)
+    return _pick(_SW_CAMPAIGN_ACK_POOL if swahili else _CAMPAIGN_ACK_POOL, seed).replace("{name}", name_tag)
 
 
 # ── A SET IS PRICED AS ITS TOTAL (owner, 2026-09-21) ─────────────────────────
@@ -3836,16 +3874,9 @@ def _comment_public_reply(answer: str, dm_sent: bool, name_tag: str, seed: str,
         return answer
     if campaign:
         # A CAMPAIGN POST (owner, 2026-09-26): with no model answer the thread
-        # hears the host's thank-you — never "which item?", never a pitch. A
-        # BUYING ask on a trusted identity is served with the gift stated as
-        # separate and the hub's price; a question or a request still promises
-        # a person.
-        if product_known and price_text and product_name:
-            _pn = product_name.strip()
-            subject = _pn if swahili else f"the {_pn}"
-            return (_pick(_SW_CAMPAIGN_SELL_POOL if swahili else _CAMPAIGN_SELL_POOL, seed)
-                    .replace("{name}", name_tag).replace("{product}", subject)
-                    .replace("{price}", price_text))
+        # hears the host — never a price, never "which item?", never a pitch
+        # (the engine refines this with _campaign_canned, which sees the
+        # comment's words); a question or a request still promises a person.
         if kind == "request":
             return (_pick(_SW_REQUEST_ACK_POOL if swahili else _REQUEST_ACK_POOL, seed)
                     .replace("{name}", name_tag).replace("{ask}", (ask or "").strip() or "what you asked for"))
@@ -3981,6 +4012,15 @@ async def _storefront_product_link(redis, channel: str, ext: str, product: dict)
 
 def _post_product_key(channel: str, post_id: str) -> str:
     return f"postprod:{channel}:{post_id}"
+
+
+def _names_exactly(text: str, product_name: str) -> bool:
+    """Does the text carry the product's WHOLE hub name? "the Purple Cassock
+    is KES 12,000" names the Purple Cassock; a host's "share your shoe size"
+    does not name the Clergy Oxford Shoe (owner, 2026-09-26: the gift never
+    travels as "Order here")."""
+    n = " ".join(str(product_name or "").lower().split())
+    return bool(n) and n in " ".join(str(text or "").lower().split())
 
 
 def _names_product(text: str, product_name: str) -> bool:
@@ -4732,9 +4772,10 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     kind, severity, ask = reading["kind"], int(reading.get("severity") or 0), reading.get("ask") or ""
     plan = plan_comment_actions(intent)
     if campaign and intent == "high":
-        # An entrant hears the host in public; their inbox opens only when
-        # they speak of buying (owner, 2026-09-26: mobilisation, not a pitch).
-        plan = dict(plan, dm=bool(_CAMPAIGN_BUY_RE.search(comment_text)))
+        # The host answers in public; the inbox opens only when the answer
+        # served another item they brought up (owner, 2026-09-26: the gift is
+        # a gift — mobilisation, not a pitch).
+        plan = dict(plan, dm=False)
 
     # ── LIVE BROADCAST ───────────────────────────────────────────────────────
     # During a live stream the room is full of people ARRIVING. classify_comment
@@ -4980,15 +5021,10 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # post: Facebook suppresses the reach of link-carrying posts and comments,
     # so the private reply is the ONLY place the storefront link may travel.
     dm_sent = False
-    # An entry's inbox stays closed (owner, 2026-09-26: mobilisation, not a
-    # pitch) — the link travels only to one who spoke of buying, and only when
-    # it is the item the ANSWER sold them by its hub name (or they asked its
-    # price outright). The bishop who loves the shoe but plans a cassock is
-    # never handed "Order here" for the shoe.
-    if campaign and not plan["dm"]:
-        product_link = ""
-    elif campaign and product_link and not (
-            is_bare_price_ask(prompt_text) or _names_product(answer, matched.get("name") or "")):
+    # Under a campaign the inbox opens only for ANOTHER item the answer served
+    # by its hub name (the bishop's cassock); the gift never travels as
+    # "Order here" (owner, 2026-09-26: that shoe is a gift).
+    if campaign and not (product_link and _names_exactly(answer, matched.get("name") or "")):
         product_link = ""
     # Goodwill opens no DM — unless the post sells a product, where the link is
     # the most useful thing we can hand them.
@@ -5035,8 +5071,6 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
         if _other and not held_issues:
             held_issues = _other
         asks_it = is_bare_price_ask(prompt_text) or _names_product(prompt_text, product_name)
-        if campaign and _CAMPAIGN_BUY_RE.search(prompt_text):
-            asks_it = True                  # "I want two pairs", "is it available in 44?"
         if held_issues:
             product_name = ""
             matched = {}
@@ -5048,13 +5082,11 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
             matched = {k: v for k, v in matched.items()
                        if k not in ("price", "price_kes", "price_usd")}
         if campaign:
-            # THE GIFT IS NEVER CONFUSED WITH A PURCHASE (owner, 2026-09-26):
-            # the canned line prices the pair only for a buying ask on a
-            # trusted identity (and then says the gift is separate); every
-            # other entry hears the host's thank-you — never "which item?".
+            # THE GIFT IS NEVER PRICED OR SOLD (owner, 2026-09-26: "that shoe
+            # is a gift"): no canned line names or prices the post's item, and
+            # "which item?" is never asked — the host's lines answer.
             ask_which = False
-            if not (_trusted and asks_it and product_name and not held_issues):
-                product_name, matched = "", {}
+            product_name, matched = "", {}
     # The no-model line names the item AS SEEN when our records describe it —
     # a SET keeps the hub's name: "This is our Cassock Set" (owner's shape).
     if product_name and _known_product.get("seen") \
@@ -5111,14 +5143,17 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
                                         swahili=swahili, made_to_order=made_to_order,
                                         ask_which=ask_which, set_items=set_items,
                                         bundle=is_bundle, kind=kind, ask=ask)
+    if campaign and not answer:
+        # The host's lines, by what they wrote (owner, 2026-09-26).
+        public_text = _campaign_canned(comment_text, kind, ask, name_tag, ext, swahili)
     if held_issues and not answer:
         # THE GATE BEFORE POSTING (owner, 2026-09-25): no verified answer —
         # the thread hears an honest holding line, never a guess.
         public_text = _pick(_SW_VERIFY_HOLD_POOL if swahili else _VERIFY_HOLD_POOL, ext).replace("{name}", name_tag)
-        if campaign and not _CAMPAIGN_BUY_RE.search(comment_text):
-            # An entry whose draft was held: the host's thanks, and a colleague
-            # (below) — never "the exact item and price" at an entry.
-            public_text = _pick(_SW_CAMPAIGN_ACK_POOL if swahili else _CAMPAIGN_ACK_POOL, ext).replace("{name}", name_tag)
+        if campaign:
+            # A held draft under a campaign: the host's lines, and a colleague
+            # (below) — never "the exact item and price".
+            public_text = _campaign_canned(comment_text, kind, ask, name_tag, ext, swahili)
     public_text = plain_public_voice(public_text)
 
     posted = await _post_public(public_text)
@@ -5130,7 +5165,8 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     if not answer and intent != "goodwill" and not ask_which and not (product_name and price_text):
         # Under a CAMPAIGN post an entry over the cap needs no colleague — the
         # host's thank-you is the answer; a question or a request still does.
-        if not campaign or held_issues or kind in ("request", "question"):
+        if not campaign or held_issues or (kind in ("request", "question")
+                                            and not _CAMPAIGN_BUY_RE.search(comment_text)):
             try:
                 await _route_comment_to_human(
                     channel, ext, comment_text,
