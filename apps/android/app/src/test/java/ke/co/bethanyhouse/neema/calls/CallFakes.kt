@@ -1,5 +1,6 @@
 package ke.co.bethanyhouse.neema.calls
 
+import ke.co.bethanyhouse.neema.core.api.UploadFile
 import ke.co.bethanyhouse.neema.core.model.Call
 import ke.co.bethanyhouse.neema.core.model.CallOffer
 import ke.co.bethanyhouse.neema.core.model.IceConfig
@@ -32,6 +33,8 @@ class FakeCallApi : CallApi {
     /** callId to (filename, mime type, bytes read from the streamed file). */
     val uploads = mutableListOf<Pair<String, Triple<String, String, Int>>>()
     var lastAnswerSdp: String? = null
+    /** The last recording was handed over as a streamed file, not bytes in memory. */
+    var lastUploadStreamed: Boolean? = null
     var lastConnect: Triple<String, String, String?>? = null
 
     override suspend fun list(): List<Call> { log += "list"; listError?.let { throw it }; return calls }
@@ -50,8 +53,8 @@ class FakeCallApi : CallApi {
         return connectId
     }
     override suspend fun requestPermission(to: String) { log += "request-permission $to"; permissionError?.let { throw it } }
-    override suspend fun uploadRecording(callId: String, file: File, filename: String, mimeType: String) {
-        log += "recording $callId"; uploads += callId to Triple(filename, mimeType, file.length().toInt())
+    override suspend fun uploadRecording(callId: String, file: UploadFile) {
+        log += "recording $callId"; lastUploadStreamed = file.bytes == null; uploads += callId to Triple(file.filename, file.mimeType, file.length.toInt())
     }
 }
 

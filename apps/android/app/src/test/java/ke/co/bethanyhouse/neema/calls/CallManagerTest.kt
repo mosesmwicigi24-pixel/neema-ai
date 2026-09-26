@@ -41,11 +41,12 @@ class CallManagerTest {
         val audio = FakeAudio()
         val frames = MutableSharedFlow<JsonObject>(extraBufferCapacity = 64)
         val foreground = MutableStateFlow(true)
+        val connected = MutableStateFlow(true)
         var signedIn = true
         var mic = true
         private val d = StandardTestDispatcher(scope.testScheduler)
         val calls = CallManager(
-            api = api, events = frames, scope = scope.backgroundScope, foreground = foreground,
+            api = api, events = frames, connected = connected, scope = scope.backgroundScope, foreground = foreground,
             signedInFn = { signedIn }, media = media, ringer = ringer, audio = audio,
             micGranted = { mic }, main = d, io = d, now = { base + scope.testScheduler.currentTime },
         ).also { it.start() }
@@ -173,11 +174,20 @@ class CallManagerTest {
         assertEquals(0, r.api.log.count { it == "list" })
         advanceTimeBy(2); runCurrent()
         assertEquals(1, r.api.log.count { it == "list" })
+        advanceTimeBy(5_000); runCurrent()
         r.ring()
-        advanceTimeBy(12_000); runCurrent()   // the idle wait already running finishes
+        // The 12s wait already running is dropped: the next poll is 2.5s after the ring.
+        advanceTimeBy(2_499); runCurrent()
+        assertEquals(1, r.api.log.count { it == "list" })
+        advanceTimeBy(2); runCurrent()
+        assertEquals(2, r.api.log.count { it == "list" })
+        advanceTimeBy(2_500); runCurrent()
+        assertEquals(3, r.api.log.count { it == "list" })
+        // Back to idle: 12s again.
+        r.calls.hangup(); r.settle(); advanceTimeBy(1_001); runCurrent()
         val n = r.api.log.count { it == "list" }
-        advanceTimeBy(2_501); runCurrent()
-        assertEquals(n + 1, r.api.log.count { it == "list" })
+        advanceTimeBy(10_000); runCurrent()
+        assertEquals(n, r.api.log.count { it == "list" })
     }
 
     @Test fun pollCatchesAFreshRingingCallOnly() = rig { r ->
@@ -408,6 +418,7 @@ class CallManagerTest {
         assertEquals("wacid.1.m4a", file.first)
         assertEquals("audio/mp4", file.second)
         assertEquals("the whole recording, streamed from disk", 48_000, file.third)
+        assertEquals("one upload path: core api.calls.uploadRecording(UploadFile.of(file))", true, r.api.lastUploadStreamed)
         assertFalse("temp file removed", rec.file.exists())
     }
 
@@ -606,4 +617,121 @@ class CallManagerTest {
         assertEquals(CallPhase.Idle, r.state.phase)
     }
 
+    // ── Round 4: missed frames, stale signals, calls that overlap ────────────
+    @Test fun socketReconnectPollsAtOnce() = rig { r ->
+        r.connected.value = false; r.settle()
+        r.api.calls = listOf(Call(id = "k1", callId = "wacid.9", waId = "254712345678", status = "ringing", startedAt = r.at(4_000)))
+        advanceTimeBy(3_000); runCurrent()
+        assertEquals(CallPhase.Idle, r.state.phase)
+        r.connected.value = true; r.settle()
+        assertEquals("caught up on reconnect, not on the next 12s tick", CallPhase.Ringing, r.state.phase)
+        assertEquals("wacid.9", r.state.callId)
+    }
+
+    @Test fun comingBackToTheForegroundPollsAtOnce() = rig { r ->
+        r.foreground.value = false; r.settle()
+        val before = r.api.log.count { it == "list" }
+        r.foreground.value = true; r.settle()
+        assertEquals(before + 1, r.api.log.count { it == "list" })
+        // Signed out: nothing is fetched.
+        r.signedIn = false
+        r.foreground.value = false; r.settle(); r.foreground.value = true; r.settle()
+        r.connected.value = false; r.settle(); r.connected.value = true; r.settle()
+        assertEquals(before + 1, r.api.log.count { it == "list" })
+    }
+
+    @Test fun aColleaguesOutboundCallNeverRingsThisPhone() = rig { r ->
+        // calls_connect logs the outbound call as status "ringing" too.
+        r.api.calls = listOf(Call(id = "k1", callId = "wacid.out", waId = "254733444555", direction = "outbound", status = "ringing", startedAt = r.at(2_000)))
+        r.calls.pollOnce(); r.settle()
+        assertEquals(CallPhase.Idle, r.state.phase)
+        assertEquals(0, r.ringer.ringStarts)
+    }
+
+    @Test fun callEndedForACallNeverSeenIsHarmlessAndBlocksALateRing() = rig { r ->
+        r.raw("""{"type": "call_ended", "call_id": "wacid.ghost", "status": "COMPLETED", "duration": null}""")
+        assertEquals(CallPhase.Idle, r.state.phase)
+        assertTrue("no request, no ringtone", r.api.log.isEmpty() && r.ringer.ringStarts == 0)
+        // The incoming_call frame arrives after its own end (out of order).
+        r.ring("wacid.ghost")
+        assertEquals(CallPhase.Idle, r.state.phase)
+        // A lagging "ringing" row for it doesn't ring either.
+        r.api.calls = listOf(Call(id = "k1", callId = "wacid.ghost", waId = "254712345678", status = "ringing", startedAt = r.at(3_000)))
+        r.calls.pollOnce(); r.settle()
+        assertEquals(CallPhase.Idle, r.state.phase)
+        // Other calls are unaffected.
+        r.ring("wacid.2")
+        assertEquals(CallPhase.Ringing, r.state.phase)
+    }
+
+    @Test fun duplicatedAndBurstFramesRingOnce() = rig { r ->
+        r.ring(); r.ring(); r.ring()
+        assertEquals(1, r.ringer.ringStarts)
+        r.frame("type" to "call_ended", "call_id" to "wacid.1")
+        r.frame("type" to "call_ended", "call_id" to "wacid.1")
+        assertEquals(CallPhase.Ended, r.state.phase)
+        advanceTimeBy(1_001); runCurrent()
+        assertEquals(CallPhase.Idle, r.state.phase)
+        r.ring()   // a duplicate that arrives after the end
+        assertEquals(CallPhase.Idle, r.state.phase)
+    }
+
+    @Test fun callEndedWhileConnectingEndsTheCall() = rig { r ->
+        r.ring(); r.media.gatherAtOnce = false
+        r.calls.answer(); r.settle()
+        assertEquals(CallPhase.Connecting, r.state.phase)
+        r.frame("type" to "call_ended", "call_id" to "wacid.1")
+        assertEquals(CallPhase.Ended, r.state.phase)
+        assertTrue(r.media.peer.closed)
+        assertFalse(r.audio.inCall)
+    }
+
+    @Test fun aSecondCallDuringALiveCallIsIgnoredThenRingsWhenItEnds() = rig { r ->
+        r.ring("wacid.1"); r.calls.answer(); r.settle()
+        r.media.peer.onEvent(PeerEvent.Connected); r.settle()
+        assertEquals(CallPhase.InCall, r.state.phase)
+        r.api.calls = listOf(Call(id = "k2", callId = "wacid.2", waId = "254799999999", name = "Sr. Agnes Wairimu", status = "ringing", startedAt = r.at(1_000)))
+        r.ring("wacid.2", "254799999999", "Sr. Agnes Wairimu")
+        // The web's startRinging() returns when not idle: the live call carries on, no ringtone over it.
+        assertEquals(CallPhase.InCall, r.state.phase)
+        assertEquals("wacid.1", r.state.callId)
+        assertEquals(1, r.ringer.ringStarts)
+        assertTrue(r.ringer.posted.isEmpty())
+        r.calls.hangup(); r.settle()
+        val polls = r.api.log.count { it == "list" }
+        advanceTimeBy(1_001); runCurrent()
+        assertEquals("looked for again the moment the phone is free", polls + 1, r.api.log.count { it == "list" })
+        assertEquals(CallPhase.Ringing, r.state.phase)
+        assertEquals("wacid.2", r.state.callId)
+        assertEquals("Sr. Agnes Wairimu", r.state.name)
+    }
+
+    @Test fun aSecondCallThatGaveUpDuringTheLiveCallDoesNotRing() = rig { r ->
+        r.ring("wacid.1"); r.calls.answer(); r.settle()
+        r.media.peer.onEvent(PeerEvent.Connected); r.settle()
+        r.ring("wacid.2")
+        r.api.calls = listOf(Call(id = "k2", callId = "wacid.2", status = "missed", startedAt = r.at(20_000)))
+        r.calls.hangup(); r.settle(); advanceTimeBy(1_001); runCurrent()
+        assertEquals(CallPhase.Idle, r.state.phase)
+    }
+
+    @Test fun ringingGivesUpAfterTwoMinutesWhenEveryEndSignalWasLost() = rig { r ->
+        r.api.listError = ApiException(503, "GET", "/admin/calls", "{}")   // polls fail too
+        r.ring()
+        advanceTimeBy(119_000); runCurrent()
+        assertEquals(CallPhase.Ringing, r.state.phase)
+        advanceTimeBy(1_001); runCurrent()
+        assertEquals(CallPhase.Idle, r.state.phase)
+        assertFalse(r.ringer.ringing); assertFalse(r.ringer.showing)
+        assertFalse("nothing to terminate: the caller is long gone", r.api.log.any { it.startsWith("terminate") })
+        r.ring()
+        assertEquals("cooldown: a replayed frame doesn't re-ring it", CallPhase.Idle, r.state.phase)
+    }
+
+    @Test fun theRingTimeoutDoesNotTouchAnAnsweredCall() = rig { r ->
+        r.ring(); r.calls.answer(); r.settle()
+        r.media.peer.onEvent(PeerEvent.Connected); r.settle()
+        advanceTimeBy(125_000); runCurrent()
+        assertEquals(CallPhase.InCall, r.state.phase)
+    }
 }
