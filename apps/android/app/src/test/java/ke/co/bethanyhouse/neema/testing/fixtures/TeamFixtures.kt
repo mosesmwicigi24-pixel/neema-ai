@@ -98,6 +98,8 @@ object TeamFixtures {
      */
     fun agentsWithMe(
         role: String = "admin", superuser: Boolean = true, customPermissions: List<String>? = null,
+        /** A custom role on the signed-in agent: its id, name, colour and permissions, as list_agents joins them. */
+        customRole: Triple<String, String, String>? = null, rolePermissions: List<String>? = null,
     ) = """[
       {"id":"${Fixtures.AGENT3_ID}","name":"Brian Otieno","email":"brian@bethanyhouse.co.ke","role":"readonly","is_available":false,
        "is_superuser":false,"avatar_url":null,"created_at":"${pyTs(60L * 24 * 30)}","last_seen_at":"${pyTs(60L * 26)}","active_convs":0,
@@ -107,7 +109,9 @@ object TeamFixtures {
        "custom_role_id":"sales","custom_permissions":null,"role_name":"Sales","role_color":"#3b82f6","role_permissions":${arr(salesPerms)}},
       {"id":"${Fixtures.ME_ID}","name":"Moses Mwicigi","email":"moses@bethanyhouse.co.ke","role":"$role","is_available":true,
        "is_superuser":$superuser,"avatar_url":null,"created_at":"${pyTs(60L * 24 * 200)}","last_seen_at":"${pyTs(1)}","active_convs":4,
-       "custom_role_id":null,"custom_permissions":${customPermissions?.let { arr(it) } ?: "null"},"role_name":null,"role_color":null,"role_permissions":null},
+       "custom_role_id":${customRole?.let { "\"${it.first}\"" } ?: "null"},"custom_permissions":${customPermissions?.let { arr(it) } ?: "null"},
+       "role_name":${customRole?.let { "\"${it.second}\"" } ?: "null"},"role_color":${customRole?.let { "\"${it.third}\"" } ?: "null"},
+       "role_permissions":${rolePermissions?.let { arr(it) } ?: "null"}},
       {"id":"$AGENT4_ID","name":"Wanjiku Kamau-Ochieng Nyambura","email":"wanjiku.kamau-ochieng.nyambura@bethanyhouse.co.ke","role":"agent",
        "is_available":false,"is_superuser":false,"avatar_url":null,"created_at":"${pyTs(60L * 24 * 10)}","last_seen_at":null,"active_convs":2,
        "custom_role_id":"support","custom_permissions":["view_conversations","reply_conversations","add_notes"],

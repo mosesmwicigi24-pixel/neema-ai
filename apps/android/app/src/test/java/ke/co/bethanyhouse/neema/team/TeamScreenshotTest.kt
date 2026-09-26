@@ -42,20 +42,33 @@ class TeamScreenshotTest : AreaShots() {
     @Test fun rolesTablet() = team(TeamPreview(tab = "roles"), device = Devices.TABLET)
     @Test fun rolesFailedToLoad() = team(TeamPreview(tab = "roles"), f = fake().also { it.on("GET", "/admin/roles", code = 500, body = "{}") })
 
-    // ── Limited permissions ──────────────────────────────────────────────────
-    /** manage_agents without manage_roles: agents only, no Roles tab. */
-    @Test fun agentsWithoutManageRoles() = team(
+    // ── Personas (round 6) ───────────────────────────────────────────────────
+    // AgentsView.tsx tests no permission: whoever reaches Team (the nav needs
+    // manage_agents; a ?view=agents link needs nothing) sees every control.
+
+    /** manage_agents without manage_roles: both tabs, as on the web. */
+    @Test fun personaOverrideNoManageRoles() = team(
+        TeamPreview(tab = "roles"),
         f = fake().also {
             it.on("GET", "/admin/agents", body = TeamFixtures.agentsWithMe("agent", false, listOf("view_conversations", "manage_agents")))
         },
         role = "agent", superuser = false,
     )
 
-    @Test fun noAccess() = team(
+    /** A legacy readonly agent who followed a link: the same screen an admin gets. */
+    @Test fun personaReadonly() = team(
+        f = fake().also { it.on("GET", "/admin/agents", body = TeamFixtures.agentsWithMe("readonly", false)) },
+        role = "readonly", superuser = false,
+    )
+
+    /** A per-agent override emptied: the dialog warns that [] means the base role's defaults. */
+    @Test fun assignRoleEmptyOverride() = team(
+        TeamPreview(dialog = "assign:${TeamFixtures.AGENT4_ID}"),
         f = fake().also {
-            it.on("GET", "/admin/agents", body = TeamFixtures.agentsWithMe("agent", false, listOf("view_conversations")))
+            it.on("GET", "/admin/agents", body = TeamFixtures.agents.replace(
+                "\"custom_permissions\":[\"view_conversations\",\"reply_conversations\",\"add_notes\"]", "\"custom_permissions\":[]"))
         },
-        role = "agent", superuser = false,
+        device = Devices.tallPhone(3000),
     )
 
     // ── Dialogs ──────────────────────────────────────────────────────────────

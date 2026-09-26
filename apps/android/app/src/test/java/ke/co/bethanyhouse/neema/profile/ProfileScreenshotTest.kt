@@ -42,7 +42,7 @@ class ProfileScreenshotTest : AreaShots() {
     @Test fun signOutConfirm() = profile(ProfilePreview(confirmSignOut = true))
     @Test fun signOutConfirmDark() = profile(ProfilePreview(confirmSignOut = true), dark = true)
 
-    /** A plain agent on a custom role, away: fewer permissions, no Settings link. */
+    /** A plain agent on a custom role, away: fewer permissions; the Settings link stays (Sidebar.tsx shows it to all). */
     private val limited get() = FakeNeema.withFixtures().also(TeamFixtures::install).also {
         // /admin/me is the bare agent row (no role join), exactly as admin.py get_me returns it.
         it.on("GET", "/admin/me", body = """{"id":"${Fixtures.AGENT2_ID}","name":"Grace Wanjiru","email":"grace@bethanyhouse.co.ke",
@@ -54,6 +54,14 @@ class ProfileScreenshotTest : AreaShots() {
     }
     @Test fun limitedAgent_0() = profile(f = limited, role = "agent", superuser = false)
     @Test fun limitedAgent_2() = profile(ProfilePreview(scroll = 4200), f = limited, role = "agent", superuser = false)
+
+    /** Legacy readonly, no custom role: the legacy readonly permissions ticked (getAgentPermissions' fallback). */
+    private val readonly get() = FakeNeema.withFixtures().also(TeamFixtures::install).also {
+        it.on("GET", "/admin/me", body = TeamFixtures.ormAgent(role = "readonly", superuser = false))
+        it.on("GET", "/admin/agents", body = TeamFixtures.agentsWithMe("readonly", false))
+    }
+    @Test fun personaReadonly_0() = profile(f = readonly, role = "readonly", superuser = false)
+    @Test fun personaReadonly_2() = profile(ProfilePreview(scroll = 4200), f = readonly, role = "readonly", superuser = false)
 
     /** /me and the team both failed: the reason and a Retry, never "Loading profile…" forever. */
     @Test fun loading() = profile(

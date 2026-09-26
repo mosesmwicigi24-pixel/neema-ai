@@ -11,6 +11,7 @@ import ke.co.bethanyhouse.neema.core.model.OfferSetting
 import ke.co.bethanyhouse.neema.core.model.TranslationSetting
 import ke.co.bethanyhouse.neema.core.net.ApiException
 import ke.co.bethanyhouse.neema.feature.agents.UNCERTAIN_SAVE
+import ke.co.bethanyhouse.neema.feature.agents.refreshAfterForbidden
 import ke.co.bethanyhouse.neema.feature.reports.BUSY_TEXT
 import ke.co.bethanyhouse.neema.feature.reports.ScreenLife
 import ke.co.bethanyhouse.neema.feature.reports.attempt
@@ -274,11 +275,14 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel() {
      * What a save that failed says. [adminOnly] is the web's words for a 403;
      * a timeout never reaches here (the caller re-reads the truth first).
      */
-    private fun saveFailure(e: Throwable, adminOnly: String, fallback: String): String = when (e.httpStatus()) {
-        403 -> adminOnly
-        429 -> BUSY_TEXT
-        422 -> (e as ApiException).readableDetail() ?: fallback
-        else -> friendlyError(e, fallback)
+    private fun saveFailure(e: Throwable, adminOnly: String, fallback: String): String {
+        dash.refreshAfterForbidden(e)
+        return when (e.httpStatus()) {
+            403 -> adminOnly
+            429 -> BUSY_TEXT
+            422 -> (e as ApiException).readableDetail() ?: fallback
+            else -> friendlyError(e, fallback)
+        }
     }
 
     // ── Standing orders ───────────────────────────────────────────────────────
@@ -421,6 +425,7 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel() {
                     return@launch
                 }
                 val ex = e as? ApiException
+                dash.refreshAfterForbidden(e)
                 dash.toast(
                     when {
                         e.mayHaveApplied() -> UNCERTAIN_SAVE
@@ -510,6 +515,7 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel() {
                 if (now != null) _stages.value = now
                 if (now != null && now.map { it.lowercase() } == cleanStages(next).map { it.lowercase() }) { onSaved(); return@launch }
                 val status = e.httpStatus()
+                dash.refreshAfterForbidden(e)
                 dash.toast(
                     when {
                         e.mayHaveApplied() -> UNCERTAIN_SAVE
