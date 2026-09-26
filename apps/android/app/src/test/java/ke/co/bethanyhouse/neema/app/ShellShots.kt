@@ -26,9 +26,10 @@ internal object ShellShots {
         ctx: Context, dark: Boolean = false, fake: FakeNeema = FakeNeema.withFixtures(),
         role: String = "admin", superuser: Boolean = true, connected: Boolean = true,
         notifications: List<String> = emptyList(),
+        persona: ke.co.bethanyhouse.neema.testing.Persona? = null,
     ): DashboardViewModel {
         val ws = FakeSocketFactory()
-        val dash = dashboard(ctx, fake, role, superuser, appDispatcher = Dispatchers.Unconfined, wsFactory = ws)
+        val dash = dashboard(ctx, fake, role, superuser, appDispatcher = Dispatchers.Unconfined, wsFactory = ws, persona = persona)
         dash.container.prefs.setDark(dark)
         dash.container.notifications.start(dash.container.foreground)
         dash.container.socket.connect(Fixtures.ME_ID)

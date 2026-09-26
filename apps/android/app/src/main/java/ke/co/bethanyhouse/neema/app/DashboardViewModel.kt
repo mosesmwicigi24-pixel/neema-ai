@@ -11,6 +11,7 @@ import ke.co.bethanyhouse.neema.core.model.InboxSummary
 import ke.co.bethanyhouse.neema.core.model.Order
 import ke.co.bethanyhouse.neema.core.perm.Perms
 import ke.co.bethanyhouse.neema.core.util.AppClock
+import ke.co.bethanyhouse.neema.core.util.Coalescer
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.delay
@@ -20,6 +21,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -147,6 +149,10 @@ class DashboardViewModel(
     private companion object {
         /** Orders fetched this recently need no catch-up on reconnect. */
         const val CATCH_UP_FRESH_MS = 5_000L
+        /** A burst of 403s (a screen's parallel loads) costs one reread. */
+        const val FORBIDDEN_WINDOW_MS = 1_000L
+        /** A screen that keeps getting 403s rereads the team list at most this often. */
+        const val FORBIDDEN_COOLDOWN_MS = 15_000L
     }
 
     init {
@@ -302,16 +308,32 @@ class DashboardViewModel(
                 ?: me
         }
 
-    fun permissions(): List<String> {
-        val a = currentAgent
-        val s = session.value
-        return when {
-            a != null -> Perms.of(a)
-            s != null -> Perms.effective(s.role, s.isSuperuser, null)
-            else -> emptyList()
+    /**
+     * page.tsx's `currentAgent`: the signed-in agent's row in the team list
+     * (GET /admin/agents), the only place role_permissions and
+     * custom_permissions come from. The web finds it by email; this finds it
+     * by id first (the same agent, robust to an email edit in flight), then
+     * by email. Null until the team list has loaded (or been restored from
+     * this agent's snapshot).
+     */
+    val teamRow: Agent?
+        get() {
+            val agents = _agents.value
+            val me = _me.value
+            val id = me?.id ?: session.value?.agentId
+            val email = me?.email?.ifBlank { null } ?: session.value?.email
+            return agents.find { it.id == id }
+                ?: email?.let { e -> agents.find { it.email.equals(e, ignoreCase = true) } }
         }
-    }
 
+    /**
+     * getAgentPermissions(currentAgent) — or nothing at all while there is no
+     * team row, exactly as the web's `can()` returns false then: gated nav
+     * items appear once the team list lands, never before.
+     */
+    fun permissions(): List<String> = teamRow?.let(Perms::of) ?: emptyList()
+
+    /** page.tsx `can(perm)`: the one permission test every feature uses. */
     fun can(perm: String): Boolean = perm in permissions()
 
     /** The nav, gated exactly as page.tsx builds its desktopNavItems. */
@@ -321,9 +343,61 @@ class DashboardViewModel(
         pendingOrders = _orders.value.count { it.status == "pending" },
     )
 
+    /**
+     * page.tsx `isAdmin`: the session's role is admin, or the team row's role
+     * is admin, or the team row is a superuser, or `can(manage_agents)`.
+     */
     val isAdmin: Boolean
-        get() = session.value?.role == "admin" || currentAgent?.role == "admin" ||
-            currentAgent?.isSuperuser == true || session.value?.isSuperuser == true || can(Perms.MANAGE_AGENTS)
+        get() {
+            val row = teamRow
+            return session.value?.role == "admin" || row?.role == "admin" || row?.isSuperuser == true || can(Perms.MANAGE_AGENTS)
+        }
+
+    /** What the signed-in agent may do, for screens that recompose when it changes. */
+    data class Access(val permissions: Set<String>, val isAdmin: Boolean) {
+        fun can(perm: String) = perm in permissions
+    }
+
+    private val _access = MutableStateFlow(Access(emptySet(), false))
+    /**
+     * [can] / [isAdmin] as state: re-derived whenever /admin/me, the team list
+     * or the session changes (the 180 s agents poll, a 403's refetch), so a
+     * screen that collects it updates the moment an admin edits this agent's
+     * role. [can] itself always reads the latest values directly.
+     */
+    val access: StateFlow<Access> = _access.asStateFlow()
+
+    private fun republishAccess() { _access.value = Access(permissions().toSet(), isAdmin) }
+
+    /** GETs of the team list and /admin/me folded into one per burst of 403s. */
+    private val forbiddenRefresh = Coalescer(viewModelScope, FORBIDDEN_WINDOW_MS) {
+        lastForbiddenRefresh = clock()
+        refetchMe()
+        refetchAgentsNow()
+    }
+    @Volatile private var lastForbiddenRefresh = Long.MIN_VALUE / 2
+
+    // After the properties above exist (initialisers run in declaration order).
+    init {
+        viewModelScope.launch { container.http.forbidden.collect { onForbidden() } }
+        viewModelScope.launch {
+            combine(_agents, _me, session) { _, _, _ -> }.collect { republishAccess() }
+        }
+    }
+
+    /**
+     * The server refused something (403): this agent's permissions may have
+     * changed since the app last read them. Rereads /admin/me and the team
+     * list (coalesced over [FORBIDDEN_WINDOW_MS], at most once per
+     * [FORBIDDEN_COOLDOWN_MS]) so the nav and every [can] check correct
+     * themselves without waiting for the 180 s poll. NeemaHttp reports every
+     * 403 here on its own; a feature may also call it directly.
+     */
+    fun onForbidden() {
+        if (session.value == null) return
+        if (clock() - lastForbiddenRefresh < FORBIDDEN_COOLDOWN_MS) return
+        forbiddenRefresh.kick()
+    }
 
     fun navigate(v: ViewId) { _view.value = v }
 

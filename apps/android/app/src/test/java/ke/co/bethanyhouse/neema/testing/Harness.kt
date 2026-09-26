@@ -45,7 +45,13 @@ fun testContainer(
     appDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Default,
     /** A fake socket (see [FakeSocketFactory]) so tests can push live frames. */
     wsFactory: okhttp3.WebSocket.Factory? = null,
+    /** Sign in as this persona (overrides [role]/[superuser] and serves its rows on [fake]). */
+    persona: Persona? = null,
 ): AppContainer {
+    if (persona != null) {
+        Personas.install(fake, persona)
+        return testContainer(context, fake, persona.role, persona.superuser, appDispatcher, wsFactory)
+    }
     installTestImageLoader(context)
     val stores = HashMap<String, MemoryPrefs>()
     val c = AppContainer(
@@ -125,8 +131,14 @@ fun AppFrame(dark: Boolean = false, content: @Composable () -> Unit) {
     }
 }
 
+/**
+ * A signed-in [DashboardViewModel] on [fake]. Pass [persona] to sign in as one
+ * of round 6's permission personas (see [Persona]): e.g.
+ * `dashboard(ctx, fake, persona = Persona.Sales)`.
+ */
 fun dashboard(
     context: Context, fake: FakeNeema = FakeNeema.withFixtures(), role: String = "admin", superuser: Boolean = true,
     appDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Default, wsFactory: okhttp3.WebSocket.Factory? = null,
+    persona: Persona? = null,
 ) =
-    DashboardViewModel(testContainer(context, fake, role, superuser, appDispatcher, wsFactory))
+    DashboardViewModel(testContainer(context, fake, role, superuser, appDispatcher, wsFactory, persona))

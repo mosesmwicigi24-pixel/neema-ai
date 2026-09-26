@@ -132,18 +132,15 @@ class DashboardViewModelTest {
     }
 
     @Test
-    fun beforeTheTeamLoadsTheSessionRoleDecides() {
-        // Deliberate difference: the web hides every gated item until the team
-        // list lands (can() is false with no agent row); the app uses the
-        // signed-in role's defaults meanwhile so the nav doesn't jump.
+    fun beforeTheTeamLoadsNothingGatedShows() {
+        // As page.tsx: can() is false while there is no team row, whatever
+        // the session's role — gated items appear once the team list lands.
         val fake = FakeNeema.withFixtures()
         fake.on("GET", "/admin/me", code = 500, body = "{}")
         fake.on("GET", "/admin/agents", code = 500, body = "{}")
         val dash = dashboard(paparazzi.context, fake, role = "agent", superuser = false)
-        assertEquals(
-            listOf(ViewId.Conversations, ViewId.Calls, ViewId.Orders, ViewId.Deals, ViewId.Leads, ViewId.Catalog, ViewId.Profile),
-            dash.ids(),
-        )
+        assertEquals(listOf(ViewId.Conversations, ViewId.Calls, ViewId.Orders, ViewId.Profile), dash.ids())
+        assertTrue(dash.permissions().isEmpty())
     }
 
     @Test

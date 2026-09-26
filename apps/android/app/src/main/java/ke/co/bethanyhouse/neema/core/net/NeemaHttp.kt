@@ -149,6 +149,15 @@ class NeemaHttp(
     /** Fires when a request came back 401 and a refresh could not rescue it. */
     val sessionExpired: SharedFlow<Unit> = _sessionExpired.asSharedFlow()
 
+    private val _forbidden = MutableSharedFlow<String>(extraBufferCapacity = 8)
+    /**
+     * Fires ("METHOD /path") when the server refused a signed-in request with
+     * 403: the agent's role or permissions may have changed since the app last
+     * read them, so the dashboard rereads /admin/me and the team list.
+     * GETs of those two are left out, so a refusal there can't loop.
+     */
+    val forbidden: SharedFlow<String> = _forbidden.asSharedFlow()
+
     private val jsonType = "application/json".toMediaType()
 
     suspend fun raw(method: String, path: String, body: RequestBody? = null, upload: Boolean = false): String {
@@ -189,6 +198,7 @@ class NeemaHttp(
                     // An error page can be anything (a proxy's multi-megabyte
                     // HTML dump): only its head is worth keeping.
                     val text = runCatching { r.peekBody(MAX_ERROR_BODY).string() }.getOrDefault("")
+                    if (r.code == 403 && !isIdentityRead(method, path)) _forbidden.tryEmit("$method ${gatePath(path)}")
                     throw ApiException(r.code, method, path, text, retryAfterSeconds = retryAfter(r))
                 }
                 // The connection can still drop while the body streams in.
@@ -196,6 +206,9 @@ class NeemaHttp(
             }
         }
     }
+
+    private fun isIdentityRead(method: String, path: String): Boolean =
+        method == "GET" && gatePath(path).trimEnd('/') in setOf("/admin/me", "/admin/agents")
 
     private fun gatePath(path: String): String =
         (if (path.startsWith("http")) path.substringAfter("://").substringAfter('/').let { "/$it" }.removePrefix("/api") else path)

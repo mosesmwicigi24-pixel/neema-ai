@@ -128,8 +128,16 @@ class NeemaApi(val http: NeemaHttp) {
     inner class Actions {
         suspend fun list(status: String = "pending"): List<PlannedAction> =
             http.get<ActionsResponse>("/admin/actions?status=${enc(status)}").actions
-        suspend fun approve(id: String, draft: String? = null): OkResponse =
-            http.post("/admin/actions/$id/approve", buildJsonObject { if (!draft.isNullOrEmpty()) put("draft", draft) })
+        /**
+         * Approving runs the action server-side (sends the message, pushes the
+         * order to the hub), which can outlast the 30 s ceiling: the long client.
+         */
+        suspend fun approve(id: String, draft: String? = null): OkResponse = http.decode(
+            http.raw(
+                "POST", "/admin/actions/$id/approve",
+                http.encode(buildJsonObject { if (!draft.isNullOrEmpty()) put("draft", draft) }), upload = true,
+            ),
+        )
         suspend fun veto(id: String): OkResponse = http.post("/admin/actions/$id/veto", JsonObject(emptyMap()))
     }
 
