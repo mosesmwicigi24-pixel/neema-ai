@@ -6,6 +6,7 @@ import ke.co.bethanyhouse.neema.app.DashboardViewModel
 import ke.co.bethanyhouse.neema.app.ToastType
 import ke.co.bethanyhouse.neema.feature.agents.TeamApi
 import ke.co.bethanyhouse.neema.feature.agents.UNCERTAIN_SAVE
+import ke.co.bethanyhouse.neema.feature.agents.refreshAfterForbidden
 import ke.co.bethanyhouse.neema.feature.reports.BUSY_TEXT
 import ke.co.bethanyhouse.neema.feature.reports.attempt
 import ke.co.bethanyhouse.neema.feature.reports.friendlyError
@@ -128,6 +129,7 @@ class ProfileViewModel(private val dash: DashboardViewModel) : ViewModel() {
                 } catch (e: Exception) {
                     ke.co.bethanyhouse.neema.feature.reports.stillHere()
                     if (e.mayHaveApplied() && verify != null && attempt { verify() }.getOrDefault(false)) { done(); return@launch }
+                    dash.refreshAfterForbidden(e)
                     dash.toast(if (e.mayHaveApplied()) uncertain else failText(e), ToastType.Error)
                     return@launch
                 }
@@ -209,7 +211,10 @@ class ProfileViewModel(private val dash: DashboardViewModel) : ViewModel() {
                     dash.refetchMe()
                     if (truth != available) dash.toast("Couldn't reach the server — availability unchanged", ToastType.Error)
                     else dash.toast(if (available) "You're available" else "You're away")
-                } else dash.toast(ke.co.bethanyhouse.neema.feature.agents.availabilityFailure(e), ToastType.Error)
+                } else {
+                    dash.refreshAfterForbidden(e)
+                    dash.toast(ke.co.bethanyhouse.neema.feature.agents.availabilityFailure(e), ToastType.Error)
+                }
             } finally { settingAvailable = false }
         }
     }

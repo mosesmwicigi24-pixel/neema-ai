@@ -49,6 +49,16 @@ internal fun availabilityFailure(e: Throwable): String = when (e.httpStatus()) {
     else -> "Failed to update availability"
 }
 
+/**
+ * A 403 can mean this agent's role or permissions changed while the app was
+ * open (the web only notices on its 3-minute agents poll): re-read /me and the
+ * team now, so the nav and every permission check correct themselves.
+ * Any other failure does nothing. (Replace with dash.onForbidden() once core has it.)
+ */
+internal fun DashboardViewModel.refreshAfterForbidden(e: Throwable) {
+    if (e.httpStatus() == 403) { refetchMe(); refetchAgents() }
+}
+
 /** What a write that got no answer says when it can't tell whether it landed. */
 internal const val UNCERTAIN_SAVE =
     "No answer from the server, so this may not have saved — what you typed is kept. Check your connection and try again."
@@ -203,6 +213,7 @@ class AgentsViewModel(private val dash: DashboardViewModel) : ViewModel() {
                         return@launch
                     }
                     if (e is ApiException && e.status == 404 && onGone != null && onGone(e)) return@launch
+                    dash.refreshAfterForbidden(e)
                     // The web's fixed words are for a refusal, not for "you're offline" or "sign in again".
                     val fixed = fallbackError?.takeUnless { e.httpStatus() == 0 || e.httpStatus() == 401 }
                     dash.toast((fixed ?: failText(e, serverError)).masking(secret), ToastType.Error)
@@ -376,6 +387,7 @@ class AgentsViewModel(private val dash: DashboardViewModel) : ViewModel() {
                     }
                     else -> {
                         _availability.update { it - agent.id }
+                        dash.refreshAfterForbidden(e)
                         dash.toast(availabilityFailure(e), ToastType.Error)
                     }
                 }

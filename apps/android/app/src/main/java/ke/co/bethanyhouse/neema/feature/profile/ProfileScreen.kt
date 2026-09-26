@@ -282,10 +282,9 @@ fun ProfileScreen(dash: DashboardViewModel) {
 
                 // ── Account (the sidebar's account menu) ────────────────────
                 ProfileCard("Account") {
-                    if (dash.can(Perms.MANAGE_SETTINGS)) {
-                        LinkRow(Icons.Outlined.Settings, "Settings", "Platform configuration and integrations") { dash.navigate(ViewId.Settings) }
-                        Spacer(Modifier.height(4.dp))
-                    }
+                    // Sidebar.tsx's account menu offers Settings to everyone; the server refuses a non-admin's saves.
+                    LinkRow(Icons.Outlined.Settings, "Settings", "Platform configuration and integrations") { dash.navigate(ViewId.Settings) }
+                    Spacer(Modifier.height(4.dp))
                     LinkRow(Icons.Outlined.Info, "App version", "Neema for Android ${BuildConfig.VERSION_NAME}", chevron = false) {}
                     Spacer(Modifier.height(12.dp))
                     Button(

@@ -22,7 +22,6 @@ import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.Forum
-import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.TableChart
 import androidx.compose.material.icons.outlined.Tag
@@ -47,9 +46,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import ke.co.bethanyhouse.neema.app.DashboardViewModel
 import ke.co.bethanyhouse.neema.core.model.Campaign
 import ke.co.bethanyhouse.neema.core.model.CatalogItem
-import ke.co.bethanyhouse.neema.core.perm.Perms
 import ke.co.bethanyhouse.neema.core.ui.components.ConfirmDialog
-import ke.co.bethanyhouse.neema.core.ui.components.EmptyState
 import ke.co.bethanyhouse.neema.core.ui.components.Panel
 import ke.co.bethanyhouse.neema.core.ui.components.Pill
 import ke.co.bethanyhouse.neema.core.ui.components.SearchField
@@ -78,15 +75,12 @@ val LocalSettingsPreview = staticCompositionLocalOf { SettingsPreview() }
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(dash: DashboardViewModel) {
-    // The nav hides Settings without manage_settings; this guards a stale deep link.
-    if (!dash.can(Perms.MANAGE_SETTINGS)) {
-        EmptyState(
-            title = "No access to Settings",
-            subtitle = "Changing platform settings needs the “Manage settings” permission.",
-            icon = Icons.Outlined.Lock,
-        )
-        return
-    }
+    // No permission gate — page.tsx renders SettingsView for anyone. The nav
+    // lists Settings only with manage_settings, but the account menu's
+    // Settings entry and ?view=settings open it for everyone. Every card
+    // loads; a save by someone who isn't an admin gets the server's 403 and
+    // the web's "(admin only)" words (crm.py checks role admin / superuser,
+    // not manage_settings).
     val vm: SettingsViewModel = viewModel { SettingsViewModel(dash) }
     ke.co.bethanyhouse.neema.feature.reports.TrackShown(vm.life)
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()

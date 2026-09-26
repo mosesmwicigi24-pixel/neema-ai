@@ -82,10 +82,16 @@ class SettingsScreenshotTest : AreaShots() {
     @Test fun productPicker() = settings(SettingsPreview(skuPicker = true), f = expired)
     @Test fun productPickerDark() = settings(SettingsPreview(skuPicker = true), f = expired, dark = true)
 
-    @Test fun noAccess() = settings(
-        f = base().also {
-            it.on("GET", "/admin/agents", body = TeamFixtures.agentsWithMe("agent", false, listOf("view_conversations")))
+    /**
+     * A legacy readonly agent (the account menu's Settings entry is there for
+     * everyone): every card loads and is editable, as SettingsView renders it;
+     * the server answers their saves with 403 and the toasts say "(admin only)".
+     */
+    @Test fun personaReadonly() = settings(
+        f = FakeNeema.withFixtures().also {
+            TeamFixtures.settings(it, admin = false)
+            it.on("GET", "/admin/agents", body = TeamFixtures.agentsWithMe("readonly", false))
         },
-        role = "agent", superuser = false,
+        role = "readonly", superuser = false,
     )
 }

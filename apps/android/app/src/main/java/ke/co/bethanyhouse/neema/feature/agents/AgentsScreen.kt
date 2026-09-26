@@ -17,7 +17,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Key
-import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.VerifiedUser
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -38,7 +37,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import ke.co.bethanyhouse.neema.app.DashboardViewModel
 import ke.co.bethanyhouse.neema.core.model.Agent
 import ke.co.bethanyhouse.neema.core.model.CustomRole
-import ke.co.bethanyhouse.neema.core.perm.Perms
 import ke.co.bethanyhouse.neema.core.ui.components.Avatar
 import ke.co.bethanyhouse.neema.core.ui.components.EmptyState
 import ke.co.bethanyhouse.neema.core.ui.components.Loading
@@ -51,16 +49,11 @@ import ke.co.bethanyhouse.neema.core.util.Fmt
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AgentsScreen(dash: DashboardViewModel) {
-    // The nav hides Team without manage_agents; this guards a stale deep link.
-    if (!dash.can(Perms.MANAGE_AGENTS)) {
-        EmptyState(
-            title = "No access to Team",
-            subtitle = "Managing agents needs the “Manage agents” permission.",
-            icon = Icons.Outlined.Lock,
-        )
-        return
-    }
-
+    // No permission gate here — AgentsView.tsx has none. The nav lists Team
+    // only with manage_agents (page.tsx), but ?view=agents opens it for anyone
+    // and it stays open when a poll takes manage_agents away. The server
+    // decides every write: admin.py's agent routes check only sign-in, and
+    // roles.py refuses only protected roles.
     val vm: AgentsViewModel = viewModel { AgentsViewModel(dash) }
     ke.co.bethanyhouse.neema.feature.reports.TrackShown(vm.life)
     // "Last seen 4m ago" keeps counting between polls instead of freezing at first paint.
@@ -78,11 +71,10 @@ fun AgentsScreen(dash: DashboardViewModel) {
     val rolesError by vm.rolesError.collectAsStateWithLifecycle()
     LaunchedEffect(agents) { vm.reconcile(agents) }
 
-    val canRoles = dash.can(Perms.MANAGE_ROLES)
     val preview = LocalTeamPreview.current
     fun opened(kind: String): String? = preview.dialog?.takeIf { it.startsWith("$kind:") }?.substringAfter(':')
-    var tabChoice by rememberSaveable { mutableStateOf(preview.tab ?: "agents") }
-    val tab = if (canRoles) tabChoice else "agents"
+    // Both tabs for everyone here: the web never tests manage_roles.
+    var tab by rememberSaveable { mutableStateOf(preview.tab ?: "agents") }
 
     // Which dialog is open, by id, so it survives rotation and resets on leaving the screen.
     var createOpen by rememberSaveable { mutableStateOf(preview.dialog == "create") }
@@ -131,7 +123,7 @@ fun AgentsScreen(dash: DashboardViewModel) {
             }
             // Tabs
             item(key = "tabs") {
-                val tabs = if (canRoles) listOf("agents", "roles") else listOf("agents")
+                val tabs = listOf("agents", "roles")
                 // The web's tabs: left-aligned labels, a 2dp underline on the active one, over a hairline.
                 Box(Modifier.fillMaxWidth()) {
                     HorizontalDivider(Modifier.align(Alignment.BottomStart), color = c.bg4)
@@ -140,7 +132,7 @@ fun AgentsScreen(dash: DashboardViewModel) {
                             val sel = tab == t
                             Column(
                                 Modifier.clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
-                                    .clickable { tabChoice = t }.width(IntrinsicSize.Max),
+                                    .clickable { tab = t }.width(IntrinsicSize.Max),
                                 horizontalAlignment = Alignment.CenterHorizontally,
                             ) {
                                 Text(
@@ -598,7 +590,21 @@ private fun AssignRoleDialog(
                 if (on && agent.customPermissions == null) perms = roles.find { it.id == roleId }?.permissions ?: perms
             })
         }
-        if (override) PermissionPicker(perms) { perms = it }
+        if (override) {
+            // getAgentPermissions reads an empty list as "none set": the agent
+            // falls back to their base role's defaults, not to nothing.
+            if (perms.none { k -> PermissionCatalog.ALL.any { it.key == k } }) {
+                Text(
+                    "With nothing ticked, the agent falls back to the default permissions of their base role " +
+                        "(${agent.role.replaceFirstChar { it.uppercase() }}) — not to none.",
+                    fontSize = 11.sp, color = c.amber, lineHeight = 15.sp,
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(c.amberDim)
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+            PermissionPicker(perms) { perms = it }
+        }
     }
 }
 
