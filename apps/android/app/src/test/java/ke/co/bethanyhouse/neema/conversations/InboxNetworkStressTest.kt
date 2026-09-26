@@ -305,20 +305,31 @@ class InboxNetworkStressTest {
         assertTrue(fake.called("POST", "/auth/refresh") || fake.called("POST", "/agent-auth/refresh"))
     }
 
-    @Test fun reply_401_andTheRefreshFails_sessionExpiredDialog_andTheWordsWaitInTheBox() {
+    /**
+     * Round 9 (lifecycle): the words used to go back into the box for the agent
+     * to send again by hand. Now they wait on their own bubble while the
+     * SessionExpiredDialog is up and go by themselves — once — on sign-in.
+     */
+    @Test fun reply_401_andTheRefreshFails_sessionExpiredDialog_andTheWordsGoOnceAfterSignIn() {
         replyRoute { 401 to """{"detail":"Token expired"}""" }
         fake.on("POST", "/(agent-auth|auth)/refresh", code = 401, body = """{"detail":"Invalid refresh token"}""")
         val (dash, vm) = vm()
         vm.select("c1")
         vm.setReplyText("Please keep me"); vm.sendReply()
         assertTrue(dash.sessionExpired.value)
-        assertEquals("Please keep me", vm.composer.value.replyText)
-        // Signed back in: the same screen, the same words — one tap sends them.
+        val held = mine(vm).single()
+        assertEquals("Please keep me", held.body)
+        assertEquals("failed", held.sendState)
+        assertEquals(ConversationsViewModel.AUTH_HELD, held.sendError)
+        // No error toast over the dialog: the dialog already says what happened.
+        assertTrue(errors().isEmpty())
+        // Signed back in: it goes by itself, exactly once.
         fake.on("POST", "/(agent-auth|auth)/refresh", body = ke.co.bethanyhouse.neema.testing.Fixtures.tokenResponse())
         replyRoute { server.rows += row("srv-b", "Please keep me"); 200 to """{"ok":true}""" }
         dash.onReauthenticated()
-        vm.sendReply()
         assertEquals(1, thread(vm).count { it.body == "Please keep me" })
+        assertTrue(mine(vm).isEmpty())
+        assertEquals(2, fake.calls.count { it.method == "POST" && it.path == "/admin/conversations/c1/reply" })
     }
 
     // ═══════════════════ Impatient users, moving on ═══════════════════

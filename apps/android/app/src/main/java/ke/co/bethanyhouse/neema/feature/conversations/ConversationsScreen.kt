@@ -16,6 +16,8 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -70,25 +72,53 @@ fun ConversationsScreen(dash: DashboardViewModel) {
     // The shell hides its bars while a thread owns the phone screen.
     LaunchedEffect(phoneThread) { dash.immersive.value = phoneThread }
     DisposableEffect(Unit) { onDispose { dash.immersive.value = false } }
-    BackHandler(enabled = phoneThread) { vm.closeThread() }
-    BackHandler(enabled = listUi.selectMode && !phoneThread) { vm.exitSelect() }
+    // Back closes the topmost thing first. Dialogs, sheets and the media viewer
+    // take it themselves; then the thread, then bulk selection, then the search
+    // and the filter panel — and only a bare list lets the shell leave.
+    val back = inboxBackStep(phoneThread, listUi.selectMode, listUi.search.isNotEmpty(), listUi.showFilters)
+    BackHandler(enabled = back != null) {
+        when (back) {
+            InboxBack.CloseThread -> vm.closeThread()
+            InboxBack.ExitSelect -> vm.exitSelect()
+            InboxBack.ClearSearch -> vm.setSearch("")
+            InboxBack.CloseFilters -> vm.toggleFilters()
+            null -> Unit
+        }
+    }
 
     // Wide: the first conversation opens on its own (the web's auto-select).
     LaunchedEffect(wide, rows.isNotEmpty(), thread.activeId.isEmpty()) {
         if (wide && thread.activeId.isEmpty()) rows.firstOrNull()?.let { vm.select(it.rep.id, openThread = false) }
     }
 
-    var viewer by remember { mutableStateOf<Viewer?>(null) }
+    // Everything the agent opened survives rotation, a theme or font change and
+    // Android reclaiming the app in the background (rememberSaveable).
+    var viewer by rememberSaveable(stateSaver = ViewerSaver) { mutableStateOf<Viewer?>(null) }
     val brokenVideos = remember { mutableStateListOf<String>() }
     // One set per change, not per recomposition: a fresh set on every keystroke in the
     // composer made every visible bubble of a long thread recompose.
     val brokenSet by remember { derivedStateOf { brokenVideos.toSet() } }
-    var customerOpen by remember { mutableStateOf(true) }      // wide side pane (open by default)
-    var customerSheet by remember { mutableStateOf(false) }    // phone / narrow wide
-    var activitySheet by remember { mutableStateOf(false) }
-    var askDialog by remember { mutableStateOf(false) }
-    var answerDialog by remember { mutableStateOf(false) }
-    var inviteDialog by remember { mutableStateOf(false) }
+    var customerOpen by rememberSaveable { mutableStateOf(true) }      // wide side pane (open by default)
+    var customerSheet by rememberSaveable { mutableStateOf(false) }    // phone / narrow wide
+    var activitySheet by rememberSaveable { mutableStateOf(false) }
+    // The reach-out dialogs remember WHICH conversation they were opened for: a
+    // deep link or a notification tap that switches threads closes them, so a
+    // team answer or an invite can never go to the next customer opened.
+    var askFor by rememberSaveable { mutableStateOf<String?>(null) }
+    var answerFor by rememberSaveable { mutableStateOf<String?>(null) }
+    var inviteFor by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(thread.activeId) {
+        val id = thread.activeId
+        if (id.isEmpty()) return@LaunchedEffect
+        if (askFor != null && askFor != id) askFor = null
+        if (answerFor != null && answerFor != id) answerFor = null
+        if (inviteFor != null && inviteFor != id) inviteFor = null
+    }
+    val askDialog = askFor != null && askFor == active?.id
+    val answerDialog = answerFor != null && answerFor == active?.id
+    val inviteDialog = inviteFor != null && inviteFor == active?.id
+    // The list keeps its place while a thread covers it (phone) and across rotation.
+    val listState = rememberLazyListState()
 
     val threadPane: @Composable (Modifier) -> Unit = { mod ->
         if (active == null) {
@@ -106,7 +136,7 @@ fun ConversationsScreen(dash: DashboardViewModel) {
                 onView = { viewer = it },
                 onProfile = if (!wide || !roomy) ({ customerSheet = true }) else null,
                 onActivity = if (!roomy) ({ activitySheet = true; vm.setActivityOpen(true) }) else null,
-                onAsk = { askDialog = true }, onAnswer = { answerDialog = true }, onInvite = { inviteDialog = true },
+                onAsk = { askFor = active.id }, onAnswer = { answerFor = active.id }, onInvite = { inviteFor = active.id },
                 modifier = mod,
             )
         }
@@ -115,13 +145,13 @@ fun ConversationsScreen(dash: DashboardViewModel) {
     // Text reads in the theme's ink wherever it sits (the shell's Scaffold does the same).
     CompositionLocalProvider(LocalContentColor provides Neema.colors.text) { if (!wide) {
         if (phoneThread) threadPane(Modifier.fillMaxSize())
-        else ConversationList(vm, inbox, listUi, rows, thread.activeId, perms, Modifier.fillMaxSize())
+        else ConversationList(vm, inbox, listUi, rows, thread.activeId, perms, Modifier.fillMaxSize(), listState)
     } else {
         Row(Modifier.fillMaxSize()) {
             // The web's LIST_WIDTH, clamp(340px, 38vw, 436px) — except that a small
             // tablet keeps 320 so the thread still has room to breathe.
             val listWidth = if (widthDp < 840) 320f else (widthDp * 0.38f).coerceIn(340f, 436f)
-            ConversationList(vm, inbox, listUi, rows, thread.activeId, perms, Modifier.width(listWidth.dp).fillMaxHeight())
+            ConversationList(vm, inbox, listUi, rows, thread.activeId, perms, Modifier.width(listWidth.dp).fillMaxHeight(), listState)
             VerticalDivider(color = hairline())
             threadPane(Modifier.weight(1f).fillMaxHeight())
             // The web's ACTIVITY_WIDTH, clamp(196px, 16vw, 292px); the customer sidebar is w-80.
@@ -186,10 +216,27 @@ fun ConversationsScreen(dash: DashboardViewModel) {
             }
         },
     )
-    if (askDialog) AskNeemaDialog(vm) { askDialog = false }
-    if (answerDialog) AnswerViaNeemaDialog(vm) { answerDialog = false }
-    if (inviteDialog && active != null) InviteDialog(dash, vm, active, inviteTarget(thread.reach, active.id)) { inviteDialog = false }
+    if (askDialog) AskNeemaDialog(vm) { askFor = null }
+    if (answerDialog) AnswerViaNeemaDialog(vm) { answerFor = null }
+    if (inviteDialog && active != null) InviteDialog(dash, vm, active, inviteTarget(thread.reach, active.id)) { inviteFor = null }
     viewer?.let { v -> ViewerDialog(v, onClose = { viewer = null }, onVideoError = { id -> if (id != null) brokenVideos += id }) }
+}
+
+/** What system back does inside the inbox, below the dialogs and sheets (which take it themselves). */
+internal enum class InboxBack { CloseThread, ExitSelect, ClearSearch, CloseFilters }
+
+/**
+ * The topmost inbox state back closes: the phone's full-screen thread, then
+ * bulk selection, then the search, then the filter panel. Null — a bare list —
+ * lets the shell have it (back to the inbox from elsewhere, or leave).
+ * The composer's text is never touched: it waits with its thread.
+ */
+internal fun inboxBackStep(phoneThread: Boolean, selectMode: Boolean, searching: Boolean, filtersOpen: Boolean): InboxBack? = when {
+    phoneThread -> InboxBack.CloseThread
+    selectMode -> InboxBack.ExitSelect
+    searching -> InboxBack.ClearSearch
+    filtersOpen -> InboxBack.CloseFilters
+    else -> null
 }
 
 /**
@@ -520,8 +567,8 @@ private fun ResultBox(text: String) {
 /** Ask Neema: the junior fetches — sizes, past orders, call context. Read-only. */
 @Composable
 internal fun AskNeemaDialog(vm: ConversationsViewModel, initialQuestion: String = "", initialAnswer: String? = null, onDismiss: () -> Unit) {
-    var q by remember { mutableStateOf(initialQuestion) }
-    var answer by remember { mutableStateOf(initialAnswer) }
+    var q by rememberSaveable { mutableStateOf(initialQuestion) }
+    var answer by rememberSaveable { mutableStateOf(initialAnswer) }
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val ask = {
@@ -563,8 +610,8 @@ internal fun AskNeemaDialog(vm: ConversationsViewModel, initialQuestion: String 
  */
 @Composable
 internal fun AnswerViaNeemaDialog(vm: ConversationsViewModel, initialFacts: String = "", initialStatus: String? = null, onDismiss: () -> Unit) {
-    var facts by remember { mutableStateOf(initialFacts) }
-    var status by remember { mutableStateOf(initialStatus) }
+    var facts by rememberSaveable { mutableStateOf(initialFacts) }
+    var status by rememberSaveable { mutableStateOf(initialStatus) }
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     AlertDialog(
@@ -603,7 +650,7 @@ internal fun AnswerViaNeemaDialog(vm: ConversationsViewModel, initialFacts: Stri
 @Composable
 internal fun InviteDialog(dash: DashboardViewModel, vm: ConversationsViewModel, conv: Conversation, profilePhone: String?, onDismiss: () -> Unit) {
     val guess = profilePhone ?: phoneDigits(conv).orEmpty()
-    var phone by remember { mutableStateOf(guess) }
+    var phone by rememberSaveable { mutableStateOf(guess) }
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val uri = LocalUriHandler.current
