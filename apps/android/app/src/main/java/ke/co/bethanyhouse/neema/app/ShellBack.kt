@@ -17,13 +17,22 @@ package ke.co.bethanyhouse.neema.app
  * On a phone the bell is a bottom sheet, which is its own window and closes
  * itself on back before any of this is asked.
  *
- * 1–3 are one back handler that re-registers whenever the top overlay
+ * 1–3 are one back handler, composed after the view and re-registered whenever the top overlay
  * changes, so it always sits above the views' handlers (registered earlier);
  * 5 is registered before any view is composed, so every view's handler sits
  * above it. The web has none of this: its overlays close on an outside click
  * or Escape, and the browser's back leaves the dashboard.
  */
 enum class ShellOverlay { Bell, AccountMenu, Drawer }
+
+/**
+ * True while one of the shell's overlays (the drawer, the account menu, the
+ * bell) is open over the view. A view's own BackHandler may add
+ * `&& !LocalShellOverlayOpen.current` to its `enabled` so it never takes a
+ * back press meant for the overlay, whatever order the handlers were
+ * registered in (the shell already registers its overlay handler last).
+ */
+val LocalShellOverlayOpen = androidx.compose.runtime.compositionLocalOf { false }
 
 /** The shell overlay system back closes now, or null to let the view (then the view history) have it. */
 fun shellBackTarget(bellPopupOpen: Boolean, accountMenuOpen: Boolean, drawerOpen: Boolean): ShellOverlay? = when {

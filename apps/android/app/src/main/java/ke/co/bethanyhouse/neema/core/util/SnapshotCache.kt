@@ -26,5 +26,11 @@ class SnapshotCache(context: Context) {
         runCatching { file(scope, key).writeText(NeemaJson.encodeToString(serializer, value)) }
     }
 
+    /** Forget one snapshot (a draft that was sent, a conversation that was closed). */
+    fun delete(scope: String?, key: String) {
+        if (scope == null) return
+        runCatching { file(scope, key).delete() }
+    }
+
     fun clear() { dir.listFiles()?.forEach { it.delete() } }
 }

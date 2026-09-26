@@ -111,18 +111,22 @@ fun DashboardShell(
     // System back, lowest priority first (see ShellBack.kt). The view history:
     // registered before any view composes, so every view's own handler wins.
     BackHandler(enabled = canGoBack) { dash.back() }
-    // The shell's overlays: one handler, re-registered whenever the topmost
-    // one changes, so it sits above every view's handlers.
+    // The shell's overlays: one handler, composed AFTER the view (in the
+    // content, below) and re-registered whenever the topmost overlay
+    // changes, so it sits above every view's handlers; views can also read
+    // LocalShellOverlayOpen and stand down while one is open.
     val drawerShown = !wide && (drawer.isOpen || drawer.targetValue == DrawerValue.Open)
     val menuShown = menuOpen && !(wide && collapsed) && (wide || drawerShown)
     val overlay = shellBackTarget(bellPopupOpen = showBell && wide, accountMenuOpen = menuShown, drawerOpen = drawerShown)
-    key(overlay) {
-        BackHandler(enabled = overlay != null) {
-            when (overlay) {
-                ShellOverlay.Bell -> showBell = false
-                ShellOverlay.AccountMenu -> menuOpen = false
-                ShellOverlay.Drawer -> scope.launch { drawer.close() }
-                null -> Unit
+    val overlayBack = @Composable {
+        key(overlay) {
+            BackHandler(enabled = overlay != null) {
+                when (overlay) {
+                    ShellOverlay.Bell -> showBell = false
+                    ShellOverlay.AccountMenu -> menuOpen = false
+                    ShellOverlay.Drawer -> scope.launch { drawer.close() }
+                    null -> Unit
+                }
             }
         }
     }
@@ -212,6 +216,7 @@ fun DashboardShell(
                 Modifier.fillMaxWidth().weight(1f)
                     .then(if (immersive && banner) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier),
             ) {
+                CompositionLocalProvider(LocalShellOverlayOpen provides (overlay != null)) {
                 when (view) {
                     ViewId.Conversations -> ConversationsScreen(dash)
                     ViewId.Calls -> CallsScreen(dash)
@@ -225,10 +230,13 @@ fun DashboardShell(
                     ViewId.Settings -> SettingsScreen(dash)
                     ViewId.Profile -> ProfileScreen(dash)
                 }
+                }
                 // Online but the live socket is down: it is on its way back.
                 if (wide && !connected && online) OfflineDot(Modifier.align(Alignment.TopEnd).padding(10.dp))
                 // An incoming/active call takes over the content area.
                 CallStage(dash)
+                // Last of all, so the shell's overlays take back before the view does.
+                overlayBack()
             }
             }
         }

@@ -31,7 +31,7 @@ import ke.co.bethanyhouse.neema.testing.TestDevice
 import ke.co.bethanyhouse.neema.testing.snapshotOn
 import ke.co.bethanyhouse.neema.testing.testContainer
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.awaitCancellation
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -114,7 +114,7 @@ class ShellRestoreScreenshotTest {
         val d = DeviceMatrix.TABLET_LANDSCAPE
         val dash = restoredDash(SavedStateHandle())
         dash.navigate(ViewId.Orders)
-        dash.endCall = { Job() }
+        dash.endCall = { awaitCancellation() }
         dash.logout()
         assertTrue(dash.signingOut.value)
         paparazzi.snapshotOn(d) { AppFrame { DashboardShell(dash, d.widthClass) } }

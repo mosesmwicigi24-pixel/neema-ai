@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -267,7 +268,7 @@ fun NeemaSidebar(
                 Modifier.matchParentSize().clip(RoundedCornerShape(12.dp)).background(Brand.Navy.copy(alpha = 0.85f))
                     .semantics { contentDescription = "Signing out…" },
                 contentAlignment = Alignment.Center,
-            ) { CircularProgressIndicator(Modifier.size(14.dp), color = Brand.Amber, strokeWidth = 2.dp, trackColor = Color.Transparent) }
+            ) { RingSpinner() }
             }
         }
     }
@@ -452,5 +453,29 @@ private fun MenuRow(icon: ImageVector, label: String, danger: Boolean = false, o
         val c = if (danger) Palette.Red600 else Palette.Pewter700
         Icon(icon, null, tint = if (danger) c else Palette.Pewter600, modifier = Modifier.size(14.dp).alpha(if (danger) 1f else 0.65f))
         Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = c, modifier = Modifier.padding(start = 10.dp))
+    }
+}
+
+/**
+ * Sidebar.tsx's logging-out spinner: a 14dp amber ring, 2dp, a quarter of it
+ * transparent, turning once every 0.7 s.
+ */
+@Composable
+private fun RingSpinner() {
+    val turn by androidx.compose.animation.core.rememberInfiniteTransition(label = "signingOut").animateFloat(
+        initialValue = 0f, targetValue = 360f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            androidx.compose.animation.core.tween(700, easing = androidx.compose.animation.core.LinearEasing),
+        ),
+        label = "turn",
+    )
+    androidx.compose.foundation.Canvas(Modifier.size(14.dp).rotate(turn)) {
+        val w = 2.dp.toPx()
+        drawArc(
+            Brand.Amber, startAngle = -45f, sweepAngle = 270f, useCenter = false,
+            topLeft = androidx.compose.ui.geometry.Offset(w / 2, w / 2),
+            size = androidx.compose.ui.geometry.Size(size.width - w, size.height - w),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(w),
+        )
     }
 }
