@@ -132,7 +132,7 @@ async def run(keep: bool) -> None:
                 await db.commit()
             async with AsyncSessionLocal() as db:
                 try:
-                    reply = await run_turn(db, redis, wa_id, text, build_llm())
+                    reply = await run_turn(db, redis, wa_id, text, build_llm(purpose="job:eval"))
                 except Exception as exc:
                     print(f"NEEMA  : <turn failed: {exc}>")
                     break

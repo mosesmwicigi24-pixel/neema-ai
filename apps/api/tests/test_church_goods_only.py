@@ -299,11 +299,11 @@ def test_the_prompt_the_reviewer_and_the_rewrite_carry_the_rule(monkeypatch):
     assert "NEVER guess at things we do not sell" in p
     llm = types.SimpleNamespace(calls=[])
 
-    async def complete(system, messages, tools=None):
+    async def complete(system, messages, tools=None, **kw):
         llm.calls.append(messages[0]["content"])
         return types.SimpleNamespace(text="verdict=pass | issues=-")
     llm.complete = complete
-    monkeypatch.setattr(rt, "build_llm", lambda model=None: llm)
+    monkeypatch.setattr(rt, "build_llm", lambda model=None, **kw: llm)
     monkeypatch.setattr(rv, "reviewer_verdict", _REAL_REVIEWER)
     asyncio.run(rv.review_reply("Maharagwe", DECLINE, [], mode="dm"))
     sent = llm.calls[-1]
@@ -341,7 +341,7 @@ class _Writer:
         self.texts = list(texts)
         self.calls = 0
 
-    async def complete(self, system, messages, tools=None):
+    async def complete(self, system, messages, tools=None, **kw):
         self.calls += 1
         return types.SimpleNamespace(text=self.texts.pop(0) if self.texts else "")
 

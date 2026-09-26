@@ -138,17 +138,17 @@ TOOLS: list[dict] = [
         "description": "Play the running discount for THIS customer, and get the exact "
                        "figures to quote. Call it ONLY at the moment the discount can "
                        "close the sale — they asked for a discount, they said it's too "
-                       "expensive, they went quiet after a price, or you are landing a "
-                       "big or repeat order. NEVER call it on a first quote, and never "
-                       "just because an offer exists: most customers buy at the list "
-                       "price and never ask. Returns the offer's name, percentage, the "
-                       "list price and the offer price for the item, and records that "
-                       "this customer was given it so the team applies it to the order.",
+                       "expensive, or you are landing a big or repeat order. NEVER call it "
+                       "on a first quote, never because someone is merely quiet, and never "
+                       "just because an offer exists: most customers buy at the list price "
+                       "and never ask. Returns the offer's name, percentage, the list price "
+                       "and the offer price for the NAMED item, and records that this "
+                       "customer was given it so the order is billed at what you said.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "product": {"type": "string",
-                            "description": "The item you are discounting, e.g. 'Eliad Oil'. Leave out to get the offer's terms alone."},
+                            "description": "The item you are discounting, by the hub's name (or the variant's label), e.g. 'Eliad Anointing Oil', 'Straight Collar — 10 inch'. Leave out to read the offer's terms only — nothing is promised without a product."},
             },
         },
     },
@@ -176,9 +176,19 @@ TOOLS: list[dict] = [
     {
         "name": "create_order",
         "description": "Place the current cart as an order in the hub. Call ONLY after the "
-                       "customer has explicitly confirmed they want to order. Returns the order "
-                       "number, total, and a secure payment link to give the customer.",
-        "input_schema": {"type": "object", "properties": {}},
+                       "customer has explicitly confirmed they want to order. Pass `notes` — "
+                       "everything the workshop and the delivery team must know from this "
+                       "conversation. Returns the order number, the total as quoted in the "
+                       "customer's currency, and the ONE secure order link to give them (it "
+                       "shows the order, the amount and the payment options).",
+        "input_schema": {"type": "object", "properties": {
+            "notes": {"type": "string",
+                      "description": "One line per fact, from the chat: colour / design / fabric per "
+                                     "item, sizes or measurements they gave, the deadline or event "
+                                     "date, delivery or pickup, the delivery town and area, the "
+                                     "recipient if the parcel goes to someone else, anything asked "
+                                     "for specially. Measurements already on file are attached "
+                                     "automatically."}}},
     },
     {
         "name": "check_order_status",
@@ -397,7 +407,10 @@ TOOLS: list[dict] = [
                        "shoe — even one at a time, and even mid-sentence. Pass what "
                        "they said, with units as they said them (e.g. chest '42in', "
                        "height '5ft10'). Merges with what's already on file, so "
-                       "sending one corrected figure never wipes the rest.",
+                       "sending one corrected figure never wipes the rest. Several "
+                       "wearers (a choir, a team of deacons): prefix each label with "
+                       "the wearer, e.g. {\"Deacon 1 chest\": \"40in\", \"Deacon 2 "
+                       "chest\": \"44in\"} — one list per person, never averaged.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -561,8 +574,9 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
     # trapped by the channel default (Meta defaults to USD).
     cur = (args.get("currency") or "").upper()
     if cur in ("KES", "USD", "ZMW") and cur != ctx.currency:
-        from dataclasses import replace as _dc_replace
-        ctx = _dc_replace(ctx, currency=cur)
+        # The whole turn switches — the cart, the quotation and the order that
+        # follow in the same turn used to keep the channel's default currency.
+        ctx.currency = cur
     # The owner's "same item, many names" table first (core/synonyms): a
     # "pendant" or a "cross and chain" searches as the hub's Pectoral Cross.
     query = _canonical(args.get("query") or "").lower().strip()
@@ -580,6 +594,7 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
     # matches a whole word of the name / category / aliases (plural-tolerant),
     # and the little words that carry no product are dropped before matching.
     from app.services.post_catalog import is_set_row, set_components
+    from app.core import companions as _companions
     toks = _search_tokens(query)
     # A query made ONLY of little words ("our client from south africa gave us
     # this") names nothing: say so, rather than answering with the whole shelf
@@ -659,7 +674,7 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
 
     results = []
     for p in matched:
-        mto = p.get("product_type") == "variable" and bool(p.get("is_producible"))
+        mto = bool(p.get("is_producible"))          # the storefront's own definition
         row = {
             "name": p.get("name"),
             "sku": p.get("sku"),
@@ -746,6 +761,48 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
                          "complete set and say what it comes with; never one piece's "
                          "price as the set's"),
             }
+            # Each piece as the hub sells it ALONE, with its own price — so
+            # "the cassock alone is $120; the complete set is $200" is a fact
+            # in both directions (A SET IS PRICED AS ITS TOTAL).
+            _pp = _companions.pieces_priced(p, catalog)
+            if _pp:
+                row["set"]["pieces_priced"] = [
+                    {"piece": e["piece"], "row": e["row"].get("name"),
+                     "price": _to_display(e["row"].get("price"), ctx, e["row"].get("price_usd"),
+                                          prices=e["row"].get("prices"))}
+                    for e in _pp[:6]]
+        else:
+            # This piece is also sold inside a set: name the set and its price
+            # when they ask about the piece under a set (never one piece's
+            # price as if it were the whole).
+            _ps = _companions.part_of_set(p, catalog)
+            if _ps is not None:
+                row["part_of_set"] = {
+                    "name": _ps.get("name"),
+                    "price": _to_display(_ps.get("price"), ctx, _ps.get("price_usd"),
+                                         prices=_ps.get("prices")),
+                    "comes_with": set_components(_ps, catalog),
+                    "note": ("also sold inside this set — under a set post, or when they "
+                             "ask about the piece and the set, give the piece's own price "
+                             "AND the set's total in one reply"),
+                }
+        # THE COMPANION MAP, grounded (owner, 2026-09-26): what a buyer of this
+        # item completes it with — the humblest hub row of each companion kind
+        # with its price, so the ONE suggestion (after their need is settled)
+        # is a fact, never a guess. The first rows only: those are the ones
+        # that get quoted.
+        if len(results) < 3:
+            _gw = _companions.goes_with(p, catalog)
+            if _gw:
+                row["goes_with"] = [
+                    {"name": g.get("name"),
+                     "price": _to_display(g.get("price"), ctx, g.get("price_usd"),
+                                          prices=g.get("prices"))}
+                    for g in _gw]
+                row["goes_with_note"] = ("the natural companions, cheapest of each kind — "
+                                         "ONE of them may be your one suggestion once the "
+                                         "order for THIS item is settled, at the price shown; "
+                                         "never before the price of what they asked for")
         # The workshop's own measurement spec for THIS item (production items
         # carry it in the hub) — the source of truth for WHAT to ask when
         # measuring. Compacted to one line; required figures lead.
@@ -796,6 +853,16 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
             prices = [vr["price"] for vr in row["variants"] if isinstance(vr["price"], (int, float))]
             if prices and min(prices) != max(prices):
                 row["price_range"] = {"from": min(prices), "to": max(prices)}
+                if row.get("offer_available"):
+                    # The card on a varied product: the played line names the
+                    # chosen variant's figures, never the base row's.
+                    _lo = promo.offer_price(campaign, min(prices))
+                    row["offer_available"]["say_when_played"] = (
+                        f"{campaign['name']}: {campaign['percent']}% off — the exact "
+                        "figure is the chosen variant's `offer_price` (from "
+                        f"{_fmt_price(min(prices), ctx.currency)}, now "
+                        f"{_fmt_price(_lo, ctx.currency) if _lo is not None else '—'}, "
+                        "for the smallest); name the variant with its two figures")
                 row["price_note"] = ("price depends on the variant — quote the one the "
                                      "customer picks, or give the range and ask")
                 row["variant_note"] = (
@@ -819,7 +886,11 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
         if mto:
             row["ask_next"] = ("made to order — the open details are the customer's: ask "
                                "the colour first, then the size or measurements "
-                               "(measurements_needed), then how many and how soon")
+                               "(measurements_needed), then how many and how soon — as "
+                               "the owner's pull, one question at its end ('Kindly place "
+                               "your order — tell us the colour and how many you need. How "
+                               "soon do you want it?'); measurements after the yes, never "
+                               "before the price")
         elif variants:
             row["ask_next"] = ("stock item with a FIXED set of options (see variants) — "
                                "offer those options by name, never an open 'which "
@@ -906,6 +977,8 @@ async def _update_cart(args: dict, ctx: ToolContext) -> dict:
     if action == "clear":
         cart = await cartmod.clear_cart(ctx.db, ctx.wa_id, ctx.channel)
         return {"ok": True, "items": [], "total": 0, "currency": ctx.currency}
+    if action not in ("add", "set", "remove"):
+        return {"error": f"unknown action '{action}' — use add, set, remove or clear"}
 
     prod = (args.get("product") or "").strip()
     if not prod:
@@ -920,15 +993,30 @@ async def _update_cart(args: dict, ctx: ToolContext) -> dict:
     line = hub_client.resolve_hub_line({"name": prod, "sku": prod, "qty": qty}, catalog)
     if not line and action in ("add", "set"):
         return {"error": f"'{prod}' not found in the catalogue", "suggestion": "call search_catalog"}
+    if line and action in ("add", "set") and not float(line.get("unit_price") or 0):
+        # An unpriced hub row is not sellable yet: a KES 0 line would reach the
+        # order and the customer would hear a total that is not one.
+        return {"error": f"'{line.get('name')}' has no price in the hub yet — do not quote or add it",
+                "next_step": "call check_availability so the team confirms it and its price"}
 
     key = (line or {}).get("name") or prod
 
     def find(name):
         return next((i for i in items if i.get("name", "").lower() == name.lower()), None)
 
+    def _is_line_of(i: dict, name: str) -> bool:
+        n = i.get("name", "").lower()
+        # the base name removes its variants too ("Straight Collar" takes
+        # "Straight Collar — 10 inch" with it)
+        return n == name.lower() or n.startswith(name.lower() + " —")
+
     existing = find(key)
     if action == "remove":
-        cart["items"] = [i for i in items if i.get("name", "").lower() != key.lower()]
+        kept = [i for i in items if not _is_line_of(i, key) and not _is_line_of(i, prod)]
+        if len(kept) == len(items):
+            return {"ok": False, "error": f"'{prod}' is not in the cart",
+                    "items": (await _cart_display(cart, ctx))[0], "currency": ctx.currency}
+        cart["items"] = kept
     elif action in ("add", "set"):
         new_qty = qty if action == "set" else (int(existing["qty"]) + qty if existing else qty)
         cat = next((p for p in catalog if p.get("hub_product_id") == line["product_id"]), {})
@@ -944,7 +1032,7 @@ async def _update_cart(args: dict, ctx: ToolContext) -> dict:
             "price_usd": line.get("unit_price_usd"),   # variant's own USD (for USD display)
             "prices": line.get("prices") or {},        # per-currency map (ZMW display)
             "in_stock": bool(cat.get("in_stock", True)),
-            "made_to_order": line.get("product_type") == "variable" and bool(line.get("is_producible")),
+            "made_to_order": bool(line.get("is_producible")),
         }
         if existing:
             items[items.index(existing)] = row
@@ -985,6 +1073,32 @@ def _sourcing_gaps(cart_items: list, catalog: list) -> list[str]:
     return gaps
 
 
+_TITLES = {"pastor", "pst", "ps", "rev", "reverend", "bishop", "archbishop", "fr", "father",
+           "dr", "mr", "mrs", "ms", "miss", "madam", "sir", "apostle", "prophet", "prophetess",
+           "evangelist", "deacon", "deaconess", "elder", "sister", "sr", "brother", "br", "bro",
+           "sis", "mama", "baba", "mzee", "canon", "dean", "venerable", "rt", "hon", "prof",
+           "eng", "the", "very"}
+
+
+def _first_name(full: str | None, fallback: str = "Customer") -> str:
+    """The first NAME, never the title: "Pastor Moses Mwicigi" → "Moses",
+    "Rt. Rev. Dr. Jane Wanjiru" → "Jane" (the hub's first_name used to be the
+    first token, so a bishop was filed as "Bishop")."""
+    toks = [t.strip(" .,") for t in str(full or "").split()]
+    toks = [t for t in toks if t]
+    while toks and toks[0].lower().rstrip(".") in _TITLES:
+        toks.pop(0)
+    return toks[0] if toks else fallback
+
+
+def _order_fingerprint(phone: str, items: list) -> str:
+    """One confirmed cart → one order: the lines' identity, order-free."""
+    import hashlib as _h
+    lines = sorted(f"{i.get('sku') or ''}|{str(i.get('name') or '').lower()}|{i.get('qty') or i.get('quantity') or 1}"
+                   for i in (items or []))
+    return _h.sha1((str(phone) + "\n" + "\n".join(lines)).encode()).hexdigest()[:16]
+
+
 async def _order_identity(ctx: ToolContext):
     """(phone, first_name, person_id) to bill this order to. WhatsApp IS the
     phone. A Meta customer has only a page-scoped PSID — never a phone — so we
@@ -994,7 +1108,7 @@ async def _order_identity(ctx: ToolContext):
     if ctx.channel == "whatsapp":
         user = (await ctx.db.execute(
             select(User).where(User.wa_id == ctx.wa_id))).scalar_one_or_none()
-        name = ((user.name if user else None) or "WhatsApp Customer").split()[0]
+        name = _first_name((user.name if user else None), "WhatsApp Customer")
         # A WEB session key is not a phone. Billing an order to "web_<hash>" is the
         # phantom-contact bug the Meta path explicitly guards against — fall back
         # to the captured phone, or make the agent ask for one (phone=None).
@@ -1014,7 +1128,7 @@ async def _order_identity(ctx: ToolContext):
         return None, name, None
     person = await ctx.db.get(Person, ident.person_id)
     if person is not None and person.display_name:
-        name = person.display_name.split()[0]
+        name = _first_name(person.display_name)
     ph = (await ctx.db.execute(select(Identifier).where(
         Identifier.person_id == ident.person_id,
         Identifier.type == "phone"))).scalars().first()
@@ -1039,7 +1153,7 @@ async def _order_identity(ctx: ToolContext):
                                       value=f"+{phone}", source="order"))
                 await ctx.db.commit()
         if u is not None and u.name and name == "Customer":
-            name = u.name.split()[0]
+            name = _first_name(u.name)
     return phone, name, ident.person_id
 
 
@@ -1059,13 +1173,54 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
 
     country_iso = (resolve_country(order_wa_id) or {}).get("country_iso")
     catalog = await svc.catalog_items(ctx.db, ctx.redis)
+
+    # EVERY line resolves to a hub row BEFORE anything is created (owner,
+    # 2026-09-26): a line that did not match used to be dropped quietly, the
+    # rest ordered and the whole cart cleared — paid for less than agreed.
+    unmatched = [str(it.get("name") or it.get("product") or "item") for it in cart["items"]
+                 if not hub_client.resolve_hub_line(it, catalog)]
+    if unmatched:
+        return {"error": "no order was created — these cart lines could not be matched to a "
+                         "hub product: " + ", ".join(unmatched),
+                "unmatched": unmatched,
+                "next_step": "search_catalog the exact hub name (or SKU) for each, fix the line "
+                             "with update_cart, then call create_order again"}
+
+    # ONE order per confirmed cart: a hub timeout after the order was created
+    # used to leave the cart in place, and the retry created it twice.
+    idem_key = f"order:done:{ctx.channel}:{ctx.wa_id}:{_order_fingerprint(order_wa_id, cart['items'])}"
+    if ctx.redis is not None:
+        try:
+            prior = await ctx.redis.get(idem_key)
+            if prior:
+                done = json.loads(prior if isinstance(prior, str) else prior.decode())
+                done["already_created"] = True
+                done["note"] = ("this exact order was placed moments ago — give them the same "
+                                "order number and link again; never create it twice")
+                await cartmod.clear_cart(ctx.db, ctx.wa_id, ctx.channel)
+                return done
+        except Exception:
+            pass
+
+    # THE CONSULTATION RIDES THE ORDER (owner, 2026-09-26): what the writer
+    # collected — colour, design, deadline, delivery town, recipient — plus the
+    # measurements on file, so the workshop and the rider start from it instead
+    # of "confirm size/measurements with the customer".
+    notes = " ".join(str(args.get("notes") or "").split())
+    figures = ""
+    try:
+        from app.agent import measurements as _meas
+        figures = _meas.describe(await _meas.get_measurements(ctx.db, ctx.wa_id, ctx.channel))
+    except Exception:
+        figures = ""
+    order_note = "; ".join(x for x in (notes, (f"Measurements on file: {figures}" if figures else ""))
+                           if x)
+
     try:
         from app.services import promotions as _promo
         # Built from what this customer was PROMISED, not from what is running
-        # now. Two things follow: a customer who never asked is never quietly
-        # discounted (no promise, no note), and one who was quoted the offer
-        # price still gets it even if the campaign ended in between — we do not
-        # withdraw a price we have already given.
+        # now: a customer who never asked is never quietly discounted, and one
+        # who was quoted the offer price still gets it after the campaign ends.
         _granted = await _promo.granted_promise(ctx.redis, ctx.channel, ctx.wa_id)
     except Exception:
         _granted = None           # no offer recorded beats no order created
@@ -1078,19 +1233,22 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
     proven = (to_e164(order_wa_id) is None
               and await whatsapp_handle_proven(ctx.db, order_wa_id))
 
+    # The total as QUOTED, in the customer's own currency — what they will hear;
+    # the hub's figure below is the hub's own currency.
+    _q_items, quoted_total = await _cart_display(cart, ctx)
+
     try:
         pushed = await hub_client.push_pending_order(
             catalog, wa_id=order_wa_id, first_name=first_name,
             country_iso=country_iso, items=cart["items"], proven=proven,
-            # The app this customer actually used. Without it every chat order
-            # reached the hub labelled WhatsApp, so a Messenger buyer's order
-            # offered a WhatsApp button that could not reach them.
+            # The app this customer actually used, so the hub offers the right
+            # contact button.
             source_channel=ctx.channel,
-            # The promise itself, not a sentence about it: push_pending_order
-            # puts the percentage on the lines it covers so the customer is
-            # charged what they were quoted, and writes the note describing
-            # what it actually did.
+            # The promise itself: push_pending_order puts the percentage on the
+            # lines it covers so the customer is charged what they were quoted.
             promise=_granted,
+            # Everything the workshop and the rider must know, on the order.
+            measurement_note=(order_note or None),
         )
     except ValueError as exc:
         return {"error": "none of the cart items could be matched to the hub",
@@ -1099,10 +1257,8 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
     hub_order_id = pushed.get("order_id")
 
     # The DURABLE customer link — the hub's /order/{public_token}: their receipt
-    # when paid, their checkout when not, and it never expires. We used to send
-    # the 72-hour pay session instead, which is why all 88 links Neema had ever
-    # sent were dead. The pay link is still fetched as a fallback for a hub that
-    # predates public_token, and never as the thing we hand the customer.
+    # when paid, their checkout when not, and it never expires. The 72-hour pay
+    # session is fetched only as a fallback for a hub that predates public_token.
     public_url = pushed.get("public_url")
     payment_url = None
     if not public_url:
@@ -1162,22 +1318,56 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
         except Exception:
             _log.warning("short ref failed for order %s", hub_order_id, exc_info=True)
             order_url = public_url or payment_url
+    # THE ONE LINK, kept where the payment reminder, check_order_status and the
+    # paid receipt look for it — it used to stay NULL whenever the hub gave the
+    # durable page, so an agent order was never reminded and never re-linked.
+    order_row.hub_payment_url = order_url or public_url or payment_url
 
     await ctx.db.commit()
     await cartmod.clear_cart(ctx.db, ctx.wa_id, ctx.channel)
 
-    return {
+    result = {
         "ok": True,
         "order_number": pushed.get("order_number"),
         "total": pushed.get("total_amount"),
         "currency": pushed.get("currency_code"),
+        # what they were quoted, in THEIR currency — say this figure
+        "quoted_total": quoted_total,
+        "quoted_currency": ctx.currency,
+        "say_total_as": f"{ctx.currency} {money.num(quoted_total) or quoted_total}",
         # ONE link for the customer: it shows the order, the amount, and every
         # payment option that works in their country. Never a product page.
         "order_url": order_url,
         "payment_url": order_url,   # legacy key — same durable destination
         "made_to_order_items": [l["name"] for l in pushed.get("production_lines", [])],
         "unmatched": pushed.get("unmatched") or [],
+        "note_on_order": order_note,
     }
+    # AN INTERNATIONAL ORDER TELLS THE TEAM ITSELF (2026-09-26): the customer
+    # pays by a transfer route a colleague confirms with them — the note and
+    # the ping go out here, so Neema stays on the thread instead of a
+    # handoff that muted her at the very moment of payment.
+    if (ctx.currency or "KES") != "KES":
+        told = await _team_note(
+            ctx, kind="international_order",
+            title="💱 International order — confirm the transfer route",
+            text=(f"💱 INTERNATIONAL ORDER #{pushed.get('order_number')} — quoted "
+                  f"{result['say_total_as']}. The customer pays by transfer (Western "
+                  "Union / MoneyGram / Mukuru): please confirm the route and the amount "
+                  "with them here. Neema stays on the thread."),
+            body=f"order #{pushed.get('order_number')} — {ctx.wa_id}")
+        result["team_told"] = told
+        result["next_step"] = ("Give the order number and the order link (it shows the amount "
+                               "and the payment options for their country); ask which transfer "
+                               "method suits them — Western Union, MoneyGram or Mukuru — and say a "
+                               "colleague confirms the route and the amount with them. Stay in the "
+                               "conversation; never present the KES M-Pesa link as their way to pay.")
+    if ctx.redis is not None:
+        try:
+            await ctx.redis.set(idem_key, json.dumps(result, default=str), ex=6 * 3600)
+        except Exception:
+            pass
+    return result
 
 
 async def _check_order_status(args: dict, ctx: ToolContext) -> dict:
@@ -1200,14 +1390,20 @@ async def _check_order_status(args: dict, ctx: ToolContext) -> dict:
     )).scalar_one_or_none()
     if row is None:
         return {"found": False}
+    from app.routers.order_link import customer_link
     out = {"found": True, "order_number": row.hub_order_number,
-           "payment_url": row.hub_payment_url}
+           "payment_url": customer_link(row) or None}
     try:
         live = await hub_client.fetch_order_status(row.hub_order_id, ctx.redis)
         if live:
             out.update({k: live.get(k) for k in ("status", "payment_status", "fulfillment_status", "total_amount")})
+        else:
+            out["live"] = False
     except Exception:
-        pass
+        out["live"] = False
+    if out.get("live") is False:
+        out["note"] = ("the hub did not answer just now — the order exists; say you will "
+                       "confirm its status shortly, never guess it")
     return out
 
 
@@ -1540,6 +1736,43 @@ async def _add_tags(args: dict, ctx: ToolContext) -> dict:
     flag_modified(user, "state")
     await ctx.db.commit()
     return {"ok": True, "tags": state["tags"]}
+
+
+async def _team_note(ctx: ToolContext, *, kind: str, title: str, text: str, body: str) -> bool:
+    """Tell the team something about this thread WITHOUT muting Neema: a note in
+    the conversation (visible in the inbox) and the dashboard ping — the same
+    shape check_availability and raise_complaint use. Best-effort."""
+    try:
+        from sqlalchemy import or_
+        from app.models.conversation import Conversation
+        from app.models.message import Message, MsgDirection, MsgSender
+        conv = (await ctx.db.execute(select(Conversation).where(
+            Conversation.channel == ctx.channel,
+            or_(Conversation.external_id == ctx.wa_id, Conversation.wa_id == ctx.wa_id),
+        ))).scalars().first()
+        if conv is None:
+            return False
+        ctx.db.add(Message(
+            channel=conv.channel, wa_id=conv.wa_id,
+            external_id=getattr(conv, "external_id", None),
+            person_id=conv.person_id, conversation_id=conv.id,
+            direction=MsgDirection.outbound, sender=MsgSender.human_agent,
+            text=text, media_type="note",
+        ))
+        await ctx.db.commit()
+        if ctx.redis is not None:
+            try:
+                import json as _json
+                await ctx.redis.publish("ws:channel:agents:all", _json.dumps({
+                    "event": "notification", "type": kind, "title": title,
+                    "body": body, "conv_id": str(conv.id),
+                }))
+            except Exception:
+                pass
+        return True
+    except Exception:
+        _log.info("team note (%s) not recorded", kind, exc_info=True)
+        return False
 
 
 async def _check_availability(args: dict, ctx: ToolContext) -> dict:
@@ -2303,21 +2536,39 @@ async def _prepare_quotation(args: dict, ctx: ToolContext) -> dict:
     if to:
         lines.append(f"Prepared for: {to}")
     lines.append("")
-    for i in items:
+    # The offer this customer was PROMISED rides the quotation's lines — a
+    # committee must see the figure they will actually be charged.
+    try:
+        from app.services import promotions as _promo
+        promise = await _promo.granted_promise(ctx.redis, ctx.channel, ctx.wa_id)
+        pct = float((promise or {}).get("percent") or 0) if promise else 0.0
+    except Exception:
+        promise, pct = None, 0.0
+    raw_lines = list(cart.get("items") or [])
+    total = 0.0
+    for i, raw in zip(items, raw_lines + [{}] * max(0, len(items) - len(raw_lines))):
         qty = i.get("qty") or i.get("quantity") or 1
         name = i.get("name") or "Item"
         try:
             unit = float(i.get("unit_price"))
-            lines.append(f"- {name} ×{qty} @ {ctx.currency} {money.num(unit)} "
+            tag = ""
+            if pct > 0 and _promo.promise_covers(promise, raw):
+                off = _promo.offer_price({"percent": pct, "name": promise.get("name") or "",
+                                          "scope": "all"}, unit)
+                if off is not None:
+                    unit, tag = float(off), f" ({promise.get('name') or 'offer'} −{pct:g}%)"
+            total += unit * float(qty)
+            lines.append(f"- {name} ×{qty} @ {ctx.currency} {money.num(unit)}{tag} "
                          f"= {ctx.currency} {money.num(unit * float(qty))}")
         except (TypeError, ValueError):
             lines.append(f"- {name} ×{qty}")
     total_s = money.num(total) or str(total)
+    tailored = any(bool(i.get("made_to_order")) for i in raw_lines)
     lines += ["",
               f"{star}TOTAL: {ctx.currency} {total_s}{star}",
               f"Valid until {(nairobi + _td(days=14)).strftime('%d %b %Y')}.",
-              "Made to order and tailored to your measurements. Delivery is "
-              "quoted separately by destination."]
+              ("Made to order and tailored to your measurements. " if tailored else "")
+              + "Delivery is quoted separately by destination."]
     return {"ok": True, "quotation": "\n".join(lines),
             "note": "send this text as your message — at most one warm line before it"}
 
@@ -2328,7 +2579,8 @@ async def _send_measurement_guide(args: dict, ctx: ToolContext) -> dict:
     url = (settings.measurement_guide_url or "").strip()
     if not url:
         return {"error": "no measurement guide is configured"}
-    if ctx.channel == "whatsapp":
+    from app.core.phone import is_plausible_phone as _plausible_phone
+    if ctx.channel == "whatsapp" and _plausible_phone(ctx.wa_id):
         try:
             from app.services import n8n_bridge as _svc
             wamid = await _svc._send_waba_image(
@@ -2378,42 +2630,74 @@ async def _apply_offer(args: dict, ctx: ToolContext) -> dict:
     #
     # Asking with no product named is a general "what's on?" — stating the
     # campaign IS the quote, so that still grants. Anything else has to earn it.
-    wanted = _canonical(args.get("product") or "").strip().lower()
-    quoted = not wanted
-    if wanted:
-        quoted = False
-        catalog = await svc.catalog_items(ctx.db, ctx.redis)
-        toks = [t for t in wanted.split() if t]
-        for p in catalog:
-            hay = " ".join([p.get("name", ""), " ".join(p.get("aliases") or [])]).lower()
-            if not all(t in hay for t in toks):
-                continue
-            if not promo.applies_to(campaign, p):
-                out["not_covered"] = (
-                    f"{p.get('name')} is NOT in this offer. Say so plainly and "
-                    "kindly — quote its normal price; never stretch the offer to "
-                    "cover it.")
-                break
-            listed = _to_display(p.get("price"), ctx, p.get("price_usd"),
-                                 prices=p.get("prices"))
-            off = promo.offer_price(campaign, listed) if isinstance(listed, (int, float)) else None
-            if off is not None:
-                out["product"] = p.get("name")
-                out["list_price"] = listed
-                out["offer_price"] = off
-                out["currency"] = ctx.currency
-                out["say"] = (
-                    f"{campaign['name']}: {campaign['percent']}% off — "
-                    f"{p.get('name')} is {_fmt_price(listed, ctx.currency)}, "
-                    f"now {_fmt_price(off, ctx.currency)}")
-                quoted = True
-            break
+    wanted = " ".join(_canonical(args.get("product") or "").split()).strip().lower()
+    quoted = False
+    matched_name = None
+    if not wanted:
+        # Terms only: nothing is promised until it is quoted on a named item
+        # (a no-product call used to grant the whole campaign for 45 days).
+        out["granted"] = False
+        out["say"] = ("these are the offer's terms only — nothing has been promised. To play "
+                      "it, call apply_offer again WITH the item they are buying: it is quoted "
+                      "on a named item, once, at the moment it closes the sale")
+        return out
+    catalog = await svc.catalog_items(ctx.db, ctx.redis)
+    toks = _search_tokens(wanted)
+
+    def _words_of(p: dict) -> set:
+        return _search_words(" ".join([p.get("name", ""), " ".join(p.get("aliases") or [])]))
+
+    def _clean(name) -> str:
+        return " ".join(str(name or "").lower().split())
+    # the hub row they named: its exact name, else every word of theirs in its
+    # name or aliases (whole words — "oil" never matches "soil"), tightest first
+    line = hub_client.resolve_hub_line({"name": wanted, "sku": wanted}, catalog)
+    hits = [p for p in catalog if _clean(p.get("name")) == wanted]
+    if not hits and line:
+        hits = [p for p in catalog if p.get("hub_product_id") == line.get("product_id")]
+    if not hits and toks:
+        hits = sorted((p for p in catalog if toks.issubset(_words_of(p))),
+                      key=lambda p: len(_words_of(p)))
+    if not hits:
+        out["granted"] = False
+        out["not_found"] = (f"no catalogue item matches '{wanted}' — search_catalog it by the "
+                            "hub's own name first; nothing has been promised")
+        return out
+    p = hits[0]
+    if not promo.applies_to(campaign, p):
+        out["granted"] = False
+        out["not_covered"] = (
+            f"{p.get('name')} is NOT in this offer. Say so plainly and kindly — quote its "
+            "normal price; never stretch the offer to cover it.")
+        return out
+    # the variant they named, at ITS price; else the product's
+    if line and line.get("product_id") == p.get("hub_product_id") and line.get("variant_id"):
+        listed = _to_display(line.get("unit_price"), ctx, line.get("unit_price_usd"),
+                             prices=line.get("prices"))
+        matched_name = line.get("name") or p.get("name")
+    else:
+        listed = _to_display(p.get("price"), ctx, p.get("price_usd"), prices=p.get("prices"))
+        matched_name = p.get("name")
+    off = promo.offer_price(campaign, listed) if isinstance(listed, (int, float)) else None
+    if off is None:
+        out["granted"] = False
+        out["not_priced"] = (f"{matched_name} carries no price the offer can be taken from — quote "
+                             "its normal price; nothing has been promised")
+        return out
+    out["product"] = matched_name
+    out["list_price"] = listed
+    out["offer_price"] = off
+    out["currency"] = ctx.currency
+    out["say"] = (f"{campaign['name']}: {campaign['percent']}% off — "
+                  f"{matched_name} is {_fmt_price(listed, ctx.currency)}, "
+                  f"now {_fmt_price(off, ctx.currency)}")
+    quoted = True
 
     # Now, and only now: record the TERMS this customer was actually told — so
     # an order placed after the campaign ends still carries what was said, and
     # a conversation that was never quoted a price carries nothing.
     out["granted"] = (
-        await promo.mark_granted(ctx.redis, ctx.channel, ctx.wa_id, campaign)
+        await promo.mark_granted(ctx.redis, ctx.channel, ctx.wa_id, campaign, product=matched_name)
         if quoted else False
     )
 

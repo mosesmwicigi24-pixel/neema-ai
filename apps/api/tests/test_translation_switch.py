@@ -121,7 +121,7 @@ def test_the_first_flip_creates_the_row():
 def test_off_stops_the_incoming_direction_before_a_single_token(monkeypatch):
     from app.agent import runtime
     monkeypatch.setattr(runtime, "build_llm",
-                        lambda model=None: (_ for _ in ()).throw(
+                        lambda model=None, **kw: (_ for _ in ()).throw(
                             AssertionError("no model call when the switch is off")))
     r = _Redis({"app:translate_enabled": "off"})
     assert asyncio.run(tx._translate_thread(r, "conv", ["m1"])) == 0
@@ -132,7 +132,7 @@ def test_off_stops_the_incoming_direction_before_a_single_token(monkeypatch):
 def test_off_sends_the_humans_reply_through_untouched(monkeypatch):
     from app.agent import runtime
     monkeypatch.setattr(runtime, "build_llm",
-                        lambda model=None: (_ for _ in ()).throw(
+                        lambda model=None, **kw: (_ for _ in ()).throw(
                             AssertionError("no model call when the switch is off")))
     out = asyncio.run(tx.translate_reply(None, _Redis({"app:translate_enabled": "off"}),
                                          "conv", "Thank you — the tray is $70."))

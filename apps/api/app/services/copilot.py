@@ -56,7 +56,7 @@ async def _human_held(redis, key: str, channel: str, text: str) -> None:
             if conv is None:
                 return
             draft = (await runtime.run_turn(
-                db, redis, wa_id=key, user_text=text, llm=runtime.build_llm(),
+                db, redis, wa_id=key, user_text=text, llm=runtime.build_llm(purpose="copilot"),
                 channel=channel,
                 external_id=(None if channel == "whatsapp" else key),
                 read_only=True)).strip()
@@ -71,7 +71,7 @@ async def _human_held(redis, key: str, channel: str, text: str) -> None:
     try:
         async with AsyncSessionLocal() as db:
             await runtime.run_turn(
-                db, redis, wa_id=key, user_text=text, llm=runtime.build_llm(),
+                db, redis, wa_id=key, user_text=text, llm=runtime.build_llm(purpose="copilot"),
                 channel=channel,
                 external_id=(None if channel == "whatsapp" else key),
                 scribe_only=True)
@@ -160,7 +160,7 @@ async def _briefing(redis, conv_id) -> None:
                            "settled (items/colour/size/total), what's still open, "
                            "anything to avoid, and ONE suggested opening line. "
                            "Short bullets.]"),
-                llm=runtime.build_llm(), channel=conv.channel,
+                llm=runtime.build_llm(purpose="copilot"), channel=conv.channel,
                 external_id=(None if conv.channel == "whatsapp" else conv.external_id),
                 read_only=True)).strip()
             if not brief:

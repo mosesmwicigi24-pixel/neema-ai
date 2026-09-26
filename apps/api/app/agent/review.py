@@ -1016,7 +1016,7 @@ async def reviewer_verdict(comment: str, answer: str, seen: list, *,
     )
     try:
         from app.agent.runtime import build_llm
-        llm = build_llm(model=_reviewer_model(comment, answer))
+        llm = build_llm(model=_reviewer_model(comment, answer), purpose="reviewer", cache=False)
         resp = await llm.complete(
             system="You verify a shop's replies before they are sent. One line only, in the shape asked.",
             messages=[{"role": "user", "content": prompt}], tools=[])
@@ -1026,12 +1026,30 @@ async def reviewer_verdict(comment: str, answer: str, seen: list, *,
         return None
 
 
+_PLAIN_BREAKERS_RE = re.compile(r"\d|https?://|www\.|wa\.me|\$|ksh|kes\b|usd\b|zmw\b",
+                                re.IGNORECASE)
+
+
+def plain_draft(answer: str, seen: list | None) -> bool:
+    """A draft the rules alone can verify: no figure, no link, no currency
+    mark, no money word, and no hub row in hand to be quoted from. The
+    reviewer's model line has nothing to check on "You're welcome, Pastor —
+    God bless" (cost audit, 2026-09-26)."""
+    a = answer or ""
+    if seen:
+        return False
+    if _PLAIN_BREAKERS_RE.search(a) or _MONEY_TURN_RE.search(a):
+        return False
+    return True
+
+
 async def review_reply(comment: str, answer: str, seen: list, *,
                        post_product: str = "", currency: str = "USD",
                        known_figures: set[float] | frozenset[float] = frozenset(),
                        redis=None, transcript: list | None = None,
                        tool_results: list | None = None, mode: str = "comment",
-                       known_text: str = "", fx: dict | None = None) -> dict:
+                       known_text: str = "", fx: dict | None = None,
+                       model_review: bool = True) -> dict:
     """DOUBLE VERIFICATION of one draft: the rules (deterministic) AND the
     reviewer (a model's reading) both read it, and their findings merge —
     {"ok", "issues", "hard", "soft", "by"}. `hard` are the findings that may
@@ -1045,9 +1063,11 @@ async def review_reply(comment: str, answer: str, seen: list, *,
     hard = [f["text"] for f in findings if f["hard"]]
     soft = [f["text"] for f in findings if not f["hard"]]
     by = "rules" if findings else ""
-    v = await reviewer_verdict(comment, answer, seen, post_product=post_product,
-                               currency=currency, redis=redis, transcript=transcript,
-                               tool_results=tool_results, mode=mode)
+    v = None
+    if model_review:
+        v = await reviewer_verdict(comment, answer, seen, post_product=post_product,
+                                   currency=currency, redis=redis, transcript=transcript,
+                                   tool_results=tool_results, mode=mode)
     if v is not None and not v["ok"]:
         soft.extend(v["issues"] or ["the reviewer rejected the draft"])
         by = (by + "+reviewer").strip("+")

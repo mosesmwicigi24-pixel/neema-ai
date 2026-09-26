@@ -92,7 +92,7 @@ def test_run_turn_read_only_offers_only_readonly_tools():
     seen = {}
 
     class _RecLLM:
-        async def complete(self, *, system, messages, tools):
+        async def complete(self, *, system, messages, tools, **kw):
             seen["tools"] = [t["name"] for t in tools]
             return types.SimpleNamespace(text="Here's a suggested reply.",
                                          tool_calls=[], assistant_content=[], usage={})

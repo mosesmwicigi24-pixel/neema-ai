@@ -208,6 +208,57 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   GOODS ONLY and THEIR COLOUR IS THE COLOUR; the reviewer model's rule 7;
   `/api/health` reports `guard` (declined, paused, silenced, lifted, noted).
   Switch: `church_goods_guard`. Tests: `tests/test_church_goods_only.py`.
+- **Where the money goes, and the cuts** (owner 2026-09-26: "heightened
+  expenditure for a few days"). EVERY model call is metered by the client
+  itself (`agent/llm.py` → `services/ai_budget.meter`), by purpose (whatsapp,
+  messenger, comment, comment-read, reviewer, rewrite, vision, translate,
+  job:…) and by model; `/api/health` reports `spend` (today's USD against
+  the $40 economy / $60 stop rungs, `by_purpose`, `by_model`). The cuts, each
+  pinned in `tests/test_cost_cycle.py`: the gate's rewrite goes out with the
+  loop's OWN tools (`tool_choice: none`) so it READS the fleet's cached
+  rules prefix instead of re-writing it cold for one call; one-off prompts
+  (reviewer, comment reader, photo description, translation, distillation)
+  carry no cache breakpoint (`build_llm(cache=False)`); a plain greeting or
+  thank-you answered in words alone is read by the rules only, never the
+  reviewer model (`review.plain_draft`); Messenger/IG/TikTok DM bursts are
+  buffered `meta_debounce_seconds` (12) and answered ONCE, "typing…"
+  meanwhile (like WhatsApp's 30 s); a turn that chose silence (closer, held
+  acknowledgement, guard pause, echo) marks `agent:missed:silenced:` so the
+  missed-reply sweep does not re-run it three times; a post's photo is
+  described once a day (`post:seen:tried:`), a trusted post identity sends no
+  image to the model, the identity ladder retries every 6 h not hourly; a
+  bare "how much?" comment is read as a price question with no model line;
+  tool results are compact JSON; the Nairobi clock and date live in the
+  per-conversation tail (`prompt.clock_line`, `customer_context(clock=True)`)
+  so the shared rules block no longer changes five times a day. A public
+  comment turn's post is the post it is under (`comment_post_id`), not the
+  first post the person ever commented on.
+- **The ten cycles — one coherent brain** (owner 2026-09-26: "run 10 full
+  top-to-bottom cycles… a highly intelligent human salesperson"). The shared
+  prompt was restructured without losing a pinned rule (the pin set is every
+  test literal found in it): the first open detail depends on the item
+  (colour for a garment we sew, nothing for a stock item); the order pull is
+  the one multi-detail shape and an either/or is a form except for the hub's
+  fixed choices; TWO READINGS, ONE REPLY (both items priced, never a silent
+  pick); colour truth (sewn takes any colour, a stock line has its own) and
+  NEVER SPEAK THE ABSENCE's two plain-truth exceptions; THE COMPANION MAP
+  (cassock → stole, cincture, shirt, collar; tray → cups, wafers, wine…) as
+  the source of the ONE suggestion, after the need is settled; THE OBJECTION
+  LADDER (value + smaller door → instalments → the offer, only while one runs
+  → a colleague; one rung per message, never a discount of her own); a first
+  deferral gets the three-part message, a second one line then silence; ONE
+  figure per item; WHEN TO MEASURE (after the yes, the guide on first ask,
+  one list per wearer) and A PARISH ORDER IN WRITING (`prepare_quotation`);
+  the international close = order number + order link + the transfer-route
+  question, the team told by `create_order` itself (`tools._team_note`;
+  result carries `team_told`/`next_step`) — Neema stays on the thread, no
+  handoff at the moment of payment; Kenya proved by evidence is a known
+  country on every channel. The hub grounds the map: every search row's
+  `goes_with` (cheapest of each companion kind, one per role — a cassock's
+  belt is the CINCTURE belt), `part_of_set` on a piece, `set.pieces_priced`
+  on a set (`core/companions.py`); a varied product's offer line names the
+  chosen variant; the made-to-order `ask_next` is the owner's pull. Tests:
+  `test_cost_cycle.py`, `test_companion_map.py`, `test_ten_cycles_battery.py`.
 - **The gate before posting** (owner 2026-09-25: "someone is asking for
   golden trays and you give silver… put a gate to review before posting…
   when someone asks for Holy Communion Cups without specifying chalice, give

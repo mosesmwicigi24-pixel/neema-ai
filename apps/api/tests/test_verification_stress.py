@@ -312,7 +312,7 @@ class _Writer:
         self.texts = list(texts)
         self.calls = 0
 
-    async def complete(self, system, messages, tools=None):
+    async def complete(self, system, messages, tools=None, **kw):
         self.calls += 1
         return types.SimpleNamespace(text=self.texts.pop(0) if self.texts else "")
 

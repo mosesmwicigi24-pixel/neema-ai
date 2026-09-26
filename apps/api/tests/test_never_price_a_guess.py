@@ -287,14 +287,14 @@ class _LLM:
         self.answers = list(answers)
         self.calls = []
 
-    async def complete(self, *, system, messages, tools):
+    async def complete(self, *, system, messages, tools, **kw):
         self.calls.append(messages)
         return _Resp(self.answers.pop(0))
 
 
 def _vision_env(monkeypatch, answers):
     llm = _LLM(answers)
-    monkeypatch.setattr("app.agent.runtime.build_llm", lambda model=None: llm)
+    monkeypatch.setattr("app.agent.runtime.build_llm", lambda model=None, **kw: llm)
     monkeypatch.setattr("app.agent.media.load_image_block",
                         lambda url: {"type": "image", "source": {"type": "url", "url": url}})
     return llm

@@ -97,7 +97,7 @@ def _wire(monkeypatch, db, turns):
         turns.append(1)
         return "- the sale stands at the Round Collar Clergy Shirt"
     monkeypatch.setattr(runtime, "run_turn", _turn)
-    monkeypatch.setattr(runtime, "build_llm", lambda model=None: object())
+    monkeypatch.setattr(runtime, "build_llm", lambda model=None, **kw: object())
 
 
 def _note(text=None, at=None):

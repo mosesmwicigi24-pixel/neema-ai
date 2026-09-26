@@ -24,10 +24,14 @@ Set a rung to 0 to disable it. Everything here is best-effort and fails OPEN:
 a redis hiccup must cost a metric, never a sale — the worst day this module can
 cause is one where it did nothing.
 
-The meter counts what `run_turn` meters (all channels, comments, drafts,
-sweeps, jobs). The handful of direct light-model calls outside it (the comment
-labeler, call transcription, the daily standup) are fractions of a cent each
-and are left unmetered on purpose.
+The meter counts EVERY model call (owner, 2026-09-26: "heightened expenditure
+for a few days"): the LLM client itself meters each completion — the agent's
+turns on every channel, the reviewer and the rewrite behind the gate, the
+comment reader, the vision reads, the bridges, follow-ups and jobs — by
+PURPOSE and by model (`meter`), so the breaker sees the true day and
+/api/health says where the money went (`read_breakdown`). Before this, only
+`run_turn`'s own loop was metered: the reviewer on every turn, every rewrite,
+every comment read and every vision read bought tokens the breaker never saw.
 """
 from __future__ import annotations
 
@@ -55,6 +59,104 @@ def _day_key(now: datetime | None = None) -> str:
 def exceeded_message(spent: float, stop: float) -> str:
     return (f"daily AI spend ceiling reached (${spent:.2f} of ${stop:.2f}, "
             "AI_DAILY_STOP_USD) — replies hold until midnight UTC or a raised ceiling")
+
+
+_sink = None                 # the app's redis, attached at startup — the client's meter
+
+
+def attach(redis) -> None:
+    """Give the client-level meter a redis to write to (main.py, at boot)."""
+    global _sink
+    _sink = redis
+
+
+def _by_key(now: datetime | None = None) -> str:
+    return _day_key(now) + ":by"
+
+
+def _slug(s: str | None) -> str:
+    return "".join(ch if ch.isalnum() or ch in "-_." else "-" for ch in str(s or "other").lower())[:40] or "other"
+
+
+async def meter(model: str | None, usage: dict | None, purpose: str = "other",
+                redis=None) -> float:
+    """One model call, from the client: its estimated cost into today's total
+    (the breaker's number) and into the day's breakdown — USD, calls and
+    tokens (fresh, cache-read, cache-written, out) per PURPOSE, USD and calls
+    per model. Returns the cost. Best-effort; never raises."""
+    from app.core.ai_pricing import estimate_cost_usd
+    u = usage or {}
+
+    def _n(k: str) -> int:
+        try:
+            return int(u.get(k) or 0)
+        except (TypeError, ValueError):
+            return 0
+    fresh, cached, written, w1h, out = (_n("input_tokens"), _n("cache_read_tokens"),
+                                        _n("cache_write_tokens"), _n("cache_write_1h_tokens"),
+                                        _n("output_tokens"))
+    usd = estimate_cost_usd(model, fresh + cached + written, out, cached_tokens=cached,
+                            cache_write_tokens=written, cache_write_1h_tokens=w1h)
+    r = redis if redis is not None else _sink
+    if r is None or usd < 0:
+        return usd
+    try:
+        key, by = _day_key(), _by_key()
+        p, m = _slug(purpose), _slug(model)
+        if usd > 0:
+            await r.incrbyfloat(key, round(usd, 6))
+            await r.expire(key, _TTL)
+            await r.hincrbyfloat(by, f"usd:{p}", round(usd, 6))
+            await r.hincrbyfloat(by, f"usd:model:{m}", round(usd, 6))
+        await r.hincrby(by, f"calls:{p}", 1)
+        await r.hincrby(by, f"calls:model:{m}", 1)
+        for field, n in (("in", fresh), ("cached", cached), ("written", written), ("out", out)):
+            if n:
+                await r.hincrby(by, f"{field}:{p}", n)
+        await r.expire(by, _TTL)
+    except Exception:
+        pass                     # the meter must never cost a reply
+    return usd
+
+
+async def read_breakdown(redis=None) -> dict:
+    """Today, for /api/health: the total against the rungs and the mode, then
+    every purpose (USD, calls, tokens) and every model (USD, calls), dearest
+    first. {} when redis cannot say."""
+    r = redis if redis is not None else _sink
+    if r is None:
+        return {}
+    try:
+        raw = await r.hgetall(_by_key()) or {}
+    except Exception:
+        raw = {}
+    purposes: dict[str, dict] = {}
+    models: dict[str, dict] = {}
+    for k, v in raw.items():
+        k = k.decode() if isinstance(k, bytes) else str(k)
+        v = v.decode() if isinstance(v, bytes) else v
+        try:
+            field, _, name = k.partition(":")
+            if name.startswith("model:"):
+                d = models.setdefault(name[6:], {"usd": 0.0, "calls": 0})
+            else:
+                d = purposes.setdefault(name, {"usd": 0.0, "calls": 0, "in": 0, "cached": 0,
+                                               "written": 0, "out": 0})
+            if field == "usd":
+                d["usd"] = round(float(v), 4)
+            elif field in d:
+                d[field] = int(float(v))
+        except (TypeError, ValueError):
+            continue
+    spent = await spent_today(r)
+    try:
+        soft, stop = float(settings.ai_daily_budget_usd or 0), float(settings.ai_daily_stop_usd or 0)
+    except Exception:
+        soft, stop = 0.0, 0.0
+    return {"today_usd": round(spent, 2), "soft_usd": soft, "stop_usd": stop,
+            "mode": await mode(r),
+            "by_purpose": dict(sorted(purposes.items(), key=lambda kv: -kv[1]["usd"])),
+            "by_model": dict(sorted(models.items(), key=lambda kv: -kv[1]["usd"]))}
 
 
 async def add_spend(redis, usd: float) -> None:

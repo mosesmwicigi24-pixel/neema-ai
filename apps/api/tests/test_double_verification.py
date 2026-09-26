@@ -166,11 +166,11 @@ def test_the_verifier_reads_rands_and_allows_the_conversion_at_todays_rate():
 def test_the_reviewer_treats_ordinary_promises_as_promises(monkeypatch):
     llm = types.SimpleNamespace(calls=[])
 
-    async def complete(system, messages, tools=None):
+    async def complete(system, messages, tools=None, **kw):
         llm.calls.append(messages[0]["content"])
         return types.SimpleNamespace(text="verdict=pass | issues=-")
     llm.complete = complete
-    monkeypatch.setattr(rt, "build_llm", lambda model=None: llm)
+    monkeypatch.setattr(rt, "build_llm", lambda model=None, **kw: llm)
     asyncio.run(rv.review_reply("my number", "Noted — a colleague will reach out shortly.", [], mode="dm"))
     sent = llm.calls[-1]
     assert "A colleague reaching out, a delivery being arranged, a price to be confirmed are ordinary promises" in sent

@@ -123,15 +123,19 @@ def _cache_last_message(messages: list[dict]) -> list[dict]:
 class AnthropicLLM:
     """Real Claude client (async), with prompt caching + usage capture."""
 
-    def __init__(self, api_key: str, model: str, max_tokens: int = 1024, cache: bool = True):
+    def __init__(self, api_key: str, model: str, max_tokens: int = 1024, cache: bool = True,
+                 purpose: str = "other"):
         from anthropic import AsyncAnthropic
         self._client = AsyncAnthropic(api_key=api_key)
         self._model = model
         self._max_tokens = max_tokens
         self._cache = cache
+        # What this client is buying tokens FOR — the day's spend is metered by
+        # it (services/ai_budget.meter): "whatsapp", "comment", "reviewer"…
+        self.purpose = purpose
 
     async def complete(self, *, system: str | list[str], messages: list[dict],
-                       tools: list[dict]) -> LLMResponse:
+                       tools: list[dict], tool_choice: str | None = None) -> LLMResponse:
         if self._cache:
             sys_param = _cached_system(system)
         elif isinstance(system, str):
@@ -139,12 +143,19 @@ class AnthropicLLM:
         else:
             sys_param = [{"type": "text", "text": s} for s in system if s]
         msgs = _cache_last_message(messages) if self._cache else messages
+        kw: dict = {}
+        if tools and tool_choice:
+            # "none": the tools stay in the prompt — so the fleet's cached
+            # tools+rules prefix is READ, not re-written — but the model may
+            # only answer in words (the gate's rewrite, 2026-09-26).
+            kw["tool_choice"] = {"type": tool_choice}
         resp = await self._client.messages.create(
             model=self._model,
             max_tokens=self._max_tokens,
             system=sys_param,
             messages=msgs,
             tools=tools,
+            **kw,
         )
         r = _blocks_to_response(resp.content)
         r.stop_reason = resp.stop_reason or "end_turn"
@@ -161,6 +172,13 @@ class AnthropicLLM:
             "cache_write_tokens": getattr(u, "cache_creation_input_tokens", 0) or 0,
             "cache_write_1h_tokens": (getattr(cc, "ephemeral_1h_input_tokens", 0) or 0) if cc else 0,
         }
+        # EVERY call is metered here, by purpose (owner, 2026-09-26): the
+        # breaker and /api/health see the whole day, not only the agent's loop.
+        try:
+            from app.services import ai_budget
+            await ai_budget.meter(self._model, r.usage, self.purpose)
+        except Exception:
+            pass
         return r
 
 
@@ -176,7 +194,8 @@ class FakeLLM:
         self._i = 0
         self._uid = 0
 
-    async def complete(self, *, system: str, messages: list[dict], tools: list[dict]) -> LLMResponse:
+    async def complete(self, *, system: str, messages: list[dict], tools: list[dict],
+                       tool_choice: str | None = None) -> LLMResponse:
         if self._i >= len(self._script):
             return LLMResponse(assistant_content=[{"type": "text", "text": ""}], text="")
         step = self._script[self._i]

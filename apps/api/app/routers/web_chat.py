@@ -215,7 +215,7 @@ async def web_chat(body: WebChatIn, request: Request, db: AsyncSession = Depends
 
     from app.agent.runtime import run_turn, build_llm, route_model, _hold_line
     try:
-        reply = await run_turn(db, redis, wa_id, text, build_llm(model=route_model(text)))
+        reply = await run_turn(db, redis, wa_id, text, build_llm(model=route_model(text), purpose="web"))
         # An empty reply is the verifier holding a reply to an acknowledgement
         # (owner, 2026-09-25): on the website that is a folded-hands, never an
         # empty bubble.

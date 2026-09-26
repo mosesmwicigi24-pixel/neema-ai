@@ -400,6 +400,15 @@ def resolve_hub_line(item: dict, catalog: list[dict]) -> dict | None:
     if sku and sku in by_var_sku:
         p, v = by_var_sku[sku]
         return _line(p, "variant_sku", v)
+    # A cart line already knows its hub row: never re-guess it from the name
+    # (two rows named alike used to swap at order time).
+    pid = item.get("hub_product_id")
+    if pid:
+        known = next((x for x in catalog if x.get("hub_product_id") == pid), None)
+        if known is not None:
+            if name and name in by_var_name and by_var_name[name][0] is known:
+                return _line(known, "variant_name", by_var_name[name][1])
+            return _line(known, "id")
     if sku and sku in by_sku and by_sku[sku].get("hub_product_id"):
         return _line(by_sku[sku], "sku")
     if name and name in by_var_name:
@@ -605,7 +614,9 @@ async def push_pending_order(
         # quoted 117" and "the customer was charged 130".
         "notes": ((f"{campaign_note} " if campaign_note else "")
                   + f"{_app} order via Neema"
-                  + (f". {measurement_note}" if (measurement_note and _any_producible) else "")),
+                  # the consultation's note rides EVERY order (delivery town, the
+                  # recipient, a deadline matter for stock lines too)
+                  + (f". {measurement_note}" if measurement_note else "")),
     }
     if stock_lines:
         payload["items"] = [

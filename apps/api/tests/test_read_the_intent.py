@@ -28,19 +28,19 @@ class _LLM:
     def __init__(self, text="high"):
         self.text, self.prompt = text, ""
 
-    async def complete(self, *, system, messages, tools):
+    async def complete(self, *, system, messages, tools, **kw):
         self.prompt = messages[0]["content"]
         return types.SimpleNamespace(text=self.text, tool_calls=[], assistant_content=[], usage={})
 
 
 class _Down:
-    async def complete(self, *, system, messages, tools):
+    async def complete(self, *, system, messages, tools, **kw):
         raise RuntimeError("credit balance is too low")
 
 
 def _read(text, monkeypatch, answer="high"):
     llm = _LLM(answer)
-    monkeypatch.setattr(rt, "build_llm", lambda model=None: llm)
+    monkeypatch.setattr(rt, "build_llm", lambda model=None, **kw: llm)
     return asyncio.run(rt.read_comment(text)), llm
 
 
@@ -93,7 +93,7 @@ def test_queen_gilis_comment_reads_as_a_request(monkeypatch):
     assert r["intent"] == "high" and r["kind"] == "request" and r["ask"] == "more designs for ladies"
     assert "kind=<request|question|complaint|praise|mixed|greeting|other>" in llm.prompt
     # …and still when the model is down (the credit stop that produced the miss)
-    monkeypatch.setattr(rt, "build_llm", lambda model=None: _Down())
+    monkeypatch.setattr(rt, "build_llm", lambda model=None, **kw: _Down())
     r2 = asyncio.run(rt.read_comment("Please more designs for ladies"))
     assert r2["intent"] == "high" and r2["kind"] == "request" and r2["ask"] == "more designs for ladies"
     # …and when the model called it a question
@@ -135,10 +135,10 @@ def test_praise_greetings_and_the_old_labels_still_read_as_before(monkeypatch):
     assert r["intent"] == "low"
     assert asyncio.run(rt.read_comment("   ")) == {"intent": "low", "kind": "other", "severity": 0, "ask": ""}
     # the old name is the reading's intent
-    monkeypatch.setattr(rt, "build_llm", lambda model=None: _LLM("intent=high | kind=question | severity=0 | ask=delivery to Uganda"))
+    monkeypatch.setattr(rt, "build_llm", lambda model=None, **kw: _LLM("intent=high | kind=question | severity=0 | ask=delivery to Uganda"))
     assert asyncio.run(rt.classify_comment_intent("do you ship to Uganda?")) == "high"
     # a short cheer is praise even with no model to say so — thanked, never handed to a person
-    monkeypatch.setattr(rt, "build_llm", lambda model=None: _Down())
+    monkeypatch.setattr(rt, "build_llm", lambda model=None, **kw: _Down())
     for text in ("Awesome 👍", "beautiful work", "❤️", "🙏🙏", "Nice one", "Thank you"):
         r = asyncio.run(rt.read_comment(text))
         assert r["intent"] == "low" and r["kind"] == "praise", text

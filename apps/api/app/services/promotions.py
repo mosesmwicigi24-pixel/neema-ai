@@ -219,7 +219,20 @@ def _grant_key(channel: str, key: str) -> str:
     return f"offer:granted:{channel or 'whatsapp'}:{key}"
 
 
-async def mark_granted(redis, channel: str, key: str, campaign) -> bool:
+def _grant_ttl(campaign) -> int:
+    """A promise outlives its campaign by a week (the order comes later) —
+    never the 45 days that let a March quote discount a May order. Three days
+    at the least, for a campaign ending today."""
+    c = campaign if isinstance(campaign, dict) else {}
+    try:
+        ends = date.fromisoformat(str(c.get("ends_on") or ""))
+        days = (ends - _today()).days + 7
+    except (TypeError, ValueError):
+        days = 45
+    return max(3, min(45, days)) * 24 * 3600
+
+
+async def mark_granted(redis, channel: str, key: str, campaign, product: str | None = None) -> bool:
     """Record the TERMS this customer was promised — not merely that they were.
 
     A price you have quoted is a promise, and a promise does not expire because
@@ -232,6 +245,8 @@ async def mark_granted(redis, channel: str, key: str, campaign) -> bool:
     c = campaign if isinstance(campaign, dict) else {"name": str(campaign or "")}
     promise = {"name": c.get("name") or "", "percent": c.get("percent"),
                "at": _today().isoformat()}
+    if product:
+        promise["product"] = str(product)[:120]        # what it was quoted on
     # What the offer COVERS travels with it. The note a person reads before
     # taking payment used to say only "X% off — honour it", so an offer scoped
     # to one category read as an offer on the whole order. Carrying the scope
@@ -242,7 +257,7 @@ async def mark_granted(redis, channel: str, key: str, campaign) -> bool:
         promise["covers"] = _clean_list(
             c.get("categories") if scope == "category" else c.get("skus"))
     try:
-        await redis.set(_grant_key(channel, key), json.dumps(promise), ex=_GRANT_TTL)
+        await redis.set(_grant_key(channel, key), json.dumps(promise), ex=_grant_ttl(c))
         return True
     except Exception:
         # Losing this quietly is how a customer gets quoted 18,000 and billed

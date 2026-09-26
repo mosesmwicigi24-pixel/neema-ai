@@ -169,10 +169,10 @@ async def _draft(redis, conv: Conversation, to: str, items: list) -> str:
     )
     async with AsyncSessionLocal() as db:
         if conv.channel == "whatsapp":
-            return await runtime.run_turn(db, redis, to, prompt, build_llm(),
+            return await runtime.run_turn(db, redis, to, prompt, build_llm(purpose="job:cart-recovery"),
                                           read_only=True)
         return await runtime.run_turn(db, redis, wa_id=to, user_text=prompt,
-                                      llm=build_llm(), channel=conv.channel,
+                                      llm=build_llm(purpose="job:cart-recovery"), channel=conv.channel,
                                       external_id=to, read_only=True)
 
 

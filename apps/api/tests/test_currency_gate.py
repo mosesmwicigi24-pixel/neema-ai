@@ -205,7 +205,13 @@ def test_prompt_greets_by_nairobi_time():
     from app.agent.prompt import _nairobi_daypart
     assert _nairobi_daypart() in ("morning", "afternoon", "evening", "late night")
     p = build_system_prompt(currency="KES")
-    assert "in Nairobi right now" in p and "Greet ONCE" in p
+    # The clock lives in the per-conversation tail now (it changed five times
+    # a day and re-wrote the whole shared block into the fleet cache each
+    # time); the shared block tells the writer where to read it.
+    from app.agent.prompt import customer_context
+    assert "in Nairobi right now" not in p and "Greet ONCE" in p
+    assert "THE CLOCK" in p and "THIS CUSTOMER" in p
+    assert "in Nairobi right now" in customer_context("", "", clock=True)
 
 
 def test_search_catalog_any_token_fallback(monkeypatch):
@@ -253,7 +259,10 @@ def test_search_catalog_currency_override_for_declared_kenyan(monkeypatch):
 
     kes = asyncio.run(_search_catalog({"query": "shirt", "currency": "KES"}, meta_ctx))["results"][0]
     assert kes["price"] == 3100 and kes["currency"] == "KES"           # native KES, not USD*rate
-    assert meta_ctx.currency == "USD"                                  # ctx untouched (replace, not mutate)
+    # The proof switches the WHOLE turn (2026-09-26): the cart, the quotation
+    # and the order that follow in the same turn speak KES too, not the
+    # channel's default.
+    assert meta_ctx.currency == "KES"
 
 
 def test_crm_country_falls_back_to_phone_prefix():
