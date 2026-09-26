@@ -81,7 +81,7 @@ function createNativeWs(url: string): NativeWs {
 }
 
 // ── Derive a valid ws:// / wss:// URL from env ────────────────────────────────
-function resolveWsUrl(agentId: string): string | null {
+function resolveWsUrl(agentId: string, token: string): string | null {
     // Try NEXT_PUBLIC_API_URL first, fall back to NEXT_PUBLIC_WS_URL, then same-origin.
     const raw =
         process.env.NEXT_PUBLIC_API_URL ||
@@ -105,7 +105,9 @@ function resolveWsUrl(agentId: string): string | null {
     // not /api/ws/{id}. NEXT_PUBLIC_API_URL often includes /api.
     const cleanBase = wsBase.replace(/\/api\/?$/, "");
 
-    return `${cleanBase}/ws/${agentId}`;
+    // The server opens the feed only for a signed-in agent; browsers can't set
+    // headers on a WebSocket, so the access token rides in the query string.
+    return `${cleanBase}/ws/${agentId}?token=${encodeURIComponent(token)}`;
 }
 
 // ── Context ───────────────────────────────────────────────────────────────────
@@ -120,16 +122,18 @@ export function WsProvider({ children }: { children: ReactNode }) {
 
     useEffect(() => {
         const agentId = (session as any)?.user?.id;
-        if (!agentId) return;
+        const token = (session as any)?.accessToken as string | undefined;
+        if (!agentId || !token) return;
 
-        const url = resolveWsUrl(agentId);
+        const url = resolveWsUrl(agentId, token);
         if (!url) {
             console.warn("[WS] No valid WebSocket URL — set NEXT_PUBLIC_API_URL");
             return;
         }
 
         const conn = createNativeWs(url);
-        conn.on("connect",    () => console.log("[WS] connected →", url));
+        // (The URL carries the token — never log it.)
+        conn.on("connect",    () => console.log("[WS] connected"));
         conn.on("disconnect", () => console.log("[WS] disconnected"));
         conn.on("error",      () => console.warn("[WS] error — will reconnect"));
         setWs(conn);
@@ -138,7 +142,8 @@ export function WsProvider({ children }: { children: ReactNode }) {
             conn.close();
             setWs(null);
         };
-    }, [(session as any)?.user?.id]);
+    // A new token (a re-sign-in after expiry) reopens the feed with it.
+    }, [(session as any)?.user?.id, (session as any)?.accessToken]);
 
     return (
         <WsContext.Provider value={ws}>

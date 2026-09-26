@@ -90,6 +90,11 @@ async def get_current_agent(
         raise HTTPException(status_code=401, detail="Token expired")
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid token")
+    # Only an access token opens the API. A refresh token lives 30 days and
+    # exists to mint access tokens at /auth/refresh — accepted here, a leaked
+    # one would be a month-long pass.
+    if payload.get("type") != "access":
+        raise HTTPException(status_code=401, detail="Invalid token")
 
     result = await db.execute(select(Agent).where(Agent.id == payload["sub"]))
     agent = result.scalar_one_or_none()
@@ -1396,7 +1401,8 @@ async def reply(conv_id: str, request: Request, body: dict, db: AsyncSession = D
     return await send_agent_reply(db, conv_id, agent, text, request.app.state.redis,
                                   reply_to_id=body.get("reply_to"),
                                   original_text=body.get("original_text"),
-                                  original_lang=body.get("original_lang"))
+                                  original_lang=body.get("original_lang"),
+                                  client_msg_id=body.get("client_msg_id"))
 
 
 @router.post("/conversations/{conv_id}/translate-reply")
@@ -1770,6 +1776,10 @@ async def assign_agent_role(
 ):
     from sqlalchemy import text
     import json
+    from app.core.permissions import ALL_PERMISSIONS, require_permission
+
+    await require_permission(db, current, "manage_agents",
+                             "Only someone who manages agents can assign roles")
 
     custom_role_id = body.get("custom_role_id")
     if not custom_role_id:
@@ -1786,8 +1796,20 @@ async def assign_agent_role(
     agent = result.scalar_one_or_none()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+    if agent.is_superuser and not current.is_superuser:
+        raise HTTPException(status_code=403,
+                            detail="Only a superuser can change a superuser's role")
 
     custom_permissions = body.get("custom_permissions")
+    if custom_permissions is not None:
+        if (not isinstance(custom_permissions, list)
+                or any(not isinstance(p, str) for p in custom_permissions)):
+            raise HTTPException(status_code=422,
+                                detail="custom_permissions must be a list of permission names")
+        unknown = sorted(set(custom_permissions) - set(ALL_PERMISSIONS))
+        if unknown:
+            raise HTTPException(status_code=422,
+                                detail=f"Unknown permissions: {', '.join(unknown)}")
     perms_json = json.dumps(custom_permissions) if custom_permissions is not None else None
 
     await db.execute(
@@ -1822,25 +1844,100 @@ async def assign_agent_role(
 async def update_agent(agent_id: str, body: dict,
                        db: AsyncSession = Depends(get_db),
                        current: Agent = Depends(get_current_agent)):
+    """Edit an agent. Anyone may change their own name, email, password and
+    availability (as on their Profile); everything else — another agent's
+    account, or any legacy role — needs manage_agents, and only a superuser
+    touches a superuser's account."""
     from app.core.security import hash_password
+    from app.core.permissions import permissions_of
     result = await db.execute(select(Agent).where(Agent.id == agent_id))
     agent = result.scalar_one_or_none()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+
+    is_self = str(agent.id) == str(current.id)
+    manages = "manage_agents" in await permissions_of(db, current)
+    wants_role = bool(body.get("role"))
+    account_change = any(body.get(k) for k in ("name", "email", "role", "password"))
+    if not is_self and not manages:
+        raise HTTPException(status_code=403,
+                            detail="Only someone who manages agents can change another agent")
+    if wants_role and not manages:
+        raise HTTPException(status_code=403,
+                            detail="Only someone who manages agents can change a role")
+    if agent.is_superuser and not current.is_superuser and not is_self and account_change:
+        raise HTTPException(status_code=403,
+                            detail="Only a superuser can change a superuser's account")
+
     if "name" in body and body["name"]:
-        agent.name = body["name"]
+        agent.name = str(body["name"]).strip()[:100] or agent.name
     if "email" in body and body["email"]:
-        agent.email = body["email"]
-    if "role" in body and body["role"]:
-        agent.role = body["role"]
+        email = _clean_email(body["email"])
+        if await _email_taken(db, email, exclude_id=agent.id):
+            raise HTTPException(status_code=409, detail="Another agent already uses that email")
+        agent.email = email
+    if wants_role:
+        new_role = _valid_role(body["role"])
+        if (_role_str(agent.role) == "admin" and new_role != "admin"
+                and not agent.is_superuser and not await _other_admins_exist(db, agent.id)):
+            raise HTTPException(status_code=409,
+                                detail="This is the last admin — make someone else an admin first")
+        agent.role = new_role
     if "is_available" in body:
         agent.is_available = bool(body["is_available"])
     if "password" in body and body["password"]:
-        if len(body["password"]) < 8:
-            raise HTTPException(status_code=422, detail="Password must be at least 8 characters")
-        agent.password_hash = hash_password(body["password"])
+        agent.password_hash = hash_password(_valid_password(body["password"]))
     await db.commit()
     return {"ok": True}
+
+
+# ── Agent-account helpers ──────────────────────────────────────────────────────
+
+def _role_str(role) -> str:
+    return getattr(role, "value", role) or ""
+
+
+def _valid_role(role) -> str:
+    from app.models.agent import AgentRole
+    value = str(role).strip().lower()
+    if value not in {r.value for r in AgentRole}:
+        raise HTTPException(status_code=422,
+                            detail="role must be one of: admin, agent, readonly")
+    return value
+
+
+def _valid_password(password) -> str:
+    password = str(password)
+    if len(password) < 8:
+        raise HTTPException(status_code=422, detail="Password must be at least 8 characters")
+    return password
+
+
+def _clean_email(email) -> str:
+    email = str(email).strip()
+    if "@" not in email or len(email) > 200:
+        raise HTTPException(status_code=422, detail="Enter a valid email address")
+    return email
+
+
+async def _email_taken(db: AsyncSession, email: str, exclude_id=None) -> bool:
+    """Case-insensitive: two accounts that differ only in capitals are one
+    person's typo, and sign-in would pick whichever matched exactly."""
+    from sqlalchemy import func
+    q = select(Agent.id).where(func.lower(Agent.email) == email.lower())
+    if exclude_id is not None:
+        q = q.where(Agent.id != exclude_id)
+    return (await db.execute(q.limit(1))).first() is not None
+
+
+async def _other_admins_exist(db: AsyncSession, excluding_id) -> bool:
+    """Is there still someone who can run the team without this agent?"""
+    from app.models.agent import AgentRole
+    q = select(Agent.id).where(
+        Agent.id != excluding_id,
+        (Agent.role == AgentRole.admin) | (Agent.is_superuser.is_(True)),
+    ).limit(1)
+    return (await db.execute(q)).first() is not None
 
 
 # ── Orders ────────────────────────────────────────────────────────────────────
@@ -2125,7 +2222,8 @@ async def overview_stats(
 
 @router.get("/me")
 async def get_me(agent: Agent = Depends(get_current_agent)):
-    return agent
+    from app.core.permissions import agent_public
+    return agent_public(agent)
 
 
 @router.patch("/me")
@@ -2135,14 +2233,22 @@ async def update_me(
     agent: Agent = Depends(get_current_agent),
 ):
     from app.core.security import hash_password
+    from app.core.permissions import agent_public
     if "name" in body:
-        agent.name = body["name"]
+        name = str(body["name"] or "").strip()
+        if not name:
+            raise HTTPException(status_code=422, detail="Name can't be empty")
+        agent.name = name[:100]
     if "email" in body:
-        agent.email = body["email"]
+        email = _clean_email(body["email"] or "")
+        if await _email_taken(db, email, exclude_id=agent.id):
+            raise HTTPException(status_code=409, detail="Another agent already uses that email")
+        agent.email = email
     if "password" in body:
-        agent.password_hash = hash_password(body["password"])
+        agent.password_hash = hash_password(_valid_password(body["password"] or ""))
     await db.commit()
-    return agent
+    await db.refresh(agent)
+    return agent_public(agent)
 
 
 # ── Agents CRUD ───────────────────────────────────────────────────────────────
@@ -2153,21 +2259,33 @@ async def create_agent(
     db: AsyncSession = Depends(get_db),
     current: Agent = Depends(get_current_agent),
 ):
+    from sqlalchemy.exc import IntegrityError
     from app.core.security import hash_password
+    from app.core.permissions import agent_public, require_permission
+    await require_permission(db, current, "manage_agents",
+                             "Only someone who manages agents can add one")
     missing = [f for f in ("name", "email", "password") if not body.get(f)]
     if missing:
         raise HTTPException(status_code=422, detail=f"Missing required fields: {', '.join(missing)}")
+    email = _clean_email(body["email"])
+    if await _email_taken(db, email):
+        raise HTTPException(status_code=409, detail="An agent with that email already exists")
     agent = Agent(
-        name=body["name"],
-        email=body["email"],
-        password_hash=hash_password(body["password"]),
-        role=body.get("role", "agent"),
+        name=str(body["name"]).strip()[:100],
+        email=email,
+        password_hash=hash_password(_valid_password(body["password"])),
+        role=_valid_role(body.get("role") or "agent"),
         is_available=True,
     )
     db.add(agent)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # Two adds racing past the check above: the unique index decides.
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="An agent with that email already exists")
     await db.refresh(agent)
-    return agent
+    return agent_public(agent)
 
 
 @router.delete("/agents/{agent_id}")
@@ -2176,10 +2294,21 @@ async def delete_agent(
     db: AsyncSession = Depends(get_db),
     current: Agent = Depends(get_current_agent),
 ):
+    from app.core.permissions import require_permission
+    await require_permission(db, current, "manage_agents",
+                             "Only someone who manages agents can remove one")
     result = await db.execute(select(Agent).where(Agent.id == agent_id))
     agent = result.scalar_one_or_none()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+    if str(agent.id) == str(current.id):
+        raise HTTPException(status_code=409, detail="You can't remove your own account")
+    if agent.is_superuser and not current.is_superuser:
+        raise HTTPException(status_code=403, detail="Only a superuser can remove a superuser")
+    if ((_role_str(agent.role) == "admin" or agent.is_superuser)
+            and not await _other_admins_exist(db, agent.id)):
+        raise HTTPException(status_code=409,
+                            detail="This is the last admin — make someone else an admin first")
     await db.delete(agent)
     await db.commit()
     return {"ok": True}

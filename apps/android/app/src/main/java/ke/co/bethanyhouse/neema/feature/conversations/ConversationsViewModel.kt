@@ -1388,7 +1388,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         val o = outgoing[localId] ?: return
         val err: Exception? = try {
             when (o.kind) {
-                OutKind.Reply -> inboxApi.reply(o.convId, o.text, o.replyToId, o.origText, o.origLang)
+                OutKind.Reply -> inboxApi.reply(o.convId, o.text, o.replyToId, o.origText, o.origLang, clientMsgId = o.localId)
                 OutKind.Approve -> api.conversations.approveDraft(o.convId, o.text.ifEmpty { null })
                 OutKind.Note -> api.conversations.addNote(o.convId, o.text)
             }

@@ -31,6 +31,22 @@ class LiveSocketTest {
         assertEquals("wss://x.test/ws/a1", socket("https://x.test/").url("a1"))
     }
 
+    /** The server opens the feed only for a signed-in agent: the access token rides in the query. */
+    @Test
+    fun theUrlCarriesTheCurrentTokenAndEachRetryRereadsIt() = runTest {
+        var token = "tok.en+1/="
+        val s = LiveSocket(factory, "https://neema.test", backgroundScope, token = { token })
+        assertEquals("wss://neema.test/ws/a1?token=tok.en%2B1%2F%3D", s.url("a1"))
+
+        s.connect("a1")
+        assertTrue(factory.last.url.endsWith("/ws/a1?token=tok.en%2B1%2F%3D"))
+        token = "refreshed"
+        factory.last.fail()
+        advanceTimeBy(2_001); runCurrent()
+        assertEquals(2, factory.sockets.size)
+        assertTrue("a retry after a refresh uses the new token", factory.last.url.endsWith("/ws/a1?token=refreshed"))
+    }
+
     @Test
     fun connectOpensOnceAndIsIdempotentPerAgent() = runTest {
         val s = socket()

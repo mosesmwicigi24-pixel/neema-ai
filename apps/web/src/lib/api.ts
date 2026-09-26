@@ -312,6 +312,14 @@ function mapThreadItem(raw: ApiThreadItem): Message {
     };
 }
 
+/** A fresh id for one outgoing message (see sendReply's client_msg_id). */
+export function newClientMsgId(): string {
+    try {
+        if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
+    } catch { /* fall through */ }
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
 export const conversationsApi = {
     /** Resolve a hub deep link (phone and/or order number) to a conversation id. */
     resolve: (key: string, ref?: string) =>
@@ -380,10 +388,15 @@ export const conversationsApi = {
         post<ApiConversation>(`/admin/conversations/${id}/transfer`, {
             agent_id: agentId,
         }),
+    // client_msg_id: one id per message — a repeated POST (double click, a
+    // retry after a lost answer) returns the first send's result instead of
+    // messaging the customer twice.
     sendReply: (id: string, text: string, replyTo?: string,
-               extras?: { original_text?: string; original_lang?: string }) =>
+               extras?: { original_text?: string; original_lang?: string },
+               clientMsgId?: string) =>
         post<Message>(`/admin/conversations/${id}/reply`, {
             text, reply_to: replyTo, ...(extras ?? {}),
+            client_msg_id: clientMsgId ?? newClientMsgId(),
         }),
     // Reply-box translate toggle: English in, the customer's language out.
     translateReply: (id: string, text: string) =>

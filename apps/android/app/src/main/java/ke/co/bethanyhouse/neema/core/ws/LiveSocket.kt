@@ -22,8 +22,8 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 
 /**
- * The dashboard's live feed: a plain FastAPI WebSocket at `/ws/{agent_id}`
- * (routers/websocket.py) that relays every `ws:channel:*` Redis broadcast to
+ * The dashboard's live feed: a plain FastAPI WebSocket at
+ * `/ws/{agent_id}?token=<access token>` (routers/websocket.py) that relays every `ws:channel:*` Redis broadcast to
  * every connected client. Port of `lib/websocket.tsx`: reconnect after any
  * close (2 s like the web, then backing off 4/8/16/30 s while the server stays
  * unreachable, so a phone on a dead network doesn't spin its radio), JSON
@@ -99,6 +99,13 @@ class LiveSocket(
     /** Retries back off (doubling) up to this; an open socket resets it. */
     private val maxReconnectDelayMs: Long = 30_000,
     private val pingEveryMs: Long = 25_000,
+    /**
+     * The signed-in agent's current access token, read on every attempt so a
+     * reconnect after a token refresh uses the fresh one. The server opens the
+     * feed only for a valid token for the agent in the path (it carries every
+     * customer's messages); a refused handshake is retried like any drop.
+     */
+    private val token: () -> String? = { null },
 ) {
     /**
      * Frames are parsed on OkHttp's reader thread and handed over without
@@ -141,7 +148,9 @@ class LiveSocket(
             .replaceFirst(Regex("^https://"), "wss://")
             .replaceFirst(Regex("^http://"), "ws://")
             .replace(Regex("/api/?$"), "")
-        return "$wsBase/ws/$agentId"
+        val t = token()
+        return if (t.isNullOrEmpty()) "$wsBase/ws/$agentId"
+        else "$wsBase/ws/$agentId?token=${java.net.URLEncoder.encode(t, "UTF-8")}"
     }
 
     /** The wait before retry number [attempt] (1-based): 2 s, 4 s, 8 s, 16 s, then 30 s. */

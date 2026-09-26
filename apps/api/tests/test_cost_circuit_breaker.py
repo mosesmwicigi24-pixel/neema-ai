@@ -28,6 +28,12 @@ from app.core.config import settings
 from app.services import ai_budget
 
 
+@pytest.fixture(autouse=True)
+def _in_memory_action_claims(monkeypatch):
+    from tests import _action_fakes
+    _action_fakes.install(monkeypatch)
+
+
 # ── minimal fakes (patterns from test_agent_flow) ────────────────────────────
 
 class _Res:

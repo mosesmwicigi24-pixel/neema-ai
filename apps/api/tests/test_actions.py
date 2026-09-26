@@ -10,6 +10,12 @@ from app.services import actions as act
 from app.services import deals as ds
 
 
+@pytest.fixture(autouse=True)
+def _in_memory_action_claims(monkeypatch):
+    from tests import _action_fakes
+    _action_fakes.install(monkeypatch)
+
+
 def test_customer_promise_parser_needs_verb_and_timeword():
     got = ds.detect_customer_promise("I'll confirm after our church meeting.")
     assert got is not None
