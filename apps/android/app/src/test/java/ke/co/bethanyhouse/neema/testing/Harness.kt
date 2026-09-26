@@ -21,10 +21,15 @@ import ke.co.bethanyhouse.neema.core.ui.theme.NeemaTheme
 import kotlinx.coroutines.Dispatchers
 
 /** A JWT the auth layer accepts as valid for a year (signature is never checked client-side). */
+private val jtiSeq = java.util.concurrent.atomic.AtomicLong()
+
 fun fakeJwt(sub: String = Fixtures.ME_ID, expiresInSec: Long = 365L * 24 * 3600): String {
     fun b64(s: String) = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(s.toByteArray())
     val exp = AppClock.now() / 1000 + expiresInSec
-    return "${b64("""{"alg":"HS256","typ":"JWT"}""")}.${b64("""{"sub":"$sub","exp":$exp,"type":"access"}""")}.sig"
+    // A unique jti: two tokens minted in the same second must still differ, or
+    // the auth layer reads a refresh that "returned the same token" as failed.
+    val jti = jtiSeq.incrementAndGet()
+    return "${b64("""{"alg":"HS256","typ":"JWT"}""")}.${b64("""{"sub":"$sub","exp":$exp,"type":"access","jti":"t$jti"}""")}.sig"
 }
 
 /**
@@ -41,6 +46,7 @@ fun testContainer(
     /** A fake socket (see [FakeSocketFactory]) so tests can push live frames. */
     wsFactory: okhttp3.WebSocket.Factory? = null,
 ): AppContainer {
+    installTestImageLoader(context)
     val stores = HashMap<String, MemoryPrefs>()
     val c = AppContainer(
         context,
@@ -77,9 +83,35 @@ private class TestResults : androidx.activity.result.ActivityResultRegistryOwner
     }
 }
 
+/**
+ * Screenshot tests have no network: every image request fails at once, on the
+ * calling thread, so each render shows the same fallback (initials, emoji,
+ * placeholder) every run — Coil's async loads otherwise race the snapshot.
+ */
+fun installTestImageLoader(context: Context) {
+    coil.Coil.setImageLoader(
+        coil.ImageLoader.Builder(context)
+            .dispatcher(Dispatchers.Unconfined)
+            .interceptorDispatcher(Dispatchers.Unconfined)
+            .fetcherDispatcher(Dispatchers.Unconfined)
+            .decoderDispatcher(Dispatchers.Unconfined)
+            .transformationDispatcher(Dispatchers.Unconfined)
+            .networkObserverEnabled(false)
+            .components {
+                add(object : coil.intercept.Interceptor {
+                    override suspend fun intercept(chain: coil.intercept.Interceptor.Chain): coil.request.ImageResult =
+                        coil.request.ErrorResult(null, chain.request, java.io.IOException("no network in tests"))
+                })
+            }
+            .build(),
+    )
+}
+
 /** Theme + a ViewModel store, as MainActivity provides. */
 @Composable
 fun AppFrame(dark: Boolean = false, content: @Composable () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    androidx.compose.runtime.remember { installTestImageLoader(context); true }
     CompositionLocalProvider(
         LocalViewModelStoreOwner provides TestOwner(),
         androidx.activity.compose.LocalActivityResultRegistryOwner provides TestResults(),
