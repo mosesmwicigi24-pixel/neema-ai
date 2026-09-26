@@ -64,6 +64,8 @@ _BUY_RE = re.compile(
     r"sell|sells|selling|uza|unauza|mnauza|products?|bidhaa|items?|do you have|mnayo|"
     r"nataka|natafuta|i need|i want|looking for|"
     r"located|location|shop|duka|address|visit|open|hours|branch|mko wapi|mahali|"
+    r"nipe|nipatie|niuzie|shilingi|kiasi gani|niko na|nimeagiza|nimetuma|hela|doo|mkwanja|"
+    r"ganji|fee|fees|gift|gifts|zawadi|present|hamper|"
     r"black|white|navy|blue|red|purple|green|gold|golden|silver|cream|maroon|grey|gray|"
     r"nyeusi|nyeupe|bluu|bule|nyekundu|zambarau|kijani|dhahabu|fedha|"
     r"small|medium|large|xl|xxl|inch|inches|cm|\d+|"
