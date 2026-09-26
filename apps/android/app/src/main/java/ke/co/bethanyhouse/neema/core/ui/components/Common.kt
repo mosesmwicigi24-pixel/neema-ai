@@ -383,7 +383,10 @@ fun FilterChips(
 /**
  * The web's modal overlay: `bg-black/50`. Call it inside any dialog's
  * content: the platform's own dim comes from the window theme (0.6), not the
- * web's value. (The screenshot renderer draws its own dim and ignores this.)
+ * web's value. Pass 0 where the dialog draws the web's overlay itself
+ * (SessionExpiredDialog's bg-black/40, the media viewer's black/90). It also
+ * lays the window flat ([FlatDialogWindow]). Screenshot tests render the dim
+ * as the device does (testing/Harness.kt settleDialogWindows).
  */
 @Composable
 fun WebModalDim(amount: Float = 0.5f) {
@@ -392,6 +395,30 @@ fun WebModalDim(amount: Float = 0.5f) {
         (view.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window?.let { w ->
             w.addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
             w.setDimAmount(amount)
+        }
+    }
+    FlatDialogWindow()
+}
+
+/**
+ * Call inside a dialog's content (WebModalDim does). Compose raises its
+ * dialog window's root (DialogLayout) to 8dp and the window's decor to the
+ * theme's 16dp, both over transparent outlines, so a phone draws no shadow
+ * from them — the card's own look over the web's plain overlay is all there
+ * is. The screenshot renderer ignores the outline's alpha and casts a dark
+ * halo over the whole screen from them — cast or not depending on which
+ * tests ran before in the same JVM (it is kept from the first frame that
+ * draws it), which is what made dialog goldens flake. At elevation 0 it can
+ * never appear, and nothing changes on a device.
+ */
+@Composable
+fun FlatDialogWindow() {
+    val view = androidx.compose.ui.platform.LocalView.current
+    androidx.compose.runtime.SideEffect {
+        (view.parent as? androidx.compose.ui.window.DialogWindowProvider)?.let { p ->
+            (p as? android.view.View)?.elevation = 0f
+            p.window.setElevation(0f)
+            p.window.peekDecorView()?.elevation = 0f
         }
     }
 }

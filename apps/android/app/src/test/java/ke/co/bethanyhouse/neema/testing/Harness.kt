@@ -95,7 +95,6 @@ private class TestResults : androidx.activity.result.ActivityResultRegistryOwner
  * placeholder) every run — Coil's async loads otherwise race the snapshot.
  */
 fun installTestImageLoader(context: Context) {
-    freezePlatformAnimations()
     coil.Coil.setImageLoader(
         coil.ImageLoader.Builder(context)
             .dispatcher(Dispatchers.Unconfined)
@@ -115,17 +114,35 @@ fun installTestImageLoader(context: Context) {
 }
 
 /**
- * Platform animations (the dialog window's dim among them) run on real time in
- * the renderer, so a snapshot caught them at a point that varied with machine
- * load — dialog goldens flaked by a few percent. Duration scale 0 makes every
- * platform animation jump to its end, as "Remove animations" does on a phone.
+ * Makes every open dialog window render as it does on a phone, the same way
+ * every run. The renderer (layoutlib) draws a dialog window's dim as a flat
+ * layer behind it, at the dim amount the window had when it was ADDED — so
+ * a dialog that dims like the web ([WebModalDim]: 50%, or none where the card
+ * draws its own overlay) showed the theme's 60% instead. And it casts the
+ * window's 16dp elevation shadow from a light source it shares across the
+ * whole test JVM: in one test order that shadow darkened the entire screen
+ * around a dialog by ~10%, in another it was not drawn at all — the "few
+ * percent" by which dialog goldens differed between full runs and runs of a
+ * single class. Called before every frame is drawn (see [AppFrame]): each
+ * dialog's dim layer takes the window's CURRENT dim, and its decor casts no
+ * shadow (on a device the window shadow hugs the card; the dim is the look).
  */
-fun freezePlatformAnimations() {
-    runCatching {
-        android.animation.ValueAnimator::class.java
-            .getDeclaredMethod("setDurationScale", Float::class.javaPrimitiveType)
-            .apply { isAccessible = true }
-            .invoke(null, 0f)
+fun settleDialogWindows(root: android.view.View) {
+    val dialogs = ArrayList<androidx.compose.ui.window.DialogWindowProvider>()
+    fun walk(v: android.view.View) {
+        if (v is androidx.compose.ui.window.DialogWindowProvider) dialogs += v
+        if (v is android.view.ViewGroup) for (i in 0 until v.childCount) walk(v.getChildAt(i))
+    }
+    walk(root)
+    for (d in dialogs) {
+        val window = d.window
+        val decor = window.peekDecorView() ?: continue
+        if (decor.elevation != 0f) decor.elevation = 0f
+        val attrs = window.attributes
+        if (attrs.flags and android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND == 0) continue
+        val layer = decor.parent as? android.view.View ?: continue
+        val dim = android.graphics.Color.argb(Math.round(attrs.dimAmount.coerceIn(0f, 1f) * 255), 0, 0, 0)
+        if ((layer.background as? android.graphics.drawable.ColorDrawable)?.color != dim) layer.setBackgroundColor(dim)
     }
 }
 
@@ -134,6 +151,36 @@ fun freezePlatformAnimations() {
 fun AppFrame(dark: Boolean = false, content: @Composable () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     androidx.compose.runtime.remember { installTestImageLoader(context); true }
+    val host = androidx.compose.ui.platform.LocalView.current
+    androidx.compose.runtime.DisposableEffect(host) {
+        // Before anything of a dialog is drawn: the renderer keeps what one
+        // frame drew outside the next frame's damage, so a shadow cast once
+        // stays in the picture. Windows are added to one of the host's
+        // ancestors; watch them all for a window layer arriving, and each
+        // layer for its dialog windows.
+        val watched = ArrayList<android.view.ViewGroup>()
+        // A dialog's decor arriving in a window layer: settle it at once.
+        val onDecor = object : android.view.ViewGroup.OnHierarchyChangeListener {
+            override fun onChildViewAdded(parent: android.view.View, child: android.view.View) = settleDialogWindows(host.rootView)
+            override fun onChildViewRemoved(parent: android.view.View, child: android.view.View) = Unit
+        }
+        // A window layer arriving beside the content: watch it for decors.
+        val onLayer = object : android.view.ViewGroup.OnHierarchyChangeListener {
+            override fun onChildViewAdded(parent: android.view.View, child: android.view.View) {
+                if (child is android.view.ViewGroup && child !in watched) { watched += child; child.setOnHierarchyChangeListener(onDecor) }
+                settleDialogWindows(host.rootView)
+            }
+            override fun onChildViewRemoved(parent: android.view.View, child: android.view.View) = Unit
+        }
+        generateSequence(host.parent) { it.parent }.filterIsInstance<android.view.ViewGroup>()
+            .forEach { watched += it; it.setOnHierarchyChangeListener(onLayer) }
+        val settle = android.view.ViewTreeObserver.OnPreDrawListener { settleDialogWindows(host.rootView); true }
+        host.viewTreeObserver.addOnPreDrawListener(settle)
+        onDispose {
+            runCatching { host.viewTreeObserver.removeOnPreDrawListener(settle) }
+            watched.forEach { it.setOnHierarchyChangeListener(null) }
+        }
+    }
     CompositionLocalProvider(
         LocalViewModelStoreOwner provides TestOwner(),
         androidx.activity.compose.LocalActivityResultRegistryOwner provides TestResults(),
