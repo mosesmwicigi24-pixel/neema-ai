@@ -7,10 +7,10 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import ke.co.bethanyhouse.neema.app.AppContainer
 import ke.co.bethanyhouse.neema.core.notify.LiveService
 import ke.co.bethanyhouse.neema.core.notify.Notifier
+import android.net.ConnectivityManager
+import android.net.Network
+import ke.co.bethanyhouse.neema.app.LiveLifecycle
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.launch
 
 class NeemaApplication : Application() {
     lateinit var container: AppContainer
@@ -32,25 +32,29 @@ class NeemaApplication : Application() {
 
         // One socket per signed-in agent, for the life of the process; the
         // foreground service only keeps the process alive in the background.
-        container.appScope.launch {
-            combine(container.sessionStore.session, container.prefs.backgroundLive, foreground) { s, bg, fg ->
-                Triple(s?.agentId, bg, fg)
-            }.distinctUntilChanged().collect { (agentId, bg, fg) ->
-                if (agentId.isNullOrEmpty()) {
-                    container.socket.disconnect()
-                    LiveService.stop(this@NeemaApplication)
-                    return@collect
-                }
-                container.socket.connect(agentId)
-                if (bg) LiveService.start(this@NeemaApplication)
-                else {
-                    LiveService.stop(this@NeemaApplication)
-                    if (!fg) container.socket.disconnect()
-                }
-            }
-        }
+        LiveLifecycle(
+            container.appScope, container.sessionStore.session, container.prefs.backgroundLive, foreground,
+            container.socket,
+            startService = { LiveService.start(this) },
+            stopService = { LiveService.stop(this) },
+        ).start()
+        watchNetwork()
         container.notifications.start(foreground)
         container.calls.start()
+    }
+
+    /**
+     * The network came back: retry the socket now instead of waiting out a
+     * backoff of up to 30 s (a no-op when connected or closed on purpose).
+     */
+    private fun watchNetwork() {
+        runCatching {
+            getSystemService(ConnectivityManager::class.java)?.registerDefaultNetworkCallback(
+                object : ConnectivityManager.NetworkCallback() {
+                    override fun onAvailable(network: Network) = container.socket.nudge()
+                },
+            )
+        }
     }
 
     companion object {

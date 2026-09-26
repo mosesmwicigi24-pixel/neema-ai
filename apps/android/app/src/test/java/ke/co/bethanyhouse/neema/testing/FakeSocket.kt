@@ -19,6 +19,18 @@ class FakeSocketFactory : WebSocket.Factory {
 
     override fun newWebSocket(request: Request, listener: WebSocketListener): WebSocket =
         FakeWs(request, listener).also { sockets += it }
+
+    /**
+     * Drop the connection and let LiveSocket come back (its first retry is
+     * 2 s): [advance] moves the test clock, e.g. `{ scheduler.advanceTimeBy(it); scheduler.runCurrent() }`.
+     * Frames pushed in between are lost, as in real life; the reopen fires
+     * `LiveSocket.reconnected`, which screens use to catch up.
+     */
+    fun dropAndReconnect(advance: (Long) -> Unit) {
+        last.fail()
+        advance(2_001)
+        last.open()
+    }
 }
 
 class FakeWs(private val req: Request, val listener: WebSocketListener) : WebSocket {

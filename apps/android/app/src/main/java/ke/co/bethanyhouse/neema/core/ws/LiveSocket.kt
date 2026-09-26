@@ -24,8 +24,10 @@ import okhttp3.WebSocketListener
 /**
  * The dashboard's live feed: a plain FastAPI WebSocket at `/ws/{agent_id}`
  * (routers/websocket.py) that relays every `ws:channel:*` Redis broadcast to
- * every connected client. Port of `lib/websocket.tsx`: reconnect 2s after any
- * close, JSON `{"type":"ping"}` every 25s (the server answers
+ * every connected client. Port of `lib/websocket.tsx`: reconnect after any
+ * close (2 s like the web, then backing off 4/8/16/30 s while the server stays
+ * unreachable, so a phone on a dead network doesn't spin its radio), JSON
+ * `{"type":"ping"}` every 25s (the server answers
  * `{"type":"pong"}`, dropped here; anything that isn't JSON makes the server
  * close the socket, so only JSON is ever sent).
  *
@@ -92,7 +94,10 @@ class LiveSocket(
     private val client: WebSocket.Factory,
     private val baseUrl: String,
     private val scope: CoroutineScope,
+    /** The first retry's wait — the web's flat 2 s. */
     private val reconnectDelayMs: Long = 2_000,
+    /** Retries back off (doubling) up to this; an open socket resets it. */
+    private val maxReconnectDelayMs: Long = 30_000,
     private val pingEveryMs: Long = 25_000,
 ) {
     private val _events = MutableSharedFlow<JsonObject>(extraBufferCapacity = 256)
@@ -101,10 +106,24 @@ class LiveSocket(
     private val _connected = MutableStateFlow(false)
     val connected: StateFlow<Boolean> = _connected.asStateFlow()
 
+    private val _reconnected = MutableSharedFlow<Unit>(extraBufferCapacity = 8)
+    /**
+     * Fires every time the socket opens AGAIN for the same agent — after a
+     * drop, a retry, or a deliberate close while backgrounded — i.e. whenever
+     * frames may have been missed. Screens refetch what they show on it (the
+     * web has no such signal: a browser tab just misses them). Not fired for
+     * the first open after sign-in / an agent switch; screens load then anyway.
+     */
+    val reconnected: SharedFlow<Unit> = _reconnected.asSharedFlow()
+
     private var ws: WebSocket? = null
     private var agentId: String? = null
     private var pingJob: Job? = null
     private var reconnectJob: Job? = null
+    /** Has a socket opened for [agentId] since sign-in / the last agent switch? */
+    private var everOpened = false
+    /** Consecutive failed attempts since the last open (drives the backoff). */
+    private var failures = 0
     @Volatile private var closed = true
 
     internal fun url(agentId: String): String {
@@ -115,34 +134,54 @@ class LiveSocket(
         return "$wsBase/ws/$agentId"
     }
 
+    /** The wait before retry number [attempt] (1-based): 2 s, 4 s, 8 s, 16 s, then 30 s. */
+    internal fun backoff(attempt: Int): Long {
+        var d = reconnectDelayMs
+        repeat((attempt - 1).coerceIn(0, 20)) { d = (d * 2).coerceAtMost(maxReconnectDelayMs) }
+        return d.coerceAtMost(maxReconnectDelayMs)
+    }
+
     /** Idempotent: connecting as the same agent again is a no-op. */
     @Synchronized
     fun connect(agentId: String) {
         if (!closed && this.agentId == agentId) return
-        disconnect()
+        if (this.agentId != agentId) everOpened = false
+        close()
         this.agentId = agentId
         closed = false
+        failures = 0
         open()
     }
 
+    /**
+     * Close on purpose; nothing reconnects until [connect] again. The agent
+     * is remembered, so reconnecting as them later counts as a *re*connect
+     * (frames were missed meanwhile) — [signOut] forgets them.
+     */
     @Synchronized
-    fun disconnect() {
+    fun disconnect() = close()
+
+    /** Close and forget the agent: nothing reconnects, and nothing is "missed". */
+    @Synchronized
+    fun signOut() { close(); agentId = null; everOpened = false }
+
+    private fun close() {
         closed = true
         pingJob?.cancel(); reconnectJob?.cancel()
         ws?.close(1000, null); ws = null
         _connected.value = false
     }
 
-    /** Reconnect immediately (e.g. the app came back to the foreground). */
     /**
      * Reconnect immediately if the socket is down but wanted (the app came
-     * back to the foreground mid-backoff). A socket closed on purpose —
-     * signed out, or backgrounded without live mode — stays closed: the
-     * session/foreground watcher in NeemaApplication decides when to reopen.
+     * back to the foreground, or the network returned, mid-backoff). A socket
+     * closed on purpose — signed out, or backgrounded without live mode —
+     * stays closed: the session/foreground watcher decides when to reopen.
      */
     @Synchronized
     fun nudge() {
         if (agentId == null || closed || _connected.value) return
+        failures = 0
         reconnectJob?.cancel(); ws?.cancel(); ws = null; open()
     }
 
@@ -150,18 +189,11 @@ class LiveSocket(
         val id = agentId ?: return
         val req = Request.Builder().url(url(id)).build()
         ws = client.newWebSocket(req, object : WebSocketListener() {
-            override fun onOpen(webSocket: WebSocket, response: Response) {
-                _connected.value = true
-                pingJob?.cancel()
-                pingJob = scope.launch {
-                    while (isActive) {
-                        delay(pingEveryMs)
-                        webSocket.send("""{"type":"ping"}""")
-                    }
-                }
-            }
+            override fun onOpen(webSocket: WebSocket, response: Response) = opened(webSocket)
 
             override fun onMessage(webSocket: WebSocket, text: String) {
+                // A replaced socket still draining must not double every frame.
+                if (webSocket !== ws) return
                 val obj = runCatching { NeemaJson.parseToJsonElement(text) as? JsonObject }.getOrNull() ?: return
                 if (obj["type"]?.jsonPrimitive?.contentOrNull == "pong") return
                 _events.tryEmit(obj)
@@ -175,14 +207,36 @@ class LiveSocket(
         })
     }
 
+    @Synchronized
+    private fun opened(socket: WebSocket) {
+        if (socket !== ws || closed) { socket.cancel(); return }
+        _connected.value = true
+        failures = 0
+        pingJob?.cancel()
+        pingJob = scope.launch {
+            while (isActive) {
+                delay(pingEveryMs)
+                socket.send("""{"type":"ping"}""")
+            }
+        }
+        if (everOpened) _reconnected.tryEmit(Unit)
+        everOpened = true
+    }
+
+    @Synchronized
     private fun dropped(socket: WebSocket) {
         if (socket !== ws) return
         _connected.value = false
         pingJob?.cancel()
         if (closed) return
+        failures++
+        val wait = backoff(failures)
         reconnectJob?.cancel()
-        reconnectJob = scope.launch { delay(reconnectDelayMs); if (!closed) open() }
+        reconnectJob = scope.launch { delay(wait); if (!closed) reopen() }
     }
+
+    @Synchronized
+    private fun reopen() { if (!closed && !_connected.value) open() }
 }
 
 /** Convenience readers for the loosely-typed socket frames. */
