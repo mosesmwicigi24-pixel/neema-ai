@@ -80,8 +80,10 @@ fun DashboardShell(
     val online by dash.online.collectAsStateWithLifecycle()
     val backOnline = rememberBackOnline(online)
 
-    // Permissions resolve once /me and the team list land; re-derive the nav then.
-    val items = remember(me, agents, summary, orders, session) { dash.navItems() }
+    // Permissions resolve once the team list lands (and again on every agents
+    // poll or 403 reread); re-derive the nav whenever they change.
+    val access by dash.access.collectAsStateWithLifecycle()
+    val items = remember(access, me, agents, summary, orders, session) { dash.navItems() }
 
     var showBell by remember { mutableStateOf(initialBellOpen) }
     var collapsed by rememberSaveable { mutableStateOf(initialCollapsed) }

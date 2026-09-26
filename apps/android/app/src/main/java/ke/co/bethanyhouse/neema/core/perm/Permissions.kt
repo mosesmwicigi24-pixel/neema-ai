@@ -45,6 +45,13 @@ object Perms {
         "readonly" to listOf(VIEW_CONVERSATIONS, VIEW_ORDERS, VIEW_CATALOG, VIEW_CRM, VIEW_LEADS, VIEW_ANALYTICS),
     )
 
+    /**
+     * getAgentPermissions(): a superuser has everything; otherwise the
+     * resolved list ([Agent.permissions] = custom_permissions ?? role_permissions)
+     * when it is non-empty; otherwise the legacy role's defaults. An empty
+     * per-agent override `[]` therefore falls back to the legacy role, exactly
+     * as on the web; an unknown role with nothing resolved has no permissions.
+     */
     fun effective(role: String, isSuperuser: Boolean, permissions: List<String>?): List<String> = when {
         isSuperuser -> ALL
         !permissions.isNullOrEmpty() -> permissions
@@ -52,4 +59,11 @@ object Perms {
     }
 
     fun of(agent: Agent): List<String> = effective(agent.role, agent.isSuperuser, agent.permissions)
+
+    /** hasPermission() */
+    fun has(agent: Agent, perm: String): Boolean = perm in of(agent)
+    /** hasAllPermissions() */
+    fun hasAll(agent: Agent, perms: List<String>): Boolean = of(agent).let { e -> perms.all { it in e } }
+    /** hasAnyPermission() */
+    fun hasAny(agent: Agent, perms: List<String>): Boolean = of(agent).let { e -> perms.any { it in e } }
 }
