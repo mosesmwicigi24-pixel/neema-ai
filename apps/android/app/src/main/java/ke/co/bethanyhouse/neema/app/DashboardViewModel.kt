@@ -13,6 +13,8 @@ import ke.co.bethanyhouse.neema.core.perm.Perms
 import ke.co.bethanyhouse.neema.core.util.AppClock
 import ke.co.bethanyhouse.neema.core.util.Coalescer
 import ke.co.bethanyhouse.neema.core.util.ScreenLife
+import ke.co.bethanyhouse.neema.core.util.SingleFlight
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModelStore
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.withTimeoutOrNull
@@ -85,7 +87,16 @@ data class Toast(val message: String, val type: ToastType = ToastType.Success, v
  */
 class DashboardViewModel(
     val container: AppContainer = NeemaApplication.instance.container,
+    /**
+     * What must survive the process being killed in the background: the view
+     * on screen, the way back through the views, and a deep link waiting for
+     * sign-in. The activity's default factory hands one in.
+     */
+    private val saved: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
+    /** MainActivity's `by viewModels()`: the default factory calls this with the activity's saved state. */
+    constructor(saved: SavedStateHandle) : this(NeemaApplication.instance.container, saved)
+
     /** True while the app is on screen — polls pause in the background. */
     val foreground: StateFlow<Boolean> get() = container.foreground
     /** The device has a network (the shell's offline banner). */
@@ -111,8 +122,22 @@ class DashboardViewModel(
     /** Inbox badges, counted by the server over ALL conversations. The inbox keeps it fresh. */
     val inboxSummary = MutableStateFlow<InboxSummary?>(null)
 
-    private val _view = MutableStateFlow(ViewId.Conversations)
+    private val _view = MutableStateFlow(
+        saved.get<String>(KEY_VIEW)?.let { n -> ViewId.entries.find { it.name == n } } ?: ViewId.Conversations,
+    )
     val view: StateFlow<ViewId> = _view.asStateFlow()
+
+    /**
+     * The views visited before this one, most recent last, each at most once
+     * (see [back]). Restored with the view after a process death.
+     */
+    private val history = ArrayDeque<ViewId>(
+        saved.get<ArrayList<String>>(KEY_HISTORY).orEmpty().mapNotNull { n -> ViewId.entries.find { it.name == n } },
+    )
+
+    private val _canGoBack = MutableStateFlow(history.isNotEmpty() || _view.value != ViewId.Conversations)
+    /** System back has a view to return to (the shell's lowest-priority back handler). */
+    val canGoBack: StateFlow<Boolean> = _canGoBack.asStateFlow()
 
     /** Cross-view request: open this customer's thread (wa_id / external_id / "phone|orderRef" / conversation id). */
     val openConvKey = MutableStateFlow<String?>(null)
@@ -145,10 +170,40 @@ class DashboardViewModel(
     /** "Now" for the catch-up freshness check; tests drive it by hand. */
     internal var clock: () -> Long = AppClock::now
 
-    /** A deep link that arrived signed out — page.tsx's sessionStorage "neema:deeplink". */
-    private var pendingLink: DeepLink? = null
+    /**
+     * A deep link that arrived signed out — page.tsx's sessionStorage
+     * "neema:deeplink" — kept in the saved state, so the login screen being
+     * killed in the background does not lose it either.
+     */
+    private var pendingLink: DeepLink?
+        get() = saved.get<ArrayList<String?>>(KEY_LINK)?.takeIf { it.size == 4 }?.let { DeepLink(it[0], it[1], it[2], it[3]) }
+        set(v) { if (v == null) saved.remove<Any>(KEY_LINK) else saved[KEY_LINK] = arrayListOf(v.open, v.ref, v.view, v.caller) }
+
+    private val _signingOut = MutableStateFlow(false)
+    /** Sign-out is waiting (bounded) for a live call's terminate to reach the server. */
+    val signingOut: StateFlow<Boolean> = _signingOut.asStateFlow()
+    private var signOutJob: Job? = null
+
+    /**
+     * Ends any call and returns a job that completes once the server has been
+     * told (CallManager.hangup). Tests replace it.
+     */
+    internal var endCall: () -> Job = { container.calls.hangup() }
 
     private companion object {
+        const val KEY_VIEW = "shell.view"
+        const val KEY_HISTORY = "shell.history"
+        /** Whose view and history those are: another agent signing in starts on the inbox. */
+        const val KEY_OWNER = "shell.owner"
+        const val KEY_LINK = "shell.pendingLink"
+        /** Views remembered for back; each appears once, so this is plenty. */
+        const val HISTORY_MAX = 10
+        /**
+         * How long sign-out waits for a live call's terminate before the token
+         * goes (the request needs it). Terminate retries past this carry on
+         * and fail quietly; the customer's side then ends when Meta times out.
+         */
+        const val SIGN_OUT_CALL_MS = 4_000L
         /** Orders fetched this recently need no catch-up on reconnect. */
         const val CATCH_UP_FRESH_MS = 5_000L
         /** A burst of 403s (a screen's parallel loads) costs one reread. */
@@ -159,6 +214,13 @@ class DashboardViewModel(
 
     /** One inbox refetch per burst of inbox alerts (see the notification collector). */
     private val inboxKick = Coalescer(viewModelScope, ScreenLife.EVENT_WINDOW_MS) { _inboxRefresh.emit(Unit) }
+    /**
+     * One GET /admin/orders on the wire at a time: the 90 s poll, a
+     * reconnect's catch-up, an order alert, re-auth and a pull-to-refresh
+     * that meet share a read (a caller arriving mid-read gets the next one,
+     * so its answer never predates its reason to ask).
+     */
+    private val ordersRead = SingleFlight(viewModelScope) { fetchOrdersNow() }
     /** One GET /admin/orders per burst of order alerts. */
     private val ordersKick = Coalescer(viewModelScope, ScreenLife.EVENT_WINDOW_MS) { refetchOrdersNow() }
 
@@ -209,6 +271,11 @@ class DashboardViewModel(
                 // restored session, a re-login as another agent): nothing of
                 // the previous agent's may stay on screen.
                 if (last != null && last != id) clearAgentState()
+                // A view restored after a process death belongs to whoever was
+                // signed in then: someone else starts on the inbox.
+                val owner = saved.get<String>(KEY_OWNER)
+                if (owner != null && owner != id) resetNav()
+                saved[KEY_OWNER] = id
                 last = id
                 onSignedIn()
             }
@@ -300,7 +367,8 @@ class DashboardViewModel(
         _agents.value = list
         container.snapshots.write(who, "agents", ListSerializer(Agent.serializer()), list)
     }
-    private suspend fun refetchOrdersNow() = forCurrentAgent({ api.orders.list() }) { who, list ->
+    private suspend fun refetchOrdersNow() = ordersRead.run()
+    private suspend fun fetchOrdersNow() = forCurrentAgent({ api.orders.list() }) { who, list ->
         lastOrdersFetch = clock()
         _orders.value = list
         container.snapshots.write(who, "orders", ListSerializer(Order.serializer()), list)
@@ -425,10 +493,50 @@ class DashboardViewModel(
         forbiddenRefresh.kick()
     }
 
-    fun navigate(v: ViewId) { _view.value = v }
+    /**
+     * Switch view, remembering where the agent came from for system back.
+     * The web's view is plain state (no history entry), so the browser's
+     * back leaves the dashboard; on a phone that would throw the agent out
+     * of the app from any view, so the app keeps a short history instead —
+     * each view at most once, most recent last — and back walks it: the
+     * previous view, then the inbox, and only then out of the app.
+     */
+    fun navigate(v: ViewId) {
+        val from = _view.value
+        if (v == from) return
+        history.remove(v)
+        history.addLast(from)
+        while (history.size > HISTORY_MAX) history.removeFirst()
+        _view.value = v
+        saveNav()
+    }
 
-    fun openConversationFor(key: String) { openConvKey.value = key; _view.value = ViewId.Conversations }
-    fun focusCalls(waId: String) { callsFocusKey.value = waId; _view.value = ViewId.Calls }
+    /**
+     * System back with nothing above the view to close: the previous view,
+     * else the inbox. False when already on the inbox with nowhere to go
+     * back to (the system then leaves the app).
+     */
+    fun back(): Boolean {
+        val to = history.removeLastOrNull() ?: ViewId.Conversations.takeIf { _view.value != it } ?: return false
+        _view.value = to
+        saveNav()
+        return true
+    }
+
+    private fun saveNav() {
+        saved[KEY_VIEW] = _view.value.name
+        saved[KEY_HISTORY] = ArrayList(history.map { it.name })
+        _canGoBack.value = history.isNotEmpty() || _view.value != ViewId.Conversations
+    }
+
+    private fun resetNav() {
+        history.clear()
+        _view.value = ViewId.Conversations
+        saveNav()
+    }
+
+    fun openConversationFor(key: String) { openConvKey.value = key; navigate(ViewId.Conversations) }
+    fun focusCalls(waId: String) { callsFocusKey.value = waId; navigate(ViewId.Calls) }
 
     /**
      * page.tsx's deep links: `?open=<wa_id>[&ref=<order>]` opens that chat;
@@ -478,13 +586,31 @@ class DashboardViewModel(
         refetchMe(); refetchAgents(); refetchOrders(); refetchCatalog(); refreshInbox()
     }
 
+    /**
+     * Sidebar.tsx's sign-out. A live call is ended first and its terminate
+     * request given up to [SIGN_OUT_CALL_MS] to reach the server BEFORE the
+     * token goes — cleared first, the request would leave without one and
+     * the customer's phone would stay on the line. Meanwhile [signingOut]
+     * is true (the web's spinner over the account button) and further taps
+     * are ignored. Then: the token, the bell, and every per-agent state go;
+     * the session change drops the agent's screens (cancelling their work).
+     */
     fun logout() {
+        if (signOutJob?.isActive == true) return
         stopPolling()
-        container.calls.hangup()
-        container.auth.logout()
-        container.notifications.clear()
-        clearAgentState()
-        pendingLink = null
+        val call = runCatching { endCall() }.getOrNull()
+        _signingOut.value = true
+        signOutJob = viewModelScope.launch {
+            try {
+                if (call != null) withTimeoutOrNull(SIGN_OUT_CALL_MS) { call.join() }
+            } finally {
+                container.auth.logout()
+                container.notifications.clear()
+                clearAgentState()
+                pendingLink = null
+                _signingOut.value = false
+            }
+        }
     }
 
     /** Forget everything that belonged to the signed-in agent. */
@@ -496,6 +622,6 @@ class DashboardViewModel(
         sessionExpired.value = false
         immersive.value = false
         lastOrdersFetch = 0L
-        _view.value = ViewId.Conversations
+        resetNav()
     }
 }

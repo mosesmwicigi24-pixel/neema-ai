@@ -94,7 +94,10 @@ fun DashboardShell(
     val access by dash.access.collectAsStateWithLifecycle()
     val items = remember(access, me, agents, summary, orders, session) { dash.navItems() }
 
-    var showBell by remember { mutableStateOf(initialBellOpen) }
+    // Open overlays survive a configuration change (rotation, fold, dark mode,
+    // font size) and the process being restored; the drawer's state is saveable too.
+    var showBell by rememberSaveable { mutableStateOf(initialBellOpen) }
+    var menuOpen by rememberSaveable { mutableStateOf(initialAccountMenu) }
     // A 600–840dp window (an unfolded foldable, a small tablet upright) opens on
     // the 60dp icon rail so the view keeps its width; the toggle still expands it.
     var collapsed by rememberSaveable { mutableStateOf(initialCollapsed || widthClass == WindowWidthSizeClass.Medium) }
@@ -102,11 +105,29 @@ fun DashboardShell(
     val wide = widthClass != WindowWidthSizeClass.Compact
     val drawer = rememberDrawerState(if (initialDrawerOpen) DrawerValue.Open else DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    val canGoBack by dash.canGoBack.collectAsStateWithLifecycle()
+    val signingOut by dash.signingOut.collectAsStateWithLifecycle()
 
-    BackHandler(enabled = drawer.isOpen) { scope.launch { drawer.close() } }
-    BackHandler(enabled = showBell && wide) { showBell = false }
-    // Back from any view returns to the inbox before leaving the app.
-    BackHandler(enabled = !drawer.isOpen && view != ViewId.Conversations && !immersive) { dash.navigate(ViewId.Conversations) }
+    // System back, lowest priority first (see ShellBack.kt). The view history:
+    // registered before any view composes, so every view's own handler wins.
+    BackHandler(enabled = canGoBack) { dash.back() }
+    // The shell's overlays: one handler, re-registered whenever the topmost
+    // one changes, so it sits above every view's handlers.
+    val drawerShown = !wide && (drawer.isOpen || drawer.targetValue == DrawerValue.Open)
+    val menuShown = menuOpen && !(wide && collapsed) && (wide || drawerShown)
+    val overlay = shellBackTarget(bellPopupOpen = showBell && wide, accountMenuOpen = menuShown, drawerOpen = drawerShown)
+    key(overlay) {
+        BackHandler(enabled = overlay != null) {
+            when (overlay) {
+                ShellOverlay.Bell -> showBell = false
+                ShellOverlay.AccountMenu -> menuOpen = false
+                ShellOverlay.Drawer -> scope.launch { drawer.close() }
+                null -> Unit
+            }
+        }
+    }
+    // The phone's account menu lives in the drawer: it closes with it.
+    LaunchedEffect(drawerShown) { if (!wide && !drawerShown && !initialAccountMenu) menuOpen = false }
 
     // One toast at a time, replaced by the next, gone after 3.5 s (page.tsx showToast).
     var toast by remember { mutableStateOf(initialToast) }
@@ -151,7 +172,9 @@ fun DashboardShell(
             bellCount = unreadBell, onBell = { showBell = !showBell }, bellOpen = showBell && wide,
             // Sidebar.tsx signs straight out — no confirmation step.
             onSignOut = { dash.logout() },
-            expandedWidth = width, initialMenuOpen = initialAccountMenu,
+            expandedWidth = width,
+            menuOpen = menuOpen, onMenuOpenChange = { menuOpen = it },
+            signingOut = signingOut,
         )
     }
 

@@ -38,9 +38,46 @@ object Fmt {
         }
     }
 
+    /**
+     * lib/utils.ts `initials`: the first letter of the first two words. Taken
+     * per grapheme, not per UTF-16 unit: the web's `w[0]` cuts an emoji in
+     * half ("Mama 🌸 Njeri" draws "M�"); here it is "M🌸".
+     */
     fun initials(name: String?): String =
-        name?.trim()?.split(Regex("\\s+"))?.filter { it.isNotEmpty() }
-            ?.joinToString("") { it.first().toString() }?.take(2)?.uppercase()?.ifEmpty { "?" } ?: "?"
+        name?.trim()?.split(Regex("\\s+"))?.filter { it.isNotEmpty() }?.take(2)
+            ?.joinToString("") { firstGrapheme(it).uppercase() }?.ifEmpty { "?" } ?: "?"
+
+    /**
+     * The first user-perceived character of [word]: a surrogate pair, a letter
+     * with its combining marks, and an emoji with its variation selector,
+     * skin tone or ZWJ-joined parts (👩🏽‍💻) stay whole.
+     */
+    fun firstGrapheme(word: String): String {
+        if (word.isEmpty()) return word
+        val it = java.text.BreakIterator.getCharacterInstance(Locale.ROOT)
+        it.setText(word)
+        var end = it.next().takeIf { e -> e != java.text.BreakIterator.DONE } ?: word.length
+        // A flag is two regional indicators.
+        val first = word.codePointAt(0)
+        if (first in 0x1F1E6..0x1F1FF && end == Character.charCount(first) && end < word.length && word.codePointAt(end) in 0x1F1E6..0x1F1FF) {
+            end += Character.charCount(word.codePointAt(end))
+        }
+        // Older JDK/ICU tables split emoji sequences: keep joiners and modifiers attached.
+        while (end < word.length) {
+            val cp = word.codePointAt(end)
+            end = when {
+                cp == 0xFE0F || cp == 0xFE0E || cp in 0x1F3FB..0x1F3FF || cp in 0xE0020..0xE007F ||
+                    Character.getType(cp) == Character.NON_SPACING_MARK.toInt() ||
+                    Character.getType(cp) == Character.ENCLOSING_MARK.toInt() -> end + Character.charCount(cp)
+                cp == 0x200D && end + 1 < word.length -> {
+                    val next = word.codePointAt(end + 1)
+                    end + 1 + Character.charCount(next)
+                }
+                else -> break
+            }
+        }
+        return word.substring(0, end)
+    }
 
     private val grouping: NumberFormat = NumberFormat.getNumberInstance(Locale.US).apply { maximumFractionDigits = 2 }
 

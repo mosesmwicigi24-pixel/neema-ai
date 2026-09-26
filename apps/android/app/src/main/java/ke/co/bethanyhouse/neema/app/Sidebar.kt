@@ -1,6 +1,8 @@
 package ke.co.bethanyhouse.neema.app
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
@@ -131,11 +133,23 @@ fun NeemaSidebar(
     bellOpen: Boolean = false,
     /** 208dp docked (the web's width); the phone drawer passes its own. */
     expandedWidth: Dp = 208.dp,
-    /** Screenshot tests: start with the account menu open. */
+    /** Screenshot tests: start with the account menu open (when the menu's state is not hoisted). */
     initialMenuOpen: Boolean = false,
+    /**
+     * The account menu's state, hoisted by the shell (which closes it on
+     * system back, above the drawer); null keeps it here.
+     */
+    menuOpen: Boolean? = null,
+    onMenuOpenChange: ((Boolean) -> Unit)? = null,
+    /** Signing out (waiting for a live call's hang-up): the account button spins, as on the web. */
+    signingOut: Boolean = false,
 ) {
     val width by animateDpAsState(if (collapsed) 60.dp else expandedWidth, label = "sidebar")
-    var menuOpen by remember { mutableStateOf(initialMenuOpen) }
+    var ownMenuOpen by rememberSaveable { mutableStateOf(initialMenuOpen) }
+    val open = menuOpen ?: ownMenuOpen
+    val setOpen: (Boolean) -> Unit = { v -> if (onMenuOpenChange != null) onMenuOpenChange(v) else ownMenuOpen = v }
+    // Not hoisted: back closes the inline menu here (the rail's popup closes itself).
+    if (onMenuOpenChange == null && open && !collapsed) BackHandler { setOpen(false) }
 
     Column(
         modifier.width(width).fillMaxHeight().background(Brand.Navy),
@@ -194,32 +208,33 @@ fun NeemaSidebar(
             val card = @Composable {
                 AccountCard(
                     userName, userEmail, userRole, avatarUrl, dark, onToggleDark,
-                    onProfile = { menuOpen = false; onSelect(ViewId.Profile) },
-                    onSettings = { menuOpen = false; onSelect(ViewId.Settings) },
-                    onSignOut = { menuOpen = false; onSignOut() },
+                    onProfile = { setOpen(false); onSelect(ViewId.Profile) },
+                    onSettings = { setOpen(false); onSelect(ViewId.Settings) },
+                    onSignOut = { setOpen(false); onSignOut() },
                 )
             }
             // Expanded: the popup opens above the footer row, as wide as it, 8dp clear.
-            AnimatedVisibility(menuOpen && !collapsed) { Box(Modifier.padding(bottom = 8.dp)) { card() } }
+            AnimatedVisibility(open && !collapsed) { Box(Modifier.padding(bottom = 8.dp)) { card() } }
             // Collapsed rail: it opens to the right (8dp past the button), bottom-aligned with the avatar.
-            if (menuOpen && collapsed) {
+            if (open && collapsed) {
                 // Anchored to this padded column's content (x = 6dp on the rail): 6 + 54 = the web's 60dp.
                 val dx = with(LocalDensity.current) { 54.dp.roundToPx() }
                 Popup(
                     alignment = Alignment.BottomStart, offset = IntOffset(dx, 0),
-                    onDismissRequest = { menuOpen = false },
+                    onDismissRequest = { setOpen(false) },
                     properties = PopupProperties(focusable = true),
                 ) { Box(Modifier.width(252.dp)) { card() } }
             }
-            val chevron by animateFloatAsState(if (menuOpen) 180f else 0f, label = "chevron")
+            val chevron by animateFloatAsState(if (open) 180f else 0f, label = "chevron")
+            Box {
             Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                    .background(if (menuOpen) Brand.NavyHover else Color.Transparent)
-                    .clickable(role = Role.Button, onClickLabel = if (menuOpen) "Close account menu" else "Open account menu") { menuOpen = !menuOpen }
+                    .background(if (open) Brand.NavyHover else Color.Transparent)
+                    .clickable(enabled = !signingOut, role = Role.Button, onClickLabel = if (open) "Close account menu" else "Open account menu") { setOpen(!open) }
                     .clearAndSetSemantics {
                         contentDescription = "Account: ${userName.ifBlank { userEmail }}, ${userRole.ifBlank { "agent" }}"
                         role = Role.Button
-                        onClick(if (menuOpen) "Close account menu" else "Open account menu") { menuOpen = !menuOpen; true }
+                        onClick(if (open) "Close account menu" else "Open account menu") { setOpen(!open); true }
                     }
                     .heightIn(min = 48.dp)
                     .padding(horizontal = if (collapsed) 0.dp else 8.dp, vertical = if (collapsed) 4.dp else 6.dp),
@@ -246,6 +261,13 @@ fun NeemaSidebar(
                     }
                     Icon(WebIcons.ChevronUp, null, tint = Brand.TextMuted, modifier = Modifier.padding(start = 10.dp).size(14.dp).rotate(chevron))
                 }
+            }
+            // Sidebar.tsx while logging out: navy over the button, a 14dp amber ring spinning.
+            if (signingOut) Box(
+                Modifier.matchParentSize().clip(RoundedCornerShape(12.dp)).background(Brand.Navy.copy(alpha = 0.85f))
+                    .semantics { contentDescription = "Signing out…" },
+                contentAlignment = Alignment.Center,
+            ) { CircularProgressIndicator(Modifier.size(14.dp), color = Brand.Amber, strokeWidth = 2.dp, trackColor = Color.Transparent) }
             }
         }
     }

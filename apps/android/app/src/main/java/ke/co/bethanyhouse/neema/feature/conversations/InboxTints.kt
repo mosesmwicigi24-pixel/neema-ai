@@ -13,6 +13,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
+import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 
 /**
  * A tinted surface — a chip, a pill, a strip — as the web draws it in light
@@ -64,104 +65,100 @@ internal fun Modifier.webHeight(h: Dp): Modifier =
     if (LocalDensity.current.fontScale > 1f) heightIn(min = h) else height(h)
 
 /**
- * The inbox's named colours beyond the core [ke.co.bethanyhouse.neema.core.ui.theme.Palette]:
- * the Tailwind shades the web's inbox, thread and customer panel use that the
- * core palette does not name yet (e.g. `sky-700`, `violet-700`, `orange-100`),
- * and the hex literals ConversationsView / CustomerSidebar write inline
- * (the WhatsApp-green reply bubble, the sage hairlines, the pipeline gold).
- * Every screen in the inbox names a colour from here, Palette, ChannelColors
- * or [Neema.colors] — no `Color(0x…)` elsewhere in feature/conversations.
+ * Moved to core: `Palette` now names every one of these colours. These
+ * forwards keep existing references compiling until the integrator points
+ * them at `Palette.X` and deletes this object.
  */
 internal object Hue {
-    val Sky100 = Color(0xFFE0F2FE)
-    val Sky200 = Color(0xFFBAE6FD)
-    val Sky300 = Color(0xFF7DD3FC)
-    val Sky400 = Color(0xFF38BDF8)
-    val Sky700 = Color(0xFF0369A1)
-    val Violet100 = Color(0xFFEDE9FE)
-    val Violet500 = Color(0xFF8B5CF6)
-    val Violet700 = Color(0xFF6D28D9)
-    val Purple100 = Color(0xFFF3E8FF)
-    val Purple300 = Color(0xFFD8B4FE)
-    val Indigo50 = Color(0xFFEEF2FF)
-    val Indigo100 = Color(0xFFE0E7FF)
-    val Indigo200 = Color(0xFFC7D2FE)
-    val Indigo300 = Color(0xFFA5B4FC)
-    val Indigo700 = Color(0xFF4338CA)
-    val Blue100 = Color(0xFFDBEAFE)
-    val Blue300 = Color(0xFF93C5FD)
-    val Blue800 = Color(0xFF1E40AF)
-    val Blue950 = Color(0xFF172554)
-    val Green100 = Color(0xFFDCFCE7)
-    val Green200 = Color(0xFFBBF7D0)
-    val Green300 = Color(0xFF86EFAC)
-    val Green400 = Color(0xFF4ADE80)
-    val Green700 = Color(0xFF15803D)
-    val Emerald100 = Color(0xFFD1FAE5)
-    val Emerald900 = Color(0xFF064E3B)
-    val Teal100 = Color(0xFFCCFBF1)
-    val Teal300 = Color(0xFF5EEAD4)
-    val Lime50 = Color(0xFFF7FEE7)
-    val Lime300 = Color(0xFFBEF264)
-    val Lime800 = Color(0xFF3F6417)
-    val Orange50 = Color(0xFFFFF7ED)
-    val Orange100 = Color(0xFFFFEDD5)
-    val Orange200 = Color(0xFFFED7AA)
-    val Orange300 = Color(0xFFFDBA74)
-    val Orange500 = Color(0xFFF97316)
-    val Orange600 = Color(0xFFEA580C)
-    val Orange700 = Color(0xFFC2410C)
-    val Slate100 = Color(0xFFF1F5F9)
-    val Slate600 = Color(0xFF475569)
-    val Slate800 = Color(0xFF1E293B)
-    val Gray800 = Color(0xFF1F2937)
-    val Amber950 = Color(0xFF451A03)
-    val Red950 = Color(0xFF450A0A)
-    val BubbleGreen = Color(0xFF2AD113)
-    val BubbleInk = Color(0xFF0A2E05)
-    val LivePill = Color(0xFFFFF3CD)
-    val LivePillInk = Color(0xFF856404)
-    val ActiveRow = Color(0xFFFDF6E9)
-    val UnreadEdge = Color(0xFFFCD98A)
-    val PickedRow = Color(0xFFEEF6E5)
-    val StoneGreen = Color(0xFFF5F6F3)
-    val ForestInk = Color(0xFF3A5C28)
-    val SageRing = Color(0xFFDDE8D5)
-    val SagePale = Color(0xFFC5D5BC)
-    val SageDeep = Color(0xFF3D5A30)
-    val SageDetail = Color(0xFF8FA383)
-    val SageCaption = Color(0xFF5F6F57)
-    val SageRim = Color(0xFFCFDAC6)
-    val SageDash = Color(0xFFC7CEC0)
-    val SageField = Color(0xFFE5E8E2)
-    val SageFieldBg = Color(0xFFF6F7F5)
-    val SageRule = Color(0xFFF2F4EF)
-    val SageQuote = Color(0xFFF2F7EE)
-    val SageStrip = Color(0xFFFBFCFA)
-    val SageBanner = Color(0xFFFAFBF8)
-    val SageResult = Color(0xFFF8FAF6)
-    val SageResultRim = Color(0xFFE8EDE4)
-    val SageButton = Color(0xFFEEF2E8)
-    val MossNight = Color(0xFF7FC25A)
-    val MossBright = Color(0xFF86C95E)
-    val MossWash = Color(0xFFE9F6DF)
-    val MossRim = Color(0xFFD6E9C2)
-    val MossTint = Color(0xFFF0F9E8)
-    val ForestText = Color(0xFF1A2E0F)
-    val CoolGray = Color(0xFFF1F3F5)
-    val WhatsAppDeep = Color(0xFF1DA851)
-    val MessengerSky = Color(0xFF0099FF)
-    val InstaOrange = Color(0xFFF09433)
-    val InstaCoral = Color(0xFFE6683C)
-    val InstaRed = Color(0xFFDC2743)
-    val InstaMagenta = Color(0xFFCC2366)
-    val InstaPurple = Color(0xFFBC1888)
-    val PipeGold = Color(0xFFC89B3C)
-    val PipeGoldSolid = Color(0xFFA97C14)
-    val PipeGoldInk = Color(0xFF8A6D1F)
-    val PipeGoldWash = Color(0xFFFDF8EC)
-    val PipeGoldRim = Color(0xFFE3CF9B)
-    val PipeLost = Color(0xFFF4CCCC)
-    val PipeLostIcon = Color(0xFFEFA3A3)
-    val PipeLostText = Color(0xFFE08A8A)
+    val Sky100 = Palette.Sky100
+    val Sky200 = Palette.Sky200
+    val Sky300 = Palette.Sky300
+    val Sky400 = Palette.Sky400
+    val Sky700 = Palette.Sky700
+    val Violet100 = Palette.Violet100
+    val Violet500 = Palette.Violet500
+    val Violet700 = Palette.Violet700
+    val Purple100 = Palette.Purple100
+    val Purple300 = Palette.Purple300
+    val Indigo50 = Palette.Indigo50
+    val Indigo100 = Palette.Indigo100
+    val Indigo200 = Palette.Indigo200
+    val Indigo300 = Palette.Indigo300
+    val Indigo700 = Palette.Indigo700
+    val Blue100 = Palette.Blue100
+    val Blue300 = Palette.Blue300
+    val Blue800 = Palette.Blue800
+    val Blue950 = Palette.Blue950
+    val Green100 = Palette.Green100
+    val Green200 = Palette.Green200
+    val Green300 = Palette.Green300
+    val Green400 = Palette.Green400
+    val Green700 = Palette.Green700
+    val Emerald100 = Palette.Emerald100
+    val Emerald900 = Palette.Emerald900
+    val Teal100 = Palette.Teal100
+    val Teal300 = Palette.Teal300
+    val Lime50 = Palette.Lime50
+    val Lime300 = Palette.Lime300
+    val Lime800 = Palette.Lime800
+    val Orange50 = Palette.Orange50
+    val Orange100 = Palette.Orange100
+    val Orange200 = Palette.Orange200
+    val Orange300 = Palette.Orange300
+    val Orange500 = Palette.Orange500
+    val Orange600 = Palette.Orange600
+    val Orange700 = Palette.Orange700
+    val Slate100 = Palette.Slate100
+    val Slate600 = Palette.Slate600
+    val Slate800 = Palette.Slate800
+    val Gray800 = Palette.Gray800
+    val Amber950 = Palette.Amber950
+    val Red950 = Palette.Red950
+    val BubbleGreen = Palette.BubbleGreen
+    val BubbleInk = Palette.BubbleInk
+    val LivePill = Palette.LivePill
+    val LivePillInk = Palette.LivePillInk
+    val ActiveRow = Palette.ActiveRow
+    val UnreadEdge = Palette.UnreadEdge
+    val PickedRow = Palette.PickedRow
+    val StoneGreen = Palette.StoneGreen
+    val ForestInk = Palette.ForestInk
+    val SageRing = Palette.SageRing
+    val SagePale = Palette.SagePale
+    val SageDeep = Palette.SageDeep
+    val SageDetail = Palette.SageDetail
+    val SageCaption = Palette.SageCaption
+    val SageRim = Palette.SageRim
+    val SageDash = Palette.SageDash
+    val SageField = Palette.SageField
+    val SageFieldBg = Palette.SageFieldBg
+    val SageRule = Palette.SageRule
+    val SageQuote = Palette.SageQuote
+    val SageStrip = Palette.SageStrip
+    val SageBanner = Palette.SageBanner
+    val SageResult = Palette.SageResult
+    val SageResultRim = Palette.SageResultRim
+    val SageButton = Palette.SageButton
+    val MossNight = Palette.MossNight
+    val MossBright = Palette.MossBright
+    val MossWash = Palette.MossWash
+    val MossRim = Palette.MossRim
+    val MossTint = Palette.MossTint
+    val ForestText = Palette.ForestText
+    val CoolGray = Palette.CoolGray
+    val WhatsAppDeep = Palette.WhatsAppDeep
+    val MessengerSky = Palette.MessengerSky
+    val InstaOrange = Palette.InstaOrange
+    val InstaCoral = Palette.InstaCoral
+    val InstaRed = Palette.InstaRed
+    val InstaMagenta = Palette.InstaMagenta
+    val InstaPurple = Palette.InstaPurple
+    val PipeGold = Palette.PipeGold
+    val PipeGoldSolid = Palette.PipeGoldSolid
+    val PipeGoldInk = Palette.PipeGoldInk
+    val PipeGoldWash = Palette.PipeGoldWash
+    val PipeGoldRim = Palette.PipeGoldRim
+    val PipeLost = Palette.PipeLost
+    val PipeLostIcon = Palette.PipeLostIcon
+    val PipeLostText = Palette.PipeLostText
 }

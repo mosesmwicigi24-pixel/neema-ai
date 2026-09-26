@@ -17,6 +17,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -94,11 +95,13 @@ internal fun LoginContent(
     /** The footer year (tests pin it). */
     year: Int = Year.now().value,
 ) {
-    var email by remember { mutableStateOf(initialEmail) }
+    var email by rememberSaveable { mutableStateOf(initialEmail) }
+    // Not saveable on purpose: a password is kept out of the Bundle the system
+    // may persist while the app sits in the background.
     var password by remember { mutableStateOf(initialPassword) }
-    var show by remember { mutableStateOf(false) }
+    var show by rememberSaveable { mutableStateOf(false) }
     var loading by remember { mutableStateOf(initialLoading) }
-    var error by remember { mutableStateOf(initialError) }
+    var error by rememberSaveable { mutableStateOf(initialError) }
     val scope = rememberCoroutineScope()
     val focus = LocalFocusManager.current
 
@@ -375,7 +378,7 @@ internal fun SessionExpiredCard(
 ) {
     var password by remember { mutableStateOf(initialPassword) }
     var loading by remember { mutableStateOf(initialLoading) }
-    var error by remember { mutableStateOf(initialError) }
+    var error by rememberSaveable { mutableStateOf(initialError) }
     val scope = rememberCoroutineScope()
     val focus = remember { FocusRequester() }
     if (autoFocus) LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }

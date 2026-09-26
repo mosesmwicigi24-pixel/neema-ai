@@ -39,6 +39,12 @@ suspend fun quietly(block: suspend () -> Unit) {
  */
 class Coalescer(private val scope: CoroutineScope, private val windowMs: Long, private val block: suspend () -> Unit) {
     private val lock = Any()
+    /**
+     * The one run that has not started yet — waiting out its window, or
+     * waiting for the run ahead of it to finish. Every kick until it starts
+     * folds into it, so however many kicks land during a slow run, at most
+     * ONE run follows it (not one per window's worth of kicks).
+     */
     private var pending: Job? = null
     /** Runs never overlap: a kick during a slow run waits for it, so fetches can't stack. */
     private val running = Mutex()
@@ -49,10 +55,14 @@ class Coalescer(private val scope: CoroutineScope, private val windowMs: Long, p
             if (pending?.isActive == true) return
             // Recorded before it starts: on an immediate dispatcher the body
             // may run (and clear `pending`) before launch() even returns.
-            val job = scope.launch(start = CoroutineStart.LAZY) {
+            lateinit var job: Job
+            job = scope.launch(start = CoroutineStart.LAZY) {
                 delay(windowMs)
-                synchronized(lock) { pending = null }
-                running.withLock { quietly { block() } }
+                running.withLock {
+                    // Only now is it running: a kick from here on schedules the next.
+                    synchronized(lock) { if (pending === job) pending = null }
+                    quietly { block() }
+                }
             }
             pending = job
             job.start()

@@ -6,7 +6,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
@@ -23,6 +25,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -246,12 +249,27 @@ fun SectionTitle(text: String, modifier: Modifier = Modifier, trailing: (@Compos
 @Composable
 fun StatTile(label: String, value: String, modifier: Modifier = Modifier, hint: String? = null, accent: Color? = null) {
     Panel(modifier) {
-        // Two lines each, so large text wraps instead of cutting a label or an amount.
-        Text(label, fontSize = 12.sp, color = Neema.colors.muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        // Two lines each, so large text wraps instead of cutting a label or an
+        // amount — between words only: a one-word label ("Permissions") that
+        // is wider than a narrow tile at large text steps its size down to
+        // fit on one line rather than breaking as "Permission / s".
+        val oneWord = label.none { it.isWhitespace() }
+        BasicText(
+            label,
+            style = LocalTextStyle.current.merge(androidx.compose.ui.text.TextStyle(fontSize = 12.sp, color = Neema.colors.muted)),
+            maxLines = if (oneWord) 1 else 2, overflow = TextOverflow.Ellipsis,
+            autoSize = if (oneWord) TextAutoSize.StepBased(minFontSize = 8.sp, maxFontSize = 12.sp, stepSize = 0.5.sp) else null,
+        )
         Spacer(Modifier.height(4.dp))
-        Text(
-            value, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = accent ?: MaterialTheme.colorScheme.onSurface,
-            maxLines = 2, style = TabularNums,
+        // The same for the figure: "20/20" or "Online" shrinks rather than split as "20/2 / 0".
+        val oneToken = value.none { it.isWhitespace() }
+        BasicText(
+            value,
+            style = TabularNums.merge(
+                androidx.compose.ui.text.TextStyle(fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = accent ?: MaterialTheme.colorScheme.onSurface),
+            ),
+            maxLines = if (oneToken) 1 else 2, overflow = TextOverflow.Ellipsis,
+            autoSize = if (oneToken) TextAutoSize.StepBased(minFontSize = 12.sp, maxFontSize = 22.sp, stepSize = 1.sp) else null,
         )
         if (hint != null) Text(hint, fontSize = 11.sp, color = Neema.colors.muted, maxLines = 2)
     }
@@ -292,8 +310,11 @@ fun SearchField(
         cursorBrush = androidx.compose.ui.graphics.SolidColor(Palette.Moss600),
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
         interactionSource = source,
-        modifier = modifier.fillMaxWidth(),
+        // The field takes taps over a 48dp band (the minimum touch target);
+        // the box drawn inside it keeps the web's own height.
+        modifier = modifier.fillMaxWidth().heightIn(min = 48.dp),
         decorationBox = { inner ->
+          Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
             // At least [height]; taller only when large text needs a second placeholder line.
             Row(
                 Modifier.fillMaxWidth().heightIn(min = height).clip(shape)
@@ -311,13 +332,27 @@ fun SearchField(
                     )
                     inner()
                 }
+                // A 36dp slot in the row, answering taps (and TalkBack) over 48dp.
                 if (value.isNotEmpty()) Box(
-                    Modifier.size(36.dp).clip(CircleShape).clickable { onChange("") },
+                    Modifier.touchTargetOver(36.dp).clip(CircleShape).clickable { onChange("") },
                     contentAlignment = Alignment.Center,
                 ) { Icon(Icons.Default.Close, "Clear", tint = c.muted, modifier = Modifier.size(16.dp)) }
             }
+          }
         },
     )
+}
+
+/**
+ * A control that takes [slot] of room in its row but is [target] (48dp) for
+ * touch and for TalkBack: it measures [target] square, reports [slot] to its
+ * parent, and sits centred on that slot, overhanging it evenly.
+ */
+fun Modifier.touchTargetOver(slot: Dp, target: Dp = 48.dp): Modifier = this.layout { measurable, _ ->
+    val t = target.roundToPx()
+    val s = slot.roundToPx()
+    val p = measurable.measure(androidx.compose.ui.unit.Constraints.fixed(t, t))
+    layout(s, s) { p.place((s - t) / 2, (s - t) / 2) }
 }
 
 /** Horizontal filter chips with an optional count badge. */

@@ -153,6 +153,109 @@ object Palette {
     val Blue50 = Color(0xFFEFF6FF); val Blue200 = Color(0xFFBFDBFE); val Blue400 = Color(0xFF60A5FA); val Blue500 = Color(0xFF3B82F6)
     val Blue600 = Color(0xFF2563EB); val Blue700 = Color(0xFF1D4ED8)
     val Violet50 = Color(0xFFF5F3FF); val Violet200 = Color(0xFFDDD6FE); val Violet600 = Color(0xFF7C3AED)
+
+    // Tailwind shades and inbox literals (ConversationsView, CustomerSidebar) — was feature/conversations Hue
+    val Sky100 = Color(0xFFE0F2FE); val Sky200 = Color(0xFFBAE6FD); val Sky300 = Color(0xFF7DD3FC)
+    val Sky400 = Color(0xFF38BDF8); val Sky700 = Color(0xFF0369A1); val Violet100 = Color(0xFFEDE9FE)
+    val Violet500 = Color(0xFF8B5CF6); val Violet700 = Color(0xFF6D28D9); val Purple100 = Color(0xFFF3E8FF)
+    val Purple300 = Color(0xFFD8B4FE); val Indigo50 = Color(0xFFEEF2FF); val Indigo100 = Color(0xFFE0E7FF)
+    val Indigo200 = Color(0xFFC7D2FE); val Indigo300 = Color(0xFFA5B4FC); val Indigo700 = Color(0xFF4338CA)
+    val Blue100 = Color(0xFFDBEAFE); val Blue300 = Color(0xFF93C5FD); val Blue800 = Color(0xFF1E40AF)
+    val Blue950 = Color(0xFF172554); val Green100 = Color(0xFFDCFCE7); val Green200 = Color(0xFFBBF7D0)
+    val Green300 = Color(0xFF86EFAC); val Green400 = Color(0xFF4ADE80); val Green700 = Color(0xFF15803D)
+    val Emerald100 = Color(0xFFD1FAE5); val Emerald900 = Color(0xFF064E3B); val Teal100 = Color(0xFFCCFBF1)
+    val Teal300 = Color(0xFF5EEAD4); val Lime50 = Color(0xFFF7FEE7); val Lime300 = Color(0xFFBEF264)
+    val Lime800 = Color(0xFF3F6417); val Orange50 = Color(0xFFFFF7ED); val Orange100 = Color(0xFFFFEDD5)
+    val Orange200 = Color(0xFFFED7AA); val Orange300 = Color(0xFFFDBA74); val Orange500 = Color(0xFFF97316)
+    val Orange600 = Color(0xFFEA580C); val Orange700 = Color(0xFFC2410C); val Slate100 = Color(0xFFF1F5F9)
+    val Slate600 = Color(0xFF475569); val Slate800 = Color(0xFF1E293B); val Gray800 = Color(0xFF1F2937)
+    val Amber950 = Color(0xFF451A03); val Red950 = Color(0xFF450A0A); val BubbleGreen = Color(0xFF2AD113)
+    val BubbleInk = Color(0xFF0A2E05); val LivePill = Color(0xFFFFF3CD); val LivePillInk = Color(0xFF856404)
+    val ActiveRow = Color(0xFFFDF6E9); val UnreadEdge = Color(0xFFFCD98A); val PickedRow = Color(0xFFEEF6E5)
+    val StoneGreen = Color(0xFFF5F6F3); val ForestInk = Color(0xFF3A5C28); val SageRing = Color(0xFFDDE8D5)
+    val SagePale = Color(0xFFC5D5BC); val SageDeep = Color(0xFF3D5A30); val SageDetail = Color(0xFF8FA383)
+    val SageCaption = Color(0xFF5F6F57); val SageRim = Color(0xFFCFDAC6); val SageDash = Color(0xFFC7CEC0)
+    val SageField = Color(0xFFE5E8E2); val SageFieldBg = Color(0xFFF6F7F5); val SageRule = Color(0xFFF2F4EF)
+    val SageQuote = Color(0xFFF2F7EE); val SageStrip = Color(0xFFFBFCFA); val SageBanner = Color(0xFFFAFBF8)
+    val SageResult = Color(0xFFF8FAF6); val SageResultRim = Color(0xFFE8EDE4); val SageButton = Color(0xFFEEF2E8)
+    val MossNight = Color(0xFF7FC25A); val MossBright = Color(0xFF86C95E); val MossWash = Color(0xFFE9F6DF)
+    val MossRim = Color(0xFFD6E9C2); val MossTint = Color(0xFFF0F9E8); val ForestText = Color(0xFF1A2E0F)
+    val CoolGray = Color(0xFFF1F3F5); val WhatsAppDeep = Color(0xFF1DA851); val MessengerSky = Color(0xFF0099FF)
+    val InstaOrange = Color(0xFFF09433); val InstaCoral = Color(0xFFE6683C); val InstaRed = Color(0xFFDC2743)
+    val InstaMagenta = Color(0xFFCC2366); val InstaPurple = Color(0xFFBC1888); val PipeGold = Color(0xFFC89B3C)
+    val PipeGoldSolid = Color(0xFFA97C14); val PipeGoldInk = Color(0xFF8A6D1F); val PipeGoldWash = Color(0xFFFDF8EC)
+    val PipeGoldRim = Color(0xFFE3CF9B); val PipeLost = Color(0xFFF4CCCC); val PipeLostIcon = Color(0xFFEFA3A3)
+    val PipeLostText = Color(0xFFE08A8A)
+    // Analytics / Catalog / Team / Profile / Settings literals — was feature/reports AreaPalette
+    val Yellow50 = Color(0xFFFEFCE8); val Sky50 = Color(0xFFF0F9FF); val Rose50 = Color(0xFFFFF1F2)
+    val Pink50 = Color(0xFFFDF2F8); val Teal50 = Color(0xFFF0FDFA); val Cyan50 = Color(0xFFECFEFF)
+    val Purple50 = Color(0xFFFAF5FF); val Purple200 = Color(0xFFE9D5FF); val Purple500 = Color(0xFFA855F7)
+    val Purple700 = Color(0xFF7E22CE); val SproutWash = Color(0xFFEAF5DD); val DangerWash = Color(0xFFFFF5F5)
+    val PipeChipFill = Color(0xFFFDF8EC); val PipeChipLine = Color(0xFFE3CF9B); val PipeChipInk = Color(0xFF8A6D1F)
+    val MessengerTile = Color(0xFF0099FF); val MpesaGreen = Color(0xFF00A651); val SlackAubergine = Color(0xFF4A154B)
+    val SheetsGreen = Color(0xFF0F9D58)
+    // Orders / Leads / Deals literals — was feature/orders SalesInk (Messenger here is CH_BG's #0099ff, not ChannelColors')
+    val Yellow200 = Color(0xFFFEF08A); val Yellow500 = Color(0xFFEAB308); val Yellow700 = Color(0xFFA16207)
+    val Messenger = Color(0xFF0099FF); val DealsPage = Color(0xFFF6F7F2); val NeedsBg = Color(0xFFFDF6E9)
+    val NeedsBorder = Color(0xFFF0DDB0); val QueuedBg = Color(0xFFF8FAF6); val QueuedBorder = Color(0xFFE8EDE4)
+    val WonBg = Color(0xFFE9F6DF); val HubLinkBorder = Color(0xFFCFE3BD); val PaneHighlight = Color(0xFFF7FBF2)
+
+    /** Instagram's gradient, first stop to last (SettingsView's tile). */
+    val InstagramGradient = listOf(
+        Color(0xFFF09433), Color(0xFFE6683C), Color(0xFFDC2743), Color(0xFFCC2366), Color(0xFFBC1888),
+    )
+    /** LeadsView's `#igGrad`, bottom-left → top-right, as brush stops. */
+    val InstagramGradientStops = arrayOf(
+        0f to Color(0xFFF09433), 0.25f to Color(0xFFE6683C), 0.5f to Color(0xFFDC2743),
+        0.75f to Color(0xFFCC2366), 1f to Color(0xFFBC1888),
+    )
+
+    /**
+     * The call screens' own colours (was feature/calls CallInk): CallsView.tsx
+     * and CallStage.tsx style themselves inline with a WhatsApp-dark palette
+     * that is neither Tailwind nor Neema's. Translucent variants are these at
+     * the web's rgba() alpha; WhatsApp green itself is `ChannelColors.WhatsApp`.
+     */
+    object Call {
+        // CallsView.tsx — the call-log console.
+        val Green = Color(0xFF2AD17F)
+        val Red = Color(0xFFF2555A)
+        val Amber = Color(0xFFF5A623)
+        val Muted = Color(0xFF7F9B8B)
+        val Dim = Color(0xFF6B8577)
+        val Text = Color(0xFFE9EDEF)
+        val Soft = Color(0xFFCFE9D9)
+        val Sage = Color(0xFF9FB3A8)
+        /** The console card's night fill (and the ink on its green buttons). */
+        val Ink = Color(0xFF0B1410)
+        /** The glow at the top of the console card's radial gradient. */
+        val Glow = Color(0xFF123626)
+        /** "Transcribing…", the readiness bell. */
+        val Gold = Color(0xFFF5C451)
+        /** The missed-count badge's text. */
+        val MissedText = Color(0xFFFF8A8D)
+        /** `avatarColor`'s six discs. */
+        val Avatars = listOf(
+            Color(0xFF3B6EA5), Color(0xFFA5417D), Color(0xFFB5892F), Color(0xFF3C8C5A), Color(0xFF8A4FC4), Color(0xFFB24A4A),
+        )
+
+        // CallStage.tsx — the take-over call card.
+        val StageSubText = Color(0xFF8AA89A)
+        val StagePillText = Color(0xFFA8E6C4)
+        val StageRed = Color(0xFFE24B4A)
+        val StageAmber = Color(0xFFEF9F27)
+        val StageLabel = Color(0xFF8696A0)
+        val StageGlow = Color(0xFF0E5C3A)
+        val StageInk = Color(0xFF06110B)
+        /** The card's glass (`rgba(11,20,26,0.6)` at full strength). */
+        val StageGlass = Color(0xFF0B141A)
+        /** The initial on the green avatar disc. */
+        val StageInitial = Color(0xFF04220F)
+        /** Mute / speaker when off. */
+        val StageControl = Color(0xFF1F2C33)
+        /** "Call ended" / the callback note. */
+        val StageEnded = Color(0xFFA8C7B6)
+    }
 }
 
 /**
@@ -242,6 +345,23 @@ val NeemaFont: FontFamily = FontFamily(
     Font(R.font.manrope_bold, FontWeight.Bold),
     Font(R.font.manrope_extrabold, FontWeight.ExtraBold),
 )
+
+/**
+ * DM Mono, the web's `--font-mono` (globals.css; loaded at 400 and 500 in
+ * layout.tsx), bundled from the OFL release (assets/licenses/DMMono-OFL.txt).
+ * Use it wherever the web writes `font-mono` / `var(--font-mono)` — phone
+ * numbers, SKUs, order refs, WhatsApp ```code``` — instead of
+ * `FontFamily.Monospace`, which is the device's own (Droid Sans Mono or a
+ * vendor font). Bold asks are served by the Medium cut, as the web's
+ * browser does with only 400/500 loaded (a synthesised bold on top).
+ */
+val NeemaMono: FontFamily = FontFamily(
+    Font(R.font.dm_mono_regular, FontWeight.Normal),
+    Font(R.font.dm_mono_medium, FontWeight.Medium),
+)
+
+/** Monospaced text in DM Mono (`font-mono`): merge onto a style or pass as `style =`. */
+val MonoText = TextStyle(fontFamily = NeemaMono)
 
 /** Tabular (monospaced) figures, for amounts and counts that line up in columns. */
 val TabularNums = TextStyle(fontFamily = NeemaFont, fontFeatureSettings = "tnum")
