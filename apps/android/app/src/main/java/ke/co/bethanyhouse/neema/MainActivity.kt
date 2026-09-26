@@ -80,7 +80,11 @@ class MainActivity : ComponentActivity() {
                         // Screen ViewModels live in a store owned by this signed-in agent:
                         // signing out (or in as someone else) discards it, so one agent's
                         // conversations, orders or drafts can never show for the next.
-                        SignedInScope(dash, s.agentId) { DashboardShell(dash, size.widthSizeClass) }
+                        // Keyed by the agent too: saved UI state (a view's filters and
+                        // drafts, open overlays) is never restored into someone else's shell.
+                        androidx.compose.runtime.key(s.agentId) {
+                            SignedInScope(dash, s.agentId) { DashboardShell(dash, size.widthSizeClass) }
+                        }
                         if (expired) SessionExpiredDialog(
                             email = s.email,
                             onSuccess = { dash.onReauthenticated() },
@@ -127,7 +131,10 @@ class MainActivity : ComponentActivity() {
         }
         // Consumed once, like the web stripping the query string: a config
         // change must not replay it.
-        listOf(Notifier.EXTRA_OPEN_CONV, Notifier.EXTRA_VIEW, Notifier.EXTRA_NOTIFICATION).forEach(intent::removeExtra)
+        listOf(
+            Notifier.EXTRA_OPEN_CONV, Notifier.EXTRA_VIEW, Notifier.EXTRA_NOTIFICATION,
+            Notifier.EXTRA_CALL_ACTION, Notifier.EXTRA_CALL_ID,
+        ).forEach(intent::removeExtra)
         val uri: Uri = intent.data ?: return
         // Signed out, the dashboard keeps it and replays it after sign-in.
         dash.applyDeepLink(DeepLink.of { runCatching { uri.getQueryParameter(it) }.getOrNull() })

@@ -1,31 +1,21 @@
 package ke.co.bethanyhouse.neema.core
 
-import ke.co.bethanyhouse.neema.calls.FakeAudio
-import ke.co.bethanyhouse.neema.calls.FakeCallApi
-import ke.co.bethanyhouse.neema.calls.FakeMedia
-import ke.co.bethanyhouse.neema.calls.FakeRinger
-import ke.co.bethanyhouse.neema.core.net.ApiException
 import ke.co.bethanyhouse.neema.core.util.Coalescer
 import ke.co.bethanyhouse.neema.core.util.Fmt
 import ke.co.bethanyhouse.neema.core.util.SingleFlight
-import ke.co.bethanyhouse.neema.feature.calls.CallManager
-import ke.co.bethanyhouse.neema.feature.calls.CallPhase
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Round 9 core carry-overs: Coalescer, SingleFlight in core, grapheme initials, the hang-up job. */
+/** Round 9 core carry-overs: Coalescer, SingleFlight in core (and its cancel), grapheme initials. */
 @OptIn(ExperimentalCoroutinesApi::class)
 class CoreRound9Test {
 
@@ -91,33 +81,22 @@ class CoreRound9Test {
         assertEquals("?", Fmt.initials("  "))
     }
 
-    // ── CallManager.hangup(): a job sign-out can wait on ──────────────────
+    // ── SingleFlight.cancel(): sign-out abandons the read on the wire ──
 
-    @Test fun hangUpsJobEndsOnlyOnceTheServerHasBeenTold() = runTest {
-        val api = FakeCallApi()
-        val frames = MutableSharedFlow<JsonObject>(extraBufferCapacity = 8)
-        val d = StandardTestDispatcher(testScheduler)
-        val calls = CallManager(
-            api = api, events = frames, connected = MutableStateFlow(true), scope = backgroundScope,
-            foreground = MutableStateFlow(true), signedInFn = { true }, media = FakeMedia(), ringer = FakeRinger(), audio = FakeAudio(),
-            micGranted = { true }, main = d, io = d, now = { testScheduler.currentTime },
-        ).also { it.start() }
+    @Test fun cancelAbandonsTheReadAndTheQueuedOneThenStartsAfresh() = runTest {
+        var started = 0
+        val gate = CompletableDeferred<Int>()
+        val flight = SingleFlight(backgroundScope) { started++; if (started == 1) gate.await() else started }
+        val first = async { runCatching { flight.run() } }
+        val second = async { runCatching { flight.run() } }
         runCurrent()
-        frames.tryEmit(JsonObject(mapOf("type" to JsonPrimitive("incoming_call"), "call_id" to JsonPrimitive("wacid.7"), "from" to JsonPrimitive("254712345678"))))
+        assertTrue(flight.inFlight)
+        flight.cancel()
         runCurrent()
-        assertEquals(CallPhase.Ringing, calls.state.value.phase)
-        // The first terminate meets a dead network; the retry (2 s later) gets through.
-        api.terminateErrors += ApiException(0, "POST", "/admin/calls/wacid.7/terminate", "")
-        val job = calls.hangup()
-        runCurrent()
-        assertEquals("the card ends at once", CallPhase.Ended, calls.state.value.phase)
-        assertFalse("but the job waits for the server", job.isCompleted)
-        advanceTimeBy(2_001); runCurrent()
-        assertEquals(2, api.log.count { it == "terminate wacid.7" })
-        assertTrue(job.isCompleted)
-        // Idle: nothing to end, the job is done at once.
-        val idle = calls.hangup()
-        advanceTimeBy(5_000); runCurrent()
-        assertTrue(idle.isCompleted)
+        assertFalse(flight.inFlight)
+        assertTrue(first.await().exceptionOrNull() is CancellationException)
+        assertTrue(second.await().exceptionOrNull() is CancellationException)
+        assertEquals("the queued read never started", 1, started)
+        assertEquals(2, flight.run())
     }
 }

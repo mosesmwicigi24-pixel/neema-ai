@@ -563,17 +563,15 @@ class CallManager internal constructor(
      * Ends the call on this phone at once (a second tap finds it over), then
      * tells the server in the background — a slow or unreachable server never
      * keeps a live-looking card on screen.
-     *
-     * The returned job ends once the server has been told (or has given up
-     * being told): sign-out waits on it, bounded, before dropping the token
-     * the terminate request needs. Callers that don't care ignore it.
      */
-    fun hangup(): Job = ui.launch {
-        if (!live || _state.value.busy) return@launch
-        val id = _state.value.callId
-        cleanup()
-        finish()
-        if (id != null && id != "pending") terminateSoon(id).join()
+    fun hangup() {
+        ui.launch {
+            if (!live || _state.value.busy) return@launch
+            val id = _state.value.callId
+            cleanup()
+            finish()
+            if (id != null && id != "pending") terminateSoon(id)
+        }
     }
 
     /**
@@ -606,14 +604,16 @@ class CallManager internal constructor(
      * reached — otherwise the customer's phone keeps ringing, or the call stays
      * up on their side, until Meta times it out.
      */
-    private fun terminateSoon(id: String): Job = ui.launch {
-        for (attempt in 0..TERMINATE_RETRY_MS.size) {
-            try { api.terminate(id); return@launch }
-            catch (e: CancellationException) { throw e }
-            catch (e: Exception) {
-                // 502 "terminate failed": Meta says the call is already over, or couldn't be reached.
-                if (!RecordingOutbox.isTransient(e) || attempt == TERMINATE_RETRY_MS.size) return@launch
-                delay(TERMINATE_RETRY_MS[attempt])
+    private fun terminateSoon(id: String) {
+        ui.launch {
+            for (attempt in 0..TERMINATE_RETRY_MS.size) {
+                try { api.terminate(id); return@launch }
+                catch (e: CancellationException) { throw e }
+                catch (e: Exception) {
+                    // 502 "terminate failed": Meta says the call is already over, or couldn't be reached.
+                    if (!RecordingOutbox.isTransient(e) || attempt == TERMINATE_RETRY_MS.size) return@launch
+                    delay(TERMINATE_RETRY_MS[attempt])
+                }
             }
         }
     }

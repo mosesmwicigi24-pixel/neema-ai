@@ -24,6 +24,16 @@ class SingleFlight<T>(private val scope: CoroutineScope, private val block: susp
     /** True while a read is on the wire. */
     val inFlight: Boolean get() = running?.isCompleted == false
 
+    /**
+     * Abandon the read on the wire and the one waiting behind it (sign-out,
+     * a switch of agent): their OkHttp calls are cancelled and their callers
+     * see a CancellationException. The next [run] starts afresh.
+     */
+    fun cancel() {
+        queued?.cancel(); running?.cancel()
+        queued = null; running = null
+    }
+
     suspend fun run(): T {
         queued?.let { if (!it.isCompleted) return it.await() }
         val prev = running?.takeIf { !it.isCompleted }

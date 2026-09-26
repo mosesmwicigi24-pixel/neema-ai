@@ -6,11 +6,9 @@ import app.cash.paparazzi.Paparazzi
 import ke.co.bethanyhouse.neema.testing.FakeNeema
 import ke.co.bethanyhouse.neema.testing.Fixtures
 import ke.co.bethanyhouse.neema.testing.testContainer
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -178,8 +176,8 @@ class ShellLifecycleTest {
         fake.on("POST", "/admin/calls/wacid.9/terminate", body = """{"ok":true}""")
         val hold = fake.hang("POST", "/admin/calls/wacid.9/terminate")
         val d = dash(fake = fake)
-        val io = CoroutineScope(Dispatchers.Unconfined)
-        d.endCall = { io.launch { runCatching { d.container.api.calls.terminate("wacid.9") } } }
+        // What CallManager.endForSignOut does for a live call: POST /terminate, awaited.
+        d.endCall = { runCatching { d.container.api.calls.terminate("wacid.9") } }
 
         d.logout()
         assertNotNull("the token stays while the terminate is on its way", d.session.value)
@@ -193,9 +191,8 @@ class ShellLifecycleTest {
 
     @Test fun signOutWaitsForTheCallOnlySoLong() {
         val d = dash()
-        val never = Job()
         var ended = 0
-        d.endCall = { ended++; never }
+        d.endCall = { ended++; awaitCancellation() }
         d.navigate(ViewId.Orders)
         d.logout()
         d.logout()   // a second tap while waiting changes nothing

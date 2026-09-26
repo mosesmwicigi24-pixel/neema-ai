@@ -16,6 +16,7 @@ import ke.co.bethanyhouse.neema.core.util.ScreenLife
 import ke.co.bethanyhouse.neema.core.util.SingleFlight
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModelStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.delay
@@ -185,10 +186,11 @@ class DashboardViewModel(
     private var signOutJob: Job? = null
 
     /**
-     * Ends any call and returns a job that completes once the server has been
-     * told (CallManager.hangup). Tests replace it.
+     * Ends any call and returns once the server has been told, bounded
+     * (CallManager.endForSignOut: 3 s; a merely ringing call is left ringing
+     * for colleagues). Tests replace it.
      */
-    internal var endCall: () -> Job = { container.calls.hangup() }
+    internal var endCall: suspend () -> Unit = { container.calls.endForSignOut() }
 
     private companion object {
         const val KEY_VIEW = "shell.view"
@@ -199,9 +201,9 @@ class DashboardViewModel(
         /** Views remembered for back; each appears once, so this is plenty. */
         const val HISTORY_MAX = 10
         /**
-         * How long sign-out waits for a live call's terminate before the token
-         * goes (the request needs it). Terminate retries past this carry on
-         * and fail quietly; the customer's side then ends when Meta times out.
+         * The shell's own cap on waiting for the call to end before the token
+         * goes (the terminate request needs it). endForSignOut bounds itself
+         * at 3 s; this only guards against it ever hanging.
          */
         const val SIGN_OUT_CALL_MS = 4_000L
         /** Orders fetched this recently need no catch-up on reconnect. */
@@ -266,7 +268,7 @@ class DashboardViewModel(
         viewModelScope.launch {
             var last: String? = null
             session.map { it?.agentId }.distinctUntilChanged().collect { id ->
-                if (id == null) { stopPolling(); dropAgentStore(); last = null; return@collect }
+                if (id == null) { stopPolling(); ordersRead.cancel(); dropAgentStore(); last = null; return@collect }
                 // Someone else signed in without a sign-out in between (a
                 // restored session, a re-login as another agent): nothing of
                 // the previous agent's may stay on screen.
@@ -598,11 +600,14 @@ class DashboardViewModel(
     fun logout() {
         if (signOutJob?.isActive == true) return
         stopPolling()
-        val call = runCatching { endCall() }.getOrNull()
+        // In-flight reads of this agent's orders go with the polls.
+        ordersRead.cancel()
         _signingOut.value = true
         signOutJob = viewModelScope.launch {
             try {
-                if (call != null) withTimeoutOrNull(SIGN_OUT_CALL_MS) { call.join() }
+                withTimeoutOrNull(SIGN_OUT_CALL_MS) {
+                    try { endCall() } catch (e: CancellationException) { throw e } catch (_: Exception) { /* sign out regardless */ }
+                }
             } finally {
                 container.auth.logout()
                 container.notifications.clear()
@@ -615,6 +620,7 @@ class DashboardViewModel(
 
     /** Forget everything that belonged to the signed-in agent. */
     private fun clearAgentState() {
+        ordersRead.cancel()
         _me.value = null; _agents.value = emptyList(); _orders.value = emptyList(); _catalog.value = emptyList()
         inboxSummary.value = null
         openConvKey.value = null
