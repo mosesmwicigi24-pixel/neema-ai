@@ -322,6 +322,13 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "giving shipping details, or as the one clause 'we ship worldwide by "
         "DHL' in a first quote to someone nobody has placed — and then it "
         "reassures: Nairobi workshop, worldwide DHL delivery.\n"
+        "- CAMPAIGN / GIVEAWAY POSTS (owner, 2026-09-26): a post that gives an item "
+        "away, runs a draw or a competition is hosted, not sold. Every comment is an "
+        "entry or a cheer: welcome them by name and title, confirm what they told you "
+        "(name, role, size, town) and save it, state the rule in one line exactly as "
+        "the caption gives it, never price or sell the giveaway item, and pick up any "
+        "item they say they plan to buy with one warm line and an invitation to "
+        "message us. Never a complaint line or an apology at an entry.\n"
         "- WHEN THE POST IS NOT A PRODUCT — a journey, a milestone, an "
         "announcement, a celebration, a greeting, a thank-you (the caption tells "
         "you) — you are the HOST, not the shopkeeper. There is no product to "
@@ -2759,12 +2766,43 @@ def parse_comment_reading(text: str) -> dict | None:
     return _reading(intent, kind, max(0, min(severity, 3)), "" if ask == "-" else ask)
 
 
+# Displeasure the model may hear that the strict negative regex does not
+# catch — enough to let a model's "negative" stand. With NONE of these, none
+# of the grievance cues and no plain displeasure in the words, a model's
+# "negative"/"mixed" is a misread (owner, 2026-09-26: a bishop wrote "I love
+# the shoe… My size is no 41" under a giveaway and was told "we're sorry
+# about the part that went wrong").
+_DISPLEASURE_HINT_RE = re.compile(
+    r"\b(not\s+happy|unhappy|angry|upset|annoy\w*|frustrat\w*|disappoint\w*|poor|bad|worst|"
+    r"terrible|horrible|nonsense|rubbish|late|delay\w*|waiting|never|lied?|lying|fake|broken|"
+    r"damaged|torn|stolen|missing|lost|ignored|rude|useless|regret|cheap\s+quality|"
+    r"low\s+quality|mbaya|sijafurahi|nimechoka|bado|hujanijibu|hamjanijibu|hamjibu|hujibu|"
+    r"pesa\s+zangu|nilituma|sijapata|hasira|vibaya|"
+    # something HAPPENED to them — the shape of a grievance about our service
+    r"came|arrived|received|ordered|sent|delivered|took|charged|returned|"
+    r"too\s+(?:small|big|large|short|long|tight|loose|wide|narrow)|"
+    r"(?:doesn|didn|hasn|haven|wasn|isn|aren|weren|won|can)'?t|not\s+(?:what|as)\s+|"
+    r"different\s+from|instead\s+of)\b|"
+    r"\bbut\b|\bhowever\b|😡|😠|👎|😤",
+    re.IGNORECASE)
+
+
+def _grievance_in_words(text: str) -> bool:
+    t = (text or "").strip()
+    return bool(looks_negative(t) or _GRIEVANCE_CUE_RE.search(t) or _DISPLEASURE_HINT_RE.search(t))
+
+
 def _settle_reading(text: str, r: dict) -> dict:
     """The reading with the deterministic readers laid over it: a grievance is
     a complaint with a grade never below its own words; kind words beside a
     grievance make it mixed; a request shape is a request even when the model
     called it a question; a request always carries its ask."""
     r = dict(r)
+    if (r["intent"] == "negative" or r["kind"] in ("complaint", "mixed")) \
+            and not _grievance_in_words(text):
+        # The model heard a grievance the words do not carry: kind words stay
+        # kind words, anything else is a person to answer — never to apologise to.
+        r["intent"], r["kind"], r["severity"] = "high", "other", 0
     if r["intent"] == "negative":
         r["kind"] = "mixed" if (r["kind"] == "mixed" or looks_praise(text)) else "complaint"
         r["severity"] = max(int(r.get("severity") or 0), grade_complaint(text))
@@ -2877,6 +2915,35 @@ async def _thread_parent(parent_id: str) -> dict:
         return {}
 
 
+_CAMPAIGN_RE = re.compile(
+    r"\b(give\s*-?\s*aways?|raffle|competition|contest|campaign|winners?|\bwin\b|"
+    r"lucky\s+draw|draw\s+(?:on|date|day)|stand\s+a\s+chance|shinda|mshindi|"
+    r"washindi|bahati\s+nasibu|zawadi\s+ya\s+bure)\b",
+    re.IGNORECASE)
+
+
+def is_campaign_post(caption: str | None) -> bool:
+    """A post that runs a GIVEAWAY, a draw, a competition (owner, 2026-09-26:
+    "one person will get the shoe for free — the only cost is shipping").
+    Its comments are entries and cheers, never orders: the host answers
+    them, the shopkeeper does not."""
+    return bool(_CAMPAIGN_RE.search(" ".join(str(caption or "").split())))
+
+
+def _campaign_context(caption: str) -> str:
+    cap = " ".join(str(caption or "").split())[:400]
+    return ("(THIS POST IS A CAMPAIGN / GIVEAWAY — its caption: \"" + cap + "\". You are the "
+            "HOST of the campaign, not a shopkeeper. Welcome them by name and title; "
+            "confirm what they told you — their name, their role, their size, their town — "
+            "and SAVE it in this turn (capture_contact; a shoe or garment size with "
+            "save_measurements); say the campaign's rule in ONE line exactly as the caption "
+            "gives it — never a date, a count, a winner or a rule the caption does not "
+            "state; the giveaway item is never priced and never sold. If they mention an "
+            "item they plan to buy, pick it up warmly in one line and invite them to "
+            "message us for it. Never a complaint line, never an apology, never \"something "
+            "went wrong\": an entry is a person joining in.)")
+
+
 def _reading_context(reading: dict | None) -> str:
     """The model's line about what this comment IS (owner, 2026-09-22) — so a
     request is answered with the shelf, a question with the answer, praise
@@ -2884,6 +2951,9 @@ def _reading_context(reading: dict | None) -> str:
     r = reading or {}
     kind = str(r.get("kind") or "other")
     ask = str(r.get("ask") or "").strip()
+    if r.get("campaign"):
+        rest = _reading_context({k: v for k, v in r.items() if k != "campaign"})
+        return _campaign_context(str(r["campaign"])) + (("\n\n" + rest) if rest else "")
     if kind == "request":
         return ("(Reading: this comment is a REQUEST — they want: "
                 f"{ask or 'to be shown what we have'}. Answer it with what we have for it "
@@ -4419,6 +4489,14 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # complaint, praise, mixed, a greeting), a complaint's weight, a request's
     # ask — and everything below acts on it.
     reading = await read_comment(comment_text, redis=redis)
+    # A CAMPAIGN POST (owner, 2026-09-26): its comments are entries and cheers.
+    # The host answers every one with words in it — the canned thanks and the
+    # complaint lines are for shop posts.
+    _caption = ((comment.get("post_context") or {}).get("title") or "").strip()
+    if _caption and is_campaign_post(_caption) and reading["intent"] != "spam":
+        reading = dict(reading, campaign=_caption)
+        if reading["intent"] in ("low", "goodwill") and len(re.findall(r"[A-Za-z']+", comment_text)) >= 2:
+            reading["intent"], reading["kind"] = "high", "other"
     intent = reading["intent"]
     kind, severity, ask = reading["kind"], int(reading.get("severity") or 0), reading.get("ask") or ""
     plan = plan_comment_actions(intent)
