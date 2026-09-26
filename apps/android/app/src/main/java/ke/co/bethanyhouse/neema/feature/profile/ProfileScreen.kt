@@ -5,6 +5,13 @@ import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.input.ImeAction
+import ke.co.bethanyhouse.neema.feature.agents.isCramped
+import ke.co.bethanyhouse.neema.feature.agents.keyboardAware
+import ke.co.bethanyhouse.neema.feature.agents.contentOn
+import ke.co.bethanyhouse.neema.feature.agents.neemaSwitchColors
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -50,8 +57,12 @@ import ke.co.bethanyhouse.neema.feature.agents.PermissionCatalog
 import ke.co.bethanyhouse.neema.feature.agents.TeamButton
 import ke.co.bethanyhouse.neema.feature.agents.hexColor
 
-/** The web's #9ccd65 secondary text; on the dark theme that stand-in is unreadable, so the muted grey-green instead. */
-private val ke.co.bethanyhouse.neema.core.ui.theme.NeemaColors.faint: Color get() = if (isDark) muted else border2
+/**
+ * The web's #9ccd65 secondary text reads at 1.9:1 on white, and is unreadable
+ * by night: the theme's secondary green by day and the muted grey-green by
+ * night keep the quiet tone at a legible contrast.
+ */
+private val ke.co.bethanyhouse.neema.core.ui.theme.NeemaColors.faint: Color get() = if (isDark) muted else textDim
 
 /** A permission you hold: the web's #2c4e18 on #f0f9ec. */
 private val HasPermText = Color(0xFF2C4E18)
@@ -95,7 +106,7 @@ val LocalProfilePreview = staticCompositionLocalOf { ProfilePreview() }
  * Settings link, theme, Sign out) and the Android-only device settings:
  * background connection, system notification settings, app version.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ProfileScreen(dash: DashboardViewModel) {
     val vm: ProfileViewModel = viewModel { ProfileViewModel(dash) }
@@ -139,8 +150,12 @@ fun ProfileScreen(dash: DashboardViewModel) {
     var confirmSignOut by rememberSaveable { mutableStateOf(preview.confirmSignOut) }
 
     PullToRefreshBox(isRefreshing = refreshing, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize().background(c.bg)) {
+      BoxWithConstraints(Modifier.fillMaxSize()) {
+        // A 360dp phone at a large font: the header stacks, the tiles go one per line, the permission grid one column.
+        val compact = isCramped(minOf(maxWidth, 720.dp) - 32.dp, 300.dp)
+        val stackTiles = isCramped(minOf(maxWidth, 720.dp) - 32.dp, 260.dp)
         Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState(preview.scroll)).padding(16.dp),
+            Modifier.fillMaxSize().keyboardAware().verticalScroll(rememberScrollState(preview.scroll)).padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             // The web caps this page at max-w-2xl; tablets keep that reading width.
@@ -152,18 +167,20 @@ fun ProfileScreen(dash: DashboardViewModel) {
 
                 // ── Profile card ────────────────────────────────────────────
                 Panel(Modifier.fillMaxWidth(), padding = PaddingValues(20.dp)) {
-                    Row(verticalAlignment = Alignment.Top) {
-                        Avatar(agent.name, agent.avatarUrl, size = 56.dp)
-                        Spacer(Modifier.width(16.dp))
-                        Column(Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(agent.name, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = c.text, modifier = Modifier.weight(1f, fill = false))
-                                Spacer(Modifier.width(8.dp))
-                                BaseRoleBadge(agent.role)
+                    val editButton = @Composable {
+                        TeamButton(if (editMode) "Cancel" else "Edit", { editMode = !editMode }, small = true,
+                            variant = if (editMode) BtnVariant.Outline else BtnVariant.Secondary)
+                    }
+                    val details = @Composable { m: Modifier ->
+                        Column(m) {
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(agent.name, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = c.text,
+                                    modifier = Modifier.align(Alignment.CenterVertically))
+                                Box(Modifier.align(Alignment.CenterVertically)) { BaseRoleBadge(agent.role) }
                             }
                             teamRow?.roleName?.let { rn ->
                                 Spacer(Modifier.height(4.dp))
-                                Pill(rn, hexColor(teamRow.roleColor), filled = true)
+                                RoleChip(rn, hexColor(teamRow.roleColor))
                             }
                             Text(agent.email, fontSize = 14.sp, color = c.faint, modifier = Modifier.padding(top = 2.dp))
                             Text(
@@ -174,8 +191,24 @@ fun ProfileScreen(dash: DashboardViewModel) {
                                 fontSize = 12.sp, color = c.faint, modifier = Modifier.padding(top = 4.dp),
                             )
                         }
-                        TeamButton(if (editMode) "Cancel" else "Edit", { editMode = !editMode }, small = true,
-                            variant = if (editMode) BtnVariant.Outline else BtnVariant.Secondary)
+                    }
+                    if (compact) {
+                        // Avatar and Edit on one line, the name and details under them at full width.
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Avatar(agent.name, agent.avatarUrl, size = 56.dp)
+                            Spacer(Modifier.weight(1f))
+                            editButton()
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        details(Modifier.fillMaxWidth())
+                    } else {
+                        Row(verticalAlignment = Alignment.Top) {
+                            Avatar(agent.name, agent.avatarUrl, size = 56.dp)
+                            Spacer(Modifier.width(16.dp))
+                            details(Modifier.weight(1f))
+                            Spacer(Modifier.width(8.dp))
+                            editButton()
+                        }
                     }
                     if (editMode) {
                         Spacer(Modifier.height(20.dp))
@@ -190,15 +223,25 @@ fun ProfileScreen(dash: DashboardViewModel) {
                 }
 
                 // ── Stats ───────────────────────────────────────────────────
-                // One height for the three tiles, even when Status carries a "Seen …" line.
-                Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    StatTile("Active chats", agent.activeConvs.toString(), Modifier.weight(1f).fillMaxHeight())
-                    StatTile(
-                        "Status", if (available) "Online" else "Away", Modifier.weight(1f).fillMaxHeight(),
-                        accent = if (available) c.gold else c.muted,
-                        hint = if (!available && agent.lastSeenAt != null) "Seen ${Fmt.timeAgo(agent.lastSeenAt)}" else null,
-                    )
-                    StatTile("Permissions", "${permKeys.count { k -> PermissionCatalog.ALL.any { it.key == k } }}/${PermissionCatalog.ALL.size}", Modifier.weight(1f).fillMaxHeight())
+                val tiles = listOf<@Composable (Modifier) -> Unit>(
+                    { m -> StatTile("Active chats", agent.activeConvs.toString(), m) },
+                    { m ->
+                        StatTile(
+                            "Status", if (available) "Online" else "Away", m,
+                            accent = if (available) c.gold else c.muted,
+                            hint = if (!available && agent.lastSeenAt != null) "Seen ${Fmt.timeAgo(agent.lastSeenAt)}" else null,
+                        )
+                    },
+                    { m -> StatTile("Permissions", "${permKeys.count { k -> PermissionCatalog.ALL.any { it.key == k } }}/${PermissionCatalog.ALL.size}", m) },
+                )
+                if (stackTiles) {
+                    // Three abreast would cut "Active chats" and "20/20" short at this size.
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { tiles.forEach { it(Modifier.fillMaxWidth()) } }
+                } else {
+                    // One height for the three tiles, even when Status carries a "Seen …" line.
+                    Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        tiles.forEach { it(Modifier.weight(1f).fillMaxHeight()) }
+                    }
                 }
 
                 // ── Availability ────────────────────────────────────────────
@@ -218,6 +261,7 @@ fun ProfileScreen(dash: DashboardViewModel) {
                             Text("Password", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = c.text)
                             Text("Change your login password", fontSize = 12.sp, color = c.faint)
                         }
+                        Spacer(Modifier.width(8.dp))
                         TeamButton(if (changingPassword) "Cancel" else "Change", { changingPassword = !changingPassword }, small = true,
                             variant = BtnVariant.Secondary)
                     }
@@ -259,12 +303,13 @@ fun ProfileScreen(dash: DashboardViewModel) {
 
                 // ── Permissions ─────────────────────────────────────────────
                 ProfileCard("Your Permissions") {
-                    PermissionCatalog.ALL.chunked(2).forEach { pair ->
-                        Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val perRow = if (compact) 1 else 2
+                    PermissionCatalog.ALL.chunked(perRow).forEach { pair ->
+                        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             pair.forEach { p ->
                                 val has = p.key in permKeys
                                 Row(
-                                    Modifier.weight(1f).clip(RoundedCornerShape(8.dp))
+                                    Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(8.dp))
                                         .background(if (has) c.goldDim else c.bg)
                                         .border(1.dp, if (has) c.border else c.bg4, RoundedCornerShape(8.dp))
                                         .padding(10.dp),
@@ -275,7 +320,7 @@ fun ProfileScreen(dash: DashboardViewModel) {
                                     Text(p.label, fontSize = 12.sp, color = if (has) (if (c.isDark) c.gold2 else HasPermText) else c.faint)
                                 }
                             }
-                            if (pair.size == 1) Spacer(Modifier.weight(1f))
+                            if (pair.size < perRow) Spacer(Modifier.weight(1f))
                         }
                     }
                 }
@@ -291,7 +336,7 @@ fun ProfileScreen(dash: DashboardViewModel) {
                         onClick = { confirmSignOut = true },
                         colors = ButtonDefaults.buttonColors(containerColor = c.redDim, contentColor = c.red),
                         shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
                     ) {
                         Icon(Icons.AutoMirrored.Outlined.Logout, null, Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
@@ -301,6 +346,7 @@ fun ProfileScreen(dash: DashboardViewModel) {
                 Spacer(Modifier.height(24.dp))
             }
         }
+      }
     }
 
     if (confirmSignOut) {
@@ -315,6 +361,7 @@ fun ProfileScreen(dash: DashboardViewModel) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun EditProfileForm(
     initialName: String,
@@ -331,8 +378,9 @@ private fun EditProfileForm(
     var department by rememberSaveable(agentId) { mutableStateOf("") }
     LabeledInput("Full Name", name, { name = it }, style = InputStyle.Form)
     LabeledInput("Email", email, { email = it }, keyboardType = KeyboardType.Email, style = InputStyle.Form)
-    LabeledInput("Department", department, { department = it }, placeholder = "Sales, Support…", style = InputStyle.Form)
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    LabeledInput("Department", department, { department = it }, placeholder = "Sales, Support…", style = InputStyle.Form,
+        imeAction = ImeAction.Done)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         TeamButton(if (saving) "Saving…" else "Save Changes", { onSave(name, email) }, variant = BtnVariant.Amber, enabled = !saving)
         TeamButton("Cancel", onCancel, variant = BtnVariant.Outline)
     }
@@ -344,8 +392,17 @@ private fun PasswordForm(saving: Boolean, onSubmit: (String, String) -> Unit) {
     var pw by rememberSaveable { mutableStateOf(typed["password"] ?: "") }
     var confirm by rememberSaveable { mutableStateOf(typed["confirm"] ?: "") }
     LabeledInput("New Password", pw, { pw = it }, placeholder = "Minimum 8 characters", password = true, style = InputStyle.Form)
-    LabeledInput("Confirm Password", confirm, { confirm = it }, password = true, style = InputStyle.Form)
+    LabeledInput("Confirm Password", confirm, { confirm = it }, password = true, style = InputStyle.Form, imeAction = ImeAction.Done)
     TeamButton(if (saving) "Changing…" else "Change Password", { onSubmit(pw, confirm) }, variant = BtnVariant.Amber, enabled = !saving)
+}
+
+/** Your custom role, in its colour, with whichever text colour reads on it. */
+@Composable
+private fun RoleChip(name: String, fill: Color) {
+    Text(
+        name, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = contentOn(fill), maxLines = 1,
+        modifier = Modifier.clip(RoundedCornerShape(50)).background(fill).padding(horizontal = 8.dp, vertical = 3.dp),
+    )
 }
 
 @Composable
@@ -360,13 +417,17 @@ private fun ProfileCard(title: String, content: @Composable ColumnScope.() -> Un
 @Composable
 private fun ToggleRow(label: String, desc: String, checked: Boolean, onToggle: () -> Unit) {
     val c = Neema.colors
-    Row(Modifier.fillMaxWidth().clickable(onClick = onToggle), verticalAlignment = Alignment.CenterVertically) {
+    // The whole row is the switch: one target, read by TalkBack as "label, switch, on".
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 48.dp).toggleable(checked, role = Role.Switch) { onToggle() },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Column(Modifier.weight(1f)) {
             Text(label, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = c.text)
             Text(desc, fontSize = 12.sp, color = c.faint, lineHeight = 16.sp)
         }
         Spacer(Modifier.width(12.dp))
-        Switch(checked = checked, onCheckedChange = { onToggle() })
+        Switch(checked = checked, onCheckedChange = null, colors = neemaSwitchColors())
     }
 }
 
@@ -374,7 +435,8 @@ private fun ToggleRow(label: String, desc: String, checked: Boolean, onToggle: (
 private fun LinkRow(icon: ImageVector, label: String, desc: String, chevron: Boolean = true, onClick: () -> Unit) {
     val c = Neema.colors
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable(enabled = chevron, onClick = onClick).padding(vertical = 8.dp),
+        Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(RoundedCornerShape(10.dp))
+            .clickable(enabled = chevron, role = Role.Button, onClick = onClick).padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, null, tint = c.textDim, modifier = Modifier.size(20.dp))
