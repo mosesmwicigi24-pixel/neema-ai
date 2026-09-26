@@ -291,7 +291,13 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   backend it stays the attachment the prompt handles. The guard reads the
   hub's own names (`names=`), so an item we sell never reads as off-domain.
   Prompt: A DATE ON THE TABLE (urgent buyers — ready-piece check, honest
-  time, nearest ready alternative, close today, check-in the day before). Comments: `_person_over_cap` (`meta_comment_person_cap` 6 full
+  time, nearest ready alternative, close today, check-in the day before);
+  "how do I pay?" / "send me the link" on a SETTLED order IS the yes
+  (`create_order` in that reply, never a second "are you ready?"); A GIFT
+  BUYER (one question — the recipient's role — then recommendations by role,
+  leading with what needs no size). `is_closer` never gates an ask wearing
+  a pleasantry ("God bless, how much is the stole?"). The re-engagement
+  sweep leaves a paced, paused or guard-silenced thread alone. Comments: `_person_over_cap` (`meta_comment_person_cap` 6 full
   model replies per person per post per day; the free priced path is decided
   first and never spends it). The prompt's PACING rule; `/api/health`
   `cooling` (economy, cooled, silenced, lifted, duplicate). Switch:

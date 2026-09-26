@@ -457,6 +457,40 @@ def test_the_schedulers_put_cooled_chat_on_the_slow_lane(monkeypatch):
     assert ("wa", "what time do you close?", False) in ran
 
 
+def test_a_pleasantry_wearing_an_ask_is_never_a_closer():
+    assert rt.is_closer("thanks") and rt.is_closer("God bless") and rt.is_closer("I'll get back to you")
+    for t in ("God bless, how much is the stole?", "Welcome, I need a cassock", "thanks, send the link",
+              "bye but first the price of the tray"):
+        assert not rt.is_closer(t), t
+    assert rt.is_closer("ok thanks 🙏")
+
+
+def test_sheng_and_swahili_buyers_are_read_as_buyers():
+    for t in ("nipe bei", "shilingi ngapi", "niko na order", "zawadi ya bishop", "hamper for my pastor",
+              "nimetuma pesa", "the fee?"):
+        assert cl.buying_signal(t), t
+
+
+def test_reengage_leaves_a_paced_or_paused_thread_alone():
+    import app.jobs.reengage as rj
+    conv = types.SimpleNamespace(channel="messenger", wa_id=None, external_id="P1", id="c1")
+    msg = types.SimpleNamespace(id="m1", text="hmm so anyway", direction=None)
+    r = _R()
+    asyncio.run(cl.cool(r, "messenger", "P1"))
+    out = asyncio.run(rj._handle(r, conv, msg, send=False))
+    assert out["skipped"] == "left alone (paced / paused)"
+    r2 = _R()
+    r2.store["agent:pause:messenger:P1"] = "1"
+    assert asyncio.run(rj._handle(r2, conv, msg, send=False))["skipped"] == "left alone (paced / paused)"
+
+
+def test_the_prompt_closes_when_they_ask_to_pay_and_serves_gift_buyers():
+    p = build_system_prompt(currency="KES")
+    assert "IS their yes: call `create_order` in\n  that same reply" in p
+    assert 'never a second "are you ready?"' in p
+    assert "A GIFT BUYER" in p and "leading with what needs no\n  size" in p
+
+
 def test_the_agent_pause_lifts_on_a_buying_signal():
     r = _R()
     r.store["agent:pause:whatsapp:254700"] = "1"

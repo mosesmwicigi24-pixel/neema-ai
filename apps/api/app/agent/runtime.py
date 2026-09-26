@@ -617,7 +617,14 @@ def is_closer(text: str) -> bool:
     t = (text or "").strip()
     if not t or len(t.split()) > 8:
         return False
-    return bool(_ACK_RE.match(t) or _CLOSER_RE.search(t))
+    if _ACK_RE.match(t):
+        return True
+    if not _CLOSER_RE.search(t):
+        return False
+    # "God bless — how much is the stole?" / "Welcome, I need a cassock" is an
+    # ask wearing a pleasantry, never a closer: silencing it lost the sale.
+    from app.agent.cooling import buying_signal
+    return not buying_signal(t)
 
 
 _CLOSER_KEY_TTL = 6 * 3600
@@ -2316,6 +2323,7 @@ async def schedule_meta_reply(redis, channel: str, external_id: str, text: str,
             async def _later(t, m):
                 await _run_and_send_meta(redis, channel, external_id, t, page_id, m, deferred=True)
             if await _pace.slow_lane(redis, channel, external_id, text, media, _later):
+                await _mark_silenced(redis, channel, external_id)   # the sweep leaves it to the lane
                 return True
     except Exception:
         pass
