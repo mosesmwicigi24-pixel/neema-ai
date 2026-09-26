@@ -306,7 +306,24 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   know, what the hub says, where they are: trust → clarity → recommendation
   → add-on → purchase → close) and ends with BEFORE IT GOES OUT — THE CHECK
   (every product, price, quantity, size, shipping detail and recommendation
-  backed by a tool or the thread; never invented). Comments: `_person_over_cap` (`meta_comment_person_cap` 6 full
+  backed by a tool or the thread; never invented).
+- **Campaign posts, and a grievance the words do not carry** (owner
+  2026-09-26: the clergy shoe giveaway — "one person will get the shoe for
+  free; the only cost is shipping"; a bishop's entry "I love the shoe… my
+  size is no 41" got the mixed-complaint line). `runtime.is_campaign_post`
+  reads a giveaway / draw / competition from the caption; under such a post
+  every comment with words in it goes to the model as HOST
+  (`_campaign_context` in the reading: welcome by name and title, confirm
+  and SAVE what they told you — name, role, size via save_measurements,
+  town — state the rule in one line exactly as the caption gives it, never
+  price or sell the giveaway item, pick up an item they plan to buy with
+  one line and an invitation to message us; never a complaint line). The
+  canned thanks and empathy lines are for shop posts. And a model's
+  "negative"/"mixed" reading with NO grievance in the words (`looks_negative`,
+  `_GRIEVANCE_CUE_RE`, `_DISPLEASURE_HINT_RE` — displeasure words and the
+  shape of something that happened: came, arrived, too small, didn't — all
+  silent) is a misread: `_settle_reading` makes it high/other — a person to
+  answer, never to apologise to. Tests: `tests/test_campaign_posts.py`. Comments: `_person_over_cap` (`meta_comment_person_cap` 6 full
   model replies per person per post per day; the free priced path is decided
   first and never spends it). The prompt's PACING rule; `/api/health`
   `cooling` (economy, cooled, silenced, lifted, duplicate). Switch:
