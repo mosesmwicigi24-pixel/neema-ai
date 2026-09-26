@@ -198,9 +198,11 @@ fun ConversationsScreen(dash: DashboardViewModel) {
  * DELETE /messages is admin-only. So a custom role keeps every control its
  * legacy role gives, and a readonly (or supervisor) agent gets none.
  *
- * Who the agent is comes from the freshest source: the team-list row (polled
- * every 180 s, refetched on a 403), else /admin/me, else the sign-in session —
- * so an admin changing this agent's role reaches the open inbox by itself.
+ * Who the agent is comes from the freshest record: the team-list row (polled
+ * every 180 s, refetched on any 403), else /admin/me — so an admin changing
+ * this agent's role reaches the open inbox by itself. Never the sign-in
+ * session: like the web (whose `currentAgent` is null until profileApi.me()
+ * answers), no record yet means no controls yet.
  */
 @Composable
 private fun rememberInboxPerms(dash: DashboardViewModel): InboxPerms {
@@ -211,10 +213,8 @@ private fun rememberInboxPerms(dash: DashboardViewModel): InboxPerms {
 }
 
 internal fun inboxPermsOf(dash: DashboardViewModel): InboxPerms {
-    val s = dash.session.value
     val a = dash.currentAgent
-    return if (a != null) inboxPermsOf(a.role, a.isSuperuser, s?.agentId ?: a.id)
-    else inboxPermsOf(s?.role, s?.isSuperuser == true, s?.agentId)
+    return inboxPermsOf(a?.role, a?.isSuperuser == true, dash.session.value?.agentId ?: a?.id)
 }
 
 internal fun inboxPermsOf(role: String?, superuser: Boolean, me: String?): InboxPerms {
