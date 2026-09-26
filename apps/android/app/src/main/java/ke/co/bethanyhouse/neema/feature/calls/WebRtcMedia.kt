@@ -53,7 +53,13 @@ internal class WebRtcMedia(private val context: Context) : CallMedia {
         PeerConnectionFactory.builder().setAudioDeviceModule(adm).createPeerConnectionFactory()
     }
 
-    override fun createPeer(config: IceConfig, onEvent: (PeerEvent) -> Unit): CallPeer = Peer(config, onEvent)
+    /**
+     * A device whose ABI the WebRTC library doesn't ship fails to load it with
+     * an Error (UnsatisfiedLinkError), which the call's catch-Exception would
+     * let through and crash the app: turn it into a failed call instead.
+     */
+    override fun createPeer(config: IceConfig, onEvent: (PeerEvent) -> Unit): CallPeer =
+        try { Peer(config, onEvent) } catch (e: LinkageError) { throw IllegalStateException("WebRTC unavailable", e) }
 
     override fun sweepLeftovers() {
         if (recorder != null) return

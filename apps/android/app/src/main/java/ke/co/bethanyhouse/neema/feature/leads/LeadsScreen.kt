@@ -21,14 +21,14 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.activity.compose.BackHandler
-import ke.co.bethanyhouse.neema.feature.orders.MinuteTicker
-import ke.co.bethanyhouse.neema.feature.orders.RestoreUi
-import ke.co.bethanyhouse.neema.feature.orders.liveAgo
+import ke.co.bethanyhouse.neema.core.util.MinuteTicker
+import ke.co.bethanyhouse.neema.core.util.RestoreUi
+import ke.co.bethanyhouse.neema.core.util.liveAgo
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
+import ke.co.bethanyhouse.neema.core.ui.theme.NeemaMono
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -58,7 +58,6 @@ import androidx.compose.ui.graphics.Brush
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 import ke.co.bethanyhouse.neema.feature.orders.CH_BG
-import ke.co.bethanyhouse.neema.feature.orders.SalesInk
 import ke.co.bethanyhouse.neema.core.util.Fmt
 import java.util.Locale
 
@@ -72,7 +71,7 @@ private fun money(n: Double): String = Fmt.currency(n).unbroken()
 
 /** Instagram's mark sits on its gradient (the web's `url(#igGrad)`, bottom-left → top-right). */
 private val IG_GRADIENT = Brush.linearGradient(
-    *SalesInk.InstagramGradient,
+    *Palette.InstagramGradientStops,
     start = Offset(0f, Float.POSITIVE_INFINITY), end = Offset(Float.POSITIVE_INFINITY, 0f),
 )
 
@@ -111,7 +110,7 @@ fun LeadsScreen(dash: DashboardViewModel) {
     // agent. A refusal the server does send is said where the save failed.
     val vm: LeadsViewModel = viewModel { LeadsViewModel(dash) }
     RestoreUi(vm)
-    ke.co.bethanyhouse.neema.feature.reports.TrackShown(vm.life)
+    ke.co.bethanyhouse.neema.core.util.TrackShown(vm.life)
     val leads by vm.leads.collectAsStateWithLifecycle()
     val loading by vm.loading.collectAsStateWithLifecycle()
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()
@@ -256,6 +255,8 @@ fun LeadsScreen(dash: DashboardViewModel) {
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
             containerColor = c.bg2,
             dragHandle = { WebDragHandle() },
+            // The web's modal overlay: bg-black/40.
+            scrimColor = Color.Black.copy(alpha = 0.4f),
         ) {
             LeadDetail(
                 lead = selected, stages = stages,
@@ -377,7 +378,7 @@ private fun LeadCard(
                 } else {
                     Text("Unknown", fontSize = 12.sp, fontStyle = FontStyle.Italic, color = if (c.isDark) c.muted else Palette.Stone400)
                 }
-                Text(Fmt.formatPhone(lead.handle), fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = c.textDim,
+                Text(Fmt.formatPhone(lead.handle), fontSize = 10.sp, fontFamily = NeemaMono, color = c.textDim,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Text("${lead.leadScore}/100", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = c.textDim, style = Tabular, maxLines = 1)
@@ -498,7 +499,7 @@ internal fun LeadDetail(
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f).padding(top = 2.dp)) {
                 Text(lead.name?.takeIf { it.isNotBlank() } ?: "Unknown customer", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = c.text)
-                Text(Fmt.formatPhone(lead.handle).unbroken(), fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = c.textDim)
+                Text(Fmt.formatPhone(lead.handle).unbroken(), fontSize = 12.sp, fontFamily = NeemaMono, color = c.textDim)
                 val extra = listOfNotNull(lead.email?.takeIf { it.isNotBlank() }, lead.location?.takeIf { it.isNotBlank() })
                 if (extra.isNotEmpty()) Text(extra.joinToString(" · "), fontSize = 11.sp, color = c.muted)
                 TextButton(

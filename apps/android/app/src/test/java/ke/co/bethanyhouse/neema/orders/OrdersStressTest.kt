@@ -5,13 +5,13 @@ import app.cash.paparazzi.Paparazzi
 import ke.co.bethanyhouse.neema.core.model.Order
 import ke.co.bethanyhouse.neema.feature.orders.ORDER_STATUSES
 import ke.co.bethanyhouse.neema.feature.orders.OrdersViewModel
-import ke.co.bethanyhouse.neema.feature.orders.SingleFlight
+import ke.co.bethanyhouse.neema.core.util.SingleFlight
 import ke.co.bethanyhouse.neema.feature.orders.amount
 import ke.co.bethanyhouse.neema.feature.orders.filterOrders
 import ke.co.bethanyhouse.neema.feature.orders.orderStats
 import ke.co.bethanyhouse.neema.feature.orders.pageOf
 import ke.co.bethanyhouse.neema.feature.orders.statusColumns
-import ke.co.bethanyhouse.neema.feature.reports.ScreenLife
+import ke.co.bethanyhouse.neema.core.util.ScreenLife
 import ke.co.bethanyhouse.neema.testing.FakeNeema
 import ke.co.bethanyhouse.neema.testing.dashboard
 import ke.co.bethanyhouse.neema.testing.fixtures.SalesStressFixtures

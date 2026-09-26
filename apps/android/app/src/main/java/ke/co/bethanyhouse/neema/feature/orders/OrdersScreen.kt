@@ -12,6 +12,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -42,7 +43,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
-import androidx.compose.ui.text.font.FontFamily
+import ke.co.bethanyhouse.neema.core.ui.theme.NeemaMono
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -60,6 +61,9 @@ import ke.co.bethanyhouse.neema.core.ui.components.channelStyle
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 import ke.co.bethanyhouse.neema.core.util.Fmt
+import ke.co.bethanyhouse.neema.core.util.MinuteTicker
+import ke.co.bethanyhouse.neema.core.util.RestoreUi
+import ke.co.bethanyhouse.neema.core.util.liveAgo
 
 private const val PAGE_SIZE = 15
 
@@ -89,7 +93,7 @@ fun OrdersScreen(dash: DashboardViewModel) {
     // signed-in agent. A refusal the server does send is said in the toast.
     val vm: OrdersViewModel = viewModel { OrdersViewModel(dash) }
     RestoreUi(vm)
-    ke.co.bethanyhouse.neema.feature.reports.TrackShown(vm.life)
+    ke.co.bethanyhouse.neema.core.util.TrackShown(vm.life)
     val orders by dash.orders.collectAsStateWithLifecycle()
     val filter by vm.filter.collectAsStateWithLifecycle()
     val search by vm.search.collectAsStateWithLifecycle()
@@ -110,6 +114,23 @@ fun OrdersScreen(dash: DashboardViewModel) {
     val totalPages = maxOf(1, (filtered.size + PAGE_SIZE - 1) / PAGE_SIZE)
     val page = pageRaw.coerceIn(1, totalPages)
     val paginated = remember(filtered, page) { pageOf(filtered, page, PAGE_SIZE) }
+
+    // Where the agent was scrolled comes back after process death too: the
+    // list's own saved position is clamped against the empty first frame
+    // (the orders are re-read), so the ViewModel keeps it and it is applied
+    // once the orders are in.
+    val listState = rememberLazyListState()
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+            .collect { vm.scroll = it }
+    }
+    val pendingScroll by vm.pendingScroll.collectAsStateWithLifecycle()
+    LaunchedEffect(pendingScroll, unknown) {
+        val p = pendingScroll ?: return@LaunchedEffect
+        if (unknown) return@LaunchedEffect
+        listState.scrollToItem(p.first, p.second)
+        vm.scrollRestored()
+    }
 
     val stats = remember(orders) { orderStats(orders) }
     val statusCounts = stats.counts
@@ -133,6 +154,7 @@ fun OrdersScreen(dash: DashboardViewModel) {
         PullToRefreshBox(isRefreshing = refreshing, onRefresh = vm::refresh, modifier = Modifier.weight(1f).fillMaxHeight()) {
             LazyColumn(
                 Modifier.fillMaxSize(),
+                state = listState,
                 contentPadding = PaddingValues(if (wide) 24.dp else 16.dp),
                 verticalArrangement = Arrangement.spacedBy(0.dp),
             ) {
@@ -282,6 +304,8 @@ fun OrdersScreen(dash: DashboardViewModel) {
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
             containerColor = c.bg2,
             dragHandle = { WebDragHandle() },
+            // The web's modal overlay: bg-black/50.
+            scrimColor = Color.Black.copy(alpha = 0.5f),
         ) {
             OrderDetail(
                 dash = dash, order = selected,
@@ -366,7 +390,10 @@ private fun OrderRow(
     // sale kept reading "Pending".
     val meta = hubMeta(order) ?: statusMeta(order.status)
     val hubHref = hubOrderHref(order)
-    val name = Fmt.displayName(order.contactName, order.waId)
+    // The web's `contact_name ?? formatPhone(..)` over mapOrder's `contact_name ?? wa_id`:
+    // the API sends no contact_name, so the name is the bare wa_id and the
+    // formatted phone is the line under it, as on the web.
+    val name = order.customerName.ifBlank { "Unknown" }
     val itemSummary = remember(order.items) {
         order.items.take(2).joinToString(", ") { i -> i.name + if (i.effectiveQty > 1) " ×${qtyText(i.effectiveQty)}" else "" }
     }
@@ -377,7 +404,7 @@ private fun OrderRow(
         Text(
             order.hubOrderNumber?.takeIf { it.isNotBlank() } ?: "not in hub",
             modifier = m.clip(RoundedCornerShape(4.dp)).background(c.bg3).padding(horizontal = 4.dp, vertical = 2.dp),
-            fontSize = 10.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = c.gold2,
+            fontSize = 10.sp, fontFamily = NeemaMono, fontWeight = FontWeight.Bold, color = c.gold2,
         )
     }
     val hubLink: @Composable (Modifier) -> Unit = { m ->
@@ -385,7 +412,7 @@ private fun OrderRow(
             Text(
                 "Open in hub ↗",
                 modifier = m.clip(RoundedCornerShape(4.dp))
-                    .border(1.dp, if (c.isDark) c.border else SalesInk.HubLinkBorder, RoundedCornerShape(4.dp))
+                    .border(1.dp, if (c.isDark) c.border else Palette.HubLinkBorder, RoundedCornerShape(4.dp))
                     .clickable { runCatching { uri.openUri(hubHref) } }
                     .padding(horizontal = 6.dp, vertical = 2.dp),
                 fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = c.gold2,
@@ -426,7 +453,7 @@ private fun OrderRow(
 
     Row(
         Modifier.fillMaxWidth()
-            .background(if (highlighted) (if (c.isDark) c.bg3 else SalesInk.PaneHighlight) else Color.Transparent)
+            .background(if (highlighted) (if (c.isDark) c.bg3 else Palette.PaneHighlight) else Color.Transparent)
             .clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = if (compact) Alignment.Top else Alignment.CenterVertically,
     ) {
@@ -469,7 +496,7 @@ private fun OrderRow(
                 if (phone != null || itemSummary.isNotEmpty()) {
                     Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                         phone?.let {
-                            Text(it.unbroken(), fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = c.textDim, maxLines = 1)
+                            Text(it.unbroken(), fontSize = 12.sp, fontFamily = NeemaMono, color = c.textDim, maxLines = 1)
                             Spacer(Modifier.width(6.dp))
                         }
                         summary(Modifier.weight(1f, fill = false))
@@ -494,7 +521,7 @@ private fun OrderRow(
                     hubLink(Modifier.align(Alignment.CenterVertically))
                     pushFailed(Modifier.align(Alignment.CenterVertically))
                     phoneLine(order, name)?.let { phone ->
-                        Text(phone, fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = c.textDim,
+                        Text(phone, fontSize = 12.sp, fontFamily = NeemaMono, color = c.textDim,
                             modifier = Modifier.align(Alignment.CenterVertically))
                     }
                     summary(Modifier.widthIn(max = 232.dp).align(Alignment.CenterVertically))
@@ -593,7 +620,10 @@ internal fun OrderDetail(
     val clipboard = LocalClipboardManager.current
     val meta = statusMeta(order.status)
     val actions = STATUS_ACTIONS[order.status] ?: emptyList()
-    val name = Fmt.displayName(order.contactName, order.waId)
+    // The web's `contact_name ?? formatPhone(..)` over mapOrder's `contact_name ?? wa_id`:
+    // the API sends no contact_name, so the name is the bare wa_id and the
+    // formatted phone is the line under it, as on the web.
+    val name = order.customerName.ifBlank { "Unknown" }
     val hubHref = hubOrderHref(order)
     val hub = hubMeta(order)
     val soft = RoundedCornerShape(12.dp)
@@ -625,7 +655,7 @@ internal fun OrderDetail(
                     )
                     Badge(meta.label, meta.tone, Modifier.align(Alignment.CenterVertically), fontSize = 12, radius = 8.dp, hPad = 8.dp, vPad = 4.dp)
                 }
-                phoneLine(order, name)?.let { Text(it.unbroken(), fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = c.textDim) }
+                phoneLine(order, name)?.let { Text(it.unbroken(), fontSize = 12.sp, fontFamily = NeemaMono, color = c.textDim) }
             }
         }
         Spacer(Modifier.height(16.dp))
@@ -655,7 +685,7 @@ internal fun OrderDetail(
                     order.hubOrderNumber?.takeIf { it.isNotBlank() } ?: "not in hub",
                     modifier = Modifier.align(Alignment.CenterVertically).clip(RoundedCornerShape(4.dp))
                         .background(c.bg3).padding(horizontal = 6.dp, vertical = 2.dp),
-                    fontSize = 12.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = c.gold2,
+                    fontSize = 12.sp, fontFamily = NeemaMono, fontWeight = FontWeight.Bold, color = c.gold2,
                 )
                 if (hub != null) Badge(hub.label, hub.tone, Modifier.align(Alignment.CenterVertically))
                 order.hubPaymentStatus?.takeIf { it.isNotBlank() }?.let {
@@ -708,7 +738,7 @@ internal fun OrderDetail(
                         FlowRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(item.name, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = c.text)
                             if (!item.sku.isNullOrBlank()) {
-                                Text(item.sku, fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = c.textDim,
+                                Text(item.sku, fontSize = 10.sp, fontFamily = NeemaMono, color = c.textDim,
                                     modifier = Modifier.align(Alignment.CenterVertically))
                             }
                         }
@@ -809,7 +839,7 @@ fun WebBtn(
     val dark = Neema.colors.isDark
     val (bg, fg, border) = when (variant) {
         BtnVariant.Primary -> Triple(Palette.Amber500, Color.White, Palette.Amber500)
-        BtnVariant.Danger -> if (dark) Triple(SalesInk.Red950.copy(alpha = 0.3f), Palette.Red400, Palette.Red800)
+        BtnVariant.Danger -> if (dark) Triple(Palette.Red950.copy(alpha = 0.3f), Palette.Red400, Palette.Red800)
             else Triple(Palette.Red50, Palette.Red600, Palette.Red200)
         BtnVariant.Outline -> if (dark) Triple(Color.Transparent, Palette.Gray200, Palette.Gray600)
             else Triple(Color.Transparent, Palette.Gray700, Palette.Gray300)

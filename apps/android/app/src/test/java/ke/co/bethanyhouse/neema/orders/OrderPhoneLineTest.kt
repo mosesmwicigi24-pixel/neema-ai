@@ -10,8 +10,10 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 /**
- * GET /admin/orders carries no `contact_name`, so an order's name IS its
- * formatted phone; the card and the sheet must not print it twice.
+ * GET /admin/orders carries no `contact_name`. The web's mapOrder makes the
+ * name `contact_name ?? wa_id`, so the card and the sheet show the bare wa_id
+ * with the formatted phone under it (round 10: they showed the formatted
+ * phone as the name). [phoneLine] never repeats the name it sits under.
  */
 class OrderPhoneLineTest {
     private fun order(waId: String, name: String? = null): Order {
@@ -39,5 +41,11 @@ class OrderPhoneLineTest {
     @Test fun aBlankNameFallsBackToThePhoneAndHidesTheLine() {
         val o = order("255754333222", name = "   ")
         assertNull(phoneLine(o, Fmt.displayName(o.contactName, o.waId)))
+    }
+
+    @Test fun theWebsNameIsTheBareWaIdWithTheFormattedPhoneUnderIt() {
+        val o = order("254712345678")
+        assertEquals("254712345678", o.customerName)
+        assertEquals(Fmt.formatPhone("254712345678"), phoneLine(o, o.customerName))
     }
 }

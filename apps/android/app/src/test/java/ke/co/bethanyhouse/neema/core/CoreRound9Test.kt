@@ -54,11 +54,11 @@ class CoreRound9Test {
         assertEquals(2, runs)
     }
 
-    // ── SingleFlight now lives in core (feature/orders keeps a typealias) ─
+    // ── SingleFlight lives in core (the feature/orders forward was deleted in round 10) ─
 
-    @Test fun singleFlightIsReachableFromBothPackages() = runTest {
+    @Test fun singleFlightIsReachableFromCore() = runTest {
         var n = 0
-        val a: SingleFlight<Int> = ke.co.bethanyhouse.neema.feature.orders.SingleFlight(backgroundScope) { ++n }
+        val a: SingleFlight<Int> = SingleFlight(backgroundScope) { ++n }
         assertEquals(1, a.run())
     }
 

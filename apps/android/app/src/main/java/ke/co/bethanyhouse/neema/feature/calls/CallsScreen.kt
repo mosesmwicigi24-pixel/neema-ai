@@ -10,9 +10,9 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.saveable.rememberSaveable
-import ke.co.bethanyhouse.neema.feature.orders.MinuteTicker
-import ke.co.bethanyhouse.neema.feature.orders.RestoreUi
-import ke.co.bethanyhouse.neema.feature.orders.liveAgo
+import ke.co.bethanyhouse.neema.core.util.MinuteTicker
+import ke.co.bethanyhouse.neema.core.util.RestoreUi
+import ke.co.bethanyhouse.neema.core.util.liveAgo
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -101,16 +101,16 @@ import ke.co.bethanyhouse.neema.feature.conversations.customer.CustomerPanel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
-// The console's palette (CallsView.tsx inline styles): see [CallInk].
-private val Green = CallInk.Green
-private val RedC = CallInk.Red
-private val AmberC = CallInk.Amber
-private val Muted = CallInk.Muted
-private val Dim = CallInk.Dim
-private val TextC = CallInk.Text
-private val Soft = CallInk.Soft
-private val Sage = CallInk.Sage
-private val Ink = CallInk.Ink
+// The console's palette (CallsView.tsx inline styles): core Palette.Call.
+private val Green = Palette.Call.Green
+private val RedC = Palette.Call.Red
+private val AmberC = Palette.Call.Amber
+private val Muted = Palette.Call.Muted
+private val Dim = Palette.Call.Dim
+private val TextC = Palette.Call.Text
+private val Soft = Palette.Call.Soft
+private val Sage = Palette.Call.Sage
+private val Ink = Palette.Call.Ink
 
 private enum class Dir { In, Back }
 private data class Outcome(val label: String, val color: Color, val dir: Dir)
@@ -138,9 +138,9 @@ internal fun avatarIndex(s: String): Int {
         sum += src[i].code
         i += Character.charCount(src.codePointAt(i))
     }
-    return sum % CallInk.Avatars.size
+    return sum % Palette.Call.Avatars.size
 }
-private fun avatarColor(s: String) = CallInk.Avatars[avatarIndex(s)]
+private fun avatarColor(s: String) = Palette.Call.Avatars[avatarIndex(s)]
 
 /** The row's `who`: name, else +wa_id, else "Unknown" (a blank name falls through too). */
 internal fun rowWho(c: Call): String =
@@ -189,7 +189,7 @@ fun CallsScreen(
 
     LaunchedEffect(focusKey, calls) { focusKey?.let { if (calls != null) vm.consumeFocus(it) } }
 
-    ke.co.bethanyhouse.neema.feature.reports.TrackShown(vm.life)
+    ke.co.bethanyhouse.neema.core.util.TrackShown(vm.life)
     val list = calls
     // Once per change of the log, not per recomposition (a tick of a recording's scrubber).
     val missed = remember(list) { list.orEmpty().count { it.status == "missed" } }
@@ -279,7 +279,7 @@ private fun CallLog(
                     // wherever its top has scrolled to.
                     val span = state.cardExtent() ?: return@drawBehind
                     drawTopEllipseGradient(
-                        1.2f, 0.6f, 0f to CallInk.Glow, 0.6f to Ink, 1f to Ink,
+                        1.2f, 0.6f, 0f to Palette.Call.Glow, 0.6f to Ink, 1f to Ink,
                         top = span.top - span.clampedTop(size.height), height = span.height,
                     )
                 }
@@ -299,7 +299,7 @@ private fun CallLog(
                         val press = remember { MutableInteractionSource() }
                         Text(
                             "$missed missed" + if (missedOnly) " ✕" else "",
-                            color = CallInk.MissedText, fontSize = 12.sp, fontWeight = FontWeight.Medium, style = TabularNums,
+                            color = Palette.Call.MissedText, fontSize = 12.sp, fontWeight = FontWeight.Medium, style = TabularNums,
                             modifier = Modifier
                                 .offset(y = (-10).dp)
                                 .touchCell(press, onClickLabel = if (missedOnly) "Show all calls" else "Show only missed calls") {
@@ -381,7 +381,8 @@ internal fun rowKeys(rows: List<Call>): List<String> {
     val seen = HashMap<String, Int>(rows.size * 2)
     return rows.map { c ->
         val base = c.id.ifEmpty { c.callId }
-        val n = seen.merge(base, 1, Int::plus)!!
+        val n = (seen[base] ?: 0) + 1
+        seen[base] = n
         if (n == 1) base else "$base#$n"
     }
 }
@@ -492,7 +493,7 @@ private fun CallRow(
                     icon = CallIcons.Chat, iconSize = 16.dp,
                     label = "Open the conversation in Neema",
                     bg = ChannelColors.WhatsApp.copy(alpha = 0.16f), tint = Green, border = ChannelColors.WhatsApp.copy(alpha = 0.3f),
-                    onClick = { onOpenConversation(c.waId!!) },
+                    onClick = { c.waId?.let(onOpenConversation) },
                 )
             }
         }
@@ -561,10 +562,10 @@ private fun TranscriptPanel(t: TranscriptUi, vm: CallsViewModel, compact: Boolea
                 color = Muted, fontSize = 11.sp,
                 modifier = Modifier.clickable { vm.toggleFull() }.heightIn(min = 48.dp).wrapContentHeight(Alignment.CenterVertically).padding(vertical = 2.dp),
             )
-            if (t.showFull) Text(data.transcript!!, color = Sage, fontSize = 12.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 6.dp))
+            if (t.showFull) Text(data.transcript.orEmpty(), color = Sage, fontSize = 12.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 6.dp))
         }
         if (st == "pending" || st == "processing") {
-            Text("Transcribing… this runs on our server, usually ~1–2 min.", color = CallInk.Gold, fontSize = 12.sp)
+            Text("Transcribing… this runs on our server, usually ~1–2 min.", color = Palette.Call.Gold, fontSize = 12.sp)
         }
         if (st == "recorded") {
             val press = remember { MutableInteractionSource() }
@@ -734,7 +735,7 @@ private fun CallerPanel(
     calls: List<Call>,
     modifier: Modifier,
 ) {
-    val wa = sel.waId!!
+    val wa = sel.waId.orEmpty()
     val callerCalls = remember(calls, wa) { calls.filter { it.waId == wa } }
     val callerMissed = remember(callerCalls) { callerCalls.count { it.status == "missed" } }
     // A synthetic conversation handle is enough — the panel fetches the real CRM profile by wa_id itself.
@@ -756,7 +757,7 @@ private fun CallerPanel(
                     "${callerCalls.size} call${if (callerCalls.size == 1) "" else "s"}",
                     color = TextC, fontSize = 12.sp, fontWeight = FontWeight.Medium,
                 )
-                if (callerMissed > 0) Text(" · $callerMissed missed", color = CallInk.MissedText, fontSize = 12.sp)
+                if (callerMissed > 0) Text(" · $callerMissed missed", color = Palette.Call.MissedText, fontSize = 12.sp)
                 callerCalls.firstOrNull()?.startedAt?.let { Text(" · last ${liveAgo(it)}", color = Sage, fontSize = 12.sp, maxLines = 1) }
             }
             StripButton("Open chat →") { dash.openConversationFor(wa) }
@@ -833,7 +834,7 @@ private fun ReadinessBanner(r: CallReadiness, compact: Boolean = false, inset: D
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            Icons.Filled.NotificationsActive, null, tint = CallInk.Gold,
+            Icons.Filled.NotificationsActive, null, tint = Palette.Call.Gold,
             modifier = Modifier.size(18.dp).then(if (compact) Modifier.align(Alignment.Top).padding(top = 1.dp) else Modifier),
         )
         Spacer(Modifier.width(12.dp))
