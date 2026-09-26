@@ -11,6 +11,8 @@ import ke.co.bethanyhouse.neema.feature.orders.lowerFirst
 import ke.co.bethanyhouse.neema.feature.orders.salesFailure
 import ke.co.bethanyhouse.neema.feature.orders.SalesInk
 import ke.co.bethanyhouse.neema.feature.orders.SingleFlight
+import ke.co.bethanyhouse.neema.feature.orders.SavesUi
+import ke.co.bethanyhouse.neema.feature.orders.str
 import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 import kotlinx.coroutines.CancellationException
 import java.util.Locale
@@ -90,15 +92,47 @@ fun parseTags(text: String): List<String> = text.split(",").map { it.trim() }.fi
  * AI-set stage as "manual" and clobbers notes appended meanwhile; only real
  * changes are sent here, and notes carry their base for the server's merge.
  */
-fun diffLead(base: Lead, stage: String, tagsText: String, notes: String): LeadEdit {
+fun diffLead(base: Lead, stage: String, tagsText: String, notes: String): LeadEdit =
+    diffLead(base.leadStage, base.tags, base.notes.orEmpty(), stage, tagsText, notes)
+
+private fun diffLead(baseStage: String?, baseTags: List<String>, baseNotes: String, stage: String, tagsText: String, notes: String): LeadEdit {
     val tags = parseTags(tagsText)
-    val baseNotes = base.notes.orEmpty()
     return LeadEdit(
-        stage = stage.takeIf { !it.equals(base.leadStage, ignoreCase = true) },
-        tags = tags.takeIf { it != base.tags },
+        stage = stage.takeIf { !it.equals(baseStage, ignoreCase = true) },
+        tags = tags.takeIf { it != baseTags },
         notes = notes.takeIf { it != baseNotes },
         notesBase = baseNotes,
     )
+}
+
+/**
+ * The detail sheet's fields as typed, and the lead as the sheet opened (what
+ * "changed" means, and the base of the server's notes merge). Held by the
+ * ViewModel, so a rotation, a trip to another view or Android killing the app
+ * in the background never loses a half-typed note; a swipe or back that
+ * closes the sheet keeps it too (reopening the lead shows it), while Cancel
+ * and the close button throw it away as the web does.
+ */
+data class LeadSheetDraft(
+    val leadId: String,
+    val stage: String,
+    val tags: String,
+    val notes: String,
+    val baseStage: String?,
+    val baseTags: List<String>,
+    val baseNotes: String,
+) {
+    fun edit(): LeadEdit = diffLead(baseStage, baseTags, baseNotes, stage, tags, notes)
+
+    companion object {
+        fun of(lead: Lead, stages: List<LeadStage>) = LeadSheetDraft(
+            leadId = lead.id,
+            stage = stages.firstOrNull { it.matches(lead.leadStage) }?.id ?: lead.leadStage.orEmpty(),
+            tags = lead.tags.joinToString(", "),
+            notes = lead.notes.orEmpty(),
+            baseStage = lead.leadStage, baseTags = lead.tags, baseNotes = lead.notes.orEmpty(),
+        )
+    }
 }
 
 /** Paragraphs as crm.py `merge_notes` splits them. */
@@ -182,7 +216,7 @@ fun buildBoard(leads: List<Lead>, filtered: List<Lead>, stages: List<LeadStage>)
 }
 
 /** LeadsView's state: the leads, the pipeline's columns, filter/search and the open lead. */
-class LeadsViewModel(private val dash: DashboardViewModel) : ViewModel() {
+class LeadsViewModel(private val dash: DashboardViewModel) : ViewModel(), SavesUi {
     private val api = LeadsApi(dash.api.http)
 
     private val _leads = MutableStateFlow<List<Lead>>(emptyList())
@@ -317,7 +351,63 @@ class LeadsViewModel(private val dash: DashboardViewModel) : ViewModel() {
     fun select(id: String?) {
         if (id != _selectedId.value) _sheetError.value = null
         _selectedId.value = id
+        // Cancel / close / a save that landed: what was typed goes with the sheet.
+        if (id == null) _sheet.value = null
     }
+
+    /**
+     * The open lead's sheet as typed (null until the sheet has shown once for it).
+     * A different lead's leftover draft is never shown: [sheetFor] replaces it.
+     */
+    private val _sheet = MutableStateFlow<LeadSheetDraft?>(null)
+    val sheet: StateFlow<LeadSheetDraft?> = _sheet.asStateFlow()
+
+    /** The draft for [lead]'s sheet, started from the lead as it is now if there is none yet. */
+    fun sheetFor(lead: Lead): LeadSheetDraft =
+        _sheet.value?.takeIf { it.leadId == lead.id } ?: LeadSheetDraft.of(lead, _stages.value).also { _sheet.value = it }
+
+    fun editSheet(d: LeadSheetDraft) { if (d.leadId == _selectedId.value) _sheet.value = d }
+
+    /**
+     * The sheet was swiped away or closed with back: it closes, but what was
+     * typed stays for this lead (the web has no prompt to match; nothing
+     * half-typed is thrown away without an explicit Cancel).
+     */
+    fun dismissSheet() {
+        _sheetError.value = null
+        _selectedId.value = null
+    }
+
+    // -- Process death: filter, search, the open lead and its typed fields come back --
+    override var uiAttached = false
+
+    override fun saveUi(): Map<String, Any?> {
+        val d = _sheet.value
+        return mapOf(
+            "filter" to filterStage.value, "search" to search.value, "selected" to _selectedId.value,
+            "sheet.lead" to d?.leadId, "sheet.stage" to d?.stage, "sheet.tags" to d?.tags, "sheet.notes" to d?.notes,
+            "sheet.baseStage" to d?.baseStage, "sheet.baseTags" to d?.baseTags?.let { ArrayList(it) }, "sheet.baseNotes" to d?.baseNotes,
+        )
+    }
+
+    override fun restoreUi(saved: Map<String, Any?>) {
+        saved.str("filter")?.let { filterStage.value = it }
+        saved.str("search")?.let { search.value = it }
+        _selectedId.value = saved.str("selected")
+        val lead = saved.str("sheet.lead") ?: return
+        _sheet.value = LeadSheetDraft(
+            leadId = lead,
+            stage = saved.str("sheet.stage").orEmpty(),
+            tags = saved.str("sheet.tags").orEmpty(),
+            notes = saved.str("sheet.notes").orEmpty(),
+            baseStage = saved.str("sheet.baseStage"),
+            baseTags = (saved["sheet.baseTags"] as? List<*>)?.filterIsInstance<String>().orEmpty(),
+            baseNotes = saved.str("sheet.baseNotes").orEmpty(),
+        )
+    }
+
+    /** The board has been read (or failed to be): an open lead missing from it is really gone. */
+    val loaded: Boolean get() = !_loading.value
 
     fun moveTo(lead: Lead, stage: String) = update(lead, stage = stage)
 
@@ -454,6 +544,7 @@ class LeadsViewModel(private val dash: DashboardViewModel) : ViewModel() {
     private suspend fun saved(id: String, edit: LeadEdit, fresh: Boolean = false) {
         if (!fresh) apply(id, edit)
         if (_selectedId.value == id) { _selectedId.value = null; _sheetError.value = null }
+        if (_sheet.value?.leadId == id) _sheet.value = null
         dash.toast("Lead updated")
         // The notes stored are merged server-side: re-read so the board shows them.
         if (!fresh && edit.notes != null) fetch()
@@ -469,6 +560,7 @@ class LeadsViewModel(private val dash: DashboardViewModel) : ViewModel() {
         touch(id)
         _leads.value = _leads.value.filterNot { it.id == id }
         if (_selectedId.value == id) { _selectedId.value = null; _sheetError.value = null }
+        if (_sheet.value?.leadId == id) _sheet.value = null
         dash.toast("This lead no longer exists — someone may have deleted or merged it", ToastType.Error)
     }
 }

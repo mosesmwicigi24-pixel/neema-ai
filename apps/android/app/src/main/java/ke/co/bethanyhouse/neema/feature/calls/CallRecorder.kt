@@ -183,6 +183,17 @@ class CallRecorder(
 
     companion object {
         private const val TAG = "CallRecorder"
+        private val LEFTOVER = Regex("^call_(mic_|remote_)?\\d+\\.(pcm|m4a)$")
+
+        /**
+         * Deletes the tracks and unfinished encodes a recorder in an earlier
+         * process left in [dir] (the process was killed mid-call, so [stop]
+         * never ran). Only for start-up, before any recording begins: a live
+         * recorder's files have the same names. Returns how many went.
+         */
+        fun sweepLeftovers(dir: File): Int =
+            (runCatching { dir.listFiles() }.getOrNull() ?: emptyArray())
+                .count { f -> f.isFile && LEFTOVER.matches(f.name) && runCatching { f.delete() }.getOrDefault(false) }
         const val OUT_RATE = 16_000
         /** Mixing + encoding an hour takes well under a minute; this only catches a wedged codec. */
         private const val FINALISE_TIMEOUT_MIN = 10L

@@ -12,6 +12,8 @@ import ke.co.bethanyhouse.neema.core.util.Fmt
 import ke.co.bethanyhouse.neema.core.ws.str
 import ke.co.bethanyhouse.neema.feature.orders.recheckAccess
 import ke.co.bethanyhouse.neema.feature.orders.SingleFlight
+import ke.co.bethanyhouse.neema.feature.orders.SavesUi
+import ke.co.bethanyhouse.neema.feature.orders.str
 import ke.co.bethanyhouse.neema.feature.reports.ScreenLife
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -42,7 +44,7 @@ data class TranscriptUi(
  * the missed-only filter, the selected caller, and the open transcript panel
  * (lazily fetched, polled every 5s while a transcription job runs).
  */
-class CallsViewModel(private val dash: DashboardViewModel) : ViewModel() {
+class CallsViewModel(private val dash: DashboardViewModel) : ViewModel(), SavesUi {
     companion object {
         /** The web's fallback interval (the socket frames are the real path). */
         const val POLL_MS = 60_000L
@@ -138,9 +140,16 @@ class CallsViewModel(private val dash: DashboardViewModel) : ViewModel() {
      */
     private fun land(r: Result<List<Call>>) {
         r.exceptionOrNull()?.let { if (it is kotlinx.coroutines.CancellationException) throw it }
-        r.onSuccess {
-            _calls.value = it
+        r.onSuccess { list ->
+            _calls.value = list
             _loadError.value = null
+            // The open caller follows the log: a restored one is found again,
+            // an open one shows its row as it is now.
+            val want = (pendingSelect ?: selected.value?.id)?.takeIf { it.isNotEmpty() }
+            if (want != null) {
+                pendingSelect = null
+                list.find { it.id == want }?.let { selected.value = it }
+            }
         }.onFailure { e ->
             // The server never refuses the log by role today (admin.py `list_calls`
             // only needs a signed-in agent); if it ever does, re-read who we are.
@@ -151,20 +160,52 @@ class CallsViewModel(private val dash: DashboardViewModel) : ViewModel() {
     }
 
     /**
-     * Deep-link focus: once the log has loaded, open the caller panel for the
-     * customer the link named. Waits for the list so a cold navigation doesn't
-     * consume the key against an empty log.
+     * Deep-link focus (`?view=calls&caller=<wa_id>`, a missed-call alert):
+     * open the caller panel for that customer. The log on hand may be minutes
+     * old — the alert is usually about a call it doesn't hold yet — so when
+     * it has no call with them it is read again before saying so. A read that
+     * fails says nothing false ("no calls yet"): the log's own error shows.
      */
     fun consumeFocus(key: String) {
-        val list = _calls.value ?: return
+        if (focusing == key) return
         val wa = key.removePrefix("+")
-        val match = list.sortedByDescending { it.startedAt ?: "" }.find { it.waId == wa }
-        if (match != null) selected.value = match
-        else dash.toast("No calls with this customer yet — showing the full call log.", ToastType.Warning)
-        dash.callsFocusKey.value = null
+        fun match(list: List<Call>) = list.sortedByDescending { it.startedAt ?: "" }.find { it.waId == wa }
+        _calls.value?.let(::match)?.let { selected.value = it; dash.callsFocusKey.value = null; return }
+        focusing = key
+        viewModelScope.launch {
+            try {
+                val read = reads.run()
+                if (dash.callsFocusKey.value != key) return@launch   // another link came meanwhile
+                val found = _calls.value?.let(::match)
+                when {
+                    found != null -> selected.value = found
+                    read -> dash.toast("No calls with this customer yet — showing the full call log.", ToastType.Warning)
+                }
+                dash.callsFocusKey.value = null
+            } finally {
+                if (focusing == key) focusing = null
+            }
+        }
     }
+    private var focusing: String? = null
 
-    fun select(c: Call?) { selected.value = c }
+    fun select(c: Call?) { selected.value = c; pendingSelect = null }
+
+    // ── Process death: the missed filter and the open caller come back ───────
+    override var uiAttached = false
+    /** A caller restored before the log has loaded: opened once the row is read. */
+    private var pendingSelect: String? = null
+
+    override fun saveUi(): Map<String, Any?> = mapOf(
+        "missedOnly" to missedOnly.value, "selected" to (selected.value?.id ?: pendingSelect),
+    )
+
+    override fun restoreUi(saved: Map<String, Any?>) {
+        (saved["missedOnly"] as? Boolean)?.let { missedOnly.value = it }
+        val id = saved.str("selected") ?: return
+        val row = _calls.value?.find { it.id == id }
+        if (row != null) selected.value = row else pendingSelect = id
+    }
 
     // ── Transcript panel ─────────────────────────────────────────────────────
     /** The panel's Retry after a failed first load. */

@@ -55,6 +55,12 @@ internal class WebRtcMedia(private val context: Context) : CallMedia {
 
     override fun createPeer(config: IceConfig, onEvent: (PeerEvent) -> Unit): CallPeer = Peer(config, onEvent)
 
+    override fun sweepLeftovers() {
+        if (recorder != null) return
+        val n = CallRecorder.sweepLeftovers(context.cacheDir)
+        if (n > 0) Log.d(TAG, "swept $n leftover recording files")
+    }
+
     override fun startRecording(micMuted: Boolean): CallRecording? {
         val r = CallRecorder(context.cacheDir)
         r.micMuted = micMuted

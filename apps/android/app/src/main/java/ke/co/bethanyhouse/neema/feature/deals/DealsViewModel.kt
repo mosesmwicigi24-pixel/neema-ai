@@ -10,6 +10,8 @@ import ke.co.bethanyhouse.neema.core.model.PlannedAction
 import ke.co.bethanyhouse.neema.feature.orders.FailKind
 import ke.co.bethanyhouse.neema.feature.orders.SalesFailure
 import ke.co.bethanyhouse.neema.feature.orders.SingleFlight
+import ke.co.bethanyhouse.neema.feature.orders.SavesUi
+import ke.co.bethanyhouse.neema.feature.orders.str
 import ke.co.bethanyhouse.neema.feature.orders.lowerFirst
 import ke.co.bethanyhouse.neema.feature.orders.salesFailure
 import ke.co.bethanyhouse.neema.feature.reports.Coalescer
@@ -30,7 +32,7 @@ import kotlinx.serialization.json.put
  * Neema's initiative queue. Refreshes every minute while on display, like
  * the web's visibility-gated interval (see [life]).
  */
-class DealsViewModel(private val dash: DashboardViewModel) : ViewModel() {
+class DealsViewModel(private val dash: DashboardViewModel) : ViewModel(), SavesUi {
     companion object {
         /** DealsView's interval. */
         const val POLL_MS = 60_000L
@@ -126,6 +128,31 @@ class DealsViewModel(private val dash: DashboardViewModel) : ViewModel() {
     }
     fun setDraftText(text: String) { _draftText.value = text }
 
+    // ── Process death: the guidance being typed and the edit-and-send dialog come back ──
+    override var uiAttached = false
+    /** The dialog's action, restored before the queue has loaded: it reopens once the action is read. */
+    private var pendingDraftFor: String? = null
+
+    override fun saveUi(): Map<String, Any?> = mapOf(
+        "editing" to _editing.value, "guidance" to _guidanceDraft.value,
+        "draftFor" to (_draftFor.value?.id ?: pendingDraftFor), "draftTextFor" to draftTextFor, "draftText" to _draftText.value,
+    )
+
+    override fun restoreUi(saved: Map<String, Any?>) {
+        saved.str("editing")?.let { _editing.value = it; _guidanceDraft.value = saved.str("guidance").orEmpty().take(400) }
+        saved.str("draftTextFor")?.let { draftTextFor = it; _draftText.value = saved.str("draftText").orEmpty() }
+        pendingDraftFor = saved.str("draftFor")
+        reopenDraft()
+    }
+
+    /** Reopens a restored dialog once its action is in the queue (and forgets it if the action left). */
+    private fun reopenDraft() {
+        val id = pendingDraftFor ?: return
+        val list = _actions.value ?: return
+        pendingDraftFor = null
+        list.find { it.id == id }?.let { openDraft(it) }
+    }
+
     /**
      * Queue items sent or vetoed here, by the [gen] at which they left: a load
      * that was already on the wire when one left must not bring it back (a
@@ -147,6 +174,7 @@ class DealsViewModel(private val dash: DashboardViewModel) : ViewModel() {
             _actions.value = if (left.isEmpty()) list else list.filterNot { (left[it.id] ?: -1L) > startGen }
             // What left before this read began is in the server's answer now.
             left.values.removeAll { it <= startGen }
+            reopenDraft()
         }
         val failed = d.exceptionOrNull() ?: a.exceptionOrNull() ?: w.exceptionOrNull()
         _loadError.value = failed?.let { dash.salesFailure(it).message() }

@@ -20,6 +20,10 @@ import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.activity.compose.BackHandler
+import ke.co.bethanyhouse.neema.feature.orders.MinuteTicker
+import ke.co.bethanyhouse.neema.feature.orders.RestoreUi
+import ke.co.bethanyhouse.neema.feature.orders.liveAgo
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -106,6 +110,7 @@ fun LeadsScreen(dash: DashboardViewModel) {
     // Save — and crm.py `list_leads` / `update_lead` only require a signed-in
     // agent. A refusal the server does send is said where the save failed.
     val vm: LeadsViewModel = viewModel { LeadsViewModel(dash) }
+    RestoreUi(vm)
     ke.co.bethanyhouse.neema.feature.reports.TrackShown(vm.life)
     val leads by vm.leads.collectAsStateWithLifecycle()
     val loading by vm.loading.collectAsStateWithLifecycle()
@@ -117,7 +122,10 @@ fun LeadsScreen(dash: DashboardViewModel) {
     val loadError by vm.loadError.collectAsStateWithLifecycle()
     val saving by vm.saving.collectAsStateWithLifecycle()
     val sheetError by vm.sheetError.collectAsStateWithLifecycle()
+    val sheet by vm.sheet.collectAsStateWithLifecycle()
     val c = Neema.colors
+    // Back clears the search before it leaves the view (the sheet is its own window and takes back first).
+    BackHandler(enabled = search.isNotEmpty()) { vm.search.value = "" }
 
     // Everything the board shows, derived once per change (not per frame, not per column):
     // 500 leads across seven columns is one pass, not seven filters and seven counts per recomposition.
@@ -128,6 +136,7 @@ fun LeadsScreen(dash: DashboardViewModel) {
     // Never loaded: no counts or totals — zeros would be a claim.
     val unknown = leads.isEmpty() && (loading || loadError != null)
 
+    MinuteTicker {
     BoxWithConstraints(Modifier.fillMaxSize().background(c.bg)) {
         val wide = maxWidth >= 600.dp
         val boardWidth = maxWidth
@@ -228,11 +237,22 @@ fun LeadsScreen(dash: DashboardViewModel) {
         }
     }
 
+    }
+
     // ── Lead detail ────────────────────────────────────────────────────────
     val selected = remember(leads, selectedId) { selectedId?.let { id -> leads.find { it.id == id } } }
+    if (selectedId != null && selected == null && !loading) {
+        // Gone from the board (deleted, merged). Not before the first read: a
+        // lead restored after process death waits for the board to load.
+        LaunchedEffect(selectedId) { vm.select(null) }
+    }
     if (selected != null) {
+        // Started once per open lead (as the lead is then), kept as typed.
+        LaunchedEffect(selected.id) { vm.sheetFor(selected) }
+        val draft = sheet?.takeIf { it.leadId == selected.id }
         ModalBottomSheet(
-            onDismissRequest = { vm.select(null) },
+            // A swipe or back closes the sheet but keeps what was typed for this lead.
+            onDismissRequest = { vm.dismissSheet() },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
             containerColor = c.bg2,
             dragHandle = { WebDragHandle() },
@@ -244,6 +264,7 @@ fun LeadsScreen(dash: DashboardViewModel) {
                 onOpenChat = { dash.openConversationFor(selected.handle) },
                 // The sheet closes when the server has the change; a failure keeps it open, fields as typed.
                 onSave = { edit -> vm.save(selected, edit) },
+                draft = draft, onDraft = vm::editSheet,
             )
         }
     }
@@ -393,7 +414,7 @@ private fun LeadCard(
         }
 
         if (!lead.lastSeenAt.isNullOrBlank()) {
-            Text(Fmt.timeAgo(lead.lastSeenAt), fontSize = 10.sp, color = c.textDim, modifier = Modifier.padding(top = 6.dp))
+            Text(liveAgo(lead.lastSeenAt), fontSize = 10.sp, color = c.textDim, modifier = Modifier.padding(top = 6.dp))
         }
 
         // Stage moves. Hover-only on the web; always shown on a touch screen.
@@ -446,13 +467,20 @@ internal fun LeadDetail(
     error: String? = null,
     /** Only the fields that changed are set — an untouched stage must not lock the AI out. */
     onSave: (LeadEdit) -> Unit,
+    /**
+     * The fields as typed and the lead as the sheet opened (the ViewModel's, so
+     * they outlive a rotation or process death); null keeps them here (previews).
+     */
+    draft: LeadSheetDraft? = null,
+    onDraft: (LeadSheetDraft) -> Unit = {},
 ) {
     val c = Neema.colors
-    // The lead as the sheet opened: what "changed" means, and the notes base for the server's merge.
-    val base = remember(lead.id) { lead }
-    var stage by rememberSaveable(lead.id) { mutableStateOf(stages.firstOrNull { it.matches(lead.leadStage) }?.id ?: lead.leadStage) }
-    var notes by rememberSaveable(lead.id) { mutableStateOf(lead.notes.orEmpty()) }
-    var tags by rememberSaveable(lead.id) { mutableStateOf(lead.tags.joinToString(", ")) }
+    var local by remember(lead.id) { mutableStateOf(LeadSheetDraft.of(lead, stages)) }
+    val d = draft ?: local
+    val set: (LeadSheetDraft) -> Unit = { local = it; onDraft(it) }
+    val stage = d.stage
+    val notes = d.notes
+    val tags = d.tags
     val fieldColors = OutlinedTextFieldDefaults.colors(
         unfocusedContainerColor = c.bg, focusedContainerColor = c.bg,
         unfocusedBorderColor = c.border, focusedBorderColor = c.gold,
@@ -494,7 +522,7 @@ internal fun LeadDetail(
                 Text(
                     s.label,
                     // 48dp to the finger; the chips keep the web's px-2.5 py-1.5 look.
-                    modifier = Modifier.touchCell(press, enabled = !saving, role = Role.RadioButton) { stage = s.id }
+                    modifier = Modifier.touchCell(press, enabled = !saving, role = Role.RadioButton) { set(d.copy(stage = s.id)) }
                         .clip(shape)
                         .background(if (on) s.bgC() else c.bg2)
                         .border(1.dp, if (on) s.borderC() else if (c.isDark) c.hairline else Palette.Stone200, shape)
@@ -509,7 +537,7 @@ internal fun LeadDetail(
 
         FieldLabel("Tags (comma separated)")
         OutlinedTextField(
-            value = tags, onValueChange = { tags = it }, readOnly = saving, singleLine = true,
+            value = tags, onValueChange = { set(d.copy(tags = it)) }, readOnly = saving, singleLine = true,
             placeholder = { Text("church, wholesale, repeat-buyer") },
             colors = fieldColors, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth(),
         )
@@ -517,7 +545,7 @@ internal fun LeadDetail(
 
         FieldLabel("Notes")
         OutlinedTextField(
-            value = notes, onValueChange = { notes = it }, readOnly = saving,
+            value = notes, onValueChange = { set(d.copy(notes = it)) }, readOnly = saving,
             placeholder = { Text("Internal notes about this lead…") }, minLines = 3, maxLines = 8,
             colors = fieldColors, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth(),
         )
@@ -567,7 +595,7 @@ internal fun LeadDetail(
             WebBtn(
                 if (saving) "Saving…" else "Save Changes", BtnVariant.Primary, Modifier.weight(1f),
                 enabled = !saving, busy = saving,
-                onClick = { onSave(diffLead(base, stage, tags, notes)) },
+                onClick = { onSave(d.edit()) },
             )
             WebBtn("Cancel", BtnVariant.Outline, onClick = onClose)
         }

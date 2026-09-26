@@ -36,6 +36,8 @@ class FakeCallApi : CallApi {
     val uploadErrors = ArrayDeque<Exception>()
     /** When set, answer() waits for it (to reply late, or never). */
     var answerGate: CompletableDeferred<Unit>? = null
+    /** When set, terminate() waits for it (a server that answers late, or never). */
+    var terminateGate: CompletableDeferred<Unit>? = null
     /** When set, callback() waits for it. */
     var callbackGate: CompletableDeferred<Unit>? = null
     /** callId to (filename, mime type, bytes read from the streamed file). */
@@ -54,7 +56,7 @@ class FakeCallApi : CallApi {
     override suspend fun answer(callId: String, sdp: String) {
         log += "answer $callId"; lastAnswerSdp = sdp; answerGate?.await(); answerError?.let { throw it }
     }
-    override suspend fun terminate(callId: String) { log += "terminate $callId"; terminateErrors.removeFirstOrNull()?.let { throw it } }
+    override suspend fun terminate(callId: String) { log += "terminate $callId"; terminateGate?.await(); terminateErrors.removeFirstOrNull()?.let { throw it } }
     override suspend fun callback(callId: String) { log += "callback $callId"; callbackGate?.await(); callbackErrors.removeFirstOrNull()?.let { throw it } }
     override suspend fun connect(to: String, sdp: String, name: String?): String {
         log += "connect $to"; lastConnect = Triple(to, sdp, name)

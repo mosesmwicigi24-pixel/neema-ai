@@ -90,6 +90,13 @@ interface CallMedia {
     fun createPeer(config: IceConfig, onEvent: (PeerEvent) -> Unit): CallPeer
     /** Starts recording the live call, or returns null when it can't. */
     fun startRecording(micMuted: Boolean): CallRecording?
+
+    /**
+     * Deletes what an earlier process killed mid-call left behind (the raw
+     * audio tracks of an unfinished recording: an hour of call is hundreds of
+     * MB). Called once at start-up, before any call can be live.
+     */
+    fun sweepLeftovers() {}
 }
 
 /** The ringtone, vibration and the incoming-call notification. */

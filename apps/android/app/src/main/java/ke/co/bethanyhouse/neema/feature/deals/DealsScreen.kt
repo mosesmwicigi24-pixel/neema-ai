@@ -6,6 +6,10 @@ import ke.co.bethanyhouse.neema.feature.orders.touchCell
 import androidx.compose.runtime.remember
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import ke.co.bethanyhouse.neema.core.util.AppClock
+import ke.co.bethanyhouse.neema.feature.orders.LocalMinute
+import ke.co.bethanyhouse.neema.feature.orders.MinuteTicker
+import ke.co.bethanyhouse.neema.feature.orders.RestoreUi
+import ke.co.bethanyhouse.neema.feature.orders.liveAgo
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -96,6 +100,7 @@ fun DealsScreen(dash: DashboardViewModel) {
     // opens it), and crm.py's deals/actions routes only require a signed-in
     // agent. Send, Veto, Guidance, Won and Lost show for everyone, as on the web.
     val vm: DealsViewModel = viewModel { DealsViewModel(dash) }
+    RestoreUi(vm)
     ke.co.bethanyhouse.neema.feature.reports.TrackShown(vm.life)
     val deals by vm.deals.collectAsStateWithLifecycle()
     val wonCount by vm.wonCount.collectAsStateWithLifecycle()
@@ -121,6 +126,7 @@ fun DealsScreen(dash: DashboardViewModel) {
     }
 
     // The page is the web's own #f6f7f2, a shade off the shell's parchment.
+    MinuteTicker {
     BoxWithConstraints(Modifier.fillMaxSize().background(if (c.isDark) c.surface else SalesInk.DealsPage)) {
         // Three stage columns (and the queue's buttons beside its text) need a
         // real tablet width: at ~600dp they squeezed a card's buttons to nothing.
@@ -234,6 +240,8 @@ fun DealsScreen(dash: DashboardViewModel) {
         }
     }
 
+    }
+
     draftFor?.let { a ->
         val text by vm.draftText.collectAsStateWithLifecycle()
         val error by vm.draftError.collectAsStateWithLifecycle()
@@ -289,6 +297,7 @@ private fun ActionRow(
     onOpen: (() -> Unit)?,
 ) {
     val c = Neema.colors
+    LocalMinute.current   // "in 2h" moves on with the clock
     val needs = a.status == "needs_approval"
     val bg = when {
         c.isDark -> if (needs) c.amberDim else c.bg3
@@ -456,7 +465,7 @@ private fun DealCard(
                 modifier = Modifier.weight(1f).clickable(enabled = canOpen, onClick = onOpen),
             )
             Spacer(Modifier.width(8.dp))
-            Text(Fmt.timeAgo(d.updatedAt), fontSize = 10.sp, color = if (c.isDark) c.muted else Palette.Sage300)
+            Text(liveAgo(d.updatedAt), fontSize = 10.sp, color = if (c.isDark) c.muted else Palette.Sage300)
         }
         if (!d.title.isNullOrBlank()) {
             Text(d.title, fontSize = 11.sp, color = if (c.isDark) c.textMid else SalesInk.Slate600,
