@@ -172,7 +172,8 @@ class DashboardViewModel(
         viewModelScope.launch {
             container.socket.reconnected.collect {
                 if (session.value == null) return@collect
-                _inboxRefresh.tryEmit(Unit)
+                // The inbox (alive from sign-in) catches itself up on reconnect —
+                // list, open thread and draft — so asking it too would fetch twice.
                 if (clock() - lastOrdersFetch > CATCH_UP_FRESH_MS) refetchOrders()
             }
         }

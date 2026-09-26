@@ -64,6 +64,10 @@ fun DashboardShell(
     initialCollapsed: Boolean = false,
 ) {
     val view by dash.view.collectAsStateWithLifecycle()
+    // The inbox runs from sign-in, whatever view is open (the web's useInbox lives
+    // in page.tsx): its badge and summary stay live even if the app opened on
+    // Orders. ConversationsScreen asks for the same default-keyed instance.
+    androidx.lifecycle.viewmodel.compose.viewModel { ke.co.bethanyhouse.neema.feature.conversations.ConversationsViewModel(dash) }
     val summary by dash.inboxSummary.collectAsStateWithLifecycle()
     val orders by dash.orders.collectAsStateWithLifecycle()
     val me by dash.me.collectAsStateWithLifecycle()

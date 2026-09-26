@@ -79,7 +79,9 @@ class DashboardRealtimeTest {
         assertEquals("nothing until the socket is really back", 0, refreshes())
         ws.last.open()
 
-        assertEquals(1, refreshes())
+        // The inbox catches itself up on reconnect (InboxLiveTest); the dashboard
+        // must not ping it as well, or the list would be fetched twice.
+        assertEquals(0, refreshes())
         assertEquals(before + 1, orders())
     }
 
@@ -98,7 +100,7 @@ class DashboardRealtimeTest {
         val before = fake.callsTo("GET", "/admin/orders").size
         now += 1_000 // the poll ran a second ago (e.g. the app just came to the front)
         ws.dropAndReconnect(::advance)
-        assertEquals(1, refreshes())
+        assertEquals("the inbox catches itself up", 0, refreshes())
         assertEquals("no refetch storm", before, fake.callsTo("GET", "/admin/orders").size)
     }
 
@@ -109,7 +111,7 @@ class DashboardRealtimeTest {
         now += 600_000
         dash.container.socket.disconnect() // backgrounded, live mode off
         dash.container.socket.connect(Fixtures.ME_ID); ws.last.open()
-        assertEquals(1, refreshes())
+        assertEquals("the inbox catches itself up", 0, refreshes())
         assertTrue(fake.callsTo("GET", "/admin/orders").size >= 2)
     }
 
