@@ -161,7 +161,7 @@ def test_rapid_reclicks_produce_one_briefing_not_five(monkeypatch):
         turns.append(1)
         return "- the sale stands at the Cincture Rope"
     monkeypatch.setattr(runtime, "run_turn", _turn)
-    monkeypatch.setattr(runtime, "build_llm", lambda model=None: object())
+    monkeypatch.setattr(runtime, "build_llm", lambda model=None, **kw: object())
 
     r = _Redis()
     asyncio.run(copilot._briefing(r, "c1"))

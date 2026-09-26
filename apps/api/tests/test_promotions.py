@@ -450,12 +450,16 @@ def test_a_product_we_do_not_stock_records_nothing(monkeypatch):
     assert granted is False
 
 
-def test_asking_what_is_on_offer_still_counts_as_a_quote(monkeypatch):
-    # No product named: stating the campaign IS the quote.
+def test_asking_what_is_on_offer_promises_nothing_until_an_item_is_named(monkeypatch):
+    """2026-09-26: a no-product call used to GRANT the whole campaign for 45
+    days — a blanket discount earned by asking "what's on?". The terms come
+    back; the promise waits for the item it is quoted on."""
     out, granted = _run_apply_offer(monkeypatch, _c(), [], None)
 
-    assert out["granted"] is True
-    assert granted is True
+    assert out["granted"] is False
+    assert granted is False
+    assert "nothing has been promised" in out["say"] and out["offer"]["percent"] == _c()["percent"]
+    assert "then" not in out
 
 
 def test_no_campaign_promises_nothing(monkeypatch):

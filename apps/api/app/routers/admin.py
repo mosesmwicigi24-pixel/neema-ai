@@ -1192,7 +1192,7 @@ async def generate_draft(
     is_comment = channel == "facebook" or bool(last_in and getattr(last_in, "comment_context", None))
 
     try:
-        llm = runtime.build_llm(model=runtime.route_model(user_text))
+        llm = runtime.build_llm(model=runtime.route_model(user_text), purpose="admin")
         draft = await runtime.run_turn(
             db, request.app.state.redis,
             wa_id=conv.wa_id or (conv.external_id or ""),
@@ -1287,7 +1287,7 @@ async def ask_neema(conv_id: str, request: Request, body: dict,
                    "customer. Answer THEM, briefly and factually, from the "
                    "conversation, phone calls, sizes on file, cart and orders. "
                    f"This is never sent to the customer.] {question[:400]}"),
-        llm=runtime.build_llm(), channel=conv.channel,
+        llm=runtime.build_llm(purpose="admin"), channel=conv.channel,
         external_id=(None if conv.channel == "whatsapp" else conv.external_id),
         read_only=True)).strip()
     return {"answer": answer or "I couldn't find that in what we have on file."}
@@ -1333,7 +1333,7 @@ async def answer_through_neema(conv_id: str, request: Request, body: dict,
                    "availability or a price, invite the next step of the order "
                    "in the same breath. Never mention the checking process or "
                    "the team's internals.]"),
-        llm=runtime.build_llm(), channel=conv.channel,
+        llm=runtime.build_llm(purpose="admin"), channel=conv.channel,
         external_id=(None if conv.channel == "whatsapp" else conv.external_id),
         read_only=True)).strip()
     if not text:

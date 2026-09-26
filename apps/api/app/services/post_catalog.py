@@ -651,7 +651,7 @@ async def product_from_vision(redis, thumb_url: str, catalog: list[dict],
         if not cands:
             return None
         listing = "\n".join(f"{i + 1}. {p.get('name')}" for i, p in enumerate(cands))
-        llm = build_llm(model=settings.tier2_model_light)
+        llm = build_llm(model=settings.tier2_model_light, purpose="vision", cache=False)
         resp = await llm.complete(
             system=("You identify which catalogue item a shop's post photo shows. You "
                     "answer only in the exact format asked, and you say NONE whenever "

@@ -23,7 +23,7 @@ import types
 import pytest
 
 import app.agent.runtime as runtime
-from app.agent.llm import FakeLLM, LLMResponse
+from app.agent.llm import AnthropicLLM, FakeLLM
 from app.core.config import settings
 from app.services import ai_budget
 
@@ -177,7 +177,7 @@ def test_the_stop_reads_as_budget_on_the_health_card():
 def test_run_turn_downgrades_to_the_light_model_in_economy(monkeypatch):
     seen = {}
 
-    def _fake_build(model=None):
+    def _fake_build(model=None, **kw):
         seen["model"] = model
         return FakeLLM([{"text": "answered on the light model"}])
 
@@ -203,30 +203,29 @@ def test_under_budget_nothing_changes():
 
 
 def test_every_metered_turn_feeds_the_day_counter():
-    """The breaker is only as good as its meter: the turn's estimated cost
-    (same table as the standup) must land in today's counter even when the
-    DB-side usage row fails — a down database must never blind the breaker."""
-    class _UsageLLM:
-        _model = "claude-sonnet-5"
-
-        async def complete(self, **kw):
-            return LLMResponse(
-                assistant_content=[{"type": "text", "text": "ok"}], text="ok",
-                usage={"input_tokens": 1000, "output_tokens": 100,
-                       "cache_read_tokens": 9000, "cache_write_tokens": 0,
-                       "cache_write_1h_tokens": 0})
-
+    """The breaker is only as good as its meter. Since 2026-09-26 the LLM
+    client meters EVERY call itself (services/ai_budget.meter) — the agent's
+    loop, the reviewer, the rewrite, the vision reads — so the turn no longer
+    meters its own loop (that would count twice), and a call's estimated cost
+    (same table as the standup) lands in today's counter independently of the
+    DB-side usage row."""
     r = _Redis()
-    asyncio.run(runtime.run_turn(_turn_db(), r, "254700000001", "hello", _UsageLLM()))
+    asyncio.run(ai_budget.meter("claude-sonnet-5",
+                                {"input_tokens": 1000, "output_tokens": 100,
+                                 "cache_read_tokens": 9000, "cache_write_tokens": 0,
+                                 "cache_write_1h_tokens": 0}, "whatsapp", redis=r))
     # 1000 fresh @ $3/M + 9000 cache-read @ $0.30/M + 100 out @ $15/M
     assert r.kv[_day_key()] == pytest.approx(0.0072)
+    import inspect
+    assert "ai_budget.add_spend(" not in inspect.getsource(runtime.run_turn)
+    assert "await ai_budget.meter(self._model, r.usage, self.purpose)" in inspect.getsource(AnthropicLLM)
 
 
 def test_comment_labeler_skips_the_model_under_stop(monkeypatch):
     """Under a stop the whole comment funnel must run at $0: the labeler falls
     to its uncertainty default without a call, and the canned sell pools
     (real product, real price) carry the replies."""
-    def _no_build(model=None):
+    def _no_build(model=None, **kw):
         raise AssertionError("labeler called the model during a budget stop")
     monkeypatch.setattr(runtime, "build_llm", _no_build)
     out = asyncio.run(runtime.classify_comment_intent(

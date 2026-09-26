@@ -139,7 +139,7 @@ async def _compose_follow_up(db, redis, conv, reason: str) -> str:
             "has confirmed yet, be honest and say you're still on it. Never "
             "repeat a message already sent; never pressure.]")
     return (await runtime.run_turn(
-        db, redis, wa_id=key, user_text=text, llm=runtime.build_llm(),
+        db, redis, wa_id=key, user_text=text, llm=runtime.build_llm(purpose="follow-up"),
         channel=conv.channel,
         external_id=(None if conv.channel == "whatsapp" else conv.external_id),
         read_only=True)).strip()

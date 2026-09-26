@@ -54,7 +54,7 @@ def test_distillation_stores_capped_proposals(monkeypatch):
         async def execute(self, *a, **k): return self._q.pop(0)
 
     class _LLM:
-        async def complete(self, *, system, messages, tools):
+        async def complete(self, *, system, messages, tools, **kw):
             return types.SimpleNamespace(text="Open with Habari, never Dear\n"
                                               "Re-check the thread before asking colours\n"
                                               "Rule three\nRule four (dropped)")

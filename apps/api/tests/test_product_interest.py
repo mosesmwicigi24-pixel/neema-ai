@@ -182,7 +182,7 @@ def test_the_next_turn_reads_the_memory_in_its_tail(monkeypatch):
     seen = {}
 
     class _RecLLM:
-        async def complete(self, *, system, messages, tools):
+        async def complete(self, *, system, messages, tools, **kw):
             seen["system"] = system
             return types.SimpleNamespace(text="You asked about the Brass Thurible —",
                                          tool_calls=[], assistant_content=[], usage={})

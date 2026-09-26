@@ -88,7 +88,7 @@ def test_web_chat_runs_agent_and_returns_reply(monkeypatch):
         called["outbound"] = (wa_id, text)
 
     monkeypatch.setattr(runtime, "run_turn", fake_run_turn)
-    monkeypatch.setattr(runtime, "build_llm", lambda model=None: object())
+    monkeypatch.setattr(runtime, "build_llm", lambda model=None, **kw: object())
     monkeypatch.setattr(runtime, "route_model", lambda t: "m")
     monkeypatch.setattr(n8n, "save_outbound_message", fake_save_outbound)
 
@@ -114,7 +114,7 @@ def test_web_chat_holds_when_human_intercepted(monkeypatch):
         return "should not run"
 
     monkeypatch.setattr(runtime, "run_turn", fake_run_turn)
-    monkeypatch.setattr(runtime, "build_llm", lambda model=None: object())
+    monkeypatch.setattr(runtime, "build_llm", lambda model=None, **kw: object())
     monkeypatch.setattr(runtime, "route_model", lambda t: "m")
 
     conv = types.SimpleNamespace(id="c1", intercept_mode=InterceptMode.human,

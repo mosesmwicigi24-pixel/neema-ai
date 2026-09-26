@@ -80,7 +80,7 @@ def test_run_turn_sends_shared_rules_and_customer_tail_separately():
     seen = {}
 
     class _RecLLM:
-        async def complete(self, *, system, messages, tools):
+        async def complete(self, *, system, messages, tools, **kw):
             seen["system"] = system
             return types.SimpleNamespace(text="Karibu!", tool_calls=[],
                                          assistant_content=[], usage={})

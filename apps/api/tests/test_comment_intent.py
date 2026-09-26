@@ -18,7 +18,7 @@ class _CapturingLLM:
     def __init__(self, label="high"):
         self.label, self.prompt, self.system = label, "", ""
 
-    async def complete(self, *, system, messages, tools):
+    async def complete(self, *, system, messages, tools, **kw):
         self.system = system
         self.prompt = messages[0]["content"]
         return types.SimpleNamespace(text=self.label, tool_calls=[],
@@ -27,7 +27,7 @@ class _CapturingLLM:
 
 def _prompt_for(text, monkeypatch, label="high"):
     llm = _CapturingLLM(label)
-    monkeypatch.setattr(rt, "build_llm", lambda model=None: llm)
+    monkeypatch.setattr(rt, "build_llm", lambda model=None, **kw: llm)
     out = asyncio.run(rt.classify_comment_intent(text))
     return llm.prompt, out
 

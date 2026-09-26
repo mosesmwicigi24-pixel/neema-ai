@@ -175,7 +175,7 @@ class _LLM:
         self.text = text
         self.calls = []
 
-    async def complete(self, system, messages, tools=None):
+    async def complete(self, system, messages, tools=None, **kw):
         self.calls.append(messages[0]["content"])
         return types.SimpleNamespace(text=self.text)
 
@@ -183,7 +183,7 @@ class _LLM:
 def test_double_verification_reads_every_draft_twice_and_merges(monkeypatch):
     monkeypatch.setattr(settings, "comment_reply_review", True, raising=False)
     llm = _LLM("verdict=fail | issues=their question about South Africa is unanswered")
-    monkeypatch.setattr(rt, "build_llm", lambda model=None: llm)
+    monkeypatch.setattr(rt, "build_llm", lambda model=None, **kw: llm)
     # the rules find the wrong item (HARD) and the reviewer a missing answer (SOFT): both are read
     v = asyncio.run(rv.review_reply(GOLD_ASK, GOLD_LIVE_REPLY, [SILVER]))
     assert v["ok"] is False and v["by"] == "rules+reviewer" and len(llm.calls) == 1
@@ -210,7 +210,7 @@ def test_double_verification_reads_every_draft_twice_and_merges(monkeypatch):
 def test_the_reviewer_is_switchable_and_a_model_outage_leaves_the_rules_verdict(monkeypatch):
     draft = "The Golden Communion Tray is $220. No shop in South Africa; DHL delivers. How many?"
     monkeypatch.setattr(settings, "comment_reply_review", False, raising=False)
-    monkeypatch.setattr(rt, "build_llm", lambda model=None: (_ for _ in ()).throw(AssertionError("no model")))
+    monkeypatch.setattr(rt, "build_llm", lambda model=None, **kw: (_ for _ in ()).throw(AssertionError("no model")))
     assert asyncio.run(rv.review_reply(GOLD_ASK, draft, [GOLDEN])) == {
         "ok": True, "issues": [], "hard": [], "soft": [], "by": "rules"}
     monkeypatch.setattr(settings, "comment_reply_review", True, raising=False)
@@ -218,7 +218,7 @@ def test_the_reviewer_is_switchable_and_a_model_outage_leaves_the_rules_verdict(
     class _Down:
         async def complete(self, *a, **k):
             raise RuntimeError("model down")
-    monkeypatch.setattr(rt, "build_llm", lambda model=None: _Down())
+    monkeypatch.setattr(rt, "build_llm", lambda model=None, **kw: _Down())
     assert asyncio.run(rv.review_reply(GOLD_ASK, draft, [GOLDEN])) == {
         "ok": True, "issues": [], "hard": [], "soft": [], "by": "rules"}
     # a rule failure still stands with the model down — and it is hard
@@ -253,7 +253,7 @@ class _TurnLLM:
         self.texts = list(texts)
         self.calls = []
 
-    async def complete(self, system, messages, tools=None):
+    async def complete(self, system, messages, tools=None, **kw):
         self.calls.append({"system": system, "messages": messages, "tools": tools})
         return types.SimpleNamespace(text=self.texts.pop(0) if self.texts else "")
 
@@ -459,10 +459,10 @@ def test_run_turn_gates_every_real_turn_and_reports_to_the_caller():
     assert 'tool_log.append({"tool": call.name, "input": call.input, "out": out})' in src
     assert "if reply and not read_only and not scribe_only and _gate_applies(user_text):" in src
     assert "reply, _held, _gate_outcome = await _gate_turn_reply(" in src
-    assert "fx=_fx_rates, closer=is_closer(user_text or \"\"))" in src
+    assert "fx=_fx_rates, closer=is_closer(user_text or \"\"), tools=tools," in src
     assert 'turn_facts.update({"tools": tool_log, "held": list(_held), "review": _gate_outcome})' in src
     # the gate runs before the spend is measured and the reply returned
-    assert src.index("await _gate_turn_reply(") < src.index("await ai_budget.add_spend(")
+    assert src.index("await _gate_turn_reply(") < src.index("svc.log_agent_usage(")
     assert "_gate_post_product = str((_known or {}).get(\"name\") or \"\")" in src
 
 
@@ -571,7 +571,7 @@ def test_the_reviewer_reads_the_conversation_and_the_tools_in_a_private_chat(mon
     monkeypatch.setattr(settings, "reply_review", True, raising=False)
     llm = _LLM("verdict=fail | issues=re-asks the colour they gave")
     chosen = []
-    monkeypatch.setattr(rt, "build_llm", lambda model=None: chosen.append(model) or llm)
+    monkeypatch.setattr(rt, "build_llm", lambda model=None, **kw: chosen.append(model) or llm)
     transcript = [{"role": "user", "content": "I want the cassock in red"},
                   {"role": "assistant", "content": "Red it is — what size?"},
                   {"role": "user", "content": "Size L"}]
@@ -594,7 +594,7 @@ def test_the_reviewer_reads_the_conversation_and_the_tools_in_a_private_chat(mon
 
 def test_the_private_chat_reviewer_has_its_own_switch(monkeypatch):
     monkeypatch.setattr(settings, "reply_review", False, raising=False)
-    monkeypatch.setattr(rt, "build_llm", lambda model=None: (_ for _ in ()).throw(AssertionError("no model")))
+    monkeypatch.setattr(rt, "build_llm", lambda model=None, **kw: (_ for _ in ()).throw(AssertionError("no model")))
     v = asyncio.run(rv.review_reply("hi", "Hello! How can I help?", [], mode="dm"))
     assert v == {"ok": True, "issues": [], "hard": [], "soft": [], "by": "rules"}
     assert settings.reply_review is True or True

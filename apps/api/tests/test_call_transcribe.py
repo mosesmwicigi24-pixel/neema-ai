@@ -64,11 +64,11 @@ def test_summarize_transcript_uses_light_model(monkeypatch):
     captured = {}
 
     class _FakeLLM:
-        async def complete(self, *, system, messages, tools):
+        async def complete(self, *, system, messages, tools, **kw):
             captured.update(system=system, messages=messages, tools=tools)
             return types.SimpleNamespace(text="  Two cassocks, KES 9000, deliver Fri  ")
 
-    monkeypatch.setattr("app.agent.runtime.build_llm", lambda model=None: _FakeLLM())
+    monkeypatch.setattr("app.agent.runtime.build_llm", lambda model=None, **kw: _FakeLLM())
     out = asyncio.run(ct.summarize_transcript("Nataka cass mbili, how much? Ni 9000."))
     assert out == "Two cassocks, KES 9000, deliver Fri"          # stripped
     assert captured["messages"][0]["content"].startswith("Nataka")  # transcript passed through

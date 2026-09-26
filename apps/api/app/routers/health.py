@@ -58,6 +58,15 @@ async def health(request: Request):
                          "held": tally.get("held", 0)}
     except Exception:
         pass
+    # WHERE THE MONEY WENT (owner, 2026-09-26): today's spend against the
+    # rungs, by purpose and by model — every model call is metered.
+    try:
+        from app.services.ai_budget import read_breakdown
+        spend = await read_breakdown(getattr(request.app.state, "redis", None))
+        if spend:
+            out["spend"] = spend
+    except Exception:
+        pass
     # WE SELL CHURCH GOODS ONLY (owner, 2026-09-25): what the guard did today
     # — asks for other goods declined, threads paused, silenced, lifted.
     try:

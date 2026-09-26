@@ -108,7 +108,7 @@ async def _compose_bridge(db, redis, dest_conv, src_channel: str,
         "mention windows, policies or systems — just continue the conversation.]"
     )
     reply = await runtime.run_turn(
-        db, redis, wa_id=key, user_text=text, llm=runtime.build_llm(),
+        db, redis, wa_id=key, user_text=text, llm=runtime.build_llm(purpose="bridge"),
         channel=dest_conv.channel,
         external_id=(None if dest_conv.channel == "whatsapp" else dest_conv.external_id),
         read_only=True)
@@ -266,7 +266,7 @@ async def sweep_missed_replies(redis, *, min_age_s: int = 90, max_age_h: int = 2
     (~276 model turns) for ONE undeliverable thread. Three strikes, then the
     thread goes to a human with the reason, which also removes it from the
     sweep's query for good."""
-    from app.agent.runtime import _run_and_send_meta, _is_paused, escalate_to_human
+    from app.agent.runtime import _run_and_send_meta, _is_paused, escalate_to_human, silenced_since
 
     now = datetime.now(timezone.utc)
     young = now - timedelta(seconds=min_age_s)      # give the normal path its chance
@@ -309,6 +309,20 @@ async def sweep_missed_replies(redis, *, min_age_s: int = 90, max_age_h: int = 2
             pass
         if await _is_paused(redis, channel, ext):
             continue
+        # Deliberate silence is not a miss: the turn ran and chose to say
+        # nothing (a closer, a held acknowledgement, the guard's pause, an
+        # echo). Re-running it composed the same silence, fully billed, up to
+        # three times per thread (cost audit, 2026-09-26).
+        try:
+            _quiet = await silenced_since(redis, channel, ext)
+            _at = msg.created_at
+            if _quiet is not None and _at is not None:
+                if _at.tzinfo is None:
+                    _at = _at.replace(tzinfo=timezone.utc)
+                if _quiet >= _at:
+                    continue
+        except Exception:
+            pass
         # Fresh recheck: has an outbound landed since we queried? (normal path or
         # a human just replied) — if so, leave it alone.
         async with AsyncSessionLocal() as db2:

@@ -91,7 +91,7 @@ class _CapturingLLM:
     def __init__(self, label="high"):
         self.label, self.prompt = label, ""
 
-    async def complete(self, *, system, messages, tools):
+    async def complete(self, *, system, messages, tools, **kw):
         self.prompt = messages[0]["content"]
         return types.SimpleNamespace(text=self.label, tool_calls=[],
                                      assistant_content=[], usage={})
@@ -99,7 +99,7 @@ class _CapturingLLM:
 
 def test_the_model_is_told_goodwill_is_not_negative(monkeypatch):
     llm = _CapturingLLM("goodwill")
-    monkeypatch.setattr(rt, "build_llm", lambda model=None: llm)
+    monkeypatch.setattr(rt, "build_llm", lambda model=None, **kw: llm)
     # a goodwill phrasing the regex does not know (French) reaches the model…
     out = asyncio.run(rt.classify_comment_intent("On vous attend avec impatience en Zambie"))
     assert out == "goodwill"                       # …and the label passes through

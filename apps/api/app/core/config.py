@@ -142,6 +142,11 @@ class Settings(BaseSettings):
     # enquiries merges into ONE model call — half the turns on a typing
     # customer, and one coherent answer instead of two overlapping ones.
     whatsapp_debounce_seconds: int = 30
+    # Messenger / Instagram / TikTok DMs: rapid-fire messages are combined for
+    # this long and answered ONCE (cost audit, 2026-09-26). Shorter than
+    # WhatsApp's: a chat bubble expects a quicker turn, and "typing…" shows
+    # meanwhile. 0 disables the buffer.
+    meta_debounce_seconds: int = 12
     whatsapp_verify_token: str = ""
     # Set only when the WhatsApp product lives in a DIFFERENT Meta app than
     # Messenger (different X-Hub-Signature-256 secret). Falls back to

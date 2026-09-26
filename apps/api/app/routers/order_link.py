@@ -40,6 +40,19 @@ def new_short_ref() -> str:
     return "".join(secrets.choice(_ALPHABET) for _ in range(6))
 
 
+def customer_link(row) -> str:
+    """The ONE link we hand a customer for an order: the short ref when it has
+    one, else the hub's durable page, else the pay session. The reminder, the
+    status check and the paid receipt all read this."""
+    if row is None:
+        return ""
+    base = (settings.media_public_url or "").rstrip("/")
+    ref = getattr(row, "short_ref", None)
+    if ref and base:
+        return f"{base}/api/r/{ref}"
+    return str(getattr(row, "hub_public_url", None) or getattr(row, "hub_payment_url", None) or "").strip()
+
+
 async def assign_short_ref(db, row: OrderEvent) -> str:
     """Give this order a ref, retrying on the (vanishingly rare) collision.
 

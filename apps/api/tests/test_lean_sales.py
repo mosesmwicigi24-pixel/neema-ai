@@ -323,15 +323,15 @@ def test_post_identity_remembers_how_the_item_looks(monkeypatch):
 def test_describe_post_image_rejects_nonsense_and_never_raises(monkeypatch):
     class _LLM:
         def __init__(self, text): self.text = text
-        async def complete(self, *, system, messages, tools):
+        async def complete(self, *, system, messages, tools, **kw):
             return types.SimpleNamespace(text=self.text)
     monkeypatch.setattr(rt.settings, "tier2_vision", True, raising=False)
     monkeypatch.setattr("app.agent.media.load_image_block", lambda url: {"type": "image"})
-    monkeypatch.setattr(rt, "build_llm", lambda model=None: _LLM("NONE"))
+    monkeypatch.setattr(rt, "build_llm", lambda model=None, **kw: _LLM("NONE"))
     assert asyncio.run(rt._describe_post_image("https://x/y.jpg")) == ""
-    monkeypatch.setattr(rt, "build_llm", lambda model=None: _LLM("Green chasuble with gold piping."))
+    monkeypatch.setattr(rt, "build_llm", lambda model=None, **kw: _LLM("Green chasuble with gold piping."))
     assert asyncio.run(rt._describe_post_image("https://x/y.jpg")) == "Green chasuble with gold piping"
-    monkeypatch.setattr(rt, "build_llm", lambda model=None: (_ for _ in ()).throw(RuntimeError("down")))
+    monkeypatch.setattr(rt, "build_llm", lambda model=None, **kw: (_ for _ in ()).throw(RuntimeError("down")))
     assert asyncio.run(rt._describe_post_image("https://x/y.jpg")) == ""
     assert asyncio.run(rt._describe_post_image("")) == ""
 
