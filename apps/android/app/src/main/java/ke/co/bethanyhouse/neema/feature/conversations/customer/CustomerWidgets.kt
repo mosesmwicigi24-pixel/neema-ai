@@ -38,19 +38,23 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
+import ke.co.bethanyhouse.neema.core.ui.theme.NeemaFont
+import ke.co.bethanyhouse.neema.core.ui.theme.Palette
+import ke.co.bethanyhouse.neema.core.ui.theme.ChannelColors
+import ke.co.bethanyhouse.neema.feature.conversations.Hue
 
 // ── Metadata (the web's STAGE_META / TIER_META / SOURCE_META / CH_META) ─────
 
 data class StageMeta(val label: String, val color: Color, val dot: Color)
 
 private val STAGE_META = mapOf(
-    "new" to StageMeta("New", Color(0xFF78716C), Color(0xFFA8A29E)),
-    "contacted" to StageMeta("Contacted", Color(0xFF2563EB), Color(0xFF3B82F6)),
-    "qualified" to StageMeta("Qualified", Color(0xFF7C3AED), Color(0xFF8B5CF6)),
-    "proposal" to StageMeta("Proposal", Color(0xFFD97706), Color(0xFFF59E0B)),
-    "negotiation" to StageMeta("Negotiating", Color(0xFFEA580C), Color(0xFFF97316)),
-    "won" to StageMeta("Won ✓", Color(0xFF047857), Color(0xFF10B981)),
-    "lost" to StageMeta("Lost", Color(0xFFEF4444), Color(0xFFF87171)),
+    "new" to StageMeta("New", Palette.Stone500, Palette.Stone400),
+    "contacted" to StageMeta("Contacted", Palette.Blue600, Palette.Blue500),
+    "qualified" to StageMeta("Qualified", Palette.Violet600, Hue.Violet500),
+    "proposal" to StageMeta("Proposal", Palette.Amber600, Palette.Amber500),
+    "negotiation" to StageMeta("Negotiating", Hue.Orange600, Hue.Orange500),
+    "won" to StageMeta("Won ✓", Palette.Emerald700, Palette.Emerald500),
+    "lost" to StageMeta("Lost", Palette.Red500, Palette.Red400),
 )
 
 /** A custom (operator-added) stage shows its own label in the pipeline's gold, not "New". */
@@ -68,12 +72,12 @@ fun stageLabel(s: String): String = PIPE_LABEL[s] ?: s.replaceFirstChar { it.upp
 data class TierMeta(val label: String, val color: Color, val border: Color, val title: String, val bg: Color)
 
 val TIER_META = mapOf(
-    "vip" to TierMeta("VIP", Color(0xFF92400E), Color(0xFFFCD34D), "Top spender / very frequent buyer", Color(0xFFFEF3C7)),
-    "loyal" to TierMeta("Loyal", Color(0xFF047857), Color(0xFF6EE7B7), "Repeat customer", Color(0xFFD1FAE5)),
-    "regular" to TierMeta("Regular", Color(0xFF0369A1), Color(0xFF7DD3FC), "A few orders", Color(0xFFE0F2FE)),
-    "new" to TierMeta("New", Color(0xFF57534E), Color(0xFFD6D3D1), "First order", Color(0xFFF5F5F4)),
-    "prospect" to TierMeta("Prospect", Color(0xFFA8A29E), Color(0xFFE7E5E4), "No orders yet", Color(0xFFFAFAF9)),
-    "at_risk" to TierMeta("At risk", Color(0xFFB91C1C), Color(0xFFFCA5A5), "Good customer who's gone quiet — worth a nudge", Color(0xFFFEE2E2)),
+    "vip" to TierMeta("VIP", Palette.Amber800, Palette.Amber300, "Top spender / very frequent buyer", Palette.Amber100),
+    "loyal" to TierMeta("Loyal", Palette.Emerald700, Palette.Emerald300, "Repeat customer", Hue.Emerald100),
+    "regular" to TierMeta("Regular", Hue.Sky700, Hue.Sky300, "A few orders", Hue.Sky100),
+    "new" to TierMeta("New", Palette.Stone600, Palette.Stone300, "First order", Palette.Stone100),
+    "prospect" to TierMeta("Prospect", Palette.Stone400, Palette.Stone200, "No orders yet", Palette.Stone50),
+    "at_risk" to TierMeta("At risk", Palette.Red700, Palette.Red300, "Good customer who's gone quiet — worth a nudge", Palette.Red100),
 )
 
 /** Where a lead first found us (captured by the AI or set by an operator). */
@@ -102,26 +106,26 @@ fun sourceMeta(src: String): Pair<String, String>? =
 
 /** Channel label + brand colour for the linked-identities list. */
 fun chMeta(channel: String): Pair<String, Color> = when (channel) {
-    "whatsapp" -> "WhatsApp" to Color(0xFF25D366)
-    "messenger" -> "Messenger" to Color(0xFF0084FF)
-    "facebook" -> "Facebook" to Color(0xFF1877F2)
-    "instagram" -> "Instagram" to Color(0xFFE1306C)
-    "email" -> "Email" to Color(0xFF6366F1)
-    "sms" -> "SMS" to Color(0xFF64748B)
-    else -> channel.replaceFirstChar { it.uppercase() } to Color(0xFF64748B)
+    "whatsapp" -> "WhatsApp" to ChannelColors.WhatsApp
+    "messenger" -> "Messenger" to ChannelColors.Messenger
+    "facebook" -> "Facebook" to ChannelColors.Facebook
+    "instagram" -> "Instagram" to ChannelColors.Instagram
+    "email" -> "Email" to ChannelColors.Email
+    "sms" -> "SMS" to Palette.Slate500
+    else -> channel.replaceFirstChar { it.uppercase() } to Palette.Slate500
 }
 
 // Goldenrod stepper palette (sampled by the web from its reference design).
-val PIPE_GOLD = Color(0xFFC89B3C)
-val PIPE_GOLD_SOLID = Color(0xFFA97C14)
-private val PIPE_IDLE = Color(0xFFE7E5E4)
-private val PIPE_IDLE_TEXT = Color(0xFFA8A29E)
-private val PIPE_LOST = Color(0xFFF4CCCC)
-private val PIPE_LOST_ICON = Color(0xFFEFA3A3)
-private val PIPE_LOST_TEXT = Color(0xFFE08A8A)
-private val LOST_RED = Color(0xFFEF4444)
+val PIPE_GOLD = Hue.PipeGold
+val PIPE_GOLD_SOLID = Hue.PipeGoldSolid
+private val PIPE_IDLE = Palette.Stone200
+private val PIPE_IDLE_TEXT = Palette.Stone400
+private val PIPE_LOST = Hue.PipeLost
+private val PIPE_LOST_ICON = Hue.PipeLostIcon
+private val PIPE_LOST_TEXT = Hue.PipeLostText
+private val LOST_RED = Palette.Red500
 
-val WA_GREEN = Color(0xFF25D366)
+val WA_GREEN = ChannelColors.WhatsApp
 
 fun Color.dim(a: Float = 0.12f) = copy(alpha = a)
 
@@ -148,14 +152,14 @@ fun Hint(text: String?, content: @Composable () -> Unit) {
 fun ChannelBadge(channel: String, size: Dp = 20.dp) {
     val bg: Brush = when (channel) {
         "whatsapp" -> SolidColor(WA_GREEN)
-        "messenger" -> SolidColor(Color(0xFF0099FF))
-        "facebook" -> SolidColor(Color(0xFF1877F2))
+        "messenger" -> SolidColor(Hue.MessengerSky)
+        "facebook" -> SolidColor(ChannelColors.Facebook)
         "instagram" -> Brush.linearGradient(
-            listOf(Color(0xFFF09433), Color(0xFFE6683C), Color(0xFFDC2743), Color(0xFFCC2366), Color(0xFFBC1888)),
+            listOf(Hue.InstaOrange, Hue.InstaCoral, Hue.InstaRed, Hue.InstaMagenta, Hue.InstaPurple),
         )
-        "email" -> SolidColor(Color(0xFF4D66B3))
-        "web" -> SolidColor(Color(0xFF64748B))
-        else -> SolidColor(Color(0xFF2C4E18))
+        "email" -> SolidColor(Palette.Indigo500)
+        "web" -> SolidColor(Palette.Slate500)
+        else -> SolidColor(Palette.Moss800)
     }
     if (channel == "web") {
         // A website visitor: a globe, never WhatsApp's mark.
@@ -231,7 +235,7 @@ fun SmallInput(
         onValueChange = onChange,
         singleLine = singleLine,
         minLines = minLines,
-        textStyle = TextStyle(fontSize = fontSize, color = c.text),
+        textStyle = TextStyle(fontFamily = NeemaFont, fontSize = fontSize, color = c.text),
         cursorBrush = SolidColor(c.gold),
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = if (singleLine) ImeAction.Done else ImeAction.Default),
         keyboardActions = KeyboardActions(onDone = { onDone?.invoke() }),
@@ -286,7 +290,7 @@ fun EditableField(
                 keyboardType = keyboardType, focusRequester = focus, onDone = commit,
             )
             IconButton(onClick = commit, modifier = Modifier.size(32.dp)) {
-                Icon(Icons.Default.Check, "Save", tint = Color(0xFF059669), modifier = Modifier.size(16.dp))
+                Icon(Icons.Default.Check, "Save", tint = Palette.Emerald600, modifier = Modifier.size(16.dp))
             }
             IconButton(onClick = { draft = value; editing = false }, modifier = Modifier.size(32.dp)) {
                 Icon(Icons.Default.Close, "Cancel", tint = c.muted, modifier = Modifier.size(16.dp))
@@ -308,9 +312,9 @@ fun EditableField(
 @Composable
 fun ScoreBar(score: Int) {
     val color = when {
-        score >= 70 -> Color(0xFF10B981)
-        score >= 40 -> Color(0xFFF59E0B)
-        else -> Color(0xFFD6D3D1)
+        score >= 70 -> Palette.Emerald500
+        score >= 40 -> Palette.Amber500
+        else -> Palette.Stone300
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
         ProgressBar(score / 100f, color, Modifier.weight(1f).height(6.dp))
@@ -436,6 +440,9 @@ fun PipelineStepper(
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val needed = 38.dp * stages.size + 16.dp
         val fits = maxWidth >= needed
+        // Each label gets its node's share of the row (less a hair of air), so two
+        // neighbours never run together ("ContactedQualified") in a wide font.
+        val labelMax = (if (fits) (maxWidth - 16.dp) / stages.size else 38.dp) - 3.dp
         Row(
             (if (fits) Modifier.fillMaxWidth() else Modifier.horizontalScroll(rememberScrollState()).width(needed))
                 .padding(start = 8.dp, end = 8.dp, bottom = 18.dp),
@@ -473,10 +480,18 @@ fun PipelineStepper(
                 }
                 // The label hangs under the node and may be wider than it (whitespace-nowrap).
                 Box(Modifier.size(0.dp), contentAlignment = Alignment.TopCenter) {
-                    Text(
-                        stageLabel(stage), fontSize = 9.sp, color = labelColor, maxLines = 1, softWrap = false,
-                        fontWeight = if (state == StepState.Active) FontWeight.Bold else FontWeight.SemiBold,
-                        modifier = Modifier.wrapContentSize(Alignment.TopCenter, unbounded = true).offset(x = (-12).dp, y = 15.dp),
+                    // Full size (9sp) where it fits its slot; a long label in a crowded row
+                    // steps down to 7sp rather than running into its neighbour.
+                    androidx.compose.foundation.text.BasicText(
+                        stageLabel(stage), maxLines = 1, softWrap = false,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        style = androidx.compose.ui.text.TextStyle(
+                            fontFamily = NeemaFont, color = labelColor,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            fontWeight = if (state == StepState.Active) FontWeight.Bold else FontWeight.SemiBold,
+                        ),
+                        autoSize = androidx.compose.foundation.text.TextAutoSize.StepBased(minFontSize = 7.sp, maxFontSize = 9.sp, stepSize = 0.5.sp),
+                        modifier = Modifier.wrapContentSize(Alignment.TopCenter, unbounded = true).offset(x = (-12).dp, y = 15.dp).widthIn(max = labelMax),
                     )
                 }
                 // A finger-sized target over node + label, without changing the layout.

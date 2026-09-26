@@ -35,6 +35,8 @@ import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import ke.co.bethanyhouse.neema.core.util.Fmt
 import ke.co.bethanyhouse.neema.feature.conversations.isWebVisitor
 import kotlin.math.roundToInt
+import ke.co.bethanyhouse.neema.core.ui.theme.Palette
+import ke.co.bethanyhouse.neema.feature.conversations.Hue
 
 /** What every tab needs, computed once by the panel. */
 class PanelCtx(
@@ -141,13 +143,13 @@ private fun PipelineSection(vm: CustomerViewModel, ctx: PanelCtx) {
         if (p.leadStageSource == "auto") {
             Row(Modifier.padding(bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "✦ AI", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF7C3AED).themed(),
-                    modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(Color(0xFF7C3AED).dim(0.08f))
-                        .border(1.dp, Color(0xFFDDD6FE), RoundedCornerShape(4.dp)).padding(horizontal = 4.dp, vertical = 1.dp),
+                    "✦ AI", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Palette.Violet600.themed(),
+                    modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(Palette.Violet600.dim(0.08f))
+                        .border(1.dp, Palette.Violet200, RoundedCornerShape(4.dp)).padding(horizontal = 4.dp, vertical = 1.dp),
                 )
                 Text(
                     " set from the conversation — tap any stage to override.",
-                    fontSize = 10.sp, color = Color(0xFF7C3AED).themed(),
+                    fontSize = 10.sp, color = Palette.Violet600.themed(),
                 )
             }
         }
@@ -162,8 +164,8 @@ private fun PipelineSection(vm: CustomerViewModel, ctx: PanelCtx) {
                     modifier = Modifier.padding(bottom = 6.dp)) {
                     customs.forEach { s ->
                         RemovableChip(
-                            s, if (c.isDark) PIPE_GOLD else Color(0xFF8A6D1F), if (c.isDark) PIPE_GOLD.dim(0.15f) else Color(0xFFFDF8EC),
-                            if (c.isDark) PIPE_GOLD.dim(0.5f) else Color(0xFFE3CF9B), enabled = !stagesSaving,
+                            s, if (c.isDark) PIPE_GOLD else Hue.PipeGoldInk, if (c.isDark) PIPE_GOLD.dim(0.15f) else Hue.PipeGoldWash,
+                            if (c.isDark) PIPE_GOLD.dim(0.5f) else Hue.PipeGoldRim, enabled = !stagesSaving,
                         ) {
                             vm.saveCustomStages(customs.filter { it != s })
                         }
@@ -247,7 +249,7 @@ private fun NotesSection(vm: CustomerViewModel, ctx: PanelCtx) {
             }
             Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 TextButton(onClick = { vm.saveNotes() }) {
-                    Text("Save", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF059669))
+                    Text("Save", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Palette.Emerald600)
                 }
                 TextButton(onClick = { vm.cancelEditNotes() }) { Text("Cancel", fontSize = 10.sp, color = c.muted) }
             }
@@ -278,9 +280,9 @@ private fun IdentitySection(vm: CustomerViewModel, ctx: PanelCtx, onOpenIdentity
     val unmerging by vm.unmerging.collectAsState()
     // In the ViewModel: kept through a failed merge, cleared once it went through.
     val mergeQuery by vm.mergeQuery.collectAsState()
-    val slate = if (c.isDark) c.textMid else Color(0xFF1E293B)
+    val slate = if (c.isDark) c.textMid else Hue.Slate800
     // The web's filled slate (#1e293b) buttons; on dark, the palette's deep blue keeps white text legible.
-    val slateFill = if (c.isDark) c.border2 else Color(0xFF1E293B)
+    val slateFill = if (c.isDark) c.border2 else Hue.Slate800
 
     CrmSection(
         "Cross-channel Identity",
@@ -323,7 +325,7 @@ private fun IdentitySection(vm: CustomerViewModel, ctx: PanelCtx, onOpenIdentity
                 p.linkedIdentities.forEach { id ->
                     val web = isWebVisitor(id.externalId)
                     // A legacy web-visitor identity is not WhatsApp: no WhatsApp green.
-                    val color = if (web) Color(0xFF64748B).themed() else chMeta(id.channel).second
+                    val color = if (web) Palette.Slate500.themed() else chMeta(id.channel).second
                     val label = channelLabel(id.channel, id.externalId)
                     val digits = realPhoneDigits(id.externalId)
                     // A real WhatsApp number opens a wa.me chat; any other channel (and a legacy
@@ -450,7 +452,7 @@ private fun MergeCandidate(s: MergeSuggestion, fill: Color, enabled: Boolean = t
     val strong = s.strength == "strong"
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(c.bg2)
-            .border(if (strong) 1.5.dp else 1.dp, if (strong) Color(0xFF86C95E) else c.hairline, RoundedCornerShape(8.dp))
+            .border(if (strong) 1.5.dp else 1.dp, if (strong) Hue.MossBright else c.hairline, RoundedCornerShape(8.dp))
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -467,9 +469,9 @@ private fun MergeCandidate(s: MergeSuggestion, fill: Color, enabled: Boolean = t
             FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(2.dp),
                 modifier = Modifier.padding(top = 2.dp)) {
                 s.evidence.forEach { ev ->
-                    Text(ev, fontSize = 9.sp, color = if (strong) (if (c.isDark) c.gold2 else Color(0xFF427425)) else c.textMid,
+                    Text(ev, fontSize = 9.sp, color = if (strong) (if (c.isDark) c.gold2 else Palette.Moss700) else c.textMid,
                         modifier = Modifier.clip(RoundedCornerShape(50))
-                            .background(if (strong) (if (c.isDark) c.greenDim else Color(0xFFE9F6DF)) else c.bg3).padding(horizontal = 6.dp, vertical = 2.dp))
+                            .background(if (strong) (if (c.isDark) c.greenDim else Hue.MossWash) else c.bg3).padding(horizontal = 6.dp, vertical = 2.dp))
                 }
             }
         }
@@ -514,9 +516,9 @@ fun InsightsTab(ctx: PanelCtx) {
             if (r.overdue) {
                 Text(
                     "⏰ Overdue — it's been longer than their usual gap. A good moment to check in.",
-                    fontSize = 11.sp, color = Color(0xFFB45309).themed(),
+                    fontSize = 11.sp, color = Palette.Amber700.themed(),
                     modifier = Modifier.padding(top = 4.dp).fillMaxWidth().clip(RoundedCornerShape(4.dp))
-                        .background(Color(0xFFF59E0B).dim(0.1f)).border(1.dp, Color(0xFFFDE68A), RoundedCornerShape(4.dp))
+                        .background(Palette.Amber500.dim(0.1f)).border(1.dp, Palette.Amber200, RoundedCornerShape(4.dp))
                         .padding(horizontal = 8.dp, vertical = 6.dp),
                 )
             }
@@ -557,7 +559,7 @@ fun InsightsTab(ctx: PanelCtx) {
                     Text(row.label, fontSize = 10.sp, color = c.textMid, modifier = Modifier.weight(1f))
                     Text("${Fmt.number(row.pts)}/${Fmt.number(row.max)}", fontSize = 10.sp, color = c.textMid)
                 }
-                ProgressBar(if (row.max != 0.0) (row.pts / row.max).toFloat() else 0f, Color(0xFF22C55E), Modifier.fillMaxWidth().height(4.dp))
+                ProgressBar(if (row.max != 0.0) (row.pts / row.max).toFloat() else 0f, Palette.Green500, Modifier.fillMaxWidth().height(4.dp))
             }
         }
     }
@@ -567,10 +569,10 @@ fun InsightsTab(ctx: PanelCtx) {
 
 @Composable
 fun orderStatusColor(status: String?): Color = when (status) {
-    "delivered" -> Color(0xFF047857)
-    "confirmed" -> Color(0xFF1D4ED8)
-    "cancelled" -> Color(0xFFDC2626)
-    else -> Color(0xFFB45309)
+    "delivered" -> Palette.Emerald700
+    "confirmed" -> Palette.Blue700
+    "cancelled" -> Palette.Red600
+    else -> Palette.Amber700
 }
 
 @Composable
@@ -588,7 +590,7 @@ fun ActivityTab(ctx: PanelCtx) {
                     Text(
                         "Same customer in the shop" + (p.hubCustomerName?.ifEmpty { null }?.let { " · $it" } ?: "") +
                             " — showing full in-shop + WhatsApp history",
-                        fontSize = 11.sp, color = if (c.isDark) c.gold2 else Color(0xFF3F6417),
+                        fontSize = 11.sp, color = if (c.isDark) c.gold2 else Hue.Lime800,
                     )
                 }
             }

@@ -48,15 +48,16 @@ import coil.request.ImageRequest
 import coil.request.videoFrameMillis
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 
 // Bubble palette (the web's literal hex values).
-internal val InboundTint: Color @androidx.compose.runtime.Composable get() = ink(Color(0xFF699A32))
-internal val InboundTintBg: Color @androidx.compose.runtime.Composable get() = if (ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.isDark) Color(0xFF699A32).copy(alpha = 0.16f) else Color(0xFFF0F9E8)
+internal val InboundTint: Color @androidx.compose.runtime.Composable get() = ink(Palette.Willow600)
+internal val InboundTintBg: Color @androidx.compose.runtime.Composable get() = if (ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.isDark) Palette.Willow600.copy(alpha = 0.16f) else Hue.MossTint
 
 /** The revealed transcript / analysis text inside an inbound bubble (light or dark page). */
 @Composable
 private fun revealInk(): Color =
-    if (ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.isDark) Color.White.copy(alpha = 0.7f) else Color(0xFF3A5C28).copy(alpha = 0.7f)
+    if (ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.isDark) Color.White.copy(alpha = 0.7f) else Hue.ForestInk.copy(alpha = 0.7f)
 
 /** "Show transcript" / "Show image analysis" pill toggle. */
 @Composable
@@ -119,7 +120,7 @@ internal fun MediaFallback(kind: String, messageId: String?, inbound: Boolean, o
                     }
                     .padding(horizontal = 8.dp, vertical = 3.dp),
                 fontSize = 10.sp, fontWeight = FontWeight.Medium,
-                color = if (inbound) ink(Color(0xFF427425)) else Color.White,
+                color = if (inbound) ink(Palette.Moss700) else Color.White,
             )
         }
     }
@@ -157,7 +158,7 @@ internal fun ImageBubble(
         if (!caption.isNullOrBlank() && !caption.startsWith("[")) {
             Text(
                 caption, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(horizontal = 4.dp),
-                color = if (inbound) (if (ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.isDark) ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.text else Color(0xFF1A2E0F)) else Color.White.copy(alpha = 0.9f),
+                color = if (inbound) (if (ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.isDark) ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.text else Hue.ForestText) else Color.White.copy(alpha = 0.9f),
             )
         }
     }
@@ -176,7 +177,7 @@ internal fun VideoBubble(
             MediaFallback("video", messageId, inbound, onRecover) { url = it }
         } else {
             Box(
-                Modifier.width(240.dp).height(180.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF1C2917))
+                Modifier.width(240.dp).height(180.dp).clip(RoundedCornerShape(12.dp)).background(Palette.Ink)
                     .clickable { onView(Viewer.Video(url, messageId)) },
                 contentAlignment = Alignment.Center,
             ) {
@@ -187,7 +188,7 @@ internal fun VideoBubble(
                 PlayBadge(loading = false, video = true)
             }
         }
-        if (!caption.isNullOrBlank()) Text(formatWa(caption), fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(horizontal = 4.dp))
+        if (!caption.isNullOrBlank()) Text(rememberWa(caption), fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(horizontal = 4.dp))
     }
 }
 
@@ -195,9 +196,9 @@ internal fun VideoBubble(
 internal fun PlayBadge(loading: Boolean, video: Boolean) {
     Box(Modifier.size(40.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.9f)), contentAlignment = Alignment.Center) {
         when {
-            loading -> CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = Color(0xFF427425))
-            video -> Icon(Icons.Filled.PlayArrow, "Play", tint = Color(0xFF1C2917))
-            else -> Icon(Icons.Filled.ZoomOutMap, "View", tint = Color(0xFF1C2917), modifier = Modifier.size(18.dp))
+            loading -> CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = Palette.Moss700)
+            video -> Icon(Icons.Filled.PlayArrow, "Play", tint = Palette.Ink)
+            else -> Icon(Icons.Filled.ZoomOutMap, "View", tint = Palette.Ink, modifier = Modifier.size(18.dp))
         }
     }
 }
@@ -220,7 +221,7 @@ internal fun AudioBubble(src: String, transcription: String?, cartText: String?,
         }
     }
     val nc = ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors
-    val fg = if (inbound) (if (nc.isDark) nc.textMid else Color(0xFF427425)) else Color.White
+    val fg = if (inbound) (if (nc.isDark) nc.textMid else Palette.Moss700) else Color.White
     Column(Modifier.widthIn(min = 220.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = {
@@ -278,7 +279,7 @@ internal fun DocumentTile(url: String, name: String, inbound: Boolean) {
     Row(
         Modifier.clip(RoundedCornerShape(12.dp))
             .background(if (inbound) (if (nc.isDark) nc.bg3 else Color.White) else Color.White.copy(alpha = 0.2f))
-            .border(1.dp, if (inbound) (if (nc.isDark) nc.border else Color(0xFFEDF0EA)) else Color.White.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+            .border(1.dp, if (inbound) (if (nc.isDark) nc.border else Palette.Hairline2) else Color.White.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
             .clickable { runCatching { uri.openUri(url) } }
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -363,8 +364,8 @@ internal fun CommentContextCard(
     val dark = inbound && ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.isDark
     Column(
         Modifier.clip(RoundedCornerShape(8.dp))
-            .background(if (dark) Color(0xFF589B31).copy(alpha = 0.10f) else if (inbound) Color(0xFFF0F4EC) else Color.White.copy(alpha = 0.15f))
-            .border(1.dp, if (dark) ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.border else if (inbound) Color(0xFFDDE8D5) else Color.White.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+            .background(if (dark) Palette.Moss600.copy(alpha = 0.10f) else if (inbound) Palette.Leaf else Color.White.copy(alpha = 0.15f))
+            .border(1.dp, if (dark) ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.border else if (inbound) Hue.SageRing else Color.White.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
             .padding(8.dp),
     ) {
         Text(
@@ -372,7 +373,7 @@ internal fun CommentContextCard(
             color = if (inbound) InboundTint else Color.White.copy(alpha = 0.7f),
         )
         Spacer(Modifier.height(4.dp))
-        Text(title, fontSize = 11.sp, lineHeight = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, color = if (dark) ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.text else if (inbound) Color(0xFF3A5C28) else Color.White.copy(alpha = 0.9f))
+        Text(title, fontSize = 11.sp, lineHeight = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, color = if (dark) ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.text else if (inbound) Hue.ForestInk else Color.White.copy(alpha = 0.9f))
         Spacer(Modifier.height(6.dp))
         if (thumb.isNotEmpty() && thumbOk) {
             Box(

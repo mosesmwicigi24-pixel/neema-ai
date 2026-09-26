@@ -11,6 +11,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
+import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 
 /**
  * Port of lib/waText.tsx: render WhatsApp-style inline formatting the way
@@ -22,7 +23,15 @@ import androidx.compose.ui.text.withStyle
 private val TOKEN = Regex("(```[^`]+```|\\*\\*[^*\\n]+\\*\\*|\\*[^*\\n]+\\*|_[^_\\n]+_|~[^~\\n]+~|`[^`\\n]+`)")
 private val URL = Regex("(https?://[^\\s<>\"]+|www\\.[^\\s<>\"]+)", RegexOption.IGNORE_CASE)
 
-fun formatWa(text: String?, linkColor: Color = Color(0xFF2563EB)): AnnotatedString {
+/**
+ * [formatWa] for composition: the regex passes over a long message run once
+ * per text (and link colour), not on every recomposition of its bubble.
+ */
+@androidx.compose.runtime.Composable
+fun rememberWa(text: String?, linkColor: Color = Palette.Blue600): AnnotatedString =
+    androidx.compose.runtime.remember(text, linkColor) { formatWa(text, linkColor) }
+
+fun formatWa(text: String?, linkColor: Color = Palette.Blue600): AnnotatedString {
     if (text.isNullOrEmpty()) return AnnotatedString("")
     val styled = buildAnnotatedString {
         var last = 0

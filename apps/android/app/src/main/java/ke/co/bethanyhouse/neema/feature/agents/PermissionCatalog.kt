@@ -49,7 +49,7 @@ val ROLE_COLORS = listOf(
 
 /** "#589b31" → Color; anything unparseable falls back to the brand green. */
 fun hexColor(hex: String?): Color =
-    runCatching { Color(android.graphics.Color.parseColor(hex?.trim())) }.getOrDefault(Color(0xFF589B31))
+    runCatching { Color(android.graphics.Color.parseColor(hex?.trim())) }.getOrDefault(ke.co.bethanyhouse.neema.core.ui.theme.Palette.Moss600)
 
 /** The users table only knows admin / agent / readonly (toDbRole in the web). */
 fun toDbRole(roleId: String): String = when (roleId) {

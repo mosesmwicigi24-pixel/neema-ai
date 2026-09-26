@@ -10,10 +10,18 @@ import ke.co.bethanyhouse.neema.feature.reports.attempt
 import ke.co.bethanyhouse.neema.feature.reports.friendlyError
 import ke.co.bethanyhouse.neema.feature.reports.recheckAccessOn
 import ke.co.bethanyhouse.neema.app.ToastType
+import ke.co.bethanyhouse.neema.feature.reports.cpu
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /** The web's category list: every distinct, non-empty category, in catalogue order. */
@@ -34,15 +42,68 @@ internal fun filterCatalog(catalog: List<CatalogItem>, filter: String, search: S
 }
 
 /**
+ * A catalogue with each product's searchable text lowercased once, so a
+ * keystroke in the search box over 2,000 products compares strings instead
+ * of lowercasing every name, SKU and alias again.
+ */
+internal class CatalogIndex(val items: List<CatalogItem>) {
+    private val haystacks: List<List<String>> =
+        items.map { i -> buildList(2 + i.aliases.size) { add(i.name.lowercase()); add(i.sku.lowercase()); i.aliases.forEach { add(it.lowercase()) } } }
+    val categories: List<String> = catalogCategories(items)
+    val inStock: Int = items.count { it.inStock }
+
+    /** Exactly [filterCatalog]'s answer. */
+    fun filter(filter: String, search: String): List<CatalogItem> {
+        val q = search.lowercase()
+        if (filter == "all" && q.isEmpty()) return items
+        val out = ArrayList<CatalogItem>()
+        items.forEachIndexed { n, i ->
+            if ((filter == "all" || i.category == filter) && (q.isEmpty() || haystacks[n].any { it.contains(q) })) out += i
+        }
+        return out
+    }
+}
+
+/** What the grid shows: the filtered products, the category menu, and the header's counts. */
+class CatalogView(
+    val filtered: List<CatalogItem>,
+    val categories: List<String>,
+    val total: Int,
+    val inStock: Int,
+) {
+    val outStock: Int get() = total - inStock
+}
+
+/**
  * Catalog state. The list itself is the dashboard's shared, polled
  * `dash.catalog`; this holds the filters and the price audit. Like the web
  * view it is READ-ONLY: products, prices and stock live in the hub, the single
  * source of truth — nothing is written from here.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class CatalogViewModel(private val dash: DashboardViewModel) : ViewModel() {
 
     val filter = MutableStateFlow("all")
     val search = MutableStateFlow("")
+
+    private val cpu = dash.container.cpu
+
+    /** The catalogue indexed once per poll (not once per keystroke). */
+    private val index = dash.catalog.map(::CatalogIndex).flowOn(cpu)
+
+    private fun viewOf(ix: CatalogIndex, f: String, q: String) =
+        CatalogView(ix.filter(f, q), ix.categories, ix.items.size, ix.inStock)
+
+    /**
+     * The grid's contents, filtered off the main thread; a newer keystroke
+     * cancels the search still running for the last one. Starts from the
+     * catalogue already held, so the screen never flashes "No items found".
+     */
+    val view: StateFlow<CatalogView> =
+        combine(index, filter, search) { ix, f, q -> Triple(ix, f, q) }
+            .mapLatest { (ix, f, q) -> viewOf(ix, f, q) }
+            .flowOn(cpu)
+            .stateIn(viewModelScope, SharingStarted.Eagerly, viewOf(CatalogIndex(dash.catalog.value), filter.value, search.value))
 
     private val _audit = MutableStateFlow<PriceAudit?>(null)
     val audit: StateFlow<PriceAudit?> = _audit.asStateFlow()

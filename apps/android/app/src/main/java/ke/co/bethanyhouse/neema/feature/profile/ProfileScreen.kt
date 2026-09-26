@@ -9,9 +9,10 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import ke.co.bethanyhouse.neema.feature.agents.isCramped
-import ke.co.bethanyhouse.neema.feature.agents.keyboardAware
 import ke.co.bethanyhouse.neema.feature.agents.contentOn
-import ke.co.bethanyhouse.neema.feature.agents.neemaSwitchColors
+import ke.co.bethanyhouse.neema.core.ui.components.neemaSwitchColors
+import ke.co.bethanyhouse.neema.core.ui.theme.Palette
+import ke.co.bethanyhouse.neema.feature.reports.AreaPalette
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -65,7 +66,7 @@ import ke.co.bethanyhouse.neema.feature.agents.hexColor
 private val ke.co.bethanyhouse.neema.core.ui.theme.NeemaColors.faint: Color get() = if (isDark) muted else textDim
 
 /** A permission you hold: the web's #2c4e18 on #f0f9ec. */
-private val HasPermText = Color(0xFF2C4E18)
+private val HasPermText = Palette.Moss800
 
 /**
  * The role chip beside your name: `capitalize`d DB role; admin in purple
@@ -77,8 +78,8 @@ private fun BaseRoleBadge(role: String) {
     val c = Neema.colors
     val admin = role == "admin"
     val (fill, text, edge) = when {
-        admin && c.isDark -> Triple(Color(0x33A855F7), Color(0xFFD8B4FE), Color(0x66A855F7))
-        admin -> Triple(Color(0xFFF3E8FF), Color(0xFF7E22CE), Color(0xFFE9D5FF))
+        admin && c.isDark -> Triple(AreaPalette.Purple500.copy(alpha = 0.2f), AreaPalette.Purple300, AreaPalette.Purple500.copy(alpha = 0.4f))
+        admin -> Triple(AreaPalette.Purple100, AreaPalette.Purple700, AreaPalette.Purple200)
         c.isDark -> Triple(c.goldDim, c.gold2, c.border)
         else -> Triple(c.bg3, c.gold2, c.bg4)
     }
@@ -155,7 +156,7 @@ fun ProfileScreen(dash: DashboardViewModel) {
         val compact = isCramped(minOf(maxWidth, 720.dp) - 32.dp, 300.dp)
         val stackTiles = isCramped(minOf(maxWidth, 720.dp) - 32.dp, 260.dp)
         Column(
-            Modifier.fillMaxSize().keyboardAware().verticalScroll(rememberScrollState(preview.scroll)).padding(16.dp),
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState(preview.scroll)).padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             // The web caps this page at max-w-2xl; tablets keep that reading width.
@@ -315,7 +316,7 @@ fun ProfileScreen(dash: DashboardViewModel) {
                                         .padding(10.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Box(Modifier.size(6.dp).clip(CircleShape).background(if (has) c.gold else Color(0xFFD6D3D1)))
+                                    Box(Modifier.size(6.dp).clip(CircleShape).background(if (has) c.gold else Palette.Stone300))
                                     Spacer(Modifier.width(8.dp))
                                     Text(p.label, fontSize = 12.sp, color = if (has) (if (c.isDark) c.gold2 else HasPermText) else c.faint)
                                 }

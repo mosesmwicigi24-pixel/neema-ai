@@ -38,6 +38,7 @@ import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import ke.co.bethanyhouse.neema.core.util.Fmt
 import ke.co.bethanyhouse.neema.feature.conversations.customer.CustomerPanel
 import kotlinx.coroutines.launch
+import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 
 /**
  * The inbox — a port of components/views/ConversationsView.tsx.
@@ -79,6 +80,9 @@ fun ConversationsScreen(dash: DashboardViewModel) {
 
     var viewer by remember { mutableStateOf<Viewer?>(null) }
     val brokenVideos = remember { mutableStateListOf<String>() }
+    // One set per change, not per recomposition: a fresh set on every keystroke in the
+    // composer made every visible bubble of a long thread recompose.
+    val brokenSet by remember { derivedStateOf { brokenVideos.toSet() } }
     var customerOpen by remember { mutableStateOf(true) }      // wide side pane (open by default)
     var customerSheet by remember { mutableStateOf(false) }    // phone / narrow wide
     var activitySheet by remember { mutableStateOf(false) }
@@ -88,17 +92,17 @@ fun ConversationsScreen(dash: DashboardViewModel) {
 
     val threadPane: @Composable (Modifier) -> Unit = { mod ->
         if (active == null) {
-            Box(mod.background(if (Neema.colors.isDark) Neema.colors.bg else Color(0xFFF8FAFC)), contentAlignment = Alignment.Center) {
+            Box(mod.background(if (Neema.colors.isDark) Neema.colors.bg else Palette.Slate50), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("💬", fontSize = 36.sp)
                     Spacer(Modifier.height(8.dp))
-                    Text("Select a conversation", fontSize = 14.sp, color = if (Neema.colors.isDark) Neema.colors.muted else Color(0xFFC5D5BC))
+                    Text("Select a conversation", fontSize = 14.sp, color = if (Neema.colors.isDark) Neema.colors.muted else Hue.SagePale)
                 }
             }
         } else {
             ThreadPane(
                 vm = vm, dash = dash, conv = active, inbox = inbox, thread = thread, composer = composer, perms = perms,
-                wide = wide, roomy = roomy, brokenVideos = brokenVideos.toSet(),
+                wide = wide, roomy = roomy, brokenVideos = brokenSet,
                 onView = { viewer = it },
                 onProfile = if (!wide || !roomy) ({ customerSheet = true }) else null,
                 onActivity = if (!roomy) ({ activitySheet = true; vm.setActivityOpen(true) }) else null,
@@ -142,7 +146,7 @@ fun ConversationsScreen(dash: DashboardViewModel) {
         ModalBottomSheet(onDismissRequest = { customerSheet = false }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Customer Profile", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                IconButton(onClick = { customerSheet = false }) { Icon(Icons.Filled.Close, "Close", tint = Color(0xFF589B31)) }
+                IconButton(onClick = { customerSheet = false }) { Icon(Icons.Filled.Close, "Close", tint = Palette.Moss600) }
             }
             HorizontalDivider(color = hairline())
             CustomerPanel(
@@ -157,7 +161,7 @@ fun ConversationsScreen(dash: DashboardViewModel) {
     }
     if (activitySheet && active != null) {
         ModalBottomSheet(onDismissRequest = { activitySheet = false; vm.setActivityOpen(false) }) {
-            Text("ACTIVITY LOG", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp, color = Color(0xFFB5C9A8), modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+            Text("ACTIVITY LOG", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp, color = Palette.Sage300, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
             ActivityList(thread.activity, Modifier.fillMaxWidth().heightIn(min = 200.dp, max = 560.dp))
         }
     }
@@ -171,7 +175,7 @@ fun ConversationsScreen(dash: DashboardViewModel) {
         text = {
             Text(
                 "This will permanently delete all messages in this conversation. The conversation record and customer profile will be kept. This cannot be undone.",
-                fontSize = 14.sp, color = if (Neema.colors.isDark) Neema.colors.textMid else Color(0xFF57534E), // text-sm text-stone-600
+                fontSize = 14.sp, color = if (Neema.colors.isDark) Neema.colors.textMid else Palette.Stone600, // text-sm text-stone-600
             )
         },
         // <Btn variant="danger"> then <Btn variant="outline">, medium size, as on the web.
@@ -258,6 +262,9 @@ private fun ThreadPane(
         else inbox.cache.values.filter { it.personId == conv.personId }
             .sortedBy { ConversationsViewModel.CHAN_ORDER.indexOf(it.channel).let { i -> if (i < 0) 99 else i } }
     }
+    // A backwards scan of the thread (2,000 rows at worst): once per change, not per keystroke.
+    val threadLang = remember(thread.messages, thread.activeId) { threadLangOf(thread) }
+    val txOn = remember(threadLang, composer.txMode, thread.activeId) { txOnOf(thread, composer) }
     val digits = phoneDigits(conv).orEmpty()
     val hasPhone = digits.isNotEmpty()
     // CustomerSidebar's rule: the invite exists only for a person with a real
@@ -318,24 +325,24 @@ private fun ThreadPane(
         // Reply box — when the agent owns the conversation, or is admin/superuser.
         if (can.composer) {
             HorizontalDivider(color = hairline())
-            Box(Modifier.heightIn(max = composerMax)) { Composer(vm, composer, thread.window, humanMode = true, threadLang = threadLangOf(thread), txOn = txOnOf(thread, composer)) }
+            Box(Modifier.heightIn(max = composerMax)) { Composer(vm, composer, thread.window, humanMode = true, threadLang = threadLang, txOn = txOn) }
         } else if (can.locked) {
             // Lock banner
             val dark = Neema.colors.isDark
             HorizontalDivider(color = hairline())
             Row(
-                Modifier.fillMaxWidth().background(if (dark) Neema.colors.bg2 else Color(0xFFFAFBF8)).padding(16.dp),
+                Modifier.fillMaxWidth().background(if (dark) Neema.colors.bg2 else Hue.SageBanner).padding(16.dp),
                 horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("🔒", fontSize = 16.sp); Spacer(Modifier.width(8.dp))
                 Text(
                     androidx.compose.ui.text.buildAnnotatedString {
                         append("Handled by ")
-                        pushStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold, color = if (dark) Color(0xFF7FC25A) else Color(0xFF589B31)))
+                        pushStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold, color = if (dark) Hue.MossNight else Palette.Moss600))
                         append(conv.assignedAgentName ?: "another agent"); pop()
                         append(" — ask them to release or transfer it to you")
                     },
-                    fontSize = 12.sp, color = Color(0xFF8A9E80),
+                    fontSize = 12.sp, color = Palette.Sage400,
                 )
             }
         }
@@ -345,7 +352,7 @@ private fun ThreadPane(
 
 /** The inbox's hairline: `#edf0ea` in light, the theme's border in dark. */
 @Composable
-internal fun hairline(): Color = if (Neema.colors.isDark) Neema.colors.border else Color(0xFFEDF0EA)
+internal fun hairline(): Color = if (Neema.colors.isDark) Neema.colors.border else Palette.Hairline2
 
 /** The collapsed side-pane rail ("Activity" / "Customer"). */
 @Composable
@@ -354,14 +361,14 @@ private fun SideRail(label: String, count: Int = 0, flipArrow: Boolean = false, 
         Modifier.width(32.dp).fillMaxHeight().background(Neema.colors.bg2).border(0.5.dp, hairline()).clickable(onClickLabel = "Show ${label.lowercase()}", onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
     ) {
-        Icon(if (flipArrow) Icons.AutoMirrored.Filled.KeyboardArrowLeft else Icons.AutoMirrored.Filled.KeyboardArrowRight, "Show ${label.lowercase()}", tint = Color(0xFFC5D5BC))
+        Icon(if (flipArrow) Icons.AutoMirrored.Filled.KeyboardArrowLeft else Icons.AutoMirrored.Filled.KeyboardArrowRight, "Show ${label.lowercase()}", tint = Hue.SagePale)
         Spacer(Modifier.height(4.dp))
         Spacer(Modifier.height(8.dp))
-        Text(label.uppercase(), fontSize = 9.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 2.sp, color = if (Neema.colors.isDark) Neema.colors.muted else Color(0xFFC5D5BC), maxLines = 1, softWrap = false, modifier = Modifier.verticalLabel())
+        Text(label.uppercase(), fontSize = 9.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 2.sp, color = if (Neema.colors.isDark) Neema.colors.muted else Hue.SagePale, maxLines = 1, softWrap = false, modifier = Modifier.verticalLabel())
         if (count > 0) {
             Spacer(Modifier.height(12.dp))
-            Box(Modifier.size(18.dp).clip(CircleShape).background(Color(0xFFFEF3C7)).border(1.dp, Color(0xFFFCD34D), CircleShape), contentAlignment = Alignment.Center) {
-                Text(if (count > 20) "20+" else "$count", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB45309))
+            Box(Modifier.size(18.dp).clip(CircleShape).background(Palette.Amber100).border(1.dp, Palette.Amber300, CircleShape), contentAlignment = Alignment.Center) {
+                Text(if (count > 20) "20+" else "$count", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = Palette.Amber700)
             }
         }
     }
@@ -373,9 +380,9 @@ private fun ActivityPane(events: List<ActivityEvent>, open: Boolean, width: andr
     if (!open) { SideRail("Activity", events.size) { setOpen(true) }; return }
     Column(Modifier.width(width).fillMaxHeight().background(Neema.colors.bg2)) {
         Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("ACTIVITY LOG", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp, color = Color(0xFFB5C9A8), modifier = Modifier.weight(1f))
+            Text("ACTIVITY LOG", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp, color = Palette.Sage300, modifier = Modifier.weight(1f))
             IconButton(onClick = { setOpen(false) }, modifier = Modifier.size(28.dp)) {
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Collapse activity log", tint = Color(0xFFB5C9A8))
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Collapse activity log", tint = Palette.Sage300)
             }
         }
         HorizontalDivider(color = hairline())
@@ -384,22 +391,22 @@ private fun ActivityPane(events: List<ActivityEvent>, open: Boolean, width: andr
 }
 
 private val DOT_COLOR = mapOf(
-    "escalated" to (Color(0xFFFEF3C7) to Color(0xFFFCD34D)),
-    "flag" to (Color(0xFFFEE2E2) to Color(0xFFFCA5A5)),
-    "intercept" to (Color(0xFFF3E8FF) to Color(0xFFD8B4FE)),
-    "release" to (Color(0xFFDBEAFE) to Color(0xFF93C5FD)),
-    "transfer" to (Color(0xFFE0E7FF) to Color(0xFFA5B4FC)),
-    "approve_draft" to (Color(0xFFDCFCE7) to Color(0xFF86EFAC)),
-    "pause" to (Color(0xFFE7E5E4) to Color(0xFFA8A29E)),
-    "checkin_planned" to (Color(0xFFE0F2FE) to Color(0xFF7DD3FC)),
-    "checkin_sent" to (Color(0xFFBAE6FD) to Color(0xFF38BDF8)),
-    "checkin_vetoed" to (Color(0xFFF5F5F4) to Color(0xFFD6D3D1)),
-    "checkin_failed" to (Color(0xFFFEE2E2) to Color(0xFFFCA5A5)),
-    "deal" to (Color(0xFFD1FAE5) to Color(0xFF6EE7B7)),
-    "promise" to (Color(0xFFFEF3C7) to Color(0xFFFCD34D)),
-    "order" to (Color(0xFFDCFCE7) to Color(0xFF4ADE80)),
-    "call" to (Color(0xFFCCFBF1) to Color(0xFF5EEAD4)),
-    "tool" to (Color(0xFFF7FEE7) to Color(0xFFBEF264)),
+    "escalated" to (Palette.Amber100 to Palette.Amber300),
+    "flag" to (Palette.Red100 to Palette.Red300),
+    "intercept" to (Hue.Purple100 to Hue.Purple300),
+    "release" to (Hue.Blue100 to Hue.Blue300),
+    "transfer" to (Hue.Indigo100 to Hue.Indigo300),
+    "approve_draft" to (Hue.Green100 to Hue.Green300),
+    "pause" to (Palette.Stone200 to Palette.Stone400),
+    "checkin_planned" to (Hue.Sky100 to Hue.Sky300),
+    "checkin_sent" to (Hue.Sky200 to Hue.Sky400),
+    "checkin_vetoed" to (Palette.Stone100 to Palette.Stone300),
+    "checkin_failed" to (Palette.Red100 to Palette.Red300),
+    "deal" to (Hue.Emerald100 to Palette.Emerald300),
+    "promise" to (Palette.Amber100 to Palette.Amber300),
+    "order" to (Hue.Green100 to Hue.Green400),
+    "call" to (Hue.Teal100 to Hue.Teal300),
+    "tool" to (Hue.Lime50 to Hue.Lime300),
 )
 
 /** The person-scoped journey: pickups, check-ins, deals, orders and calls. */
@@ -409,24 +416,24 @@ private fun ActivityList(events: List<ActivityEvent>, modifier: Modifier) {
         Box(modifier.padding(16.dp), contentAlignment = Alignment.Center) {
             Text(
                 "No activity yet — pickups, check-ins, deals, orders and calls will appear here as the journey unfolds.",
-                fontSize = 11.sp, color = Color(0xFFD6D3D1), textAlign = TextAlign.Center, lineHeight = 16.sp,
+                fontSize = 11.sp, color = Palette.Stone300, textAlign = TextAlign.Center, lineHeight = 16.sp,
             )
         }
         return
     }
     LazyColumn(modifier, contentPadding = PaddingValues(12.dp)) {
         itemsIndexed(events, key = { _, e -> e.id }) { i, e ->
-            val (fill, ring) = DOT_COLOR[e.kind] ?: (Color(0xFFF5F5F4) to Color(0xFFD6D3D1))
+            val (fill, ring) = DOT_COLOR[e.kind] ?: (Palette.Stone100 to Palette.Stone300)
             Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
                 Box(Modifier.width(14.dp).fillMaxHeight()) {
-                    if (i < events.size - 1) Box(Modifier.padding(start = 6.5.dp, top = 16.dp).width(1.dp).fillMaxHeight().background(if (Neema.colors.isDark) Neema.colors.border else Color(0xFFF5F5F4)))
+                    if (i < events.size - 1) Box(Modifier.padding(start = 6.5.dp, top = 16.dp).width(1.dp).fillMaxHeight().background(if (Neema.colors.isDark) Neema.colors.border else Palette.Stone100))
                     Box(Modifier.padding(top = 2.dp).size(14.dp).clip(CircleShape).background(fill).border(1.dp, ring, CircleShape))
                 }
                 Spacer(Modifier.width(8.dp))
                 Column(Modifier.padding(bottom = 12.dp)) {
                     Text(e.label, fontSize = 11.sp, fontWeight = FontWeight.Medium, lineHeight = 15.sp)
-                    e.detail?.takeIf { it.isNotEmpty() }?.let { Text(it, fontSize = 10.sp, color = Color(0xFF8FA383), lineHeight = 14.sp, modifier = Modifier.padding(top = 2.dp)) }
-                    Text(Fmt.timeAgo(e.at), fontSize = 10.sp, color = Color(0xFFA8A29E), modifier = Modifier.padding(top = 2.dp))
+                    e.detail?.takeIf { it.isNotEmpty() }?.let { Text(it, fontSize = 10.sp, color = Hue.SageDetail, lineHeight = 14.sp, modifier = Modifier.padding(top = 2.dp)) }
+                    Text(Fmt.timeAgo(e.at), fontSize = 10.sp, color = Palette.Stone400, modifier = Modifier.padding(top = 2.dp))
                 }
             }
         }
@@ -445,7 +452,7 @@ internal fun TransferDialog(dash: DashboardViewModel, conv: Conversation?, busy:
         title = { Text("Transfer Conversation") },
         text = {
             Column {
-                Text("Select an agent to transfer this conversation to:", fontSize = 14.sp, color = Color(0xFF8A9E80))
+                Text("Select an agent to transfer this conversation to:", fontSize = 14.sp, color = Palette.Sage400)
                 Spacer(Modifier.height(12.dp))
                 LazyColumn(Modifier.heightIn(max = 280.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(available, key = { it.id }) { a ->
@@ -458,12 +465,12 @@ internal fun TransferDialog(dash: DashboardViewModel, conv: Conversation?, busy:
                             Spacer(Modifier.width(12.dp))
                             Column {
                                 Text(a.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Neema.colors.text)
-                                Text("${a.activeConvs} active conversations", fontSize = 12.sp, color = Color(0xFFB5C9A8))
+                                Text("${a.activeConvs} active conversations", fontSize = 12.sp, color = Palette.Sage300)
                             }
                         }
                     }
                     if (agents.none { it.isAvailable }) item {
-                        Text("No available agents", fontSize = 14.sp, color = Color(0xFFB5C9A8), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp))
+                        Text("No available agents", fontSize = 14.sp, color = Palette.Sage300, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp))
                     }
                 }
             }
@@ -505,8 +512,8 @@ private fun ResultBox(text: String) {
     val c = Neema.colors
     Text(
         text, fontSize = 13.sp, color = c.text,
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(if (c.isDark) c.bg3 else Color(0xFFF8FAF6))
-            .border(1.dp, if (c.isDark) c.border else Color(0xFFE8EDE4), RoundedCornerShape(8.dp)).padding(10.dp),
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(if (c.isDark) c.bg3 else Hue.SageResult)
+            .border(1.dp, if (c.isDark) c.border else Hue.SageResultRim, RoundedCornerShape(8.dp)).padding(10.dp),
     )
 }
 
@@ -606,7 +613,7 @@ internal fun InviteDialog(dash: DashboardViewModel, vm: ConversationsViewModel, 
         title = { Text("Invite to WhatsApp") },
         text = {
             Column {
-                Text("Send this customer a WhatsApp invite (delivers the approved template to their number).", fontSize = 13.sp, color = Color(0xFF8A9E80))
+                Text("Send this customer a WhatsApp invite (delivers the approved template to their number).", fontSize = 13.sp, color = Palette.Sage400)
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(phone, { phone = it }, label = { Text("Phone (with country code)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             }
