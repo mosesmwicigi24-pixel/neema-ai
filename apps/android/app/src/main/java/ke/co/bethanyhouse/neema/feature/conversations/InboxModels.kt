@@ -175,6 +175,8 @@ sealed interface Viewer {
 internal const val PAGE = 50
 internal const val THREAD_PAGE = 50
 internal const val SNAP_KEY = "inbox_v2"
+/** The agent's work in progress (InboxMemory), per agent. */
+internal const val MEMORY_KEY = "inbox_memory_v1"
 
 internal fun filterKeyOf(f: InboxQuery): String =
     listOf(f.tab, f.channel, f.mode, f.tag ?: "", f.q.trim()).joinToString("\u0001")

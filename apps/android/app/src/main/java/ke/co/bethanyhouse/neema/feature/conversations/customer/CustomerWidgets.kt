@@ -268,10 +268,11 @@ fun EditableField(
     onRestored: () -> Unit = {},
 ) {
     val c = Neema.colors
-    var editing by remember { mutableStateOf(false) }
+    // Saveable: a half-typed edit survives rotation and Android reclaiming the app.
+    var editing by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     // Seeded when the edit starts, never re-keyed on [value]: a live reload that
     // brings a new value mid-edit must not wipe what the agent is typing.
-    var draft by remember { mutableStateOf(value) }
+    var draft by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(value) }
     val focus = remember { FocusRequester() }
     LaunchedEffect(restore) {
         if (restore != null) {

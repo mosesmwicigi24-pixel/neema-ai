@@ -180,7 +180,8 @@ internal fun ThreadMessages(
     val sorted = remember(messages) { sortThread(messages) }
     val rows = remember(sorted, unreadSnap) { buildThreadRows(sorted, unreadSnap).asReversed() }
     // Newest at the bottom (reverseLayout): prepending older pages never moves the reader.
-    val state: LazyListState = remember(convId) { LazyListState() }
+    // Saveable per thread: a reader scrolled back through history keeps their place across rotation.
+    val state: LazyListState = androidx.compose.runtime.saveable.rememberSaveable(convId, saver = LazyListState.Saver) { LazyListState() }
     val newest = sorted.lastOrNull()
     LaunchedEffect(convId, newest?.id) {
         if (rows.isNotEmpty() && (state.firstVisibleItemIndex <= 2 || newest?.isLocal == true)) state.animateScrollToItem(0)

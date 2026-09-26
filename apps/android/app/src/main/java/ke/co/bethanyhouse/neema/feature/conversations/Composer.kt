@@ -153,6 +153,7 @@ internal fun Composer(
                 Text(state.txPreview.text, fontSize = 12.sp, fontStyle = FontStyle.Italic, color = if (c.isDark) c.textMid else Palette.Stone600)
             }
         }
+        if (state.lostMedia.isNotEmpty()) LostMediaNote(state.lostMedia, vm::dismissLostMedia)
         }
         // ── Text box + attach + send ──
         Row(verticalAlignment = Alignment.Bottom) {
@@ -290,7 +291,9 @@ internal fun WindowStrip(win: ConversationWindow) {
 private fun AttachButton(vm: ConversationsViewModel) {
     val context = LocalContext.current
     var menu by remember { mutableStateOf(false) }
-    var cameraUri by remember { mutableStateOf<Uri?>(null) }
+    // Saveable: Android often kills the app while the camera is open, and the
+    // photo it took comes back to a fresh process — which must still know where.
+    var cameraUri by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<Uri?>(null) }
     val gallery = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { vm.addMedia(it) }
     val docs = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { vm.addMedia(it) }
     val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok -> if (ok) cameraUri?.let { vm.addMedia(listOf(it)) } }
@@ -321,6 +324,31 @@ private fun AttachButton(vm: ConversationsViewModel) {
                 menu = false
                 docs.launch(ACCEPT_TYPES)
             })
+        }
+    }
+}
+
+/**
+ * Files picked before Android closed the app that it no longer lets the app
+ * read (a picker's permission lapses with the process): named, so the agent
+ * attaches them again instead of wondering where they went.
+ */
+@Composable
+private fun LostMediaNote(names: List<String>, onDismiss: () -> Unit) {
+    val t = tint(Palette.Amber50, Palette.Amber800, Palette.Amber200)
+    Row(
+        Modifier.padding(bottom = 8.dp).fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(t.bg).border(1.dp, t.border, RoundedCornerShape(8.dp))
+            .padding(start = 12.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("📎", fontSize = 11.sp); Spacer(Modifier.width(8.dp))
+        val list = names.take(3).joinToString(", ") + if (names.size > 3) " and ${names.size - 3} more" else ""
+        Text(
+            "The app closed before ${if (names.size == 1) "this file was" else "these files were"} sent — attach again: $list",
+            fontSize = 11.sp, lineHeight = 15.sp, fontWeight = FontWeight.Medium, color = t.fg, modifier = Modifier.weight(1f),
+        )
+        IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+            Icon(Icons.Filled.Close, "Dismiss", tint = t.fg, modifier = Modifier.size(14.dp))
         }
     }
 }
