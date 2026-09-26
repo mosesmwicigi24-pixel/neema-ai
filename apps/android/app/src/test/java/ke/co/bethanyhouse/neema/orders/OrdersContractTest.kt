@@ -198,12 +198,12 @@ class OrdersContractTest {
         toasts = ToastLog(dash)
         fake.on("PATCH", "/admin/orders/.*", code = 404, body = """{"detail":"Order not found"}""")
         vm.updateStatus("gone", "confirmed")
-        assertEquals("Failed to update order", toasts!!.all.last().message)
+        assertEquals("This order no longer exists — it may have been deleted", toasts!!.all.last().message)
         // FastAPI's 422 for a non-object body is a pydantic LIST detail.
         fake.on("PATCH", "/admin/orders/.*", code = 422,
             body = """{"detail":[{"type":"dict_type","loc":["body"],"msg":"Input should be a valid dictionary","input":"x"}]}""")
         vm.updateStatus("o1", "confirmed")
-        assertEquals("Failed to update order", toasts!!.all.last().message)
+        assertEquals("Failed to update order — input should be a valid dictionary", toasts!!.all.last().message)
         assertNull(vm.updating.value)
     }
 

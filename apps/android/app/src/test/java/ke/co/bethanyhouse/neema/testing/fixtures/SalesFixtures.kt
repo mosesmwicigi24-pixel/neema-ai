@@ -44,8 +44,13 @@ object SalesFixtures {
     /** The same for a NAIVE datetime (`datetime.utcnow()`): no offset at all. */
     fun pyNaive(i: Instant): String = if (i.nano / 1000 == 0) PY_SECONDS.format(i) else PY_MICROS.format(i)
 
-    /** [minutes] ago, as the server prints it (with microseconds). */
-    fun ago(minutes: Long): String = pyIso(AppClock.instant().minus(minutes, ChronoUnit.MINUTES).plusNanos(123_456_000))
+    /**
+     * [minutes] ago, as the server prints it (with microseconds). The sub-second
+     * part is taken OFF, never added: a stamp 123 ms in the future read "44m
+     * ago" instead of "45m ago" whenever a screen rendered within 123 ms of
+     * building it, so snapshots flipped with machine speed.
+     */
+    fun ago(minutes: Long): String = pyIso(AppClock.instant().minus(minutes, ChronoUnit.MINUTES).minusNanos(123_456_000))
 
     fun inHours(h: Long, extraMin: Long = 20): String =
         pyIso(AppClock.instant().plus(h * 60 + extraMin, ChronoUnit.MINUTES).plusNanos(654_321_000))

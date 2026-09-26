@@ -35,6 +35,9 @@ import ke.co.bethanyhouse.neema.app.DashboardViewModel
 import ke.co.bethanyhouse.neema.core.perm.Perms
 import ke.co.bethanyhouse.neema.core.ui.components.Avatar
 import ke.co.bethanyhouse.neema.core.ui.components.EmptyState
+import ke.co.bethanyhouse.neema.core.ui.components.ErrorState
+import ke.co.bethanyhouse.neema.feature.orders.InlineError
+import ke.co.bethanyhouse.neema.feature.orders.StaleBanner
 import ke.co.bethanyhouse.neema.core.ui.components.Loading
 import ke.co.bethanyhouse.neema.feature.orders.BtnVariant
 import ke.co.bethanyhouse.neema.feature.orders.ChannelGlyphs
@@ -119,12 +122,17 @@ fun LeadsScreen(dash: DashboardViewModel) {
     val filterStage by vm.filterStage.collectAsStateWithLifecycle()
     val search by vm.search.collectAsStateWithLifecycle()
     val selectedId by vm.selectedId.collectAsStateWithLifecycle()
+    val loadError by vm.loadError.collectAsStateWithLifecycle()
+    val saving by vm.saving.collectAsStateWithLifecycle()
+    val sheetError by vm.sheetError.collectAsStateWithLifecycle()
     val canManage = dash.can(Perms.MANAGE_LEADS)
     val c = Neema.colors
 
     val filtered = remember(leads, filterStage, search) { filterLeads(leads, filterStage, search) }
     val pipelineValue = leads.filter { it.leadStage.lowercase() !in setOf("lost", "won") }.sumOf { it.totalSpent }
     val wonValue = leads.filter { it.leadStage.equals("won", ignoreCase = true) }.sumOf { it.totalSpent }
+    // Never loaded: no counts or totals — zeros would be a claim.
+    val unknown = leads.isEmpty() && (loading || loadError != null)
 
     BoxWithConstraints(Modifier.fillMaxSize().background(c.bg)) {
         val wide = maxWidth >= 600.dp
@@ -134,7 +142,8 @@ fun LeadsScreen(dash: DashboardViewModel) {
                 Column {
                     Text("Leads Pipeline", fontSize = 20.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp, color = c.text)
                     Text(
-                        "${leads.size} leads · Pipeline ${money(pipelineValue)} · Won ${money(wonValue)}",
+                        if (unknown) (if (loadError != null) "Not loaded" else "Loading…")
+                        else "${leads.size} leads · Pipeline ${money(pipelineValue)} · Won ${money(wonValue)}",
                         fontSize = 14.sp, color = c.textDim, modifier = Modifier.padding(top = 2.dp),
                     )
                 }
@@ -161,18 +170,24 @@ fun LeadsScreen(dash: DashboardViewModel) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     item(key = "all") {
-                        StagePill(label = "All (${leads.size})", selected = filterStage == "all", stage = null) {
+                        StagePill(label = if (unknown) "All" else "All (${leads.size})", selected = filterStage == "all", stage = null) {
                             vm.filterStage.value = "all"
                         }
                     }
                     items(stages, key = { it.id }) { s ->
                         val count = leads.count { s.matches(it.leadStage) }
-                        StagePill(label = "${s.label} ($count)", selected = filterStage.equals(s.id, ignoreCase = true), stage = s) {
+                        StagePill(label = if (unknown) s.label else "${s.label} ($count)", selected = filterStage.equals(s.id, ignoreCase = true), stage = s) {
                             vm.filterStage.value = s.id
                         }
                     }
                 }
                 HorizontalDivider(color = c.bg4)
+            }
+
+            // A refresh failed with leads on screen: they stay, and this says why.
+            val err = loadError
+            if (err != null && leads.isNotEmpty() && !loading) {
+                StaleBanner(err, onRetry = vm::refresh, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp))
             }
 
             // ── Kanban board ───────────────────────────────────────────────
@@ -181,6 +196,11 @@ fun LeadsScreen(dash: DashboardViewModel) {
                     // w-6 h-6 border-2, moss
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp, color = Color(0xFF589B31))
+                    }
+                } else if (err != null && leads.isEmpty()) {
+                    // Never read: seven empty columns would claim there are no leads.
+                    Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), contentAlignment = Alignment.TopCenter) {
+                        ErrorState(err, onRetry = vm::load, modifier = Modifier.padding(top = 32.dp))
                     }
                 } else {
                     val colWidth = 210.dp
@@ -193,7 +213,7 @@ fun LeadsScreen(dash: DashboardViewModel) {
                             val stageLeads = filtered.filter { stage.matches(it.leadStage) }
                             StageColumn(
                                 stage = stage, stageLeads = stageLeads, stages = stages, width = colWidth,
-                                canManage = canManage,
+                                canManage = canManage, saving = saving,
                                 onSelect = { vm.select(it.id) },
                                 onMove = { lead, to -> vm.moveTo(lead, to) },
                             )
@@ -215,14 +235,11 @@ fun LeadsScreen(dash: DashboardViewModel) {
         ) {
             LeadDetail(
                 lead = selected, stages = stages, canManage = canManage,
+                saving = selected.id in saving, error = sheetError,
                 onClose = { vm.select(null) },
                 onOpenChat = { dash.openConversationFor(selected.handle) },
-                onSave = { edit ->
-                    if (!edit.isEmpty) {
-                        vm.update(selected, stage = edit.stage, tags = edit.tags, notes = edit.notes, notesBase = edit.notesBase)
-                    }
-                    vm.select(null)
-                },
+                // The sheet closes when the server has the change; a failure keeps it open, fields as typed.
+                onSave = { edit -> vm.save(selected, edit) },
             )
         }
     }
@@ -270,6 +287,7 @@ private fun StageColumn(
     stages: List<LeadStage>,
     width: Dp,
     canManage: Boolean,
+    saving: Set<String>,
     onSelect: (Lead) -> Unit,
     onMove: (Lead, String) -> Unit,
 ) {
@@ -299,7 +317,7 @@ private fun StageColumn(
         } else {
             LazyColumn(Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(stageLeads, key = { it.id }) { lead ->
-                    LeadCard(lead, stages, canManage, onSelect = { onSelect(lead) }, onMove = { onMove(lead, it) })
+                    LeadCard(lead, stages, canManage, busy = lead.id in saving, onSelect = { onSelect(lead) }, onMove = { onMove(lead, it) })
                 }
             }
         }
@@ -312,6 +330,7 @@ private fun LeadCard(
     lead: Lead,
     stages: List<LeadStage>,
     canManage: Boolean,
+    busy: Boolean,
     onSelect: () -> Unit,
     onMove: (String) -> Unit,
 ) {
@@ -380,10 +399,10 @@ private fun LeadCard(
                 HorizontalDivider(color = c.bg3, modifier = Modifier.padding(top = 8.dp))
                 Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (prev != null) {
-                        MoveButton("← ${prev.label}", bg = if (c.isDark) c.bg else Color(0xFFF0F9EC), fg = c.textDim, Modifier.weight(1f)) { onMove(prev.id) }
+                        MoveButton("← ${prev.label}", bg = if (c.isDark) c.bg else Color(0xFFF0F9EC), fg = c.textDim, Modifier.weight(1f), enabled = !busy) { onMove(prev.id) }
                     }
                     if (next != null) {
-                        MoveButton("${next.label} →", bg = c.bg3, fg = c.gold2, Modifier.weight(1f)) { onMove(next.id) }
+                        MoveButton("${next.label} →", bg = c.bg3, fg = c.gold2, Modifier.weight(1f), enabled = !busy) { onMove(next.id) }
                     }
                 }
             }
@@ -392,14 +411,14 @@ private fun LeadCard(
 }
 
 @Composable
-private fun MoveButton(label: String, bg: Color, fg: Color, modifier: Modifier, onClick: () -> Unit) {
+private fun MoveButton(label: String, bg: Color, fg: Color, modifier: Modifier, enabled: Boolean = true, onClick: () -> Unit) {
     // text-[9px] rounded py-1
     val shape = RoundedCornerShape(4.dp)
     Text(
         label,
         modifier = modifier.clip(shape).background(bg).border(1.dp, Neema.colors.border, shape)
-            .clickable(onClick = onClick).padding(vertical = 4.dp),
-        fontSize = 9.sp, lineHeight = 13.5.sp, color = fg, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            .clickable(enabled = enabled, onClick = onClick).padding(vertical = 4.dp),
+        fontSize = 9.sp, lineHeight = 13.5.sp, color = fg.copy(alpha = if (enabled) 1f else 0.45f), textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis,
     )
 }
 
@@ -413,6 +432,10 @@ internal fun LeadDetail(
     canManage: Boolean,
     onClose: () -> Unit,
     onOpenChat: () -> Unit,
+    /** A save is in flight: the fields wait and Save shows progress. */
+    saving: Boolean = false,
+    /** Why the last save failed — shown above the buttons; the fields keep what was typed. */
+    error: String? = null,
     /** Only the fields that changed are set — an untouched stage must not lock the AI out. */
     onSave: (LeadEdit) -> Unit,
 ) {
@@ -457,7 +480,7 @@ internal fun LeadDetail(
                     modifier = Modifier.clip(shape)
                         .background(if (on) s.bgC() else c.bg2)
                         .border(1.dp, if (on) s.borderC() else if (c.isDark) c.hairline else Color(0xFFE7E5E4), shape)
-                        .clickable(enabled = canManage) { stage = s.id }
+                        .clickable(enabled = canManage && !saving) { stage = s.id }
                         .padding(horizontal = 10.dp, vertical = 6.dp),
                     fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
                     color = if (on) s.textC() else if (c.isDark) c.muted else Color(0xFFA8A29E),
@@ -468,7 +491,7 @@ internal fun LeadDetail(
 
         FieldLabel("Tags (comma separated)")
         OutlinedTextField(
-            value = tags, onValueChange = { tags = it }, enabled = canManage, singleLine = true,
+            value = tags, onValueChange = { tags = it }, enabled = canManage, readOnly = saving, singleLine = true,
             placeholder = { Text("church, wholesale, repeat-buyer") },
             colors = fieldColors, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth(),
         )
@@ -476,7 +499,7 @@ internal fun LeadDetail(
 
         FieldLabel("Notes")
         OutlinedTextField(
-            value = notes, onValueChange = { notes = it }, enabled = canManage,
+            value = notes, onValueChange = { notes = it }, enabled = canManage, readOnly = saving,
             placeholder = { Text("Internal notes about this lead…") }, minLines = 3, maxLines = 8,
             colors = fieldColors, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth(),
         )
@@ -516,12 +539,16 @@ internal fun LeadDetail(
         }
         Spacer(Modifier.height(16.dp))
 
+        if (error != null) {
+            InlineError(error, Modifier.padding(bottom = 12.dp))
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (canManage) {
-                WebBtn("Save Changes", BtnVariant.Primary, Modifier.weight(1f), onClick = {
-                    onSave(diffLead(base, stage, tags, notes))
-                    onClose()
-                })
+                WebBtn(
+                    if (saving) "Saving…" else "Save Changes", BtnVariant.Primary, Modifier.weight(1f),
+                    enabled = !saving, busy = saving,
+                    onClick = { onSave(diffLead(base, stage, tags, notes)) },
+                )
                 WebBtn("Cancel", BtnVariant.Outline, onClick = onClose)
             } else {
                 Text("Your role can view leads but not change them.", fontSize = 12.sp, color = c.muted,

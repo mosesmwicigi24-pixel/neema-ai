@@ -86,7 +86,8 @@ class OrdersBehaviourTest {
         assertNull(vm.updating.value)
         val t = toasts.all.last()
         assertEquals(ToastType.Error, t.type)
-        assertEquals("the web's exact copy", "Failed to update order", t.message)
+        // The web's copy, plus the server's reason.
+        assertEquals("Failed to update order — hub unreachable", t.message)
     }
 
     @Test fun allowedTransitionsMatchTheWeb() {

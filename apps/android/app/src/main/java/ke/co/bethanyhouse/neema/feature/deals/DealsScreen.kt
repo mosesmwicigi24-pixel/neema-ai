@@ -37,6 +37,9 @@ import ke.co.bethanyhouse.neema.core.model.Deal
 import ke.co.bethanyhouse.neema.core.model.PlannedAction
 import ke.co.bethanyhouse.neema.core.perm.Perms
 import ke.co.bethanyhouse.neema.core.ui.components.EmptyState
+import ke.co.bethanyhouse.neema.core.ui.components.ErrorState
+import ke.co.bethanyhouse.neema.feature.orders.InlineError
+import ke.co.bethanyhouse.neema.feature.orders.StaleBanner
 import ke.co.bethanyhouse.neema.core.ui.components.Loading
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import ke.co.bethanyhouse.neema.core.util.Fmt
@@ -88,6 +91,10 @@ fun DealsScreen(dash: DashboardViewModel) {
     val actions by vm.actions.collectAsStateWithLifecycle()
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()
     val acting by vm.acting.collectAsStateWithLifecycle()
+    val checking by vm.checking.collectAsStateWithLifecycle()
+    val patching by vm.patching.collectAsStateWithLifecycle()
+    val loadError by vm.loadError.collectAsStateWithLifecycle()
+    val guidanceError by vm.guidanceError.collectAsStateWithLifecycle()
     // Deals are the pipeline: editing them is lead management. Sending a
     // follow-up puts words in front of a customer, so it follows the reply right.
     val canManage = dash.can(Perms.MANAGE_LEADS)
@@ -117,10 +124,18 @@ fun DealsScreen(dash: DashboardViewModel) {
                     Column {
                         Text("Deals", fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = c.text)
                         Text(
-                            "What Neema owns right now · ${open.size} open · $wonCount won",
+                            // Never loaded: no counts — "0 open · 0 won" would be a claim.
+                            if (deals == null) "What Neema owns right now"
+                            else "What Neema owns right now · ${open.size} open · $wonCount won",
                             fontSize = 12.sp, color = c.muted, modifier = Modifier.padding(top = 2.dp),
                         )
                     }
+                }
+
+                // A refresh failed with something on screen: it stays, and this says why.
+                val err = loadError
+                if (err != null && (deals != null || actions != null)) {
+                    item(key = "stale") { StaleBanner(err, onRetry = vm::refresh) }
                 }
 
                 // ── Initiative queue ───────────────────────────────────────
@@ -134,6 +149,8 @@ fun DealsScreen(dash: DashboardViewModel) {
                         Spacer(Modifier.height(8.dp))
                         val pending = actions
                         when {
+                            // The reason is in the banner / error state just below.
+                            pending == null && err != null -> Text("Couldn't load the queue.", fontSize = 12.sp, color = stone400())
                             pending == null -> Text("Loading…", fontSize = 12.sp, color = stone400())
                             pending.isEmpty() -> Text(
                                 "Nothing queued. Promises made in chat (hers or the customer's) land here automatically.",
@@ -142,7 +159,7 @@ fun DealsScreen(dash: DashboardViewModel) {
                             else -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 pending.forEach { a ->
                                     ActionRow(
-                                        a, busy = a.id in acting, canSend = canSend, wide = wide,
+                                        a, busy = a.id in acting, checking = a.id in checking, canSend = canSend, wide = wide,
                                         onSend = { vm.act(a.id, "approve") },
                                         onEdit = { vm.openDraft(a) },
                                         onVeto = { vm.act(a.id, "veto") },
@@ -155,7 +172,10 @@ fun DealsScreen(dash: DashboardViewModel) {
                 }
 
                 // ── The board ──────────────────────────────────────────────
-                if (deals == null) {
+                if (deals == null && err != null) {
+                    // Nothing was ever read: an empty board would claim there are no deals.
+                    item(key = "error") { ErrorState(err, onRetry = vm::reload) }
+                } else if (deals == null) {
                     item(key = "loading") { Box(Modifier.fillMaxWidth().height(160.dp)) { Loading() } }
                 } else {
                     val columns = STAGES.map { stage ->
@@ -167,6 +187,8 @@ fun DealsScreen(dash: DashboardViewModel) {
                         StageColumn(
                             stage, col, mod,
                             canManage = canManage,
+                            patching = patching,
+                            guidanceError = guidanceError,
                             editing = editing,
                             guidanceDraft = guidanceDraft,
                             onGuidanceDraft = vm::setGuidanceDraft,
@@ -195,10 +217,15 @@ fun DealsScreen(dash: DashboardViewModel) {
     }
 
     draftFor?.let { a ->
+        val text by vm.draftText.collectAsStateWithLifecycle()
+        val error by vm.draftError.collectAsStateWithLifecycle()
+        // The dialog stays up until the send is known to have gone: a failure
+        // shows its reason here, with every word the operator typed.
         DraftDialog(
-            action = a,
+            action = a, text = text, onText = vm::setDraftText,
+            busy = a.id in acting, checking = a.id in checking, error = error,
             onDismiss = { vm.openDraft(null) },
-            onSend = { text -> vm.act(a.id, "approve", text); vm.openDraft(null) },
+            onSend = { vm.act(a.id, "approve", text) },
         )
     }
 }
@@ -218,6 +245,7 @@ private fun Card16(modifier: Modifier = Modifier, content: @Composable ColumnSco
 private fun ActionRow(
     a: PlannedAction,
     busy: Boolean,
+    checking: Boolean,
     canSend: Boolean,
     wide: Boolean,
     onSend: () -> Unit,
@@ -265,7 +293,7 @@ private fun ActionRow(
             )
         }
     }
-    val buttons: @Composable () -> Unit = {
+    val buttons: @Composable () -> Unit = { Column {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             if (canSend) {
                 SmallButton("Send", bg = Color(0xFF589B31), fg = Color.White, enabled = !busy, onClick = onSend)
@@ -275,9 +303,18 @@ private fun ActionRow(
             if (onOpen != null) {
                 SmallButton("Open chat", bg = Color.Transparent, fg = c.gold2, enabled = true, onClick = onOpen)
             }
-            if (busy) CircularProgressIndicator(Modifier.size(18.dp).align(Alignment.CenterVertically), strokeWidth = 2.dp)
         }
-    }
+        // In flight, or its answer lost and being checked: say which, under the (locked) buttons.
+        if (busy) {
+            Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp, color = slate())
+                Text(
+                    if (checking) "No answer yet — checking whether it went…" else "Working…",
+                    fontSize = 11.sp, color = slate(), modifier = Modifier.padding(start = 6.dp),
+                )
+            }
+        }
+    } }
     val box = Modifier.fillMaxWidth().clip(shape).background(bg).border(1.dp, border, shape).padding(horizontal = 12.dp, vertical = 10.dp)
     if (wide) {
         // The web's row: the text takes the room, the buttons sit on the right (gap-3).
@@ -312,7 +349,7 @@ private fun SmallButton(
     val shape = RoundedCornerShape(8.dp)
     Text(
         label,
-        modifier = Modifier.clip(shape).background(bg)
+        modifier = Modifier.clip(shape).background(if (enabled) bg else bg.copy(alpha = bg.alpha * 0.5f))
             .then(if (border != null) Modifier.border(1.dp, border, shape) else Modifier)
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = hPad, vertical = vPad),
@@ -328,6 +365,8 @@ private fun StageColumn(
     col: List<Deal>,
     modifier: Modifier,
     canManage: Boolean,
+    patching: Set<String>,
+    guidanceError: String?,
     editing: String?,
     guidanceDraft: String,
     onGuidanceDraft: (String) -> Unit,
@@ -354,7 +393,8 @@ private fun StageColumn(
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             col.forEach { d ->
                 DealCard(
-                    d, canManage = canManage, isEditing = editing == d.id,
+                    d, canManage = canManage, busy = d.id in patching, isEditing = editing == d.id,
+                    guidanceError = guidanceError.takeIf { editing == d.id },
                     guidanceDraft = guidanceDraft, onGuidanceDraft = onGuidanceDraft,
                     onEdit = { onEdit(d) }, onCancel = onCancel, onSave = { onSave(d) },
                     onWon = { onWon(d) }, onLost = { onLost(d) }, onOpen = { onOpen(d) },
@@ -372,6 +412,8 @@ private fun StageColumn(
 private fun DealCard(
     d: Deal,
     canManage: Boolean,
+    busy: Boolean,
+    guidanceError: String?,
     isEditing: Boolean,
     guidanceDraft: String,
     onGuidanceDraft: (String) -> Unit,
@@ -420,8 +462,9 @@ private fun DealCard(
                 supportingText = { Text("${guidanceDraft.length}/400", fontSize = 10.sp) },
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             )
+            if (guidanceError != null) InlineError(guidanceError, Modifier.padding(top = 4.dp))
             Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                SmallButton("Save", bg = Color(0xFF1E293B), fg = Color.White, enabled = true, fontSize = 10, hPad = 10.dp, vPad = 4.dp, onClick = onSave)
+                SmallButton(if (busy) "Saving…" else "Save", bg = Color(0xFF1E293B), fg = Color.White, enabled = !busy, fontSize = 10, hPad = 10.dp, vPad = 4.dp, onClick = onSave)
                 SmallButton("Cancel", bg = Color.Transparent, fg = slate(), enabled = true, fontSize = 10, hPad = 8.dp, vPad = 4.dp,
                     weight = FontWeight.Normal, onClick = onCancel)
             }
@@ -435,12 +478,12 @@ private fun DealCard(
                 Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     SmallButton(
                         if (!d.guidance.isNullOrBlank()) "📌 Guidance" else "＋ Guidance",
-                        bg = if (c.isDark) c.bg4 else Color(0xFFFAFAF9), fg = slate(), enabled = true, fontSize = 10,
+                        bg = if (c.isDark) c.bg4 else Color(0xFFFAFAF9), fg = slate(), enabled = !busy, fontSize = 10,
                         hPad = 8.dp, vPad = 4.dp, weight = FontWeight.Normal, onClick = onEdit,
                     )
                     SmallButton("Won", bg = if (c.isDark) c.greenDim else Color(0xFFE9F6DF), fg = if (c.isDark) c.green else Color(0xFF427425),
-                        enabled = true, fontSize = 10, hPad = 8.dp, vPad = 4.dp, weight = FontWeight.Normal, onClick = onWon)
-                    SmallButton("Lost", bg = if (c.isDark) c.bg4 else Color(0xFFFAFAF9), fg = if (c.isDark) c.muted else Color(0xFF94A3B8), enabled = true, fontSize = 10,
+                        enabled = !busy, fontSize = 10, hPad = 8.dp, vPad = 4.dp, weight = FontWeight.Normal, onClick = onWon)
+                    SmallButton("Lost", bg = if (c.isDark) c.bg4 else Color(0xFFFAFAF9), fg = if (c.isDark) c.muted else Color(0xFF94A3B8), enabled = !busy, fontSize = 10,
                         hPad = 8.dp, vPad = 4.dp, weight = FontWeight.Normal, onClick = onLost)
                 }
             }
@@ -451,17 +494,29 @@ private fun DealCard(
 /** Approve with an edited draft. Empty text lets Neema compose from the reason. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DraftDialog(action: PlannedAction, onDismiss: () -> Unit, onSend: (String) -> Unit) {
+private fun DraftDialog(
+    action: PlannedAction, text: String, onText: (String) -> Unit,
+    busy: Boolean, checking: Boolean, error: String?,
+    onDismiss: () -> Unit, onSend: () -> Unit,
+) {
     BasicAlertDialog(onDismissRequest = onDismiss) {
-        DraftDialogCard(action, onDismiss, onSend)
+        DraftDialogCard(action, text, onText, busy, checking, error, onDismiss, onSend)
     }
 }
 
 /** The edit-and-send dialog's card (internal so it can be rendered without a dialog window). */
 @Composable
-internal fun DraftDialogCard(action: PlannedAction, onDismiss: () -> Unit, onSend: (String) -> Unit) {
+internal fun DraftDialogCard(
+    action: PlannedAction,
+    text: String,
+    onText: (String) -> Unit,
+    busy: Boolean,
+    checking: Boolean,
+    error: String?,
+    onDismiss: () -> Unit,
+    onSend: () -> Unit,
+) {
     val c = Neema.colors
-    var text by rememberSaveable(action.id) { mutableStateOf(action.draft.orEmpty()) }
     Surface(shape = RoundedCornerShape(24.dp), color = c.bg2, shadowElevation = 6.dp) {
         Column(Modifier.padding(24.dp)) {
             Text("Edit before sending", fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = c.text)
@@ -470,17 +525,34 @@ internal fun DraftDialogCard(action: PlannedAction, onDismiss: () -> Unit, onSen
                 Text(action.reason, fontSize = 12.sp, color = c.muted, modifier = Modifier.padding(bottom = 8.dp))
             }
             OutlinedTextField(
-                value = text, onValueChange = { text = it },
+                value = text, onValueChange = onText, enabled = !busy,
                 placeholder = { Text("Leave empty and Neema writes it from the reason") },
                 minLines = 4, maxLines = 10, modifier = Modifier.fillMaxWidth(),
             )
-            Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = onDismiss) { Text("Cancel") }
+            if (error != null) InlineError(error, Modifier.padding(top = 12.dp), pending = checking)
+            Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onDismiss) { Text(if (busy) "Close" else "Cancel") }
                 Spacer(Modifier.width(8.dp))
                 Button(
-                    onClick = { onSend(text) },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF589B31), contentColor = Color.White),
-                ) { Text(if (text.isBlank()) "Let Neema write & send" else "Send") }
+                    onClick = onSend, enabled = !busy,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF589B31), contentColor = Color.White,
+                        disabledContainerColor = Color(0xFF589B31).copy(alpha = 0.5f), disabledContentColor = Color.White,
+                    ),
+                ) {
+                    if (busy) {
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.White)
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text(
+                        when {
+                            checking -> "Checking…"
+                            busy -> "Sending…"
+                            text.isBlank() -> "Let Neema write & send"
+                            else -> "Send"
+                        },
+                    )
+                }
             }
         }
     }

@@ -98,7 +98,9 @@ fun OrdersScreen(dash: DashboardViewModel) {
     val updating by vm.updating.collectAsStateWithLifecycle()
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()
     val initialLoading by vm.initialLoading.collectAsStateWithLifecycle()
+    val loadError by vm.loadError.collectAsStateWithLifecycle()
     val canManage = dash.can(Perms.MANAGE_ORDERS)
+    val unknown = orders.isEmpty() && (initialLoading || loadError != null)
     val c = Neema.colors
 
     val filtered = remember(orders, filter, search) { filterOrders(orders, filter, search) }
@@ -123,7 +125,8 @@ fun OrdersScreen(dash: DashboardViewModel) {
                         Column(Modifier.weight(1f)) {
                             Text("Orders", fontSize = 20.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp, color = c.text)
                             Row(Modifier.padding(top = 2.dp)) {
-                                Text("${orders.size} total", fontSize = 14.sp, color = c.textDim)
+                                // Never loaded: no counts — "0 total" would be a claim.
+                                Text(if (unknown) (if (loadError != null) "Not loaded" else "Loading…") else "${orders.size} total", fontSize = 14.sp, color = c.textDim)
                                 val pending = statusCounts["pending"] ?: 0
                                 if (pending > 0) {
                                     Text("· $pending pending", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = c.amber,
@@ -138,7 +141,7 @@ fun OrdersScreen(dash: DashboardViewModel) {
                             horizontalAlignment = Alignment.End,
                         ) {
                             Text("Total Revenue", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = c.textDim, modifier = Modifier.padding(bottom = 2.dp))
-                            Text(money(totalRevenue), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = c.gold2)
+                            Text(if (unknown) "—" else money(totalRevenue), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = c.gold2)
                         }
                     }
                 }
@@ -153,7 +156,7 @@ fun OrdersScreen(dash: DashboardViewModel) {
                                     val meta = statusMeta(s)
                                     val rev = orders.filter { it.status == s }.sumOf { it.amount }
                                     StatusCard(
-                                        meta = meta, count = statusCounts[s] ?: 0, revenue = rev,
+                                        meta = meta, count = statusCounts[s] ?: 0, revenue = rev, known = !unknown,
                                         active = filter == s, onClick = { vm.toggleFilter(s) },
                                         modifier = Modifier.weight(1f).fillMaxHeight(),
                                     )
@@ -182,8 +185,15 @@ fun OrdersScreen(dash: DashboardViewModel) {
                 }
 
                 // ── The list ───────────────────────────────────────────────
+                val err = loadError
+                if (err != null && orders.isNotEmpty()) {
+                    item(key = "stale") { StaleBanner(err, onRetry = vm::refresh, modifier = Modifier.padding(bottom = 12.dp)) }
+                }
                 if (initialLoading && orders.isEmpty()) {
                     item(key = "loading") { Box(Modifier.fillMaxWidth().height(200.dp)) { Loading() } }
+                } else if (err != null && orders.isEmpty()) {
+                    // Nothing was ever read: "No orders found" would be a lie.
+                    item(key = "error") { ke.co.bethanyhouse.neema.core.ui.components.ErrorState(err, onRetry = vm::retry) }
                 } else if (filtered.isEmpty()) {
                     item(key = "empty") {
                         Column(
@@ -244,7 +254,7 @@ fun OrdersScreen(dash: DashboardViewModel) {
 }
 
 @Composable
-private fun StatusCard(meta: StatusMeta, count: Int, revenue: Double, active: Boolean, onClick: () -> Unit, modifier: Modifier) {
+private fun StatusCard(meta: StatusMeta, count: Int, revenue: Double, active: Boolean, known: Boolean = true, onClick: () -> Unit, modifier: Modifier) {
     val c = Neema.colors
     val shape = RoundedCornerShape(12.dp)
     Column(
@@ -259,7 +269,7 @@ private fun StatusCard(meta: StatusMeta, count: Int, revenue: Double, active: Bo
             Text(meta.label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = toneText(meta.tone))
         }
         Spacer(Modifier.height(8.dp))
-        Text(count.toString(), fontSize = 20.sp, fontWeight = FontWeight.Bold, color = c.text)
+        Text(if (known) count.toString() else "—", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = c.text)
         if (revenue > 0) Text(money(revenue), fontSize = 12.sp, color = c.textDim, modifier = Modifier.padding(top = 2.dp))
     }
 }

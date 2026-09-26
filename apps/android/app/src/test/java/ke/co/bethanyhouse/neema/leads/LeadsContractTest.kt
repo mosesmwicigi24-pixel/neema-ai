@@ -115,8 +115,8 @@ class LeadsContractTest {
         val vm = LeadsViewModel(dash)
         assertTrue(vm.leads.value.isEmpty())
         assertEquals(false, vm.loading.value)
-        assertEquals("database is down", toasts!!.all.last().message)
-        assertEquals(ToastType.Error, toasts!!.all.last().type)
+        // Shown in the board's error state (with Retry), not a toast.
+        assertEquals("database is down", vm.loadError.value)
     }
 
     // ── PATCH /admin/leads/{id} ─────────────────────────────────────────────
@@ -178,12 +178,21 @@ class LeadsContractTest {
         )
     }
 
-    @Test fun patchNotFoundRollsBack() {
+    @Test fun patchNotFoundRemovesTheDeletedLead() {
         fake.on("PATCH", "/admin/leads/.*", code = 404, body = """{"detail":"Lead not found"}""")
         toasts = ToastLog(dash)
         val vm = LeadsViewModel(dash)
         vm.moveTo(vm.leads.value.first { it.id == "u2" }, "won")
-        assertEquals("Failed to update lead", toasts!!.all.last().message)
+        assertEquals("This lead no longer exists — someone may have deleted or merged it", toasts!!.all.last().message)
+        assertTrue(vm.leads.value.none { it.id == "u2" })
+    }
+
+    @Test fun patchServerErrorRollsBack() {
+        fake.on("PATCH", "/admin/leads/.*", code = 500, body = """{"detail":"database is down"}""")
+        toasts = ToastLog(dash)
+        val vm = LeadsViewModel(dash)
+        vm.moveTo(vm.leads.value.first { it.id == "u2" }, "won")
+        assertEquals("Failed to update lead — database is down", toasts!!.all.last().message)
         assertEquals("qualified", vm.leads.value.first { it.id == "u2" }.leadStage)
     }
 }

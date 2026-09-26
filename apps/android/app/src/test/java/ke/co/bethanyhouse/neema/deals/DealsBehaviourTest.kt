@@ -47,12 +47,14 @@ class DealsBehaviourTest {
         assertEquals(listOf("x1", "x2"), vm.actions.value!!.map { it.id })
     }
 
-    @Test fun failedLoadsShowEmptyNotLoading() {
+    @Test fun failedLoadsShowTheReasonNotAnEmptyBoard() {
         fake.on("GET", "/admin/deals", code = 500, body = "{}")
         fake.on("GET", "/admin/actions", code = 500, body = "{}")
         val vm = vm()
-        assertEquals(emptyList<Any>(), vm.deals.value)
-        assertEquals(emptyList<Any>(), vm.actions.value)
+        // The web shows "Nothing queued" and empty columns; here the error state says why.
+        assertNull(vm.deals.value)
+        assertNull(vm.actions.value)
+        assertEquals("The server hit an error — try again", vm.loadError.value)
     }
 
     @Test fun sendAsDraftedPostsAnEmptyBodyAndReloads() {
@@ -90,8 +92,8 @@ class DealsBehaviourTest {
         vm.act("x1", "approve")
         val t = toasts.all.last()
         assertEquals(ToastType.Error, t.type)
-        // A 409 carries the server's reason (crm.py approve_action), and the queue reloads.
-        assertEquals("approve failed — Action is sent", t.message)
+        // A 409 "Action is sent" (crm.py approve_action): nothing went twice; the queue reloads.
+        assertEquals("Already sent — nothing was sent twice", t.message)
         assertTrue(vm.acting.value.isEmpty())
     }
 
@@ -131,7 +133,10 @@ class DealsBehaviourTest {
         val vm = vm()
         vm.markWon("d1")
         assertEquals(ToastType.Error, toasts.all.last().type)
-        assertEquals("Update failed", toasts.all.last().message)
+        assertEquals("This deal no longer exists — someone may have deleted it", toasts.all.last().message)
+        fake.on("PATCH", "/admin/deals/.*", code = 500, body = "Internal Server Error")
+        vm.markLost("d2")
+        assertEquals("Update failed — the server hit an error — try again", toasts.all.last().message)
     }
 
     @Test fun dueLabels() {
