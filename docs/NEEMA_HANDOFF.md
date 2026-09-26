@@ -259,6 +259,28 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   on a set (`core/companions.py`); a varied product's offer line names the
   chosen variant; the made-to-order `ask_next` is the owner's pull. Tests:
   `test_cost_cycle.py`, `test_companion_map.py`, `test_ten_cycles_battery.py`.
+- **Pacing — cooling off without betraying the sale** (owner 2026-09-26:
+  "some people want to chat with neema non-stop"). `agent/cooling.py` reads
+  every real DM turn before a token is bought: a BUYING SIGNAL (an item, a
+  price, the order, delivery, sizes, a photo, an ask — `buying_signal`) is
+  answered in full whatever the count; BUSINESS IN PLAY (a cart, an open
+  deal, an unpaid order this week, a complaint flagged today —
+  `business_in_play`) keeps the thread warm; past the economy line
+  (`cooling_economy_hour` 10 / `cooling_economy_day` 20, or three drifting
+  turns) a non-buying turn runs on the light model with a PACING note (one
+  or two lines, then one step toward the item, then the close and
+  `pause_conversation`); past the cool-off line (`cooling_cool_hour` 20 /
+  `cooling_cool_day` 40, or `cooling_drift_turns` 5 of pure chat) with
+  nothing in play, ONE warm close that says how to resume (`cool_line`,
+  EN/SW, by name) and silence for `cooling_hours` (3) — the team flagged,
+  the sweeper told — lifted by the first buying signal, which is answered;
+  an identical text within `cooling_dup_seconds` (180) is not a new turn.
+  Closers belong to the closer gate; drafts, scribes and public comments are
+  never paced. Comments: `_person_over_cap` (`meta_comment_person_cap` 6 full
+  model replies per person per post per day; the free priced path is decided
+  first and never spends it). The prompt's PACING rule; `/api/health`
+  `cooling` (economy, cooled, silenced, lifted, duplicate). Switch:
+  `cooling_enabled`. Tests: `tests/test_cooling.py`.
 - **The gate before posting** (owner 2026-09-25: "someone is asking for
   golden trays and you give silver… put a gate to review before posting…
   when someone asks for Holy Communion Cups without specifying chalice, give

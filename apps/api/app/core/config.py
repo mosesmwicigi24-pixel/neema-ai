@@ -285,6 +285,24 @@ class Settings(BaseSettings):
     # hours (agent/domain).
     church_goods_guard: bool = True
     offdomain_pause_hours: int = 12
+    # PACING (owner, 2026-09-26: "some people want to chat with neema non-stop"):
+    # past the economy line a turn runs on the light model in one or two lines;
+    # past the cool-off line — with no item, price, photo, cart, order or
+    # complaint in play — one warm close, then silence for cooling_hours,
+    # lifted by the first buying signal. Counts are per contact, per hour and
+    # per UTC day; drift is consecutive turns with nothing to sell in them.
+    cooling_enabled: bool = True
+    cooling_economy_hour: int = 10
+    cooling_economy_day: int = 20
+    cooling_cool_hour: int = 20
+    cooling_cool_day: int = 40
+    cooling_drift_turns: int = 5
+    cooling_hours: int = 3
+    cooling_dup_seconds: int = 180
+    # A person commenting many times under one post: this many full model
+    # replies a day; beyond it, a bare price ask still gets the free priced
+    # line on an identified post and anything else the warm canned line.
+    meta_comment_person_cap: int = 6
     # ── Daily AI spend ceiling (services/ai_budget) — the cost-surprise breaker.
     # Metered per UTC day. Past the soft budget, main-model turns downgrade to
     # tier2_model_light; past the hard stop, agent turns refuse before buying a

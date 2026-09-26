@@ -1408,6 +1408,43 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         if _verdict and _verdict.get("action") == "note":
             tail += _verdict["note"]
 
+    # PACING (owner, 2026-09-26: "some people want to chat with neema non-stop
+    # … enhance cooling off without betraying the quality of the sales"). Read
+    # BEFORE any token is bought: a duplicate text or a cooled thread is
+    # silence; the cool-off line goes out once; an economy turn runs on the
+    # light model with a pacing note. A buying signal, a cart, an order or a
+    # complaint keeps the thread warm — see agent/cooling.py.
+    if not read_only and not scribe_only and not public_comment:
+        try:
+            from app.agent import cooling as _pace
+            _pv = await _pace.decide(
+                redis, db, channel=channel, key=key, text=user_text or "",
+                has_media=bool(media), closer=is_closer(user_text or ""),
+                swahili=looks_swahili(user_text or ""), customer_name=customer_name or "")
+        except Exception as exc:
+            _log.warning("pacing failed open for %s/%s: %s", channel, key, exc)
+            _pv = None
+        if _pv and _pv.get("action") == "silence":
+            if turn_facts is not None:
+                turn_facts.update({"tools": [], "held": [], "review": "pacing",
+                                   "pacing": _pv.get("why") or "silence"})
+            return ""
+        if _pv and _pv.get("action") == "cool":
+            try:
+                await _flag_guard(db, channel, key, _pv.get("flag") or "Neema paced this conversation.")
+            except Exception:
+                pass
+            if turn_facts is not None:
+                turn_facts.update({"tools": [], "held": [], "review": "pacing", "pacing": "cool"})
+            return _pv["reply"]
+        if _pv and _pv.get("action") == "economy":
+            if getattr(llm, "_model", None) == settings.tier2_model:
+                llm = build_llm(model=settings.tier2_model_light,
+                                purpose=getattr(llm, "purpose", "turn"))
+            tail += _pv.get("note") or ""
+            if turn_facts is not None:
+                turn_facts["pacing"] = "economy"
+
     # Their OWN money, at today's rate (services/fx; owner, 2026-09-25): a
     # "how much in rands?" gets a FACT to convert with — and the gate verifies
     # the figure against the same rate. No rate → no conversion, said plainly.
@@ -4189,6 +4226,25 @@ async def _order_link(redis, channel: str, ext: str, product: str = "") -> str:
     return f"{base}/api/o/{ref}" if base else target
 
 
+async def _person_over_cap(redis, post_id: str, ext: str) -> bool:
+    """True once THIS person has spent `meta_comment_person_cap` full agent
+    replies under this post today (owner, 2026-09-26: some people comment
+    non-stop). Beyond it a bare price ask on an identified post still gets the
+    free priced line, and anything else the warm canned line — the post's
+    other commenters keep the model."""
+    if not redis or not post_id or not ext:
+        return False
+    from datetime import datetime, timezone
+    try:
+        key = f"meta:personcap:{post_id}:{ext}:{datetime.now(timezone.utc):%Y%m%d}"
+        n = await redis.incr(key)
+        if n == 1:
+            await redis.expire(key, 2 * 24 * 3600)
+        return n > int(getattr(settings, "meta_comment_person_cap", 6) or 6)
+    except Exception:
+        return False
+
+
 async def _post_over_cap(redis, post_id: str) -> bool:
     """True once this post has spent `meta_comment_agent_cap` full agent replies
     TODAY — beyond that, buying comments still get a warm reply, just a lighter
@@ -4395,7 +4451,8 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # Checked BEFORE the cap counter: a free reply must not spend the post's
     # daily model budget (the counter increments on every call).
     free_ask = _trusted and is_bare_price_ask(prompt_text)
-    skip_model = free_ask or await _post_over_cap(redis, post_id)
+    skip_model = free_ask or await _post_over_cap(redis, post_id) \
+        or await _person_over_cap(redis, post_id, ext)
 
     answer = ""
     seen_products: list = []          # the catalogue rows the agent actually priced
