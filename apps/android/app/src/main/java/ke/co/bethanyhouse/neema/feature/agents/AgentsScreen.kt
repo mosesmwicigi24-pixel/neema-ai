@@ -53,7 +53,6 @@ import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 import ke.co.bethanyhouse.neema.core.ui.components.neemaSwitchColors
 import ke.co.bethanyhouse.neema.feature.reports.LocalMeasurePass
 import ke.co.bethanyhouse.neema.feature.reports.measureOnly
-import ke.co.bethanyhouse.neema.core.util.AppClock
 import ke.co.bethanyhouse.neema.core.util.Fmt
 
 /** Port of AgentsView.tsx — the Team screen: agents, custom roles, and the dialogs that edit both. */
@@ -68,7 +67,7 @@ fun AgentsScreen(dash: DashboardViewModel) {
     val vm: AgentsViewModel = viewModel { AgentsViewModel(dash) }
     // The dialogs' typed input (passwords excepted) comes back after Android restarts the app.
     ke.co.bethanyhouse.neema.feature.reports.KeepUiState(vm)
-    ke.co.bethanyhouse.neema.feature.reports.TrackShown(vm.life)
+    ke.co.bethanyhouse.neema.core.util.TrackShown(vm.life)
     // "Last seen 4m ago" keeps counting between polls instead of freezing at
     // first paint, and is fresh the moment the app comes back to the front.
     val now = ke.co.bethanyhouse.neema.feature.reports.rememberNow()
@@ -212,11 +211,12 @@ fun AgentsScreen(dash: DashboardViewModel) {
             }
 
             if (tab == "agents") {
-                if (agents.isEmpty() && agentsError != null) {
+                val teamProblem = agentsError
+                if (agents.isEmpty() && teamProblem != null) {
                     item(key = "error") {
                         ke.co.bethanyhouse.neema.feature.reports.LoadProblem(
                             title = "Couldn't load the team",
-                            message = agentsError!!, retrying = refreshing, onRetry = vm::refresh,
+                            message = teamProblem, retrying = refreshing, onRetry = vm::refresh,
                         )
                     }
                 } else if (agents.isEmpty()) {
@@ -247,11 +247,12 @@ fun AgentsScreen(dash: DashboardViewModel) {
                 if (rolesLoading && roles.isEmpty()) {
                     item(key = "loading") { Loading(Modifier.height(160.dp)) }
                 } else {
-                    if (roles.isEmpty() && rolesError != null) {
+                    val rolesProblem = rolesError
+                    if (roles.isEmpty() && rolesProblem != null) {
                         item(key = "roleserror") {
                             ke.co.bethanyhouse.neema.feature.reports.LoadProblem(
                                 title = "Couldn't load the roles",
-                                message = rolesError!!, retrying = refreshing, onRetry = vm::refresh,
+                                message = rolesProblem, retrying = refreshing, onRetry = vm::refresh,
                             )
                         }
                     } else if (roles.isEmpty()) {

@@ -63,7 +63,6 @@ import ke.co.bethanyhouse.neema.feature.agents.onGold
 import ke.co.bethanyhouse.neema.core.ui.components.neemaSwitchColors
 import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 import ke.co.bethanyhouse.neema.core.ui.theme.ChannelColors
-import ke.co.bethanyhouse.neema.feature.reports.AreaPalette
 import androidx.compose.ui.graphics.SolidColor
 
 private val Amber700 = Palette.Amber700
@@ -96,7 +95,7 @@ fun SettingsScreen(dash: DashboardViewModel) {
     val vm: SettingsViewModel = viewModel { SettingsViewModel(dash) }
     // Unsaved standing orders, offer and local fields come back after Android restarts the app.
     ke.co.bethanyhouse.neema.feature.reports.KeepUiState(vm)
-    ke.co.bethanyhouse.neema.feature.reports.TrackShown(vm.life)
+    ke.co.bethanyhouse.neema.core.util.TrackShown(vm.life)
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()
     val c = Neema.colors
     val startScroll = LocalSettingsPreview.current.scroll
@@ -300,7 +299,8 @@ private fun CardLoadProblem(vm: SettingsViewModel, card: String, title: String):
 private fun TranslationCard(vm: SettingsViewModel) {
     val state by vm.translation.collectAsStateWithLifecycle()
     val c = Neema.colors
-    fun money(v: Double) = if (v > 0 && v < 0.01) "under $0.01" else "$" + "%.2f".format(v)
+    // The web's toFixed(2): always a point, whatever the phone's language.
+    fun money(v: Double) = if (v > 0 && v < 0.01) "under $0.01" else "$" + String.format(java.util.Locale.US, "%.2f", v)
     SectionCard(
         "Translation for the team",
         "Shows an English line under any message that is not English or Swahili — in both directions, so you can " +
@@ -571,7 +571,8 @@ private fun SkuPickerDialog(catalog: List<CatalogItem>, selected: List<String>, 
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Choose products") },
+        // The web's modal overlay (bg-black/50), as every dialog in the app dims.
+        title = { ke.co.bethanyhouse.neema.core.ui.components.WebModalDim(); ke.co.bethanyhouse.neema.feature.agents.FlatDialogWindow(); Text("Choose products") },
         text = {
             Column {
                 SearchField(query, { query = it }, placeholder = "Search name or SKU…")
@@ -644,7 +645,11 @@ private fun DateButton(id: String, value: String?, emptyLabel: String, clearable
                 }) { Text("OK") }
             },
             dismissButton = { TextButton(onClick = { open = false }) { Text("Cancel") } },
-        ) { DatePicker(state) }
+        ) {
+            ke.co.bethanyhouse.neema.core.ui.components.WebModalDim()
+            ke.co.bethanyhouse.neema.feature.agents.FlatDialogWindow()
+            DatePicker(state)
+        }
     }
 }
 
@@ -682,11 +687,11 @@ private fun PipelineStagesCard(vm: SettingsViewModel) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(bottom = 8.dp)) {
                 list.forEach { s ->
                     Row(
-                        Modifier.clip(RoundedCornerShape(6.dp)).background(if (c.isDark) AreaPalette.PipeGold.copy(alpha = 0.15f) else AreaPalette.PipeChipFill)
-                            .border(1.dp, if (c.isDark) AreaPalette.PipeGold.copy(alpha = 0.4f) else AreaPalette.PipeChipLine, RoundedCornerShape(6.dp)).padding(start = 8.dp),
+                        Modifier.clip(RoundedCornerShape(6.dp)).background(if (c.isDark) Palette.PipeGold.copy(alpha = 0.15f) else Palette.PipeChipFill)
+                            .border(1.dp, if (c.isDark) Palette.PipeGold.copy(alpha = 0.4f) else Palette.PipeChipLine, RoundedCornerShape(6.dp)).padding(start = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(s, fontSize = 12.sp, color = if (c.isDark) AreaPalette.PipeChipLine else AreaPalette.PipeChipInk)
+                        Text(s, fontSize = 12.sp, color = if (c.isDark) Palette.PipeChipLine else Palette.PipeChipInk)
                         // 32dp drawn; Compose widens the touch area to 48dp.
                         IconButton(onClick = { vm.removeStage(s) }, enabled = !saving, modifier = Modifier.size(32.dp)) {
                             Icon(Icons.Default.Close, "Remove $s", Modifier.size(14.dp), tint = c.muted)
@@ -712,7 +717,7 @@ private fun PipelineStagesCard(vm: SettingsViewModel) {
                     onClick = { add() },
                     enabled = newStage.isNotBlank() && !saving,
                     shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = AreaPalette.PipeGoldSolid, contentColor = Color.White),
+                    colors = ButtonDefaults.buttonColors(containerColor = Palette.PipeGoldSolid, contentColor = Color.White),
                 ) { Text("Add", maxLines = 1) }
             }
         } else {
@@ -792,15 +797,15 @@ private data class PlatformIcon(val icon: ImageVector?, val bg: Brush, val text:
 
 private fun platformIcon(key: String): PlatformIcon = when (key) {
     "whatsapp" -> PlatformIcon(Icons.AutoMirrored.Outlined.Chat, SolidColor(ChannelColors.WhatsApp))
-    "messenger" -> PlatformIcon(Icons.Outlined.Forum, SolidColor(AreaPalette.MessengerTile))
+    "messenger" -> PlatformIcon(Icons.Outlined.Forum, SolidColor(Palette.MessengerTile))
     "instagram" -> PlatformIcon(
         Icons.Outlined.PhotoCamera,
-        Brush.linearGradient(AreaPalette.InstagramGradient),
+        Brush.linearGradient(Palette.InstagramGradient),
     )
-    "mpesa" -> PlatformIcon(null, SolidColor(AreaPalette.MpesaGreen), "M-PESA")
+    "mpesa" -> PlatformIcon(null, SolidColor(Palette.MpesaGreen), "M-PESA")
     "email" -> PlatformIcon(Icons.Outlined.Email, SolidColor(Palette.Indigo500))
-    "slack" -> PlatformIcon(Icons.Outlined.Tag, SolidColor(AreaPalette.SlackAubergine))
-    else -> PlatformIcon(Icons.Outlined.TableChart, SolidColor(AreaPalette.SheetsGreen))
+    "slack" -> PlatformIcon(Icons.Outlined.Tag, SolidColor(Palette.SlackAubergine))
+    else -> PlatformIcon(Icons.Outlined.TableChart, SolidColor(Palette.SheetsGreen))
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -828,7 +833,7 @@ private fun IntegrationsCard(vm: SettingsViewModel, twoCols: Boolean) {
                         }
                         if (integ.connected) SmallPillButton(
                             "Disconnect", c.red,
-                            if (c.isDark) c.redDim else AreaPalette.DangerWash, if (c.isDark) c.red.copy(alpha = 0.3f) else Palette.Red200,
+                            if (c.isDark) c.redDim else Palette.DangerWash, if (c.isDark) c.red.copy(alpha = 0.3f) else Palette.Red200,
                         ) { vm.toggleIntegration(integ.key) }
                         else SmallPillButton("Connect", c.gold, c.goldDim, c.border) { vm.toggleIntegration(integ.key) }
                     }

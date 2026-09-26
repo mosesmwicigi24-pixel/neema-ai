@@ -10,13 +10,13 @@ import ke.co.bethanyhouse.neema.core.model.Agent
 import ke.co.bethanyhouse.neema.core.model.CustomRole
 import ke.co.bethanyhouse.neema.core.net.ApiException
 import ke.co.bethanyhouse.neema.feature.reports.BUSY_TEXT
-import ke.co.bethanyhouse.neema.feature.reports.ScreenLife
+import ke.co.bethanyhouse.neema.core.util.ScreenLife
 import ke.co.bethanyhouse.neema.feature.reports.attempt
 import ke.co.bethanyhouse.neema.feature.reports.friendlyError
 import ke.co.bethanyhouse.neema.feature.reports.httpStatus
 import ke.co.bethanyhouse.neema.feature.reports.masking
 import ke.co.bethanyhouse.neema.feature.reports.mayHaveApplied
-import ke.co.bethanyhouse.neema.feature.reports.quietly
+import ke.co.bethanyhouse.neema.core.util.quietly
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -406,7 +406,7 @@ class AgentsViewModel(private val dash: DashboardViewModel) : ViewModel(), ke.co
                     }
                     e.httpStatus() == 404 -> {
                         _availability.update { it - agent.id }
-                        agentGone(agent) {}(e as ApiException)
+                        (e as? ApiException)?.let { agentGone(agent) {}(it) }
                     }
                     else -> {
                         _availability.update { it - agent.id }
