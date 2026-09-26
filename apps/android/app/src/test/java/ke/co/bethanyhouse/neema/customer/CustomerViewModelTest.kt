@@ -55,10 +55,12 @@ class CustomerViewModelTest {
     private lateinit var fake: FakeNeema
     private lateinit var dash: DashboardViewModel
     private val toasts = mutableListOf<Toast>()
-    private val scope = CoroutineScope(UnconfinedTestDispatcher())
+    private val scheduler = kotlinx.coroutines.test.TestCoroutineScheduler()
+    private val scope = CoroutineScope(UnconfinedTestDispatcher(scheduler))
+    private fun advance(ms: Long = CustomerViewModel.RELOAD_COALESCE_MS + 1) { scheduler.advanceTimeBy(ms); scheduler.runCurrent() }
 
     @Before fun setUp() {
-        Dispatchers.setMain(UnconfinedTestDispatcher())
+        Dispatchers.setMain(UnconfinedTestDispatcher(scheduler))
         StageCache.stages = null
         fake = FakeNeema.withFixtures().also(CustomerFixtures::install)
     }
@@ -86,7 +88,7 @@ class CustomerViewModelTest {
         placeCall: suspend (String, String?) -> Result<Unit> = { _, _ -> Result.success(Unit) },
     ): CustomerViewModel {
         if (!::dash.isInitialized) signIn()
-        return CustomerViewModel(dash, conv, placeCall)
+        return CustomerViewModel(dash, conv, placeCall = placeCall)
     }
 
     private fun calls(method: String, path: String) = fake.calls.filter { it.method == method && it.path == path }
@@ -138,11 +140,11 @@ class CustomerViewModelTest {
         val conv = CustomerFixtures.conversation("c1")
         val vm = vm(conv = conv)
         val path = "/admin/customers/${CustomerFixtures.PETER}"
-        vm.sync(conv)
+        vm.sync(conv); advance()
         assertEquals(1, calls("GET", path).size)
-        vm.sync(conv.copy(lastMessageAt = Fixtures.ago(0)))
+        vm.sync(conv.copy(lastMessageAt = Fixtures.ago(0))); advance()
         assertEquals(2, calls("GET", path).size)
-        vm.sync(conv.copy(lastMessageAt = Fixtures.ago(0), name = "Fr. Peter K."))
+        vm.sync(conv.copy(lastMessageAt = Fixtures.ago(0), name = "Fr. Peter K.")); advance()
         assertEquals(3, calls("GET", path).size)
         assertFalse("a quiet reload never blanks the panel", vm.loading.value)
     }

@@ -81,6 +81,11 @@ fun CustomerPanel(
         val vm: CustomerViewModel = viewModel(key = "customer:${conversation.id}") { CustomerViewModel(dash, conversation) }
         // The web reloads the profile when the thread's row changes (new message, rename).
         LaunchedEffect(vm, conversation) { vm.sync(conversation) }
+        // Live only while on screen: re-shown → refetch; foreground / reconnect / orders → catch up.
+        DisposableEffect(vm) {
+            vm.onShown()
+            onDispose { vm.onHidden() }
+        }
         PanelBody(
             vm = vm, dash = dash, conversation = conversation,
             canEdit = true,

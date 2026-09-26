@@ -223,21 +223,28 @@ private fun NotesSection(vm: CustomerViewModel, ctx: PanelCtx) {
     val c = Neema.colors
     val notes = ctx.profile.notes ?: ""
     val editing by vm.editNotes.collectAsState()
-    var draft by remember(notes) { mutableStateOf(notes) }
+    // The draft lives in the ViewModel: a live reload never resets what the agent is typing.
+    val draft by vm.noteDraft.collectAsState()
+    val base by vm.notesBase.collectAsState()
     CrmSection("Notes") {
         if (editing) {
-            SmallInput(draft, { draft = it }, "Internal notes about this customer…", Modifier.fillMaxWidth(), singleLine = false, minLines = 4)
+            SmallInput(draft, { vm.noteDraft.value = it }, "Internal notes about this customer…", Modifier.fillMaxWidth(), singleLine = false, minLines = 4)
+            // Something (a call summary) landed on the notes mid-edit; the server merges it in on save.
+            if (base != null && base != notes) {
+                Text("New notes arrived while you were typing — they'll be kept when you save.",
+                    fontSize = 10.sp, color = c.muted, fontStyle = FontStyle.Italic, modifier = Modifier.padding(top = 4.dp))
+            }
             Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = { vm.saveNotes(draft); vm.editNotes.value = false }) {
+                TextButton(onClick = { vm.saveNotes() }) {
                     Text("Save", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF059669))
                 }
-                TextButton(onClick = { draft = notes; vm.editNotes.value = false }) { Text("Cancel", fontSize = 10.sp, color = c.muted) }
+                TextButton(onClick = { vm.cancelEditNotes() }) { Text("Cancel", fontSize = 10.sp, color = c.muted) }
             }
         } else {
             Box(
                 Modifier.fillMaxWidth().heightIn(min = 40.dp).clip(RoundedCornerShape(8.dp)).background(c.bg2)
                     .border(1.dp, c.hairline, RoundedCornerShape(8.dp))
-                    .then(if (ctx.canEdit) Modifier.clickable { vm.editNotes.value = true } else Modifier)
+                    .then(if (ctx.canEdit) Modifier.clickable { vm.startEditNotes() } else Modifier)
                     .padding(horizontal = 10.dp, vertical = 8.dp),
             ) {
                 if (notes.isNotEmpty()) Text(notes, fontSize = 12.sp, color = c.text)
