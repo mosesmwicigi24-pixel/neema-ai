@@ -42,6 +42,7 @@ import ke.co.bethanyhouse.neema.core.model.ConversationWindow
 import ke.co.bethanyhouse.neema.core.util.Fmt
 import kotlinx.coroutines.delay
 import java.io.File
+import ke.co.bethanyhouse.neema.core.ui.theme.NeemaFont
 import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 
 private val Blue50 = Palette.Blue50
@@ -164,7 +165,7 @@ internal fun Composer(
             val boxShape = RoundedCornerShape(16.dp)
             androidx.compose.foundation.text.BasicTextField(
                 value = state.replyText, onValueChange = vm::setReplyText, interactionSource = focus,
-                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp, lineHeight = 19.sp, color = c.text),
+                textStyle = androidx.compose.ui.text.TextStyle(fontFamily = NeemaFont, fontSize = 14.sp, lineHeight = 19.sp, color = c.text),
                 cursorBrush = androidx.compose.ui.graphics.SolidColor(Amber),
                 maxLines = 6,
                 modifier = Modifier.weight(1f).heightIn(min = 44.dp, max = 132.dp)
@@ -370,7 +371,7 @@ private fun MediaTray(vm: ConversationsViewModel, state: ComposerUi, modifier: M
                 val nc = ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors
                 androidx.compose.foundation.text.BasicTextField(
                     value = it.caption, onValueChange = { v -> vm.setMediaCaption(it.id, v) }, enabled = !state.uploading, singleLine = true,
-                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp, color = nc.text),
+                    textStyle = androidx.compose.ui.text.TextStyle(fontFamily = NeemaFont, fontSize = 12.sp, color = nc.text),
                     cursorBrush = androidx.compose.ui.graphics.SolidColor(Palette.Moss600),
                     modifier = Modifier.weight(1f).alpha(if (state.uploading) 0.5f else 1f).clip(RoundedCornerShape(8.dp))
                         .background(if (nc.isDark) nc.bg2 else Color.White).border(1.dp, if (nc.isDark) nc.border else Palette.Hairline, RoundedCornerShape(8.dp)),

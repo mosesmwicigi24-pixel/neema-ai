@@ -40,6 +40,7 @@ import ke.co.bethanyhouse.neema.core.ui.components.Avatar
 import ke.co.bethanyhouse.neema.core.ui.components.channelStyle
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import ke.co.bethanyhouse.neema.core.util.Fmt
+import ke.co.bethanyhouse.neema.core.ui.theme.NeemaFont
 import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 
 /** Email + SMS hidden for now — no traffic on those channels yet (as on the web). */
@@ -165,7 +166,7 @@ internal fun ConversationList(
                     if (listUi.search.isEmpty()) Text("Start typing to search", fontSize = 13.sp, color = if (c.isDark) c.muted else Palette.Sage300, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     BasicTextField(
                         value = listUi.search, onValueChange = vm::setSearch, singleLine = true,
-                        textStyle = TextStyle(fontSize = 13.sp, color = c.text), cursorBrush = SolidColor(Green),
+                        textStyle = TextStyle(fontFamily = NeemaFont, fontSize = 13.sp, color = c.text), cursorBrush = SolidColor(Green),
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }

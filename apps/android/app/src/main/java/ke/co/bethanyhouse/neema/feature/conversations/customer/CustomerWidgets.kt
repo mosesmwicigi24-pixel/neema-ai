@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
+import ke.co.bethanyhouse.neema.core.ui.theme.NeemaFont
 import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 import ke.co.bethanyhouse.neema.core.ui.theme.ChannelColors
 import ke.co.bethanyhouse.neema.feature.conversations.Hue
@@ -234,7 +235,7 @@ fun SmallInput(
         onValueChange = onChange,
         singleLine = singleLine,
         minLines = minLines,
-        textStyle = TextStyle(fontSize = fontSize, color = c.text),
+        textStyle = TextStyle(fontFamily = NeemaFont, fontSize = fontSize, color = c.text),
         cursorBrush = SolidColor(c.gold),
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = if (singleLine) ImeAction.Done else ImeAction.Default),
         keyboardActions = KeyboardActions(onDone = { onDone?.invoke() }),
@@ -439,6 +440,9 @@ fun PipelineStepper(
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val needed = 38.dp * stages.size + 16.dp
         val fits = maxWidth >= needed
+        // Each label gets its node's share of the row (less a hair of air), so two
+        // neighbours never run together ("ContactedQualified") in a wide font.
+        val labelMax = (if (fits) (maxWidth - 16.dp) / stages.size else 38.dp) - 3.dp
         Row(
             (if (fits) Modifier.fillMaxWidth() else Modifier.horizontalScroll(rememberScrollState()).width(needed))
                 .padding(start = 8.dp, end = 8.dp, bottom = 18.dp),
@@ -476,10 +480,18 @@ fun PipelineStepper(
                 }
                 // The label hangs under the node and may be wider than it (whitespace-nowrap).
                 Box(Modifier.size(0.dp), contentAlignment = Alignment.TopCenter) {
-                    Text(
-                        stageLabel(stage), fontSize = 9.sp, color = labelColor, maxLines = 1, softWrap = false,
-                        fontWeight = if (state == StepState.Active) FontWeight.Bold else FontWeight.SemiBold,
-                        modifier = Modifier.wrapContentSize(Alignment.TopCenter, unbounded = true).offset(x = (-12).dp, y = 15.dp),
+                    // Full size (9sp) where it fits its slot; a long label in a crowded row
+                    // steps down to 7sp rather than running into its neighbour.
+                    androidx.compose.foundation.text.BasicText(
+                        stageLabel(stage), maxLines = 1, softWrap = false,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        style = androidx.compose.ui.text.TextStyle(
+                            fontFamily = NeemaFont, color = labelColor,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            fontWeight = if (state == StepState.Active) FontWeight.Bold else FontWeight.SemiBold,
+                        ),
+                        autoSize = androidx.compose.foundation.text.TextAutoSize.StepBased(minFontSize = 7.sp, maxFontSize = 9.sp, stepSize = 0.5.sp),
+                        modifier = Modifier.wrapContentSize(Alignment.TopCenter, unbounded = true).offset(x = (-12).dp, y = 15.dp).widthIn(max = labelMax),
                     )
                 }
                 // A finger-sized target over node + label, without changing the layout.
