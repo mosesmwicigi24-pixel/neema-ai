@@ -39,6 +39,8 @@ import ke.co.bethanyhouse.neema.core.model.CatalogItem
 import ke.co.bethanyhouse.neema.core.model.PriceAudit
 import ke.co.bethanyhouse.neema.core.ui.components.SearchField
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
+import ke.co.bethanyhouse.neema.core.ui.theme.Palette
+import ke.co.bethanyhouse.neema.feature.reports.AreaPalette
 import ke.co.bethanyhouse.neema.core.util.Fmt
 
 // ── Category glyphs and card tints (the web's catEmoji / catColors) ─────────
@@ -53,34 +55,37 @@ internal val catEmoji = mapOf(
 
 internal fun glyph(category: String?): String = catEmoji[category ?: ""] ?: "📦"
 
-// Tailwind *-50 shades, as gradient stops.
-private val Amber50 = Color(0xFFFFFBEB); private val Yellow50 = Color(0xFFFEFCE8)
-private val Orange50 = Color(0xFFFFF7ED); private val Sky50 = Color(0xFFF0F9FF)
-private val Blue50 = Color(0xFFEFF6FF); private val Red50 = Color(0xFFFEF2F2)
-private val Rose50 = Color(0xFFFFF1F2); private val Pink50 = Color(0xFFFDF2F8)
-private val Stone50 = Color(0xFFFAFAF9); private val Slate50 = Color(0xFFF8FAFC)
-private val Teal50 = Color(0xFFF0FDFA); private val Cyan50 = Color(0xFFECFEFF)
-private val Indigo50 = Color(0xFFEEF2FF); private val Purple50 = Color(0xFFFAF5FF)
-private val Violet50 = Color(0xFFF5F3FF); private val Stone100 = Color(0xFFF5F5F4)
+// Tailwind *-50 shades, as gradient stops (the web's catColors).
+private val catColors: Map<String, Pair<Color, Color>> = with(AreaPalette) {
+    mapOf(
+        "Anointing Oil" to (Palette.Amber50 to Yellow50), "Communion Wafers" to (Orange50 to Palette.Amber50),
+        "Communion Cups" to (Sky50 to Palette.Blue50), "Prefilled Cups" to (Palette.Red50 to Rose50),
+        "Communion Wine" to (Palette.Red50 to Pink50), "Communion Trays" to (Palette.Stone50 to Palette.Slate50),
+        "Communion Accessories" to (Teal50 to Cyan50), "Clergy Apparel" to (Palette.Blue50 to Indigo50),
+        "Clergy Vestments" to (Purple50 to Palette.Violet50),
+        "anointing" to (Palette.Amber50 to Yellow50), "communion" to (Palette.Red50 to Rose50),
+        "vestments" to (Purple50 to Palette.Violet50), "trays" to (Palette.Stone50 to Palette.Slate50),
+        "wine" to (Palette.Red50 to Pink50), "apparel" to (Palette.Blue50 to Indigo50),
+    )
+}
 
-private val catColors = mapOf(
-    "Anointing Oil" to (Amber50 to Yellow50), "Communion Wafers" to (Orange50 to Amber50),
-    "Communion Cups" to (Sky50 to Blue50), "Prefilled Cups" to (Red50 to Rose50),
-    "Communion Wine" to (Red50 to Pink50), "Communion Trays" to (Stone50 to Slate50),
-    "Communion Accessories" to (Teal50 to Cyan50), "Clergy Apparel" to (Blue50 to Indigo50),
-    "Clergy Vestments" to (Purple50 to Violet50),
-    "anointing" to (Amber50 to Yellow50), "communion" to (Red50 to Rose50),
-    "vestments" to (Purple50 to Violet50), "trays" to (Stone50 to Slate50),
-    "wine" to (Red50 to Pink50), "apparel" to (Blue50 to Indigo50),
-)
+private fun tint(pair: Pair<Color, Color>, alpha: Float): Brush =
+    Brush.linearGradient(listOf(pair.first.copy(alpha = alpha), pair.second.copy(alpha = alpha)))
+
+private val fallbackTint = Palette.Stone50 to Palette.Stone100
+
+// One brush per category and theme, made once — not one per card per frame
+// across a 2,000-product grid. The pastel tints would glare on the night
+// theme, so they're softened there.
+private val lightBrushes: Map<String, Brush> = catColors.mapValues { tint(it.value, 1f) }
+private val darkBrushes: Map<String, Brush> = catColors.mapValues { tint(it.value, 0.12f) }
+private val lightFallback = tint(fallbackTint, 1f)
+private val darkFallback = tint(fallbackTint, 0.12f)
 
 @Composable
-internal fun categoryBrush(category: String?): Brush {
-    val (a, b) = catColors[category ?: ""] ?: (Stone50 to Stone100)
-    // The pastel tints would glare on the night theme; soften them there.
-    val alpha = if (Neema.colors.isDark) 0.12f else 1f
-    return Brush.linearGradient(listOf(a.copy(alpha = alpha), b.copy(alpha = alpha)))
-}
+internal fun categoryBrush(category: String?): Brush =
+    if (Neema.colors.isDark) darkBrushes[category ?: ""] ?: darkFallback
+    else lightBrushes[category ?: ""] ?: lightFallback
 
 /**
  * SKUs and ids. The web's #b5da8b is ~1.6:1 on white (unreadable in the
@@ -90,11 +95,7 @@ internal fun categoryBrush(category: String?): Brush {
 internal fun faint(): Color = Neema.colors.muted
 
 /** The web's catalog search border: `border-[#cee6b2]` (the other search fields use #b5da8b). */
-private val CatalogSearchBorder = Color(0xFFCEE6B2)
-
-internal val Emerald600 = Color(0xFF059669)
-private val Stone200 = Color(0xFFE7E5E4)
-internal val Red500 = Color(0xFFEF4444)
+private val CatalogSearchBorder = Palette.Willow200
 
 /** "1,500" not "1500.0" — the web's toLocaleString(). */
 internal fun num(v: Double): String = if (v == Math.floor(v) && !v.isInfinite()) Fmt.number(v.toLong()) else Fmt.number(v)
@@ -157,10 +158,12 @@ fun CatalogScreen(
     val catalogError by vm.catalogError.collectAsStateWithLifecycle()
     val c = Neema.colors
 
-    val categories = remember(catalog) { catalogCategories(catalog) }
-    val filtered = remember(catalog, filter, search) { filterCatalog(catalog, filter, search) }
-    val inStock = catalog.count { it.inStock }
-    val outStock = catalog.count { !it.inStock }
+    // Filtered, counted and indexed in the ViewModel, off the main thread.
+    val view by vm.view.collectAsStateWithLifecycle()
+    val categories = view.categories
+    val filtered = view.filtered
+    val inStock = view.inStock
+    val outStock = view.outStock
 
     var detail by remember { mutableStateOf(initialDetail) }
 
@@ -171,6 +174,7 @@ fun CatalogScreen(
             val cols = catalogColumns(maxWidth - pad * 2, androidx.compose.ui.platform.LocalDensity.current.fontScale)
             // The web's gap-4: 16 between cards, both ways.
             val gap = 16.dp
+            val grid = remember(filtered, cols) { gridRows(filtered, cols) }
             LazyColumn(contentPadding = PaddingValues(pad), modifier = Modifier.fillMaxSize()) {
                 audit?.let { a ->
                     if (a.currencyGaps.isNotEmpty() || a.perPiece.isNotEmpty()) {
@@ -188,11 +192,11 @@ fun CatalogScreen(
                         Text(
                             buildAnnotatedString {
                                 withStyle(SpanStyle(color = c.muted)) { append("${catalog.size} items") }
-                                withStyle(SpanStyle(color = Stone200)) { append("  ·  ") }
-                                withStyle(SpanStyle(color = Emerald600)) { append("$inStock in stock") }
+                                withStyle(SpanStyle(color = Palette.Stone200)) { append("  ·  ") }
+                                withStyle(SpanStyle(color = Palette.Emerald600)) { append("$inStock in stock") }
                                 if (outStock > 0) {
-                                    withStyle(SpanStyle(color = Stone200)) { append("  ·  ") }
-                                    withStyle(SpanStyle(color = Red500)) { append("$outStock out of stock") }
+                                    withStyle(SpanStyle(color = Palette.Stone200)) { append("  ·  ") }
+                                    withStyle(SpanStyle(color = Palette.Red500)) { append("$outStock out of stock") }
                                 }
                             },
                             fontSize = 14.sp, modifier = Modifier.padding(top = 2.dp),
@@ -203,7 +207,7 @@ fun CatalogScreen(
                 item(key = "source") {
                     Row(
                         Modifier.padding(bottom = 20.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                            .background(if (c.isDark) c.goldDim else Color(0xFFEAF5DD))
+                            .background(if (c.isDark) c.goldDim else AreaPalette.SproutWash)
                             .border(1.dp, c.bg4, RoundedCornerShape(12.dp))
                             .padding(horizontal = 14.dp, vertical = 10.dp),
                     ) {
@@ -234,12 +238,14 @@ fun CatalogScreen(
                 // ── Grid ─────────────────────────────────────────────────
                 // Rows of equal height, like the web's CSS grid: every card in
                 // a row stretches to the tallest one in it.
-                // No keys: a hub row and a local row may share a SKU-derived id.
-                val rows = filtered.chunked(cols)
-                itemsIndexed(rows) { i, row ->
+                // Keyed by the products in the row (a repeated id — a hub row and
+                // a local row may share a SKU-derived one — gets its position),
+                // so a poll that changes one product recomposes only its row
+                // and the scroll position holds.
+                itemsIndexed(grid.rows, key = { i, _ -> grid.keys[i] }, contentType = { _, _ -> "row" }) { i, row ->
                     EqualHeightRow(
                         cols = cols, gap = gap,
-                        modifier = Modifier.padding(bottom = if (i < rows.lastIndex) gap else 0.dp),
+                        modifier = Modifier.padding(bottom = if (i < grid.rows.lastIndex) gap else 0.dp),
                     ) {
                         row.forEach { item -> ProductCard(item = item, onOpen = { detail = item }, imageAspect = if (cols == 1) 4f / 3f else 1f) }
                     }
@@ -272,6 +278,14 @@ fun CatalogScreen(
     }
 }
 
+/** The grid's rows of [cols] products, each with a lazy-item key unique within the grid. */
+internal class GridRows(val rows: List<List<CatalogItem>>, val keys: List<String>)
+
+internal fun gridRows(items: List<CatalogItem>, cols: Int): GridRows {
+    val rows = items.chunked(cols.coerceAtLeast(1))
+    return GridRows(rows, ke.co.bethanyhouse.neema.feature.reports.uniqueKeys(rows.map { r -> r.joinToString("|") { it.id } }))
+}
+
 /**
  * One grid row whose cells all take the height of the tallest, like a CSS grid
  * row. Measured twice (natural heights, then that max as a fixed height), since
@@ -283,7 +297,9 @@ internal fun EqualHeightRow(cols: Int, gap: Dp, modifier: Modifier = Modifier, c
     SubcomposeLayout(modifier.fillMaxWidth()) { constraints ->
         val gapPx = gap.roundToPx()
         val cell = ((constraints.maxWidth - gapPx * (cols - 1)) / cols).coerceAtLeast(0)
-        val natural = subcompose("natural", content).map { it.measure(Constraints(minWidth = cell, maxWidth = cell)) }
+        // The sizing copy never loads images (their box is a fixed aspect,
+        // so it measures the same): one download per product, not two.
+        val natural = subcompose("natural") { CompositionLocalProvider(ke.co.bethanyhouse.neema.feature.reports.LocalMeasurePass provides true, content) }.map { it.measure(Constraints(minWidth = cell, maxWidth = cell)) }
         val h = natural.maxOfOrNull { it.height } ?: 0
         val placeables = subcompose("stretched", content).map { it.measure(Constraints.fixed(cell, h)) }
         layout(constraints.maxWidth, h) {
@@ -329,9 +345,11 @@ internal fun ProductThumb(item: CatalogItem, glyphSize: Int = 56) {
     val src = item.imageUrl?.takeIf { it.isNotBlank() } ?: item.thumbnailUrl?.takeIf { it.isNotBlank() }
     var shown by remember(src) { mutableStateOf(false) }
     var failed by remember(src) { mutableStateOf(false) }
+    val measuring = ke.co.bethanyhouse.neema.feature.reports.LocalMeasurePass.current
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         if (!shown) Text(glyph(item.rawCategory), fontSize = glyphSize.sp, modifier = Modifier.padding(4.dp))
-        if (src != null && !failed) AsyncImage(
+        // Coil sizes the decode to this box (never the full-resolution bitmap).
+        if (src != null && !failed && !measuring) AsyncImage(
             model = src, contentDescription = item.name, contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize(),
             onSuccess = { shown = true },
@@ -347,9 +365,9 @@ internal fun StockBadge(item: CatalogItem) {
     val text = if (item.inStock) item.availableQty?.let { "${plainNum(it)} left" } ?: "IN" else "OUT"
     // bg-emerald-50 text-emerald-600 border-emerald-200 / bg-red-50 text-red-500 border-red-200;
     // by night the same hues as tints, so the badge doesn't glare on navy.
-    val fg = if (item.inStock) (if (dark) Color(0xFF34D399) else Emerald600) else (if (dark) Color(0xFFF87171) else Red500)
-    val bg = if (dark) fg.copy(alpha = 0.12f) else if (item.inStock) Color(0xFFECFDF5) else Color(0xFFFEF2F2)
-    val line = if (dark) fg.copy(alpha = 0.35f) else if (item.inStock) Color(0xFFA7F3D0) else Color(0xFFFECACA)
+    val fg = if (item.inStock) (if (dark) Palette.Emerald400 else Palette.Emerald600) else (if (dark) Palette.Red400 else Palette.Red500)
+    val bg = if (dark) fg.copy(alpha = 0.12f) else if (item.inStock) Palette.Emerald50 else Palette.Red50
+    val line = if (dark) fg.copy(alpha = 0.35f) else if (item.inStock) Palette.Emerald200 else Palette.Red200
     Text(
         text, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = fg, maxLines = 1,
         modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(bg)
@@ -384,7 +402,7 @@ private fun ProductCard(item: CatalogItem, onOpen: () -> Unit, modifier: Modifie
             if (hasDescription) {
                 Text(item.description.orEmpty(), fontSize = 12.sp, color = c.muted, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 16.5.sp, modifier = Modifier.padding(top = 4.dp))
             }
-            Text(unbroken(priceText(item)), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = if (c.isDark) c.gold2 else Color(0xFF2C4E18), style = ke.co.bethanyhouse.neema.feature.reports.tabular, modifier = Modifier.padding(top = if (hasDescription) 8.dp else 4.dp))
+            Text(unbroken(priceText(item)), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = if (c.isDark) c.gold2 else Palette.Moss800, style = ke.co.bethanyhouse.neema.feature.reports.tabular, modifier = Modifier.padding(top = if (hasDescription) 8.dp else 4.dp))
             if (item.variants.isNotEmpty()) {
                 Text("${item.variants.size} variants", fontSize = 10.sp, color = c.textDim, modifier = Modifier.padding(top = 2.dp))
             }
@@ -422,17 +440,17 @@ internal fun AliasChip(text: String) {
 private fun PriceAuditBanner(audit: PriceAudit, open: Boolean, onToggle: () -> Unit) {
     val gaps = audit.currencyGaps
     val pp = audit.perPiece
-    val amber900 = Color(0xFF78350F); val amber800 = Color(0xFF92400E); val amber950 = Color(0xFF451A03)
-    val amber700 = Color(0xFFB45309)
+    val amber900 = Palette.Amber900; val amber800 = Palette.Amber800; val amber950 = AreaPalette.Amber950
+    val amber700 = Palette.Amber700
     val dark = Neema.colors.isDark
-    val fg900 = if (dark) Color(0xFFFDE68A) else amber900
-    val fg800 = if (dark) Color(0xFFFCD34D) else amber800
-    val fg950 = if (dark) Color(0xFFFEF3C7) else amber950
+    val fg900 = if (dark) Palette.Amber200 else amber900
+    val fg800 = if (dark) Palette.Amber300 else amber800
+    val fg950 = if (dark) Palette.Amber100 else amber950
     val rate = plainNum(audit.rate)
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-            .background(if (dark) Color(0x33F59E0B) else Color(0xFFFFFBEB))
-            .border(1.dp, Color(0xFFFCD34D), RoundedCornerShape(12.dp))
+            .background(if (dark) Palette.Amber500.copy(alpha = 0.2f) else Palette.Amber50)
+            .border(1.dp, Palette.Amber300, RoundedCornerShape(12.dp))
             .clickable(onClick = onToggle).padding(16.dp),
     ) {
         val parts = buildList {
@@ -454,7 +472,7 @@ private fun PriceAuditBanner(audit: PriceAudit, open: Boolean, onToggle: () -> U
                     Text("KES ÷ $rate", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = fg900.copy(alpha = 0.7f), modifier = Modifier.weight(1f), textAlign = TextAlign.End)
                 }
                 gaps.forEach { g ->
-                    HorizontalDivider(color = Color(0xFFFDE68A), modifier = Modifier.padding(vertical = 4.dp))
+                    HorizontalDivider(color = Palette.Amber200, modifier = Modifier.padding(vertical = 4.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             buildAnnotatedString {
@@ -462,7 +480,7 @@ private fun PriceAuditBanner(audit: PriceAudit, open: Boolean, onToggle: () -> U
                                 // The hub's category is "" for an uncategorised product (and null on
                                 // older rows): the web then prints a dangling " · "; drop it instead.
                                 g.category?.takeIf { it.isNotBlank() }?.let { cat ->
-                                    withStyle(SpanStyle(color = (if (dark) Color(0xFFFBBF24) else amber700).copy(alpha = 0.7f))) { append(" · $cat") }
+                                    withStyle(SpanStyle(color = (if (dark) Palette.Amber400 else amber700).copy(alpha = 0.7f))) { append(" · $cat") }
                                 }
                             },
                             fontSize = 12.sp, modifier = Modifier.weight(2f),
@@ -471,8 +489,8 @@ private fun PriceAuditBanner(audit: PriceAudit, open: Boolean, onToggle: () -> U
                         Text(
                             usd(g.usd), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.End,
                             // red-700 / blue-700 by day; red-400 / blue-400 so they read on the night banner.
-                            color = if (g.usd > g.usdExpected) (if (dark) Color(0xFFF87171) else Color(0xFFB91C1C))
-                                else (if (dark) Color(0xFF60A5FA) else Color(0xFF1D4ED8)),
+                            color = if (g.usd > g.usdExpected) (if (dark) Palette.Red400 else Palette.Red700)
+                                else (if (dark) Palette.Blue400 else Palette.Blue700),
                             modifier = Modifier.weight(1f),
                         )
                         Text(usd(g.usdExpected), fontSize = 12.sp, color = fg950, modifier = Modifier.weight(1f), textAlign = TextAlign.End)

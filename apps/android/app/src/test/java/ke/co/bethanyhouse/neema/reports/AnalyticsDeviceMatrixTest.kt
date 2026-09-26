@@ -51,8 +51,8 @@ class AnalyticsDeviceMatrixTest {
         val dash = dashboard(paparazzi.context, f)
         val body: @Composable (DashboardViewModel) -> Unit = when (screen) {
             Screen.Overview -> { d -> OverviewScreen(d, OverviewViewModel(d), ReportsFixtures.clock) }
-            Screen.Reports -> { d -> ReportsScreen(d, ReportsViewModel(d).apply { range.value = ReportRange.D30 }, ReportsFixtures.clock) }
-            Screen.ReportsOrders -> { d -> ReportsScreen(d, ReportsViewModel(d).apply { tab.value = ReportTab.Orders }, ReportsFixtures.clock) }
+            Screen.Reports -> { d -> ReportsScreen(d, ReportsViewModel(d, ReportsFixtures.clock).apply { range.value = ReportRange.D30 }) }
+            Screen.ReportsOrders -> { d -> ReportsScreen(d, ReportsViewModel(d, ReportsFixtures.clock).apply { tab.value = ReportTab.Orders }) }
             Screen.Catalog -> { d -> CatalogScreen(d, CatalogViewModel(d)) }
         }
         paparazzi.snapshot { AppFrame(dark) { PageSlice(page, totalHeight = 6000.dp, step = step.dp) { body(dash) } } }

@@ -42,8 +42,8 @@ class NetworkErrorScreenshotTest : AreaShots() {
             if (r.url.queryParameter("limit") == null) throw java.net.SocketTimeoutException("timeout") else 200 to """{"items":[],"next_cursor":null}"""
         }
         val d = dashboard(paparazzi.context, f)
-        val vm = ReportsViewModel(d)
-        shot(device, dark) { ReportsScreen(d, vm, ReportsFixtures.clock) }
+        val vm = ReportsViewModel(d, ReportsFixtures.clock)
+        shot(device, dark) { ReportsScreen(d, vm) }
     }
 
     @Test fun reportsTimedOut() = reports()

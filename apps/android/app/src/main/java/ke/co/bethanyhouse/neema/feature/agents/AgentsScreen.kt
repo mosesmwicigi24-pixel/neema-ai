@@ -7,6 +7,7 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.unit.Constraints
@@ -48,6 +49,9 @@ import ke.co.bethanyhouse.neema.core.ui.components.EmptyState
 import ke.co.bethanyhouse.neema.core.ui.components.Loading
 import ke.co.bethanyhouse.neema.core.ui.components.Pill
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
+import ke.co.bethanyhouse.neema.core.ui.theme.Palette
+import ke.co.bethanyhouse.neema.core.ui.components.neemaSwitchColors
+import ke.co.bethanyhouse.neema.feature.reports.LocalMeasurePass
 import ke.co.bethanyhouse.neema.core.util.AppClock
 import ke.co.bethanyhouse.neema.core.util.Fmt
 
@@ -92,9 +96,13 @@ fun AgentsScreen(dash: DashboardViewModel) {
     var roleModal by rememberSaveable { mutableStateOf(opened("role")) }
     var delRoleId by rememberSaveable { mutableStateOf(opened("delrole")) }
 
-    fun agentById(id: String?) = id?.let { i -> agents.find { it.id == i } }
-    fun roleById(id: String?) = id?.let { i -> roles.find { it.id == i } }
-    val onlineCount = agents.count { availability[it.id] ?: it.isAvailable }
+    // Indexed once per list, not searched per card: a 200-agent, 50-role team.
+    val agentIndex = remember(agents) { HashMap<String, Agent>(agents.size * 2).also { m -> agents.forEach { m.putIfAbsent(it.id, it) } } }
+    val roleIndex = remember(roles) { HashMap<String, CustomRole>(roles.size * 2).also { m -> roles.forEach { m.putIfAbsent(it.id, it) } } }
+    val agentsPerRole = remember(agents) { agents.groupingBy { it.customRoleId }.eachCount() }
+    fun agentById(id: String?) = id?.let(agentIndex::get)
+    fun roleById(id: String?) = id?.let(roleIndex::get)
+    val onlineCount = remember(agents, availability) { agents.count { availability[it.id] ?: it.isAvailable } }
     val c = Neema.colors
 
     PullToRefreshBox(isRefreshing = refreshing, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize().background(c.bg)) {
@@ -102,6 +110,8 @@ fun AgentsScreen(dash: DashboardViewModel) {
         // The web's grid: one column on phones, two from sm, three from lg — here
         // as many 320dp columns as fit, never more than three.
         val columns = ((maxWidth - 32.dp + 12.dp) / (320.dp + 12.dp)).toInt().coerceIn(1, 3)
+        val agentRows = remember(agents, columns) { agents.chunked(columns) }
+        val agentRowKeys = remember(agentRows) { ke.co.bethanyhouse.neema.feature.reports.uniqueKeys(agentRows.map { row -> row.joinToString("|") { it.id } }) }
         LazyColumn(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -180,7 +190,7 @@ fun AgentsScreen(dash: DashboardViewModel) {
                     }
                 }
                 // Cards in a row share its tallest card's height, as a CSS grid row does.
-                items(agents.chunked(columns), key = { row -> row.joinToString("|") { it.id } }) { row ->
+                itemsIndexed(agentRows, key = { i, _ -> agentRowKeys[i] }, contentType = { _, _ -> "agent-row" }) { _, row ->
                     EqualHeightRow(columns = columns, spacing = 12.dp, count = row.size) { i ->
                         val agent = row[i]
                         AgentCard(
@@ -213,10 +223,10 @@ fun AgentsScreen(dash: DashboardViewModel) {
                         }
                     }
                     // Roles read as a list on the web (space-y-3), full width.
-                    items(roles, key = { it.id }) { role ->
+                    items(roles, key = { it.id }, contentType = { "role" }) { role ->
                         RoleCard(
                             role = role,
-                            agentCount = agents.count { it.customRoleId == role.id },
+                            agentCount = agentsPerRole[role.id] ?: 0,
                             onEdit = { roleModal = role.id },
                             onDelete = { delRoleId = role.id },
                         )
@@ -285,7 +295,7 @@ fun AgentsScreen(dash: DashboardViewModel) {
             Text(buildBold("Delete role ", r.name, "?"), fontSize = 14.sp, color = c.text)
             Spacer(Modifier.height(4.dp))
             Text(
-                "${agents.count { it.customRoleId == r.id }} agent(s) will be unassigned from this role.",
+                "${agentsPerRole[r.id] ?: 0} agent(s) will be unassigned from this role.",
                 fontSize = 12.sp, color = c.textDim,
             )
         }
@@ -327,7 +337,8 @@ internal fun EqualHeightRow(columns: Int, spacing: Dp, count: Int, cell: @Compos
         val cellW = ((width - gap * (columns - 1)) / columns).coerceAtLeast(0)
         val loose = Constraints(minWidth = cellW, maxWidth = cellW)
         val height = (0 until count).maxOfOrNull { i ->
-            subcompose("measure-$i") { cell(i) }.maxOfOrNull { it.measure(loose).height } ?: 0
+            subcompose("measure-$i") { CompositionLocalProvider(LocalMeasurePass provides true) { cell(i) } }
+                .maxOfOrNull { it.measure(loose).height } ?: 0
         } ?: 0
         val placeables = (0 until count).map { i ->
             subcompose("place-$i") { cell(i) }.map { it.measure(Constraints.fixed(cellW, height)) }
@@ -364,11 +375,12 @@ private fun AgentCard(
     ) {
         Row(verticalAlignment = Alignment.Top) {
             Box {
-                Avatar(agent.name, agent.avatarUrl, size = 44.dp)
+                // The sizing pass of an equal-height row draws initials only: the photo loads once.
+                Avatar(agent.name, agent.avatarUrl.takeUnless { LocalMeasurePass.current }, size = 44.dp)
                 // w-3 h-3 with a 2px white ring, nudged 2px past the avatar's corner.
                 Box(
                     Modifier.align(Alignment.BottomEnd).offset(2.dp, 2.dp).size(12.dp).clip(CircleShape).background(c.bg2).padding(2.dp)
-                        .clip(CircleShape).background(if (available) Color(0xFF10B981) else Color(0xFFD6D3D1)),
+                        .clip(CircleShape).background(if (available) Palette.Emerald500 else Palette.Stone300),
                 )
             }
             Spacer(Modifier.width(12.dp))

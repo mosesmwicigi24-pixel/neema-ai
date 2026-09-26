@@ -44,7 +44,7 @@ class AreaPersonaScreenshotTest {
     @Test fun reportsOverrideNoExportPermission() {
         val p = Persona.Override
         val dash = dashboard(paparazzi.context, fake(p), role = p.role, superuser = p.superuser)
-        paparazzi.snapshot { AppFrame { ReportsScreen(dash, ReportsViewModel(dash), ReportsFixtures.clock) } }
+        paparazzi.snapshot { AppFrame { ReportsScreen(dash, ReportsViewModel(dash, ReportsFixtures.clock)) } }
     }
 
     /** A 403 on the full list: the web's words plus why, with Retry. */
@@ -52,7 +52,7 @@ class AreaPersonaScreenshotTest {
         val p = Persona.Admin
         val f = fake(p) { it.on("GET", "/admin/conversations", code = 403, body = """{"detail":"Forbidden"}""") }
         val dash = dashboard(paparazzi.context, f, role = p.role, superuser = p.superuser)
-        paparazzi.snapshot { AppFrame { ReportsScreen(dash, ReportsViewModel(dash), ReportsFixtures.clock) } }
+        paparazzi.snapshot { AppFrame { ReportsScreen(dash, ReportsViewModel(dash, ReportsFixtures.clock)) } }
     }
 
     /** Analytics for a legacy readonly agent (view_analytics by fallback): every section, attribution included. */

@@ -17,6 +17,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -38,6 +42,13 @@ import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 
 /** A cell of a report table: plain text, or any composable (a badge, a dot). */
 typealias Cell = @Composable () -> Unit
+
+/**
+ * True inside the sizing copy an equal-height grid row composes only to
+ * measure its cells (Catalog, Team): images there are skipped, so each one
+ * is fetched and decoded once, by the copy that is drawn.
+ */
+val LocalMeasurePass = staticCompositionLocalOf { false }
 
 /** How many lines a [textCell] may take: one in a table row, two in a phone card (a phone number must not be cut). */
 val LocalCellLines = compositionLocalOf { 1 }
@@ -213,50 +224,106 @@ fun AxisLabels(
 }
 
 /**
- * The web's Table. On a wide screen it is a real table; on a phone each row
- * becomes a card — the first column as its title, the rest as label/value lines.
+ * One slice of a [Panel] drawn across several lazy items: the panel's white
+ * fill and 1dp hairline, rounded only on the [top] / [bottom] ends, so a long
+ * table can be a run of `LazyColumn` rows that still reads as one card.
  */
 @Composable
-fun ReportTable(
-    header: String,
-    cols: List<String>,
-    rows: List<List<Cell>>,
+fun Modifier.panelSegment(top: Boolean, bottom: Boolean): Modifier {
+    val c = Neema.colors
+    val r = 14.dp
+    val shape = RoundedCornerShape(
+        topStart = if (top) r else 0.dp, topEnd = if (top) r else 0.dp,
+        bottomStart = if (bottom) r else 0.dp, bottomEnd = if (bottom) r else 0.dp,
+    )
+    val line = c.hairline
+    return this.clip(shape).background(c.bg2).drawWithContent {
+        drawContent()
+        val w = 1.dp.toPx()
+        val rad = r.toPx()
+        // The whole outline of a panel that runs past this slice's open
+        // ends; the clip keeps only this slice's part of it.
+        val y0 = if (top) 0f else -rad * 2
+        val y1 = if (bottom) size.height else size.height + rad * 2
+        drawRoundRect(
+            line, topLeft = Offset(w / 2, y0 + w / 2), size = Size(size.width - w, y1 - y0 - w),
+            cornerRadius = CornerRadius(rad - w / 2), style = Stroke(w),
+        )
+    }
+}
+
+/** A table's rows, with the stable keys their lazy items take. */
+class TableModel(val header: String, val cols: List<String>, val rows: List<List<Cell>>, val keys: List<String>)
+
+/** [keys] made unique (a repeated id gets its position appended), so lazy items never collide. */
+fun uniqueKeys(keys: List<String>): List<String> {
+    val seen = HashSet<String>(keys.size * 2)
+    return keys.mapIndexed { i, k -> if (seen.add(k)) k else "$k#$i".also { seen.add(it) } }
+}
+
+/**
+ * The web's Table, as lazy items of the enclosing `LazyColumn` (a 200-agent
+ * table composes only the rows on screen). On a wide screen it is a real
+ * table; on a phone each row becomes a card — the first column as its title,
+ * the rest as label/value lines. [width] is the panel's width.
+ */
+fun LazyListScope.reportTable(
+    id: String,
+    model: TableModel,
     wide: Boolean,
+    width: Dp,
     emptyText: String = "No data",
 ) {
-    val c = Neema.colors
-    Panel(Modifier.fillMaxWidth(), padding = PaddingValues(0.dp)) {
-        Text(
-            header.uppercase(), fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp,
-            color = c.textDim, lineHeight = 16.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-        )
-        HorizontalDivider(color = c.bg3)
-        if (rows.isEmpty()) {
-            Text(emptyText, color = c.muted, fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp))
-            return@Panel
-        }
-        if (wide) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
-                cols.forEach { col ->
-                    Text(col.uppercase(), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp, color = c.muted, modifier = Modifier.weight(1f), maxLines = 1)
-                }
-            }
+    val rows = model.rows
+    val cols = model.cols
+    item(key = "$id-head", contentType = "table-head") {
+        val c = Neema.colors
+        Column(Modifier.fillMaxWidth().panelSegment(top = true, bottom = false)) {
+            Text(
+                model.header.uppercase(), fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp,
+                color = c.textDim, lineHeight = 16.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            )
             HorizontalDivider(color = c.bg3)
-            rows.forEach { row ->
+            if (wide && rows.isNotEmpty()) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
+                    cols.forEach { col ->
+                        Text(col.uppercase(), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp, color = c.muted, modifier = Modifier.weight(1f), maxLines = 1)
+                    }
+                }
+                HorizontalDivider(color = c.bg3)
+            }
+        }
+    }
+    if (rows.isEmpty()) {
+        item(key = "$id-empty", contentType = "table-empty") {
+            Text(
+                emptyText, color = Neema.colors.muted, fontSize = 12.sp, textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().panelSegment(top = false, bottom = true).padding(vertical = 32.dp),
+            )
+        }
+        return
+    }
+    if (wide) {
+        itemsIndexed(rows, key = { i, _ -> model.keys[i] }, contentType = { _, _ -> "table-row" }) { i, row ->
+            Column(Modifier.fillMaxWidth().panelSegment(top = false, bottom = i == rows.lastIndex)) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                     row.forEach { cell -> Box(Modifier.weight(1f)) { cell() } }
                 }
-                HorizontalDivider(color = c.bg)
+                HorizontalDivider(color = Neema.colors.bg)
             }
-        } else {
+        }
+    } else {
+        itemsIndexed(rows, key = { i, _ -> model.keys[i] }, contentType = { _, _ -> "table-card" }) { i, row ->
+            val c = Neema.colors
             // Two label/value pairs a line where they fit; one when the font is
             // large, so a phone number or a date is never cut.
             val scale = LocalDensity.current.fontScale
-            BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val perLine = if (maxWidth / scale.coerceAtLeast(1f) >= 240.dp) 2 else 1
-            CompositionLocalProvider(LocalCellLines provides 2) {
-            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                rows.forEach { row ->
+            val perLine = if (width / scale.coerceAtLeast(1f) >= 240.dp) 2 else 1
+            Box(
+                Modifier.fillMaxWidth().panelSegment(top = false, bottom = i == rows.lastIndex)
+                    .padding(start = 10.dp, end = 10.dp, top = if (i == 0) 10.dp else 0.dp, bottom = if (i == rows.lastIndex) 10.dp else 8.dp),
+            ) {
+                CompositionLocalProvider(LocalCellLines provides 2) {
                     Column(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(c.bg2)
                             // White like the web's table rows, so the -50 badge tints still read.
@@ -278,8 +345,6 @@ fun ReportTable(
                         }
                     }
                 }
-            }
-            }
             }
         }
     }
