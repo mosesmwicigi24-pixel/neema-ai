@@ -138,6 +138,11 @@ data class ComposerUi(
     val generatingDraft: Boolean = false,
     val media: List<PickedMedia> = emptyList(),
     val uploading: Boolean = false,
+    /**
+     * Files picked before Android closed the app that it no longer lets the
+     * app read: named, so the agent knows to attach them again.
+     */
+    val lostMedia: List<String> = emptyList(),
 )
 
 /** The control in flight on [id], or "". */
@@ -172,6 +177,8 @@ internal data class Outgoing(
     val failed: Boolean = false,
     /** Sent again by the agent: a second failure keeps the bubble, never re-opens the box. */
     val retried: Boolean = false,
+    /** Refused with a 401 (it never left): sent again as soon as the agent signs back in. */
+    val authHeld: Boolean = false,
 )
 
 data class DialogUi(
@@ -264,6 +271,13 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
     private val heldDrafts = HashMap<String, String>()
     /** A deep link that failed for want of a connection: tried again on reconnect. */
     private var retryOpenKey: String? = null
+    /** Half-written notes of threads the agent left (a deep link can switch threads under an open note). */
+    private val noteStash = HashMap<String, String>()
+    /** Whose [InboxMemory] this is (the agent signed in when it was read). */
+    private var memoryFor: String? = null
+    /** Nothing is written before the saved memory has been read back: it would overwrite it. */
+    private var memoryReady = false
+    private var memoryJob: Job? = null
 
     private val fg get() = dash.foreground
 
@@ -274,13 +288,34 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                 val id = s?.agentId ?: return@collect
                 if (seededFor == id) return@collect
                 seededFor = id
-                // The snapshot is a file read: off the main thread (synchronous in tests).
-                val snap = withContext(dash.container.config.io) {
-                    runCatching { dash.container.snapshots.read(id, SNAP_KEY, ConversationPage.serializer()) }.getOrNull()
+                memoryFor = id
+                // The snapshot and the saved memory are file reads: off the main thread (synchronous in tests).
+                val (snap, mem) = withContext(dash.container.config.io) {
+                    runCatching { dash.container.snapshots.read(id, SNAP_KEY, ConversationPage.serializer()) }.getOrNull() to
+                        runCatching { dash.container.snapshots.read(id, MEMORY_KEY, InboxMemory.serializer()) }.getOrNull()
                 }
-                seed(snap)
+                // The filters come back first, so the first request is already the right list.
+                if (mem != null) restoreFilters(mem)
+                if (filterKeyOf(_inbox.value.filters) == DEFAULT_KEY) seed(snap)
                 refresh()
+                if (mem != null) restoreWork(mem)
+                memoryReady = true
             }
+        }
+        // What the agent is doing reaches disk shortly after each change, and at
+        // once when the app goes to the background (where Android may kill it).
+        viewModelScope.launch {
+            kotlinx.coroutines.flow.merge(
+                _composer, _dialogs, _list.map { it.search to it.showFilters }.distinctUntilChanged(),
+                _inbox.map { it.filters }.distinctUntilChanged(),
+                _thread.map { Triple(it.activeId, it.threadOpen, outboxSig()) }.distinctUntilChanged(),
+            ).collect { saveSoon() }
+        }
+        viewModelScope.launch { fg.collect { if (!it) saveMemory() } }
+        // Sends refused with a 401 go the moment the agent signs back in (SessionExpiredDialog).
+        viewModelScope.launch {
+            var was = dash.sessionExpired.value
+            dash.sessionExpired.collect { v -> if (was && !v && dash.session.value != null) resendHeld(); was = v }
         }
         // Poll (push events are the primary signal) while foregrounded. A tick
         // that falls while backgrounded waits for the return — where catchUp()
@@ -586,6 +621,13 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                 draftEditing = keepDraft && next.draftEditing, draftText = if (keepDraft) next.draftText else "",
             )
             heldDrafts.remove(id)?.let { d -> _composer.update { it.copy(draftText = d, draftVisible = true, draftExpanded = true, draftEditing = false) } }
+            // A thread's dialogs belong to it. A deep link or a notification tap can
+            // switch threads under an open one: a transfer or a clear must never
+            // retarget, and a half-written note waits with its own thread.
+            val d = _dialogs.value
+            if (prev.isNotEmpty() && d.note && d.noteText.isNotBlank()) noteStash[prev] = d.noteText
+            val note = noteStash.remove(id)
+            _dialogs.update { it.copy(transfer = false, clearConfirm = false, note = note != null, noteText = note ?: "") }
         }
         _thread.update { it.copy(activeId = id, threadOpen = openThread || it.threadOpen, window = if (changed) null else it.window, activity = if (changed) emptyList() else it.activity) }
         watched = id
@@ -908,6 +950,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         _inbox.update { it.copy(cache = it.cache - convId, orderIds = it.orderIds - convId) }
         revealed = revealed - convId
         if (had.personId == null) stash.remove(convId)
+        noteStash.remove(convId)
         outgoing.values.removeAll { it.convId == convId }
         if (watched == convId) watched = null
         _thread.update {
@@ -1357,7 +1400,10 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         when {
             err == null || fateOf(err) == Fate.Done -> sent(o)
             conversationGone(err) -> dropGone(o.convId)
-            fateOf(err) == Fate.Unknown -> reconcile(localId, err)
+            // The session ran out: nothing left the phone. The words stay on their
+            // bubble and go by themselves once the agent signs back in.
+            statusOf(err) == 401 -> holdForAuth(localId)
+            fateOf(err) == Fate.Unknown -> reconcile(localId)
             else -> notSent(localId, err)
         }
     }
@@ -1411,6 +1457,26 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         OutKind.Note -> _dialogs.update { it.copy(note = true, noteText = if (it.noteText.isBlank()) o.text else it.noteText) }
     }
 
+    private fun holdForAuth(localId: String) {
+        val o = outgoing[localId] ?: return
+        outgoing[localId] = o.copy(failed = true, authHeld = true)
+        bubble(o.convId, localId, "failed", AUTH_HELD)
+    }
+
+    /** Signed back in: every send the expired session refused goes now, once. */
+    private fun resendHeld() {
+        val held = outgoing.values.filter { it.authHeld }
+        for (o in held) {
+            outgoing[o.localId] = o.copy(failed = false, authHeld = false)
+            bubble(o.convId, o.localId, "sending")
+            viewModelScope.launch { deliver(o.localId) }
+        }
+        // Files too — each tray exactly as the agent left it (captions, order).
+        val trays = mediaAuthHeld.toList()
+        mediaAuthHeld.clear()
+        trays.forEach { sendMediaOf(it) }
+    }
+
     private fun markFailed(o: Outgoing, why: String) {
         outgoing[o.localId] = o.copy(failed = true)
         bubble(o.convId, o.localId, "failed", why)
@@ -1421,13 +1487,13 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
      * delivering) before deciding. Offline, the check waits for the next
      * successful read (a poll, the catch-up on reconnect).
      */
-    private suspend fun reconcile(localId: String, e: Throwable) {
+    private suspend fun reconcile(localId: String, delays: List<Long> = RECONCILE_DELAYS_MS) {
         outgoing[localId]?.let { outgoing[localId] = it.copy(checking = true, exhausted = false, failed = false) } ?: return
         val convId = outgoing[localId]!!.convId
-        for ((i, wait) in RECONCILE_DELAYS_MS.withIndex()) {
+        for ((i, wait) in delays.withIndex()) {
             delay(wait)
             val cur = outgoing[localId] ?: return
-            if (i == RECONCILE_DELAYS_MS.lastIndex) outgoing[localId] = cur.copy(exhausted = true)
+            if (i == delays.lastIndex) outgoing[localId] = cur.copy(exhausted = true)
             val msgs = try { inboxApi.messages(convId) } catch (x: Exception) { if (x is CancellationException) throw x; null } ?: continue
             applyServer(convId, msgs)
             if (outgoing[localId] == null) return
@@ -1483,7 +1549,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
     fun retrySend(localId: String) {
         val o = outgoing[localId] ?: return
         if (!o.failed) return
-        outgoing[localId] = o.copy(failed = false, retried = true)
+        outgoing[localId] = o.copy(failed = false, retried = true, authHeld = false)
         bubble(o.convId, localId, "sending")
         viewModelScope.launch {
             if (o.checking) {
@@ -1637,6 +1703,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
 
     fun removeMedia(id: String) = _composer.update { c -> c.copy(media = c.media.filterNot { it.id == id }) }
     fun clearMedia() = _composer.update { it.copy(media = emptyList()) }
+    fun dismissLostMedia() = _composer.update { it.copy(lostMedia = emptyList()) }
 
     /**
      * Send sequentially; each file carries its OWN caption (or none). A file
@@ -1645,10 +1712,20 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
      * halfway) is looked for in the thread before it is called failed — and
      * again before a retry uploads it a second time.
      */
-    fun sendMedia() {
-        val convId = _thread.value.activeId
-        val items = _composer.value.media
-        if (items.isEmpty() || convId.isEmpty() || _composer.value.uploading) return
+    fun sendMedia() = sendMediaOf(_thread.value.activeId)
+
+    /** Threads whose files an expired session refused: they go again on sign-in. */
+    private val mediaAuthHeld = LinkedHashSet<String>()
+
+    private fun composerOf(convId: String): ComposerUi? {
+        val active = _thread.value.activeId
+        return if (active.isNotEmpty() && composerKey(active) == composerKey(convId)) _composer.value else stash[composerKey(convId)]
+    }
+
+    private fun sendMediaOf(convId: String) {
+        val c = composerOf(convId) ?: return
+        val items = c.media
+        if (items.isEmpty() || convId.isEmpty() || c.uploading) return
         editComposer(convId) { it.copy(uploading = true, media = it.media.map { m -> m.copy(error = null) }) }
         viewModelScope.launch {
             val sent = mutableListOf<ThreadMsg>()
@@ -1672,9 +1749,12 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                             findUpload(convId, item, known)?.let { hit -> sent += hit; sentIds += item.id; known += hit.id; continue }
                         }
                         failed++
-                        val why = if (statusOf(e) == 401) "your session expired — sign in again, then tap Send" else uploadErrorOf(e)
+                        val expired = statusOf(e) == 401
+                        if (expired) mediaAuthHeld += convId
+                        val why = if (expired) "your session expired — it sends once you sign in again" else uploadErrorOf(e)
                         editComposer(convId) { c -> c.copy(media = c.media.map { if (it.id == item.id) it.copy(error = why, unconfirmed = unknown) else it }) }
-                        dash.toast("${item.name}: $why", ToastType.Error)
+                        // The SessionExpiredDialog says it already; no toast over it.
+                        if (!expired) dash.toast("${item.name}: $why", ToastType.Error)
                     }
                 }
                 if (sent.isNotEmpty()) {
@@ -1850,8 +1930,174 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         }
     }
 
+    // ═══════════════════════════ Surviving process death (InboxMemory) ═══════════════════════════
+
+    /** Changes when a send starts, settles or fails: the outbox on disk follows. */
+    private fun outboxSig(): List<Any> = outgoing.values.map { listOf(it.localId, it.failed, it.authHeld, it.text) }
+
+    private fun buildMemory(): InboxMemory {
+        val t = _thread.value
+        val f = _inbox.value.filters
+        val l = _list.value
+        val d = _dialogs.value
+        val live = _composer.value
+        val composers = HashMap<String, SavedComposer>()
+        stash.forEach { (k, c) -> c.saved().takeUnless { it.isEmpty }?.let { composers[k] = it } }
+        if (t.activeId.isNotEmpty()) {
+            val key = composerKey(t.activeId)
+            val saved = live.saved()
+            if (saved.isEmpty) composers.remove(key) else composers[key] = saved
+        }
+        val notes = HashMap(noteStash)
+        if (t.activeId.isNotEmpty() && d.note && d.noteText.isNotBlank()) notes[t.activeId] = d.noteText
+        val outbox = outgoing.values.mapNotNull { o ->
+            val b = t.messages[o.convId]?.firstOrNull { it.id == o.localId } ?: return@mapNotNull null
+            SavedOutgoing(
+                localId = o.localId, convId = o.convId, kind = o.kind.name, text = o.text, replyToId = o.replyToId,
+                origText = o.origText, origLang = o.origLang, typed = o.typed, quoted = o.quoted?.saved(),
+                known = o.known.toList(), failed = o.failed, checking = o.checking, retried = o.retried, authHeld = o.authHeld,
+                bubble = b.copy(sendState = null, sendError = null), error = b.sendError,
+            )
+        }
+        return InboxMemory(
+            activeId = t.activeId, threadOpen = t.threadOpen,
+            tab = f.tab, channel = f.channel, mode = f.mode, tag = f.tag, search = l.search, q = f.q, showFilters = l.showFilters,
+            composers = composers, txMode = live.txMode, notes = notes,
+            dialog = if (d.transfer && t.activeId.isNotEmpty()) "transfer" else null,
+            outbox = outbox,
+        )
+    }
+
+    private fun writeMemory(m: InboxMemory) {
+        val id = memoryFor ?: return
+        runCatching { dash.container.snapshots.write(id, MEMORY_KEY, InboxMemory.serializer(), m) }
+    }
+
+    /** Coalesced: a burst of keystrokes is one write. */
+    private fun saveSoon() {
+        if (!memoryReady) return
+        memoryJob?.cancel()
+        memoryJob = viewModelScope.launch {
+            delay(MEMORY_DEBOUNCE_MS)
+            val m = buildMemory()
+            withContext(dash.container.config.io) { writeMemory(m) }
+        }
+    }
+
+    /** Now (the app is going to the background, where Android may kill it). */
+    internal fun saveMemory() {
+        if (!memoryReady) return
+        memoryJob?.cancel()
+        val m = buildMemory()
+        viewModelScope.launch { withContext(dash.container.config.io) { writeMemory(m) } }
+    }
+
+    override fun onCleared() {
+        // Signed out: the agent's work leaves with them — the next person on a
+        // shared phone must find nothing. Otherwise (the app finishing) it stays.
+        if (dash.session.value == null) writeMemory(InboxMemory())
+        else if (memoryReady) writeMemory(buildMemory())
+    }
+
+    private fun restoreFilters(m: InboxMemory) {
+        // The search box as typed runs as the query (its pause may not have passed before the app died).
+        val f = m.filters.copy(q = m.search)
+        _list.update { it.copy(search = m.search, showFilters = m.showFilters) }
+        if (f != _inbox.value.filters) _inbox.update { it.copy(filters = f, orderKey = filterKeyOf(f), orderIds = emptyList()) }
+    }
+
+    private fun restoreWork(m: InboxMemory) {
+        // Anything that landed before the memory did (a camera photo delivered on restore) is kept.
+        val early = _composer.value.media
+        m.composers.forEach { (k, c) -> if (k !in stash) stash[k] = c.liveWithoutMedia() }
+        _composer.update { it.copy(txMode = m.txMode + it.txMode) }
+        m.notes.forEach { (k, v) -> noteStash.putIfAbsent(k, v) }
+        restoreMedia(m.composers)
+        for (so in m.outbox) restoreSend(so)
+        val id = m.activeId
+        if (id.isEmpty()) return
+        fun open() {
+            // A deep link that arrived meanwhile, or a thread the agent already opened, wins.
+            if (dash.openConvKey.value != null || _thread.value.activeId.isNotEmpty()) return
+            select(id, openThread = m.threadOpen)
+            if (early.isNotEmpty()) _composer.update { c -> c.copy(media = c.media + early.filter { e -> c.media.none { it.id == e.id } }) }
+            if (m.dialog == "transfer") showTransfer(true)
+        }
+        if (id in _inbox.value.cache) { open(); return }
+        viewModelScope.launch {
+            val row = try { inboxApi.get(id) } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                return@launch // gone, or offline: the list shows; the words wait in the stash
+            }
+            reveal(listOf(row))
+            open()
+        }
+    }
+
+    /** A send the app was killed during: shown again, and looked for on the server — never sent twice. */
+    private fun restoreSend(so: SavedOutgoing) {
+        val kind = runCatching { OutKind.valueOf(so.kind) }.getOrNull() ?: return
+        if (so.localId in outgoing) return
+        val failed = so.failed || so.authHeld
+        val o = Outgoing(
+            localId = so.localId, convId = so.convId, kind = kind, text = so.text, replyToId = so.replyToId,
+            origText = so.origText, origLang = so.origLang, typed = so.typed, quoted = so.quoted?.live(),
+            known = so.known.toSet(), checking = so.checking || !failed, failed = failed, retried = so.retried,
+        )
+        outgoing[o.localId] = o
+        val why = if (so.authHeld) "Not sent — your session had expired. Tap Retry to send it." else so.error ?: "Not sent"
+        setMsgs(o.convId) { l ->
+            if (l.any { it.id == o.localId }) l
+            else l + so.bubble.copy(sendState = if (failed) "failed" else "sending", sendError = if (failed) why else null)
+        }
+        if (!failed) viewModelScope.launch { reconcile(o.localId, RESTORE_CHECK_MS) }
+    }
+
+    /**
+     * Files picked before the app was killed come back only if Android still
+     * lets the app read them (a camera photo always; a picker's grant may have
+     * lapsed). The rest are named in the composer so they can be picked again.
+     */
+    private fun restoreMedia(composers: Map<String, SavedComposer>) {
+        val withMedia = composers.filterValues { it.media.isNotEmpty() }
+        if (withMedia.isEmpty()) return
+        viewModelScope.launch {
+            val back = withContext(dash.container.config.io) {
+                withMedia.mapValues { (_, c) ->
+                    val kept = mutableListOf<PickedMedia>()
+                    val lost = mutableListOf<String>()
+                    for (sm in c.media) {
+                        val uri = runCatching { Uri.parse(sm.uri) }.getOrNull()
+                        val readable = uri != null && runCatching { cr.openInputStream(uri)?.use { true } == true }.getOrDefault(false)
+                        val bytes = if (readable && sm.reencoded) compressImage(uri!!) else null
+                        if (!readable || (sm.reencoded && bytes == null)) { lost += sm.name; continue }
+                        kept += PickedMedia(
+                            id = "${sm.name}-${sm.size}-${UUID.randomUUID().toString().take(6)}", uri = uri!!, name = sm.name, mime = sm.mime,
+                            size = bytes?.size?.toLong() ?: sm.size, bytes = bytes, caption = sm.caption, error = sm.error, unconfirmed = sm.unconfirmed,
+                        )
+                    }
+                    kept to lost
+                }
+            }
+            for ((key, kl) in back) editComposerKey(key) { c ->
+                c.copy(media = c.media + kl.first, lostMedia = (c.lostMedia + kl.second).distinct())
+            }
+        }
+    }
+
+    private fun editComposerKey(key: String, t: (ComposerUi) -> ComposerUi) {
+        val active = _thread.value.activeId
+        if (active.isNotEmpty() && composerKey(active) == key) _composer.update(t)
+        else stash[key] = t(stash[key] ?: ComposerUi())
+    }
+
     companion object {
         const val MB = 1024L * 1024L
+        /** A burst of typing reaches disk this long after it stops. */
+        const val MEMORY_DEBOUNCE_MS = 400L
+        /** Sends the app was killed during: looked for on the server at once, then again. */
+        val RESTORE_CHECK_MS = listOf(0L, 2_000L, 8_000L)
+        const val AUTH_HELD = "Your session expired — sign in again and it will send."
         /**
          * After a send got no answer: re-read the thread at these intervals
          * (the server may still be delivering it) before calling it failed.

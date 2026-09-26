@@ -75,6 +75,8 @@ internal fun ConversationList(
     activeId: String,
     perms: InboxPerms,
     modifier: Modifier = Modifier,
+    /** Held by the screen, so the list keeps its place while a thread covers it. */
+    state: androidx.compose.foundation.lazy.LazyListState = rememberLazyListState(),
 ) {
     val c = Neema.colors
     val summary = inbox.summary
@@ -218,7 +220,6 @@ internal fun ConversationList(
         HorizontalDivider(color = if (c.isDark) c.border else Palette.Hairline2)
 
         // ── The list — paged: the next page loads as it nears its end ──
-        val state = rememberLazyListState()
         val nearEnd by remember { derivedStateOf { (state.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= state.layoutInfo.totalItemsCount - 6 } }
         // Also tops up a page that doesn't fill the pane (nothing to scroll).
         LaunchedEffect(nearEnd, inbox.hasMore, inbox.loadingMore, rows.size) {
