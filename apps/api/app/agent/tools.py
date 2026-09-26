@@ -349,7 +349,9 @@ TOOLS: list[dict] = [
     },
     {
         "name": "pause_conversation",
-        "description": "Pause this conversation for 2 hours. Two uses: (1) after ~3 consecutive "
+        "description": "Pause this conversation for 2 hours — a buying signal from them (an item, "
+                       "a price, the order, a photo) lifts it at once, so a buyer is never locked "
+                       "out. Two uses: (1) after ~3 consecutive "
                        "customer turns that stay outside Bethany House business (legal advice, "
                        "ministry counselling, off-topic chat) despite gentle redirection — send "
                        "one brief kind closing line, then call this; (2) to END a persistent "
