@@ -49,8 +49,10 @@ jobs:
         if: env.KEYSTORE_B64 != ''
         run: echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks" && echo "NEEMA_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
 
+      # verifyPaparazziDebug runs every unit test AND compares each rendered
+      # screen with its golden image (plain testDebugUnitTest only renders).
       - name: Unit + screenshot tests
-        run: ./gradlew :app:testDebugUnitTest --no-daemon
+        run: ./gradlew :app:verifyPaparazziDebug --no-daemon
 
       - name: Build APKs
         env:

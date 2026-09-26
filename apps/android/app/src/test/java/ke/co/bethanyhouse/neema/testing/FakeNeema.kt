@@ -58,6 +58,13 @@ class FakeNeema : Interceptor, RequestGate {
         on(method, path) { _, _ -> code to body }
 
     fun on(method: String, path: String, handler: (Request, String?) -> Pair<Int, String>) {
+        // A fresh answer for exactly this route heals any fault injected on it:
+        // "timeout(GET /x) … on(GET /x, body)" reads as "then it answers".
+        val covers = Regex("^$path$")
+        faults.removeAll { f ->
+            f.method == method && (f.pattern.pattern == covers.pattern ||
+                covers.matches(f.pattern.pattern.removePrefix("^").removeSuffix("$")))
+        }
         routes.add(0, Route(method, Regex("^$path$")) { r, b -> handler(r, b).let { (c, t) -> Reply(c, t) } })
     }
 

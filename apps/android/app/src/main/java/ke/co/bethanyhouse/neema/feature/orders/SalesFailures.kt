@@ -72,6 +72,9 @@ private val NEVER_SENT = listOf("failed to connect", "unable to resolve host", "
 fun salesFailureOf(e: Throwable): SalesFailure {
     if (e is CancellationException) throw e
     val api = e as? ApiException ?: return SalesFailure(FailKind.Garbled, 200, null)
+    // The core flags an unreadable body and a timeout explicitly — trust them first.
+    if (api.malformed) return SalesFailure(FailKind.Garbled, api.status, null)
+    if (api.timedOut) return SalesFailure(FailKind.Timeout, 0, null)
     val detail = humanDetail(api.body)
     return when (val s = api.status) {
         0 -> if (api.body.contains("timed out", ignoreCase = true)) SalesFailure(FailKind.Timeout, 0, null)
