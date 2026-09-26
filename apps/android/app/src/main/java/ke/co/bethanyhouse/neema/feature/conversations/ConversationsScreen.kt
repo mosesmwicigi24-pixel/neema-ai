@@ -19,7 +19,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalUriHandler
@@ -93,7 +92,7 @@ fun ConversationsScreen(dash: DashboardViewModel) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("💬", fontSize = 36.sp)
                     Spacer(Modifier.height(8.dp))
-                    Text("Select a conversation", fontSize = 14.sp, color = Color(0xFFC5D5BC))
+                    Text("Select a conversation", fontSize = 14.sp, color = if (Neema.colors.isDark) Neema.colors.muted else Color(0xFFC5D5BC))
                 }
             }
         } else {
@@ -119,13 +118,13 @@ fun ConversationsScreen(dash: DashboardViewModel) {
             // tablet keeps 320 so the thread still has room to breathe.
             val listWidth = if (widthDp < 840) 320f else (widthDp * 0.38f).coerceIn(340f, 436f)
             ConversationList(vm, inbox, listUi, rows, thread.activeId, perms, Modifier.width(listWidth.dp).fillMaxHeight())
-            VerticalDivider(color = if (Neema.colors.isDark) Neema.colors.border else Color(0xFFEDF0EA))
+            VerticalDivider(color = hairline())
             threadPane(Modifier.weight(1f).fillMaxHeight())
             // The web's ACTIVITY_WIDTH, clamp(196px, 16vw, 292px); the customer sidebar is w-80.
             if (roomy && active != null) {
                 ActivityPane(thread.activity, thread.activityOpen, (widthDp * 0.16f).coerceIn(196f, 292f).dp) { vm.setActivityOpen(it) }
                 if (customerOpen) {
-                    VerticalDivider(color = if (Neema.colors.isDark) Neema.colors.border else Color(0xFFEDF0EA))
+                    VerticalDivider(color = hairline())
                     CustomerPanel(
                         dash = dash, conversation = active,
                         onClose = { customerOpen = false },
@@ -145,7 +144,7 @@ fun ConversationsScreen(dash: DashboardViewModel) {
                 Text("Customer Profile", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 IconButton(onClick = { customerSheet = false }) { Icon(Icons.Filled.Close, "Close", tint = Color(0xFF589B31)) }
             }
-            HorizontalDivider(color = Color(0xFFEDF0EA))
+            HorizontalDivider(color = hairline())
             CustomerPanel(
                 dash = dash, conversation = active,
                 onClose = { customerSheet = false },
@@ -274,7 +273,11 @@ private fun ThreadPane(
     }
     // Phone (edge-to-edge, shell bars hidden): keep clear of the nav bar and the
     // keyboard without counting the nav bar twice when the keyboard is up.
-    Column(modifier.then(if (!wide) Modifier.windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars)) else Modifier.imePadding())) {
+    BoxWithConstraints(modifier.then(if (!wide) Modifier.windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars)) else Modifier.imePadding())) {
+    // With the keyboard up (or at a large font scale) the composer's extras — the AI
+    // draft, the quote, the window strip — scroll inside it; the text box never leaves.
+    val composerMax = maxHeight * 0.6f
+    Column(Modifier.fillMaxSize()) {
         ThreadHeader(
             conv = conv, siblings = siblings, perms = perms, convBusy = thread.busyFor(conv.id), wide = wide,
             actions = actions, menu = menu,
@@ -289,7 +292,7 @@ private fun ThreadPane(
             onSwitch = { vm.select(it.id) },
             modifier = if (!wide) Modifier.statusBarsPadding() else Modifier,
         )
-        HorizontalDivider(color = Color(0xFFEDF0EA))
+        HorizontalDivider(color = hairline())
         ThreadMessages(
             convId = conv.id, channel = conv.channel,
             messages = thread.messages[conv.id] ?: emptyList(),
@@ -314,12 +317,12 @@ private fun ThreadPane(
         )
         // Reply box — when the agent owns the conversation, or is admin/superuser.
         if (can.composer) {
-            HorizontalDivider(color = Color(0xFFEDF0EA))
-            Box { Composer(vm, composer, thread.window, humanMode = true, threadLang = threadLangOf(thread), txOn = txOnOf(thread, composer)) }
+            HorizontalDivider(color = hairline())
+            Box(Modifier.heightIn(max = composerMax)) { Composer(vm, composer, thread.window, humanMode = true, threadLang = threadLangOf(thread), txOn = txOnOf(thread, composer)) }
         } else if (can.locked) {
             // Lock banner
             val dark = Neema.colors.isDark
-            HorizontalDivider(color = if (dark) Neema.colors.border else Color(0xFFEDF0EA))
+            HorizontalDivider(color = hairline())
             Row(
                 Modifier.fillMaxWidth().background(if (dark) Neema.colors.bg2 else Color(0xFFFAFBF8)).padding(16.dp),
                 horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
@@ -337,20 +340,26 @@ private fun ThreadPane(
             }
         }
     }
+    }
 }
+
+/** The inbox's hairline: `#edf0ea` in light, the theme's border in dark. */
+@Composable
+internal fun hairline(): Color = if (Neema.colors.isDark) Neema.colors.border else Color(0xFFEDF0EA)
 
 /** The collapsed side-pane rail ("Activity" / "Customer"). */
 @Composable
 private fun SideRail(label: String, count: Int = 0, flipArrow: Boolean = false, onClick: () -> Unit) {
     Column(
-        Modifier.width(32.dp).fillMaxHeight().background(Neema.colors.bg2).border(0.5.dp, Color(0xFFEDF0EA)).clickable(onClick = onClick),
+        Modifier.width(32.dp).fillMaxHeight().background(Neema.colors.bg2).border(0.5.dp, hairline()).clickable(onClickLabel = "Show ${label.lowercase()}", onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
     ) {
         Icon(if (flipArrow) Icons.AutoMirrored.Filled.KeyboardArrowLeft else Icons.AutoMirrored.Filled.KeyboardArrowRight, "Show ${label.lowercase()}", tint = Color(0xFFC5D5BC))
         Spacer(Modifier.height(4.dp))
-        Text(label.uppercase(), fontSize = 9.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 2.sp, color = Color(0xFFC5D5BC), modifier = Modifier.rotate(-90f).width(80.dp), textAlign = TextAlign.Center)
+        Spacer(Modifier.height(8.dp))
+        Text(label.uppercase(), fontSize = 9.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 2.sp, color = if (Neema.colors.isDark) Neema.colors.muted else Color(0xFFC5D5BC), maxLines = 1, softWrap = false, modifier = Modifier.verticalLabel())
         if (count > 0) {
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(12.dp))
             Box(Modifier.size(18.dp).clip(CircleShape).background(Color(0xFFFEF3C7)).border(1.dp, Color(0xFFFCD34D), CircleShape), contentAlignment = Alignment.Center) {
                 Text(if (count > 20) "20+" else "$count", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB45309))
             }
@@ -369,7 +378,7 @@ private fun ActivityPane(events: List<ActivityEvent>, open: Boolean, width: andr
                 Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Collapse activity log", tint = Color(0xFFB5C9A8))
             }
         }
-        HorizontalDivider(color = Color(0xFFEDF0EA))
+        HorizontalDivider(color = hairline())
         ActivityList(events, Modifier.weight(1f).fillMaxWidth())
     }
 }
@@ -410,7 +419,7 @@ private fun ActivityList(events: List<ActivityEvent>, modifier: Modifier) {
             val (fill, ring) = DOT_COLOR[e.kind] ?: (Color(0xFFF5F5F4) to Color(0xFFD6D3D1))
             Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
                 Box(Modifier.width(14.dp).fillMaxHeight()) {
-                    if (i < events.size - 1) Box(Modifier.padding(start = 6.5.dp, top = 16.dp).width(1.dp).fillMaxHeight().background(Color(0xFFF5F5F4)))
+                    if (i < events.size - 1) Box(Modifier.padding(start = 6.5.dp, top = 16.dp).width(1.dp).fillMaxHeight().background(if (Neema.colors.isDark) Neema.colors.border else Color(0xFFF5F5F4)))
                     Box(Modifier.padding(top = 2.dp).size(14.dp).clip(CircleShape).background(fill).border(1.dp, ring, CircleShape))
                 }
                 Spacer(Modifier.width(8.dp))
@@ -441,7 +450,7 @@ internal fun TransferDialog(dash: DashboardViewModel, conv: Conversation?, busy:
                 LazyColumn(Modifier.heightIn(max = 280.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(available, key = { it.id }) { a ->
                         Row(
-                            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).border(1.dp, Color(0xFFEDF0EA), RoundedCornerShape(12.dp))
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).border(1.dp, hairline(), RoundedCornerShape(12.dp))
                                 .clickable(enabled = !busy) { onPick(a.id, a.name) }.padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {

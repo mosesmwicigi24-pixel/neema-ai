@@ -239,21 +239,32 @@ private fun ThreadRowView(row: TRow, channel: String?, recovered: Map<String, St
             CommentContextCard(row.ctx, true, channel, "Your post — their comments below", cb.onView, cb.fetchVideo)
         }
         is TEscalated -> Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            val t = tint(Color(0xFFFFFBEB), Color(0xFFB45309), Color(0xFFFDE68A))
+            val rule = if (Neema.colors.isDark) t.border else Color(0xFFFDE68A)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                HorizontalDivider(Modifier.weight(1f), color = Color(0xFFFDE68A))
+                HorizontalDivider(Modifier.weight(1f), color = rule)
                 Row(
-                    Modifier.padding(horizontal = 8.dp).clip(RoundedCornerShape(50)).background(Color(0xFFFFFBEB))
-                        .border(1.dp, Color(0xFFFDE68A), RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 4.dp),
+                    Modifier.padding(horizontal = 8.dp).clip(RoundedCornerShape(50)).background(t.bg)
+                        .border(1.dp, t.border, RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Box(Modifier.size(6.dp).clip(CircleShape).background(Color(0xFFFBBF24)))
                     Spacer(Modifier.width(6.dp))
-                    Text("Escalated to agent", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFB45309))
-                    Text(" · ${if (row.msg.createdAt != null) Fmt.timeAgo(row.msg.createdAt) else ""}", fontSize = 9.sp, color = Color(0xFFFBBF24))
+                    Text(
+                        androidx.compose.ui.text.buildAnnotatedString {
+                            append("Escalated to agent")
+                            if (row.msg.createdAt != null) {
+                                pushStyle(androidx.compose.ui.text.SpanStyle(fontSize = 9.sp, fontWeight = FontWeight.Normal, color = ink(Color(0xFFD97706))))
+                                append(" · ${Fmt.timeAgo(row.msg.createdAt)}")
+                                pop()
+                            }
+                        },
+                        fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = t.fg, textAlign = TextAlign.Center,
+                    )
                 }
-                HorizontalDivider(Modifier.weight(1f), color = Color(0xFFFDE68A))
+                HorizontalDivider(Modifier.weight(1f), color = rule)
             }
-            Text(row.reason, fontSize = 10.sp, color = Color(0xFFD97706), textAlign = TextAlign.Center, lineHeight = 14.sp, modifier = Modifier.fillMaxWidth(0.72f).padding(top = 4.dp))
+            Text(row.reason, fontSize = 10.sp, color = ink(Color(0xFFD97706)), textAlign = TextAlign.Center, lineHeight = 14.sp, modifier = Modifier.fillMaxWidth(0.72f).padding(top = 4.dp))
         }
         is TFlag -> DividerPill(
             "🚩 Flagged: Needs Attention" + (row.msg.createdAt?.let { " · ${Fmt.timeAgo(it)}" } ?: ""),
@@ -269,17 +280,18 @@ private fun ThreadRowView(row: TRow, channel: String?, recovered: Map<String, St
             DividerPill(row.msg.body + (row.msg.createdAt?.let { " · ${Fmt.timeAgo(it)}" } ?: ""), line = Color(0xFFE7E5E4), bg = bg, fg = fg, border = bd)
         }
         is TNote -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            val t = tint(Color(0xFFFFFBEB), Color(0xFF92400E), Color(0xFFFDE68A))
             Column(
-                Modifier.fillMaxWidth(0.85f).clip(RoundedCornerShape(12.dp)).background(Color(0xFFFFFBEB))
-                    .dashedBorder(Color(0xFFFDE68A), 12.dp).padding(horizontal = 12.dp, vertical = 8.dp),
+                Modifier.fillMaxWidth(0.85f).widthIn(max = 560.dp).clip(RoundedCornerShape(12.dp)).background(t.bg)
+                    .dashedBorder(t.border, 12.dp).padding(horizontal = 12.dp, vertical = 8.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("📝", fontSize = 12.sp)
                     Spacer(Modifier.width(6.dp))
-                    Text("INTERNAL NOTE", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.5.sp, color = Color(0xFFD97706))
+                    Text("INTERNAL NOTE", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.5.sp, color = ink(Color(0xFFD97706)))
                 }
                 Spacer(Modifier.height(4.dp))
-                Text(row.msg.body, fontSize = 12.sp, lineHeight = 17.sp, color = Color(0xFF92400E))
+                Text(row.msg.body, fontSize = 12.sp, lineHeight = 17.sp, color = t.fg)
                 Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (row.msg.sendState == "sending") { Icon(Icons.Filled.Schedule, "Saving", Modifier.size(10.dp), tint = Color(0xFFFBBF24)); Spacer(Modifier.width(4.dp)) }
                     Text(if (row.msg.sendState == "sending") "Saving…" else row.msg.createdAt?.let { Fmt.timeAgo(it) } ?: "", fontSize = 10.sp, color = Color(0xFFFBBF24))
@@ -319,15 +331,18 @@ internal fun DashedRule(color: Color, modifier: Modifier = Modifier) {
 
 @Composable
 private fun DividerPill(text: String, line: Color, bg: Color, fg: Color, border: Color? = null) {
+    val dark = Neema.colors.isDark
+    val t = tint(bg, fg, border ?: bg)
+    val rule = if (dark) Neema.colors.border else line
     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-        HorizontalDivider(Modifier.weight(1f), color = line)
+        HorizontalDivider(Modifier.weight(1f), color = rule)
         Text(
-            text, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = fg, maxLines = 2, textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 8.dp).widthIn(max = 280.dp).clip(RoundedCornerShape(50)).background(bg)
-                .then(if (border != null) Modifier.border(1.dp, border, RoundedCornerShape(50)) else Modifier)
+            text, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = t.fg, maxLines = 3, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 8.dp).widthIn(max = 280.dp).clip(RoundedCornerShape(50)).background(t.bg)
+                .then(if (border != null || dark) Modifier.border(1.dp, t.border, RoundedCornerShape(50)) else Modifier)
                 .padding(horizontal = 10.dp, vertical = 4.dp),
         )
-        HorizontalDivider(Modifier.weight(1f), color = line)
+        HorizontalDivider(Modifier.weight(1f), color = rule)
     }
 }
 
@@ -373,6 +388,7 @@ private fun MessageBubble(msg: ThreadMsg, album: List<ThreadMsg>?, channel: Stri
             Column(
                 Modifier.offset { IntOffset(drag.roundToInt(), 0) }
                     .fillMaxWidth(if (isMedia) 0.65f else 0.75f).wrapContentWidth(if (inbound) Alignment.Start else Alignment.End)
+                    .widthIn(max = if (isMedia) 360.dp else 560.dp)
                     .clip(shape).background(bg)
                     .then(if (inbound || (c.isDark && msg.sender == "ai")) Modifier.border(1.dp, if (c.isDark) c.border else Color(0xFFEDF0EA), shape) else Modifier)
                     .padding(if (isMedia) PaddingValues(6.dp) else PaddingValues(horizontal = 16.dp, vertical = 10.dp)),
@@ -419,13 +435,16 @@ private fun MessageBubble(msg: ThreadMsg, album: List<ThreadMsg>?, channel: Stri
                         fontSize = 10.sp, fontWeight = if (msg.sendState == "failed") FontWeight.SemiBold else null,
                         color = when {
                             msg.sendState == "failed" -> if (msg.sender == "ai") Color(0xFFFCA5A5) else Color(0xFF991B1B)
-                            inbound -> Color(0xFFB5C9A8)
+                            inbound -> if (c.isDark) c.muted else Color(0xFFB5C9A8)
                             else -> fg.copy(alpha = 0.6f)
                         },
                     )
                     // Reply to this message — a threaded quote (native on WhatsApp).
                     if (inbound && msg.body.isNotBlank()) {
-                        Text("↩ Reply", fontSize = 10.sp, fontWeight = FontWeight.Medium, color = Color(0xFFB5C9A8), modifier = Modifier.clickable { cb.onReply(msg) })
+                        Text(
+                            "↩ Reply", fontSize = 10.sp, fontWeight = FontWeight.Medium, color = if (c.isDark) c.textMid else Color(0xFFB5C9A8),
+                            modifier = Modifier.clip(RoundedCornerShape(4.dp)).clickable(onClickLabel = "Reply to this message") { cb.onReply(msg) },
+                        )
                     }
                 }
             }
@@ -695,10 +714,10 @@ internal fun ThreadHeader(
                 val open = s.id == conv.id
                 Text(
                     CH_SHORT[s.channel] ?: st.label, fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                    color = if (open) Color.White else st.color,
-                    modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(if (open) st.color else st.color.copy(alpha = 0.08f))
-                        .border(1.dp, if (open) st.color else st.color.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
-                        .clickable(enabled = !open) { onSwitch(s) }.padding(horizontal = 6.dp, vertical = 2.dp),
+                    color = if (open) Color.White else ink(st.color), maxLines = 1,
+                    modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(if (open) st.color else st.color.copy(alpha = if (c.isDark) 0.16f else 0.08f))
+                        .border(1.dp, if (open) st.color else st.color.copy(alpha = if (c.isDark) 0.45f else 0.2f), RoundedCornerShape(4.dp))
+                        .clickable(enabled = !open, onClickLabel = "Open the ${st.label} thread") { onSwitch(s) }.padding(horizontal = 6.dp, vertical = 2.dp),
                 )
             }
             if (wide) actions.forEach { HeaderButton(it, convBusy, compact = false) }
@@ -757,8 +776,8 @@ internal fun WebBtn(
     }
     val shape = RoundedCornerShape(8.dp)
     Row(
-        modifier.height(size.height).alpha(if (enabled) 1f else 0.4f).clip(shape).background(bg).border(1.dp, bd, shape)
-            .clickable(enabled = enabled && !busy, onClick = onClick).padding(horizontal = size.padX),
+        modifier.heightIn(min = size.height).alpha(if (enabled) 1f else 0.4f).clip(shape).background(bg).border(1.dp, bd, shape)
+            .clickable(enabled = enabled && !busy, onClick = onClick).padding(horizontal = size.padX, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         if (busy) CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = fg)
