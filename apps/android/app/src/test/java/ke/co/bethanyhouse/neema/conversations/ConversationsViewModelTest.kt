@@ -84,7 +84,7 @@ class ConversationsViewModelTest {
         val s = vm.inbox.value
         assertTrue(s.freshLoaded); assertFalse(s.loading); assertTrue(s.hasMore)
         assertEquals("limit=50", calls("GET", "/admin/conversations").first().query)
-        assertEquals(2, s.summary?.unread)
+        assertEquals(3, s.summary?.unread)   // Fixtures.inboxSummary: c1, c2 and the web visitor
         // c1 (WhatsApp) + c5 (Facebook) are one person: one row, WhatsApp chip first.
         val rows = vm.rowsWhen { it.size == 6 }
         val row = rows.first { it.key == "p1" }
