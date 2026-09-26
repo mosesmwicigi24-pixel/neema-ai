@@ -161,7 +161,7 @@ def test_the_host_context_carries_the_facts_the_rule_and_the_sale():
     assert "the recipient only pays the shipping" in ctx                 # the caption, verbatim
     assert "HOST" in ctx and "not a shopkeeper at a stall" in ctx
     assert "GIFTING CAMPAIGN" in ctx and "not a competition, a raffle or a vote" in ctx
-    assert "capture_contact" in ctx and "save_measurements" in ctx
+    assert "capture_contact" in ctx and "save_measurements" in ctx and "save_parish" in ctx
     assert "say the rule in ONE line exactly as the caption gives it" in ctx
     assert "invite them to, warmly" in ctx
     assert "never a date, a count, a criterion or a mechanism the caption does not state" in ctx.lower()

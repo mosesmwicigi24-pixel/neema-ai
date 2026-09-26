@@ -3027,7 +3027,8 @@ def _campaign_turn_context(caption: str, comment: str, known: dict | None) -> st
         line += (f" The item in this post is our {name} — search_catalog it and price it "
                  "only when they want one of their own; never as the gift.")
     line += (" You are the HOST here as in the thread: confirm and save what they tell "
-             "you (capture_contact; a size with save_measurements), say the rule in one "
+             "you (capture_contact; the church with save_parish; a size with "
+             "save_measurements), say the rule in one "
              "line as the caption gives it, and serve any wish to buy — this item, or "
              "another — from the hub, saying plainly the gift is separate. Never an "
              "apology, never \"something went wrong\", never a generic hold.)")
@@ -3115,8 +3116,9 @@ def _campaign_context(caption: str) -> str:
     return ("(THIS POST IS A CAMPAIGN — its caption: \"" + cap + "\". You are its HOST, "
             "speaking for Bethany House — not a shopkeeper at a stall. " + _campaign_facts(caption) + " "
             "HOW TO ANSWER: welcome them by name and title; confirm what they told you — "
-            "name, role, church, town, size — and SAVE it this turn (capture_contact; a shoe "
-            "or garment size with save_measurements); say the rule in ONE line exactly as "
+            "name, role, church, town, size — and SAVE it this turn (capture_contact for the "
+            "name, role and town; the church with save_parish; a shoe or garment size with "
+            "save_measurements); say the rule in ONE line exactly as "
             "the caption gives it; if they have not yet given what the caption asks for, "
             "invite them to, warmly; be specific to their words, confident, one question at "
             "most; never a complaint line, never an apology, never \"something went wrong\", "
