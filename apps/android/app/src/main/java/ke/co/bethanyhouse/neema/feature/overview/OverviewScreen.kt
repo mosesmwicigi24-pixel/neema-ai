@@ -90,6 +90,7 @@ fun OverviewScreen(
     val humanRows by vm.humanRows.collectAsStateWithLifecycle()
     val conversations by vm.fallbackConvs.collectAsStateWithLifecycle()
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()
+    val statsError by vm.statsError.collectAsStateWithLifecycle()
     val agents by dash.agents.collectAsStateWithLifecycle()
     val orders by dash.orders.collectAsStateWithLifecycle()
     val catalog by dash.catalog.collectAsStateWithLifecycle()
@@ -124,6 +125,15 @@ fun OverviewScreen(
                         Spacer(Modifier.width(6.dp))
                         Text("Refreshing…", fontSize = 12.sp, color = c.muted)
                     }
+                }
+
+                // The server's counts didn't come: the cards below are the
+                // phone's own estimate (the web swaps them in silently).
+                statsError?.let { why ->
+                    ke.co.bethanyhouse.neema.feature.reports.LoadProblem(
+                        title = "Live figures unavailable — showing an estimate",
+                        message = why, retrying = refreshing, onRetry = vm::refresh,
+                    )
                 }
 
                 // ── Stat grid ────────────────────────────────────────────

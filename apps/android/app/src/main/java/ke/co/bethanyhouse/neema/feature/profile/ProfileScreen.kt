@@ -119,8 +119,14 @@ fun ProfileScreen(dash: DashboardViewModel) {
     LaunchedEffect(agent?.isAvailable) { vm.reconcile(agent?.isAvailable) }
 
     if (agent == null) {
-        Box(Modifier.fillMaxSize().background(c.bg), contentAlignment = Alignment.Center) {
-            Text("Loading profile…", fontSize = 14.sp, color = c.faint)
+        val loadError by vm.loadError.collectAsStateWithLifecycle()
+        Box(Modifier.fillMaxSize().background(c.bg).padding(16.dp), contentAlignment = Alignment.Center) {
+            val why = loadError
+            if (why == null) Text("Loading profile…", fontSize = 14.sp, color = c.faint)
+            else ke.co.bethanyhouse.neema.feature.reports.LoadProblem(
+                title = "Couldn't load your profile", message = why,
+                retrying = refreshing, onRetry = vm::refresh, modifier = Modifier.widthIn(max = 480.dp),
+            )
         }
         return
     }

@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material3.*
@@ -101,6 +102,25 @@ fun ReportsScreen(
 
     // Never show zeros that look like real figures while the data is loading.
     val convs = allConvs
+    val loadError by vm.loadError.collectAsStateWithLifecycle()
+    if (convs == null && loadError != null) {
+        // The first download failed: say why and offer another go — a report
+        // of zeros here would read as the truth.
+        Box(Modifier.fillMaxSize().background(c.bg).padding(16.dp), contentAlignment = Alignment.Center) {
+            ke.co.bethanyhouse.neema.core.ui.components.EmptyState(
+                title = "Couldn't load the report",
+                subtitle = loadError,
+                icon = Icons.Outlined.CloudOff,
+                modifier = Modifier.widthIn(max = 420.dp),
+            ) {
+                Button(
+                    onClick = vm::retry, shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = c.gold, contentColor = MaterialTheme.colorScheme.onPrimary),
+                ) { Text("Retry", fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
+            }
+        }
+        return
+    }
     if (convs == null) {
         Box(Modifier.fillMaxSize().background(c.bg).padding(16.dp), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -144,7 +164,7 @@ fun ReportsScreen(
                         onExport = {
                             runCatching { exportCsv(context, report.orders, range) }
                                 .onSuccess { dash.toast("Report exported") }
-                                .onFailure { dash.toast(dash.errorText(it), ToastType.Error) }
+                                .onFailure { dash.toast(exportFailureText(it), ToastType.Error) }
                         },
                     )
                 }
@@ -540,10 +560,26 @@ internal fun reportCsv(orders: List<Order>): String {
 
 internal fun csvFileName(range: ReportRange) = "neema-report-${range.key}.csv"
 
-private fun exportCsv(context: Context, orders: List<Order>, range: ReportRange) {
-    val dir = File(context.cacheDir, "reports").apply { mkdirs() }
+/** Writes the CSV into [dir] (created if needed); throws an IOException when the phone can't store it. */
+internal fun writeReportCsv(dir: File, orders: List<Order>, range: ReportRange): File {
+    if (!dir.isDirectory && !dir.mkdirs()) throw java.io.IOException("can't create ${dir.name}")
     val file = File(dir, csvFileName(range))
     file.writeText(reportCsv(orders))
+    return file
+}
+
+/** Why an export didn't reach the share sheet, in words that say what to do. */
+internal fun exportFailureText(e: Throwable): String = when (e) {
+    is android.content.ActivityNotFoundException ->
+        "No app on this phone can receive the CSV — install Gmail, Drive or a file manager, then export again."
+    is java.io.IOException, is SecurityException ->
+        "Couldn't save the report file — free up some storage on this phone and try again."
+    is IllegalArgumentException -> "Couldn't share the report file — try again."
+    else -> "Couldn't export the report — try again."
+}
+
+private fun exportCsv(context: Context, orders: List<Order>, range: ReportRange) {
+    val file = writeReportCsv(File(context.cacheDir, "reports"), orders, range)
     val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
     val send = Intent(Intent.ACTION_SEND).apply {
         type = "text/csv"

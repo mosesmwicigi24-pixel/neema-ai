@@ -69,7 +69,7 @@ class SettingsScreenshotTest : AreaShots() {
     @Test fun expiredProducts_1() = settings(SettingsPreview(scroll = 1500), f = expired)
     @Test fun expiredProductsDark_1() = settings(SettingsPreview(scroll = 1500), f = expired, dark = true)
 
-    /** Every card still loading (all four GETs failed): the web leaves them saying Loading…. */
+    /** All four GETs failed: each card says so, with its own Retry (the web leaves them on Loading… forever). */
     @Test fun loading() = settings(
         f = base().also { f ->
             listOf("directives", "translation", "offer", "pipeline-stages").forEach { f.on("GET", "/admin/settings/$it", code = 500, body = "{}") }

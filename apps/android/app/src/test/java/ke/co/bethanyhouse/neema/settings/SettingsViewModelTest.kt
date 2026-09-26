@@ -45,8 +45,11 @@ class SettingsViewModelTest : AreaTest() {
         fail("GET", "/admin/settings/directives", 500, "x")
         fail("GET", "/admin/settings/translation", 500, "x")
         val v = SettingsViewModel(dash)
-        assertTrue("the box still unlocks, like the web", v.directivesLoaded.value)
-        assertNull("translation stays loading", v.translation.value)
+        // Deliberate fix: the web unlocks an empty box here, and saving it would
+        // wipe the real standing orders. The box stays locked and the card says why.
+        assertFalse("the box stays locked until the real text arrives", v.directivesLoaded.value)
+        assertNull("translation has no switch to show", v.translation.value)
+        assertEquals(setOf("directives", "translation"), v.loadErrors.value.keys)
         assertEquals("Easter Sale", v.offer.value?.campaign?.name)
     }
 

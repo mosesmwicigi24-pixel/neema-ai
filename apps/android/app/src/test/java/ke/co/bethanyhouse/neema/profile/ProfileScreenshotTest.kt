@@ -55,6 +55,7 @@ class ProfileScreenshotTest : AreaShots() {
     @Test fun limitedAgent_0() = profile(f = limited, role = "agent", superuser = false)
     @Test fun limitedAgent_2() = profile(ProfilePreview(scroll = 4200), f = limited, role = "agent", superuser = false)
 
+    /** /me and the team both failed: the reason and a Retry, never "Loading profile…" forever. */
     @Test fun loading() = profile(
         f = FakeNeema.withFixtures().also {
             it.on("GET", "/admin/me", code = 500, body = "{}")

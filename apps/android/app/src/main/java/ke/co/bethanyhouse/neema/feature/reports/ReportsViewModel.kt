@@ -47,7 +47,11 @@ internal suspend fun fetchEveryConversation(http: NeemaHttp): List<Conversation>
     return when {
         body.startsWith("[") -> NeemaJson.decodeFromString(ListSerializer(Conversation.serializer()), body)
         body.startsWith("{") -> NeemaJson.decodeFromString(ConversationPage.serializer(), body).items
-        else -> emptyList()
+        // An empty 2xx is an empty list; anything else (a captive portal's HTML
+        // page answering 200) is not a list of conversations, and reading it
+        // as one would report zeros as if they were true.
+        body.isEmpty() -> emptyList()
+        else -> throw kotlinx.serialization.SerializationException("not a conversation list")
     }
 }
 
@@ -76,6 +80,15 @@ class ReportsViewModel(private val dash: DashboardViewModel) : ViewModel() {
     private val _refreshing = MutableStateFlow(false)
     val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
 
+    private val _loadError = MutableStateFlow<String?>(null)
+    /**
+     * Why the last download failed, in plain words; null once one succeeds.
+     * With no list yet the screen shows it with a Retry button instead of a
+     * report of zeros (the web falls back to an empty list, so a failed
+     * download there reads "0 conversations" as if it were true).
+     */
+    val loadError: StateFlow<String?> = _loadError.asStateFlow()
+
     val tab = MutableStateFlow(ReportTab.Overview)
     val range = MutableStateFlow(ReportRange.D30)
     val customFrom = MutableStateFlow<LocalDate?>(null)
@@ -100,28 +113,56 @@ class ReportsViewModel(private val dash: DashboardViewModel) : ViewModel() {
     private suspend fun fetch() {
         try {
             _allConvs.value = fetchEveryConversation(dash.api.http)
+            _loadError.value = null
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            // Keep what we had on a refresh; on first load fall back to empty.
-            if (_allConvs.value == null) _allConvs.value = emptyList()
-            dash.toast("Could not load conversations for this report.", ToastType.Error)
+            stillHere()
+            // A refresh keeps the report already on screen and says so (the
+            // web's toast); a first load shows the reason with a Retry button
+            // — never a report of zeros.
+            _loadError.value = reportLoadError(e)
+            if (_allConvs.value != null) dash.toast("Could not load conversations for this report.", ToastType.Error)
         }
     }
 
     private fun load(): Job =
         (fetchJob?.takeIf { it.isActive } ?: viewModelScope.launch { fetch() }).also { fetchJob = it }
 
+    /** The error panel's Retry: back to the loading state, then download again. */
+    fun retry() {
+        if (fetchJob?.isActive == true) return
+        _loadError.value = null
+        load()
+    }
+
     /** Re-read the orders and agents the report is built from, and every conversation; the spinner lasts until all have landed. */
     fun refresh() {
+        if (_refreshing.value) return
         viewModelScope.launch {
             _refreshing.value = true
-            coroutineScope {
-                launch { quietly { dash.refreshOrders() } }
-                launch { quietly { dash.refreshAgents() } }
-                load().join()
-            }
-            _refreshing.value = false
+            try {
+                coroutineScope {
+                    launch { quietly { dash.refreshOrders() } }
+                    launch { quietly { dash.refreshAgents() } }
+                    load().join()
+                }
+            } finally { _refreshing.value = false }
         }
     }
+}
+
+/**
+ * Why the full list didn't arrive. It is the largest download in the app, so
+ * the two phone-network failures get their own words: the long client gave
+ * up waiting, or the connection died mid-download (a truncated body).
+ */
+internal fun reportLoadError(e: Throwable): String = when {
+    e.httpStatus() == 0 && e.isTimeout() ->
+        "The download timed out — this report needs every conversation, a large download. Try again on a stronger connection."
+    e is java.io.IOException && e !is ke.co.bethanyhouse.neema.core.net.ApiException ->
+        "The download was cut off partway — try again on a stronger connection."
+    e is kotlinx.serialization.SerializationException ->
+        "The download arrived incomplete — try again on a stronger connection."
+    else -> friendlyError(e, fallback = "Could not load conversations for this report.")
 }
