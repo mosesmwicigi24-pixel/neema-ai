@@ -27,6 +27,20 @@ object Devices {
         orientation = com.android.resources.ScreenOrientation.PORTRAIT,
     )
     fun tallTablet(heightPx: Int) = DeviceConfig.PIXEL_C.copy(screenHeight = heightPx)
+
+    // ── Round 7's device / font matrix ───────────────────────────────────────
+    /** The smallest phone we support: 360 x 640dp. */
+    val SMALL = DeviceConfig.NEXUS_5
+    /** 360dp at the largest accessibility font (2.0). */
+    val SMALL_XL_FONT = DeviceConfig.NEXUS_5.copy(fontScale = 2f)
+    /** A compact phone (393dp) at font scale 1.3. */
+    val PIXEL5_LARGE_FONT = DeviceConfig.PIXEL_5.copy(fontScale = 1.3f)
+    /** A regular phone at font scale 2.0. */
+    val PHONE_XL_FONT = DeviceConfig.PIXEL_6.copy(fontScale = 2f)
+    /** A foldable's inner screen, about 600dp wide. */
+    val FOLD = DeviceConfig.PIXEL_6.copy(screenWidth = 1575, screenHeight = 2000)
+    /** Tablet landscape at font scale 1.3. */
+    val TABLET_LARGE_FONT = DeviceConfig.PIXEL_C.copy(fontScale = 1.3f)
 }
 
 /** Base for Team / Profile / Settings screenshots: real screens on the fake backend. */

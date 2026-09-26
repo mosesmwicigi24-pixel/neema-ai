@@ -5,6 +5,7 @@ import ke.co.bethanyhouse.neema.core.util.AppClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -53,6 +54,14 @@ import ke.co.bethanyhouse.neema.core.ui.components.SearchField
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import ke.co.bethanyhouse.neema.core.util.Fmt
 import java.time.LocalDate
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import ke.co.bethanyhouse.neema.feature.agents.SideBySide
+import ke.co.bethanyhouse.neema.feature.agents.isCramped
+import ke.co.bethanyhouse.neema.feature.agents.keyboardAware
+import ke.co.bethanyhouse.neema.feature.agents.onGold
+import ke.co.bethanyhouse.neema.feature.agents.neemaSwitchColors
 
 private val Amber700 = Color(0xFFB45309)
 
@@ -91,7 +100,7 @@ fun SettingsScreen(dash: DashboardViewModel) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             // The web's grid is one column on phones, two otherwise.
             val twoCols = maxWidth >= 720.dp
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState(startScroll)).padding(16.dp)) {
+            Column(Modifier.fillMaxSize().keyboardAware().verticalScroll(rememberScrollState(startScroll)).padding(16.dp)) {
                 Text("Settings", style = MaterialTheme.typography.headlineSmall, color = c.text)
                 Text("Platform configuration and integrations", fontSize = 12.sp, color = c.textDim)
                 Spacer(Modifier.height(18.dp))
@@ -211,10 +220,10 @@ private fun SaveButton(label: String, saving: Boolean, enabled: Boolean = true, 
     Button(
         onClick = onClick, enabled = enabled && !saving,
         shape = RoundedCornerShape(8.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = Neema.colors.gold, contentColor = Color.White),
+        colors = ButtonDefaults.buttonColors(containerColor = Neema.colors.gold, contentColor = onGold()),
     ) {
         if (saving) {
-            CircularProgressIndicator(Modifier.size(14.dp), color = Color.White, strokeWidth = 2.dp)
+            CircularProgressIndicator(Modifier.size(14.dp), color = LocalContentColor.current, strokeWidth = 2.dp)
             Spacer(Modifier.width(6.dp))
         }
         Text(if (saving) "Saving…" else label, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
@@ -223,6 +232,7 @@ private fun SaveButton(label: String, saving: Boolean, enabled: Boolean = true, 
 
 // ── Standing orders ───────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun StandingOrdersCard(vm: SettingsViewModel) {
     val text by vm.directives.collectAsStateWithLifecycle()
@@ -250,9 +260,15 @@ private fun StandingOrdersCard(vm: SettingsViewModel) {
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(6.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        // The counter left, Save right; at a large font the button drops under the counter.
+        FlowRow(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
             Text("${text.length}/$max", fontSize = 11.sp,
-                color = if (text.length >= max) Amber700 else Neema.colors.muted, modifier = Modifier.weight(1f))
+                color = if (text.length >= max) Amber700 else Neema.colors.muted,
+                modifier = Modifier.align(Alignment.CenterVertically).padding(end = 12.dp))
             SaveButton("Save standing orders", saving, enabled = loaded, onClick = vm::saveDirectives)
         }
     }
@@ -299,7 +315,11 @@ private fun TranslationCard(vm: SettingsViewModel) {
                     fontSize = 11.sp, color = c.muted,
                 )
             }
-            Switch(checked = state?.enabled == true, onCheckedChange = { vm.toggleTranslation() }, enabled = state != null)
+            Spacer(Modifier.width(8.dp))
+            Switch(colors = neemaSwitchColors(),
+                checked = state?.enabled == true, onCheckedChange = { vm.toggleTranslation() }, enabled = state != null,
+                modifier = Modifier.semantics { contentDescription = "Translation for the team" },
+            )
         }
         if (state != null && state?.enabled == false) {
             Text(
@@ -335,10 +355,13 @@ private fun OfferCard(vm: SettingsViewModel, dash: DashboardViewModel) {
         }
         val campaign = s.campaign
         if (campaign != null) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 8.dp)) {
-                Pill(if (s.running) "Running" else "Not running", if (s.running) c.green else Amber700)
-                Spacer(Modifier.width(8.dp))
-                Text("${campaign.name} · ${campaign.percent.toInt()}% off", fontSize = 12.sp, color = c.textMid)
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.padding(bottom = 8.dp),
+            ) {
+                Pill(if (s.running) "Running" else "Not running", if (s.running) c.green else Amber700, Modifier.align(Alignment.CenterVertically))
+                Text("${campaign.name} · ${campaign.percent.toInt()}% off", fontSize = 12.sp, color = c.textMid,
+                    modifier = Modifier.align(Alignment.CenterVertically))
             }
         }
         if (s.says.isNotBlank()) {
@@ -368,18 +391,22 @@ private fun OfferCard(vm: SettingsViewModel, dash: DashboardViewModel) {
         val max = s.maxPercent.toInt().takeIf { it > 0 } ?: 70
         val pct = draft.percent
         val pctBad = pct < 1 || pct > max
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Field("Discount %", "1–$max", hintColor = if (pctBad) c.red else null, modifier = Modifier.weight(1f)) {
-                SmallInput(
-                    if (pct == pct.toLong().toDouble()) pct.toLong().toString() else pct.toString(),
-                    { v -> vm.editDraft { it.copy(percent = v.filter { ch -> ch.isDigit() }.take(3).toDoubleOrNull() ?: 0.0) } },  // whole percent: the server keeps int(percent)
-                    keyboardType = KeyboardType.Number, isError = pctBad,
-                )
-            }
-            Field("Last day", "Inclusive — it runs through this date.", modifier = Modifier.weight(1f)) {
-                DateButton("ends", draft.endsOn.ifBlank { null }, "Pick a date") { d -> vm.editDraft { it.copy(endsOn = d ?: "") } }
-            }
-        }
+        SideBySide(
+            { m ->
+                Field("Discount %", "1–$max", hintColor = if (pctBad) c.red else null, modifier = m) {
+                    SmallInput(
+                        if (pct == pct.toLong().toDouble()) pct.toLong().toString() else pct.toString(),
+                        { v -> vm.editDraft { it.copy(percent = v.filter { ch -> ch.isDigit() }.take(3).toDoubleOrNull() ?: 0.0) } },  // whole percent: the server keeps int(percent)
+                        keyboardType = KeyboardType.Number, isError = pctBad,
+                    )
+                }
+            },
+            { m ->
+                Field("Last day", "Inclusive — it runs through this date.", modifier = m) {
+                    DateButton("ends", draft.endsOn.ifBlank { null }, "Pick a date") { d -> vm.editDraft { it.copy(endsOn = d ?: "") } }
+                }
+            },
+        )
         Field("First day (optional)", "Leave empty to start straight away.") {
             DateButton("starts", draft.startsOn, "Starts now", clearable = true) { d -> vm.editDraft { it.copy(startsOn = d) } }
         }
@@ -416,7 +443,7 @@ private fun OfferCard(vm: SettingsViewModel, dash: DashboardViewModel) {
                             ),
                             label = { Text(if (name != null) "$sku · $name" else sku, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                             trailingIcon = {
-                                Icon(Icons.Default.Close, "Remove", Modifier.size(16.dp).clickable {
+                                Icon(Icons.Default.Close, "Remove $sku", Modifier.size(16.dp).clickable(role = Role.Button) {
                                     vm.editDraft { it.copy(skus = it.skus - sku) }
                                 })
                             },
@@ -434,7 +461,7 @@ private fun OfferCard(vm: SettingsViewModel, dash: DashboardViewModel) {
             "Orders still reach the hub at the list price with the offer noted on them — a person applies it before payment.",
             fontSize = 11.sp, color = c.muted, lineHeight = 15.sp, modifier = Modifier.padding(bottom = 12.dp),
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             SaveButton(if (campaign != null) "Update offer" else "Start offer", saving) { vm.saveOffer(draft) }
             if (campaign != null) {
                 OutlinedButton(onClick = { confirmEnd = true }, enabled = !saving, shape = RoundedCornerShape(10.dp)) {
@@ -508,7 +535,7 @@ private fun AddTextRow(placeholder: String, onAdd: (String) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         OutlinedTextField(
             value = text, onValueChange = { text = it }, singleLine = true,
-            placeholder = { Text(placeholder, fontSize = 13.sp, color = Neema.colors.muted) },
+            placeholder = { Text(placeholder, fontSize = 13.sp, color = Neema.colors.muted, maxLines = 1, overflow = TextOverflow.Ellipsis) },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { submit() }),
             shape = RoundedCornerShape(10.dp),
@@ -516,7 +543,7 @@ private fun AddTextRow(placeholder: String, onAdd: (String) -> Unit) {
             modifier = Modifier.weight(1f),
         )
         Spacer(Modifier.width(6.dp))
-        FilledTonalButton(onClick = { submit() }, enabled = text.isNotBlank(), shape = RoundedCornerShape(10.dp)) { Text("Add") }
+        FilledTonalButton(onClick = { submit() }, enabled = text.isNotBlank(), shape = RoundedCornerShape(10.dp)) { Text("Add", maxLines = 1) }
     }
 }
 
@@ -554,7 +581,7 @@ private fun SkuPickerDialog(catalog: List<CatalogItem>, selected: List<String>, 
                     items(shown, key = { it.first }) { (sku, name, cat) ->
                         val on = picked.any { it.equals(sku, true) }
                         Row(
-                            Modifier.fillMaxWidth().clickable {
+                            Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Checkbox) {
                                 picked = if (on) picked.filterNot { it.equals(sku, true) } else picked + sku
                             }.padding(vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -594,7 +621,7 @@ private fun DateButton(id: String, value: String?, emptyLabel: String, clearable
             Text(
                 value?.let { Fmt.date(it) } ?: emptyLabel,
                 fontSize = 14.sp, color = if (value != null) c.text else c.muted,
-                modifier = Modifier.weight(1f), maxLines = 1,
+                modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
         }
         if (clearable && value != null) {
@@ -653,7 +680,8 @@ private fun PipelineStagesCard(vm: SettingsViewModel) {
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(s, fontSize = 12.sp, color = if (c.isDark) Color(0xFFE3CF9B) else Color(0xFF8A6D1F))
-                        IconButton(onClick = { vm.removeStage(s) }, enabled = !saving, modifier = Modifier.size(28.dp)) {
+                        // 32dp drawn; Compose widens the touch area to 48dp.
+                        IconButton(onClick = { vm.removeStage(s) }, enabled = !saving, modifier = Modifier.size(32.dp)) {
                             Icon(Icons.Default.Close, "Remove $s", Modifier.size(14.dp), tint = c.muted)
                         }
                     }
@@ -664,7 +692,7 @@ private fun PipelineStagesCard(vm: SettingsViewModel) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
                     value = newStage, onValueChange = { newStage = it.take(PIPELINE_LABEL_MAX) }, singleLine = true,
-                    placeholder = { Text("Stage label (e.g. Sampling)…", fontSize = 13.sp, color = c.muted) },
+                    placeholder = { Text("Stage label (e.g. Sampling)…", fontSize = 13.sp, color = c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { add() }),
                     shape = RoundedCornerShape(10.dp),
@@ -678,7 +706,7 @@ private fun PipelineStagesCard(vm: SettingsViewModel) {
                     enabled = newStage.isNotBlank() && !saving,
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFA97C14), contentColor = Color.White),
-                ) { Text("Add") }
+                ) { Text("Add", maxLines = 1) }
             }
         } else {
             Text("That's the most custom stages — remove one to add another.", fontSize = 11.sp, color = c.muted)
@@ -693,28 +721,19 @@ private fun BusinessCard(vm: SettingsViewModel) {
     val biz by vm.biz.collectAsStateWithLifecycle()
     val saving by vm.savingBiz.collectAsStateWithLifecycle()
     SectionCard("Business", "Core platform details") {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Field("Business Name", modifier = Modifier.weight(1f)) {
-                SmallInput(biz.businessName, { v -> vm.biz.value = biz.copy(businessName = v) }, "Bethany House")
-            }
-            Field("Currency", modifier = Modifier.weight(1f)) {
-                SmallInput(biz.currency, { v -> vm.biz.value = biz.copy(currency = v) }, "KES")
-            }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Field("WhatsApp Number", modifier = Modifier.weight(1f)) {
-                SmallInput(biz.waNumber, { v -> vm.biz.value = biz.copy(waNumber = v) }, "+254...", KeyboardType.Phone)
-            }
-            Field("Timezone", modifier = Modifier.weight(1f)) {
-                SmallInput(biz.timezone, { v -> vm.biz.value = biz.copy(timezone = v) }, "Africa/Nairobi")
-            }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Field("Open Hours", "Shown to customers", modifier = Modifier.weight(1f)) {
-                SmallInput(biz.openHours, { v -> vm.biz.value = biz.copy(openHours = v) }, "08:00–18:00")
-            }
-            Spacer(Modifier.weight(1f))
-        }
+        // The web's two-column grid; on a narrow phone or at a large font the fields stack.
+        SideBySide(
+            { m -> Field("Business Name", modifier = m) { SmallInput(biz.businessName, { v -> vm.biz.value = biz.copy(businessName = v) }, "Bethany House") } },
+            { m -> Field("Currency", modifier = m) { SmallInput(biz.currency, { v -> vm.biz.value = biz.copy(currency = v) }, "KES") } },
+        )
+        SideBySide(
+            { m -> Field("WhatsApp Number", modifier = m) { SmallInput(biz.waNumber, { v -> vm.biz.value = biz.copy(waNumber = v) }, "+254...", KeyboardType.Phone) } },
+            { m -> Field("Timezone", modifier = m) { SmallInput(biz.timezone, { v -> vm.biz.value = biz.copy(timezone = v) }, "Africa/Nairobi") } },
+        )
+        SideBySide(
+            { m -> Field("Open Hours", "Shown to customers", modifier = m) { SmallInput(biz.openHours, { v -> vm.biz.value = biz.copy(openHours = v) }, "08:00–18:00") } },
+            null,
+        )
         SaveButton("Save", saving, onClick = vm::saveBiz)
     }
 }
@@ -725,24 +744,34 @@ private fun AiCard(vm: SettingsViewModel) {
     val saving by vm.savingAi.collectAsStateWithLifecycle()
     val c = Neema.colors
     SectionCard("AI Configuration", "How the AI handles conversations") {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Field("Escalation Threshold", "Messages before escalating", modifier = Modifier.weight(1f)) {
-                SmallInput(ai.autoInterceptThreshold, { v -> vm.ai.value = ai.copy(autoInterceptThreshold = v.filter(Char::isDigit)) }, keyboardType = KeyboardType.Number)
-            }
-            Field("Response Delay (ms)", "Typing simulation", modifier = Modifier.weight(1f)) {
-                SmallInput(ai.responseDelayMs, { v -> vm.ai.value = ai.copy(responseDelayMs = v.filter(Char::isDigit)) }, keyboardType = KeyboardType.Number)
-            }
-        }
+        SideBySide(
+            { m ->
+                Field("Escalation Threshold", "Messages before escalating", modifier = m) {
+                    SmallInput(ai.autoInterceptThreshold, { v -> vm.ai.value = ai.copy(autoInterceptThreshold = v.filter(Char::isDigit)) }, keyboardType = KeyboardType.Number)
+                }
+            },
+            { m ->
+                Field("Response Delay (ms)", "Typing simulation", modifier = m) {
+                    SmallInput(ai.responseDelayMs, { v -> vm.ai.value = ai.copy(responseDelayMs = v.filter(Char::isDigit)) }, keyboardType = KeyboardType.Number)
+                }
+            },
+        )
         Field("Escalation Keywords", "Comma-separated trigger words") {
             SmallInput(ai.escalationKeywords, { v -> vm.ai.value = ai.copy(escalationKeywords = v) }, "refund, complaint, manager")
         }
         HorizontalDivider(color = c.bg3)
-        Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.fillMaxWidth()
+                .toggleable(ai.draftApproval, role = Role.Switch) { vm.ai.value = ai.copy(draftApproval = it) }
+                .padding(vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Column(Modifier.weight(1f)) {
                 Text("Require draft approval", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = c.text)
                 Text("AI drafts need agent approval before sending", fontSize = 11.sp, color = c.muted)
             }
-            Switch(checked = ai.draftApproval, onCheckedChange = { vm.ai.value = ai.copy(draftApproval = it) })
+            Spacer(Modifier.width(8.dp))
+            Switch(checked = ai.draftApproval, onCheckedChange = null, colors = neemaSwitchColors())
         }
         HorizontalDivider(color = c.bg3)
         Spacer(Modifier.height(12.dp))
@@ -767,6 +796,7 @@ private fun platformIcon(key: String): PlatformIcon = when (key) {
     else -> PlatformIcon(Icons.Outlined.TableChart, Brush.linearGradient(listOf(Color(0xFF0F9D58), Color(0xFF0F9D58))))
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun IntegrationsCard(vm: SettingsViewModel, twoCols: Boolean) {
     val integrations by vm.integrations.collectAsStateWithLifecycle()
@@ -780,10 +810,27 @@ private fun IntegrationsCard(vm: SettingsViewModel, twoCols: Boolean) {
                 val icon = platformIcon(integ.key)
                 val cfg = config[integ.key] ?: emptyMap()
                 Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).border(1.dp, if (c.isDark) c.hairline else c.bg3, RoundedCornerShape(12.dp))) {
+                  BoxWithConstraints(Modifier.fillMaxWidth()) {
+                    // Too narrow for name and buttons abreast (a phone at a large font): the buttons go under the name.
+                    val stacked = isCramped(maxWidth, 330.dp)
+                    val actions = @Composable {
+                        if (integ.fields.isNotEmpty()) {
+                            SmallPillButton(if (isExpanded) "Close" else "Configure", c.gold, if (isExpanded) c.bg3 else c.bg2, c.border) {
+                                expanded = if (isExpanded) null else integ.key
+                            }
+                        }
+                        if (integ.connected) SmallPillButton(
+                            "Disconnect", c.red,
+                            if (c.isDark) c.redDim else Color(0xFFFFF5F5), if (c.isDark) c.red.copy(alpha = 0.3f) else Color(0xFFFECACA),
+                        ) { vm.toggleIntegration(integ.key) }
+                        else SmallPillButton("Connect", c.gold, c.goldDim, c.border) { vm.toggleIntegration(integ.key) }
+                    }
+                  Column {
                     Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.size(36.dp).clip(RoundedCornerShape(12.dp)).background(icon.bg), contentAlignment = Alignment.Center) {
                             if (icon.icon != null) Icon(icon.icon, null, tint = Color.White, modifier = Modifier.size(20.dp))
-                            else Text(icon.text ?: "", color = Color.White, fontSize = 7.sp, fontWeight = FontWeight.Bold)
+                            // A logo, not text: it keeps its size inside the 36dp tile at any font scale.
+                            else Text(icon.text ?: "", color = Color.White, fontSize = with(androidx.compose.ui.platform.LocalDensity.current) { 7.dp.toSp() }, fontWeight = FontWeight.Bold, maxLines = 1)
                         }
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
@@ -792,28 +839,29 @@ private fun IntegrationsCard(vm: SettingsViewModel, twoCols: Boolean) {
                                 Box(Modifier.size(6.dp).clip(CircleShape).background(if (integ.connected) c.gold else Color(0xFFD6D3D1)))
                                 Spacer(Modifier.width(5.dp))
                                 Text(if (integ.connected) "Connected" else "Not connected", fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                                    color = if (integ.connected) c.gold else c.muted)
+                                    color = if (integ.connected) c.gold else c.muted, maxLines = 1)
                                 Text(" · ${integ.description}", fontSize = 11.sp, color = c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
-                        Spacer(Modifier.width(6.dp))
-                        if (integ.fields.isNotEmpty()) {
-                            SmallPillButton(if (isExpanded) "Close" else "Configure", c.gold, if (isExpanded) c.bg3 else c.bg2, c.border) {
-                                expanded = if (isExpanded) null else integ.key
-                            }
+                        if (!stacked) {
                             Spacer(Modifier.width(6.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) { actions() }
                         }
-                        if (integ.connected) SmallPillButton(
-                            "Disconnect", c.red,
-                            if (c.isDark) c.redDim else Color(0xFFFFF5F5), if (c.isDark) c.red.copy(alpha = 0.3f) else Color(0xFFFECACA),
-                        ) { vm.toggleIntegration(integ.key) }
-                        else SmallPillButton("Connect", c.gold, c.goldDim, c.border) { vm.toggleIntegration(integ.key) }
                     }
+                    if (stacked) {
+                        FlowRow(
+                            Modifier.padding(start = 60.dp, end = 12.dp, bottom = 10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) { actions() }
+                    }
+                  }
+                  }
                     if (isExpanded) {
                         HorizontalDivider(color = c.bg3)
                         Column(Modifier.fillMaxWidth().background(c.bg).padding(14.dp)) {
                             val perRow = if (twoCols) 2 else 1
                             integ.fields.chunked(perRow).forEach { row ->
+                                // (perRow is 2 only on the two-column layout, where the card is wide enough.)
                                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                     row.forEach { f ->
                                         Field(f.label, modifier = Modifier.weight(1f)) {
@@ -827,7 +875,7 @@ private fun IntegrationsCard(vm: SettingsViewModel, twoCols: Boolean) {
                                 onClick = { vm.saveIntegConfig(integ.key); expanded = null },
                                 shape = RoundedCornerShape(8.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = c.gold, contentColor = Color.White),
-                            ) { Text("Save Configuration", fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
+                            ) { Text("Save Configuration", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = onGold()) }
                         }
                     }
                 }
@@ -838,10 +886,12 @@ private fun IntegrationsCard(vm: SettingsViewModel, twoCols: Boolean) {
 
 @Composable
 private fun SmallPillButton(text: String, fg: Color, bg: Color, border: Color, onClick: () -> Unit) {
+    // 32dp drawn (the web's px-2.5 py-1.5); Compose widens the touch area to 48dp.
     Text(
-        text, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = fg,
-        modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(bg).border(1.dp, border, RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 7.dp),
+        text, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = fg, maxLines = 1,
+        modifier = Modifier.heightIn(min = 32.dp).clip(RoundedCornerShape(8.dp)).background(bg).border(1.dp, border, RoundedCornerShape(8.dp))
+            .clickable(role = Role.Button, onClick = onClick).wrapContentHeight(Alignment.CenterVertically)
+            .padding(horizontal = 10.dp, vertical = 7.dp),
     )
 }
 

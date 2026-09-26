@@ -3,6 +3,7 @@ package ke.co.bethanyhouse.neema.feature.agents
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -32,6 +33,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import ke.co.bethanyhouse.neema.app.DashboardViewModel
@@ -104,19 +110,27 @@ fun AgentsScreen(dash: DashboardViewModel) {
         ) {
             // Header
             item(key = "header") {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
+                // A large font or a narrow phone moves the button under the title rather than squeeze the counts.
+                FlowRow(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Column(Modifier.padding(end = 12.dp).align(Alignment.CenterVertically)) {
                         Text("Team", style = MaterialTheme.typography.headlineSmall, color = c.text)
-                        Row {
-                            Text("${agents.size} agents · ", fontSize = 14.sp, color = c.textDim)
-                            Text("$onlineCount online", fontSize = 14.sp, color = c.gold)
-                        }
+                        Text(
+                            androidx.compose.ui.text.buildAnnotatedString {
+                                append("${agents.size} agents · ")
+                                pushStyle(androidx.compose.ui.text.SpanStyle(color = c.gold)); append("$onlineCount online"); pop()
+                            },
+                            fontSize = 14.sp, color = c.textDim,
+                        )
                     }
                     if (tab == "agents") {
-                        TeamButton("Add Agent", { createOpen = true }, variant = BtnVariant.Primary,
+                        TeamButton("Add Agent", { createOpen = true }, Modifier.align(Alignment.CenterVertically), variant = BtnVariant.Primary,
                             leading = { Icon(Icons.Default.Add, null, Modifier.size(16.dp)) })
                     } else {
-                        TeamButton("New Role", { roleModal = "create" }, variant = BtnVariant.Primary,
+                        TeamButton("New Role", { roleModal = "create" }, Modifier.align(Alignment.CenterVertically), variant = BtnVariant.Primary,
                             leading = { Icon(Icons.Default.Add, null, Modifier.size(16.dp)) })
                     }
                 }
@@ -132,14 +146,16 @@ fun AgentsScreen(dash: DashboardViewModel) {
                             val sel = tab == t
                             Column(
                                 Modifier.clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
-                                    .clickable { tab = t }.width(IntrinsicSize.Max),
+                                    .clickable(role = Role.Tab) { tab = t }.width(IntrinsicSize.Max)
+                                    .semantics { selected = sel },
                                 horizontalAlignment = Alignment.CenterHorizontally,
                             ) {
                                 Text(
                                     if (t == "agents") "Agents (${agents.size})" else "Roles (${roles.size})",
                                     fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                                     color = if (sel) c.gold2 else c.textDim,
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                                    modifier = Modifier.heightIn(min = 46.dp).wrapContentHeight(Alignment.CenterVertically)
+                                        .padding(horizontal = 16.dp, vertical = 12.dp),
                                 )
                                 Box(Modifier.fillMaxWidth().height(2.dp).background(if (sel) c.gold else Color.Transparent))
                             }
@@ -276,9 +292,13 @@ fun AgentsScreen(dash: DashboardViewModel) {
     }
 }
 
-/** The web's pale greens (#9ccd65, #b5da8b) — legible stand-ins on the dark theme. */
-private val faint: Color @Composable get() = Neema.colors.let { if (it.isDark) it.muted else it.border2 }
-private val fainter: Color @Composable get() = Neema.colors.let { if (it.isDark) it.muted.copy(alpha = 0.8f) else it.border }
+/**
+ * The web's pale greens (#9ccd65, #b5da8b) read at under 2:1 on a white card;
+ * the theme's secondary green (#699a32) and muted grey-green keep the same
+ * quiet tone at a readable contrast, by day and by night.
+ */
+private val faint: Color @Composable get() = Neema.colors.let { if (it.isDark) it.muted else it.textDim }
+private val fainter: Color @Composable get() = Neema.colors.muted
 /** Card borders: #cee6b2 by day, the theme hairline by night. */
 private val cardBorder: Color @Composable get() = Neema.colors.let { if (it.isDark) it.hairline else it.bg4 }
 
@@ -355,9 +375,10 @@ private fun AgentCard(
             Column(Modifier.weight(1f)) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(agent.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = c.text,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.align(Alignment.CenterVertically))
+                        maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.align(Alignment.CenterVertically))
                     if (roleName != null) {
-                        RoleBadge(roleName, hexColor(roleColor), Color.White, Modifier.align(Alignment.CenterVertically))
+                        val fill = hexColor(roleColor)
+                        RoleBadge(roleName, fill, contentOn(fill), Modifier.align(Alignment.CenterVertically))
                     } else {
                         // The base DB role, capitalised: #e6f3d8 fill, #427425 text.
                         RoleBadge(
@@ -392,31 +413,45 @@ private fun AgentCard(
         Spacer(Modifier.height(12.dp))
         HorizontalDivider(color = if (c.isDark) c.hairline else c.bg3)
         Spacer(Modifier.height(8.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Available", fontSize = 12.sp, color = c.textDim)
-            Spacer(Modifier.width(8.dp))
-            Switch(checked = available, onCheckedChange = { onToggle() }, modifier = Modifier.scale(0.8f))
-            Spacer(Modifier.weight(1f))
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                TeamButton("Role", onRole, small = true,
-                    leading = { Icon(Icons.Outlined.VerifiedUser, null, Modifier.size(14.dp)) })
-                TeamButton("Edit", onEdit, small = true)
-                IconBtn(Icons.Outlined.Key, "Reset password", BtnVariant.Ghost, onPassword)
-                IconBtn(Icons.Outlined.DeleteOutline, "Remove agent", BtnVariant.Danger, onDelete)
+        // One line on a phone; at a large font the buttons wrap under the switch instead of clipping.
+        FlowRow(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(Modifier.align(Alignment.CenterVertically).padding(end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Available", fontSize = 12.sp, color = c.textDim)
+                Spacer(Modifier.width(8.dp))
+                Switch(colors = neemaSwitchColors(),
+                    checked = available, onCheckedChange = { onToggle() },
+                    modifier = Modifier.scale(0.8f).semantics { contentDescription = "Available" },
+                )
             }
+            Spacer(Modifier.weight(1f))
+            TeamButton("Role", onRole, Modifier.align(Alignment.CenterVertically), small = true,
+                leading = { Icon(Icons.Outlined.VerifiedUser, null, Modifier.size(14.dp)) })
+            TeamButton("Edit", onEdit, Modifier.align(Alignment.CenterVertically), small = true)
+            IconBtn(Icons.Outlined.Key, "Reset password", BtnVariant.Ghost, onPassword, Modifier.align(Alignment.CenterVertically))
+            IconBtn(Icons.Outlined.DeleteOutline, "Remove agent", BtnVariant.Danger, onDelete, Modifier.align(Alignment.CenterVertically))
         }
     }
 }
 
 @Composable
-private fun IconBtn(icon: androidx.compose.ui.graphics.vector.ImageVector, desc: String, variant: BtnVariant, onClick: () -> Unit) {
+private fun IconBtn(
+    icon: androidx.compose.ui.graphics.vector.ImageVector, desc: String, variant: BtnVariant, onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val (bg, fg, edge) = btnColors(variant)
+    // 34dp drawn, as the web's footer (growing a little with a large font to keep level with the text
+    // buttons); the touch area is widened to 48dp by Compose's minimum touch target.
+    val grow = (1f + (androidx.compose.ui.platform.LocalDensity.current.fontScale - 1f) * 0.4f).coerceIn(1f, 1.4f)
     Box(
-        Modifier.size(34.dp).clip(RoundedCornerShape(8.dp)).background(bg)
+        modifier.size(34.dp * grow).clip(RoundedCornerShape(8.dp)).background(bg)
             .border(1.dp, edge, RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick),
+            .clickable(role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { Icon(icon, desc, tint = fg, modifier = Modifier.size(16.dp)) }
+    ) { Icon(icon, desc, tint = fg, modifier = Modifier.size(16.dp * grow)) }
 }
 
 // ── Role card ─────────────────────────────────────────────────────────────────
@@ -427,7 +462,7 @@ private fun RoleSquare(role: CustomRole, size: Int) {
         Modifier.size(size.dp).clip(RoundedCornerShape(if (size >= 40) 12.dp else 8.dp)).background(hexColor(role.color)),
         contentAlignment = Alignment.Center,
     ) {
-        Text(role.name.take(1).uppercase().ifEmpty { "?" }, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        Text(role.name.take(1).uppercase().ifEmpty { "?" }, color = contentOn(hexColor(role.color)), fontWeight = FontWeight.Bold, fontSize = 14.sp)
     }
 }
 
@@ -443,12 +478,23 @@ private fun RoleCard(role: CustomRole, agentCount: Int, onEdit: () -> Unit, onDe
         RoleSquare(role, 40)
         Spacer(Modifier.width(16.dp))
         Column(Modifier.weight(1f)) {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+          // The Edit / Delete pair sits beside the name only, so on a phone the
+          // description and permission chips below keep the card's full width.
+          Row(verticalAlignment = Alignment.Top) {
+            FlowRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(role.name, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = c.text, modifier = Modifier.align(Alignment.CenterVertically))
                 if (role.protected) ProtectedTag(Modifier.align(Alignment.CenterVertically))
                 Text("$agentCount agent${if (agentCount != 1) "s" else ""}", fontSize = 11.sp, color = c.textDim,
                     modifier = Modifier.align(Alignment.CenterVertically))
             }
+            if (!role.protected) {
+                Spacer(Modifier.width(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    TeamButton("Edit", onEdit, small = true)
+                    IconBtn(Icons.Outlined.DeleteOutline, "Delete role", BtnVariant.Danger, onDelete)
+                }
+            }
+          }
             if (role.description.isNotBlank()) {
                 Text(role.description, fontSize = 12.sp, color = c.textDim, modifier = Modifier.padding(top = 2.dp, bottom = 6.dp))
             } else Spacer(Modifier.height(6.dp))
@@ -463,13 +509,6 @@ private fun RoleCard(role: CustomRole, agentCount: Int, onEdit: () -> Unit, onDe
                 if (role.permissions.isEmpty()) {
                     Text("No permissions assigned", fontSize = 10.sp, fontStyle = FontStyle.Italic, color = faint)
                 }
-            }
-        }
-        if (!role.protected) {
-            Spacer(Modifier.width(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                TeamButton("Edit", onEdit, small = true)
-                IconBtn(Icons.Outlined.DeleteOutline, "Delete role", BtnVariant.Danger, onDelete)
             }
         }
     }
@@ -551,7 +590,7 @@ private fun AssignRoleDialog(
                 Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(12.dp))
                     .background(if (sel) c.bg else c.bg2)
                     .border(if (sel) 2.dp else 1.dp, if (sel) hexColor(role.color) else if (c.isDark) c.hairline else c.bg3, RoundedCornerShape(12.dp))
-                    .clickable {
+                    .clickable(role = Role.RadioButton) {
                         roleId = role.id
                         // A fresh override starts from the chosen role's set.
                         if (!override) perms = role.permissions
@@ -562,14 +601,14 @@ private fun AssignRoleDialog(
                 RoleSquare(role, 32)
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(role.name, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = c.text)
-                        if (role.protected) { Spacer(Modifier.width(8.dp)); ProtectedTag(compact = true) }
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(role.name, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = c.text, modifier = Modifier.align(Alignment.CenterVertically))
+                        if (role.protected) ProtectedTag(Modifier.align(Alignment.CenterVertically), compact = true)
                     }
                     if (role.description.isNotBlank()) Text(role.description, fontSize = 11.sp, color = c.textDim)
                     Text("${role.permissions.size} permission${if (role.permissions.size != 1) "s" else ""}", fontSize = 11.sp, color = fainter)
                 }
-                if (sel) Icon(Icons.Default.Check, "Selected", tint = c.gold, modifier = Modifier.size(18.dp))
+                if (sel) Icon(Icons.Default.Check, "Selected", tint = c.gold, modifier = Modifier.padding(start = 8.dp).size(18.dp))
             }
         }
         if (roles.isEmpty()) Text("No roles yet — create one on the Roles tab.", fontSize = 12.sp, color = c.muted)
@@ -585,7 +624,8 @@ private fun AssignRoleDialog(
                     fontSize = 11.sp, color = c.textDim,
                 )
             }
-            Switch(checked = override, onCheckedChange = { on ->
+            Spacer(Modifier.width(8.dp))
+            Switch(checked = override, colors = neemaSwitchColors(), modifier = Modifier.semantics { contentDescription = "Custom permissions for this agent" }, onCheckedChange = { on ->
                 override = on
                 if (on && agent.customPermissions == null) perms = roles.find { it.id == roleId }?.permissions ?: perms
             })
@@ -629,7 +669,8 @@ private fun CreateAgentDialog(saving: Boolean, onDismiss: () -> Unit, onCreate: 
         LabeledInput("Full Name", name, { name = it }, placeholder = "Jane Doe")
         LabeledInput("Email", email, { email = it }, placeholder = "jane@bethanyhouse.co.ke",
             keyboardType = androidx.compose.ui.text.input.KeyboardType.Email)
-        LabeledInput("Password", password, { password = it }, placeholder = "Min. 8 characters", password = true)
+        LabeledInput("Password", password, { password = it }, placeholder = "Min. 8 characters", password = true,
+            imeAction = ImeAction.Done)
         SelectField(
             "Base Role",
             listOf("agent" to "Agent", "admin" to "Admin", "readonly" to "Read Only"),
@@ -657,7 +698,7 @@ private fun EditAgentDialog(agent: Agent, saving: Boolean, onDismiss: () -> Unit
     ) {
         LabeledInput("Full Name", name, { name = it }, placeholder = "Jane Doe")
         LabeledInput("Email", email, { email = it }, placeholder = "jane@bethanyhouse.co.ke",
-            keyboardType = androidx.compose.ui.text.input.KeyboardType.Email)
+            keyboardType = androidx.compose.ui.text.input.KeyboardType.Email, imeAction = ImeAction.Done)
     }
 }
 
@@ -682,7 +723,7 @@ private fun ResetPasswordDialog(agent: Agent, saving: Boolean, onDismiss: () -> 
         LabeledInput("New Password", password, { password = it }, placeholder = "Min. 8 characters", password = true)
         LabeledInput(
             "Confirm Password", confirm, { confirm = it }, placeholder = "Repeat new password", password = true,
-            isError = mismatch, supporting = if (mismatch) "Passwords do not match" else null,
+            isError = mismatch, supporting = if (mismatch) "Passwords do not match" else null, imeAction = ImeAction.Done,
         )
     }
 }
@@ -714,21 +755,24 @@ private fun RoleEditorDialog(editing: CustomRole?, saving: Boolean, onDismiss: (
         },
     ) {
         LabeledInput("Role Name", name, { name = it }, placeholder = "e.g. Sales Agent")
-        LabeledInput("Description", description, { description = it }, placeholder = "Brief description")
+        LabeledInput("Description", description, { description = it }, placeholder = "Brief description", imeAction = ImeAction.Done)
 
         Text("Colour", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.textDim)
         Spacer(Modifier.height(6.dp))
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            ROLE_COLORS.forEach { hex ->
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            ROLE_COLORS.forEachIndexed { i, hex ->
                 val sel = color.equals(hex, ignoreCase = true)
                 val col = hexColor(hex)
+                // A 32dp swatch (the web's) inside a 40dp tap target; the ring marks the chosen one.
                 Box(
-                    Modifier.size(32.dp)
+                    Modifier.size(40.dp).clip(CircleShape)
+                        .clickable(role = Role.RadioButton) { color = hex }
+                        .semantics { contentDescription = "Colour ${i + 1} of ${ROLE_COLORS.size}"; selected = sel }
+                        .padding(4.dp)
                         .then(if (sel) Modifier.border(2.dp, col, CircleShape) else Modifier)
-                        .padding(4.dp).clip(CircleShape).background(col)
-                        .clickable { color = hex },
+                        .padding(4.dp).clip(CircleShape).background(col),
                     contentAlignment = Alignment.Center,
-                ) { if (sel) Icon(Icons.Default.Check, "Selected", tint = Color.White, modifier = Modifier.size(14.dp)) }
+                ) { if (sel) Icon(Icons.Default.Check, null, tint = contentOn(col), modifier = Modifier.size(14.dp)) }
             }
         }
         Spacer(Modifier.height(14.dp))
@@ -763,30 +807,37 @@ private fun PermissionPicker(selected: List<String>, onChange: (List<String>) ->
                 Text(if (allSel) "Deselect" else "Select all", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = c.gold)
             }
         }
-        gp.chunked(2).forEach { pair ->
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+          // Two columns as on the web, unless each would hold under ~110dp of text (a large font on a phone).
+          val perRow = if (isCramped((maxWidth - 6.dp) / 2, 110.dp)) 1 else 2
+          Column {
+            gp.chunked(perRow).forEach { pair ->
             Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 pair.forEach { perm ->
                     val checked = perm.key in selected
                     Row(
-                        Modifier.weight(1f).clip(RoundedCornerShape(8.dp))
+                        Modifier.weight(1f).heightIn(min = 48.dp).clip(RoundedCornerShape(8.dp))
                             .background(if (checked) c.bg3 else c.surface)
                             .border(1.dp, if (checked) c.border else c.hairline, RoundedCornerShape(8.dp))
-                            .clickable { onChange(if (checked) selected - perm.key else selected + perm.key) }
-                            .padding(horizontal = 8.dp, vertical = 8.dp),
+                            .toggleable(checked, role = Role.Checkbox) { on -> onChange(if (on) selected + perm.key else selected - perm.key) }
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Box(
-                            Modifier.size(16.dp).clip(RoundedCornerShape(4.dp))
+                            Modifier.size(18.dp).clip(RoundedCornerShape(4.dp))
                                 .background(if (checked) c.gold else c.bg2)
-                                .border(1.dp, if (checked) c.gold else c.border, RoundedCornerShape(4.dp)),
+                                // Unticked, the box's edge must read at 3:1: the pale green by day, grey-green by night.
+                                .border(1.5.dp, if (checked) c.gold else if (c.isDark) c.muted else c.border2, RoundedCornerShape(4.dp)),
                             contentAlignment = Alignment.Center,
-                        ) { if (checked) Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(12.dp)) }
-                        Spacer(Modifier.width(6.dp))
-                        Text(perm.label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = if (checked) c.gold2 else c.muted)
+                        ) { if (checked) Icon(Icons.Default.Check, null, tint = onGold(), modifier = Modifier.size(13.dp)) }
+                        Spacer(Modifier.width(8.dp))
+                        Text(perm.label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = if (checked) c.gold2 else c.textMid)
                     }
                 }
-                if (pair.size == 1) Spacer(Modifier.weight(1f))
+                if (pair.size < perRow) Spacer(Modifier.weight(1f))
             }
+            }
+          }
         }
         Spacer(Modifier.height(4.dp))
     }

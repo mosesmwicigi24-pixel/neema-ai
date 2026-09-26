@@ -14,7 +14,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -59,14 +67,97 @@ private val Gray300 = Color(0xFFD1D5DB)
 fun btnColors(variant: BtnVariant): Triple<Color, Color, Color> {
     val c = Neema.colors
     return when (variant) {
-        BtnVariant.Primary -> Triple(c.gold, Color.White, c.gold2)
+        // By night the moss brightens (#84c13e): white on it is 2:1, so the theme's deep on-primary instead.
+        BtnVariant.Primary -> Triple(c.gold, onGold(), c.gold2)
         BtnVariant.Danger -> if (c.isDark) Triple(c.redDim, c.red, c.red.copy(alpha = 0.3f))
             else Triple(DangerFillLight, c.red, DangerBorderLight)
         BtnVariant.Ghost -> Triple(Color.Transparent, c.textDim, c.border)
         BtnVariant.Default -> Triple(c.bg2, c.gold2, c.border)
-        BtnVariant.Amber -> Triple(Brand.Amber, Color.White, Brand.Amber)
+        // White on amber-500 is 2.1:1; the brand navy on it reads at 7:1.
+        BtnVariant.Amber -> Triple(Brand.Amber, Brand.Navy, Brand.Amber)
         BtnVariant.Secondary -> Triple(c.bg2, c.text, c.hairline)
         BtnVariant.Outline -> Triple(Color.Transparent, c.text, if (c.isDark) c.border else Gray300)
+    }
+}
+
+/** Text/icons on a [NeemaColors.gold] fill: white by day, the theme's deep on-primary by night. */
+@Composable
+fun onGold(): Color = if (Neema.colors.isDark) MaterialTheme.colorScheme.onPrimary else Color.White
+
+/** Whichever of white or the brand text colour reads better on [fill] (a role colour, say). */
+fun contentOn(fill: Color): Color {
+    fun contrast(a: Color, b: Color): Float {
+        val la = a.luminance(); val lb = b.luminance()
+        return (maxOf(la, lb) + 0.05f) / (minOf(la, lb) + 0.05f)
+    }
+    val white = contrast(Color.White, fill)
+    // White stays unless it falls under 3:1 — the role chips are the web's white-on-colour.
+    return if (white >= 3f || white >= contrast(TextOnLight, fill)) Color.White else TextOnLight
+}
+
+/**
+ * Switch colours whose "off" state still reads: the theme default draws an
+ * off switch by night as a navy thumb on a navy track (under 1.5:1). Off is a
+ * grey-green thumb and outline on the page surface; on is unchanged.
+ */
+@Composable
+fun neemaSwitchColors(): SwitchColors {
+    val c = Neema.colors
+    return SwitchDefaults.colors(
+        uncheckedThumbColor = c.muted,
+        uncheckedBorderColor = c.muted,
+        uncheckedTrackColor = if (c.isDark) c.bg else c.surface,
+    )
+}
+
+/** The brand's #1c2917 text. */
+private val TextOnLight = Color(0xFF1C2917)
+
+/**
+ * Pads the bottom by however much of the on-screen keyboard overlaps this
+ * element, so a scrolling form shrinks above the keyboard and the focused
+ * field scrolls into view. (The app draws edge to edge, so the window no
+ * longer resizes for the keyboard; the shell's own bottom bar is already
+ * outside this element, which is why the overlap, not the whole keyboard
+ * height, is what counts.)
+ */
+@Composable
+fun Modifier.keyboardAware(): Modifier {
+    val density = LocalDensity.current
+    val ime = WindowInsets.ime.getBottom(density)
+    val root = LocalView.current.rootView
+    var gap by remember { mutableIntStateOf(0) }
+    return this
+        .onGloballyPositioned { gap = (root.height - it.boundsInWindow().bottom).toInt().coerceAtLeast(0) }
+        .padding(bottom = with(density) { (ime - gap).coerceAtLeast(0).toDp() })
+}
+
+/** True when [width] holds fewer than [minDp] dp of text at the current font scale. */
+@Composable
+fun isCramped(width: Dp, minDp: Dp): Boolean = width / LocalDensity.current.fontScale < minDp
+
+/**
+ * Two fields side by side, each [minEach] wide at font scale 1; when they
+ * would be narrower (a 360dp phone, a large font) they stack instead.
+ * [second] null leaves the right half empty, as the web's two-column grid does.
+ */
+@Composable
+fun SideBySide(
+    first: @Composable (Modifier) -> Unit,
+    second: (@Composable (Modifier) -> Unit)?,
+    modifier: Modifier = Modifier,
+    minEach: Dp = 130.dp,
+    spacing: Dp = 12.dp,
+) {
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        if (isCramped((maxWidth - spacing) / 2, minEach)) {
+            Column { first(Modifier.fillMaxWidth()); second?.invoke(Modifier.fillMaxWidth()) }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
+                first(Modifier.weight(1f))
+                if (second != null) second(Modifier.weight(1f)) else Spacer(Modifier.weight(1f))
+            }
+        }
     }
 }
 
@@ -84,8 +175,8 @@ fun TeamButton(
     OutlinedButton(
         onClick = onClick,
         enabled = enabled,
-        // Small buttons sit in a row with 34dp icon buttons (the card footers), so pin their height.
-        modifier = if (small) modifier.height(34.dp) else modifier.heightIn(min = 40.dp),
+        // Small buttons sit in a row with 34dp icon buttons (the card footers); a large font may grow them.
+        modifier = if (small) modifier.heightIn(min = 34.dp) else modifier.heightIn(min = 40.dp),
         shape = RoundedCornerShape(8.dp),
         border = BorderStroke(1.dp, border),
         colors = ButtonDefaults.outlinedButtonColors(
@@ -121,6 +212,8 @@ fun LabeledInput(
     supporting: String? = null,
     maxLength: Int? = null,
     style: InputStyle = InputStyle.Team,
+    /** Next moves to the following field; the form's last field says Done and closes the keyboard. */
+    imeAction: ImeAction = ImeAction.Next,
 ) {
     val c = Neema.colors
     val form = style == InputStyle.Form
@@ -139,9 +232,9 @@ fun LabeledInput(
             value = value,
             onValueChange = { v -> onChange(if (maxLength != null) v.take(maxLength) else v) },
             singleLine = true,
-            placeholder = placeholder?.let { { Text(it, fontSize = 14.sp, color = c.muted) } },
+            placeholder = placeholder?.let { { Text(it, fontSize = 14.sp, color = c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
             visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
-            keyboardOptions = KeyboardOptions(keyboardType = if (password) KeyboardType.Password else keyboardType),
+            keyboardOptions = KeyboardOptions(keyboardType = if (password) KeyboardType.Password else keyboardType, imeAction = imeAction),
             isError = isError,
             supportingText = supporting?.let { { Text(it, fontSize = 11.sp) } },
             shape = RoundedCornerShape(10.dp),
@@ -184,7 +277,8 @@ fun SelectField(
                     containerColor = container ?: Color.Transparent, contentColor = Neema.colors.text,
                 ),
             ) {
-                Text(options.find { it.first == selected }?.second ?: selected, Modifier.weight(1f), fontSize = 14.sp)
+                Text(options.find { it.first == selected }?.second ?: selected, Modifier.weight(1f), fontSize = 14.sp,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Icon(Icons.Default.ArrowDropDown, null)
             }
             DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
@@ -199,7 +293,11 @@ fun SelectField(
 /**
  * The web's Modal: a titled card with a scrolling body and a button row.
  * Wider than an AlertDialog so the role editor's permission grid fits a phone.
+ * It lays itself out inside the system bars and above the keyboard (the body
+ * scrolls, the title and buttons stay), and the buttons wrap onto a second
+ * line rather than squeeze at a large font.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun FormDialog(
     title: String,
@@ -207,18 +305,26 @@ fun FormDialog(
     buttons: @Composable RowScope.() -> Unit,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
         Surface(
             shape = RoundedCornerShape(16.dp),
             color = Neema.colors.bg2,
-            modifier = Modifier.padding(16.dp).widthIn(max = 560.dp).fillMaxWidth(),
+            modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(16.dp).widthIn(max = 560.dp).fillMaxWidth(),
         ) {
             Column(Modifier.padding(20.dp)) {
-                Text(title, style = MaterialTheme.typography.titleMedium)
+                Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(14.dp))
                 Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), content = content)
                 Spacer(Modifier.height(14.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically, content = buttons)
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    content = buttons,
+                )
             }
         }
     }
