@@ -164,7 +164,10 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   variant apart. The public card shows each distinct (label, price) once;
   rows the hub still leaves identical at different prices are a range to
   the verifier (soft), never a hard hold — the fix is in the hub: give those
-  rows a Size attribute. A cached copy of the catalogue (ten minutes; the
+  rows a Size attribute. An attribute every variant of a product shares
+  (Size XS on each ordination-gown colour) tells nothing apart and is not
+  said (`shared_attributes`; owner: "remove size attributes"); a lone
+  variant keeps everything it has. A cached copy of the catalogue (ten minutes; the
   seven-day last-good mirror) is re-labelled as it is read
   (`hub_client._relabelled`), so a label rule shows the moment it deploys,
   not when the cache expires. The hub client stamps `label` on every variant as it loads
@@ -175,6 +178,36 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   one variant and its price is checked to the cent (`_close`: to the cent
   below a hundred, to the unit above — $3.50 is not $4). The dashboard's
   `CatalogVariant` type knows `label`.
+- **We sell church goods only** (owner 2026-09-25, Messenger: "Kasoki 2 na
+  saples" — Neema did not know "saples" (a surplice), guessed "vikombe,
+  divai, au maharagwe?", took the "Maharagwe" that came back as an order
+  line and asked which packet; "Bule 1, na white 1" became "nyeusi na
+  nyeupe". "Guardrails against selling things that are not church based…
+  decline politely and stop for 12 hours."): `agent/domain.py` reads every
+  real customer message before the writer does. An ask for goods we do not
+  sell (`OFF_DOMAIN`: food, drinks, phones and electronics, vehicles, loans
+  and betting, property, jobs, livestock and farm inputs, cosmetics,
+  medicine, the rest) with nothing church-related in it (`CHURCH_WORDS`,
+  plus a phone NUMBER never being a phone) is DECLINED in one line that fits
+  the ask (`decline_line`: "we don't sell beans" / "we don't offer loans" /
+  "no vacancies" / "we can't help with that", English or Swahili, shorter
+  under a post) and the thread is PAUSED for `offdomain_pause_hours` (12):
+  every later message is silence (`guard:pause:{channel}:{key}`; no
+  "typing…", no canned comment line, the team flagged by `_flag_guard`),
+  until they ask for church goods, which lifts it. With church business
+  already in play on the thread (a cassock being ordered) the FIRST such
+  ask is declined by the writer inside the reply (`guard_note` in the tail)
+  and the sale carries on; a second one pauses. A mixed message ("kasoki 2
+  na maharagwe") is answered with the beans declined. The verifier holds any
+  reply that treats such goods as ours (`review.domain_issues`, hard — asks
+  a packet, prices them, lists them in an order; a plain decline passes) and
+  any reply that swaps a colour they named (`review.colour_issues`, hard —
+  "bule" / "bluu" is blue, our navy, never black; soft when the reply says
+  we do not make it and offers the nearest). `core/synonyms` maps saples /
+  saplis / sapulisi to the hub's Surplice. The prompt carries WE SELL CHURCH
+  GOODS ONLY and THEIR COLOUR IS THE COLOUR; the reviewer model's rule 7;
+  `/api/health` reports `guard` (declined, paused, silenced, lifted, noted).
+  Switch: `church_goods_guard`. Tests: `tests/test_church_goods_only.py`.
 - **The gate before posting** (owner 2026-09-25: "someone is asking for
   golden trays and you give silver… put a gate to review before posting…
   when someone asks for Holy Communion Cups without specifying chalice, give

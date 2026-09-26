@@ -409,6 +409,74 @@ def acknowledges_substitute(answer: str) -> bool:
     return bool(_SUBSTITUTE_RE.search(answer or ""))
 
 
+# THEIR COLOUR IS THE COLOUR (Messenger, 2026-09-25: "Bule 1, na white 1"
+# was confirmed as "kasoki moja nyeusi, moja nyeupe" — blue became black).
+COLOURS: dict[str, tuple[str, ...]] = {
+    "black": ("black", "nyeusi"),
+    "white": ("white", "nyeupe", "off-white", "off white", "cream", "krimu", "ivory"),
+    "blue": ("blue", "bluu", "bule", "blu", "bulu", "navy", "navy blue", "royal blue", "sky blue"),
+    "red": ("red", "nyekundu", "maroon", "burgundy", "wine red"),
+    "purple": ("purple", "zambarau", "purple red", "violet", "lilac"),
+    "green": ("green", "kijani"),
+    "grey": ("grey", "gray", "kijivu"),
+    "yellow": ("yellow", "njano", "manjano"),
+    "pink": ("pink", "pinki", "waridi"),
+    "brown": ("brown", "kahawia"),
+}
+_COLOUR_RE = re.compile(
+    r"(?<![a-z])(?:" + "|".join(re.escape(w).replace(r"\ ", r"\s+") for w in
+                                 sorted({w for ws in COLOURS.values() for w in ws}, key=len, reverse=True))
+    + r")(?![a-z])", re.IGNORECASE)
+_COLOUR_WORD = {w: c for c, ws in COLOURS.items() for w in ws}
+
+
+def colours_of(text: str) -> dict[str, str]:
+    """{family: the word they used} for every colour named in `text`."""
+    out: dict[str, str] = {}
+    for m in _COLOUR_RE.finditer(text or ""):
+        w = " ".join(m.group(0).lower().split())
+        fam = _COLOUR_WORD.get(w)
+        if fam and fam not in out:
+            out[fam] = w
+    return out
+
+
+def colour_issues(ask: str, answer: str) -> list[dict]:
+    """A colour they named SWAPPED for another in the reply — they said blue
+    ("bule") and white, it confirms black and white. Hard: a swapped colour
+    is a wrong item ordered; soft when the reply says plainly we do not
+    make theirs and offers the nearest."""
+    theirs = colours_of(ask)
+    ours = colours_of(answer)
+    if not theirs or not ours:
+        return []
+    missing = [w for fam, w in theirs.items() if fam not in ours]
+    extra = [w for fam, w in ours.items() if fam not in theirs]
+    if not missing or not extra:
+        return []
+    return [{"kind": "colour", "hard": not acknowledges_substitute(answer),
+             "text": f"they said {', '.join(missing)} — the reply says {', '.join(extra)} instead: "
+                     "their colour is the colour ('bule' / 'bluu' is BLUE — our navy is the "
+                     "closest — never black); repeat the colour they named, or say plainly we "
+                     "do not make it and offer the nearest"}]
+
+
+def domain_issues(ask: str, answer: str) -> list[dict]:
+    """WE SELL CHURCH GOODS ONLY (owner, 2026-09-25): a reply that treats
+    goods we do not sell as ours — asks a quantity or a packet of beans,
+    prices them, lists them in an order — is held; a plain one-line decline
+    passes."""
+    from app.agent.domain import treats_as_ours
+    goods = treats_as_ours(answer)
+    if not goods:
+        return []
+    return [{"kind": "domain", "hard": True,
+             "text": f"it treats {', '.join(goods)} as something we sell (asks about it, prices "
+                     "it or lists it in the order) — we sell church vestments, communion ware "
+                     "and church supplies ONLY: decline it in ONE short line that says what we "
+                     "do sell, ask nothing about it, and carry on with the church items"}]
+
+
 def item_issues(ask: str, product: dict | None, answer: str = "") -> list[str]:
     """Why this hub row is NOT what the comment asked for — a different
     finish, a chalice for cups (or cups for a chalice), cups for a tray.
@@ -532,7 +600,7 @@ def status_without_source(answer: str, tool_results: list | None, transcript: li
                    for role, t in transcript_text(transcript, limit=40))
 
 
-HARD_KINDS = ("figure", "item", "link", "status", "photos", "variants")
+HARD_KINDS = ("figure", "item", "link", "status", "photos", "variants", "domain", "colour")
 
 # "I can't send photos from here" is FALSE on every chat channel — the cards
 # tool sends them (owner, 2026-09-25: the photos went out and the very next
@@ -783,6 +851,8 @@ def rule_findings(comment: str, answer: str, seen: list,
     sold = named_rows[0] if named_rows else None
     if sold is not None:
         out.extend(variant_issues(comment, answer, sold, currency))
+    out.extend(colour_issues(comment, answer))
+    out.extend(domain_issues(comment, answer))
     if mode != "comment":
         sent = cards_sent(tool_results)
         if _NO_PHOTOS_RE.search(answer or ""):
@@ -911,9 +981,16 @@ async def reviewer_verdict(comment: str, answer: str, seen: list, *,
         "1. WRONG ITEM — the reply names or prices something other than what they asked "
         "for: a different finish (they asked GOLD, it gives SILVER), a different kind "
         "(they asked communion CUPS — the small cups a tray holds — and it gives a "
-        "CHALICE; they asked a TRAY and it gives cups), or a product they never asked "
+        "CHALICE; they asked a TRAY and it gives cups), a different colour (they said "
+        "blue / 'bule' / 'bluu', it confirms black), or a product they never asked "
         "about. A reply that says plainly we do not have the exact one and offers the "
         "nearest at its hub price PASSES.\n"
+        "7. NOT OUR GOODS — the reply offers, prices, asks details of (a quantity, a "
+        "packet) or adds to an order something we do not sell: food and groceries "
+        "(beans, rice, sugar), drinks, phones and electronics, vehicles, loans, land, "
+        "jobs, livestock, cosmetics, medicine — we sell church vestments, communion "
+        "ware and church supplies ONLY. A one-line polite decline PASSES; guessing "
+        "such goods at a customer whose word you do not know FAILS.\n"
         "2. WRONG FIGURE — a price that is not the hub price of that row in the currency "
         "shown, a total no tool returned, or an invented pack size, capacity, colour, "
         "material or delivery time.\n"
@@ -993,7 +1070,9 @@ def review_notes(issues: list[str]) -> str:
         "EVERY question they asked (where we are — Nairobi, Kenya; a shop in their "
         "country — none, we deliver there by DHL; delivery; the price). If we do not "
         "have the exact item, say so plainly and offer the nearest with its hub price. "
-        "Never post a guess.)"
+        "Their colour is the colour ('bule' is blue, never black). Anything we do not "
+        "sell (food, phones, loans — church goods only) is declined in one line, never "
+        "asked about or ordered. Never post a guess.)"
     )
 
 
@@ -1033,6 +1112,10 @@ def rewrite_block(issues: list[str], draft: str, seen: list, currency: str,
         "delivers — ONLY if they asked); never re-ask a detail they already gave; "
         "never invent a pack size, a capacity, an order status, a delivery time or "
         f"an exchange rate; never promise to 'confirm' a figure with the team; {photos_rule}"
+        "their colour is the colour ('bule' / 'bluu' is BLUE — our navy is the closest — never "
+        "black); anything they asked for that we do not sell (food, phones, loans — we sell "
+        "church vestments, communion ware and church supplies only) is declined in ONE short "
+        "line, asked nothing about, and never added to the order; "
         "keep the warmth and the closing question; write in their language.]"
     )
 
