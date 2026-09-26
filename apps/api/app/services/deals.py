@@ -158,6 +158,24 @@ async def _conversation_of(db, key: str, channel: str):
         Conversation.external_id == key))).scalar_one_or_none()
 
 
+def snapshot_items(items: list) -> list[dict]:
+    """The deal's lines with their PRICES — cart lines carry `unit_price`
+    (the `price` key read before was never there, so every deal total was
+    0 and the KES 50,000 human-approval gate never fired)."""
+    out = []
+    for i in (items or [])[:20]:
+        price = i.get("unit_price")
+        if price in (None, ""):
+            price = i.get("price")
+        try:
+            price = float(price) if price not in (None, "") else None
+        except (TypeError, ValueError):
+            price = None
+        out.append({"name": i.get("name"), "qty": i.get("qty") or i.get("quantity") or 1,
+                    "price": price})
+    return out
+
+
 async def scribe_update(db, key: str, channel: str, reply: str,
                         inbound_text: str = "") -> None:
     """File the turn: cart → items/title/stage, promises (Neema's own AND the
@@ -187,9 +205,7 @@ async def scribe_update(db, key: str, channel: str, reply: str,
             await db.flush()                # id needed for the action row
 
         if items:
-            deal.items_snapshot = [
-                {"name": i.get("name"), "qty": i.get("qty") or i.get("quantity") or 1,
-                 "price": i.get("price")} for i in items][:20]
+            deal.items_snapshot = snapshot_items(items)
             names = [str(i.get("name") or "") for i in items if i.get("name")]
             deal.title = (", ".join(names)[:290]) or deal.title
         deal.stage = derive_stage(len(items), deal.stage or "new")

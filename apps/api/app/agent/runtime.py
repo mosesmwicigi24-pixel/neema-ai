@@ -46,6 +46,7 @@ TIKTOK_CHANNEL = "tiktok"
 # catalogue, one source of truth. whatsapp_checkout_link stays as the FALLBACK
 # for a buyer who won't share a number.
 _META_TOOL_NAMES = {"search_catalog", "get_cart", "update_cart", "create_order",
+                    "apply_offer",        # the closing lever, wherever the order closes
                     "raise_complaint",
                     "check_order_status", "remember", "handoff_to_human",
                     "whatsapp_checkout_link", "share_catalog", "send_product_cards",
@@ -1699,7 +1700,11 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         try:
             reply, _held, _gate_outcome = await _gate_turn_reply(
                 reply, user_text=user_text, transcript=turn_messages, tool_log=tool_log,
-                ctx=ctx, currency=currency, channel=channel, public_comment=public_comment,
+                # the currency the turn ENDED in: a customer who proved Kenya
+                # mid-turn switched the tools to KES, and the reviewer must
+                # read the rows in the money the reply speaks
+                ctx=ctx, currency=(getattr(ctx, "currency", None) or currency), channel=channel,
+                public_comment=public_comment,
                 llm=llm, sys_blocks=sys_blocks, redis=redis, db=db, key=key,
                 post_product=_gate_post_product, swahili=looks_swahili(user_text or ""),
                 fx=_fx_rates, closer=is_closer(user_text or ""))

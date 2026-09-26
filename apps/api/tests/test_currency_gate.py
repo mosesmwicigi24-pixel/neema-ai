@@ -253,7 +253,10 @@ def test_search_catalog_currency_override_for_declared_kenyan(monkeypatch):
 
     kes = asyncio.run(_search_catalog({"query": "shirt", "currency": "KES"}, meta_ctx))["results"][0]
     assert kes["price"] == 3100 and kes["currency"] == "KES"           # native KES, not USD*rate
-    assert meta_ctx.currency == "USD"                                  # ctx untouched (replace, not mutate)
+    # The proof switches the WHOLE turn (2026-09-26): the cart, the quotation
+    # and the order that follow in the same turn speak KES too, not the
+    # channel's default.
+    assert meta_ctx.currency == "KES"
 
 
 def test_crm_country_falls_back_to_phone_prefix():

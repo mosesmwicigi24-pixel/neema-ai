@@ -32,7 +32,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, or_
 
 from app.core import money
 from app.core.config import settings
@@ -44,6 +44,7 @@ import app.models.person     # noqa: F401
 import app.models.user       # noqa: F401
 from app.models.conversation import Conversation, ConvStatus, InterceptMode
 from app.models.order_event import OrderEvent
+from app.routers.order_link import customer_link
 
 _log = logging.getLogger("neema.payment_followup")
 
@@ -123,7 +124,8 @@ async def find_unpaid(db, redis=None) -> list[dict]:
     grace = now - timedelta(hours=GRACE_HOURS)
     orders = (await db.execute(
         select(OrderEvent).where(
-            OrderEvent.hub_payment_url.isnot(None),
+            or_(OrderEvent.hub_payment_url.isnot(None),
+                OrderEvent.hub_public_url.isnot(None)),
             OrderEvent.hub_order_id.isnot(None),
             OrderEvent.created_at >= fresh,
             OrderEvent.created_at <= grace,
@@ -169,7 +171,7 @@ def compose(order: OrderEvent, name: str | None = None) -> str:
         f"Hi{who} 🙏 Just checking in on your order{num}"
         + (f" ({amount})" if amount else "") + ".\n\n"
         "Whenever you're ready, you can complete payment here:\n"
-        f"{order.hub_payment_url}\n\n"
+        f"{customer_link(order)}\n\n"
         "Any trouble with the link — or anything you'd like to change — just tell me."
     )
 
