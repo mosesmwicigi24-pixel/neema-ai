@@ -118,6 +118,7 @@ class ReportsViewModel(private val dash: DashboardViewModel) : ViewModel() {
             throw e
         } catch (e: Exception) {
             stillHere()
+            dash.recheckAccessOn(e)
             // A refresh keeps the report already on screen and says so (the
             // web's toast); a first load shows the reason with a Retry button
             // — never a report of zeros.
@@ -164,5 +165,9 @@ internal fun reportLoadError(e: Throwable): String = when {
         "The download was cut off partway — try again on a stronger connection."
     e is kotlinx.serialization.SerializationException ->
         "The download arrived incomplete — try again on a stronger connection."
+    // The web's words, and why: the server refused this agent the full list.
+    e.httpStatus() == 403 -> (e as ke.co.bethanyhouse.neema.core.net.ApiException).readableDetail()
+        ?.takeUnless { it.equals("Not authenticated", true) || it.equals("Forbidden", true) }
+        ?: "Could not load conversations for this report — you don't have permission to see them."
     else -> friendlyError(e, fallback = "Could not load conversations for this report.")
 }

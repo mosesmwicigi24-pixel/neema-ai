@@ -1,5 +1,6 @@
 package ke.co.bethanyhouse.neema.feature.reports
 
+import ke.co.bethanyhouse.neema.app.DashboardViewModel
 import ke.co.bethanyhouse.neema.core.net.ApiException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ensureActive
@@ -81,7 +82,8 @@ internal fun friendlyError(
             else -> DROPPED_TEXT
         }
         401 -> EXPIRED_TEXT
-        403 -> e.readableDetail()?.takeUnless { it == "Not authenticated" } ?: "You don't have permission to do that."
+        403 -> e.readableDetail()?.takeUnless { it.equals("Not authenticated", true) || it.equals("Forbidden", true) }
+            ?: "You don't have permission to do that."
         404 -> e.readableDetail()?.takeUnless { it.endsWith(" not found", true) } ?: notFound
         409 -> e.readableDetail() ?: "That changed on the server meanwhile — showing the latest."
         422 -> e.readableDetail() ?: "The server couldn't accept that — check the fields and try again."
@@ -117,3 +119,22 @@ internal suspend fun <T> attempt(block: suspend () -> T): Result<T> = try {
 /** [text] with every occurrence of [secret] masked — a typed password is never read back in a toast. */
 internal fun String.masking(secret: String): String =
     if (secret.length < 3) this else replace(secret, "••••••")
+
+/**
+ * A 403 means the server's idea of this agent's access differs from the
+ * app's — an admin changed their role or overrides since the last 180 s
+ * agents poll. Re-read `/admin/me` and the team now so the nav (and every
+ * `can()` gate) corrects itself instead of waiting up to three minutes.
+ *
+ * None of the Reports / Analytics / Catalog endpoints is permission-guarded
+ * on the server today (they only need a signed-in agent), so this is a
+ * safety net for a future guard or a proxy rule.
+ *
+ * TODO(core): switch to `dash.onForbidden()` once core adds it.
+ */
+internal fun DashboardViewModel.recheckAccessOn(e: Throwable?) {
+    if (e?.httpStatus() == 403) {
+        refetchMe()
+        refetchAgents()
+    }
+}

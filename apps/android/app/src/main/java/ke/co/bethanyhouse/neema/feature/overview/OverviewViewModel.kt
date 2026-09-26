@@ -11,6 +11,7 @@ import ke.co.bethanyhouse.neema.core.model.Stats
 import ke.co.bethanyhouse.neema.feature.reports.quietly
 import ke.co.bethanyhouse.neema.feature.reports.attempt
 import ke.co.bethanyhouse.neema.feature.reports.friendlyError
+import ke.co.bethanyhouse.neema.feature.reports.recheckAccessOn
 import ke.co.bethanyhouse.neema.app.ToastType
 import ke.co.bethanyhouse.neema.core.ws.str
 import ke.co.bethanyhouse.neema.feature.reports.Coalescer
@@ -113,7 +114,11 @@ class OverviewViewModel(private val dash: DashboardViewModel) : ViewModel() {
     /** The poll's pair: server stats and the human-held threads. */
     private suspend fun loadLive() {
         coroutineScope {
-            launch { quietly { _stats.value = dash.api.stats.overview(); _statsError.value = null } }
+            launch {
+                attempt { dash.api.stats.overview() }
+                    .onSuccess { _stats.value = it; _statsError.value = null }
+                    .onFailure { dash.recheckAccessOn(it) }
+            }
             launch { loadHuman() }
         }
     }
@@ -122,7 +127,7 @@ class OverviewViewModel(private val dash: DashboardViewModel) : ViewModel() {
     private suspend fun catchUp() {
         coroutineScope {
             launch { loadLive() }
-            launch { quietly { _attrib.value = dash.api.attribution() } }
+            launch { loadAttribution() }
         }
     }
 
@@ -132,6 +137,7 @@ class OverviewViewModel(private val dash: DashboardViewModel) : ViewModel() {
         val failed = attempt { dash.api.stats.overview() }
             .onSuccess { _stats.value = it; _statsError.value = null }
             .exceptionOrNull()
+        dash.recheckAccessOn(failed)
         if (failed != null && _stats.value == null) {
             // A failed pull-to-refresh keeps the figures already on screen
             // (like the web's 30 s poll); only a first load falls back — and,
@@ -140,7 +146,7 @@ class OverviewViewModel(private val dash: DashboardViewModel) : ViewModel() {
             loadFallback()
         }
         _statsLoading.value = false
-        attempt { dash.api.attribution() }.onSuccess { _attrib.value = it }
+        loadAttribution()
         loadHuman()
         // The web's feed reads `humanRows ?? conversations`: with no human tab,
         // the intercepts come from the inbox's own rows.
@@ -148,14 +154,23 @@ class OverviewViewModel(private val dash: DashboardViewModel) : ViewModel() {
         return failed
     }
 
+    /** A failed read stays hidden, as on the web (a 403 re-reads this agent's access). */
+    private suspend fun loadAttribution() {
+        attempt { dash.api.attribution() }
+            .onSuccess { _attrib.value = it }
+            .onFailure { dash.recheckAccessOn(it) }
+    }
+
     private suspend fun loadFallback() {
         attempt { dash.api.conversations.page(InboxQuery(), limit = 50) }
             .onSuccess { _fallbackConvs.value = it.items }
+            .onFailure { dash.recheckAccessOn(it) }
     }
 
     private suspend fun loadHuman() {
         attempt { dash.api.conversations.page(InboxQuery(tab = "human"), limit = 10) }
             .onSuccess { _humanRows.value = it.items }
+            .onFailure { dash.recheckAccessOn(it) }
     }
 
     /**

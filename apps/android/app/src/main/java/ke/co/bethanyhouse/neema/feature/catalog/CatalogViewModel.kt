@@ -6,9 +6,9 @@ import ke.co.bethanyhouse.neema.app.DashboardViewModel
 import ke.co.bethanyhouse.neema.core.model.CatalogItem
 import ke.co.bethanyhouse.neema.core.model.PriceAudit
 import ke.co.bethanyhouse.neema.feature.reports.ScreenLife
-import ke.co.bethanyhouse.neema.feature.reports.quietly
 import ke.co.bethanyhouse.neema.feature.reports.attempt
 import ke.co.bethanyhouse.neema.feature.reports.friendlyError
+import ke.co.bethanyhouse.neema.feature.reports.recheckAccessOn
 import ke.co.bethanyhouse.neema.app.ToastType
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -88,7 +88,10 @@ class CatalogViewModel(private val dash: DashboardViewModel) : ViewModel() {
     private suspend fun loadCatalog(): Throwable? =
         attempt { dash.refreshCatalog() }
             .onSuccess { _catalogError.value = null }
-            .onFailure { _catalogError.value = friendlyError(it, fallback = "The server couldn't send the catalogue just now.") }
+            .onFailure {
+                _catalogError.value = friendlyError(it, fallback = "The server couldn't send the catalogue just now.")
+                dash.recheckAccessOn(it)
+            }
             .exceptionOrNull()
 
     /** The empty state's Retry. */
@@ -100,7 +103,9 @@ class CatalogViewModel(private val dash: DashboardViewModel) : ViewModel() {
      * banner already shown.
      */
     private suspend fun loadAudit() {
-        quietly { _audit.value = dash.api.catalog.audit() }
+        attempt { dash.api.catalog.audit() }
+            .onSuccess { _audit.value = it }
+            .onFailure { dash.recheckAccessOn(it) }
     }
 
     /** Pull-to-refresh: the audit and the shared catalogue, the spinner lasting until both have landed (or failed). */
