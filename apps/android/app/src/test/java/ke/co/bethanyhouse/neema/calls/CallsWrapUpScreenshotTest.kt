@@ -133,7 +133,7 @@ class CallsWrapUpScreenshotTest {
         OverApp { PermissionGrantBanner(PermissionGrant("254733444555", "Deacon James Mwangi"), onCall = {}, onDismiss = {}) }
     }
 
-    // ── Messenger / Instagram: no business calling — WhatsApp instead ───────
+    // ── Messenger (calling off) / Instagram (no calling API): WhatsApp instead
     private fun sheet(platform: CallPlatform, phone: String?, dark: Boolean = false, device: DeviceConfig = DeviceConfig.PIXEL_6) = shot(device, dark) {
         Column(Modifier.fillMaxSize().background(Neema.colors.bg2).padding(top = 24.dp)) {
             CallOnWhatsAppContent(platform, "Grace", phone, onCall = {}, onAsk = {}, onDismiss = {})

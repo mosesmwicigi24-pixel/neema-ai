@@ -24,6 +24,7 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
@@ -57,6 +58,12 @@ class CustomerViewModel(
             // The call screen's "Open chat" opens this thread when it is the customer's WhatsApp one.
             val chat = conversation.id.takeIf { conversation.channel == "whatsapp" && !it.startsWith("call:") }
             dash.container.calls.initiateCall(to, name, chat)
+        },
+    /** Places a Messenger voice call to a PSID; swappable for tests. */
+    private val placeMessengerCall: suspend (psid: String, name: String?) -> Result<Unit> =
+        { psid, name ->
+            val chat = conversation.id.takeIf { !it.startsWith("call:") }
+            dash.container.calls.initiateCall(psid, name, chat, ke.co.bethanyhouse.neema.feature.calls.MESSENGER)
         },
 ) : ViewModel() {
     private val crm = CrmApi(dash.api.http)
@@ -977,14 +984,27 @@ class CustomerViewModel(
         conversation.waId?.takeIf { conversation.channel == "whatsapp" }?.let(::realPhoneDigits)
             ?: realPhoneDigits(_profile.value?.phone)
 
-    /** GET /admin/calls?wa_id= — the last [RECENT_CALLS] calls. A failure keeps what is shown. */
+    /** A Messenger chat's PSID: its Messenger calls are this customer's too (never shown). */
+    fun psidForCalls(): String? = messengerPsid(conversation)
+
+    /** The Calls section's permission / request is about Messenger: a Messenger chat while Messenger can call. */
+    private fun permissionOnMessenger(): Boolean = psidForCalls() != null && dash.container.calls.messengerCallsOn
+
+    /**
+     * GET /admin/calls?wa_id= (and ?psid= on a Messenger chat) — the last
+     * [RECENT_CALLS] calls on both apps we know them on. A failure keeps what is shown.
+     */
     fun loadCalls() {
-        val wa = callsKey() ?: return
+        val wa = callsKey()
+        val psid = psidForCalls()
+        if (wa == null && psid == null) return
         if (callsJob?.isActive == true) return
         callsJob = viewModelScope.launch {
             try {
-                val rows = dash.api.calls.list(waId = wa, limit = RECENT_CALLS)
-                _recentCalls.value = rows.filter { it.waId == wa }.take(RECENT_CALLS)
+                val a = wa?.let { dash.api.calls.list(waId = it, limit = RECENT_CALLS).filter { r -> r.waId == it } }.orEmpty()
+                val b = psid?.let { dash.api.calls.list(psid = it, limit = RECENT_CALLS).filter { r -> r.externalId == it && r.channel == "messenger" } }.orEmpty()
+                val rows = (a + b).distinctBy { it.callId }.sortedByDescending { it.startedAt ?: "" }
+                _recentCalls.value = rows.take(RECENT_CALLS)
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Throwable) {
@@ -998,11 +1018,13 @@ class CustomerViewModel(
 
     /** GET /admin/calls/permission for this customer. A failure keeps what is shown. */
     fun loadPermission() {
-        val wa = callsKey() ?: return
+        val psid = psidForCalls()?.takeIf { permissionOnMessenger() }
+        val wa = callsKey()
+        if (psid == null && wa == null) return
         if (permissionJob?.isActive == true) return
         permissionJob = viewModelScope.launch {
             try {
-                _callPermission.value = dash.api.calls.permission(wa)
+                _callPermission.value = if (psid != null) dash.api.calls.messengerPermission(psid) else dash.api.calls.permission(wa!!)
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Throwable) {
@@ -1017,11 +1039,13 @@ class CustomerViewModel(
      * they can ask again), `already_permitted` (call now).
      */
     fun sendCallRequest() {
-        val wa = callsKey() ?: return
+        val messenger = permissionOnMessenger()
+        val wa = (if (messenger) psidForCalls() else callsKey()) ?: return
         if (_callRequest.value.busy) return
         _callRequest.value = CallRequestUi(busy = true)
         viewModelScope.launch {
-            val r = dash.container.calls.requestPermission(wa, _profile.value?.name ?: conversation.name)
+            val r = dash.container.calls.requestPermission(wa, _profile.value?.name ?: conversation.name,
+                if (messenger) ke.co.bethanyhouse.neema.feature.calls.MESSENGER else ke.co.bethanyhouse.neema.feature.calls.WHATSAPP)
             val resp = r.getOrNull()
             val e = r.exceptionOrNull()
             val cm = ke.co.bethanyhouse.neema.feature.calls.CallManager
@@ -1030,7 +1054,7 @@ class CustomerViewModel(
                 resp != null -> CallRequestUi(sent = true)
                 else -> {
                     val refusal = cm.requestRefusal(e, dash.can(ke.co.bethanyhouse.neema.core.perm.Perms.MANAGE_SETTINGS))
-                    if (refusal?.code == "138009") {
+                    if (refusal?.code == "138009" || refusal?.code == "request_limit") {
                         val cur = _callPermission.value ?: ke.co.bethanyhouse.neema.core.model.CallPermission(waId = wa)
                         _callPermission.value = cur.copy(
                             canRequest = false,
@@ -1061,17 +1085,22 @@ class CustomerViewModel(
             val type = e["type"]?.let { runCatching { (it as JsonPrimitive).content }.getOrNull() }
             // Their answer to a call request (or WhatsApp's automatic revoke): read where it stands now.
             if (type == "call_permission") {
-                val who = e["wa_id"]?.let { runCatching { (it as JsonPrimitive).content }.getOrNull() }?.removePrefix("+")
-                if (who != null && who == callsKey()) { permissionJob?.cancel(); loadPermission() }
+                fun field(k: String) = e[k]?.let { runCatching { (it as JsonPrimitive).contentOrNull }.getOrNull() }?.removePrefix("+")
+                // Matched by channel + handle: the wa_id, or (Messenger) the PSID in external_id.
+                val messenger = field("channel") == "messenger"
+                val who = if (messenger) field("external_id") else field("wa_id")
+                if (who != null && who == (if (messenger) psidForCalls() else callsKey())) { permissionJob?.cancel(); loadPermission() }
                 return@collect
             }
             if (type != "call_update" && type != "call_ended" && type != "incoming_call" && type != "call_answered") return@collect
-            val wa = callsKey() ?: return@collect
+            val wa = callsKey()
+            val psid = psidForCalls()
+            if (wa == null && psid == null) return@collect
             if (type == "call_update") {
                 val row = (e["call"] as? JsonObject)?.let {
                     runCatching { NeemaJson.decodeFromJsonElement(Call.serializer(), it) }.getOrNull()
                 }
-                if (row != null && row.waId == wa) {
+                if (row != null && ((wa != null && row.waId == wa) || (psid != null && row.channel == "messenger" && row.externalId == psid))) {
                     val cur = _recentCalls.value.orEmpty()
                     _recentCalls.value = (if (cur.any { it.callId == row.callId }) cur.map { if (it.callId == row.callId) row else it } else listOf(row) + cur)
                         .take(RECENT_CALLS)
@@ -1157,6 +1186,25 @@ class CustomerViewModel(
                 }
             } finally {
                 _templateBusy.value = false
+            }
+        }
+    }
+
+    /** Which channels can call now: the Messenger Call button shows only while Messenger can. */
+    val callChannels = dash.container.calls.channels
+
+    /** Messenger voice call (only offered while Messenger calling is on). The call screen carries what happens next. */
+    fun callOnMessenger(psid: String) {
+        if (_callBusy.value) return
+        _callBusy.value = true
+        viewModelScope.launch {
+            try {
+                val r = placeMessengerCall(psid, _profile.value?.name ?: conversation.name)
+                val err = r.exceptionOrNull() ?: return@launch
+                if ((err as? ke.co.bethanyhouse.neema.feature.calls.CallManager.CallError)?.shown == true) return@launch
+                say(err.message?.ifEmpty { null } ?: "Couldn't place the call", ToastType.Error)
+            } finally {
+                _callBusy.value = false
             }
         }
     }

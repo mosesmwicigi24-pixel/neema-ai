@@ -36,7 +36,7 @@ class LiveService : Service() {
         val inCall = intent?.getBooleanExtra(EXTRA_IN_CALL, false) == true
         val b = NotificationCompat.Builder(this, Notifier.CH_LIVE)
             .setSmallIcon(R.drawable.ic_stat_neema)
-            .setContentTitle(if (inCall) "WhatsApp call in progress" else "Neema is connected")
+            .setContentTitle(if (inCall) "Call in progress" else "Neema is connected")
             .setContentText(if (inCall) "Tap to return to the call" else "Alerts and calls will reach you")
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_MIN)

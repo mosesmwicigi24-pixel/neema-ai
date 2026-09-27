@@ -492,8 +492,13 @@ data class Call(
     @SerialName("person_id") val personId: String? = null,
     /** The customer's WhatsApp conversation, for "Open chat" (null before they ever wrote). */
     @SerialName("conversation_id") val conversationId: String? = null,
-    /** Always "whatsapp": Messenger and Instagram have no business calling API. */
+    /**
+     * "whatsapp" | "messenger" (CALLING_UX.md §2.0). A Messenger row has no
+     * [waId]: its customer is [externalId], their PSID — never shown.
+     */
     val channel: String = "whatsapp",
+    /** The customer's handle on [channel]: the wa_id on WhatsApp, the PSID on Messenger. */
+    @SerialName("external_id") val externalId: String? = null,
     val direction: String = "inbound",
     /**
      * ringing | answered | completed | missed | declined | callback | no_answer |
@@ -600,6 +605,9 @@ data class CallPermission(
     @SerialName("requested_at") val requestedAt: String? = null,
     /** When this record was written (the request-permission reply and the live event carry it). */
     val at: String? = null,
+    /** "messenger" on a Messenger answer (whose customer is [externalId], the PSID); absent = WhatsApp. */
+    val channel: String? = null,
+    @SerialName("external_id") val externalId: String? = null,
 )
 
 /**
@@ -651,7 +659,55 @@ data class IceConfig(
      * device recorded nothing.
      */
     @SerialName("meta_transcription") val metaTranscription: Boolean? = null,
+    /** Which channels can call right now (the same as GET /calls/channels). */
+    val channels: CallChannels? = null,
 )
+
+/** One channel's calling, as GET /calls/channels says it. */
+@Serializable
+data class ChannelCalling(
+    val inbound: Boolean = false,
+    val outbound: Boolean = false,
+    val video: Boolean = false,
+    /** What the softphone builds for a customer's call: "answer" (WhatsApp) or "offer" (Messenger). */
+    val sdp: String? = null,
+)
+
+/**
+ * GET /calls/channels (and ice-config `channels`): which channels can take and
+ * place a call right now. Messenger sits behind the server's
+ * `messenger_calling_enabled` switch; Instagram never calls.
+ */
+@Serializable
+data class CallChannels(
+    val whatsapp: ChannelCalling = ChannelCalling(inbound = true, outbound = true, sdp = "answer"),
+    val messenger: ChannelCalling = ChannelCalling(),
+    val instagram: ChannelCalling = ChannelCalling(),
+)
+
+/**
+ * The SDP Meta sends back for a Messenger call (POST /calls/{id}/answer with
+ * our offer, POST /calls/connect with channel messenger): [sdp] is Meta's
+ * answer; [renegotiation], when present, an offer to apply after it — a
+ * plain string or `{sdp_type, sdp}` (the docs show both). A WhatsApp answer
+ * carries neither.
+ */
+@Serializable
+data class CallSdpResponse(
+    val ok: Boolean = true,
+    @SerialName("call_id") val callId: String = "",
+    val channel: String? = null,
+    val sdp: String? = null,
+    @SerialName("sdp_type") val sdpType: String? = null,
+    val renegotiation: JsonElement? = null,
+) {
+    /** The renegotiation offer's SDP, whichever shape it came in (null when none). */
+    val renegotiationSdp: String? get() = when (val r = renegotiation) {
+        is JsonPrimitive -> r.contentOrNull?.takeIf { r.isString && it.isNotBlank() }
+        is JsonObject -> (r["sdp"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+        else -> null
+    }
+}
 
 /** One holiday in the call hours: WhatsApp's "YYYY-MM-DD" and "HHMM" times. */
 @Serializable
@@ -724,7 +780,15 @@ data class PermissionTemplate(
 )
 
 @Serializable
-data class CallOffer(@SerialName("call_id") val callId: String = "", val sdp: String = "", val from: String = "")
+data class CallOffer(
+    @SerialName("call_id") val callId: String = "",
+    /** The caller's offer (WhatsApp). Null on a Messenger call: Meta sends none. */
+    val sdp: String? = null,
+    val from: String? = null,
+    val channel: String? = null,
+    /** Messenger (§2.0): WE build the offer and send it through /answer; Meta's reply carries the answer. */
+    @SerialName("offer_required") val offerRequired: Boolean = false,
+)
 
 @Serializable
 data class AttributionRow(

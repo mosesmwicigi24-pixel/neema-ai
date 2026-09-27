@@ -216,9 +216,40 @@ class CallApiContractTest {
     @Test fun offerWithNullsDecodes() {
         // calls_get_offer returns data.get("sdp") / data.get("from") — null when the webhook had none.
         val o = NeemaJson.decodeFromString(CallOffer.serializer(), """{"call_id":"$C1","sdp":null,"from":null}""")
-        assertEquals("", o.sdp); assertEquals("", o.from)
+        assertNull(o.sdp); assertNull(o.from); assertFalse(o.offerRequired)
         val real = NeemaJson.decodeFromString(CallOffer.serializer(), CallsFixtures.offer(C1))
-        assertTrue(real.sdp.contains("a=setup:actpass") && real.sdp.contains("\r\n"))
+        assertTrue(real.sdp!!.contains("a=setup:actpass") && real.sdp!!.contains("\r\n"))
+        // Messenger (§2.0): no offer — we build it.
+        val m = NeemaJson.decodeFromString(CallOffer.serializer(),
+            """{"call_id":"c_1","sdp":null,"channel":"messenger","offer_required":true,"from":"7788990011"}""")
+        assertTrue(m.offerRequired); assertEquals("messenger", m.channel); assertNull(m.sdp)
+    }
+
+    @Test fun messengerRoutesMatchTheHandlers() = runBlocking {
+        val (fake, api) = rig()
+        fake.on("GET", "/admin/calls/channels", body = """{"whatsapp":{"inbound":true,"outbound":true,"video":false,"sdp":"answer"},""" +
+            """"messenger":{"inbound":true,"outbound":true,"video":false,"sdp":"offer"},"instagram":{"inbound":false,"outbound":false,"video":false}}""")
+        fake.on("GET", "/admin/calls/permission", body = """{"wa_id":null,"channel":"messenger","external_id":"7788990011","status":"granted","expires_at":"2026-10-03T10:00:00+00:00","permanent":false,"can_call":true}""")
+        fake.on("POST", "/admin/calls/connect", body = """{"ok":true,"call_id":"c_9","channel":"messenger","sdp":"v=0 meta","sdp_type":"answer","renegotiation":{"sdp_type":"offer","sdp":"v=0 reneg"}}""")
+        fake.on("POST", "/admin/calls/request-permission", body = """{"ok":true,"route":"calling_optin","permission":{"wa_id":null,"channel":"messenger","external_id":"7788990011","status":"requested"}}""")
+        val ch = api.channels()
+        assertTrue(ch.messenger.outbound && ch.messenger.inbound); assertEquals("offer", ch.messenger.sdp); assertFalse(ch.instagram.outbound)
+        val p = api.messengerPermission("7788990011")
+        assertEquals("granted", p.status); assertEquals("7788990011", p.externalId); assertNull(p.waId)
+        assertEquals("channel=messenger&psid=7788990011", fake.last("GET", "/admin/calls/permission").query)
+        val c = api.connectMessenger("7788990011", "v=0 our-offer", "Grace Wanjiku")
+        assertEquals("c_9", c.callId); assertEquals("v=0 meta", c.sdp); assertEquals("v=0 reneg", c.renegotiationSdp)
+        assertEquals("""{"channel":"messenger","psid":"7788990011","sdp":"v=0 our-offer","name":"Grace Wanjiku"}""",
+            fake.last("POST", "/admin/calls/connect").body)
+        val r = api.requestMessengerPermission("7788990011")
+        assertEquals("calling_optin", r.route)
+        assertEquals("""{"channel":"messenger","psid":"7788990011"}""", fake.last("POST", "/admin/calls/request-permission").body)
+        // The renegotiation as a plain string (the accept sample's shape) reads the same.
+        val plain = NeemaJson.decodeFromString(ke.co.bethanyhouse.neema.core.model.CallSdpResponse.serializer(),
+            """{"ok":true,"call_id":"c_9","sdp":"v=0 a","renegotiation":"v=0 r"}""")
+        assertEquals("v=0 r", plain.renegotiationSdp)
+        assertNull(NeemaJson.decodeFromString(ke.co.bethanyhouse.neema.core.model.CallSdpResponse.serializer(),
+            """{"ok":true,"call_id":"c_9","renegotiation":null}""").renegotiationSdp)
     }
 
     @Test fun transcriptDecodesEveryVariant() = runBlocking {

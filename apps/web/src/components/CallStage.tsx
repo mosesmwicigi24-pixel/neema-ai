@@ -609,7 +609,9 @@ export function CallStage({ onOpenConversation, onOpenCallingSettings }: {
     const waitAt = ended && c.outcome === "failed" && c.errAction === "wait" ? c.availableAt : null;
     // Before (and while) ringing them: they've let our last calls ring out — WhatsApp revokes at 4.
     const streak = c.permission?.unanswered_streak ?? 0;
-    const caution = (phase === "placing" || phase === "ringing_out") && streak >= 2;
+    // WhatsApp's revoke-after-4 rule — Messenger has none to warn about.
+    const caution = (phase === "placing" || phase === "ringing_out") && streak >= 2
+        && (c.call?.channel ?? "whatsapp") === "whatsapp";
 
     return (
         <>

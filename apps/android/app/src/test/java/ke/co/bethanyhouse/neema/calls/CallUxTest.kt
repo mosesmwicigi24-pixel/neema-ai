@@ -612,7 +612,7 @@ class CallUxTest {
         assertEquals("James declined the call", r.state.statusText())
         assertEquals(listOf(WrapAction.Message, WrapAction.Done), r.state.wrapActions())
         assertNull("the agent decides: it stays", CallOutcome.Rejected.autoCloseMs)
-        assertEquals("They declined", callRowWords(Call(callId = "x", direction = "outbound", status = "rejected")).label)
+        assertEquals("Declined by customer", callRowWords(Call(callId = "x", direction = "outbound", status = "rejected")).label)
         // A no_answer corrected to rejected a moment later: the latest word wins.
         r.calls.dismiss()
         r.api.connectId = "wacid.out2"
@@ -636,6 +636,9 @@ class CallUxTest {
         r.raw("""{"type":"call_answered","call_id":"wacid.out1","agent_id":"agent-me","direction":"outbound"}""")
         assertNull("only before it goes through", r.state.callCaution())
         assertNull(CallUiState(phase = CallPhase.Placing, outbound = true, permission = meta(streak = 1)).callCaution())
+        // WhatsApp's revoke-after-4 rule: never warned about on a Messenger call.
+        assertNull(CallUiState(phase = CallPhase.Placing, outbound = true, channel = "messenger",
+            permission = meta(streak = 3)).callCaution())
     }
 
     @Test fun templateRequiredOffersSettingsToAdminsOnly() = rig { r ->
@@ -681,7 +684,7 @@ class CallUxTest {
         r.api.requestResponse = PermissionRequestResponse(permission = CallPermission(james, "granted", permanent = true), alreadyPermitted = true)
         r.calls.sendCallRequest(); r.settle()
         assertEquals(CallOutcome.AlreadyAllowed, r.state.outcome)
-        assertEquals("James already allowed calls", r.state.statusText())
+        assertEquals("James already allows calls — call now", r.state.statusText())
         assertEquals(listOf(WrapAction.CallNow, WrapAction.Message, WrapAction.Done), r.state.wrapActions())
         r.api.permission = null
         r.calls.callNow(); r.settle()
@@ -790,5 +793,33 @@ class CallUxTest {
             ke.co.bethanyhouse.neema.feature.calls.restrictionText(r.calls.restriction.value!!))
         r.calls.dismissRestriction()
         assertNull(r.calls.restriction.value)
+    }
+
+    // ── The contract's words (§2.1) and a Messenger call's (§2.0) ───────────
+    @Test fun theWordsMatchTheContractAndTheWeb() {
+        val james = CallUiState(name = "Deacon James Mwangi", from = "254733444555", outbound = true)
+        assertEquals("Declined by customer", callRowWords(Call(callId = "x", direction = "outbound", status = "rejected")).label)
+        val declined = james.copy(phase = CallPhase.Ended, outcome = CallOutcome.Rejected, conversationId = "conv-james")
+        assertEquals("James declined the call", declined.statusText())
+        assertEquals(listOf(WrapAction.Message, WrapAction.Done), declined.wrapActions())
+        assertEquals(
+            "James missed your last 3 calls — WhatsApp removes call permission after 4 in a row. Consider a message first.",
+            james.copy(phase = CallPhase.RingingOut, permission = CallPermission(status = "granted", unansweredStreak = 3)).callCaution(),
+        )
+        assertEquals("Recorded by WhatsApp — summary in a minute", CallManager.META_SUMMARY)
+        // Messenger: never a PSID, the app named, the permission words its own.
+        val m = CallUiState(from = "7788990011", channel = "messenger")
+        assertEquals("Messenger caller", m.who)
+        assertEquals("Messenger", m.app)
+        assertNull(m.number)
+        assertEquals("This customer hasn't allowed Messenger calls yet", m.copy(phase = CallPhase.Ended, outcome = CallOutcome.PermissionNeeded).statusText())
+        assertEquals("The customer declined the call", m.copy(phase = CallPhase.Ended, outcome = CallOutcome.Rejected, outbound = true).statusText())
+        assertEquals("Grace hasn't allowed Messenger calls yet",
+            m.copy(name = "Grace Wanjiku", phase = CallPhase.Ended, outcome = CallOutcome.PermissionNeeded).statusText())
+        assertEquals("Messenger caller", WaitingCall("c_1", "7788990011", null, "messenger").who)
+        assertEquals("+254712345678", WaitingCall("w_1", "254712345678", null).who)
+        assertEquals("Allowed calls", permissionLines(CallPermission(status = "granted"), "James", AppClock.now()).first())
+        assertEquals("James hasn't allowed calls yet",
+            permissionLines(CallPermission(status = "unknown", metaStatus = "no_permission"), "James", AppClock.now()).first())
     }
 }

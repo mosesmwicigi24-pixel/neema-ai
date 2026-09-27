@@ -27,12 +27,29 @@ fun callRowWords(c: Call): CallRowWords {
         "callback" -> CallRowWords("Call back", CallTone.Warn, CallIcons.DirBack)
         "no_answer" -> CallRowWords("No answer", CallTone.Bad, dir)
         // The customer declined OUR call (Meta's REJECTED) — not a follow-up, but not a good outcome.
-        "rejected" -> CallRowWords("They declined", CallTone.Bad, dir)
+        "rejected" -> CallRowWords("Declined by customer", CallTone.Bad, dir)
         "cancelled" -> CallRowWords("Cancelled", CallTone.Neutral, dir)
         "failed" -> CallRowWords("Failed", CallTone.Bad, dir)
         else -> CallRowWords(c.status.replace('_', ' ').replaceFirstChar { it.uppercase() }.ifEmpty { "Call" }, CallTone.Neutral, dir)
     }
 }
+
+/** The two channels that call (CALLING_UX.md §1, §2.0). */
+const val WHATSAPP = "whatsapp"
+const val MESSENGER = "messenger"
+
+/** A row / event's channel, WhatsApp when it says none (older rows and frames carry none). */
+fun channelOf(v: String?): String = if (v?.trim()?.lowercase() == MESSENGER) MESSENGER else WHATSAPP
+
+/** Where the call is, in words: "WhatsApp" / "Messenger". */
+fun channelLabel(ch: String?): String = if (channelOf(ch) == MESSENGER) "Messenger" else "WhatsApp"
+
+/** The customer's handle on the call's channel: the wa_id, or the PSID on Messenger (never shown). */
+fun callHandle(c: Call): String =
+    (if (channelOf(c.channel) == MESSENGER) c.externalId else c.waId ?: c.externalId)?.removePrefix("+").orEmpty()
+
+/** "Messenger caller": a Messenger call with no name yet (a PSID is no number and is never shown). */
+const val MESSENGER_CALLER = "Messenger caller"
 
 /** "4:12" for a call that connected, "" otherwise. */
 fun callDuration(s: Int?): String = if (s == null || s <= 0) "" else callLength(s)
@@ -66,15 +83,17 @@ fun untilText(iso: String, now: Long): String {
  * call may still go through).
  */
 fun permissionLine(p: CallPermission, first: String, now: Long): String? = when {
-    p.status == "granted" && p.permanent -> "Allowed permanently"
+    p.status == "granted" && (p.permanent || p.metaStatus == "permanent") -> "Allowed permanently"
     p.status == "granted" && p.expiresAt != null -> "Allowed until ${Fmt.date(p.expiresAt)}"
-    p.status == "granted" -> "Allowed"
+    p.status == "granted" -> "Allowed calls"
     p.status == "requested" -> {
         val at = (p.requestedAt ?: p.at)?.let { Fmt.timeAgo(it, now) }?.takeIf { it != "—" }
         "Request sent${at?.let { " $it" } ?: ""} — waiting for $first"
     }
     p.status == "denied" && p.revoked -> "Permission revoked after unanswered calls"
     p.status == "denied" -> "$first declined calls"
+    // Meta says they haven't allowed calls (and nobody asked yet): said, as the web does.
+    p.metaStatus == "no_permission" -> "$first hasn't allowed calls yet"
     else -> null
 }
 
@@ -110,6 +129,14 @@ fun restrictionText(r: CallingRestriction): String {
     return (if (why.isEmpty()) "" else why.joinToString(" · ") + ". ") +
         "Calls you place may fail until it lifts (up to 7 days)."
 }
+
+/**
+ * Why a chat's app can't call right now — the "call on WhatsApp instead"
+ * sheet's first line (CustomerSidebar.tsx cantCallWhy). Messenger can call
+ * when the server's switch is on; Instagram has no business calling API.
+ */
+fun cantCallWhy(app: String): String =
+    if (app == "Messenger") "Messenger calling isn't switched on for Neema yet." else "$app doesn't let businesses take calls."
 
 /** The thread pill's words: the server's label (else the row's word), and " · voicemail" when one came with the call. */
 fun threadCallLabel(body: String, call: Call?): String {
