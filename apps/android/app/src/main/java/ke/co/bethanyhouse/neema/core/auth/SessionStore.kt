@@ -44,7 +44,20 @@ class SessionStore(context: Context?, override: SharedPreferences? = null) {
     val session: StateFlow<Session?> = _session.asStateFlow()
     val current: Session? get() = _session.value
 
-    private fun read(): Session? {
+    /**
+     * The stored session, or null. Opening the encrypted file can succeed while
+     * READING it fails — a Keystore key lost or corrupted (seen on Samsung
+     * after updates / restores) throws from getString. That threw in
+     * Application.onCreate on every start: the app could never open again.
+     * Now the unreadable file is wiped and the agent signs in afresh.
+     */
+    private fun read(): Session? = runCatching { readOrThrow() }.getOrElse {
+        runCatching { ke.co.bethanyhouse.neema.core.crash.CrashVault.recordNonFatal(it, "session-read") }
+        runCatching { prefs.edit().clear().commit() }
+        null
+    }
+
+    private fun readOrThrow(): Session? {
         val token = prefs.getString("access", null) ?: return null
         val agentId = prefs.getString("agent_id", null) ?: return null
         return Session(
@@ -61,7 +74,7 @@ class SessionStore(context: Context?, override: SharedPreferences? = null) {
     }
 
     fun save(s: Session) {
-        prefs.edit()
+        runCatching { prefs.edit()
             .putString("access", s.accessToken)
             .putString("refresh", s.refreshToken)
             .putString("agent_id", s.agentId)
@@ -71,17 +84,17 @@ class SessionStore(context: Context?, override: SharedPreferences? = null) {
             .putBoolean("superuser", s.isSuperuser)
             .putString("mode", s.mode)
             .putString("na_cookie", s.nextAuthCookie)
-            .apply()
+            .apply() }
         _session.value = s
     }
 
     /** Forget the tokens but remember who was signed in (for the re-auth prompt). */
     fun clear() {
         val email = current?.email
-        prefs.edit().clear().apply()
-        if (email != null) prefs.edit().putString("last_email", email).apply()
+        runCatching { prefs.edit().clear().apply() }
+        if (email != null) runCatching { prefs.edit().putString("last_email", email).apply() }
         _session.value = null
     }
 
-    val lastEmail: String? get() = current?.email ?: prefs.getString("last_email", null)
+    val lastEmail: String? get() = current?.email ?: runCatching { prefs.getString("last_email", null) }.getOrNull()
 }

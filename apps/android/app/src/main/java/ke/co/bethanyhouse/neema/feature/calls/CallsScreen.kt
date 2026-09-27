@@ -256,18 +256,23 @@ fun CallsScreen(
 }
 
 /** A day header, then its rows (the log is newest first, so days come in order). */
-private sealed interface LogItem {
-    data class Day(val label: String) : LogItem
+internal sealed interface LogItem {
+    /** [key] is unique even if a day shows twice (rows out of order): a repeated lazy key crashes. */
+    data class Day(val label: String, val key: String = "day:$label") : LogItem
     data class Row(val call: Call, val key: String) : LogItem
 }
 
-private fun logItems(rows: List<Call>): List<LogItem> {
+internal fun logItems(rows: List<Call>): List<LogItem> {
     val keys = rowKeys(rows)
     val out = ArrayList<LogItem>(rows.size + 8)
     var day: String? = null
+    val seen = HashMap<String, Int>()
     rows.forEachIndexed { i, c ->
         val d = Fmt.dayLabel(c.startedAt).ifEmpty { "Earlier" }
-        if (d != day) { out += LogItem.Day(d); day = d }
+        if (d != day) {
+            val n = seen.merge(d, 1, Int::plus) ?: 1
+            out += LogItem.Day(d, if (n == 1) "day:$d" else "day:$d#$n"); day = d
+        }
         out += LogItem.Row(c, keys[i])
     }
     return out
@@ -384,7 +389,7 @@ private fun CallLog(
                         )
                     }
                 }
-                else -> items(items, key = { when (it) { is LogItem.Day -> "day:${it.label}"; is LogItem.Row -> it.key } },
+                else -> items(items, key = { when (it) { is LogItem.Day -> it.key; is LogItem.Row -> it.key } },
                     contentType = { if (it is LogItem.Day) "day" else "call" }) { item ->
                     when (item) {
                         is LogItem.Day -> Text(

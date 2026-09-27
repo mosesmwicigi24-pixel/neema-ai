@@ -12,6 +12,7 @@ from app.models.agent import Agent
 from app.models.user import User
 from app.models.person import Person, Identity
 from app.models.call import Call  # noqa: F401 — register the mapper at boot
+from app.models.client_crash import ClientCrash
 from app.models.parish import Parish  # noqa: F401 — Person.parish_id FK needs the table registered
 from app.models.demand_signal import DemandSignal  # noqa: F401 — register at boot
 from app.models.intercept import Intercept, InterceptAction
@@ -3737,3 +3738,68 @@ async def calls_transcribe(
     schedule_transcription(call_id)
     await call_log.publish_update(getattr(request.app.state, "redis", None), call_id)
     return {"ok": True, "call_id": call_id, "status": "pending"}
+
+
+# ── App crash reports ─────────────────────────────────────
+# The Android app saves a report when it closes unexpectedly (or a background
+# job fails) and sends it here once someone is signed in. Kept for the owner
+# (Settings → App crash reports) and logged, so "the app closed" comes with
+# the exact stack trace. The same report may arrive twice (a retry after a
+# lost answer): report_id makes the second a no-op.
+
+_CRASH_KINDS = {"crash", "nonfatal", "native", "anr"}
+
+
+def _crash_str(body: dict, key: str, limit: int) -> str:
+    v = body.get(key)
+    return (v if isinstance(v, str) else ("" if v is None else str(v)))[:limit]
+
+
+@router.post("/client-crashes")
+async def client_crash_report(
+    body: dict,
+    agent: Agent = Depends(get_current_agent),
+    db: AsyncSession = Depends(get_db),
+):
+    report_id = _crash_str(body, "id", 64).strip()
+    if not report_id:
+        raise HTTPException(status_code=422, detail="A crash report needs its id")
+    kind = _crash_str(body, "kind", 20)
+    kind = kind if kind in _CRASH_KINDS else "crash"
+    exists = await db.execute(select(ClientCrash.id).where(ClientCrash.report_id == report_id))
+    if exists.scalar_one_or_none() is not None:
+        return {"ok": True, "duplicate": True}
+    sdk = body.get("sdk")
+    row = ClientCrash(
+        report_id=report_id, agent_id=str(agent.id), agent_name=(agent.name or "")[:120] or None,
+        kind=kind, occurred_at=_crash_str(body, "at", 40) or None,
+        summary=_crash_str(body, "summary", 500), trace=_crash_str(body, "trace", 60_000),
+        thread=_crash_str(body, "thread", 120) or None,
+        app_version=_crash_str(body, "app_version", 40), build=_crash_str(body, "build", 40),
+        device=_crash_str(body, "device", 120), sdk=sdk if isinstance(sdk, int) else 0,
+    )
+    db.add(row)
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()  # a concurrent duplicate: the first one is kept
+        return {"ok": True, "duplicate": True}
+    _log.warning("android %s from %s (build %s, %s, API %s): %s", kind, agent.name, row.build,
+                 row.device, row.sdk, row.summary)
+    return {"ok": True}
+
+
+@router.get("/client-crashes")
+async def client_crash_list(
+    limit: int = 30,
+    agent: Agent = Depends(requires("manage_settings")),
+    db: AsyncSession = Depends(get_db),
+):
+    rows = (await db.execute(
+        select(ClientCrash).order_by(ClientCrash.created_at.desc()).limit(max(1, min(limit, 100)))
+    )).scalars().all()
+    return [{
+        "id": r.report_id, "kind": r.kind, "at": r.occurred_at, "received_at": r.created_at.isoformat(),
+        "agent_name": r.agent_name, "summary": r.summary, "trace": r.trace, "thread": r.thread,
+        "app_version": r.app_version, "build": r.build, "device": r.device, "sdk": r.sdk,
+    } for r in rows]

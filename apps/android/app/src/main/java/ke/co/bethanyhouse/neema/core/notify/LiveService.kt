@@ -33,6 +33,8 @@ class LiveService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // This start is being served: a stop asked for meanwhile can now run (below).
+        if (intent?.getBooleanExtra(EXTRA_COUNTED, false) == true) synchronized(Companion) { if (pending > 0) pending-- }
         val inCall = intent?.getBooleanExtra(EXTRA_IN_CALL, false) == true
         val b = NotificationCompat.Builder(this, Notifier.CH_LIVE)
             .setSmallIcon(R.drawable.ic_stat_neema)
@@ -66,7 +68,8 @@ class LiveService : Service() {
                 ServiceCompat.startForeground(this, NOTIF_ID, n, plain)
             }
             .onFailure { stopSelf(); return START_NOT_STICKY }
-        if (!stillWanted(inCall)) {
+        val stopAsked = synchronized(Companion) { (stopWanted && pending == 0).also { if (it) stopWanted = false } }
+        if (stopAsked || !stillWanted(inCall)) {
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
             stopSelf()
             return START_NOT_STICKY
@@ -92,12 +95,30 @@ class LiveService : Service() {
         fun start(ctx: Context) = launch(ctx, false)
         fun startForCall(ctx: Context) = launch(ctx, true)
 
+        private const val EXTRA_COUNTED = "counted"
+
+        /** Foreground starts asked for and not yet served by onStartCommand. */
+        private var pending = 0
+        /** A stop that arrived while a start was pending: served once it is. */
+        private var stopWanted = false
+
         private fun launch(ctx: Context, inCall: Boolean) {
+            synchronized(Companion) { pending++; stopWanted = false }
             runCatching {
-                ContextCompat.startForegroundService(ctx, Intent(ctx, LiveService::class.java).putExtra(EXTRA_IN_CALL, inCall))
-            }
+                ContextCompat.startForegroundService(ctx, Intent(ctx, LiveService::class.java)
+                    .putExtra(EXTRA_IN_CALL, inCall).putExtra(EXTRA_COUNTED, true))
+            }.onFailure { synchronized(Companion) { if (pending > 0) pending-- } }
         }
 
-        fun stop(ctx: Context) { runCatching { ctx.stopService(Intent(ctx, LiveService::class.java)) } }
+        /**
+         * Stop — but never between startForegroundService() and the service's
+         * startForeground(): Android kills the app for that ("did not then call
+         * Service.startForeground()"), which a call that fails the moment its
+         * audio starts used to do. Such a stop waits for the start and runs then.
+         */
+        fun stop(ctx: Context) {
+            val deferred = synchronized(Companion) { if (pending > 0) { stopWanted = true; true } else false }
+            if (!deferred) runCatching { ctx.stopService(Intent(ctx, LiveService::class.java)) }
+        }
     }
 }

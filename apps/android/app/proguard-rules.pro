@@ -14,3 +14,7 @@
 -dontwarn org.conscrypt.**
 -dontwarn org.bouncycastle.**
 -dontwarn org.openjsse.**
+# Crash reports: keep file names + line numbers so a trace can be retraced with
+# the release's mapping.txt (published next to the APKs).
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile

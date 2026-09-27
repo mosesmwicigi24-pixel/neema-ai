@@ -159,8 +159,22 @@ private fun SignedInScope(dash: DashboardViewModel, agentId: String, content: @a
             override val viewModelStore = store
         }
     }
+    val platformUris = androidx.compose.ui.platform.LocalUriHandler.current
+    val uris = androidx.compose.runtime.remember(platformUris) { SafeUriHandler(platformUris) }
     androidx.compose.runtime.CompositionLocalProvider(
         androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner provides owner,
+        androidx.compose.ui.platform.LocalUriHandler provides uris,
         content = content,
     )
+}
+
+/**
+ * A tapped link on a phone with nothing to open it (no browser, a disabled
+ * one, a work profile) throws ActivityNotFoundException from inside Compose's
+ * click handling — a crash for tapping a link in a chat. Now it does nothing.
+ */
+private class SafeUriHandler(private val inner: androidx.compose.ui.platform.UriHandler) : androidx.compose.ui.platform.UriHandler {
+    override fun openUri(uri: String) {
+        try { inner.openUri(uri) } catch (e: Exception) { ke.co.bethanyhouse.neema.core.crash.CrashVault.recordNonFatal(e, "open-link") }
+    }
 }

@@ -146,12 +146,19 @@ class CallsViewModel(private val dash: DashboardViewModel) : ViewModel(), SavesU
 
     fun load() { viewModelScope.launch { reads.run() } }
 
-    /** A `call_update` row: replaces its row where it is (or heads the log when new); the open call follows. */
+    /**
+     * A `call_update` row: replaces its row where it is; a row the log doesn't
+     * hold goes in at its place by time (the log is newest first). An update
+     * for a call older than everything shown (a transcript or follow-up on an
+     * old call) is left for the next read — heading the log with it broke the
+     * day grouping (the same day twice) and crashed the Calls screen.
+     */
     internal fun mergeRow(raw: kotlinx.serialization.json.JsonObject) {
         val row = runCatching { ke.co.bethanyhouse.neema.core.net.NeemaJson.decodeFromJsonElement(Call.serializer(), raw) }.getOrNull() ?: return
         if (row.callId.isEmpty()) return
         val cur = _calls.value ?: return
-        _calls.value = if (cur.any { it.callId == row.callId }) cur.map { if (it.callId == row.callId) row else it } else listOf(row) + cur
+        _calls.value = if (cur.any { it.callId == row.callId }) cur.map { if (it.callId == row.callId) row else it }
+            else insertByTime(cur, row) ?: cur
         if (selected.value?.callId == row.callId) selected.value = row
     }
 
@@ -406,3 +413,22 @@ class CallsViewModel(private val dash: DashboardViewModel) : ViewModel(), SavesU
     /** Relative time, recomputed on each recomposition. */
     fun ago(iso: String?): String = if (iso == null) "" else Fmt.timeAgo(iso)
 }
+
+/**
+ * [row] placed among [rows] (newest first) by its start time. Older than every
+ * row held: appended while the log is shorter than a page (it holds every
+ * call), else null — it belongs to a page not shown and the next read has it.
+ */
+internal fun insertByTime(rows: List<Call>, row: Call, page: Int = CALL_LOG_PAGE): List<Call>? {
+    val t = ke.co.bethanyhouse.neema.core.util.Fmt.millis(row.startedAt)
+    val at = if (t == null) -1
+        else rows.indexOfFirst { (ke.co.bethanyhouse.neema.core.util.Fmt.millis(it.startedAt) ?: Long.MIN_VALUE) <= t }
+    return when {
+        at >= 0 -> rows.subList(0, at) + row + rows.subList(at, rows.size)
+        rows.size < page -> rows + row
+        else -> null
+    }
+}
+
+/** GET /admin/calls answers the newest 50 by default. */
+internal const val CALL_LOG_PAGE = 50

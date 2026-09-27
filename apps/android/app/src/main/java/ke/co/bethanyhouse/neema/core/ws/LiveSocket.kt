@@ -214,7 +214,7 @@ class LiveSocket(
                 // A replaced socket still draining must not double every frame.
                 if (webSocket !== ws) return
                 val obj = runCatching { NeemaJson.parseToJsonElement(text) as? JsonObject }.getOrNull() ?: return
-                if (obj["type"]?.jsonPrimitive?.contentOrNull == "pong") return
+                if ((obj["type"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull == "pong") return
                 if (!_events.tryEmit(obj)) {
                     // A reconnect's catch-up (the `reconnected` refetch) is what
                     // repairs this; say so where it can be seen.
