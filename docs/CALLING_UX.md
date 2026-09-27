@@ -167,8 +167,9 @@ Source: `docs/research/META_CALLING_2026-09.md`, decisions in
 `docs/research/NEEMA_CALLING_GAPS.md`. Nothing above changed meaning.
 
 **New status `rejected`** (outbound): the customer declined our call (Meta's
-REJECTED status). Terminal, not a follow-up. Wrap-up: "{First} declined" ·
-**Message** · Call again later · Done. `no_answer` stays "didn't pick up".
+REJECTED status). Terminal, not a follow-up. Wrap-up: "{First} declined the
+call" · **Message** · Done. History word: "Declined by customer". `no_answer`
+stays "No answer".
 
 **Call row** gains `has_voicemail` (bool) — WhatsApp voicemail for this call
 arrived (the audio is also in the chat as a normal message). Calls view:
@@ -200,9 +201,11 @@ Meta's answer is the truth (cached ~60 s). `requested` = we asked in the last
 true` — WhatsApp removed it after 4 unanswered calls). Show "Allowed
 permanently" / "Allowed until {expires_at}". When `can_request` is false show
 "You can ask again {request_available_at}" instead of the Send button. When
-`unanswered_streak ≥ 2` warn before calling: "{First} hasn't answered your
-last {n} calls — another unanswered call and WhatsApp may stop you calling
-them" (WhatsApp revokes at 4).
+`unanswered_streak ≥ 2` warn before calling: "{First} missed your last {n}
+calls — WhatsApp removes call permission after 4 in a row. Consider a message
+first." (WhatsApp revokes at 4; never blocks the call). With Meta
+transcription on, the recording note reads "Recorded by WhatsApp — summary in
+a minute".
 
 **`POST /calls/request-permission {to, name?}`** → `{permission, route:
 free_form | template, already_permitted?}`. Inside the 24 h window (their last

@@ -216,7 +216,7 @@ function wrapUpActions(c: NonNullable<ReturnType<typeof useCall>>, showHelp: () 
         case "callback": return [done];
         case "no_answer": return [{ label: "Call again", onClick: c.redial, primary: true }, chat("Message"), done];
         // They turned it down: write instead, or leave it for later — never redial at once.
-        case "rejected": return [chat("Message", true), { label: "Try later", onClick: c.dismiss }, done];
+        case "rejected": return [chat("Message", true), done];
         case "cancelled": return [done];
         case "connection_lost": return [{ label: "Call again", onClick: c.redial, primary: true }, chat("Open chat"), done];
         case "failed":

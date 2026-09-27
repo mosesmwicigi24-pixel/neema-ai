@@ -509,7 +509,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
                 const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
                 if (blob.size < 2000) return;   // skip near-silent / empty recordings
                 const cfg = cfgRef.current?.cfg;
-                const saved = cfg?.auto_transcribe || cfg?.meta_transcription ? "Recording saved — summary in a minute"
+                const saved = cfg?.meta_transcription ? "Recorded by WhatsApp — summary in a minute"
+                    : cfg?.auto_transcribe ? "Recording saved — summary in a minute"
                     : cfg?.transcribe ? "Recording saved — Transcribe from Calls"
                     : "Recording saved";
                 const upload = (tries: number): Promise<unknown> =>
@@ -1792,7 +1793,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const metaSummary = snap.phase === "ended" && snap.outcome === "completed" && !!cfgRef.current?.cfg.meta_transcription
         && (snap.duration ?? 0) > 0;
     const recordingNote = recNote && snap.call && recNote.callId === snap.call.callId ? recNote.text
-        : metaSummary ? "Summary in a minute" : null;
+        : metaSummary ? "Recorded by WhatsApp — summary in a minute" : null;
     const dismissRestriction = useCallback(() => setRestriction(null), []);
     // Restrictions lift on their own (Meta: 7 days).
     useEffect(() => {
