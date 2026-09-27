@@ -268,7 +268,10 @@ class TableModel(val header: String, val cols: List<String>, val rows: List<List
 /** [keys] made unique (a repeated id gets its position appended), so lazy items never collide. */
 fun uniqueKeys(keys: List<String>): List<String> {
     val seen = HashSet<String>(keys.size * 2)
-    return keys.mapIndexed { i, k -> if (seen.add(k)) k else "$k#$i".also { seen.add(it) } }
+    return keys.mapIndexed { i, k ->
+        if (seen.add(k)) k
+        else generateSequence(0) { it + 1 }.map { n -> if (n == 0) "$k#$i" else "$k#$i.$n" }.first { seen.add(it) }
+    }
 }
 
 /**

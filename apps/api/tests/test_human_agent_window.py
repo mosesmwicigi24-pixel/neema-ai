@@ -216,42 +216,70 @@ def test_the_lapsed_window_catch_hands_over_the_whole_reply():
     assert "[:220]" not in src, "the draft is whole now, not a quote in a note"
 
 
-# ── order updates keep flowing on Messenger after 24h — legitimately ─────────
-# Meta's POST_PURCHASE_UPDATE exists for exactly this: automated updates about
-# an order the customer already placed. Messenger only; Instagram supports no
-# tag but HUMAN_AGENT, which automation must never claim.
+# ── order updates outside the 24h window go to a person ──────────────────────
+# Meta sunset POST_PURCHASE_UPDATE on 2026-04-27 (error 100 on every send that
+# carries it), so a Messenger order update after 24h was silently lost. Now it
+# is treated like Instagram: a person is asked (they may use HUMAN_AGENT).
 
-def test_a_shipped_order_reaches_a_quiet_messenger_thread_via_the_tag(monkeypatch):
-    sent = _capture(monkeypatch)
-    asyncio.run(meta_send.send_meta_message(
-        "psid1", "Your order has shipped.", tag="POST_PURCHASE_UPDATE"))
-    assert sent[0]["messaging_type"] == "MESSAGE_TAG"
-    assert sent[0]["tag"] == "POST_PURCHASE_UPDATE"
-
-
-def test_send_to_channel_drops_the_tag_for_instagram(monkeypatch):
+def test_send_to_channel_drops_any_tag_for_instagram(monkeypatch):
     sent = _capture(monkeypatch)
 
     async def _page(channel, recipient):
         return "pg1"
     monkeypatch.setattr(meta_send, "page_of_contact", _page)
-    asyncio.run(meta_send.send_to_channel(
-        "instagram", "ig1", "shipped!", tag="POST_PURCHASE_UPDATE"))
+    asyncio.run(meta_send.send_to_channel("instagram", "ig1", "hi", tag="SOME_TAG"))
     assert sent[0]["messaging_type"] == "RESPONSE" and "tag" not in sent[0]
-    sent.clear()
-    asyncio.run(meta_send.send_to_channel(
-        "messenger", "psid1", "shipped!", tag="POST_PURCHASE_UPDATE"))
-    assert sent[0]["tag"] == "POST_PURCHASE_UPDATE"
 
 
-def test_hub_order_events_use_the_tag_only_outside_the_window(monkeypatch):
+def test_no_hub_path_sends_a_sunset_message_tag():
+    import inspect
     import app.services.hub_events as hub
+    src = inspect.getsource(hub)
+    for dead in ("POST_PURCHASE_UPDATE", "CONFIRMED_EVENT_UPDATE", "ACCOUNT_UPDATE"):
+        assert f'"{dead}"' not in src, f"{dead} was sunset by Meta on 2026-04-27"
+
+
+def test_a_messenger_order_event_outside_the_window_asks_a_human(monkeypatch):
+    import app.services.hub_events as hub
+    import app.services.meta_send as ms
+
+    sends, notified = [], []
+
+    async def _send(*a, **kw):
+        sends.append(kw)
+    monkeypatch.setattr(ms, "send_to_channel", _send)
+
+    async def _notify(redis, title, body, conv=None):
+        notified.append(body)
+    monkeypatch.setattr(hub, "_notify_agents", _notify)
+
+    async def _compose(db, redis, conv, brief):
+        return "Habari — your order has shipped."
+    monkeypatch.setattr(hub, "_compose_announcement", _compose)
+    monkeypatch.setattr(hub, "is_quiet_hours", lambda now=None: False)
+
+    conv = types.SimpleNamespace(id="c1", channel="messenger", wa_id=None,
+                                 external_id="psid1", contact_name=None)
+
+    async def _win_closed(db, c):
+        return False
+    monkeypatch.setattr(hub, "_within_window", _win_closed)
+    out = asyncio.run(hub._celebrate(None, None, conv,
+                                     {"type": "order.shipped", "order_number": "ORD-1"}))
+    assert out == {"handled": True, "sent": "notified_human"}
+    assert not sends, "nothing automated may go out after 24h"
+    assert notified and "only a person may message them" in notified[0]
+
+
+def test_a_messenger_order_event_inside_the_window_sends_untagged(monkeypatch):
+    import app.services.hub_events as hub
+    import app.services.meta_send as ms
+    import app.services.n8n_bridge as svc
 
     calls = []
 
     async def _send(channel, recipient, text, tag=None, **kw):
-        calls.append({"channel": channel, "tag": tag})
-    import app.services.meta_send as ms
+        calls.append({"channel": channel, "tag": tag, **kw})
     monkeypatch.setattr(ms, "send_to_channel", _send)
 
     async def _compose(db, redis, conv, brief):
@@ -261,28 +289,17 @@ def test_hub_order_events_use_the_tag_only_outside_the_window(monkeypatch):
 
     async def _save(*a, **k):
         pass
-    monkeypatch.setattr(hub.svc if hasattr(hub, "svc") else __import__(
-        "app.services.n8n_bridge", fromlist=["x"]),
-        "save_outbound_channel_message", _save, raising=False)
-
-    conv = types.SimpleNamespace(id="c1", channel="messenger", wa_id=None,
-                                 external_id="psid1")
-
-    async def _win_closed(db, c):
-        return False
-    monkeypatch.setattr(hub, "_within_window", _win_closed)
-    out = asyncio.run(hub._celebrate(None, None, conv,
-                                     {"type": "order.shipped", "order_number": "ORD-1"}))
-    assert out == {"handled": True, "sent": "post_purchase_tag"}
-    assert calls[-1]["tag"] == "POST_PURCHASE_UPDATE"
+    monkeypatch.setattr(svc, "save_outbound_channel_message", _save, raising=False)
 
     async def _win_open(db, c):
         return True
     monkeypatch.setattr(hub, "_within_window", _win_open)
+    conv = types.SimpleNamespace(id="c1", channel="messenger", wa_id=None,
+                                 external_id="psid1")
     out = asyncio.run(hub._celebrate(None, None, conv,
                                      {"type": "order.shipped", "order_number": "ORD-1"}))
     assert out == {"handled": True, "sent": "freeform"}
-    assert calls[-1]["tag"] is None
+    assert calls[-1]["tag"] is None and not calls[-1].get("human_agent")
 
 
 def test_an_instagram_order_event_outside_the_window_still_asks_a_human(monkeypatch):

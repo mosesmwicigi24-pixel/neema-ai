@@ -90,7 +90,10 @@ class NotificationCenter(
         scope.launch {
             socket.events.collect { e ->
                 if (e.str("event") != "notification") return@collect
-                val n = fromFrame(e)
+                // A frame that can't be read is dropped — the listener stays up.
+                val n = runCatching { fromFrame(e) }.getOrElse { x ->
+                    ke.co.bethanyhouse.neema.core.crash.CrashVault.recordNonFatal(x, "notification-frame"); return@collect
+                }
                 if (isRepeat(n)) return@collect
                 save((listOf(n) + _items.value).take(MAX_ITEMS))
                 _incoming.tryEmit(n)

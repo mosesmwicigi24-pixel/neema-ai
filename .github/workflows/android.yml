@@ -85,7 +85,10 @@ jobs:
           tag="android-v${version}-${GITHUB_RUN_NUMBER}"
           cd app/build/outputs/apk/release
           for f in *.apk; do mv "$f" "neema-${version}-${f#app-}"; done
-          gh release create "$tag" *.apk \
+          # R8's mapping turns a crash report's obfuscated stack trace back
+          # into class and method names (retrace). Not a secret.
+          cp ../../mapping/release/mapping.txt "neema-${version}-${GITHUB_RUN_NUMBER}-mapping.txt"
+          gh release create "$tag" *.apk *-mapping.txt \
             --title "Neema Android ${version} (build ${GITHUB_RUN_NUMBER})" \
             --notes "Install \`neema-${version}-arm64-v8a-release.apk\` on almost any modern phone (\`universal\` works everywhere). Built from ${GITHUB_SHA::7}." \
             --target "$GITHUB_SHA"

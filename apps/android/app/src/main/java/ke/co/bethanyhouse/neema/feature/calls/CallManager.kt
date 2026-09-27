@@ -636,7 +636,16 @@ class CallManager internal constructor(
         bg.launch { runCatching { media.sweepLeftovers() } }
 
         // Primary path: the live WebSocket event (instant).
-        ui.launch { events.collect(::onFrame) }
+        // One bad frame costs that frame, never the listener: a throw here would
+        // end the collector (and with it every later call on this phone).
+        ui.launch {
+            events.collect { e ->
+                try { onFrame(e) } catch (x: CancellationException) { throw x } catch (x: Exception) {
+                    logW("call frame failed: ${e.str("type")}", x)
+                    ke.co.bethanyhouse.neema.core.crash.CrashVault.recordNonFatal(x, "call-frame:${e.str("type")}")
+                }
+            }
+        }
 
         // Catch-up: frames sent while the socket was down are lost. Poll the
         // moment it (re)connects — after a network drop, after the process was

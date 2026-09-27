@@ -50,7 +50,8 @@ val BASE_STAGES = listOf(
 
 /** Canonical columns plus the operator-added stages, which sit between Negotiating and Won. */
 fun buildStages(customs: List<String>): List<LeadStage> {
-    val defs = customs.filter { it.isNotBlank() }.map {
+    // Distinct, and never a built-in id: stages key LazyRow items, where a repeat crashes.
+    val defs = customs.filter { it.isNotBlank() }.distinct().filter { c -> BASE_STAGES.none { it.id == c } }.map {
         LeadStage(it, it, Palette.Yellow700, Palette.Yellow50, Palette.Yellow200, Palette.Yellow500)
     }
     val won = BASE_STAGES.indexOfFirst { it.id == "won" }

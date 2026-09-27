@@ -6,6 +6,7 @@ import { settingsApi, type ApiTranslationSetting,
          type ApiCampaign, type ApiOfferSetting } from "@/lib/api";
 import type { SharedViewProps } from "@/types";
 import { WhatsAppCallingCard } from "@/components/views/WhatsAppCallingCard";
+import { AppCrashReportsCard } from "@/components/views/AppCrashReportsCard";
 
 // ── Platform SVG icons ────────────────────────────────────────────────────────
 
@@ -574,6 +575,7 @@ export function SettingsView({ onToast, isMobile, canManageCalling = false }: Sh
             </div>
 
             {canManageCalling && <WhatsAppCallingCard onToast={onToast} />}
+            {canManageCalling && <AppCrashReportsCard onToast={onToast} />}
 
             {/* Integrations */}
             <SectionCard title="Integrations" description="Connected platforms and services">

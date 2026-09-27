@@ -19,6 +19,9 @@ android {
         versionName = "1.0.0"
         // The same origin the web dashboard is served from; /api and /ws hang off it.
         buildConfigField("String", "NEEMA_BASE_URL", "\"https://neema.bethanyhouse.co.ke\"")
+        // Which CI build this is (the android-v…-N release): crash reports name it,
+        // so a stack trace can be matched to that build's R8 mapping.
+        buildConfigField("String", "BUILD_NUMBER", "\"${System.getenv("GITHUB_RUN_NUMBER") ?: "local"}\"")
     }
 
     signingConfigs {

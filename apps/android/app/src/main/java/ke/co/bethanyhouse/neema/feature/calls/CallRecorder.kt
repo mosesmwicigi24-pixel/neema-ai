@@ -301,7 +301,7 @@ private fun encodeAac(mixer: PcmMixer, out: File) {
             if (!inputDone) {
                 val ii = codec.dequeueInputBuffer(1_000)
                 if (ii >= 0) {
-                    val ib = codec.getInputBuffer(ii)!!
+                    val ib = codec.getInputBuffer(ii) ?: break@outer
                     ib.clear()
                     val n = mixer.read(buf, minOf(ib.remaining(), buf.size))
                     val pts = (readBytes / 2) * 1_000_000L / rate
@@ -325,7 +325,7 @@ private fun encodeAac(mixer: PcmMixer, out: File) {
                         muxer.start(); muxing = true
                     }
                     oi >= 0 -> {
-                        val ob = codec.getOutputBuffer(oi)!!
+                        val ob = codec.getOutputBuffer(oi) ?: break@outer
                         if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) info.size = 0
                         if (info.size > 0 && muxing) {
                             ob.position(info.offset); ob.limit(info.offset + info.size)

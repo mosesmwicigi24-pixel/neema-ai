@@ -21,6 +21,8 @@ class NeemaApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Before anything else can fail: a crash from here on leaves a report.
+        ke.co.bethanyhouse.neema.core.crash.CrashVault.install(this)
         instance = this
         container = AppContainer(this)
         Notifier.createChannels(this)
@@ -41,6 +43,7 @@ class NeemaApplication : Application() {
         watchNetwork()
         container.notifications.start(foreground)
         container.calls.start()
+        container.crashReporter.start()
     }
 
     /**

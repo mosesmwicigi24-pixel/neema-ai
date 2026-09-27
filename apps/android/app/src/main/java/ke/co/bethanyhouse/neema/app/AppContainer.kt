@@ -11,7 +11,13 @@ import ke.co.bethanyhouse.neema.core.util.AppPrefs
 import ke.co.bethanyhouse.neema.core.util.SnapshotCache
 import ke.co.bethanyhouse.neema.core.ws.LiveSocket
 import ke.co.bethanyhouse.neema.feature.calls.CallManager
+import ke.co.bethanyhouse.neema.core.crash.CrashReporter
+import ke.co.bethanyhouse.neema.core.crash.CrashVault
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 
@@ -35,8 +41,17 @@ data class ContainerConfig(
 
 /** Hand-rolled DI: one of each, created with the Application. */
 class AppContainer(val context: Context, val config: ContainerConfig = ContainerConfig()) {
-    /** Lives as long as the process; for work that must outlive a screen. */
-    val appScope = CoroutineScope(SupervisorJob() + config.appDispatcher)
+    /**
+     * Lives as long as the process; for work that must outlive a screen. An
+     * error that escapes one of its coroutines (calls, notifications, the
+     * socket's listeners) is recorded as a crash report and that one job ends
+     * — it no longer takes the whole app down with it.
+     */
+    val appScope = CoroutineScope(SupervisorJob() + config.appDispatcher + CoroutineExceptionHandler { _, e ->
+        runCatching { android.util.Log.e("Neema", "background job failed", e) }
+        CrashVault.recordNonFatal(e)
+        crashReporterRef?.flushSoon()
+    })
 
     val prefs = AppPrefs(context, config.prefs?.invoke("neema_prefs"))
     val sessionStore = SessionStore(context, config.prefs?.invoke("neema_session"))
@@ -66,4 +81,11 @@ class AppContainer(val context: Context, val config: ContainerConfig = Container
         agentIdFn = { sessionStore.session.value?.agentId },
         agentNameFn = { sessionStore.session.value?.name },
     )
+    private var crashReporterRef: CrashReporter? = null
+
+    /** Sends saved crash reports to the server once someone is signed in. */
+    val crashReporter = CrashReporter(
+        appScope, http,
+        sessionStore.session.map { it != null }.stateIn(appScope, SharingStarted.Eagerly, sessionStore.session.value != null),
+    ).also { crashReporterRef = it }
 }
