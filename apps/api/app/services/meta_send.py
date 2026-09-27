@@ -65,11 +65,10 @@ async def send_meta_message(recipient_id: str, text: str, page_id: str | None = 
     type is refused with error (#10) once the 24-hour window shuts. Only a real
     person may use it, so it is set by the human reply path and never by the AI.
 
-    `tag` names one of Meta's other message tags for the narrow automated
-    messages the platform DOES allow outside the window — for this shop that is
-    POST_PURCHASE_UPDATE (payment received, in production, shipped, delivered:
-    updates about an order the customer already placed). Messenger only —
-    Instagram supports no tag but HUMAN_AGENT, so IG callers must not pass one.
+    `tag` passes another Meta message tag through (Messenger only — Instagram
+    supports no tag but HUMAN_AGENT). No caller sets one today: Meta sunset
+    POST_PURCHASE_UPDATE, CONFIRMED_EVENT_UPDATE and ACCOUNT_UPDATE on
+    2026-04-27 (error 100), so automation has no way past the 24 h window.
     `human_agent` wins when both are given."""
     body: dict = {
         "recipient": {"id": recipient_id},

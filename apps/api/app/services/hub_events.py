@@ -250,16 +250,12 @@ async def _celebrate(db, redis, conv, event: dict) -> dict:
     in_window = await _within_window(db, conv)
     recipient = _recipient_of(conv)
 
-    # Meta allows POST_PURCHASE_UPDATE outside the 24h window for exactly this:
-    # automated updates about an order the customer already placed (payment
-    # received, in production, shipped, delivered). Messenger only — Instagram
-    # supports no tag but HUMAN_AGENT, which automation must never claim. So a
-    # Messenger customer hears "your order shipped" the day it ships, not only
-    # if they happened to write to us yesterday (owner, 2026-08-19).
-    post_purchase = (conv.channel == "messenger"
-                     and (event.get("type") or "").startswith("order."))
-
-    if in_window or post_purchase:
+    # Outside the 24 h window no automated Messenger / Instagram message is
+    # allowed: Meta sunset POST_PURCHASE_UPDATE (with CONFIRMED_EVENT_UPDATE and
+    # ACCOUNT_UPDATE) on 2026-04-27 — every send carrying it answers error 100,
+    # so these order updates were silently failing. HUMAN_AGENT (7 days) is for
+    # a real person only, so a person is asked below.
+    if in_window:
         text = await _compose_announcement(db, redis, conv, brief)
         if not text:
             return {"handled": False, "reason": "compose_failed"}
@@ -268,12 +264,10 @@ async def _celebrate(db, redis, conv, event: dict) -> dict:
             await svc.save_outbound_message(db, redis, recipient, text, waba_msg_id=wamid)
         else:
             from app.services.meta_send import send_to_channel
-            await send_to_channel(conv.channel, recipient, text,
-                                  tag=(None if in_window else "POST_PURCHASE_UPDATE"))
+            await send_to_channel(conv.channel, recipient, text)
             await svc.save_outbound_channel_message(db, redis, conv.channel, recipient, text)
-        _log.info("hub event %s → celebrated %s to %s", event.get("type"),
-                  "in-window" if in_window else "via POST_PURCHASE_UPDATE", recipient)
-        return {"handled": True, "sent": "freeform" if in_window else "post_purchase_tag"}
+        _log.info("hub event %s → celebrated in-window to %s", event.get("type"), recipient)
+        return {"handled": True, "sent": "freeform"}
 
     if conv.channel == "whatsapp" and settings.wa_event_template:
         name = (getattr(conv, "contact_name", None) or "").split(" ")[0] or "there"
@@ -295,8 +289,11 @@ async def _celebrate(db, redis, conv, event: dict) -> dict:
 
     await _notify_agents(
         redis, "💰 " + (event.get("type") or "hub event"),
-        f"{event.get('order_number') or ''}: outside the 24h window and no event "
-        f"template — send the good news manually. ({brief})", conv)
+        f"{event.get('order_number') or ''}: "
+        + ("outside the 24h window and no event template"
+           if conv.channel == "whatsapp" else
+           "outside the 24h window — only a person may message them now")
+        + f" — send the good news manually. ({brief})", conv)
     return {"handled": True, "sent": "notified_human"}
 
 
