@@ -1,6 +1,8 @@
 "use client";
 
-// The call surface — WhatsApp calls look like WhatsApp calls (docs/CALLING_UX.md §5).
+// The call surface — WhatsApp calls look like WhatsApp calls (docs/CALLING_UX.md §5),
+// Messenger calls keep the same layout and controls in Messenger's accent
+// (blue → purple ring, blue Answer, "Messenger voice call").
 //
 //  • CallStage: the full card, rendered INSIDE the dashboard content area
 //    (absolute overlay) so the sidebar stays visible. Avatar, name, "WhatsApp
@@ -13,11 +15,12 @@
 //
 // Reads all state/actions from CallProvider; renders nothing when idle. Never
 // shows what the WhatsApp API can't do: no video, hold, transfer, conference.
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useId, useRef, useState } from "react";
 import {
-    useCall, useCallPresence, callerLabel, firstName, isLivePhase, YOU_ELSEWHERE,
+    useCall, useCallPresence, callerLabel, firstName, isLivePhase, channelLabel, YOU_ELSEWHERE,
     type CallOutcome, type CallPhase,
 } from "@/lib/callContext";
+import type { CallChannel } from "@/lib/api";
 import type { OpenChatRequest } from "@/types";
 import { permissionLines, relTime, type PermTone } from "@/lib/callStatus";
 
@@ -25,6 +28,24 @@ const WA = {
     bg: "#0B141A", bg2: "#111B21", panel: "#202C33", text: "#E9EDEF", muted: "#8696A0",
     green: "#25D366", greenDeep: "#00A884", greenText: "#008069", red: "#EA0038", amber: "#FFB02E",
 };
+
+// Messenger's accent. White glyph on #0084FF is 3.7:1 (≥ 3:1 for the Answer
+// icon); text buttons sit on the darker #0066D6 (5.4:1 for white text).
+export const MSGR = {
+    blue: "#0084FF", ink: "#0066D6", purple: "#A033FF",
+    ring: "linear-gradient(135deg, #0084FF 0%, #A033FF 100%)",
+};
+
+/** The one accent a call's surface changes by channel — everything else is shared. */
+function accent(ch: CallChannel | undefined) {
+    const m = ch === "messenger";
+    return {
+        answer: m ? MSGR.blue : WA.greenDeep,    // the round Answer button (icon only)
+        button: m ? MSGR.ink : WA.greenText,     // buttons with white text
+        pulse: m ? MSGR.blue : WA.greenDeep,
+        ring: m ? MSGR.ring : null,
+    };
+}
 
 const ICONS: Record<string, React.ReactElement> = {
     phone: <path d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />,
@@ -64,6 +85,29 @@ export function WhatsAppGlyph({ size = 14, color = WA.green }: { size?: number; 
             <path fill={color} d="M8.9 7.3c-.2-.4-.4-.4-.6-.4h-.5a1 1 0 00-.7.3 3 3 0 00-.9 2.2 5.2 5.2 0 001.1 2.7 11.8 11.8 0 004.6 4c2.3.9 2.7.7 3.2.7a2.7 2.7 0 001.8-1.3 2.2 2.2 0 00.2-1.3c-.1-.1-.3-.2-.6-.3l-1.9-.9c-.3-.1-.5-.2-.7.1l-.8 1a.5.5 0 01-.7.1 6.8 6.8 0 01-2-1.2 7.5 7.5 0 01-1.4-1.7.4.4 0 01.1-.6l.4-.5.3-.5a.5.5 0 000-.4l-.9-2z" />
         </svg>
     );
+}
+
+/** The Messenger glyph (bubble + lightning), for "Messenger voice call". */
+export function MessengerGlyph({ size = 14, color }: { size?: number; color?: string }) {
+    const gid = `msgr-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
+    return (
+        <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            {!color && (
+                <defs>
+                    <linearGradient id={gid} x1="0" y1="1" x2="1" y2="0">
+                        <stop offset="0" stopColor={MSGR.blue} /><stop offset="1" stopColor={MSGR.purple} />
+                    </linearGradient>
+                </defs>
+            )}
+            <path fill={color ?? `url(#${gid})`} d="M12 2C6.36 2 2 6.13 2 11.7c0 2.91 1.19 5.44 3.14 7.17.16.14.26.35.27.57l.05 1.78a.8.8 0 001.12.71l1.98-.87a.8.8 0 01.53-.04c.91.25 1.87.38 2.91.38 5.64 0 10-4.13 10-9.7S17.64 2 12 2z" />
+            <path fill="#fff" d="M6 14.54l2.94-4.66a1.5 1.5 0 012.17-.4l2.34 1.75a.6.6 0 00.72 0l3.16-2.4c.42-.32.97.18.69.63l-2.94 4.66a1.5 1.5 0 01-2.17.4l-2.34-1.75a.6.6 0 00-.72 0l-3.16 2.4c-.42.32-.97-.18-.69-.63z" />
+        </svg>
+    );
+}
+
+/** The call's app glyph: WhatsApp or Messenger. */
+export function ChannelGlyph({ channel, size = 14, color }: { channel?: CallChannel | string | null; size?: number; color?: string }) {
+    return channel === "messenger" ? <MessengerGlyph size={size} color={color} /> : <WhatsAppGlyph size={size} color={color} />;
 }
 
 /** The live timer: mm:ss, as a phone shows it ("03:07"). */
@@ -110,7 +154,7 @@ function outcomeWords(o: CallOutcome | null, c: ReturnType<typeof useCall>): str
         case "cancelled": return "Call cancelled";
         case "connection_lost": return `Call dropped${d} — the connection was lost`;
         case "failed": return c.reason || "The call couldn't be connected";
-        case "permission_needed": return `${first} hasn't allowed WhatsApp calls yet`;
+        case "permission_needed": return `${first} hasn't allowed ${channelLabel(c.call?.channel)} calls yet`;
         case "permission_requested": return `Call request sent — you'll be told when ${first} taps Allow`;
         case "permission_granted": return `${first} already allows calls — call now`;
         case "mic_blocked": return "Microphone blocked — allow it in settings";
@@ -151,7 +195,9 @@ function wrapUpActions(c: NonNullable<ReturnType<typeof useCall>>, showHelp: () 
     const done: Action = { label: "Done", onClick: () => { c.dismiss(); c.offerNotifications(); } };
     const chat = (label: string, primary = false): Action => ({ label, onClick: c.openChat, primary });
     const inbound = c.call?.direction === "inbound";
-    const settings: Action | null = openSettings
+    const app = channelLabel(c.call?.channel);
+    // Settings → WhatsApp calling can't fix a Messenger refusal (a Page token, the allowlist).
+    const settings: Action | null = openSettings && c.call?.channel !== "messenger"
         ? { label: "Open WhatsApp calling settings", onClick: () => { c.dismiss(); openSettings(); }, primary: true } : null;
     const askAt = askAgainAt(c);
     const sendRequest = (): Action => {
@@ -159,7 +205,7 @@ function wrapUpActions(c: NonNullable<ReturnType<typeof useCall>>, showHelp: () 
         return {
             label: c.permissionBusy ? "Sending…" : "Send call request", onClick: c.requestPermission, primary: !blocked,
             busy: c.permissionBusy, disabled: blocked,
-            title: blocked ? (askAt ? `WhatsApp allows another request ${relTime(askAt)}` : "WhatsApp's request limit is reached") : undefined,
+            title: blocked ? (askAt ? `${app} allows another request ${relTime(askAt)}` : `${app}'s request limit is reached`) : undefined,
         };
     };
     switch (c.outcome) {
@@ -242,19 +288,25 @@ function RoundBtn({ label, a11y, icon, onClick, color, fg = "#fff", size = 60, p
     );
 }
 
-function Avatar({ label, size, pulse }: { label: string; size: string; pulse: boolean }) {
-    const initials = label.replace("+", "").split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase() || "?";
+function Avatar({ label, size, pulse, channel, noInitials }: { label: string; size: string; pulse: boolean; channel?: CallChannel; noInitials?: boolean }) {
+    const initials = noInitials ? "" : label.replace("+", "").split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase() || "?";
+    const a = accent(channel);
+    // Messenger: the blue → purple ring around the same avatar.
+    const ring = a.ring ? 3 : 0;
     return (
-        <div className="relative flex-shrink-0" style={{ width: size, height: size }}>
+        <div className="relative flex-shrink-0" style={{ width: size, height: size }} data-channel={channel ?? "whatsapp"}>
             {pulse && (
                 <>
-                    <span className="cs-pulse absolute inset-0 rounded-full" style={{ background: WA.greenDeep }} />
-                    <span className="cs-pulse cs-pulse2 absolute inset-0 rounded-full" style={{ background: WA.greenDeep }} />
+                    <span className="cs-pulse absolute inset-0 rounded-full" style={{ background: a.pulse }} />
+                    <span className="cs-pulse cs-pulse2 absolute inset-0 rounded-full" style={{ background: a.pulse }} />
                 </>
             )}
+            {a.ring && <span data-ring="" className="absolute inset-0 rounded-full" style={{ background: a.ring }} aria-hidden="true" />}
             <div className="relative rounded-full flex items-center justify-center font-semibold select-none"
-                style={{ width: size, height: size, backgroundColor: "#2A3942", color: WA.text, fontSize: `calc(${size} * 0.36)` }}>
-                {/^\d/.test(initials) ? <Icon name="phone" size={40} /> : initials}
+                style={{ width: `calc(${size} - ${ring * 2}px)`, height: `calc(${size} - ${ring * 2}px)`, margin: ring,
+                         backgroundColor: "#2A3942", color: WA.text, fontSize: `calc(${size} * 0.36)`,
+                         boxShadow: ring ? `0 0 0 2px ${WA.bg}` : undefined }}>
+                {!initials || /^\d/.test(initials) ? <Icon name="phone" size={40} /> : initials}
             </div>
         </div>
     );
@@ -321,13 +373,14 @@ function WaitingBanner({ compact }: { compact?: boolean }) {
     const c = useCall();
     if (!c?.waiting) return null;
     const who = callerLabel(c.waiting);
+    const wch = c.waiting.channel;
     const btn = "rounded-full px-1.5 font-semibold leading-tight";
     return (
         <div role="alert" className={`flex flex-col gap-2 ${compact ? "px-3 py-2" : "px-4 py-3 rounded-2xl"}`}
             style={{ backgroundColor: WA.panel, color: WA.text }}>
             <span className="flex items-center gap-2 min-w-0" style={{ fontSize: 14 }}>
-                <WhatsAppGlyph size={16} />
-                <span className="truncate"><b className="font-semibold">{who}</b> is also calling</span>
+                <ChannelGlyph channel={wch} size={16} />
+                <span className="truncate"><b className="font-semibold">{who}</b> is also calling<span className="sr-only"> on {channelLabel(wch)}</span></span>
             </span>
             <span className="grid grid-cols-3 gap-2 max-w-md">
                 <button type="button" onClick={c.declineWaiting} aria-label={`Decline ${who}'s call`}
@@ -335,7 +388,7 @@ function WaitingBanner({ compact }: { compact?: boolean }) {
                 <button type="button" onClick={c.callbackWaiting}
                     className={btn} style={{ minHeight: 44, fontSize: 12.5, backgroundColor: "rgba(255,255,255,0.08)", color: WA.text }}>Call back later</button>
                 <button type="button" onClick={c.endAndAnswerWaiting}
-                    className={btn} style={{ minHeight: 44, fontSize: 12.5, backgroundColor: WA.greenText, color: "#fff" }}>
+                    className={btn} style={{ minHeight: 44, fontSize: 12.5, backgroundColor: accent(wch).button, color: "#fff" }}>
                     {c.phase === "incoming" ? "Answer instead" : "End & answer"}
                 </button>
             </span>
@@ -370,7 +423,7 @@ const MIC_HELP = "Click the lock or tune icon left of the address bar → Site s
 function announcement(c: NonNullable<ReturnType<typeof useCall>>): string {
     const who = callerLabel(c.call);
     switch (c.phase) {
-        case "incoming": return `Incoming WhatsApp call from ${who}`;
+        case "incoming": return `Incoming ${channelLabel(c.call?.channel)} call from ${who}`;
         case "placing": return `Calling ${who}`;
         case "ringing_out": return "Ringing";
         case "connecting": return "Connecting";
@@ -496,6 +549,10 @@ export function CallStage({ onOpenConversation, onOpenCallingSettings }: {
     if (!c || phase === "idle" || minimised) return announcer;
 
     const who = callerLabel(c.call);
+    const channel: CallChannel = c.call?.channel ?? "whatsapp";
+    const messenger = channel === "messenger";
+    const app = channelLabel(channel);
+    const tint = accent(channel);
     const live = isLivePhase(phase);
     const inCall = phase === "active" || phase === "reconnecting";
     const ended = phase === "ended";
@@ -562,7 +619,7 @@ export function CallStage({ onOpenConversation, onOpenCallingSettings }: {
         <div ref={cardRef} data-callui=""
             className="cs-in absolute inset-0 z-50 flex flex-col overflow-y-auto"
             style={{ background: `linear-gradient(180deg, ${WA.bg} 0%, ${WA.bg2} 100%)`, color: WA.text }}
-            role="dialog" aria-modal="false" aria-label={`WhatsApp voice call with ${who}`}>
+            role="dialog" aria-modal="false" aria-label={`${app} voice call with ${who}`} data-channel={channel}>
             <style>{STYLES}</style>
 
             {/* Top: minimise / close + the waiting banner and device notices */}
@@ -598,14 +655,16 @@ export function CallStage({ onOpenConversation, onOpenCallingSettings }: {
             <div className="flex-1 flex flex-col md:justify-center">
             <div className="flex-1 md:flex-none flex flex-col items-center justify-center text-center px-4 py-4">
                 {/* Smaller while a second call's banner needs the room, so the controls stay in view. */}
-                <Avatar label={who} size={c.waiting ? "clamp(48px, 10vh, 96px)" : "clamp(64px, 16vh, 128px)"} pulse={pulse} />
+                <Avatar label={who} size={c.waiting ? "clamp(48px, 10vh, 96px)" : "clamp(64px, 16vh, 128px)"} pulse={pulse}
+                    channel={channel} noInitials={messenger && !c.call?.name} />
                 <h2 title={who} className="mt-4 font-semibold leading-tight max-w-full break-words line-clamp-2"
                     style={{ fontSize: "clamp(22px, 5vw, 28px)" }}>{who}</h2>
-                {c.call?.name && c.call.from && (
+                {/* A Messenger PSID is no number: never shown. */}
+                {c.call?.name && c.call.from && !messenger && (
                     <div className="mt-1 tabular-nums" style={{ fontSize: 14, color: WA.muted }}>+{c.call.from}</div>
                 )}
                 <div className="mt-2 flex items-center gap-1.5" style={{ fontSize: 14, color: WA.muted }}>
-                    <WhatsAppGlyph size={15} /> WhatsApp voice call
+                    <ChannelGlyph channel={channel} size={15} /> {app} voice call
                 </div>
                 {/* Readable in place, but not a live region: the announcer above
                     speaks each change once; this holds the ticking clock. */}
@@ -622,7 +681,9 @@ export function CallStage({ onOpenConversation, onOpenCallingSettings }: {
                 )}
                 {ended && c.outcome === "permission_needed" && !c.reason && (
                     <div className="mt-2 max-w-sm" style={{ fontSize: 13, color: WA.muted }}>
-                        WhatsApp only lets a business call someone who allowed it. The request is a WhatsApp message with an Allow button.
+                        {messenger
+                            ? "Messenger only lets a business call someone who accepted a call request. The request is a Messenger message with Accept and Decline buttons."
+                            : "WhatsApp only lets a business call someone who allowed it. The request is a WhatsApp message with an Allow button."}
                     </div>
                 )}
                 {ended && (c.outcome === "permission_needed" || c.outcome === "permission_requested"
@@ -678,7 +739,7 @@ export function CallStage({ onOpenConversation, onOpenCallingSettings }: {
                         <div className="w-full max-w-[340px] flex items-end justify-between px-2">
                             <RoundBtn label="Decline" a11y="Decline call" icon="phone-off" color={WA.red} size={60}
                                 onClick={c.decline} />
-                            <RoundBtn label="Answer" a11y="Answer call" icon="phone-fill" color={WA.greenDeep} size={72}
+                            <RoundBtn label="Answer" a11y="Answer call" icon="phone-fill" color={tint.answer} size={72}
                                 onClick={c.answer} btnRef={answerRef} />
                         </div>
                         <button type="button" onClick={c.callbackLater}
@@ -727,7 +788,7 @@ export function CallStage({ onOpenConversation, onOpenCallingSettings }: {
                                     a.primary && actions.length > 2 ? "basis-full sm:basis-auto" : "flex-1 sm:flex-none max-w-[200px]"}`}
                                 style={{
                                     minHeight: 48, fontSize: 15,
-                                    backgroundColor: a.primary ? WA.greenText : "rgba(255,255,255,0.08)",
+                                    backgroundColor: a.primary ? tint.button : "rgba(255,255,255,0.08)",
                                     color: a.primary ? "#fff" : WA.text,
                                 }}>
                                 {a.label}
@@ -773,18 +834,18 @@ export function CallBar(): React.ReactElement | null {
 
     if (phase === "idle" || (phase === "ended" && !c.minimised)) {
         if (!c.granted || phase !== "idle") return null;
-        const first = firstName({ name: c.granted.name, from: c.granted.waId });
+        const first = firstName({ name: c.granted.name, from: c.granted.waId, channel: c.granted.channel });
         return (
             <div role="status" data-callui="" className="flex items-center gap-3 px-4 flex-shrink-0"
                 style={{ minHeight: 48, backgroundColor: WA.bg2, color: WA.text }}>
                 <style>{STYLES}</style>
-                <WhatsAppGlyph size={18} />
+                <ChannelGlyph channel={c.granted.channel} size={18} />
                 <span className="flex-1 min-w-0 truncate" style={{ fontSize: 14 }}>
-                    <b className="font-semibold">{first}</b> allowed calls
+                    <b className="font-semibold">{first}</b> allowed {c.granted.channel === "messenger" ? "Messenger calls" : "calls"}
                 </span>
                 <button type="button" onClick={c.callGranted}
                     className="rounded-full px-4 font-semibold flex items-center gap-1.5"
-                    style={{ minHeight: 44, fontSize: 14, backgroundColor: WA.greenText, color: "#fff" }}>
+                    style={{ minHeight: 44, fontSize: 14, backgroundColor: accent(c.granted.channel).button, color: "#fff" }}>
                     <Icon name="phone" size={15} /> Call now
                 </button>
                 <button type="button" onClick={c.dismissGranted} aria-label="Dismiss"
@@ -807,7 +868,7 @@ export function CallBar(): React.ReactElement | null {
                 <style>{STYLES}</style>
                 <button ref={expandRef} type="button" onClick={c.expand} className="flex-1 min-w-0 flex items-center gap-2 text-left"
                     style={{ minHeight: 44 }} aria-label={`Show call with ${who}`}>
-                    <span className="flex-shrink-0"><WhatsAppGlyph size={16} color={WA.muted} /></span>
+                    <span className="flex-shrink-0"><ChannelGlyph channel={c.call?.channel} size={16} color={WA.muted} /></span>
                     {/* Two lines: the outcome is the news — it must never be the part cut off. */}
                     <span className="min-w-0 flex flex-col leading-tight">
                         <b className="font-semibold truncate" style={{ fontSize: 13 }}>{who}</b>
@@ -817,7 +878,7 @@ export function CallBar(): React.ReactElement | null {
                 {primary && (
                     <button type="button" onClick={primary.onClick} disabled={primary.busy || primary.disabled}
                         className="rounded-full px-3 font-semibold flex-shrink-0"
-                        style={{ minHeight: 44, fontSize: 13, backgroundColor: WA.greenText, color: "#fff" }}>{primary.label}</button>
+                        style={{ minHeight: 44, fontSize: 13, backgroundColor: accent(c.call?.channel).button, color: "#fff" }}>{primary.label}</button>
                 )}
                 <button type="button" onClick={c.dismiss}
                     className="rounded-full px-3 flex-shrink-0 hover:bg-white/5"
@@ -835,6 +896,7 @@ export function CallBar(): React.ReactElement | null {
                 <button ref={expandRef} type="button" onClick={c.expand} aria-label={`Show call with ${who}`}
                     className="flex-1 min-w-0 flex items-center gap-2 text-left" style={{ minHeight: 44 }}>
                     <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: dot }} aria-hidden="true" />
+                    {c.call?.channel === "messenger" && <span className="flex-shrink-0"><MessengerGlyph size={14} /></span>}
                     <span className="truncate font-semibold" style={{ fontSize: 14 }}>{who}</span>
                     <span className="flex items-center gap-1 flex-shrink-0 tabular-nums"
                         style={{ fontSize: 13, color: reconnecting ? WA.amber : WA.muted }}>

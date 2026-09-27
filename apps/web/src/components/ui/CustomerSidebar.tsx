@@ -681,13 +681,14 @@ function EditableField({
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Calling — the last calls with this customer, and the "call on WhatsApp
-// instead" sheet for channels with no business calling API
+// instead" sheet for a chat whose app can't call right now
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface MetaSheetStyle { label: string; gradient: string; /** Behind white text (readable end of the gradient). */ ink: string; }
 
-// Messenger and Instagram have NO business calling API (docs/CALLING_UX.md §1):
-// their Call button offers a WhatsApp call, styled in the platform's own look.
+// Instagram has NO business calling API; Messenger has one, behind the server's
+// switch (docs/CALLING_UX.md §1, §2.0). While a chat's app can't call, its Call
+// button offers a WhatsApp call instead, styled in the platform's own look.
 const META_CALL_SHEET: Record<string, MetaSheetStyle> = {
     messenger: { label: "Messenger", gradient: "linear-gradient(135deg, #0084FF 0%, #A033FF 100%)",
                  ink: "linear-gradient(135deg, #0066E0 0%, #8A1FEA 100%)" },
@@ -697,6 +698,11 @@ const META_CALL_SHEET: Record<string, MetaSheetStyle> = {
     instagram: { label: "Instagram", gradient: "linear-gradient(45deg, #FEDA75 0%, #FA7E1E 25%, #D62976 50%, #962FBF 75%, #4F5BD5 100%)",
                  ink: "linear-gradient(90deg, #4F5BD5 0%, #962FBF 30%, #D62976 65%, #FA7E1E 100%)" },
 };
+
+/** Why this chat's app can't call — the sheet's first line. */
+const cantCallWhy = (meta: MetaSheetStyle) => meta.label === "Messenger"
+    ? "Messenger calling isn't switched on for Neema yet."
+    : `${meta.label} doesn't let businesses take calls.`;
 
 function MetaCallSheet({ meta, first, name, callDigits, busy, busyLabel, onCall, onAsk, onInvited, onToast, onClose }: {
     meta: MetaSheetStyle;
@@ -742,7 +748,7 @@ function MetaCallSheet({ meta, first, name, callDigits, busy, busyLabel, onCall,
             </div>
             <div className="px-3 py-3">
                 <p className="text-xs leading-relaxed" style={{ color: "#1e293b" }}>
-                    {meta.label} doesn&apos;t let businesses take calls. Call {first} on WhatsApp instead.
+                    {cantCallWhy(meta)} Call {first} on WhatsApp instead.
                 </p>
                 {callDigits ? (
                     <>
@@ -795,29 +801,32 @@ const PERM_TONE: Record<PermTone, { color: string; d: string }> = {
     bad: { color: "#C62828", d: "M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z" },
     info: { color: "#57534e", d: "M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z" },
 };
-function SidebarCallPermission({ waId, first }: { waId: string; first: string }) {
+function SidebarCallPermission({ waId, first, channel = "whatsapp" }: { waId: string; first: string; channel?: "whatsapp" | "messenger" }) {
     const ws = useWs();
     const [perm, setPerm] = useState<CallPermission | null>(null);
+    const messenger = channel === "messenger";
     const load = useCallback(() => {
-        callsApi.permission(waId).then(setPerm).catch(() => { /* say nothing rather than guess */ });
-    }, [waId]);
+        (messenger ? callsApi.messengerPermission(waId) : callsApi.permission(waId))
+            .then(setPerm).catch(() => { /* say nothing rather than guess */ });
+    }, [waId, messenger]);
     useEffect(() => { load(); }, [load]);
     useEffect(() => {
         if (!ws) return;
         let t: ReturnType<typeof setTimeout> | null = null;
-        const on = (e: { type?: string; wa_id?: string }) => {
-            if (e?.type === "call_permission" && String(e.wa_id || "").replace(/^\+/, "") === waId) {
+        const on = (e: { type?: string; wa_id?: string | null; channel?: string; external_id?: string | null }) => {
+            const who = messenger ? (e?.channel === "messenger" ? e.external_id : null) : (e?.channel === "messenger" ? null : e?.wa_id);
+            if (e?.type === "call_permission" && String(who || "").replace(/^\+/, "") === waId) {
                 if (t) clearTimeout(t);
                 t = setTimeout(load, 400);
             }
         };
         ws.on("event", on);
         return () => { ws.off("event", on); if (t) clearTimeout(t); };
-    }, [ws, waId, load]);
+    }, [ws, waId, load, messenger]);
     const lines = permissionLines(perm, first);
     if (!lines.length) return null;
     return (
-        <ul className="mt-2 space-y-0.5" aria-label="WhatsApp call permission">
+        <ul className="mt-2 space-y-0.5" aria-label={`${messenger ? "Messenger" : "WhatsApp"} call permission`}>
             {lines.map((l) => (
                 <li key={l.text} className="flex items-center gap-1.5 text-xs" style={{ color: PERM_TONE[l.tone].color }}>
                     <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2}
@@ -833,26 +842,38 @@ function SidebarCallPermission({ waId, first }: { waId: string; first: string })
 
 // The last three calls with this customer — outcome in words, when, how long,
 // and whether the team still owes them a call. Live: rows merge in place.
-function SidebarCalls({ waId }: { waId: string }) {
+function SidebarCalls({ waId, psid }: { waId?: string; psid?: string }) {
     const ws = useWs();
     const [calls, setCalls] = useState<ApiCall[] | null>(null);
     const callsRef = React.useRef<ApiCall[] | null>(null);
     useEffect(() => { callsRef.current = calls; }, [calls]);
     const load = useCallback(() => {
-        callsApi.list({ wa_id: waId, limit: 3 })
-            .then(setCalls)
+        // This customer's calls on both apps we know them on.
+        Promise.all([
+            waId ? callsApi.list({ wa_id: waId, limit: 3 }) : Promise.resolve([] as ApiCall[]),
+            psid ? callsApi.list({ psid, limit: 3 }) : Promise.resolve([] as ApiCall[]),
+        ])
+            .then(([a, b]) => {
+                const seen = new Set<string>();
+                const rows = [...(Array.isArray(a) ? a : []), ...(Array.isArray(b) ? b : [])]
+                    .filter((r) => r && !seen.has(r.call_id) && (seen.add(r.call_id), true))
+                    .sort((x, y) => (y.started_at ?? "").localeCompare(x.started_at ?? ""));
+                setCalls(rows.slice(0, 3));
+            })
             .catch(() => setCalls((c) => c ?? []));
-    }, [waId]);
+    }, [waId, psid]);
+    const isThem = useCallback((wa?: string | null, ext?: string | null, ch?: string | null) =>
+        ch === "messenger" ? !!psid && ext === psid : !!waId && (wa || "").replace(/^\+/, "") === waId, [waId, psid]);
     useEffect(() => { load(); }, [load]);   // keyed by waId at the call site: a new customer starts empty
     useEffect(() => {
         if (!ws) return;
         let t: ReturnType<typeof setTimeout> | null = null;
         const soon = () => { if (t) clearTimeout(t); t = setTimeout(load, 600); };
-        const on = (e: { type?: string; call?: ApiCall; call_id?: string; from?: string }) => {
-            if (e?.type === "call_update" && e.call && (e.call.wa_id || "").replace(/^\+/, "") === waId) {
+        const on = (e: { type?: string; call?: ApiCall; call_id?: string; from?: string; channel?: string }) => {
+            if (e?.type === "call_update" && e.call && isThem(e.call.wa_id, e.call.external_id, e.call.channel)) {
                 const row = e.call;
                 setCalls((prev) => (prev ? upsertCall(prev, row).slice(0, 3) : [row]));
-            } else if (e?.type === "incoming_call" && (e.from || "").replace(/^\+/, "") === waId) {
+            } else if (e?.type === "incoming_call" && isThem(e.from, e.from, e.channel)) {
                 soon();   // they're ringing now — the row appears as "Ringing…"
             } else if ((e?.type === "call_ended" || e?.type === "call_answered")
                        && callsRef.current?.some((c) => c.call_id === e.call_id)) {
@@ -861,7 +882,7 @@ function SidebarCalls({ waId }: { waId: string }) {
         };
         ws.on("event", on);
         return () => { ws.off("event", on); if (t) clearTimeout(t); };
-    }, [ws, waId, load]);
+    }, [ws, isThem, load]);
 
     if (!calls || calls.length === 0) return null;
     const owed = calls.some((c) => c.follow_up_open);
@@ -885,6 +906,9 @@ function SidebarCalls({ waId }: { waId: string }) {
                                 <path d={CALL_ICON_PATH[st.icon]} />
                             </svg>
                             <span className="font-semibold" style={{ color: st.light }}>{st.word}</span>
+                            <span className="font-semibold" style={{ color: c.channel === "messenger" ? "#0066D6" : "#128C4B" }}>
+                                · {c.channel === "messenger" ? "Messenger" : "WhatsApp"}
+                            </span>
                             {c.has_voicemail ? <span className="font-semibold" style={{ color: "#A15C00" }}>· Voicemail</span> : null}
                             {c.duration ? <span style={{ color: "#64748b" }}>· {fmtCallDuration(c.duration)}</span> : null}
                             {c.agent_name ? <span className="truncate" style={{ color: "#64748b" }}>· {c.agent_name.split(" ")[0]}</span> : null}
@@ -1442,12 +1466,14 @@ export function CustomerSidebar({
                     )}
                 </div>
 
-                {/* Reach-out actions — Call (WhatsApp voice) + Send template (to
-                    re-open a chat). WhatsApp is the only channel with a business
-                    calling API: on a Messenger / Instagram chat the Call button
-                    opens a sheet that offers a WhatsApp call instead. The call
-                    card itself handles every outcome, including "hasn't allowed
-                    calls yet" (it offers Send call request — never sent for them). */}
+                {/* Reach-out actions — Call + Send template (to re-open a chat).
+                    WhatsApp chats call on WhatsApp; a Messenger chat calls on
+                    Messenger while the server says Messenger calling is on
+                    (GET /calls/channels), else — and on Instagram, which has no
+                    calling API — the Call button opens a sheet that offers a
+                    WhatsApp call instead. The call card itself handles every
+                    outcome, including "hasn't allowed calls yet" (it offers Send
+                    call request — never sent for them). */}
                 {(() => {
                     const valid = (d: string) => d.length >= 7 && d.length <= 15;
                     const digits = (profile.phone || "").replace(/\D/g, "");
@@ -1456,13 +1482,23 @@ export function CustomerSidebar({
                         ? conversation.wa_id || conversation.external_id || ""
                         : waIdentity).replace(/\D/g, "");
                     const callDigits = valid(waDigits) ? waDigits : valid(digits) ? digits : "";
-                    const meta = META_CALL_SHEET[conversation.channel as string];
-                    if (!callDigits && !meta) return null;
+                    // A Messenger chat: their PSID, and whether Messenger can call now.
+                    const onMessenger = conversation.channel === "messenger" || (conversation.channel as string) === "facebook";
+                    const psid = onMessenger ? String(conversation.external_id || "").replace(/\D/g, "") : "";
+                    const messengerCall = !!psid && !!callCtx?.channels?.messenger?.outbound;
+                    const meta = messengerCall ? undefined : META_CALL_SHEET[conversation.channel as string];
+                    if (!callDigits && !meta && !messengerCall) return null;
                     // One call at a time: while one rings, is placed, live or ending,
                     // this button can't start another — and says why.
                     const busy = !!callCtx?.busy;
-                    const withThem = busy && !!callDigits && callCtx?.waId === callDigits;
+                    const withThem = busy && ((!!callDigits && callCtx?.waId === callDigits) || (!!psid && callCtx?.waId === psid));
                     const busyLabel = withThem ? "On a call" : "On another call";
+                    const startMessengerCall = async () => {
+                        if (!callCtx) return onToast("Calling unavailable", "error");
+                        const convId = !String(conversation.id).startsWith("call:") ? conversation.id : null;
+                        const r = await callCtx.initiateCall(psid, profile.name, convId, { channel: "messenger" });
+                        if (!r.ok) onToast(r.error || "Couldn't place the call", "error");
+                    };
                     const startCall = async () => {
                         if (!callCtx) return onToast("Calling unavailable", "error");
                         // A real WhatsApp thread id lets the card's "Open chat" go straight back here.
@@ -1477,12 +1513,16 @@ export function CustomerSidebar({
                             <button
                                 type="button"
                                 disabled={busy}
-                                onClick={() => (meta ? setCallSheetOpen((v) => !v) : startCall())}
+                                onClick={() => (messengerCall ? startMessengerCall() : meta ? setCallSheetOpen((v) => !v) : startCall())}
                                 aria-expanded={meta ? callSheetOpen : undefined}
                                 title={busy ? (withThem ? "You're on a call with this customer" : "End the current call first")
-                                    : meta ? `${meta.label} can't take calls — call on WhatsApp instead` : "Call this customer on WhatsApp"}
+                                    : messengerCall ? "Call this customer on Messenger"
+                                    : meta ? (meta.label === "Messenger" ? "Messenger calling isn't switched on — call on WhatsApp instead"
+                                        : `${meta.label} can't take calls — call on WhatsApp instead`)
+                                    : "Call this customer on WhatsApp"}
+                                data-call-channel={messengerCall ? "messenger" : meta ? "sheet" : "whatsapp"}
                                 className="flex-1 inline-flex items-center justify-center gap-1.5 h-11 rounded-lg text-xs font-semibold text-white transition-transform hover:brightness-95 active:scale-95 disabled:opacity-60"
-                                style={{ background: meta ? meta.ink : "#008069" }}
+                                style={{ background: messengerCall ? "#0066D6" : meta ? meta.ink : "#008069" }}
                             >
                                 <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                                     <path d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
@@ -1528,11 +1568,14 @@ export function CustomerSidebar({
                                 onClose={() => setCallSheetOpen(false)}
                             />
                         )}
-                        {callDigits && (
+                        {messengerCall ? (
+                            <SidebarCallPermission key={`perm-m-${psid}`} waId={psid} channel="messenger"
+                                first={firstName({ name: profile.name, from: psid, channel: "messenger" })} />
+                        ) : callDigits && (
                             <SidebarCallPermission key={`perm-${callDigits}`} waId={callDigits}
                                 first={firstName({ name: profile.name, from: callDigits })} />
                         )}
-                        {callDigits && <SidebarCalls key={callDigits} waId={callDigits} />}
+                        {(callDigits || psid) && <SidebarCalls key={`${callDigits}|${psid}`} waId={callDigits || undefined} psid={psid || undefined} />}
                         </>
                     );
                 })()}

@@ -738,7 +738,10 @@ export interface ApiCall {
     name: string | null;
     person_id?: string | null;
     conversation_id?: string | null;
-    channel?: string;          // always "whatsapp" — the only channel with a calling API
+    /** "whatsapp" | "messenger" (docs/CALLING_UX.md §2.0). Absent on older rows = WhatsApp. */
+    channel?: string;
+    /** The customer's handle on the call's channel: wa_id for WhatsApp, the PSID for Messenger. */
+    external_id?: string | null;
     direction: string;         // inbound | outbound
     // ringing | answered | completed | missed | declined | callback | no_answer
     // | cancelled | failed  (legacy "ended" is mapped to completed server-side)
@@ -777,13 +780,41 @@ export interface CallIceConfig {
     auto_transcribe?: boolean; // …and runs by itself after every upload
     /** WhatsApp transcribes the call itself (opt-in on the server) — "Summary in a minute". */
     meta_transcription?: boolean;
+    /** Which channels can take / place a call right now (same as GET /calls/channels). */
+    channels?: CallChannels;
+}
+
+/** GET /admin/calls/channels — never offer a call the server says can't be placed. */
+export interface CallChannelCaps { inbound: boolean; outbound: boolean; video?: boolean; sdp?: "answer" | "offer"; }
+export interface CallChannels {
+    whatsapp?: CallChannelCaps;
+    messenger?: CallChannelCaps;
+    instagram?: CallChannelCaps;
+}
+export type CallChannel = "whatsapp" | "messenger";
+
+/** GET /calls/{id}/offer. Messenger sends no offer: `sdp` null + `offer_required`
+ *  — the softphone builds the OFFER and posts it to /answer. */
+export interface CallOfferResp { call_id: string; sdp: string | null; from: string; channel?: string; offer_required?: boolean; }
+/** POST /calls/{id}/answer and /calls/connect. Messenger: Meta's SDP answer
+ *  (`sdp`, `sdp_type: "answer"`) and maybe a renegotiation offer, at once. */
+export interface CallSdpResp {
+    ok: boolean;
+    call_id: string;
+    channel?: string;
+    sdp?: string | null;
+    sdp_type?: string | null;
+    renegotiation?: string | { sdp_type?: string; sdp?: string } | null;
 }
 
 /** Whether a customer allowed business calls (WhatsApp needs it before we ring them).
  *  The fields after `permanent` come from Meta's own answer (docs/CALLING_UX.md §2.1)
  *  and are absent on older servers. */
 export interface CallPermission {
-    wa_id?: string;
+    wa_id?: string | null;
+    /** Messenger: "messenger" + the PSID in external_id (wa_id null). */
+    channel?: string;
+    external_id?: string | null;
     status: "granted" | "denied" | "requested" | "unknown";
     expires_at: string | null;
     permanent: boolean;
@@ -804,7 +835,7 @@ export interface CallPermission {
 export interface CallPermissionRequestResp {
     ok: boolean;
     permission?: CallPermission;
-    route?: "free_form" | "template" | null;
+    route?: "free_form" | "template" | "calling_optin" | null;
     /** They already allow calls permanently — nothing to ask: call. */
     already_permitted?: boolean;
 }
@@ -923,13 +954,15 @@ export function isNetworkError(e: unknown): boolean {
 
 const callPath = (callId: string) => `/admin/calls/${encodeURIComponent(callId)}`;
 
-// WhatsApp voice calling — the dashboard softphone's backend.
+// WhatsApp + Messenger voice calling — the dashboard softphone's backend.
 export const callsApi = {
     /** Recent calls, newest first. `wa_id` narrows to one customer;
      *  `view: "follow_up"` to the missed / callback calls nobody returned yet. */
-    list: (params: { wa_id?: string; view?: "follow_up"; limit?: number } = {}) => {
+    list: (params: { wa_id?: string; psid?: string; channel?: CallChannel; view?: "follow_up"; limit?: number } = {}) => {
         const qs = new URLSearchParams();
         if (params.wa_id) qs.set("wa_id", params.wa_id.replace(/^\+/, ""));
+        if (params.psid) qs.set("psid", params.psid);
+        if (params.channel) qs.set("channel", params.channel);
         if (params.view) qs.set("view", params.view);
         if (params.limit) qs.set("limit", String(params.limit));
         const q = qs.toString();
@@ -938,12 +971,18 @@ export const callsApi = {
     /** One call's current row — how a screen that lost its connection learns the truth. */
     get: (callId: string) => get<ApiCall>(callPath(callId)),
     iceConfig: () => get<CallIceConfig>("/admin/calls/ice-config"),
+    /** Which channels can call right now (Messenger has a server switch). */
+    channels: () => get<CallChannels>("/admin/calls/channels"),
     permission: (waId: string) =>
         get<CallPermission>(`/admin/calls/permission?wa_id=${encodeURIComponent(waId.replace(/^\+/, ""))}`),
+    /** Messenger: Meta's messenger_call_permissions merged with our store. */
+    messengerPermission: (psid: string) =>
+        get<CallPermission>(`/admin/calls/permission?channel=messenger&psid=${encodeURIComponent(psid)}`),
     offer: (callId: string) =>
-        get<{ call_id: string; sdp: string; from: string }>(`${callPath(callId)}/offer`),
+        get<CallOfferResp>(`${callPath(callId)}/offer`),
+    /** WhatsApp: `sdp` is our answer. Messenger: `sdp` is our OFFER and the reply carries Meta's answer. */
     answer: (callId: string, sdp: string) =>
-        post<{ ok: boolean }>(`${callPath(callId)}/answer`, { sdp }),
+        post<CallSdpResp>(`${callPath(callId)}/answer`, { sdp }),
     /** Hang up, decline or cancel — the server decides which from where the call is. */
     terminate: (callId: string) =>
         post<{ ok: boolean; outcome?: string | null }>(`${callPath(callId)}/terminate`, {}),
@@ -953,8 +992,14 @@ export const callsApi = {
         post<{ ok: boolean }>(`${callPath(callId)}/follow-up-done`, {}),
     connect: (to: string, sdp: string, name?: string) =>
         post<{ ok: boolean; call_id: string }>("/admin/calls/connect", { to, sdp, name }),
+    /** Place a Messenger call with our offer: Meta's answer comes back at once. */
+    connectMessenger: (psid: string, sdp: string, name?: string) =>
+        post<CallSdpResp>("/admin/calls/connect", { channel: "messenger", psid, sdp, name }),
     requestPermission: (to: string, name?: string | null) =>
         post<CallPermissionRequestResp>("/admin/calls/request-permission", name ? { to, name } : { to }),
+    /** Messenger's `calling_optin` request (Accept / Decline buttons). */
+    requestMessengerPermission: (psid: string) =>
+        post<CallPermissionRequestResp>("/admin/calls/request-permission", { channel: "messenger", psid }),
     /** Admin (manage_settings): the number's WhatsApp calling settings. */
     settings: () => get<CallSettings>("/admin/calls/settings"),
     /** Send only the fields that changed. */
