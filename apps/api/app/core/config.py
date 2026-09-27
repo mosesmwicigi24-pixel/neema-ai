@@ -355,6 +355,13 @@ class Settings(BaseSettings):
     # Audio is recorded in the agent's browser (both sides mixed) and uploaded on
     # hangup — free. Transcription runs on OUR box via faster-whisper (no per-call
     # API cost); swap to a cloud provider later by flipping whisper_provider.
+    # A missed inbound call gets one WhatsApp / Messenger message and the chat
+    # is flagged for a person (services/missed_call.py). Off by default: it
+    # messages the customer.
+    missed_call_message_enabled: bool = False
+    missed_call_message: str = ("Sorry we missed your call \U0001F64F A member of our team will "
+                                "call you back shortly — or tell us here how we can help.")
+    missed_call_message_cooldown_h: int = 6
     call_recording_enabled: bool = True    # let the softphone record calls (browser-side)
     whisper_enabled: bool = False          # can we transcribe at all (provider installed/configured)
     whisper_auto: bool = False             # auto-transcribe every call on hangup vs. on-demand only

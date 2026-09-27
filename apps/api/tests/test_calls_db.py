@@ -1294,3 +1294,72 @@ def test_a_window_we_misread_falls_back_to_the_template(env, world, monkeypatch)
     r = env.client.post("/api/admin/calls/request-permission", json={"to": wa}, headers=_as(world["ann"]))
     assert r.status_code == 200 and r.json()["route"] == "template"
     assert env.meta.sent[-1][:3] == ("permission_template", wa, "call_ok")
+
+
+# ── Missed-call follow-up (opt-in) ───────────────────────────────────────────
+
+def test_a_missed_call_gets_one_message_and_a_flag_only_when_switched_on(env, world, monkeypatch):
+    import asyncio as _a
+    from app.core.config import settings
+    from app.services import missed_call, meta_send, n8n_bridge
+    sent, saved = [], []
+
+    async def fake_send(channel, to, text, **kw):
+        sent.append((channel, to, text))
+        return "wamid.1"
+
+    async def fake_save(db, redis, wa_id, text, waba_msg_id=None):
+        saved.append((wa_id, waba_msg_id))
+    monkeypatch.setattr(meta_send, "send_to_channel", fake_send)
+    monkeypatch.setattr(n8n_bridge, "save_outbound_message", fake_save)
+
+    wa = "254777000001"
+    _ring(env, "wacid.mc.1", frm=wa)
+    _end(env, "wacid.mc.1", status="FAILED")                  # missed
+    # Off by default: the terminate schedules nothing, nothing goes out.
+    assert settings.missed_call_message_enabled is False
+    assert not missed_call._bg and sent == []
+    monkeypatch.setattr(settings, "missed_call_message_enabled", True, raising=False)
+    assert _a.run(missed_call._follow_up(env.redis, "wacid.mc.1")) is True
+    assert sent == [("whatsapp", wa, settings.missed_call_message)] and saved == [(wa, "wamid.1")]
+    # A second missed call within the cooldown: no second message.
+    _ring(env, "wacid.mc.2", frm=wa)
+    _end(env, "wacid.mc.2", status="FAILED")
+    assert _a.run(missed_call._follow_up(env.redis, "wacid.mc.2")) is False
+    assert len(sent) == 1
+
+
+def test_no_missed_call_message_once_they_were_called_back(env, world, monkeypatch):
+    import asyncio as _a
+    from app.core.config import settings
+    from app.services import missed_call, meta_send
+    monkeypatch.setattr(settings, "missed_call_message_enabled", True, raising=False)
+    sent = []
+
+    async def fake_send(channel, to, text, **kw):
+        sent.append(to)
+    monkeypatch.setattr(meta_send, "send_to_channel", fake_send)
+    wa = "254777000002"
+    _ring(env, "wacid.mc.3", frm=wa)
+    _end(env, "wacid.mc.3", status="FAILED")
+    _ring(env, "wacid.mc.4", frm=wa)                           # they call again and Ann answers
+    env.client.post("/api/admin/calls/wacid.mc.4/answer", json={"sdp": "v=0"}, headers=_as(world["ann"]))
+    assert _a.run(missed_call._follow_up(env.redis, "wacid.mc.3")) is False
+    # Answered / declined calls never get it either.
+    assert _a.run(missed_call._follow_up(env.redis, "wacid.mc.4")) is False
+    assert sent == []
+
+
+def test_a_failing_send_never_breaks_anything(env, world, monkeypatch):
+    import asyncio as _a
+    from app.core.config import settings
+    from app.services import missed_call, meta_send
+    monkeypatch.setattr(settings, "missed_call_message_enabled", True, raising=False)
+
+    async def boom(*a, **k):
+        raise RuntimeError("WhatsApp down")
+    monkeypatch.setattr(meta_send, "send_to_channel", boom)
+    _ring(env, "wacid.mc.5", frm="254777000003")
+    _end(env, "wacid.mc.5", status="FAILED")
+    assert _a.run(missed_call._follow_up(env.redis, "wacid.mc.5")) is False
+    assert _get(env, "wacid.mc.5", world["ann"])["status"] == "missed"

@@ -365,6 +365,9 @@ async def on_terminate(redis, cid: str, duration, status, extra: dict | None = N
         "type": "call_ended", **info, "call_id": cid,
         "status": status, **(extra or {}),
     })
+    if info.get("outcome") == "missed":
+        from app.services import missed_call
+        missed_call.schedule(redis, cid)
 
 
 async def _handle_call_status(redis, st: dict) -> None:

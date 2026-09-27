@@ -297,6 +297,9 @@ async def sweep_stale(db, redis=None) -> int:
     await db.commit()
     for e in events:
         await publish(redis, e)
+        if e.get("outcome") == "missed":
+            from app.services import missed_call
+            missed_call.schedule(redis, e["call_id"])
     return len(events)
 
 
