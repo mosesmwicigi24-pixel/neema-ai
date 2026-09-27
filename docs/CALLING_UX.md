@@ -15,21 +15,24 @@ routes in `apps/api/app/routers/admin.py`.
 | Channel   | Take a customer's call | Call a customer | Notes |
 |-----------|------------------------|-----------------|-------|
 | WhatsApp  | Yes (Cloud API calling) | Yes, once they allowed calls (`call_permission_request`) | Voice only. No video, no transfer, no hold, no conference in the API. |
-| Messenger | **No** business calling API | **No** | Offer a WhatsApp call instead (their number if we have it, else ask for it). |
-| Instagram | **No** business calling API | **No** | Same as Messenger. |
+| Messenger | Yes, via the Messenger Calling API **when enabled** (`messenger_calling_enabled`) | Yes, once they tapped Accept on our call request (`calling_optin`) | Voice only here: the API has video, but we never offer it. No transfer, hold or conference. |
+| Instagram | **No** business calling API | **No** | Offer a WhatsApp call instead (their number if we have it, else ask for it). |
 
-So: every call screen is a WhatsApp call. Messenger and Instagram appear only
-where an agent tries to call from a Messenger / Instagram conversation — there
-the entry point is styled in that platform's look and says plainly "Messenger
-doesn't let businesses take calls — call {first name} on WhatsApp instead".
-Never show a video button, a transfer button, a hold button, or an "end-to-end
-encrypted" claim.
+Which channels can call right now comes from the server (`channels` in
+`GET /calls/ice-config`, or `GET /calls/channels`). Never offer a call it says
+can't be placed. When Messenger calling is off, a Messenger conversation keeps
+the old entry point: "Messenger calling isn't on — call {first name} on WhatsApp
+instead". Instagram always gets that entry point, styled in Instagram's look.
+Never show a video button, a transfer button, a hold button, or an
+"end-to-end encrypted" claim. The incoming card's status line names the
+platform: "WhatsApp voice call" or "Messenger voice call".
 
 ## 2. Server contract (what the clients read)
 
 Call row (`GET /admin/calls`, `GET /admin/calls/{call_id}`, `call_update.call`):
 ```
-id, call_id, wa_id, name, person_id, conversation_id, channel ("whatsapp"),
+id, call_id, wa_id, external_id, name, person_id, conversation_id,
+channel ("whatsapp" | "messenger"),
 direction (inbound|outbound), status, duration, agent_id, agent_name,
 started_at, answered_at, ended_at, summary, insights, transcript_status
 (none|recorded|pending|processing|done|failed), has_recording,
@@ -41,7 +44,8 @@ maps it. `rejected` and `has_voicemail`: see §2.1.)
 `insights` (may be null): intent, products[], objections[], commitments[],
 next_action, follow_up_message, sentiment.
 
-Query: `GET /admin/calls?wa_id=…` (one customer), `?view=follow_up` (open
+Query: `GET /admin/calls?wa_id=…` (one WhatsApp customer), `?psid=…` (one
+Messenger customer), `?channel=whatsapp|messenger`, `?view=follow_up` (open
 missed / callback calls), `limit`.
 
 Other routes: `GET /calls/ice-config` → `{ice_servers, record, transcribe,
@@ -78,6 +82,84 @@ Calls list or a single row is read — only `ringing` rows, never a live call.
 The thread (`GET /conversations/{id}/messages`, first page) now includes
 `system_event` items with `event_kind: "call"`, `text` (the label), `agent_name`,
 `event_reason` (the summary) and `call` (the full row).
+
+### 2.0 Messenger calls (the second channel — all additive)
+
+Shapes from Meta: `docs/research/META_CALLING_2026-09.md` §7a. A Messenger row
+has `channel: "messenger"`, `wa_id: null`, `external_id` = the customer's PSID
+(for WhatsApp rows `external_id` = `wa_id`). `conversation_id` is their
+Messenger conversation. The call shows in that thread like any other. Statuses,
+outcomes, follow-ups, multi-agent rules and the wrap-up table are the same as
+WhatsApp. One exception: Messenger has no "declined" status for our call, so a
+declined outbound call reads `no_answer`.
+
+**The SDP is the other way round.** Meta sends no offer with a Messenger call.
+- `GET /calls/{id}/offer` → `{sdp: null, channel: "messenger", offer_required:
+  true, from}`. The phone creates the **offer** itself.
+- `POST /calls/{id}/answer {sdp: <offer>}` → `{ok, call_id, channel, sdp:
+  <Meta's answer>, sdp_type: "answer", renegotiation: <offer | null>}`. Apply
+  `sdp` as the remote answer. Then, if `renegotiation` is set, apply it as a
+  remote offer and create a local answer. The 409 (answered by {name}) and
+  410 (already ended) rules are the same. Meta gives 60 s to accept.
+- `terminate` / `callback` work as before. On a ringing inbound call the
+  server sends Meta `reject`, otherwise `terminate`.
+
+**Placing a Messenger call.**
+- `POST /calls/connect {channel: "messenger", psid, sdp: <offer>, name?}` →
+  `{ok, call_id, channel, sdp: <Meta's answer>, sdp_type: "answer",
+  renegotiation}`. The answer arrives at once, not over the socket.
+- 409 `code: "no_permission"`, `action: "request_permission"` when they
+  haven't allowed calls. The server checks with Meta first and never rings them
+  in that case.
+- The call then moves on the same events as WhatsApp: `call_status {ringing}`,
+  `call_answered` (the customer accepted), `call_ended`.
+- Plus a new event, `media_update {call_id, channel, version, sdp_type:
+  "offer", sdp}`: the customer picked up, or changed media. Apply the offer
+  with the highest `version` and create a local answer.
+
+**Permission (Messenger).**
+- `GET /calls/permission?channel=messenger&psid=` has the same fields as
+  WhatsApp, plus `channel` and `external_id`, with `wa_id: null`. It is
+  Meta's `messenger_call_permissions` merged with our store.
+- `POST /calls/request-permission {channel: "messenger", psid}` sends Meta's
+  `calling_optin` request (Accept / Decline buttons) →
+  `{permission, route: "calling_optin"}`.
+- 409 `request_limit` (`wait`): Messenger allows 2 requests per thread per day.
+- 409 `outside_window` (`none`): more than 24 h since their last message.
+- The answer arrives as `call_permission {channel: "messenger", external_id,
+  status: granted | denied, expires_at}`. A grant lasts 7 days, and a
+  connected call or a missed inbound call also grants it.
+
+**Events** carry `channel` for Messenger: `incoming_call {…, channel:
+"messenger", from: <psid>, external_id, name: null}`. The name follows in the
+next `call_update.call.name`, from the linked person. `call_ended` also
+carries `channel`.
+
+**The switch.** With `messenger_calling_enabled` off:
+- Messenger call webhooks are only logged. Nobody is rung.
+- Every Messenger action (`offer`, `answer`, `terminate`, `callback`,
+  `connect`, `request-permission`, `permission`) returns 409
+  `code: "messenger_calling_off"`, `action: "none"`.
+- `channels.messenger` says `inbound: false, outbound: false`.
+
+`GET /calls/channels` (also `channels` in `ice-config`) returns:
+```
+{whatsapp:  {inbound, outbound, video: false, sdp: "answer"},
+ messenger: {inbound, outbound, video: false, sdp: "offer"},
+ instagram: {inbound: false, outbound: false, video: false}}
+```
+
+Messenger error codes use the same `{detail, code, action}` shape:
+
+| `code` | Meaning | `action` |
+|---|---|---|
+| `2018389` | Page not allowlisted | `admin` |
+| `2018390` | Call no longer available | `none` |
+| `2018391`, `2018392` | Bad offer | `retry` |
+| `2018393`, `2018394` | Wrong Page | `admin` |
+| `2018395`, `2018396` | Call already ended | `none` |
+| `190` | Page token expired | `admin` |
+| `4`, `613` | Rate limited | `wait` |
 
 ### 2.1 Additions (2026-09-27 platform refresh — all additive)
 
@@ -196,7 +278,7 @@ Rules:
 
 | Phase / outcome | Title (who) | Status line | Primary actions |
 |---|---|---|---|
-| incoming | Name (or +number) | "WhatsApp voice call" + "Incoming…" | Decline · **Answer** · "Call back later" (text button) |
+| incoming | Name (or +number) | "WhatsApp voice call" (or "Messenger voice call") + "Incoming…" | Decline · **Answer** · "Call back later" (text button) |
 | placing | Name | "Calling…" | Mute · End |
 | ringing_out | Name | "Ringing…" | Mute · End |
 | connecting | Name | "Connecting…" | Mute · Audio · End |

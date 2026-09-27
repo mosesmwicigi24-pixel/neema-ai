@@ -9,7 +9,8 @@ from app.models import Base
 
 
 class Call(Base):
-    """A WhatsApp voice call — one row per inbound call, its whole lifecycle.
+    """A voice call (WhatsApp, or Messenger when enabled) — one row per call, its
+    whole lifecycle.
 
     status (services/call_log.py owns the transitions):
       ringing → answered → completed               (a call that connected)
@@ -29,6 +30,11 @@ class Call(Base):
     id           : Mapped[uuid.UUID]        = mapped_column(primary_key=True, default=uuid.uuid4)
     call_id      : Mapped[str]              = mapped_column(String(200), unique=True, index=True)  # Meta wacid
     wa_id        : Mapped[str | None]       = mapped_column(String(30), index=True)   # caller number
+    # whatsapp | messenger. A Messenger call has no wa_id: the customer is the
+    # page-scoped PSID in external_id (conversations match on channel + external_id).
+    channel      : Mapped[str]              = mapped_column(String(20), default="whatsapp",
+                                                            server_default="whatsapp", nullable=False)
+    external_id  : Mapped[str | None]       = mapped_column(String(64), nullable=True, index=True)
     caller_name  : Mapped[str | None]       = mapped_column(String(200), nullable=True)
     direction    : Mapped[str]              = mapped_column(String(10), default="inbound")
     status       : Mapped[str]              = mapped_column(String(20), default="ringing", index=True)

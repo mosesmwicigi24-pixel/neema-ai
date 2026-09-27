@@ -1,5 +1,9 @@
-"""The WhatsApp call lifecycle: the one place a call's status moves, and the one
-shape every client reads it in.
+"""The call lifecycle (WhatsApp, and Messenger when enabled): the one place a
+call's status moves, and the one shape every client reads it in.
+
+A row's `channel` says which platform carried it. WhatsApp rows key the
+customer by `wa_id`; Messenger rows leave `wa_id` NULL and key them by the PSID
+in `external_id`. Everything below is channel-blind except where it says so.
 
 Statuses (models/call.py has the diagram):
   ringing    inbound ringing the team, or our outbound call ringing the customer
@@ -19,12 +23,13 @@ racing the terminate webhook) can never rewrite a call that is already over.
 
 Every change is also broadcast on `ws:channel:calls` ([publish]) so all agents'
 phones and dashboards agree within a moment:
-  incoming_call  {call_id, from, name, at, person_id, conversation_id}
+  incoming_call  {call_id, from, name, at, channel}
   call_answered  {call_id, agent_id, agent_name, direction}
   call_ended     {call_id, outcome, status (Meta's raw, when it gave one),
                   duration, agent_id, agent_name, direction}
   call_update    {call: <row>}      recording / transcript / insights moved
   call_permission{wa_id, status, expires_at, permanent, revoked}
+                 (Messenger: wa_id null, channel "messenger", external_id = PSID)
   call_status    {call_id, status: "ringing"}   the customer's phone is ringing
   call_settings  {value}                         Meta says calling settings changed
   calling_restricted {event, reasons, value}     Meta restricted / flagged calling
@@ -67,6 +72,24 @@ def normalize_status(status: str | None) -> str:
     return "completed" if status == "ended" else (status or "ringing")
 
 
+MESSENGER = "messenger"
+
+
+def perm_key(channel: str | None, wa_id: str | None = None, external_id: str | None = None) -> str:
+    """The permission-store key: the number for WhatsApp, `messenger:<psid>`
+    for Messenger (so the two never collide)."""
+    if channel == MESSENGER:
+        return f"{MESSENGER}:{external_id}" if external_id else ""
+    return wa_id or ""
+
+
+def _who(c) -> tuple[str, str] | None:
+    """(channel, handle) of the customer on a call row — handle = wa_id or PSID."""
+    ch = getattr(c, "channel", None) or "whatsapp"
+    h = c.external_id if ch == MESSENGER else c.wa_id
+    return (ch, h) if h else None
+
+
 async def publish(redis, event: dict) -> None:
     """Tell every connected agent. Never raises."""
     if redis is None:
@@ -84,7 +107,23 @@ async def _agent_name(db, agent_id) -> str | None:
     return (await db.execute(select(Agent.name).where(Agent.id == agent_id))).scalar_one_or_none()
 
 
-async def record_ringing(call_id: str, wa_id: str | None, name: str | None) -> dict:
+async def messenger_person_id(db, psid: str | None):
+    """The person behind a Messenger PSID (created on first sight, like an
+    inbound DM does). None when it can't be resolved."""
+    if not psid:
+        return None
+    from app.services.identity import resolve_or_create_person
+    try:
+        ident = await resolve_or_create_person(db, MESSENGER, psid, source="messenger_call",
+                                               confidence="deterministic")
+        return ident.person_id
+    except Exception:
+        await db.rollback()
+        return None
+
+
+async def record_ringing(call_id: str, wa_id: str | None, name: str | None, *,
+                         channel: str = "whatsapp", external_id: str | None = None) -> dict:
     """Create the call row on `connect` (status=ringing). Resolves the person so
     the Calls view can link to the customer. Idempotent on call_id. Returns
     {person_id, conversation_id} for the ring event (empty on failure)."""
@@ -93,19 +132,23 @@ async def record_ringing(call_id: str, wa_id: str | None, name: str | None) -> d
             c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
             if c is None:
                 person_id = None
-                if wa_id:
+                if channel == MESSENGER:
+                    person_id = await messenger_person_id(db, external_id)
+                elif wa_id:
                     from app.services.identity import resolve_person_id_for_wa_id
                     try:
                         person_id = await resolve_person_id_for_wa_id(db, wa_id, source="whatsapp_call")
                     except Exception:
                         person_id = None
                 c = Call(call_id=call_id, wa_id=wa_id, caller_name=name,
-                         status="ringing", person_id=person_id)
+                         status="ringing", person_id=person_id, channel=channel or "whatsapp",
+                         external_id=external_id)
                 db.add(c)
                 await db.commit()
-            conv = await conversation_ids_for(db, [c.wa_id] if c.wa_id else [])
+            who = _who(c)
+            conv = await conversation_ids_by_channel(db, [who] if who else [])
             return {"person_id": str(c.person_id) if c.person_id else None,
-                    "conversation_id": conv.get(c.wa_id or "")}
+                    "conversation_id": conv.get(who) if who else None}
     except Exception as exc:
         _log.warning("call_log ringing failed: %s", exc)
         return {}
@@ -135,12 +178,13 @@ async def mark_answered(call_id: str, agent_id, redis=None) -> dict | None:
                 values["agent_id"] = agent_id
             res = await db.execute(
                 update(Call).where(Call.call_id == call_id, Call.status == "ringing")
-                .values(**values).returning(Call.agent_id, Call.direction, Call.wa_id))
+                .values(**values).returning(Call.agent_id, Call.direction, Call.wa_id,
+                                            Call.channel, Call.external_id))
             row = res.first()
             await db.commit()
             if row is None:
                 return None
-            await forget_meta_permission(redis, row.wa_id)
+            await forget_meta_permission(redis, perm_key(row.channel, row.wa_id, row.external_id))
             return {"agent_id": str(row.agent_id) if row.agent_id else None,
                     "agent_name": await _agent_name(db, row.agent_id),
                     "direction": row.direction}
@@ -350,6 +394,23 @@ async def conversation_ids_for(db, wa_ids: list[str]) -> dict[str, str]:
     return {r.external_id: str(r.id) for r in rows}
 
 
+async def conversation_ids_by_channel(db, pairs) -> dict[tuple[str, str], str]:
+    """(channel, handle) → the customer's conversation id on that channel."""
+    want = {(ch, h) for ch, h in (p for p in pairs if p) if h}
+    if not want:
+        return {}
+    from app.models.conversation import Conversation
+    out: dict[tuple[str, str], str] = {}
+    for ch in {ch for ch, _ in want}:
+        ids = sorted(h for c2, h in want if c2 == ch)
+        rows = (await db.execute(
+            select(Conversation.id, Conversation.external_id)
+            .where(Conversation.channel == ch, Conversation.external_id.in_(ids))
+        )).all()
+        out.update({(ch, r.external_id): str(r.id) for r in rows})
+    return out
+
+
 def _iso(d: datetime | None) -> str | None:
     return d.isoformat() if d else None
 
@@ -359,9 +420,10 @@ def follow_up_open(c: Call, later_connected: set[tuple[str, datetime]] | None = 
     or a later call with them connected."""
     if normalize_status(c.status) not in FOLLOW_UP or c.follow_up_done_at is not None:
         return False
-    if later_connected and c.wa_id:
-        for wa, at in later_connected:
-            if wa == c.wa_id and c.started_at and at > c.started_at:
+    who = _who(c)
+    if later_connected and who:
+        for key, at in later_connected:
+            if key in (who, who[1]) and c.started_at and at > c.started_at:
                 return False
     return True
 
@@ -371,10 +433,11 @@ def serialize(c: Call, *, person=None, agent_name: str | None = None,
     """The one row shape the Calls view, the phone and the thread read."""
     return {
         "id": str(c.id), "call_id": c.call_id, "wa_id": c.wa_id,
+        "external_id": getattr(c, "external_id", None) or c.wa_id,
         "name": c.caller_name or (person.display_name if person is not None else None),
         "person_id": str(c.person_id) if c.person_id else None,
         "conversation_id": conversation_id,
-        "channel": "whatsapp",
+        "channel": getattr(c, "channel", None) or "whatsapp",
         "direction": c.direction or "inbound",
         "status": normalize_status(c.status),
         "duration": c.duration,
@@ -407,17 +470,25 @@ async def serialize_rows(db, rows: list[Call]) -> list[dict]:
     if agent_ids:
         amap = {a.id: a.name for a in (await db.execute(
             select(Agent).where(Agent.id.in_(agent_ids)))).scalars().all()}
-    convs = await conversation_ids_for(db, [c.wa_id for c in rows if c.wa_id])
-    # Later connected calls close a missed call's follow-up.
-    wa_ids = {c.wa_id for c in rows if c.wa_id and normalize_status(c.status) in FOLLOW_UP}
+    convs = await conversation_ids_by_channel(db, [_who(c) for c in rows])
+    # Later connected calls (same customer, same channel) close a missed call's follow-up.
+    owed = {_who(c) for c in rows if _who(c) and normalize_status(c.status) in FOLLOW_UP}
     later: set = set()
+    wa_ids = {h for ch, h in owed if ch != MESSENGER}
+    psids = {h for ch, h in owed if ch == MESSENGER}
     if wa_ids:
-        later = {(r.wa_id, r.started_at) for r in (await db.execute(
+        later |= {(("whatsapp", r.wa_id), r.started_at) for r in (await db.execute(
             select(Call.wa_id, Call.started_at)
             .where(Call.wa_id.in_(wa_ids), Call.status.in_(("answered", "completed", "ended")))
         )).all() if r.started_at}
+    if psids:
+        later |= {((MESSENGER, r.external_id), r.started_at) for r in (await db.execute(
+            select(Call.external_id, Call.started_at)
+            .where(Call.channel == MESSENGER, Call.external_id.in_(psids),
+                   Call.status.in_(("answered", "completed", "ended")))
+        )).all() if r.started_at}
     return [serialize(c, person=pmap.get(c.person_id), agent_name=amap.get(c.agent_id),
-                      conversation_id=convs.get(c.wa_id or ""),
+                      conversation_id=convs.get(_who(c)) if _who(c) else None,
                       follow_up=follow_up_open(c, later)) for c in rows]
 
 
@@ -445,7 +516,8 @@ async def publish_update(redis, call_id: str) -> None:
 # first webhook that carries our `biz_opaque_callback_data` ──────────────────
 
 async def upsert_outbound(call_id: str, wa_id: str | None, *, agent_id=None, name: str | None = None,
-                          person_id=None) -> bool:
+                          person_id=None, channel: str = "whatsapp",
+                          external_id: str | None = None) -> bool:
     """Create our outbound row if it isn't there yet; fill blanks if it is.
     Safe against the webhook and the route racing (INSERT … ON CONFLICT).
     Returns True when this call created the row."""
@@ -458,13 +530,15 @@ async def upsert_outbound(call_id: str, wa_id: str | None, *, agent_id=None, nam
                     id=_uuid.uuid4(), call_id=call_id, wa_id=wa_id, caller_name=name,
                     direction="outbound", status="ringing", person_id=person_id,
                     agent_id=agent_id, started_at=datetime.now(timezone.utc),
-                    transcript_status="none")
+                    transcript_status="none", channel=channel or "whatsapp",
+                    external_id=external_id)
                 .on_conflict_do_nothing(index_elements=["call_id"]).returning(Call.id))
             created = res.first() is not None
             if not created:
                 c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
                 if c is not None:
                     c.wa_id = c.wa_id or wa_id
+                    c.external_id = c.external_id or external_id
                     c.caller_name = c.caller_name or name
                     c.person_id = c.person_id or person_id
                     c.agent_id = c.agent_id or agent_id
@@ -659,7 +733,11 @@ async def _meta_permission(redis, wa_id: str) -> dict | None:
         except Exception:
             pass
     try:
-        meta = await wa_calling.get_call_permission(wa_id)
+        if wa_id.startswith(MESSENGER + ":"):
+            from app.services import messenger_calling
+            meta = await messenger_calling.get_call_permission(wa_id.split(":", 1)[1])
+        else:
+            meta = await wa_calling.get_call_permission(wa_id)
     except Exception as exc:
         _log.warning("call permission read from Meta failed for %s: %s", wa_id, exc)
         if redis is not None:
@@ -719,15 +797,23 @@ async def set_permission(redis, wa_id: str, status: str, *, expires_at: datetime
     return data
 
 
-async def note_permission_reply(redis, wa_id: str, reply: dict) -> dict | None:
+async def note_permission_reply(redis, wa_id: str, reply: dict, *,
+                                channel: str = "whatsapp") -> dict | None:
     """A customer's answer to our call-permission request (the interactive
     `call_permission_reply` message), a grant from their business profile, or
     WhatsApp's automatic revoke after 4 unanswered calls
     (`response: reject, response_source: automatic`). Stores it and tells
-    every agent."""
+    every agent. Messenger (`channel="messenger"`, `wa_id` = the PSID): the
+    `call_permission_reply` webhook, `response: approve | reject`, stored under
+    `messenger:<psid>`."""
     if not wa_id or not isinstance(reply, dict):
         return None
-    granted = str(reply.get("response") or "").lower() in ("accept", "accepted", "allow", "allowed")
+    messenger = channel == MESSENGER
+    psid = wa_id
+    if messenger:
+        wa_id = perm_key(MESSENGER, external_id=psid)
+    ok = ("approve", "approved") if messenger else ("accept", "accepted", "allow", "allowed")
+    granted = str(reply.get("response") or "").lower() in ok
     revoked = (not granted) and str(reply.get("response_source") or "").lower() == "automatic"
     permanent = bool(reply.get("is_permanent"))
     expires = None
@@ -741,8 +827,16 @@ async def note_permission_reply(redis, wa_id: str, reply: dict) -> dict | None:
         expires = datetime.now(timezone.utc) + timedelta(seconds=PERMISSION_TTL)
     data = await set_permission(redis, wa_id, "granted" if granted else "denied",
                                 expires_at=expires, permanent=permanent, revoked=revoked)
+    if messenger:
+        data = messenger_permission_shape(data, psid)
     event = {"type": "call_permission", **data}
     if revoked:
         event["reason"] = "automatic"
     await publish(redis, event)
     return data
+
+
+def messenger_permission_shape(data: dict, psid: str) -> dict:
+    """A permission record / answer stored under `messenger:<psid>`, as clients
+    read it: no wa_id, the channel and the PSID instead."""
+    return {**data, "wa_id": None, "channel": MESSENGER, "external_id": psid}

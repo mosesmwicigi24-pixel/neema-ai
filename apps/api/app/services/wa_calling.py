@@ -83,20 +83,23 @@ def _retryable(exc: MetaError) -> bool:
 
 
 async def _send(method: str, url: str, what: str, *, json_body: dict | None = None,
-                params: dict | None = None, retry: bool = False) -> dict:
+                params: dict | None = None, retry: bool = False,
+                token: str | None = None, label: str = "WA") -> dict:
     """One Graph request → parsed JSON. Raises MetaError. `retry` = once more on
-    429 / 5xx / network (only for requests that are safe to repeat)."""
+    429 / 5xx / network (only for requests that are safe to repeat). `token`
+    overrides the WABA token (the Messenger adapter passes the Page token)."""
     attempts = 2 if retry else 1
     last: MetaError | None = None
+    headers = {"Authorization": f"Bearer {token}"} if token else _auth()
     for attempt in range(attempts):
         try:
             async with httpx.AsyncClient() as client:
                 if method == "GET":
-                    resp = await client.get(url, headers=_auth(), params=params, timeout=15.0)
+                    resp = await client.get(url, headers=headers, params=params, timeout=15.0)
                 else:
-                    resp = await client.post(url, headers=_auth(), json=json_body, timeout=30.0)
+                    resp = await client.post(url, headers=headers, json=json_body, timeout=30.0)
         except Exception as exc:          # timeout / DNS / connection reset
-            last = MetaError(f"WA {what} failed (network): {exc}", status=0)
+            last = MetaError(f"{label} {what} failed (network): {exc}", status=0)
         else:
             if resp.is_success:
                 try:
@@ -104,8 +107,8 @@ async def _send(method: str, url: str, what: str, *, json_body: dict | None = No
                 except Exception:
                     return {}
             code, body = _error_of(resp)
-            _log.error("WA %s failed %s: %s", what, resp.status_code, resp.text[:300])
-            last = MetaError(f"WA {what} failed ({resp.status_code}): {resp.text[:300]}",
+            _log.error("%s %s failed %s: %s", label, what, resp.status_code, resp.text[:300])
+            last = MetaError(f"{label} {what} failed ({resp.status_code}): {resp.text[:300]}",
                              status=resp.status_code, code=code, body=body)
         if attempt + 1 < attempts and _retryable(last):
             await asyncio.sleep(random.uniform(*RETRY_JITTER))

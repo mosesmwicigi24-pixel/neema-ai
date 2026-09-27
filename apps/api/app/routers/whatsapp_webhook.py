@@ -331,34 +331,40 @@ async def _handle_calls(request: Request, payload: dict) -> None:
                 elif event == "terminate":
                     _log.info("WA call %s terminated (status=%s, dur=%ss)",
                               cid, call.get("status"), (call.get("duration") or "?"))
-                    info = await call_log.mark_ended(cid, duration=call.get("duration"))
-                    if info is None:
-                        # Already closed on our side (declined, callback, the stale
-                        # sweep): still say so — a screen that missed that event
-                        # must stop ringing now.
-                        try:
-                            from app.database import AsyncSessionLocal
-                            async with AsyncSessionLocal() as db:
-                                r = await call_log.row(db, cid)
-                        except Exception:
-                            r = None
-                        if r is None:
-                            # No row yet (this terminate beat the connect, or
-                            # our outbound row): park it for when it lands.
-                            await call_log.note_early(redis, "end", cid, {
-                                "duration": call.get("duration"), "status": call.get("status")})
-                        info = {"call_id": cid,
-                                "outcome": (r or {}).get("status")
-                                or ("completed" if call.get("duration") else "missed"),
-                                "duration": (r or {}).get("duration") or call.get("duration"),
-                                "direction": (r or {}).get("direction"),
-                                "agent_id": (r or {}).get("agent_id"),
-                                "agent_name": (r or {}).get("agent_name")}
-                    info.pop("wa_id", None)
-                    await call_log.publish(redis, {
-                        "type": "call_ended", **info, "call_id": cid,
-                        "status": call.get("status"),
-                    })
+                    await on_terminate(redis, cid, call.get("duration"), call.get("status"))
+
+
+async def on_terminate(redis, cid: str, duration, status, extra: dict | None = None) -> None:
+    """Meta's `terminate` for a call (either channel): close the row and tell
+    every agent. A call already closed on our side (declined, callback, the
+    stale sweep) is still announced — a screen that missed that event must stop
+    ringing now — and a terminate with no row yet is parked for when it lands."""
+    from app.services import call_log
+    info = await call_log.mark_ended(cid, duration=duration)
+    if info is None:
+        try:
+            from app.database import AsyncSessionLocal
+            async with AsyncSessionLocal() as db:
+                r = await call_log.row(db, cid)
+        except Exception:
+            r = None
+        if r is None:
+            # No row yet (this terminate beat the connect, or
+            # our outbound row): park it for when it lands.
+            await call_log.note_early(redis, "end", cid, {
+                "duration": duration, "status": status})
+        info = {"call_id": cid,
+                "outcome": (r or {}).get("status")
+                or ("completed" if duration else "missed"),
+                "duration": (r or {}).get("duration") or duration,
+                "direction": (r or {}).get("direction"),
+                "agent_id": (r or {}).get("agent_id"),
+                "agent_name": (r or {}).get("agent_name")}
+    info.pop("wa_id", None)
+    await call_log.publish(redis, {
+        "type": "call_ended", **info, "call_id": cid,
+        "status": status, **(extra or {}),
+    })
 
 
 async def _handle_call_status(redis, st: dict) -> None:

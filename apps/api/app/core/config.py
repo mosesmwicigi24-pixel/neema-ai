@@ -91,6 +91,12 @@ class Settings(BaseSettings):
     # page-scoped, so each contact belongs to exactly one page.
     meta_page_tokens: str = ""
     meta_graph_version: str = "v21.0"
+    # Messenger voice calling (Messenger Calling API, GA 2026-02-11 —
+    # services/messenger_calling.py). OFF: Messenger `calls` webhooks are only
+    # logged (so we can see whether Meta sends them), no agent is rung, and the
+    # /calls routes refuse a Messenger call with 409 `messenger_calling_off`.
+    # Incoming calls reach us only once the Page's call routing is PARTNERS.
+    messenger_calling_enabled: bool = False
 
     # Shared secret for the server-to-server analytics rollup the Bethany hub
     # pulls (per-person × per-channel message counts). INERT until set — the

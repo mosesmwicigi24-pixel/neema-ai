@@ -319,6 +319,161 @@ Details:
 
 ---
 
+## 7a. Messenger calling — exact shapes (read 2026-09-27)
+Read from the official pages (their `.md` sources) on 2026-09-27. Every field below appears in the docs; nothing is invented. Where the docs disagree with themselves, that is flagged and our code parses both ways. This is what `apps/api/app/services/messenger_calling.py` and the page-webhook tap in `routers/meta_webhook.py` implement.
+
+**Big difference from WhatsApp: the SDP direction is reversed for inbound calls.**
+- The Messenger `connect` webhook carries **no SDP**.
+- The business sends the **offer** in `accept`, and Meta returns the **answer** in the HTTP response ([MACC], [MC2BF]).
+- So for a Messenger call the softphone builds an offer, not an answer.
+
+### Access and eligibility
+- GA on 2026-02-11. "Any app with the `pages_messaging` permission can enable voice calling" ([MCHG]). No other permission is named. All calls use the **Page access token**.
+- Eligibility check ([MC]):
+
+  ```
+  POST /{page-id}/business_messaging_feature_status
+  {"features":[{"feature":"messenger_api_calling"}]}
+  → {"data":[{"feature":"messenger_api_calling","status":"enabled"}]}
+  ```
+
+  The prose says "A status of `ENABLED`" but the sample says `"enabled"`, so compare case-insensitively.
+- Kenya is on the available-countries list ([MC]).
+- **Unconfirmed:** the minimum Graph version. No page names one, so we use `settings.meta_graph_version`.
+
+### Webhook fields
+- Subscribe to `calls`. For business-initiated calls, also subscribe to `call_permission_reply` ([MWH]).
+- Call events arrive as **`entry[].calls[]`**, not under `changes[]` or `messaging[]`:
+
+  ```
+  {"object":"page","entry":[{"id":"{page-id}","time":…,"calls":[ … ]}]}
+  ```
+
+- **`connect`** (consumer- and business-initiated):
+
+  ```
+  {id:"c_…", to:"{page-id}", from:"{psid}", event:"connect", timestamp, call_direction:"business_initiated"|"user_initiated"}
+  ```
+
+  - There is no `session` or SDP, and no caller name.
+  - **Unclear:** `to` and `from` are documented as "Callee (Page ID)" and "Caller (PSID)" even for business-initiated calls. We take the PSID to be whichever side is not the page `entry.id`.
+- **`call_status`** (business-initiated only):
+
+  ```
+  {id, event:"call_status", timestamp, recipient_id:"{psid}", call_status:"ringing"|"accepted"}
+  ```
+
+  There is no rejected status. A declined call ends with `terminate`.
+- **`media_update`** (business-initiated calls, and whenever the consumer mutes or turns video on):
+
+  ```
+  {id, event:"media_update", timestamp, session:{version:int, sdp_renegotiation:{sdp_type:"offer", sdp}}}
+  ```
+
+  "apply the one with the highest version number".
+- **`terminate`**:
+
+  ```
+  {id, event:"terminate", timestamp, status:"Completed"|"Failed", start_time, end_time, duration}
+  ```
+
+  - `Completed` "includes calls rejected by the consumer or business".
+  - `duration` is empty if the business never connected.
+- **`call_permission_reply`** ([MB2C], [MB2CF]):
+
+  ```
+  {"object":"page","entry":[{"sender":{"id":"{psid}"},"recipient":{"id":"{page-id}"},"timestamp":…,
+    "call_permission_reply":{"response":"approve"|"reject","expiration_timestamp":"{ts}"}}]}
+  ```
+
+  - The sample puts it straight on `entry[]`, yet the prose calls it "a postback webhook". We also accept it inside `entry[].messaging[]`.
+  - `expiration_timestamp` is present only on `approve`.
+- **`call_settings_update`** (entry `call_settings`: `audio_enabled`, `icon_enabled`, `call_routing`, `call_hours`) ([MCS]). We log it only.
+
+### `/{page-id}/calls` actions
+All are `POST /{page-id}/calls`. `platform:"messenger"` is optional; the docs spell it both "Messenger" and "messenger", and we send lowercase.
+
+- **accept** ([MACC]):
+
+  ```
+  {platform, call_id, action:"accept", session:{sdp_type:"offer", sdp}}
+  → {success:true, session:{sdp_response, sdp_renegotiation}}
+  ```
+
+  - You have **60 s**. "If you don't respond, the call terminates on the consumer side with 'Not Answered'", followed by a terminate webhook ([MC2B], [MACC]).
+  - Apply the answer first, then the renegotiation offer, then create a local answer.
+  - **Inconsistent:** the accept sample shows `sdp_response` and `sdp_renegotiation` as plain strings. The JS sample and the media_update response show `{sdp_type, sdp}` objects. We accept both.
+- **reject**: `{platform, call_id, action:"reject"}` → `{success:true}` (incoming calls only) ([MREJ]).
+- **terminate**: `{platform, call_id, action:"terminate"}` → `{success:true}` ([MREJ], [MINIT]).
+- **connect** (business-initiated) ([MINIT]):
+
+  ```
+  {platform, to:"{psid}", action:"connect", session:{sdp_type:"offer", sdp}}
+  → {success:true, id:"c_…", session:{sdp_response:{sdp_type:"answer", sdp}}}
+  ```
+
+  - The answer comes back **synchronously**.
+  - After the consumer picks up, a `media_update` renegotiation offer follows.
+  - **Unclear:** the docs only say "Generate an SDP answer and apply it to your peer connection". No endpoint for posting that answer back is documented. We relay the offer to the browser as a `media_update` event.
+- **media_update** (video/tracks) ([MVID]):
+
+  ```
+  {platform, call_id, action:"media_update", from_version, to_version, tracks:[{msid,label,status}], session:{sdp_type:"offer", sdp}}
+  ```
+
+  **Not used.** Neema is voice only and never offers video.
+- Error codes ([MERR]):
+
+  | Code | Meaning |
+  |---|---|
+  | 2018389 | Page not allowlisted |
+  | 2018390 | Invalid call id |
+  | 2018391 | Invalid connection parameter |
+  | 2018392 | Invalid SDP |
+  | 2018393 | Page not in call |
+  | 2018394 | Insufficient permission to join |
+  | 2018395 | Cannot join failed call |
+  | 2018396 | Cannot join ended call |
+  | TBD | Call rate limit exceeded |
+
+  - The consumer-has-no-permission error on `connect` has **no documented code**. We check permission before connecting and match its text defensively.
+
+### Permission
+- **Read** ([MB2C]):
+
+  ```
+  GET /{page-id}/messenger_call_permissions?psid={psid}
+  → {permission:{status:"no_permission"|"has_permission", expiration_time}, actions:[{action_name:"send_call_permission_request"|"start_call", can_perform:bool, limits:[{time_period:"PT24H", max_allowed:2, current_usage}]}]}
+  ```
+
+  - The field is `can_perform`. WhatsApp's is `can_perform_action`.
+  - `has_permission` is described as "permanent" but "expires in 7 days by default", so we honour `expiration_time`.
+- **Request** ([MB2C]):
+
+  ```
+  POST /{page-id}/messages
+  {recipient:{id:psid}, message:{attachment:{type:"template", payload:{template_type:"calling_optin"}}}}
+  → {recipient:{id}, message_id}
+  ```
+
+  - The consumer sees **Accept** and **Decline** buttons.
+  - Limits: "at most **2 call permission requests per thread per day**". Each permission lasts **7 days**.
+  - Send API rules apply, including the 24-hour window.
+- **Implicit (callback) permission** after "a fully connected call" or after the consumer calls and "the business does not pick up" ([MB2C]).
+
+### Settings
+All under `POST /{page-id}/messenger_call_settings` ([MCS]):
+- `icon_enabled`
+- `call_hours{timezone_id, weekly_operating_hours[{day_of_week, open_time "hhmm", close_time}]}`
+- `call_routing{ring_target: "META"|"PARTNERS"}`. **Incoming calls reach our webhook only with `PARTNERS`**, and the app must be subscribed to `calls` before `PARTNERS` can be set.
+
+The `call_prompt` template (`ttl_days`, default 7) and the `audio_call` button CTA exist, but we don't use them. Messenger uses DTMF over RTP with no DTMF webhook ([MC]).
+
+### Instagram
+Unchanged from §7: no business calling API.
+
+---
+
 ## 8. Pricing
 - "All user-initiated calls are free" ([PRC]).
 - Business-initiated calls are billed per **6-second pulse** (partial pulses round up), by the callee's country code, with monthly volume tiers. A call that crosses a tier is priced entirely at the higher-volume (lower) rate. A payment method or credit line is required ([PRC], [FAQ]).
@@ -420,6 +575,12 @@ Details:
 - [MVID] https://developers.facebook.com/documentation/business-messaging/messenger-platform/calling/videocalling
 - [MCS] https://developers.facebook.com/documentation/business-messaging/messenger-platform/calling/callsettings
 - [MCHG] https://developers.facebook.com/documentation/business-messaging/messenger-platform/changelog
+- [MACC] https://developers.facebook.com/documentation/business-messaging/messenger-platform/calling/consumer2biz/accept-c2b-call
+- [MREJ] https://developers.facebook.com/documentation/business-messaging/messenger-platform/calling/consumer2biz/reject-end-call
+- [MC2BF] https://developers.facebook.com/documentation/business-messaging/messenger-platform/calling/consumer2biz/call-flow
+- [MB2CF] https://developers.facebook.com/documentation/business-messaging/messenger-platform/calling/biz2consumer/call-flow
+- [MINIT] https://developers.facebook.com/documentation/business-messaging/messenger-platform/calling/biz2consumer/initiate-call
+- [MERR] https://developers.facebook.com/documentation/business-messaging/messenger-platform/error-codes
 - [IGM] https://developers.facebook.com/documentation/business-messaging/instagram-messaging
 - [MBA] https://developers.facebook.com/documentation/meta-business-agent/overview
 - [MBAN] https://about.fb.com/news/2026/06/meta-business-agent/
@@ -460,6 +621,12 @@ Details:
 [MVID]: https://developers.facebook.com/documentation/business-messaging/messenger-platform/calling/videocalling
 [MCS]: https://developers.facebook.com/documentation/business-messaging/messenger-platform/calling/callsettings
 [MCHG]: https://developers.facebook.com/documentation/business-messaging/messenger-platform/changelog
+[MACC]: https://developers.facebook.com/documentation/business-messaging/messenger-platform/calling/consumer2biz/accept-c2b-call
+[MREJ]: https://developers.facebook.com/documentation/business-messaging/messenger-platform/calling/consumer2biz/reject-end-call
+[MC2BF]: https://developers.facebook.com/documentation/business-messaging/messenger-platform/calling/consumer2biz/call-flow
+[MB2CF]: https://developers.facebook.com/documentation/business-messaging/messenger-platform/calling/biz2consumer/call-flow
+[MINIT]: https://developers.facebook.com/documentation/business-messaging/messenger-platform/calling/biz2consumer/initiate-call
+[MERR]: https://developers.facebook.com/documentation/business-messaging/messenger-platform/error-codes
 [IGM]: https://developers.facebook.com/documentation/business-messaging/instagram-messaging
 [MBA]: https://developers.facebook.com/documentation/meta-business-agent/overview
 [MBAN]: https://about.fb.com/news/2026/06/meta-business-agent/
