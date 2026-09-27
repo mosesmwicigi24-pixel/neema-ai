@@ -106,7 +106,16 @@ async function req<T>(
 
     if (!res.ok) {
         const err = await res.text();
-        throw new Error(`${method} ${path} → ${res.status}: ${err}`);
+        // Same message as always (older callers parse it); newer ones read the
+        // structured refusal ({detail, code, action, …} + X-Neema-Reason) off
+        // the error itself via apiErrorInfo().
+        let parsed: unknown = null;
+        try { parsed = JSON.parse(err); } catch { parsed = null; }
+        throw Object.assign(new Error(`${method} ${path} → ${res.status}: ${err}`), {
+            status: res.status,
+            reason: res.headers.get("X-Neema-Reason"),
+            body: parsed && typeof parsed === "object" ? parsed : null,
+        });
     }
     if (res.status === 204) return undefined as T;
     return res.json();
@@ -744,6 +753,8 @@ export interface ApiCall {
     insights?: CallInsights | null;
     transcript_status?: string | null;  // none | recorded | pending | processing | done | failed
     has_recording?: boolean;
+    /** WhatsApp voicemail arrived for this call (the audio is in the chat). */
+    has_voicemail?: boolean;
     follow_up_open?: boolean;
     follow_up_done_at?: string | null;
 }
@@ -764,14 +775,87 @@ export interface CallIceConfig {
     record?: boolean;          // server kill switch for the browser recording
     transcribe?: boolean;      // Whisper is on (on-demand transcription works)
     auto_transcribe?: boolean; // …and runs by itself after every upload
+    /** WhatsApp transcribes the call itself (opt-in on the server) — "Summary in a minute". */
+    meta_transcription?: boolean;
 }
 
-/** Whether a customer allowed business calls (WhatsApp needs it before we ring them). */
+/** Whether a customer allowed business calls (WhatsApp needs it before we ring them).
+ *  The fields after `permanent` come from Meta's own answer (docs/CALLING_UX.md §2.1)
+ *  and are absent on older servers. */
 export interface CallPermission {
     wa_id?: string;
     status: "granted" | "denied" | "requested" | "unknown";
     expires_at: string | null;
     permanent: boolean;
+    /** Meta's view; null when Meta couldn't be reached. */
+    meta_status?: "no_permission" | "temporary" | "permanent" | null;
+    can_call?: boolean;
+    can_request?: boolean;
+    request_available_at?: string | null;
+    calls_left_today?: number | null;
+    /** WhatsApp removed the permission after 4 unanswered calls. */
+    revoked?: boolean;
+    unanswered_streak?: number;
+    source?: "meta" | "store";
+    /** When we asked (our store), if known. */
+    requested_at?: string | null;
+}
+
+export interface CallPermissionRequestResp {
+    ok: boolean;
+    permission?: CallPermission;
+    route?: "free_form" | "template" | null;
+    /** They already allow calls permanently — nothing to ask: call. */
+    already_permitted?: boolean;
+}
+
+/** The number's WhatsApp calling settings (GET /admin/calls/settings). */
+export interface CallHoursDay { day_of_week: string; open_time: string; close_time: string; }
+export interface CallHoliday { date: string; start_time: string; end_time: string; }
+export interface CallSettings {
+    status?: string | null;
+    call_icon_visibility?: string | null;
+    callback_permission_status?: string | null;
+    call_hours?: {
+        status?: string | null;
+        timezone_id?: string | null;
+        weekly_operating_hours?: CallHoursDay[];
+        holiday_schedule?: CallHoliday[];
+    } | null;
+    voicemail?: { status?: string | null; triggers?: string[] | null; timeout_seconds?: number | null } | null;
+    restrictions?: { type?: string; expiration?: number | string | null; [k: string]: unknown }[];
+    last_settings_event?: { value?: unknown; at?: string } | null;
+    last_restriction_event?: { reasons?: string[]; at?: string; value?: unknown } | null;
+}
+export interface CallSettingsPatch {
+    status?: string;
+    call_icon_visibility?: string;
+    callback_permission_status?: string;
+    call_hours?: Partial<NonNullable<CallSettings["call_hours"]>>;
+    voicemail?: { status?: string; triggers?: string[]; timeout_seconds?: number };
+}
+export interface CallPermissionTemplate {
+    configured: boolean;
+    name: string | null;
+    language: string | null;
+    source: "env" | "app" | null;
+    waba_configured: boolean;
+    exists: boolean | null;
+    status: string | null;
+    category?: string | null;
+    error?: { code?: string; reason?: string; action?: string } | null;
+}
+
+/** What to offer after a refused calling request (docs/CALLING_UX.md §2.1). */
+export type CallErrorAction = "retry" | "request_permission" | "wait" | "admin" | "none";
+export interface ApiErrorInfo {
+    status: number | null;
+    detail: string | null;
+    /** Meta's error code as a string ("138006") or ours ("template_required"). */
+    code: string | null;
+    action: CallErrorAction | null;
+    /** Every other field of the refusal body (request_available_at, route, …). */
+    data: Record<string, unknown>;
 }
 
 // ── Reading a failed request ─────────────────────────────────────────────────
@@ -799,6 +883,34 @@ export function apiErrorDetail(e: unknown): string | null {
         const t = body.trim();
         return t && !t.startsWith("<") && t.length < 300 ? t : null;
     }
+}
+
+/** A failed req() in full: status, the sentence to show, and the structured
+ *  `code` / `action` newer calling routes send (body or X-Neema-Reason). */
+export function apiErrorInfo(e: unknown): ApiErrorInfo {
+    const err = e as { status?: number; reason?: string | null; body?: Record<string, unknown> | null } | null;
+    let body: Record<string, unknown> | null = err && typeof err === "object" && err.body ? err.body : null;
+    if (!body) {
+        const msg = String((e as Error)?.message ?? e ?? "");
+        const i = msg.search(/→ \d{3}: /);
+        if (i >= 0) {
+            try {
+                const b = JSON.parse(msg.slice(msg.indexOf(": ", i) + 2));
+                if (b && typeof b === "object") body = b as Record<string, unknown>;
+            } catch { /* not JSON */ }
+        }
+    }
+    const str = (v: unknown) => (typeof v === "string" && v ? v : null);
+    const code = str(body?.code) ?? (err && typeof err === "object" ? str(err.reason) : null);
+    const act = str(body?.action);
+    const actions: CallErrorAction[] = ["retry", "request_permission", "wait", "admin", "none"];
+    return {
+        status: (err && typeof err === "object" && typeof err.status === "number") ? err.status : apiErrorStatus(e),
+        detail: apiErrorDetail(e),
+        code,
+        action: act && (actions as string[]).includes(act) ? act as CallErrorAction : null,
+        data: body ?? {},
+    };
 }
 
 /** True when a request failed for want of a connection (offline, reset, timed out). */
@@ -841,8 +953,16 @@ export const callsApi = {
         post<{ ok: boolean }>(`${callPath(callId)}/follow-up-done`, {}),
     connect: (to: string, sdp: string, name?: string) =>
         post<{ ok: boolean; call_id: string }>("/admin/calls/connect", { to, sdp, name }),
-    requestPermission: (to: string) =>
-        post<{ ok: boolean; permission?: CallPermission }>("/admin/calls/request-permission", { to }),
+    requestPermission: (to: string, name?: string | null) =>
+        post<CallPermissionRequestResp>("/admin/calls/request-permission", name ? { to, name } : { to }),
+    /** Admin (manage_settings): the number's WhatsApp calling settings. */
+    settings: () => get<CallSettings>("/admin/calls/settings"),
+    /** Send only the fields that changed. */
+    saveSettings: (patch: CallSettingsPatch) =>
+        post<{ ok: boolean; sent: CallSettingsPatch; settings: CallSettings | null }>("/admin/calls/settings", patch),
+    permissionTemplate: () => get<CallPermissionTemplate>("/admin/calls/permission-template"),
+    createPermissionTemplate: (body: { name?: string; language?: string; body_text?: string } = {}) =>
+        post<{ ok: boolean; name: string; language: string; id?: string; status: string }>("/admin/calls/permission-template", body),
     transcript: (callId: string) =>
         get<CallTranscriptResp>(`${callPath(callId)}/transcript`),
     transcribe: (callId: string) =>

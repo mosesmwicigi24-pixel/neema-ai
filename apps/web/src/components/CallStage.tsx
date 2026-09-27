@@ -19,6 +19,7 @@ import {
     type CallOutcome, type CallPhase,
 } from "@/lib/callContext";
 import type { OpenChatRequest } from "@/types";
+import { permissionLines, relTime, type PermTone } from "@/lib/callStatus";
 
 const WA = {
     bg: "#0B141A", bg2: "#111B21", panel: "#202C33", text: "#E9EDEF", muted: "#8696A0",
@@ -41,6 +42,8 @@ const ICONS: Record<string, React.ReactElement> = {
     "wifi-off": <><path d="M1 1l22 22M16.7 11.1A10.9 10.9 0 0119 12.6M5 12.6a10.9 10.9 0 015.2-2.5M10.7 5A16 16 0 0122.6 9M1.4 9a16 16 0 014.3-2.8M8.5 16.1a5 5 0 017 0M12 20h.01" /></>,
     check: <path d="M20 6L9 17l-5-5" />,
     in: <path d="M17 7L7 17M7 17h7M7 17v-7" />,
+    clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
+    shield: <path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z" />,
     out: <path d="M7 17L17 7M17 7h-7M17 7v7" />,
 };
 
@@ -103,11 +106,13 @@ function outcomeWords(o: CallOutcome | null, c: ReturnType<typeof useCall>): str
         case "callback": return c.byAgent ? `${agentFirst(c.byAgent)} saved it to call back — find it under Calls`
             : "Saved to call back — find it under Calls";
         case "no_answer": return "No answer";
+        case "rejected": return `${first} declined the call`;
         case "cancelled": return "Call cancelled";
         case "connection_lost": return `Call dropped${d} — the connection was lost`;
         case "failed": return c.reason || "The call couldn't be connected";
         case "permission_needed": return `${first} hasn't allowed WhatsApp calls yet`;
         case "permission_requested": return `Call request sent — you'll be told when ${first} taps Allow`;
+        case "permission_granted": return `${first} already allows calls — call now`;
         case "mic_blocked": return "Microphone blocked — allow it in settings";
         default: return "Call ended";
     }
@@ -116,8 +121,8 @@ function outcomeWords(o: CallOutcome | null, c: ReturnType<typeof useCall>): str
 // Every outcome is an icon AND words (never colour alone, §5).
 const OUTCOME_ICON: Record<CallOutcome, string> = {
     completed: "phone-off", answered_elsewhere: "check", declined: "phone-off", missed: "in",
-    callback: "callback", no_answer: "alert", cancelled: "phone-off", connection_lost: "wifi-off",
-    failed: "alert", permission_needed: "alert", permission_requested: "check", mic_blocked: "alert",
+    callback: "callback", no_answer: "alert", rejected: "x", cancelled: "phone-off", connection_lost: "wifi-off",
+    failed: "alert", permission_needed: "alert", permission_requested: "check", permission_granted: "check", mic_blocked: "alert",
 };
 
 // Neutral wrap-ups close themselves; ones that leave the agent owing the
@@ -131,14 +136,32 @@ const AUTO_CLOSE: Partial<Record<CallOutcome, number>> = {
     completed: 8000,
 };
 
-type Action = { label: string; onClick: () => void; primary?: boolean; busy?: boolean };
+type Action = { label: string; onClick: () => void; primary?: boolean; busy?: boolean; disabled?: boolean; title?: string };
 
-function wrapUpActions(c: NonNullable<ReturnType<typeof useCall>>, showHelp: () => void): Action[] {
+/** When asking again becomes possible (a 138009 refusal, or Meta's limit counters). */
+function askAgainAt(c: NonNullable<ReturnType<typeof useCall>>): string | null {
+    if (c.availableAt) return c.availableAt;
+    const p = c.permission;
+    return p && p.can_request === false && p.status !== "granted" ? p.request_available_at ?? null : null;
+}
+
+function wrapUpActions(c: NonNullable<ReturnType<typeof useCall>>, showHelp: () => void, openSettings?: () => void): Action[] {
     // Done is a calm, deliberate tap — the one moment we ask (once ever) to
     // notify about calls that ring while Neema is in a background tab.
     const done: Action = { label: "Done", onClick: () => { c.dismiss(); c.offerNotifications(); } };
     const chat = (label: string, primary = false): Action => ({ label, onClick: c.openChat, primary });
     const inbound = c.call?.direction === "inbound";
+    const settings: Action | null = openSettings
+        ? { label: "Open WhatsApp calling settings", onClick: () => { c.dismiss(); openSettings(); }, primary: true } : null;
+    const askAt = askAgainAt(c);
+    const sendRequest = (): Action => {
+        const blocked = c.permission?.can_request === false || (c.errAction === "wait" && !!askAt);
+        return {
+            label: c.permissionBusy ? "Sending…" : "Send call request", onClick: c.requestPermission, primary: !blocked,
+            busy: c.permissionBusy, disabled: blocked,
+            title: blocked ? (askAt ? `WhatsApp allows another request ${relTime(askAt)}` : "WhatsApp's request limit is reached") : undefined,
+        };
+    };
     switch (c.outcome) {
         case "completed": return [chat("Open chat", true), { label: "Call again", onClick: c.redial }, done];
         case "answered_elsewhere": return [done];
@@ -146,16 +169,60 @@ function wrapUpActions(c: NonNullable<ReturnType<typeof useCall>>, showHelp: () 
         case "missed": return [{ label: "Call back", onClick: c.redial, primary: true }, chat("Message"), done];
         case "callback": return [done];
         case "no_answer": return [{ label: "Call again", onClick: c.redial, primary: true }, chat("Message"), done];
+        // They turned it down: write instead, or leave it for later — never redial at once.
+        case "rejected": return [chat("Message", true), { label: "Try later", onClick: c.dismiss }, done];
         case "cancelled": return [done];
         case "connection_lost": return [{ label: "Call again", onClick: c.redial, primary: true }, chat("Open chat"), done];
-        case "failed": return [{ label: inbound ? "Call back" : "Try again", onClick: c.redial, primary: true }, chat("Message"), done];
-        case "permission_needed": return [
-            { label: c.permissionBusy ? "Sending…" : "Send call request", onClick: c.requestPermission, primary: true, busy: c.permissionBusy },
-            chat("Message"), { label: "Cancel", onClick: c.dismiss }];
+        case "failed":
+            switch (c.errAction) {
+                case "request_permission": return [sendRequest(), chat("Message"), done];
+                case "wait": return [chat("Message", true), done];
+                case "admin": return settings ? [settings, chat("Message"), done] : [chat("Message", true), done];
+                case "none": return [chat("Message", true), done];
+                default: return [{ label: inbound ? "Call back" : "Try again", onClick: c.redial, primary: true }, chat("Message"), done];
+            }
+        case "permission_needed":
+            // No template for customers outside the 24 h window: only an admin can fix it.
+            if (c.errCode === "template_required" || c.errAction === "admin") {
+                return settings ? [settings, chat("Message"), { label: "Cancel", onClick: c.dismiss }]
+                    : [chat("Message", true), { label: "Cancel", onClick: c.dismiss }];
+            }
+            return [sendRequest(), chat("Message"), { label: "Cancel", onClick: c.dismiss }];
         case "permission_requested": return [chat("Message"), done];
+        case "permission_granted": return [{ label: "Call now", onClick: c.redial, primary: true }, done];
         case "mic_blocked": return [{ label: "How to allow it", onClick: showHelp, primary: true }, done];
         default: return [done];
     }
+}
+
+const TONE: Record<PermTone, { color: string; icon: string }> = {
+    ok: { color: "#7EE2A8", icon: "check" },
+    wait: { color: WA.amber, icon: "clock" },
+    bad: { color: "#FFB3C0", icon: "alert" },
+    info: { color: WA.muted, icon: "shield" },
+};
+
+/** The permission facts under a wrap-up (and the caution before a call) — text + icon, never colour alone. */
+function PermissionFacts({ c }: { c: NonNullable<ReturnType<typeof useCall>> }) {
+    const first = firstName(c.call);
+    let lines = permissionLines(c.permission, first)
+        // The status line already says these.
+        .filter((l) => !l.text.endsWith("hasn't allowed calls yet"))
+        .filter((l) => !(c.outcome === "permission_requested" && l.text.startsWith("Request sent")));
+    const askAt = askAgainAt(c);
+    if (askAt && !lines.some((l) => l.text.startsWith("You can ask again"))) {
+        lines = [...lines, { text: `You can ask again ${relTime(askAt)}`, tone: "wait" }];
+    }
+    if (!lines.length) return null;
+    return (
+        <ul className="mt-2 flex flex-col items-center gap-1" aria-label="Call permission">
+            {lines.map((l) => (
+                <li key={l.text} className="flex items-center gap-1.5" style={{ fontSize: 13, color: TONE[l.tone].color }}>
+                    <Icon name={TONE[l.tone].icon} size={14} /> {l.text}
+                </li>
+            ))}
+        </ul>
+    );
 }
 
 function RoundBtn({ label, a11y, icon, onClick, color, fg = "#fff", size = 60, pressed, expanded, btnRef, disabled }: {
@@ -315,7 +382,11 @@ function announcement(c: NonNullable<ReturnType<typeof useCall>>): string {
     }
 }
 
-export function CallStage({ onOpenConversation }: { onOpenConversation?: (req: OpenChatRequest) => void }): React.ReactElement | null {
+export function CallStage({ onOpenConversation, onOpenCallingSettings }: {
+    onOpenConversation?: (req: OpenChatRequest) => void;
+    /** Only for agents who may change settings (manage_settings): Settings → WhatsApp calling. */
+    onOpenCallingSettings?: () => void;
+}): React.ReactElement | null {
     const c = useCall();
     const answerRef = useRef<HTMLButtonElement>(null);
     const cardRef = useRef<HTMLDivElement>(null);
@@ -472,9 +543,16 @@ export function CallStage({ onOpenConversation }: { onOpenConversation?: (req: O
     } else {
         status = PHASE_WORDS[phase] ?? "";
     }
-    const endedTone = ended && ["missed", "no_answer", "connection_lost", "failed", "mic_blocked", "permission_needed"].includes(c.outcome ?? "");
+    const endedTone = ended && ["missed", "no_answer", "rejected", "connection_lost", "failed", "mic_blocked", "permission_needed"].includes(c.outcome ?? "");
 
-    const actions = ended ? wrapUpActions(c, () => setMicHelpFor(callId ?? null)) : [];
+    const actions = ended ? wrapUpActions(c, () => setMicHelpFor(callId ?? null), onOpenCallingSettings) : [];
+    // Refusals only an admin can clear (expired token, no template, not configured).
+    const needsAdmin = ended && (c.outcome === "failed" || c.outcome === "permission_needed")
+        && (c.errAction === "admin" || c.errCode === "template_required");
+    const waitAt = ended && c.outcome === "failed" && c.errAction === "wait" ? c.availableAt : null;
+    // Before (and while) ringing them: they've let our last calls ring out — WhatsApp revokes at 4.
+    const streak = c.permission?.unanswered_streak ?? 0;
+    const caution = (phase === "placing" || phase === "ringing_out") && streak >= 2;
 
     return (
         <>
@@ -545,6 +623,27 @@ export function CallStage({ onOpenConversation }: { onOpenConversation?: (req: O
                 {ended && c.outcome === "permission_needed" && !c.reason && (
                     <div className="mt-2 max-w-sm" style={{ fontSize: 13, color: WA.muted }}>
                         WhatsApp only lets a business call someone who allowed it. The request is a WhatsApp message with an Allow button.
+                    </div>
+                )}
+                {ended && (c.outcome === "permission_needed" || c.outcome === "permission_requested"
+                    || c.outcome === "permission_granted") && <PermissionFacts c={c} />}
+                {needsAdmin && (
+                    <div className="mt-2 flex items-center gap-1.5 rounded-full px-3 py-1.5"
+                        style={{ fontSize: 13, backgroundColor: "rgba(255,176,46,0.14)", color: WA.amber }}>
+                        <Icon name="shield" size={15} />
+                        {onOpenCallingSettings ? "An admin must fix this — you can, in Settings" : "Ask an admin — only they can fix this"}
+                    </div>
+                )}
+                {waitAt && (
+                    <div className="mt-2 flex items-center gap-1.5" style={{ fontSize: 13, color: WA.amber }}>
+                        <Icon name="clock" size={14} /> Try again {relTime(waitAt)}
+                    </div>
+                )}
+                {caution && (
+                    <div role="note" className="mt-3 max-w-sm flex items-start gap-1.5 rounded-xl px-3 py-2 text-left"
+                        style={{ fontSize: 13, backgroundColor: "rgba(255,176,46,0.12)", color: WA.amber }}>
+                        <Icon name="alert" size={15} style={{ flexShrink: 0, marginTop: 2 }} />
+                        <span>{firstName(c.call)} missed your last {streak} calls — WhatsApp removes call permission after 4 in a row. Consider a message first.</span>
                     </div>
                 )}
                 {ended && c.outcome === "mic_blocked" && micHelp && (
@@ -619,7 +718,8 @@ export function CallStage({ onOpenConversation }: { onOpenConversation?: (req: O
                 {ended && (
                     <div className="flex flex-wrap items-center justify-center gap-2">
                         {actions.map((a, i) => (
-                            <button key={a.label} type="button" onClick={a.onClick} disabled={a.busy}
+                            <button key={a.label} type="button" onClick={a.onClick} disabled={a.busy || a.disabled}
+                                title={a.title}
                                 ref={i === 0 ? primaryRef : undefined}
                                 // Three choices don't fit one row on a phone: the main one
                                 // gets its own full-width row, the others sit under it.
@@ -715,7 +815,7 @@ export function CallBar(): React.ReactElement | null {
                     </span>
                 </button>
                 {primary && (
-                    <button type="button" onClick={primary.onClick} disabled={primary.busy}
+                    <button type="button" onClick={primary.onClick} disabled={primary.busy || primary.disabled}
                         className="rounded-full px-3 font-semibold flex-shrink-0"
                         style={{ minHeight: 44, fontSize: 13, backgroundColor: WA.greenText, color: "#fff" }}>{primary.label}</button>
                 )}

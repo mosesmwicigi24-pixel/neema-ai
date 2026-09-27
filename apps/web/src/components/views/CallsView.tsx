@@ -11,7 +11,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { callsApi, type ApiCall, type CallTranscriptResp } from "@/lib/api";
 import { useWs } from "@/lib/websocket";
 import { useCall } from "@/lib/callContext";
-import { callStatus, fmtCallDuration, upsertCall, CALL_ICON_PATH } from "@/lib/callStatus";
+import { callStatus, fmtCallDuration, upsertCall, CALL_ICON_PATH, speakerTurns, dayDate } from "@/lib/callStatus";
 import type { SharedViewProps, OpenChatRequest } from "@/types";
 import { dayLabel, clockTime } from "@/lib/utils";
 import { CustomerSidebar } from "@/components/ui/CustomerSidebar";
@@ -41,6 +41,27 @@ function CallIcon({ c, size = 13 }: { c: ApiCall; size?: number }) {
         </svg>
     );
 }
+
+// WhatsApp voicemail: the audio itself is a normal message in the chat.
+const VoicemailGlyph = ({ size = 13 }: { size?: number }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2}
+        strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="flex-shrink-0">
+        <circle cx="6" cy="12" r="3.5" /><circle cx="18" cy="12" r="3.5" /><path d="M6 15.5h12" />
+    </svg>
+);
+const VM = { fg: "#f5c451", bg: "rgba(245,196,81,0.16)" };
+
+/** Meta's restriction reasons, in words an agent can act on. */
+const RESTRICTION_WORDS: Record<string, string> = {
+    LOW_BUSINESS_INITIATED_CALLING_QUALITY: "too many of our calls were rated poorly",
+    RESTRICTED_BUSINESS_INITIATED_CALLING: "customers reported or blocked our calls",
+    LOW_USER_INITIATED_CALLING_QUALITY: "customers rated their calls to us poorly",
+    USER_INITIATED_CALLS_LOW_PICKUP_RATE: "too many customer calls went unanswered",
+    RESTRICTED_USER_INITIATED_CALLING_CALL_BUTTON_HIDDEN: "the call button is hidden from customers for now",
+    RESTRICTED_USER_INITIATED_CALLING: "customers can't call us for now",
+};
+const restrictionReason = (reasons: string[]): string =>
+    reasons.map((r) => RESTRICTION_WORDS[r] ?? r.toLowerCase().replace(/_/g, " ")).join("; ") || "calling quality";
 
 const PhoneGlyph = ({ size = 16 }: { size?: number }) => (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
@@ -155,9 +176,26 @@ function CallTranscript({ call, onUseReply }: { call: ApiCall; onUseReply?: (tex
                         style={{ fontSize: 12, color: C.sub, minHeight: 44 }}>
                         {showFull ? "Hide" : "Show"} full transcript{data.language ? ` · ${data.language}` : ""}
                     </button>
-                    {showFull && (
-                        <div style={{ fontSize: 12, color: C.sub, whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{data.transcript}</div>
-                    )}
+                    {showFull && (() => {
+                        const turns = speakerTurns(data.transcript);
+                        if (!turns) return <div style={{ fontSize: 12, color: C.sub, whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{data.transcript}</div>;
+                        // Two speakers (WhatsApp's own transcript): who said what, at a glance.
+                        return (
+                            <ol aria-label="Transcript" className="space-y-1.5">
+                                {turns.map((t, i) => (
+                                    <li key={i} className={`flex ${t.who === "Agent" ? "justify-end" : "justify-start"}`}>
+                                        <div className="rounded-xl px-3 py-1.5" style={{ maxWidth: "88%",
+                                            background: t.who === "Agent" ? "rgba(37,211,102,0.12)" : "rgba(255,255,255,0.06)" }}>
+                                            <div style={{ fontSize: 11, fontWeight: 600, color: t.who === "Agent" ? C.green : "#9fc3ff" }}>
+                                                {t.who === "Agent" ? "Agent" : "Customer"}
+                                            </div>
+                                            <div style={{ fontSize: 13, color: C.text, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{t.text}</div>
+                                        </div>
+                                    </li>
+                                ))}
+                            </ol>
+                        );
+                    })()}
                 </>
             )}
             {(st === "pending" || st === "processing") && (
@@ -243,11 +281,18 @@ function CallDetail({ c, onBack, onCallBack, onOpenChat, onUseReply, onFollowUpD
                         style={{ minHeight: 44, fontSize: 13, color: C.sub }} aria-label={isMobile ? "Back to all calls" : "Close call details"}>
                         {isMobile ? "← All calls" : "Close"}
                     </button>
-                    {c.follow_up_open && (
-                        <span className="rounded-full px-2.5 py-1" style={{ fontSize: 12, fontWeight: 600, color: "#ffb3b5", background: "rgba(242,85,90,0.16)" }}>
-                            Follow-up open
-                        </span>
-                    )}
+                    <span className="flex items-center gap-1.5">
+                        {c.has_voicemail && (
+                            <span className="rounded-full px-2.5 py-1 flex items-center gap-1" style={{ fontSize: 12, fontWeight: 600, color: VM.fg, background: VM.bg }}>
+                                <VoicemailGlyph /> Voicemail
+                            </span>
+                        )}
+                        {c.follow_up_open && (
+                            <span className="rounded-full px-2.5 py-1" style={{ fontSize: 12, fontWeight: 600, color: "#ffb3b5", background: "rgba(242,85,90,0.16)" }}>
+                                Follow-up open
+                            </span>
+                        )}
+                    </span>
                 </div>
                 <div className="flex items-center gap-3 mt-1">
                     <div className="flex items-center justify-center rounded-full flex-shrink-0"
@@ -290,6 +335,20 @@ function CallDetail({ c, onBack, onCallBack, onOpenChat, onUseReply, onFollowUpD
                     )}
                 </div>
             </div>
+            {c.has_voicemail && (
+                <div className="px-4 py-3 flex items-center gap-3 flex-wrap" style={{ borderBottom: `1px solid ${C.line}` }}>
+                    <span className="flex-1 min-w-0 flex items-center gap-1.5" style={{ fontSize: 13, color: VM.fg }}>
+                        <VoicemailGlyph size={15} /> {who.startsWith("+") ? "They" : who.split(/\s+/)[0]} left a voicemail — it&apos;s in the chat.
+                    </span>
+                    {onOpenChat && (
+                        <button type="button" onClick={onOpenChat} className="rounded-full px-4 font-semibold"
+                            style={{ minHeight: 44, fontSize: 13, background: VM.bg, color: VM.fg }}
+                            aria-label={`Open chat to listen to ${who}'s voicemail`}>
+                            Open chat to listen
+                        </button>
+                    )}
+                </div>
+            )}
             <div className="px-4 py-4" style={{ borderBottom: `1px solid ${C.line}` }}>
                 <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, color: C.faint, marginBottom: 8 }}>Timeline</div>
                 <Timeline c={c} />
@@ -522,6 +581,22 @@ export function CallsView({ isMobile, onOpenConversation, onToast, focusWaId, on
                         </div>
                     </div>
 
+                    {callCtx?.restriction && (
+                        <div role="alert" className="mx-5 mb-3 rounded-xl px-3 py-2 flex items-start gap-2"
+                            style={{ fontSize: 13, background: "rgba(234,0,56,0.16)", color: "#ffc2cc", border: "1px solid rgba(234,0,56,0.35)" }}>
+                            <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2}
+                                strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="flex-shrink-0" style={{ marginTop: 2 }}>
+                                <path d="M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z" />
+                            </svg>
+                            <span className="flex-1 min-w-0">
+                                WhatsApp paused business-initiated calling{callCtx.restriction.until ? ` until ${dayDate(callCtx.restriction.until)}` : ""}: {restrictionReason(callCtx.restriction.reasons)}
+                            </span>
+                            <button type="button" onClick={callCtx.dismissRestriction} aria-label="Dismiss"
+                                className="flex-shrink-0 rounded-full flex items-center justify-center" style={{ width: 44, height: 44, marginTop: -12, marginBottom: -12, marginRight: -8 }}>
+                                <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} aria-hidden="true"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                            </button>
+                        </div>
+                    )}
                     {!online && (
                         <div role="status" className="mx-5 mb-3 rounded-xl px-3 py-2" style={{ fontSize: 13, background: "rgba(245,182,66,0.12)", color: "#f5c451" }}>
                             You&apos;re offline — showing the last loaded calls. Calls can&apos;t ring here until you&apos;re back.
@@ -588,7 +663,7 @@ export function CallsView({ isMobile, onOpenConversation, onToast, focusWaId, on
                                                 style={{ borderTop: `1px solid ${C.line}`, backgroundColor: sel ? "rgba(37,211,102,0.08)" : undefined }}>
                                                 <button type="button" onClick={() => setSelectedId(c.call_id)}
                                                     className="flex-1 min-w-0 flex items-center gap-3 text-left"
-                                                    style={{ minHeight: 48 }} aria-label={`${who}, ${st.word}, details`}>
+                                                    style={{ minHeight: 48 }} aria-label={`${who}, ${st.word}${c.has_voicemail ? ", voicemail" : ""}, details`}>
                                                     <span className="flex items-center justify-center rounded-full flex-shrink-0"
                                                         style={{ width: 40, height: 40, backgroundColor: avatarColor(who), color: "#fff", fontSize: 13, fontWeight: 500 }}>
                                                         {initialsOf(who)}
@@ -604,6 +679,11 @@ export function CallsView({ isMobile, onOpenConversation, onToast, focusWaId, on
                                                             {c.follow_up_open && (
                                                                 <span className="rounded-full px-1.5" style={{ fontSize: 11, fontWeight: 600, background: "rgba(242,85,90,0.2)", color: "#ffb3b5" }}>
                                                                     Follow up
+                                                                </span>
+                                                            )}
+                                                            {c.has_voicemail && (
+                                                                <span className="rounded-full px-1.5 flex items-center gap-1" style={{ fontSize: 11, fontWeight: 600, background: VM.bg, color: VM.fg }}>
+                                                                    <VoicemailGlyph size={11} /> Voicemail
                                                                 </span>
                                                             )}
                                                             {c.duration ? <span style={{ color: "#7f9b8b" }}>· {fmtCallDuration(c.duration)}</span> : null}

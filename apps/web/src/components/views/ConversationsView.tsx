@@ -55,7 +55,9 @@ function CallPill({ msg, onUseReply, composerReady = true }: { msg: Message; onU
     const agent = msg.agent_name && !["missed", "no_answer", "cancelled", "failed"].includes(call?.status ?? "")
         ? msg.agent_name.split(" ")[0] : null;
     const at = call?.started_at || msg.created_at;
-    const label = msg.text || st.word;
+    // WhatsApp voicemail for this call: the audio is the voice note right here in the chat.
+    const baseLabel = msg.text || st.word;
+    const label = call?.has_voicemail && !/voicemail/i.test(baseLabel) ? `${baseLabel} · voicemail` : baseLabel;
     const long = !!summary && summary.length > 220;
     return (
         <div className="flex flex-col items-center gap-1.5 my-2.5">

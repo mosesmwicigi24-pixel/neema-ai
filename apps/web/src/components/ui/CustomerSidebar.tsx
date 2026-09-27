@@ -16,10 +16,10 @@ import {
     displayName,
 } from "@/lib/utils";
 import type { Conversation, Order } from "@/types";
-import { whatsappApi, callsApi, askNeema, answerViaNeema, settingsApi, type ApiCall } from "@/lib/api";
+import { whatsappApi, callsApi, askNeema, answerViaNeema, settingsApi, type ApiCall, type CallPermission } from "@/lib/api";
 import { useWs } from "@/lib/websocket";
-import { callStatus, fmtCallDuration, upsertCall, CALL_ICON_PATH } from "@/lib/callStatus";
-import { useCallPresence } from "@/lib/callContext";
+import { callStatus, fmtCallDuration, upsertCall, CALL_ICON_PATH, permissionLines, type PermTone } from "@/lib/callStatus";
+import { useCallPresence, firstName } from "@/lib/callContext";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -787,6 +787,50 @@ function MetaCallSheet({ meta, first, name, callDigits, busy, busyLabel, onCall,
     );
 }
 
+// Whether WhatsApp lets us call them, in Meta's own words (docs/CALLING_UX.md
+// §2.1) — where the agent decides to call. Nothing when the server can't say.
+const PERM_TONE: Record<PermTone, { color: string; d: string }> = {
+    ok: { color: "#128C4B", d: "M20 6L9 17l-5-5" },
+    wait: { color: "#A15C00", d: "M12 7v5l3 2M21 12a9 9 0 11-18 0 9 9 0 0118 0z" },
+    bad: { color: "#C62828", d: "M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z" },
+    info: { color: "#57534e", d: "M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z" },
+};
+function SidebarCallPermission({ waId, first }: { waId: string; first: string }) {
+    const ws = useWs();
+    const [perm, setPerm] = useState<CallPermission | null>(null);
+    const load = useCallback(() => {
+        callsApi.permission(waId).then(setPerm).catch(() => { /* say nothing rather than guess */ });
+    }, [waId]);
+    useEffect(() => { load(); }, [load]);
+    useEffect(() => {
+        if (!ws) return;
+        let t: ReturnType<typeof setTimeout> | null = null;
+        const on = (e: { type?: string; wa_id?: string }) => {
+            if (e?.type === "call_permission" && String(e.wa_id || "").replace(/^\+/, "") === waId) {
+                if (t) clearTimeout(t);
+                t = setTimeout(load, 400);
+            }
+        };
+        ws.on("event", on);
+        return () => { ws.off("event", on); if (t) clearTimeout(t); };
+    }, [ws, waId, load]);
+    const lines = permissionLines(perm, first);
+    if (!lines.length) return null;
+    return (
+        <ul className="mt-2 space-y-0.5" aria-label="WhatsApp call permission">
+            {lines.map((l) => (
+                <li key={l.text} className="flex items-center gap-1.5 text-xs" style={{ color: PERM_TONE[l.tone].color }}>
+                    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2}
+                        strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="flex-shrink-0">
+                        <path d={PERM_TONE[l.tone].d} />
+                    </svg>
+                    <span className="font-medium">{l.text}</span>
+                </li>
+            ))}
+        </ul>
+    );
+}
+
 // The last three calls with this customer — outcome in words, when, how long,
 // and whether the team still owes them a call. Live: rows merge in place.
 function SidebarCalls({ waId }: { waId: string }) {
@@ -841,6 +885,7 @@ function SidebarCalls({ waId }: { waId: string }) {
                                 <path d={CALL_ICON_PATH[st.icon]} />
                             </svg>
                             <span className="font-semibold" style={{ color: st.light }}>{st.word}</span>
+                            {c.has_voicemail ? <span className="font-semibold" style={{ color: "#A15C00" }}>· Voicemail</span> : null}
                             {c.duration ? <span style={{ color: "#64748b" }}>· {fmtCallDuration(c.duration)}</span> : null}
                             {c.agent_name ? <span className="truncate" style={{ color: "#64748b" }}>· {c.agent_name.split(" ")[0]}</span> : null}
                             <span className="ml-auto flex-shrink-0" style={{ color: "#94a3b8" }}>{c.started_at ? timeAgo(c.started_at) : ""}</span>
@@ -1482,6 +1527,10 @@ export function CustomerSidebar({
                                 onToast={onToast}
                                 onClose={() => setCallSheetOpen(false)}
                             />
+                        )}
+                        {callDigits && (
+                            <SidebarCallPermission key={`perm-${callDigits}`} waId={callDigits}
+                                first={firstName({ name: profile.name, from: callDigits })} />
                         )}
                         {callDigits && <SidebarCalls key={callDigits} waId={callDigits} />}
                         </>
