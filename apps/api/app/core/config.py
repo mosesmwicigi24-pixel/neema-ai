@@ -15,6 +15,29 @@ class Settings(BaseSettings):
     waba_token: str = ""
     waba_phone_number_id: str = ""
     waba_api_version: str = "v21.0"
+    # Graph version for every WhatsApp CALLING request (calls, call_permissions,
+    # settings, call-permission messages/templates). Kept separate so calling
+    # runs on a supported version (v21.0 expires 2027-01-21; v23.0 → 2027-10-08)
+    # without moving all messaging at once. selfcheck warns 90 days ahead.
+    waba_calling_api_version: str = "v23.0"
+    # The WhatsApp Business Account id — needed only to read / create message
+    # templates (the call-permission template). Empty = template admin disabled.
+    waba_business_account_id: str = ""
+    # Approved template that carries a `call_permission_request` component —
+    # the only way to ask for call permission outside the 24 h window. Empty =
+    # use the one an admin created from Settings → WhatsApp calling (stored in
+    # app_settings), else outside-window requests answer 409 template_required.
+    call_permission_template: str = ""
+    call_permission_template_lang: str = "en"
+    # Body parameters, comma-separated, in order: `first_name` | `name` | any
+    # literal text. Empty = the template has no body variables.
+    call_permission_template_params: str = "first_name"
+    # Meta's own per-call recording / transcription (opt-in: Meta plays an
+    # announcement to the customer — the owner must choose it).
+    call_meta_transcription: bool = False
+    call_meta_recording: bool = False
+    call_recording_purpose: str = "to help us serve your order and train our team"
+    call_recording_language: str = "en"
     # Approved WhatsApp template used to open a thread with a customer who reached
     # us on Messenger/Facebook (Meta requires a template to message first). Body:
     # "Hello {{1}}, this is Bethany House…". Name + language must match the

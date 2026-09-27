@@ -16,6 +16,7 @@ class Call(Base):
       ringing → missed                             (inbound, nobody answered)
       ringing → declined | callback                (inbound, an agent turned it down)
       ringing → no_answer | cancelled | failed     (outbound, never connected)
+      ringing → rejected                           (outbound, the customer declined)
     Rows written before 2026-09 say `ended` for `completed`; the API reports both
     as `completed`. The
     webhook creates it on `connect` (ringing) and closes it on `terminate`; the
@@ -53,3 +54,5 @@ class Call(Base):
     # A missed / callback call is an open follow-up until someone calls the
     # customer back (a later connected call closes it too) or marks it done.
     follow_up_done_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # WhatsApp voicemail: an inbound audio message whose id is this call's WACID.
+    voicemail_message_id: Mapped[str | None] = mapped_column(String(200), nullable=True)

@@ -421,7 +421,46 @@ async def _probe_price_consistency(db, redis) -> list[str]:
     return [line] if line else []
 
 
+# Graph API version expiries (developers.facebook.com/docs/graph-api/changelog/versions,
+# read 2026-09-27). A version past its date stops answering; warn 90 days ahead.
+GRAPH_VERSION_EXPIRY = {
+    "v20.0": "2026-09-24",
+    "v21.0": "2027-01-21",
+    "v22.0": "2027-05-20",
+    "v23.0": "2027-10-08",
+    "v24.0": "2028-02-18",
+    "v25.0": "2028-07-29",
+}
+_GRAPH_VERSION_WARN_DAYS = 90
+
+
+def graph_version_findings(today=None) -> list[str]:
+    """WABA_API_VERSION (messaging) / WABA_CALLING_API_VERSION (calling) that
+    are expired or expire within 90 days."""
+    from datetime import date
+    today = today or datetime.now(timezone.utc).date()
+    out: list[str] = []
+    for label, version in (("WABA_API_VERSION", settings.waba_api_version),
+                           ("WABA_CALLING_API_VERSION", settings.waba_calling_api_version)):
+        exp = GRAPH_VERSION_EXPIRY.get(str(version or "").strip())
+        if not exp:
+            continue
+        left = (date.fromisoformat(exp) - today).days
+        if left < 0:
+            out.append(f"{label}={version} EXPIRED on {exp} — Meta no longer serves it; move to a "
+                       f"supported Graph version (and test it) now.")
+        elif left <= _GRAPH_VERSION_WARN_DAYS:
+            out.append(f"{label}={version} expires on {exp} ({left} days) — plan and test the move "
+                       f"to a newer Graph version before then.")
+    return out
+
+
+async def _probe_graph_versions(db, redis) -> list[str]:
+    return graph_version_findings()
+
+
 PROBES = [
+    ("graph_versions", _probe_graph_versions),
     ("agent_failures", _probe_agent_failures),
     ("meta_tokens", _probe_meta_tokens),
     ("webhook_signature", _probe_webhook_signature),

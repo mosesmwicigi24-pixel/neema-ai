@@ -36,7 +36,8 @@ started_at, answered_at, ended_at, summary, insights, transcript_status
 follow_up_open, follow_up_done_at
 ```
 `status`: ringing · answered · completed · missed · declined · callback ·
-no_answer · cancelled · failed. (`ended` never appears — the server maps it.)
+no_answer · rejected · cancelled · failed. (`ended` never appears — the server
+maps it. `rejected` and `has_voicemail`: see §2.1.)
 `insights` (may be null): intent, products[], objections[], commitments[],
 next_action, follow_up_message, sentiment.
 
@@ -77,6 +78,98 @@ Calls list or a single row is read — only `ringing` rows, never a live call.
 The thread (`GET /conversations/{id}/messages`, first page) now includes
 `system_event` items with `event_kind: "call"`, `text` (the label), `agent_name`,
 `event_reason` (the summary) and `call` (the full row).
+
+### 2.1 Additions (2026-09-27 platform refresh — all additive)
+
+Source: `docs/research/META_CALLING_2026-09.md`, decisions in
+`docs/research/NEEMA_CALLING_GAPS.md`. Nothing above changed meaning.
+
+**New status `rejected`** (outbound): the customer declined our call (Meta's
+REJECTED status). Terminal, not a follow-up. Wrap-up: "{First} declined" ·
+**Message** · Call again later · Done. `no_answer` stays "didn't pick up".
+
+**Call row** gains `has_voicemail` (bool) — WhatsApp voicemail for this call
+arrived (the audio is also in the chat as a normal message). Calls view:
+"Voicemail" badge; thread pill: "Missed call · voicemail".
+
+**Refusals from calling routes** (connect, answer, terminate,
+request-permission, settings, permission-template): body
+`{detail, code, action, …}` + header `X-Neema-Reason: <code>`. `detail` is
+still the sentence to show. `code` = Meta's error code as a string
+(`"138006"`, `"190"`, …) or ours (`template_required`, `meta_unavailable`,
+`rate_limited`, `not_configured`, `unknown`). `action` = what to offer:
+`retry` (Try again) · `request_permission` (Send call request) · `wait` (show
+when, if a time is given) · `admin` (tell them an admin must act; no retry
+button) · `none` (Message instead). An expired token is `code "190"`,
+`action "admin"`: "WhatsApp access token expired — an admin must renew it".
+Connect and answer are never retried by the server (a duplicate would place
+a second call) — the client's Try again is the only retry.
+
+**`GET /calls/permission?wa_id=`** now returns (old fields unchanged):
+```
+wa_id, status (granted | denied | requested | unknown), expires_at, permanent,
+meta_status (no_permission | temporary | permanent | null when Meta was unreachable),
+can_call, can_request, request_available_at (ISO or null),
+calls_left_today (int or null), revoked (bool), unanswered_streak (int),
+source (meta | store)
+```
+Meta's answer is the truth (cached ~60 s). `requested` = we asked in the last
+7 days and they haven't answered; `denied` = they declined (or `revoked:
+true` — WhatsApp removed it after 4 unanswered calls). Show "Allowed
+permanently" / "Allowed until {expires_at}". When `can_request` is false show
+"You can ask again {request_available_at}" instead of the Send button. When
+`unanswered_streak ≥ 2` warn before calling: "{First} hasn't answered your
+last {n} calls — another unanswered call and WhatsApp may stop you calling
+them" (WhatsApp revokes at 4).
+
+**`POST /calls/request-permission {to, name?}`** → `{permission, route:
+free_form | template, already_permitted?}`. Inside the 24 h window (their last
+WhatsApp message or inbound call, answered or not) it is the free-form
+request, outside it the approved template. 409 `code: template_required`,
+`action: admin` when outside the window and no template exists ("{First}
+hasn't messaged in 24 hours — WhatsApp only allows a call request by
+template then. An admin can create it in Settings → WhatsApp calling.").
+409 `code: "138009"`, `action: wait`, `request_available_at` when the
+1-a-day / 2-a-week limit is hit. `already_permitted: true` (200, permission
+granted permanent) = they already allowed calls permanently — show Call now.
+
+**Admin (`manage_settings`)**:
+- `GET /calls/permission-template` → `{configured, name, language, source
+  (env | app), waba_configured, exists, status (approved | pending | rejected
+  | … | null), category, error?}`; `POST /calls/permission-template {name?,
+  language?, body_text?}` (body needs exactly one `{{1}}` = first name) →
+  `{name, language, id, status: "pending"}`. Meta reviews it; requests use
+  it as soon as it is approved.
+- `GET /calls/settings` → `{status, call_icon_visibility,
+  callback_permission_status, call_hours {status, timezone_id,
+  weekly_operating_hours[], holiday_schedule[{date, start_time, end_time}]},
+  voicemail {status, triggers[], timeout_seconds}, restrictions[] (read-only),
+  last_settings_event, last_restriction_event}`.
+  `POST /calls/settings` with only the fields to change → `{ok, sent,
+  settings}`. `call_hours` / `voicemail` are merged over the current ones (the
+  holiday schedule is always re-sent — WhatsApp deletes it when omitted); if
+  the current settings can't be read nothing is written (503, `retry`).
+  Changes can take up to 7 days to reach customers' phones.
+
+**`GET /calls/ice-config`** adds `meta_transcription` (bool): WhatsApp
+transcribes the call itself — after a call say "Summary in a minute" even
+when nothing was recorded on this device. (When on, WhatsApp plays a short
+recording announcement to the customer.)
+
+**New live events** (`ws:channel:calls`):
+- `call_status {call_id, status: "ringing"}` — our outbound call is ringing
+  on the customer's phone: `placing` ("Calling…") → `ringing_out`
+  ("Ringing…") on this event, not before.
+- `call_ended` may carry `outcome: "rejected"` (and a `no_answer` may be
+  corrected to `rejected` a moment later — take the latest).
+- `call_permission` adds `revoked` (bool) and `reason: "automatic"` on an
+  automatic revoke.
+- `call_settings {value, at}` — Meta says calling settings changed.
+- `calling_restricted {event, reasons[], value, at}` — Meta flagged or
+  restricted calling (low quality / low pickup / call button hidden): show an
+  admin banner; business-initiated calls may fail until it lifts (7 days).
+- `call_update` also fires when a voicemail is linked and when WhatsApp's
+  transcript / recording lands.
 
 ## 3. Client call phases
 

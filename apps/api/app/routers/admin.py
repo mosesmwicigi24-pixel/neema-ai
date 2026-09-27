@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, func, delete, or_
 from app.core import money
+from app.core.permissions import requires
 from app.database import get_db
 from app.models.conversation import Conversation, InterceptMode
 from app.models.message import Message
@@ -1022,10 +1023,11 @@ def _call_label(r: dict) -> str:
         "ringing": "Calling…" if out else "Incoming call",
         "answered": "Call in progress",
         "completed": ("Outgoing call" if out else "Incoming call") + dur,
-        "missed": "Missed call",
+        "missed": "Missed call · voicemail" if r.get("has_voicemail") else "Missed call",
         "declined": "Declined call",
         "callback": "Missed call · call back",
         "no_answer": "Outgoing call · no answer",
+        "rejected": "Outgoing call · declined",
         "cancelled": "Outgoing call · cancelled",
         "failed": "Outgoing call · failed",
     }.get(r.get("status") or "", "Call")
@@ -2479,6 +2481,22 @@ def _redis(request: Request):
     return getattr(request.app.state, "redis", None)
 
 
+def _call_error(status: int, detail: str, code: str, action: str, **extra):
+    """A calling route's refusal. Body `{detail, code, action, …}` — `detail`
+    stays the human sentence older clients show; `code` (Meta's error code, or
+    ours: template_required, …) and `action` (retry | request_permission |
+    wait | admin | none) are what newer clients key on. `X-Neema-Reason`
+    mirrors `code`."""
+    from fastapi.responses import JSONResponse
+    return JSONResponse(status_code=status,
+                        content={"detail": detail, "code": code, "action": action, **extra},
+                        headers={"X-Neema-Reason": code})
+
+
+def _digits(v) -> str:
+    return "".join(ch for ch in str(v or "") if ch.isdigit())[:20]
+
+
 def _answered_by(value) -> str | None:
     """The redis answer-lock holds "<agent id>|<agent name>" (older: the id)."""
     if not value:
@@ -2497,7 +2515,9 @@ async def calls_ice_config(agent: Agent = Depends(get_current_agent)):
     from app.core.config import settings
     return {"ice_servers": ice_servers(), "record": settings.call_recording_enabled,
             "transcribe": bool(settings.whisper_enabled),
-            "auto_transcribe": bool(settings.whisper_enabled and settings.whisper_auto)}
+            "auto_transcribe": bool(settings.whisper_enabled and settings.whisper_auto),
+            # Meta transcribes the call itself (opt-in): "Summary in a minute".
+            "meta_transcription": bool(settings.call_meta_transcription)}
 
 
 @router.get("/calls/permission")
@@ -2507,10 +2527,272 @@ async def calls_permission(
     agent: Agent = Depends(get_current_agent),
 ):
     """Whether this customer allowed business calls: granted | denied |
-    requested | unknown (never asked — a call may still go through)."""
+    requested | unknown (never asked — a call may still go through). Meta's
+    answer is the truth (cached ~60 s); our store fills in requested / denied
+    and stands in when Meta can't be reached (`source`). Plus the limits
+    (`can_request`, `request_available_at`, `calls_left_today`) and the
+    `unanswered_streak` (WhatsApp revokes permission after 4)."""
     from app.services import call_log
+    from app.database import AsyncSessionLocal
     # Digits only: the number keys a redis entry.
-    return await call_log.permission(_redis(request), "".join(ch for ch in wa_id if ch.isdigit())[:20])
+    wa = _digits(wa_id)
+    out = await call_log.permission(_redis(request), wa)
+    try:
+        async with AsyncSessionLocal() as db:
+            out["unanswered_streak"] = await call_log.unanswered_streak(db, wa)
+    except Exception:
+        out["unanswered_streak"] = 0
+    return out
+
+
+# ── The call-permission template (outside the 24 h window) ──────────────────
+
+PERMISSION_TEMPLATE_KEY = "call_permission_template"
+DEFAULT_PERMISSION_TEMPLATE = "neema_call_permission"
+DEFAULT_PERMISSION_TEMPLATE_BODY = ("Hi {{1}}, Bethany House would like to call you on WhatsApp "
+                                    "about your order. Tap Allow to let us call you.")
+
+
+async def _permission_template(db) -> dict | None:
+    """{name, language, source} of the template requests use, or None."""
+    from app.core.config import settings
+    if settings.call_permission_template:
+        return {"name": settings.call_permission_template,
+                "language": settings.call_permission_template_lang or "en", "source": "env"}
+    import json as _json
+    from app.services.app_settings import get_value
+    try:
+        data = _json.loads(await get_value(db, PERMISSION_TEMPLATE_KEY) or "{}")
+    except Exception:
+        data = {}
+    if isinstance(data, dict) and data.get("name"):
+        return {"name": data["name"], "language": data.get("language") or "en", "source": "app"}
+    return None
+
+
+@router.get("/calls/permission-template")
+async def calls_permission_template(
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(requires("manage_settings")),
+):
+    """Is the call-permission template configured, does it exist at Meta, and
+    is it approved? Meta being unreachable leaves `exists`/`status` null."""
+    from app.core.config import settings
+    from app.services import wa_calling
+    tpl = await _permission_template(db)
+    out = {"configured": tpl is not None, "name": (tpl or {}).get("name"),
+           "language": (tpl or {}).get("language"), "source": (tpl or {}).get("source"),
+           "waba_configured": bool(settings.waba_business_account_id),
+           "exists": None, "status": None, "category": None}
+    if tpl and settings.waba_business_account_id:
+        try:
+            found = await wa_calling.find_template(tpl["name"], tpl["language"])
+            out["exists"] = found is not None
+            if found:
+                out["status"] = str(found.get("status") or "").lower() or None
+                out["category"] = found.get("category")
+        except Exception as exc:
+            out["error"] = wa_calling.classify_error(exc)
+    return out
+
+
+@router.post("/calls/permission-template")
+async def calls_create_permission_template(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(requires("manage_settings")),
+):
+    """Create the UTILITY template with the `call_permission_request` component
+    (Meta reviews it). `{name?, language?, body_text?}` — the body must carry
+    exactly one {{1}} (the customer's first name)."""
+    import json as _json
+    import re as _re
+    from app.core.config import settings
+    from app.services import wa_calling
+    from app.services.app_settings import set_value
+    body = body or {}
+    name = str(body.get("name") or settings.call_permission_template or DEFAULT_PERMISSION_TEMPLATE).strip()
+    lang = str(body.get("language") or settings.call_permission_template_lang or "en").strip()
+    text = str(body.get("body_text") or DEFAULT_PERMISSION_TEMPLATE_BODY).strip()
+    if not _re.fullmatch(r"[a-z0-9_]{1,512}", name):
+        raise HTTPException(status_code=400, detail="Template names use lowercase letters, digits and _ only.")
+    if not _re.fullmatch(r"[A-Za-z_]{2,8}", lang):
+        raise HTTPException(status_code=400, detail="A language code like en or en_US is required.")
+    if text.count("{{1}}") != 1 or _re.search(r"\{\{[2-9]", text) or len(text) > 1024:
+        raise HTTPException(status_code=400,
+                            detail="The message needs exactly one {{1}} (the customer's first name).")
+    if not settings.waba_business_account_id:
+        return _call_error(409, "Set WABA_BUSINESS_ACCOUNT_ID on the server to create templates.",
+                           "not_configured", "admin")
+    try:
+        resp = await wa_calling.create_permission_template(name, lang, text)
+    except Exception as exc:
+        info = wa_calling.classify_error(exc)
+        detail = str(exc) if "(4" in str(exc) and info["code"] == "unknown" else info["reason"]
+        return _call_error(502, f"Couldn't create the template: {detail}", info["code"], info["action"])
+    if not settings.call_permission_template:
+        try:
+            await set_value(db, PERMISSION_TEMPLATE_KEY, _json.dumps({"name": name, "language": lang}))
+        except Exception:
+            await db.rollback()
+    return {"ok": True, "name": name, "language": lang, "id": resp.get("id"),
+            "status": str(resp.get("status") or "pending").lower()}
+
+
+# ── Calling settings (Meta's /<PNID>/settings `calling` object) ──────────────
+
+_ENABLED = ("ENABLED", "DISABLED")
+_CALL_SETTING_ENUMS = {
+    "status": _ENABLED,
+    "call_icon_visibility": ("DEFAULT", "DISABLE_ALL", "HIDE_IN_CHAT"),
+    "callback_permission_status": _ENABLED,
+}
+
+
+def _holidays(items) -> list[dict]:
+    """Holiday rows with Meta's sample spelling (start_time / end_time); the
+    reference table's open_time / close_time is accepted too."""
+    out = []
+    for h in items or []:
+        if not isinstance(h, dict):
+            continue
+        out.append({"date": h.get("date"),
+                    "start_time": h.get("start_time", h.get("open_time")),
+                    "end_time": h.get("end_time", h.get("close_time"))})
+    return out
+
+
+def _settings_view(calling: dict) -> dict:
+    calling = calling or {}
+    hours = calling.get("call_hours")
+    if isinstance(hours, dict):
+        hours = {**hours, "holiday_schedule": _holidays(hours.get("holiday_schedule"))}
+    vm = calling.get("voicemail")
+    restrictions = ((calling.get("restrictions") or {}).get("restrictions_list")) or []
+    return {
+        "status": calling.get("status"),
+        "call_icon_visibility": calling.get("call_icon_visibility"),
+        "callback_permission_status": calling.get("callback_permission_status"),
+        "call_hours": hours if isinstance(hours, dict) else None,
+        "voicemail": ({k: vm.get(k) for k in ("status", "triggers", "timeout_seconds")}
+                      if isinstance(vm, dict) else None),
+        "restrictions": restrictions,
+    }
+
+
+async def _latest_call_account_events(redis) -> dict:
+    import json as _json
+    from app.routers.whatsapp_webhook import CALL_RESTRICTION_KEY, CALL_SETTINGS_EVENT_KEY
+    out = {"last_settings_event": None, "last_restriction_event": None}
+    if redis is None:
+        return out
+    for field, key in (("last_settings_event", CALL_SETTINGS_EVENT_KEY),
+                       ("last_restriction_event", CALL_RESTRICTION_KEY)):
+        try:
+            raw = await redis.get(key)
+            out[field] = _json.loads(raw) if raw else None
+        except Exception:
+            pass
+    return out
+
+
+@router.get("/calls/settings")
+async def calls_get_settings(
+    request: Request,
+    agent: Agent = Depends(requires("manage_settings")),
+):
+    """The number's WhatsApp calling settings: status, call icons, callback
+    permission, call hours, voicemail, plus Meta's restrictions (read-only)."""
+    from app.services import wa_calling
+    try:
+        calling = await wa_calling.get_settings()
+    except Exception as exc:
+        info = wa_calling.classify_error(exc)
+        return _call_error(502, f"Couldn't read calling settings: {info['reason']}",
+                           info["code"], info["action"])
+    return {**_settings_view(calling), **await _latest_call_account_events(_redis(request))}
+
+
+@router.post("/calls/settings")
+async def calls_update_settings(
+    body: dict,
+    request: Request,
+    agent: Agent = Depends(requires("manage_settings")),
+):
+    """Change only the calling fields given. `call_hours` / `voicemail` are
+    merged over the current ones, so the holiday schedule (which Meta deletes
+    when omitted) and the voicemail announcement are always re-sent."""
+    from app.services import wa_calling
+    body = body or {}
+    change: dict = {}
+    for key, allowed in _CALL_SETTING_ENUMS.items():
+        if key in body:
+            v = str(body[key] or "").upper()
+            if v not in allowed:
+                raise HTTPException(status_code=400, detail=f"{key} must be one of {', '.join(allowed)}.")
+            change[key] = v
+    hours = body.get("call_hours")
+    vm = body.get("voicemail")
+    if hours is not None and not isinstance(hours, dict):
+        raise HTTPException(status_code=400, detail="call_hours must be an object.")
+    if vm is not None and not isinstance(vm, dict):
+        raise HTTPException(status_code=400, detail="voicemail must be an object.")
+    if isinstance(vm, dict):
+        if "status" in vm and str(vm["status"] or "").upper() not in _ENABLED:
+            raise HTTPException(status_code=400, detail="voicemail.status must be ENABLED or DISABLED.")
+        trig = vm.get("triggers")
+        if trig is not None and (not isinstance(trig, list)
+                                 or any(str(t).upper() not in ("REJECT", "TIMEOUT") for t in trig)):
+            raise HTTPException(status_code=400, detail="voicemail.triggers may hold REJECT and TIMEOUT.")
+        if "timeout_seconds" in vm:
+            try:
+                ts = int(vm["timeout_seconds"])
+            except (TypeError, ValueError):
+                ts = -1
+            if not 0 <= ts <= 30:
+                raise HTTPException(status_code=400, detail="voicemail.timeout_seconds must be 0–30.")
+    if isinstance(hours, dict):
+        if len(hours.get("holiday_schedule") or []) > 20:
+            raise HTTPException(status_code=400, detail="At most 20 holidays.")
+        if "status" in hours and str(hours["status"] or "").upper() not in _ENABLED:
+            raise HTTPException(status_code=400, detail="call_hours.status must be ENABLED or DISABLED.")
+    if hours is not None or vm is not None:
+        try:
+            current = await wa_calling.get_settings()
+        except Exception as exc:
+            info = wa_calling.classify_error(exc)
+            # Never write blind: Meta deletes a holiday schedule we don't re-send.
+            return _call_error(503, "Couldn't read the current calling settings from WhatsApp, so "
+                               "nothing was changed (the holiday schedule would be lost) — try again.",
+                               info["code"], "retry")
+        if isinstance(hours, dict):
+            merged = {**(current.get("call_hours") or {}), **hours}
+            if "status" in merged:
+                merged["status"] = str(merged["status"]).upper()
+            merged["holiday_schedule"] = _holidays(
+                hours["holiday_schedule"] if "holiday_schedule" in hours
+                else (current.get("call_hours") or {}).get("holiday_schedule"))
+            change["call_hours"] = merged
+        if isinstance(vm, dict):
+            merged_vm = {**(current.get("voicemail") or {}), **vm}
+            if "status" in merged_vm:
+                merged_vm["status"] = str(merged_vm["status"]).upper()
+            if merged_vm.get("triggers") is not None:
+                merged_vm["triggers"] = [str(t).upper() for t in merged_vm["triggers"]]
+            change["voicemail"] = merged_vm
+    if not change:
+        raise HTTPException(status_code=400, detail="Nothing to change.")
+    try:
+        await wa_calling.update_settings(change)
+    except Exception as exc:
+        info = wa_calling.classify_error(exc)
+        return _call_error(502, f"Couldn't save calling settings: {info['reason']}",
+                           info["code"], info["action"])
+    try:
+        fresh = _settings_view(await wa_calling.get_settings())
+    except Exception:
+        fresh = None
+    return {"ok": True, "sent": change, "settings": fresh}
 
 
 @router.get("/calls/{call_id}/offer")
@@ -2561,15 +2843,23 @@ async def calls_answer(
             who = _answered_by(await redis.get(lock))
             raise HTTPException(status_code=409,
                                 detail=f"call already answered by {who}" if who else "call already answered")
+    conv_id = None
+    try:
+        async with AsyncSessionLocal() as db:
+            wa = (await db.execute(select(Call.wa_id).where(Call.call_id == call_id))).scalar_one_or_none()
+            conv_id = (await call_log.conversation_ids_for(db, [wa] if wa else [])).get(wa or "")
+    except Exception:
+        conv_id = None
     try:
         # accept directly with the SDP answer. (pre_accept+accept back-to-back
-        # raced and 502'd — accept alone establishes media fine.)
-        await wa_calling.accept(call_id, sdp)
+        # raced and 502'd — accept alone establishes media fine.) Never retried.
+        await wa_calling.accept(call_id, sdp, biz_opaque=wa_calling.opaque(agent.id, conv_id))
     except Exception as exc:
         if redis is not None:
             await redis.delete(lock)   # let another try
-        raise HTTPException(status_code=502, detail=f"accept failed: {exc}")
-    moved = await call_log.mark_answered(call_id, agent.id)
+        info = wa_calling.classify_error(exc)
+        return _call_error(502, f"accept failed: {info['reason']}", info["code"], info["action"])
+    moved = await call_log.mark_answered(call_id, agent.id, redis)
     await call_log.publish(redis, {
         "type": "call_answered", "call_id": call_id,
         "agent_id": str(agent.id), "agent_name": agent.name,
@@ -2582,23 +2872,98 @@ async def calls_answer(
 async def calls_request_permission(
     body: dict,
     request: Request,
+    db: AsyncSession = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
 ):
-    """Ask a customer for permission to call them (interactive
-    call_permission_request). Needed before a business-initiated call to someone
-    who hasn't allowed calls. Their answer arrives as `call_permission`."""
+    """Ask a customer for permission to call them. Inside the 24 h window
+    (their last message or inbound call) it is the free-form interactive
+    request; outside it, the approved template (409 `template_required` when
+    there is none). Returns `{permission, route: free_form | template}`; the
+    customer's answer arrives as `call_permission`. Only ever sent because an
+    agent asked; Meta's 1-a-day / 2-a-week limit is respected (409 `138009`)."""
     from app.core.phone import is_plausible_phone
     from app.services import wa_calling, call_log
+    from app.models.message import Message, MsgDirection
     to = str((body or {}).get("to") or "").lstrip("+").strip()
     if not is_plausible_phone(to):
         raise HTTPException(status_code=400, detail="A valid phone number is required.")
+    redis = _redis(request)
+
+    full = str((body or {}).get("name") or "").strip() or None
+    if not full:
+        try:
+            full = (await db.execute(
+                select(Message.name).where(Message.wa_id == to, Message.direction == MsgDirection.inbound,
+                                           Message.name.isnot(None))
+                .order_by(Message.created_at.desc()).limit(1))).scalar_one_or_none()
+            full = full or (await db.execute(
+                select(Call.caller_name).where(Call.wa_id == to, Call.caller_name.isnot(None))
+                .order_by(Call.started_at.desc()).limit(1))).scalar_one_or_none()
+        except Exception:
+            await db.rollback()
+            full = None
+    first = (full or "").split()[0] if (full or "").split() else None
+    who = first or "This customer"
+
+    # Meta already told us (cached) that asking can't work, or isn't needed.
+    cached = await call_log.cached_meta_permission(redis, to)
+    if cached and cached.get("meta_status") == "permanent":
+        perm = await call_log.set_permission(redis, to, "granted", permanent=True)
+        return {"ok": True, "permission": perm, "route": None, "already_permitted": True}
+    if cached and cached.get("can_request") is False:
+        reason, _ = wa_calling._CALL_ERRORS["138009"]
+        return _call_error(409, reason, "138009", "wait",
+                           request_available_at=cached.get("request_available_at"))
+
     try:
-        await wa_calling.request_call_permission(to)
+        in_window = await call_log.in_service_window(db, to)
+    except Exception:
+        await db.rollback()
+        # Can't tell: the template when there is one (it works either side of the
+        # window), else the free-form request (as before).
+        in_window = (await _permission_template(db)) is None
+    if in_window:
+        route = "free_form"
+        send = wa_calling.request_call_permission(to)
+    else:
+        tpl = await _permission_template(db)
+        if tpl is None:
+            return _call_error(
+                409, f"{who} hasn't messaged in 24 hours — WhatsApp only allows a call request "
+                     "by template then. An admin can create it in Settings → WhatsApp calling.",
+                "template_required", "admin", route="template")
+        route = "template"
+        send = wa_calling.request_call_permission_template(
+            to, tpl["name"], tpl["language"], wa_calling.template_params(first, full))
+    try:
+        try:
+            await send
+        except Exception as exc:
+            # Our window read was wrong (131047: more than 24 h since they wrote):
+            # the template still reaches them, when there is one.
+            tpl = await _permission_template(db) if route == "free_form" and "131047" in str(exc) else None
+            if tpl is None:
+                raise
+            route = "template"
+            await wa_calling.request_call_permission_template(
+                to, tpl["name"], tpl["language"], wa_calling.template_params(first, full))
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"permission request failed: {exc}")
-    perm = await call_log.set_permission(_redis(request), to, "requested")
-    await call_log.publish(_redis(request), {"type": "call_permission", **perm})
-    return {"ok": True, "permission": perm}
+        info = wa_calling.classify_error(exc)
+        if info["code"] == "138017":
+            # A permanent permission already exists: nothing to ask — call.
+            perm = await call_log.set_permission(redis, to, "granted", permanent=True)
+            await call_log.publish(redis, {"type": "call_permission", **perm})
+            return {"ok": True, "permission": perm, "route": route, "already_permitted": True}
+        if info["code"] == "138009":
+            await call_log.forget_meta_permission(redis, to)
+            live = await call_log.permission(redis, to)
+            return _call_error(409, info["reason"], "138009", "wait",
+                               request_available_at=live.get("request_available_at"), route=route)
+        return _call_error(502, f"permission request failed: {info['reason']}",
+                           info["code"], info["action"], route=route)
+    perm = await call_log.set_permission(redis, to, "requested")
+    await call_log.publish(redis, {"type": "call_permission", **perm})
+    return {"ok": True, "permission": perm, "route": route}
 
 
 @router.post("/calls/connect")
@@ -2622,34 +2987,42 @@ async def calls_connect(
     if not sdp:
         raise HTTPException(status_code=400, detail="sdp offer is required")
     from app.services import wa_calling
+    redis = _redis(request)
     try:
-        resp = await wa_calling.connect(to, sdp)
+        conv_id = (await call_log.conversation_ids_for(db, [to])).get(to)
+    except Exception:
+        await db.rollback()
+        conv_id = None
+    try:
+        # Never retried: a second connect would place a second call (138003).
+        resp = await wa_calling.connect(to, sdp, biz_opaque=wa_calling.opaque(agent.id, conv_id))
     except Exception as exc:
-        msg = str(exc)
-        if "138006" in msg:
+        info = wa_calling.classify_error(exc)
+        if info["code"] == "138006":
             # Meta's "no call permission": whatever we had on file is stale.
-            perm = await call_log.permission(_redis(request), to)
+            perm = await call_log.stored_permission(redis, to)
             if perm.get("status") == "granted":
-                await call_log.set_permission(_redis(request), to, "unknown")
-            raise HTTPException(status_code=409,
-                detail="This customer hasn't allowed calls yet. Send them a call "
-                       "request — you can call as soon as they tap Allow.")
-        raise HTTPException(status_code=502, detail=f"call failed: {wa_calling.friendly_error(msg)}")
+                await call_log.set_permission(redis, to, "unknown")
+            await call_log.forget_meta_permission(redis, to)
+            return _call_error(409, "This customer hasn't allowed calls yet. Send them a call "
+                                    "request — you can call as soon as they tap Allow.",
+                               "138006", "request_permission")
+        return _call_error(502, f"call failed: {info['reason']}", info["code"], info["action"])
     call_id = ((resp.get("calls") or [{}])[0]).get("id")
     if not call_id:
-        raise HTTPException(status_code=502, detail="Meta did not return a call id")
-    redis = _redis(request)
+        return _call_error(502, "Meta did not return a call id", "meta_unavailable", "retry")
     if redis is not None:
         # We own it: nobody else can "answer" our outbound call.
         await redis.set(f"wa:call:answered:{call_id}", f"{agent.id}|{agent.name or ''}", ex=3600)
+    pid = None
     try:
         from app.services.identity import resolve_person_id_for_wa_id
         pid = await resolve_person_id_for_wa_id(db, to, source="whatsapp_call")
-        db.add(Call(call_id=call_id, wa_id=to, caller_name=name, direction="outbound",
-                    status="ringing", person_id=pid, agent_id=agent.id))
         await db.commit()
     except Exception:
         await db.rollback()
+    # A webhook carrying our opaque data may already have written the row.
+    await call_log.upsert_outbound(call_id, to, agent_id=agent.id, name=name, person_id=pid)
     # The customer's answer (or Meta's terminate) may have beaten this row.
     await call_log.apply_early(redis, call_id)
     await call_log.publish_update(redis, call_id)
@@ -2747,9 +3120,10 @@ async def calls_terminate(
     from app.database import AsyncSessionLocal
     await _refuse_if_colleagues_call(request, call_id, agent)
     try:
-        await wa_calling.terminate(call_id)
+        await wa_calling.terminate(call_id)      # retried once on 429 / 5xx inside
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"terminate failed: {exc}")
+        info = wa_calling.classify_error(exc)
+        return _call_error(502, f"terminate failed: {info['reason']}", info["code"], info["action"])
     async with AsyncSessionLocal() as db:
         c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
         status, direction = (c.status, c.direction) if c else (None, None)
