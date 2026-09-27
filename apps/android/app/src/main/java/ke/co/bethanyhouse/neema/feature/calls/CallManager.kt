@@ -9,9 +9,13 @@ import androidx.core.content.ContextCompat
 import ke.co.bethanyhouse.neema.core.api.NeemaApi
 import ke.co.bethanyhouse.neema.core.api.UploadFile
 import ke.co.bethanyhouse.neema.core.model.Call
+import ke.co.bethanyhouse.neema.core.model.CallChannels
+import ke.co.bethanyhouse.neema.core.model.CallPermission
+import ke.co.bethanyhouse.neema.core.model.PermissionRequestResponse
 import ke.co.bethanyhouse.neema.core.model.IceConfig
 import ke.co.bethanyhouse.neema.core.net.ApiException
 import ke.co.bethanyhouse.neema.core.notify.Notifier
+import ke.co.bethanyhouse.neema.core.util.AppClock
 import ke.co.bethanyhouse.neema.core.util.AppPrefs
 import ke.co.bethanyhouse.neema.core.util.Fmt
 import ke.co.bethanyhouse.neema.core.ws.LiveSocket
@@ -36,6 +40,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
@@ -87,15 +92,24 @@ sealed interface CallOutcome {
     data class Callback(val saved: CallbackSave, val agent: String? = null) : CallOutcome {
         override val autoCloseMs get() = if (saved == CallbackSave.NotSaved) null else 4_000L
     }
-    /** Our call rang out, or the customer turned it down. */
+    /** Our call rang out unanswered. */
     data object NoAnswer : CallOutcome
+    /** The customer declined OUR call (Meta's REJECTED): "{First} declined the call". */
+    data object Rejected : CallOutcome
     /** The agent hung up our call before the customer answered. */
     data object Cancelled : CallOutcome { override val autoCloseMs get() = 2_000L }
     /** The media dropped and did not come back. */
     data object ConnectionLost : CallOutcome
-    data class Failed(val reason: String) : CallOutcome
+    /**
+     * The server's reason, and its `action` (CALLING_UX.md §2.1): retry (or
+     * null — an older server) offers Try again; wait / admin / none never do.
+     * [until]: when a `wait` may end, if the server said.
+     */
+    data class Failed(val reason: String, val action: String? = null, val until: String? = null) : CallOutcome
     /** The customer hasn't allowed business calls: the agent may send WhatsApp's call request. */
     data object PermissionNeeded : CallOutcome
+    /** The call request found they had already allowed calls permanently: "Call now". */
+    data object AlreadyAllowed : CallOutcome
     /** Nothing more is owed here: the "{First} allowed calls" banner follows when they tap Allow. */
     data object PermissionRequested : CallOutcome { override val autoCloseMs get() = 6_000L }
     data object MicBlocked : CallOutcome
@@ -107,22 +121,40 @@ enum class CallbackSave { Saved, Retrying, NotSaved }
 enum class WrapAction(val label: String) {
     OpenChat("Open chat"), CallAgain("Call again"), CallBack("Call back"), TryAgain("Try again"),
     Message("Message"), SendCallRequest("Send call request"), OpenSettings("Open settings"),
+    CallNow("Call now"), CallingSettings("Open WhatsApp calling settings"),
     Done("Done"), Cancel("Cancel"),
 }
 
-/** A second caller while this phone is on a call: a banner, never a take-over. */
-data class WaitingCall(val callId: String, val from: String?, val name: String?) {
-    val who: String get() = name?.takeIf { it.isNotBlank() } ?: from?.takeIf { it.isNotEmpty() }?.let { "+$it" } ?: "Someone"
+/**
+ * Why the call request didn't go (a refusal of POST /calls/request-permission
+ * with the server's `code` / `action`): `template_required` (outside the 24 h
+ * window with no approved template — [adminCanFix] offers Settings →
+ * WhatsApp calling), `138009` (the 1-a-day / 2-a-week limit).
+ */
+data class CallRefusal(val code: String?, val action: String?, val detail: String, val adminCanFix: Boolean = false)
+
+/** Meta flagged or restricted calling on the number (`calling_restricted`): the Calls view's banner. */
+data class CallingRestriction(val reasons: List<String>, val at: String?)
+
+/** A second caller while this phone is on a call: a banner, never a take-over. [from]: wa_id, or the PSID on Messenger. */
+data class WaitingCall(val callId: String, val from: String?, val name: String?, val channel: String = WHATSAPP) {
+    val who: String get() = name?.takeIf { it.isNotBlank() }
+        ?: if (channel == MESSENGER) MESSENGER_CALLER else from?.takeIf { it.isNotEmpty() }?.let { "+$it" } ?: "Someone"
 }
 
-/** A customer this phone asked allowed calls: "{First} allowed calls — Call now". */
-data class PermissionGrant(val waId: String, val name: String?)
+/**
+ * A customer this phone asked allowed calls: "{First} allowed calls — Call now".
+ * [waId]: their handle on [channel] (the PSID on Messenger).
+ */
+data class PermissionGrant(val waId: String, val name: String?, val channel: String = WHATSAPP)
 
 data class CallUiState(
     val phase: CallPhase = CallPhase.Idle,
     val callId: String? = null,
-    /** Customer wa_id (digits, no +). */
+    /** Customer wa_id (digits, no +) — on Messenger their PSID, which is never shown. */
     val from: String? = null,
+    /** "whatsapp" | "messenger": where the call is (the card's look and words follow it). */
+    val channel: String = WHATSAPP,
     val name: String? = null,
     val muted: Boolean = false,
     val seconds: Int = 0,
@@ -149,14 +181,35 @@ data class CallUiState(
     /** The call shrank to the bar at the top of the app (§6). */
     val minimised: Boolean = false,
     val waiting: WaitingCall? = null,
+    /**
+     * Whether the customer allowed calls, as the server read it before this
+     * call was placed (and as `call_permission` frames update it): the
+     * wrap-up says it honestly, the card warns about unanswered calls.
+     */
+    val permission: CallPermission? = null,
+    /** A refused call request (see [CallRefusal]). */
+    val refusal: CallRefusal? = null,
+    /** WhatsApp records and transcribes this call itself (ice-config `meta_transcription`). */
+    val metaTranscription: Boolean = false,
 ) {
     val speaker: Boolean get() = route.kind == AudioRouteKind.Speaker
+    /** A Messenger call (CALLING_UX.md §2.0): Messenger's look, never the PSID on screen. */
+    val messenger: Boolean get() = channel == MESSENGER
+    /** "WhatsApp" / "Messenger". */
+    val app: String get() = channelLabel(channel)
+    /** Their number to show under the name (never a PSID). */
+    val number: String? get() = from?.takeIf { it.isNotEmpty() && !messenger }
     /** Ringing, placing, connecting or on a call — anything but idle and the wrap-up. */
     val live: Boolean get() = phase != CallPhase.Idle && phase != CallPhase.Ended
-    /** Name, else +number, else "Unknown caller". */
-    val who: String get() = name?.takeIf { it.isNotBlank() } ?: from?.takeIf { it.isNotEmpty() }?.let { "+$it" } ?: "Unknown caller"
-    /** The key "Open chat" / "Message" opens: the wa_id (the inbox matches it), else the conversation. */
-    val chatKey: String? get() = from?.takeIf { it.isNotEmpty() } ?: conversationId?.takeIf { it.isNotEmpty() }
+    /** Name, else +number ("Messenger caller" on Messenger), else "Unknown caller". */
+    val who: String get() = name?.takeIf { it.isNotBlank() }
+        ?: if (messenger) MESSENGER_CALLER else number?.let { "+$it" } ?: "Unknown caller"
+    /**
+     * The key "Open chat" / "Message" opens: the wa_id (the inbox matches it),
+     * else the conversation. On Messenger the conversation first, else the PSID.
+     */
+    val chatKey: String? get() = if (messenger) conversationId?.takeIf { it.isNotEmpty() } ?: from?.takeIf { it.isNotEmpty() }
+        else from?.takeIf { it.isNotEmpty() } ?: conversationId?.takeIf { it.isNotEmpty() }
     /** A headset or Bluetooth is there: the audio button opens a list instead of toggling the speaker. */
     val routeChoice: Boolean get() = routes.any { it.isHeadset }
 }
@@ -197,8 +250,8 @@ fun CallUiState.statusText(): String = when (phase) {
 
 /** The wrap-up's words for [o] (a table row of CALLING_UX.md §3). */
 fun CallUiState.outcomeText(o: CallOutcome): String {
-    // Addressed by first name (titles skipped); no name: their number, as the web's firstName().
-    val first = firstNameOf(name) ?: from?.takeIf { it.isNotEmpty() }?.let { "+$it" }
+    // Addressed by first name (titles skipped); no name: their number, as the web's firstName() (never a PSID).
+    val first = firstNameOf(name) ?: number?.let { "+$it" }
     return when (o) {
         CallOutcome.Completed -> if (seconds > 0) "Call ended · ${callLength(seconds)}" else "Call ended"
         is CallOutcome.AnsweredElsewhere ->
@@ -211,11 +264,13 @@ fun CallUiState.outcomeText(o: CallOutcome): String {
             CallbackSave.NotSaved -> CallManager.CALLBACK_FAILED
         }
         CallOutcome.NoAnswer -> "No answer"
+        CallOutcome.Rejected -> "${first ?: "The customer"} declined the call"
+        CallOutcome.AlreadyAllowed -> "${first ?: "This customer"} already allows calls — call now"
         CallOutcome.Cancelled -> "Call cancelled"
         CallOutcome.ConnectionLost ->
             if (seconds > 0) "Call dropped · ${callLength(seconds)} — the connection was lost" else "Call dropped — the connection was lost"
         is CallOutcome.Failed -> o.reason
-        CallOutcome.PermissionNeeded -> "${first ?: "This customer"} hasn't allowed WhatsApp calls yet"
+        CallOutcome.PermissionNeeded -> "${first ?: "This customer"} hasn't allowed $app calls yet"
         CallOutcome.PermissionRequested -> "Call request sent — you'll be told when ${first ?: "they"} tap${if (first == null) "" else "s"} Allow"
         CallOutcome.MicBlocked -> CallManager.MIC_BLOCKED_WRAP
     }
@@ -231,9 +286,48 @@ fun CallUiState.outcomeNote(): String? {
     if (phase != CallPhase.Ended || error != null) return null
     return when (val o = outcome) {
         is CallOutcome.Missed -> o.note
-        CallOutcome.PermissionNeeded -> CallManager.PERMISSION_EXPLAINED
+        CallOutcome.PermissionNeeded -> {
+            // Where their permission stands (declined, revoked, asked already), then what the button does —
+            // or why it can't be pressed yet.
+            val state = permission?.takeIf { it.status == "denied" || it.status == "requested" }
+                ?.let { permissionLine(it, firstNameOf(name) ?: "them", AppClock.now()) }
+            listOfNotNull(
+                state, sendRequestBlocked() ?: if (messenger) CallManager.PERMISSION_EXPLAINED_MESSENGER else CallManager.PERMISSION_EXPLAINED,
+            ).joinToString("\n")
+        }
+        is CallOutcome.Failed -> when (o.action) {
+            "admin" -> CallManager.ADMIN_MUST_ACT
+            "wait" -> o.until?.let { "You can try again ${untilText(it, AppClock.now())}" } ?: CallManager.WAIT_A_MOMENT
+            "none" -> CallManager.MESSAGE_INSTEAD
+            else -> null
+        }
         else -> null
     }
+}
+
+/**
+ * "You can ask again in 5 h": Send call request can't be pressed yet — Meta's
+ * limit (1 a day, 2 a week) is used up. Null when a request may be sent.
+ */
+fun CallUiState.sendRequestBlocked(): String? {
+    val p = permission
+    val limited = refusal?.code == "138009" || refusal?.code == "request_limit" || (p != null && p.canRequest == false && p.status != "granted" && p.status != "requested")
+    if (!limited) return null
+    return p?.requestAvailableAt?.let { "You can ask again ${untilText(it, AppClock.now())}" } ?: "You can ask again later"
+}
+
+/**
+ * The line shown on the card before the call goes through, when this customer
+ * left our last calls unanswered — WhatsApp removes the permission after 4 in
+ * a row. A caution, never a block.
+ */
+fun CallUiState.callCaution(): String? {
+    if (!outbound || (phase != CallPhase.Placing && phase != CallPhase.RingingOut)) return null
+    // WhatsApp's rule: Messenger has no unanswered-call revoke to warn about.
+    if (channel != WHATSAPP) return null
+    val n = permission?.unansweredStreak ?: 0
+    if (n < 2) return null
+    return "${firstNameOf(name) ?: "This customer"} missed your last $n calls — WhatsApp removes call permission after 4 in a row. Consider a message first."
 }
 
 /**
@@ -251,18 +345,27 @@ fun CallUiState.wrapActions(): List<WrapAction> {
         is CallOutcome.Declined -> list(WrapAction.Message.takeIf { chat }, WrapAction.Done)
         is CallOutcome.Missed -> list(WrapAction.CallBack.takeIf { dial }, WrapAction.Message.takeIf { chat }, WrapAction.Done)
         CallOutcome.NoAnswer -> list(WrapAction.CallAgain.takeIf { dial }, WrapAction.Message.takeIf { chat }, WrapAction.Done)
+        CallOutcome.Rejected -> list(WrapAction.Message.takeIf { chat }, WrapAction.Done)
+        CallOutcome.AlreadyAllowed -> list(WrapAction.CallNow.takeIf { dial }, WrapAction.Message.takeIf { chat }, WrapAction.Done)
         CallOutcome.ConnectionLost -> list(WrapAction.CallAgain.takeIf { dial }, WrapAction.OpenChat.takeIf { chat }, WrapAction.Done)
+        // Only a retryable failure offers another go (wait / admin / none: trying again won't help).
         is CallOutcome.Failed -> list(
-            (if (outbound) WrapAction.TryAgain else WrapAction.CallBack).takeIf { dial }, WrapAction.Message.takeIf { chat }, WrapAction.Done,
+            (if (outbound) WrapAction.TryAgain else WrapAction.CallBack).takeIf { dial && (o.action == null || o.action == "retry") },
+            WrapAction.Message.takeIf { chat }, WrapAction.Done,
         )
-        CallOutcome.PermissionNeeded -> list(WrapAction.SendCallRequest.takeIf { dial }, WrapAction.Message.takeIf { chat }, WrapAction.Cancel)
+        // No template outside the 24 h window: asking again can't work — an admin can fix it in Settings.
+        CallOutcome.PermissionNeeded -> if (refusal?.code == "template_required") list(
+            WrapAction.CallingSettings.takeIf { refusal?.adminCanFix == true }, WrapAction.Message.takeIf { chat }, WrapAction.Cancel,
+        ) else list(WrapAction.SendCallRequest.takeIf { dial }, WrapAction.Message.takeIf { chat }, WrapAction.Cancel)
         CallOutcome.PermissionRequested -> list(WrapAction.Message.takeIf { chat }, WrapAction.Done)
         CallOutcome.MicBlocked -> list(WrapAction.OpenSettings, WrapAction.Done)
     }
 }
 
 /**
- * The WhatsApp softphone: incoming-call ringing, answer / decline / callback,
+ * The softphone (WhatsApp and Messenger — CALLING_UX.md §2.0: a Messenger
+ * call's SDP runs the other way, see [answer] / [placeMessenger] /
+ * `media_update`): incoming-call ringing, answer / decline / callback,
  * outbound calls, mute, audio routes, the wrap-up after a call, and call
  * recording — the port of lib/callContext.tsx, grown into docs/CALLING_UX.md.
  * Process-wide (lives in AppContainer) so a call survives navigating between
@@ -423,6 +526,29 @@ class CallManager internal constructor(
     /** A customer this phone asked has allowed calls: the "{First} allowed calls — Call now" banner. */
     val permissionGranted: StateFlow<PermissionGrant?> = _permissionGranted.asStateFlow()
 
+    private val _restriction = MutableStateFlow<CallingRestriction?>(null)
+    /**
+     * Meta flagged or restricted calling on the number (`calling_restricted`):
+     * the Calls view's banner — calls we place may fail until it lifts.
+     */
+    val restriction: StateFlow<CallingRestriction?> = _restriction.asStateFlow()
+    fun dismissRestriction() { _restriction.value = null }
+
+    private val _channels = MutableStateFlow<CallChannels?>(null)
+    /**
+     * Which channels can call right now (GET /calls/channels, read at start,
+     * on every socket reconnect and with each ice-config). Null until read —
+     * Messenger counts as off until then, so a Messenger Call button never
+     * shows before the server said it may.
+     */
+    val channels: StateFlow<CallChannels?> = _channels.asStateFlow()
+
+    /** Messenger calls can be placed now (the server's `messenger_calling_enabled` switch, as last read). */
+    val messengerCallsOn: Boolean get() = _channels.value?.messenger?.outbound == true
+
+    /** This agent may open Settings → WhatsApp calling (manage_settings); the dashboard sets it. */
+    @Volatile var canManageSettings: () -> Boolean = { false }
+
     // ── Refs (the web's useRef state) ────────────────────────────────────────
     private var peer: CallPeer? = null
     /** The call currently on screen. */
@@ -433,6 +559,10 @@ class CallManager internal constructor(
     /** The server transcribes recordings (and without being asked): what the wrap-up promises. */
     private var transcribes = false
     private var autoTranscribes = false
+    /** WhatsApp records + transcribes the call itself: "summary in a minute" even with nothing recorded here. */
+    private var metaTranscribes = false
+    /** A `call_status: ringing` for our call that beat connect's reply (applied once the id is known). */
+    private var earlyRinging: String? = null
     private var recording: CallRecording? = null
     private var recCallId: String? = null
     private var timerJob: Job? = null
@@ -472,8 +602,21 @@ class CallManager internal constructor(
     private var earlyAnswer: Pair<String, String>? = null
     /** An incoming call was ignored because another call was on screen: look again once it's over. */
     private var missedWhileBusy = false
-    /** wa_id → name of the customers this phone asked for call permission (for the "allowed calls" banner). */
+    /** "channel:handle" → name of the customers this phone asked for call permission (for the "allowed calls" banner). */
     private val askedPermission = LinkedHashMap<String, String?>()
+    private fun askKey(channel: String, handle: String) = "$channel:$handle"
+
+    // ── Messenger's SDP (CALLING_UX.md §2.0) ────────────────────────────────
+    /** The current peer has its remote description (Meta's answer): a renegotiation offer may be applied. */
+    private var remoteReady = false
+    /** The highest `media_update` version applied to the call on screen (older ones are stale). */
+    private var mediaVersion = Int.MIN_VALUE
+    /** A `media_update` that came before the call was set up: (callId, version, sdp), applied once it is. */
+    private var pendingMedia: Triple<String, Int, String>? = null
+    /** The media path is up (the peer said connected, and hasn't dropped since). */
+    private var mediaUp = false
+    /** Remote offers are applied one at a time (a renegotiation and a media_update may meet). */
+    private val sdpLock = kotlinx.coroutines.sync.Mutex()
     private var started = false
 
     private val phase: CallPhase get() = _state.value.phase
@@ -510,6 +653,8 @@ class CallManager internal constructor(
         }
         // Recordings a previous session could not upload.
         drainRecordings()
+        // Which channels can call (Messenger sits behind a server switch).
+        loadChannels()
 
         // Headsets come and go: the call follows them (see [onRoutes]).
         ui.launch { audio.routes.collect(::onRoutes) }
@@ -588,6 +733,17 @@ class CallManager internal constructor(
         ui.launch { pollOnce() }
         ui.launch { resync() }
         drainRecordings()
+        loadChannels()
+    }
+
+    /** GET /calls/channels. A failure keeps what was known (unknown = Messenger off). */
+    fun loadChannels() {
+        ui.launch {
+            if (!signedInFn()) return@launch
+            try { _channels.value = api.channels() }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { logW("channels unavailable", e) }
+        }
     }
 
     /** The live call's length from [liveSince] (the only way [CallUiState.seconds] moves). */
@@ -606,7 +762,7 @@ class CallManager internal constructor(
     private fun postIncoming() {
         val s = _state.value
         val id = s.callId ?: return
-        ringer.postIncoming(id, s.who, s.from?.takeIf { it.isNotEmpty() })
+        ringer.postIncoming(id, s.who, s.number, s.app)
     }
 
     // ── Audio routes ─────────────────────────────────────────────────────────
@@ -679,15 +835,18 @@ class CallManager internal constructor(
             "incoming_call" -> {
                 logD("WS event: $evt")
                 val id = evt.str("call_id") ?: return
+                val ch = channelOf(evt.str("channel"))
+                // Messenger: `from` is their PSID (`external_id` too); no name — it follows in a call_update.
+                val from = (evt.str("from") ?: evt.str("external_id"))?.removePrefix("+").orEmpty()
                 val s = _state.value
                 if (s.live && id != s.callId) {
                     missedWhileBusy = true
                     // On a call: a banner, never a take-over (there is no hold in the API).
                     if (s.phase != CallPhase.Ringing && !endedAt.containsKey(id)) {
-                        update { it.copy(waiting = WaitingCall(id, evt.str("from"), evt.str("name"))) }
+                        update { it.copy(waiting = WaitingCall(id, from, evt.str("name"), ch)) }
                     }
                 }
-                startRinging(id, evt.str("from") ?: "", evt.str("name"), evt.str("conversation_id"), evt.str("person_id"))
+                startRinging(id, from, evt.str("name"), evt.str("conversation_id"), evt.str("person_id"), ch)
             }
             "outbound_answer" -> {
                 val id = evt.str("call_id") ?: return
@@ -697,7 +856,7 @@ class CallManager internal constructor(
                     // The customer accepted OUR call — apply their SDP answer to connect.
                     logD("outbound answered")
                     val p = peer ?: return
-                    if (phase == CallPhase.RingingOut) { update { it.copy(phase = CallPhase.Connecting) }; armConnectGuard(id) }
+                    if (phase == CallPhase.Placing || phase == CallPhase.RingingOut) { update { it.copy(phase = CallPhase.Connecting) }; armConnectGuard(id) }
                     ui.launch { runCatching { p.setRemote(SdpType.Answer, sdp) } }
                 } else if (activeId == null && s.outbound && s.callId == "pending" && s.phase == CallPhase.Placing) {
                     // Ours, most likely, but connect hasn't told us its id yet.
@@ -705,6 +864,32 @@ class CallManager internal constructor(
                 }
             }
             "call_answered" -> onAnswered(evt)
+            // Messenger: the customer picked up our call, or changed media — a new offer (§2.0).
+            "media_update" -> {
+                val id = evt.str("call_id") ?: return
+                val sdp = evt.str("sdp")?.takeIf { it.isNotBlank() }
+                val type = evt.str("sdp_type")
+                if (sdp == null || (type != null && type != "offer")) { logD("media_update without an offer — ignored"); return }
+                val v = evt.str("version")?.toDoubleOrNull()?.toInt() ?: 0
+                onMediaUpdate(id, v, sdp)
+            }
+            // Meta rings the customer's phone now: "Calling…" becomes "Ringing…" — only on this.
+            "call_status" -> {
+                val id = evt.str("call_id") ?: return
+                if (evt.str("status") != "ringing") return
+                val s = _state.value
+                if (s.outbound && s.phase == CallPhase.Placing) {
+                    if (s.callId == id) update { it.copy(phase = CallPhase.RingingOut) }
+                    else if (s.callId == "pending") earlyRinging = id
+                }
+            }
+            "calling_restricted" -> {
+                val reasons = (evt["reasons"] as? kotlinx.serialization.json.JsonArray)?.mapNotNull {
+                    (it as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { p -> p.isString }?.content
+                        ?: (it as? JsonObject)?.let { o -> o.str("reason") ?: o.str("type") ?: o.str("description") }
+                }.orEmpty()
+                _restriction.value = CallingRestriction(reasons, evt.str("at"))
+            }
             "call_ended" -> {
                 logD("WS event: $evt")
                 val id = evt.str("call_id") ?: return
@@ -713,6 +898,8 @@ class CallManager internal constructor(
                 if (cur.callId == id && cur.live) {
                     finish(outcomeOf(evt.str("outcome"), cur, evt.str("agent_name"), evt.str("agent_id")), evt.str("duration")?.toIntOrNull())
                 }
+                // A no_answer corrected to rejected a moment later: the latest word wins.
+                else if (cur.callId == id && evt.str("outcome") == "rejected") correctToRejected()
                 // A call we never showed (or not yet: frames can arrive out of
                 // order): it is over, so a late incoming_call must not ring it.
                 else if (cur.callId != id && !endedAt.containsKey(id)) markEnded(id)
@@ -740,9 +927,82 @@ class CallManager internal constructor(
         val agentId = evt.str("agent_id")
         when (s.phase) {
             CallPhase.Ringing -> finish(CallOutcome.AnsweredElsewhere(evt.str("agent_name"), mine = isMe(agentId)))
-            CallPhase.RingingOut -> { update { it.copy(phase = CallPhase.Connecting) }; armConnectGuard(id) }
+            CallPhase.Placing, CallPhase.RingingOut -> if (s.outbound) customerAnswered(id)
             CallPhase.Connecting -> if (!s.outbound && takenBySomeoneElse(agentId)) finish(CallOutcome.AnsweredElsewhere(evt.str("agent_name")))
             else -> Unit
+        }
+    }
+
+    /**
+     * The customer picked up OUR call. WhatsApp: their answer's media follows
+     * ("Connecting…"). Messenger: the media path to Meta may be up already
+     * (its answer came back with connect) — then they're talking now; never
+     * before this moment, whatever the media did.
+     */
+    private fun customerAnswered(id: String) {
+        val s = _state.value
+        if (s.callId != id || !s.outbound || (s.phase != CallPhase.Placing && s.phase != CallPhase.RingingOut)) return
+        if (s.messenger && mediaUp && peer != null) {
+            update { it.copy(phase = CallPhase.InCall) }
+            return
+        }
+        update { it.copy(phase = CallPhase.Connecting) }
+        armConnectGuard(id)
+    }
+
+    /**
+     * `media_update {version, sdp}` (Messenger): the offer with the highest
+     * version is applied as a remote offer and answered locally — nothing is
+     * sent back (Meta documents no route for it; the web does the same).
+     * Stale versions, other calls' and SDP-less frames are ignored; one that
+     * arrives before the call is set up is held and applied once it is.
+     */
+    private fun onMediaUpdate(id: String, version: Int, sdp: String) {
+        val s = _state.value
+        when {
+            s.callId == id && s.live -> applyMediaUpdate(id, version, sdp)
+            // Our call whose id connect hasn't told us yet.
+            s.live && s.outbound && s.callId == "pending" -> holdMedia(id, version, sdp)
+            else -> Unit
+        }
+    }
+
+    private fun holdMedia(id: String, version: Int, sdp: String) {
+        val had = pendingMedia
+        if (had == null || had.first != id || had.second < version) pendingMedia = Triple(id, version, sdp)
+    }
+
+    private fun applyMediaUpdate(id: String, version: Int, sdp: String) {
+        if (version <= mediaVersion) { logD("stale media_update v$version ignored"); return }
+        val p = peer
+        if (p == null || !remoteReady) { holdMedia(id, version, sdp); return }
+        mediaVersion = version
+        ui.launch { applyRemoteOffer(p, sdp, "media_update") }
+    }
+
+    /** A held media_update for [id], now that the call has Meta's answer. */
+    private fun flushMedia(id: String) {
+        val m = pendingMedia?.takeIf { it.first == id } ?: return
+        pendingMedia = null
+        applyMediaUpdate(id, m.second, m.third)
+    }
+
+    /**
+     * Meta's offer (a renegotiation after accept / connect, or a media_update)
+     * → a local answer. A failure is logged, never fatal: the call keeps the
+     * media it has.
+     */
+    private suspend fun applyRemoteOffer(p: CallPeer, sdp: String, why: String): Boolean = sdpLock.withLock {
+        if (peer !== p) return@withLock false
+        try {
+            p.setRemote(SdpType.Offer, sdp)
+            p.setLocal(SdpType.Answer, p.createAnswer())
+            true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logW("Messenger $why offer not applied", e)
+            false
         }
     }
 
@@ -762,13 +1022,31 @@ class CallManager internal constructor(
 
     /** `call_permission`: a customer this phone asked has allowed calls (or not). */
     private fun onPermission(evt: JsonObject) {
-        val wa = evt.str("wa_id")?.removePrefix("+") ?: return
-        if (evt.str("status") != "granted" || !askedPermission.containsKey(wa)) return
-        val name = askedPermission.remove(wa)
-        _permissionGranted.value = PermissionGrant(wa, name)
+        // Matched by channel + handle: the wa_id, or (Messenger) the PSID in `external_id`.
+        val ch = channelOf(evt.str("channel"))
+        val wa = (if (ch == MESSENGER) evt.str("external_id") else evt.str("wa_id") ?: evt.str("external_id"))
+            ?.removePrefix("+")?.takeIf { it.isNotEmpty() } ?: return
+        // The card showing this customer says where their permission stands now.
+        val cur = _state.value
+        val sameCall = cur.from == wa && cur.channel == ch
+        if (sameCall && cur.phase != CallPhase.Idle) {
+            val st = evt.str("status") ?: "unknown"
+            val prev = cur.permission ?: CallPermission(waId = wa)
+            update {
+                it.copy(permission = prev.copy(
+                    status = st, expiresAt = evt.str("expires_at"), permanent = evt.str("permanent") == "true",
+                    revoked = evt.str("revoked") == "true", at = evt.str("at") ?: prev.at,
+                    canCall = when (st) { "granted" -> true; "denied" -> false; else -> prev.canCall },
+                ))
+            }
+        }
+        val key = askKey(ch, wa)
+        if (evt.str("status") != "granted" || !askedPermission.containsKey(key)) return
+        val name = askedPermission.remove(key)
+        _permissionGranted.value = PermissionGrant(wa, name, ch)
         // The wrap-up that said "call request sent" has its answer: the banner replaces it.
         val s = _state.value
-        if (s.phase == CallPhase.Ended && s.from == wa &&
+        if (s.phase == CallPhase.Ended && s.from == wa && s.channel == ch &&
             (s.outcome == CallOutcome.PermissionRequested || s.outcome == CallOutcome.PermissionNeeded)
         ) dismiss()
     }
@@ -787,6 +1065,7 @@ class CallManager internal constructor(
         "declined" -> CallOutcome.Declined(agent.takeIf { takenBySomeoneElse(agentId) })
         "callback" -> CallOutcome.Callback(CallbackSave.Saved, agent.takeIf { takenBySomeoneElse(agentId) })
         "no_answer" -> CallOutcome.NoAnswer
+        "rejected" -> CallOutcome.Rejected
         "cancelled" -> CallOutcome.Cancelled
         "failed" -> CallOutcome.Failed(CALL_NOT_CONNECTED)
         // An older frame without an outcome: judge by where the call was.
@@ -810,6 +1089,7 @@ class CallManager internal constructor(
                 conversationId = row.conversationId ?: it.conversationId,
                 personId = row.personId ?: it.personId,
                 name = it.name?.takeIf { n -> n.isNotBlank() } ?: row.name,
+                channel = if (channelOf(row.channel) == MESSENGER) MESSENGER else it.channel,
             )
         }
         val st = row.status
@@ -818,7 +1098,7 @@ class CallManager internal constructor(
             // Saving a callback: the server marks the row itself; the card ends with its note.
             CallPhase.Ringing -> if (st != "ringing" && !s.busy) finish(outcomeOf(st, s, row.agentName, row.agentId))
             CallPhase.Placing, CallPhase.RingingOut -> when {
-                st == "answered" -> if (s.phase == CallPhase.RingingOut) { update { it.copy(phase = CallPhase.Connecting) }; armConnectGuard(row.callId) }
+                st == "answered" -> if (s.outbound) customerAnswered(row.callId)
                 st != "ringing" -> finish(outcomeOf(st, s, row.agentName, row.agentId), row.duration)
             }
             CallPhase.Connecting, CallPhase.InCall -> when {
@@ -827,8 +1107,17 @@ class CallManager internal constructor(
                 }
                 st != "ringing" -> finish(outcomeOf(st, s, row.agentName, row.agentId), row.duration)
             }
+            CallPhase.Ended -> if (st == "rejected") correctToRejected()
             else -> Unit
         }
+    }
+
+    /** Meta's REJECTED can land just after the call was taken as unanswered: "{First} declined the call". */
+    private fun correctToRejected() {
+        val s = _state.value
+        if (s.phase != CallPhase.Ended || !s.outbound || s.outcome != CallOutcome.NoAnswer) return
+        update { it.copy(outcome = CallOutcome.Rejected) }
+        scheduleClose(CallOutcome.Rejected)
     }
 
     /**
@@ -856,7 +1145,7 @@ class CallManager internal constructor(
             val other = calls.firstOrNull { it.isFreshInboundRing(t) && it.callId != s.callId && !coolingDown(it.callId, t) }
             if (other != null) {
                 missedWhileBusy = true
-                if (s.waiting == null) update { it.copy(waiting = WaitingCall(other.callId, other.waId, other.name)) }
+                if (s.waiting == null) update { it.copy(waiting = WaitingCall(other.callId, callHandle(other), other.name, channelOf(other.channel))) }
             }
             s.waiting?.let { w ->
                 val row = calls.find { it.callId == w.callId }
@@ -868,7 +1157,7 @@ class CallManager internal constructor(
         val ringing = calls.find { it.isFreshInboundRing(t) && !coolingDown(it.callId, t) }
         if (ringing != null) {
             logD("poll fallback caught ringing call: ${ringing.callId}")
-            startRinging(ringing.callId, ringing.waId ?: "", ringing.name, ringing.conversationId, ringing.personId)
+            startRinging(ringing.callId, callHandle(ringing), ringing.name, ringing.conversationId, ringing.personId, channelOf(ringing.channel))
         }
     }
 
@@ -957,19 +1246,31 @@ class CallManager internal constructor(
     // A short cooldown stops a still-"ringing" record from instantly re-ringing
     // after a decline / failed answer, while allowing a genuine retry after ~12s.
     // A wrap-up on screen gives way at once.
-    private fun startRinging(callId: String, from: String, name: String?, conversationId: String? = null, personId: String? = null) {
+    private fun startRinging(
+        callId: String, from: String, name: String?, conversationId: String? = null, personId: String? = null,
+        channel: String = WHATSAPP,
+    ) {
         if (_state.value.live) return
         if (coolingDown(callId, now())) return
         resetJob?.cancel(); resetJob = null
         activeId = callId
         ringSince = now()
         answerPosted = false
+        resetSdp(keepFor = callId)
         val s = _state.value
         _state.value = CallUiState(
-            phase = CallPhase.Ringing, callId = callId, from = from, name = name,
+            phase = CallPhase.Ringing, callId = callId, from = from, name = name, channel = channel,
             conversationId = conversationId, personId = personId,
             routes = s.routes, route = preferredRoute(s.routes),
         )
+    }
+
+    /** A new call: nothing of the last one's SDP state carries over (a frame held for [keepFor] does). */
+    private fun resetSdp(keepFor: String? = null) {
+        remoteReady = false
+        mediaUp = false
+        mediaVersion = Int.MIN_VALUE
+        if (pendingMedia?.first != keepFor) pendingMedia = null
     }
 
     // ── Microphone ───────────────────────────────────────────────────────────
@@ -1012,7 +1313,7 @@ class CallManager internal constructor(
             it.copy(
                 recording = false,
                 recordingNote = when {
-                    autoTranscribes -> RECORDING_SAVED_AUTO
+                    autoTranscribes || metaTranscribes -> RECORDING_SAVED_AUTO
                     transcribes -> RECORDING_SAVED_MANUAL
                     else -> RECORDING_SAVED
                 },
@@ -1047,6 +1348,9 @@ class CallManager internal constructor(
         recEnabled = cfg.record != false
         transcribes = cfg.transcribe == true
         autoTranscribes = cfg.autoTranscribe == true
+        metaTranscribes = cfg.metaTranscription == true
+        cfg.channels?.let { _channels.value = it }
+        if (_state.value.metaTranscription != metaTranscribes) update { it.copy(metaTranscription = metaTranscribes) }
     }
 
     // ── Teardown ─────────────────────────────────────────────────────────────
@@ -1077,7 +1381,10 @@ class CallManager internal constructor(
                 phase = CallPhase.Ended, outcome = outcome, reconnecting = false, busy = false, error = null,
                 seconds = connectedSeconds ?: if (it.seconds == 0 && serverSeconds != null) serverSeconds else it.seconds,
                 waiting = null,
-                recordingNote = it.recordingNote.takeIf { _ -> outcome == CallOutcome.Completed || outcome == CallOutcome.ConnectionLost },
+                recordingNote = if (outcome == CallOutcome.Completed || outcome == CallOutcome.ConnectionLost) {
+                    // WhatsApp transcribes the call itself: a summary follows even when nothing was recorded here.
+                    it.recordingNote ?: META_SUMMARY.takeIf { _ -> it.metaTranscription && (connectedSeconds ?: it.seconds) > 0 }
+                } else null,
             )
         }
         scheduleClose(outcome)
@@ -1123,7 +1430,8 @@ class CallManager internal constructor(
             if (_state.value.live) return@launch
             val row = rows?.find { it.callId == w.callId }
             if (row != null && row.status != "ringing") { markEnded(w.callId); return@launch }
-            startRinging(w.callId, row?.waId ?: w.from ?: "", row?.name ?: w.name, row?.conversationId, row?.personId)
+            startRinging(w.callId, row?.let(::callHandle)?.takeIf { it.isNotEmpty() } ?: w.from ?: "", row?.name ?: w.name,
+                row?.conversationId, row?.personId, row?.let { channelOf(it.channel) } ?: w.channel)
         }
     }
 
@@ -1161,7 +1469,7 @@ class CallManager internal constructor(
         val s = _state.value
         val to = s.from?.takeIf { it.isNotEmpty() } ?: return
         if (s.live) return
-        ui.launch { initiateCall(to, s.name, s.conversationId) }
+        ui.launch { initiateCall(to, s.name, s.conversationId, s.channel) }
     }
 
     /**
@@ -1315,7 +1623,7 @@ class CallManager internal constructor(
             finish(CallOutcome.Completed, promoteWaiting = false)
             if (id != null && id != "pending") terminateSoon(id)
             // The agent chose them: straight to answering (a 409 / 410 says if they are gone).
-            startRinging(w.callId, w.from ?: "", w.name)
+            startRinging(w.callId, w.from ?: "", w.name, channel = w.channel)
             if (_state.value.callId == w.callId && phase == CallPhase.Ringing) answer()
         }
     }
@@ -1339,19 +1647,31 @@ class CallManager internal constructor(
                 }
                 readConfig(cfg)
                 if (!stillMine()) return@launch   // hung up meanwhile
+                // Messenger sends no offer (CALLING_UX.md §2.0): WE build the offer and
+                // accept with it; Meta's answer comes back in the reply.
+                val reversed = offer.offerRequired ||
+                    (offer.sdp.isNullOrEmpty() && (channelOf(offer.channel) == MESSENGER || _state.value.messenger))
+                if (reversed && !_state.value.messenger) update { it.copy(channel = MESSENGER) }
                 val p = newPeer(cfg)
                 if (!ensureMic()) throw MicBlocked()
                 if (peer !== p) return@launch
                 p.addMic(!_state.value.muted)
                 audio.micLive()
-                p.setRemote(SdpType.Offer, offer.sdp)
-                val answer = p.createAnswer()
-                p.setLocal(SdpType.Answer, answer)
+                val mine: String
+                if (reversed) {
+                    mine = p.createOffer()
+                    p.setLocal(SdpType.Offer, mine)
+                } else {
+                    p.setRemote(SdpType.Offer, offer.sdp.orEmpty())
+                    mine = p.createAnswer()
+                    p.setLocal(SdpType.Answer, mine)
+                }
                 awaitGathering(p)
                 if (peer !== p) return@launch
                 answerPosted = true
-                api.answer(callId, p.localSdp ?: answer)
+                val resp = api.answer(callId, p.localSdp ?: mine)
                 answerAccepted = true
+                if (reversed && !acceptMessengerAnswer(p, callId, resp)) return@launch
                 if (stillMine() && phase == CallPhase.Connecting) armConnectGuard(callId)
             } catch (e: CancellationException) {
                 throw e
@@ -1359,6 +1679,11 @@ class CallManager internal constructor(
                 logW("answer failed", e)
                 if (!stillMine()) return@launch
                 when {
+                    // Messenger calling was switched off since we last looked.
+                    e.isMessengerOff() -> {
+                        loadChannels()
+                        finish(CallOutcome.Failed(e.messengerOffReason(), "none")); return@launch
+                    }
                     // 409: a colleague won the redis lock and is talking to the customer.
                     // Only this device's side goes — never terminate their call.
                     e.isTakenElsewhere() -> {
@@ -1393,10 +1718,34 @@ class CallManager internal constructor(
                 if (_state.value.callId != callId || !_state.value.live) return@launch
                 // Connected after all (the error was about a request whose work was done).
                 if (phase == CallPhase.InCall) { update { it.copy(error = null) }; return@launch }
-                finish(CallOutcome.Failed(why))
+                finish(CallOutcome.Failed(why, (e as? ApiException)?.action))
                 terminateSoon(callId)
             }
         }
+    }
+
+    /**
+     * Meta's answer to our offer, then (when present) its renegotiation offer,
+     * then any media_update that came early. Accepted but nothing to apply
+     * (or an answer the peer refuses): the call can't carry audio — it is
+     * ended, never left as a silent line. False when the call is over.
+     */
+    private suspend fun acceptMessengerAnswer(p: CallPeer, callId: String, resp: ke.co.bethanyhouse.neema.core.model.CallSdpResponse): Boolean {
+        if (peer !== p) return false
+        val answer = resp.sdp?.takeIf { it.isNotBlank() }
+        val applied = answer != null && try {
+            p.setRemote(SdpType.Answer, answer); true
+        } catch (e: CancellationException) { throw e } catch (e: Exception) { logW("Messenger answer rejected", e); false }
+        if (peer !== p || _state.value.callId != callId) return false
+        if (!applied) {
+            finish(CallOutcome.Failed(if (answer == null) AUDIO_NOT_CONNECTED else AUDIO_SETUP_FAILED))
+            terminateSoon(callId)
+            return false
+        }
+        remoteReady = true
+        resp.renegotiationSdp?.let { applyRemoteOffer(p, it, "accept") }
+        flushMedia(callId)
+        return peer === p
     }
 
     fun toggleMute() {
@@ -1418,24 +1767,44 @@ class CallManager internal constructor(
      * card already says it); a call the agent hung up before it was placed
      * counts as success (there is nothing to report).
      */
-    suspend fun initiateCall(to: String, name: String? = null, conversationId: String? = null): Result<Unit> = withContext(main) {
+    suspend fun initiateCall(
+        to: String, name: String? = null, conversationId: String? = null,
+        /** "messenger": [to] is their PSID and the call goes out on Messenger (CALLING_UX.md §2.0). */
+        channel: String = WHATSAPP,
+    ): Result<Unit> = withContext(main) {
         if (_state.value.live) return@withContext Result.failure(CallError("Already in a call"))
+        val messenger = channelOf(channel) == MESSENGER
+        val wa = if (messenger) to.filter { it.isDigit() } else to.removePrefix("+")
+        if (messenger && wa.isEmpty()) return@withContext Result.failure(CallError("No Messenger id for this customer."))
         resetJob?.cancel(); resetJob = null
         earlyAnswer = null
+        earlyRinging = null
         answerPosted = false
         answerAccepted = false
-        val wa = to.removePrefix("+")
+        resetSdp()
         val routes = _state.value.routes
         _state.value = CallUiState(
             phase = CallPhase.Placing, callId = "pending", from = wa, name = name, outbound = true,
+            channel = if (messenger) MESSENGER else WHATSAPP,
             conversationId = conversationId, routes = routes, route = preferredRoute(routes),
         )
         fun stillMine() = _state.value.outbound && _state.value.callId == "pending" && phase == CallPhase.Placing
         val startedAfter = now() - CLOCK_SKEW_MS
         try {
-            val cfg = api.iceConfig()
+            // Permission truth first (Meta's answer, read alongside the ICE config): a customer
+            // who hasn't allowed calls goes straight to "Send call request" — no doomed connect.
+            // A slow or failed read never holds the call up: it is placed as before.
+            val (cfg, perm) = coroutineScope {
+                val p = async { readPermission(wa, messenger) }
+                api.iceConfig() to p.await()
+            }
             readConfig(cfg)
             if (!stillMine()) return@withContext Result.success(Unit)
+            if (perm != null) update { it.copy(permission = perm) }
+            if (perm != null && perm.canCall == false && perm.status != "granted") {
+                finish(if (perm.status == "requested") CallOutcome.PermissionRequested else CallOutcome.PermissionNeeded)
+                return@withContext Result.failure(CallError(NO_CALL_PERMISSION, shown = true))
+            }
             val p = newPeer(cfg)
             if (!ensureMic()) throw MicBlocked()
             if (peer !== p) return@withContext Result.success(Unit)
@@ -1445,6 +1814,7 @@ class CallManager internal constructor(
             p.setLocal(SdpType.Offer, offer)
             awaitGathering(p)
             if (peer !== p) return@withContext Result.success(Unit)
+            if (messenger) return@withContext placeMessenger(p, wa, p.localSdp ?: offer, name)
             val id = try {
                 api.connect(to, p.localSdp ?: offer, name?.takeIf { it.isNotEmpty() })
             } catch (e: CancellationException) {
@@ -1461,12 +1831,15 @@ class CallManager internal constructor(
                 return@withContext Result.success(Unit)
             }
             activeId = id
-            update { if (it.callId == "pending") it.copy(callId = id, phase = CallPhase.RingingOut) else it }
+            // Placed: still "Calling…" until Meta says their phone rings (`call_status`), which may have come already.
+            val ringing = earlyRinging == id
+            earlyRinging = null
+            update { if (it.callId == "pending") it.copy(callId = id, phase = if (ringing) CallPhase.RingingOut else CallPhase.Placing) else it }
             earlyAnswer?.let { (early, sdp) ->
                 earlyAnswer = null
                 if (early == id) {
                     logD("outbound answered (early)")
-                    if (phase == CallPhase.RingingOut) { update { it.copy(phase = CallPhase.Connecting) }; armConnectGuard(id) }
+                    if (phase == CallPhase.Placing || phase == CallPhase.RingingOut) { update { it.copy(phase = CallPhase.Connecting) }; armConnectGuard(id) }
                     runCatching { p.setRemote(SdpType.Answer, sdp) }
                 }
             }
@@ -1480,13 +1853,18 @@ class CallManager internal constructor(
             if (!stillMine()) return@withContext Result.failure(CallError(friendly))
             val outcome = when {
                 e is MicBlocked -> CallOutcome.MicBlocked
-                e is ApiException && e.status == 409 -> {
+                // Messenger calling was switched off since we last looked: call them on WhatsApp instead.
+                e.isMessengerOff() -> { loadChannels(); CallOutcome.Failed(e.messengerOffReason(), "none") }
+                e is ApiException && (e.status == 409 || e.action == "request_permission") -> {
                     // Asked already (and waiting on their Allow), or never: the card says which.
-                    val perm = try { api.permission(wa) } catch (x: CancellationException) { throw x } catch (_: Exception) { null }
+                    val perm = readPermission(wa, messenger)
+                    if (perm != null && stillMine()) update { it.copy(permission = perm) }
                     if (perm?.status == "requested") CallOutcome.PermissionRequested else CallOutcome.PermissionNeeded
                 }
                 friendly == UNCONFIRMED_CALL -> CallOutcome.Failed(UNCONFIRMED_CALL)
-                else -> CallOutcome.Failed(e.serverReason() ?: friendly)
+                else -> CallOutcome.Failed(
+                    e.serverReason() ?: friendly, (e as? ApiException)?.action, (e as? ApiException)?.field("request_available_at"),
+                )
             }
             if (!stillMine()) return@withContext Result.failure(CallError(friendly))
             finish(outcome)
@@ -1495,18 +1873,58 @@ class CallManager internal constructor(
     }
 
     /**
-     * Ask the customer for permission to call them (WhatsApp's interactive
-     * call_permission_request). It messages the customer, so only ever on the
-     * agent's tap — "Send call request" on the wrap-up. Their Allow arrives as
-     * `call_permission` and raises [permissionGranted] on this phone.
+     * The Messenger half of [initiateCall]: connect with our offer; Meta's
+     * answer comes back at once and is applied (then its renegotiation, and
+     * any media_update that beat the reply). The card stays "Calling…" /
+     * "Ringing…" until `call_answered` — the media path to Meta may come up
+     * before the customer picks up, and that is not them answering.
      */
-    suspend fun requestPermission(to: String, name: String? = null): Result<Unit> {
+    private suspend fun placeMessenger(p: CallPeer, psid: String, sdp: String, name: String?): Result<Unit> {
+        // Never retried, never looked up after a timeout: a second connect would ring them twice.
+        val resp = api.connectMessenger(psid, sdp, name?.takeIf { it.isNotBlank() })
+        val id = resp.callId.takeIf { it.isNotEmpty() } ?: throw CallError(CALL_NOT_CONNECTED)
+        if (peer !== p) {
+            try { api.terminate(id) } catch (e: CancellationException) { throw e } catch (_: Exception) {}
+            return Result.success(Unit)
+        }
+        activeId = id
+        val ringing = earlyRinging == id
+        earlyRinging = null
+        update { if (it.callId == "pending") it.copy(callId = id, phase = if (ringing) CallPhase.RingingOut else CallPhase.Placing) else it }
+        val answer = resp.sdp?.takeIf { it.isNotBlank() }
+        if (answer != null) {
+            try { p.setRemote(SdpType.Answer, answer); remoteReady = true }
+            catch (e: CancellationException) { throw e } catch (e: Exception) { logW("Messenger answer rejected", e) }
+        }
+        if (remoteReady) {
+            resp.renegotiationSdp?.let { applyRemoteOffer(p, it, "connect") }
+            flushMedia(id)
+        }
+        return Result.success(Unit)
+    }
+
+    /**
+     * Ask the customer for permission to call them (WhatsApp's interactive
+     * call_permission_request inside the 24 h window, the approved template
+     * outside it). It messages the customer, so only ever on the agent's tap —
+     * "Send call request" on the wrap-up or the customer panel. Their Allow
+     * arrives as `call_permission` and raises [permissionGranted] on this
+     * phone. A refusal is an [ApiException] with the server's `code` /
+     * `action` (template_required, 138009 — see [requestRefusal]).
+     */
+    suspend fun requestPermission(to: String, name: String? = null, channel: String = WHATSAPP): Result<PermissionRequestResponse> {
         val wa = to.filter { it.isDigit() }
+        val ch = channelOf(channel)
         return try {
-            api.requestPermission(wa)
-            withContext(main) { askedPermission[wa] = name ?: _state.value.takeIf { it.from == wa }?.name }
-            Result.success(Unit)
-        } catch (e: CancellationException) { throw e } catch (e: Exception) { Result.failure(e) }
+            val who = name ?: withContext(main) { _state.value.takeIf { it.from == wa && it.channel == ch }?.name }
+            // Messenger: the `calling_optin` message (Accept / Decline); WhatsApp: its call-permission request.
+            val r = if (ch == MESSENGER) api.requestMessengerPermission(wa) else api.requestPermission(wa, who?.takeIf { it.isNotBlank() })
+            if (!r.alreadyPermitted) withContext(main) { askedPermission[askKey(ch, wa)] = who }
+            Result.success(r)
+        } catch (e: CancellationException) { throw e } catch (e: Exception) {
+            if (e.isMessengerOff()) loadChannels()
+            Result.failure(e)
+        }
     }
 
     /** The wrap-up's "Send call request". */
@@ -1515,17 +1933,62 @@ class CallManager internal constructor(
             val s = _state.value
             val to = s.from?.takeIf { it.isNotEmpty() } ?: return@launch
             if (s.phase != CallPhase.Ended || s.outcome != CallOutcome.PermissionNeeded || s.busy) return@launch
+            if (s.sendRequestBlocked() != null || s.refusal?.code == "template_required") return@launch
             update { it.copy(busy = true, error = null) }
-            val r = requestPermission(to, s.name)
+            val r = requestPermission(to, s.name, s.channel)
             val now = _state.value
             if (now.phase != CallPhase.Ended || now.from != to || now.outcome != CallOutcome.PermissionNeeded) return@launch
-            update {
-                if (r.isSuccess) it.copy(busy = false, outcome = CallOutcome.PermissionRequested)
-                else it.copy(busy = false, error = permissionRequestError(r.exceptionOrNull()))
+            val resp = r.getOrNull()
+            val e = r.exceptionOrNull()
+            when {
+                // They had allowed calls permanently already: nothing to ask — "Call now".
+                resp?.alreadyPermitted == true -> {
+                    update { it.copy(busy = false, outcome = CallOutcome.AlreadyAllowed, permission = resp.permission ?: it.permission) }
+                    scheduleClose(CallOutcome.AlreadyAllowed)
+                }
+                resp != null -> {
+                    update { it.copy(busy = false, outcome = CallOutcome.PermissionRequested, permission = resp.permission ?: it.permission) }
+                    // Nothing more is owed on this card: it closes as the web's does (the banner follows the Allow).
+                    scheduleClose(CallOutcome.PermissionRequested)
+                }
+                else -> {
+                    val refusal = requestRefusal(e, canManageSettings())
+                    update {
+                        when (refusal?.code) {
+                            // The limit (Messenger's: 2 a day): the button waits, saying when it can be pressed again.
+                            "138009", "request_limit" -> it.copy(
+                                busy = false, refusal = refusal,
+                                permission = (it.permission ?: CallPermission(waId = to)).copy(
+                                    canRequest = false,
+                                    requestAvailableAt = (e as? ApiException)?.field("request_available_at") ?: it.permission?.requestAvailableAt,
+                                ),
+                            )
+                            "template_required" -> it.copy(busy = false, refusal = refusal, error = refusal.detail)
+                            else -> it.copy(busy = false, refusal = refusal, error = permissionRequestError(e))
+                        }
+                    }
+                }
             }
-            // Nothing more is owed on this card: it closes as the web's does (the banner follows the Allow).
-            if (r.isSuccess) scheduleClose(CallOutcome.PermissionRequested)
         }
+    }
+
+    /** The wrap-up's "Call now" (the call request found they already allowed calls). */
+    fun callNow() {
+        val s = _state.value
+        val to = s.from?.takeIf { it.isNotEmpty() } ?: return
+        if (s.live) return
+        ui.launch { initiateCall(to, s.name, s.conversationId, s.channel) }
+    }
+
+    /**
+     * GET /calls/permission, capped at [PERMISSION_READ_MS]: null when it is
+     * slow or fails (the call is placed as it always was).
+     */
+    private suspend fun readPermission(wa: String, messenger: Boolean = false): CallPermission? = try {
+        withTimeoutOrNull(PERMISSION_READ_MS) { if (messenger) api.messengerPermission(wa) else api.permission(wa) }
+    } catch (e: CancellationException) { throw e } catch (e: Exception) {
+        if (e.isMessengerOff()) loadChannels()
+        null
     }
 
     /** The banner's "Call now" for a customer who just allowed calls. */
@@ -1533,7 +1996,7 @@ class CallManager internal constructor(
         val g = _permissionGranted.value ?: return
         _permissionGranted.value = null
         if (_state.value.live) return
-        ui.launch { initiateCall(g.waId, g.name) }
+        ui.launch { initiateCall(g.waId, g.name, channel = g.channel) }
     }
 
     fun dismissGrant() { _permissionGranted.value = null }
@@ -1565,23 +2028,28 @@ class CallManager internal constructor(
                 if (me == null || peer !== me) return@launch
                 when (ev) {
                     PeerEvent.Connected -> {
+                        mediaUp = true
                         graceJob?.cancel(); graceJob = null
                         connectGuard?.cancel(); connectGuard = null
                         droppedAt = null
                         if (_state.value.reconnecting) update { it.copy(reconnecting = false) }
                         setInCall()
                     }
-                    PeerEvent.Interrupted -> onInterrupted(me)
-                    PeerEvent.Ended -> when {
+                    PeerEvent.Interrupted -> { mediaUp = false; onInterrupted(me) }
+                    PeerEvent.Ended -> { mediaUp = false; when {
                         // The path failed for good while it was recovering, or before any audio: gone.
                         _state.value.reconnecting || phase == CallPhase.Connecting -> loseConnection()
+                        // Messenger: our call's path to Meta failed before they picked up.
+                        phase == CallPhase.Placing || phase == CallPhase.RingingOut -> loseConnection()
                         else -> finish(CallOutcome.Completed)
-                    }
+                    } }
                 }
             }
         }
         self = p
         peer = p
+        remoteReady = false
+        mediaUp = false
         return p
     }
 
@@ -1632,6 +2100,10 @@ class CallManager internal constructor(
     }
 
     private fun setInCall() {
+        val s = _state.value
+        // Messenger: Meta's media server answered our offer before the customer picked up —
+        // the call goes live on `call_answered`, never on the media alone.
+        if (s.outbound && s.messenger && (s.phase == CallPhase.Placing || s.phase == CallPhase.RingingOut)) return
         if (phase == CallPhase.Connecting || phase == CallPhase.Ringing || phase == CallPhase.RingingOut) {
             update { it.copy(phase = CallPhase.InCall) }
         }
@@ -1685,9 +2157,16 @@ class CallManager internal constructor(
         const val ANSWER_DROPPED = "The connection dropped while answering — call them back"
         /** Answered, but no audio ever flowed. */
         const val AUDIO_NOT_CONNECTED = "The call audio couldn't connect"
+        /** Meta's answer to our offer couldn't be applied. */
+        const val AUDIO_SETUP_FAILED = "Couldn't set up the call audio"
+        /** 409 `messenger_calling_off` with no sentence of its own. */
+        const val MESSENGER_OFF = "Messenger calling is switched off — call them on WhatsApp instead."
         /** Under "{First} hasn't allowed WhatsApp calls yet" (CallStage.tsx). */
         const val PERMISSION_EXPLAINED =
             "WhatsApp only lets a business call someone who allowed it. The request is a WhatsApp message with an Allow button."
+        /** The same for Messenger (CallStage.tsx). */
+        const val PERMISSION_EXPLAINED_MESSENGER =
+            "Messenger only lets a business call someone who accepted a call request. The request is a Messenger message with Accept and Decline buttons."
         const val OUTBOUND_SLOW = "The server took too long — couldn't place the call"
         /** connect timed out and no placed call turned up: it may still be ringing them. */
         const val UNCONFIRMED_CALL = "Couldn't confirm the call went through — check Calls before trying again"
@@ -1699,6 +2178,16 @@ class CallManager internal constructor(
         const val RECORDING_SAVED_AUTO = "Recording saved — summary in a minute"
         const val RECORDING_SAVED_MANUAL = "Recording saved — Transcribe from Calls"
         const val RECORDING_SAVED = "Recording saved"
+        /** Nothing recorded here, but WhatsApp records and transcribes the call itself. */
+        const val META_SUMMARY = "Recorded by WhatsApp — summary in a minute"
+        /** A refusal whose `action` is admin: no Try again. */
+        const val ADMIN_MUST_ACT = "An admin needs to fix this — trying again won't help."
+        /** `action` wait with no time given. */
+        const val WAIT_A_MOMENT = "Wait a little before trying again."
+        /** `action` none: calling won't work — write to them. */
+        const val MESSAGE_INSTEAD = "Send them a message instead."
+        /** How long the permission read may hold up placing a call. */
+        const val PERMISSION_READ_MS = 1_500L
 
         /** How long a "disconnected" call may take to recover before it is ended. */
         const val ICE_GRACE_MS = 10_000L
@@ -1716,6 +2205,12 @@ class CallManager internal constructor(
 
         private fun Throwable.statusOrNull() = (this as? ApiException)?.status
 
+        /** 409 `messenger_calling_off`: the server's switch is off (every Messenger action says so). */
+        internal fun Throwable.isMessengerOff() = this is ApiException && code == "messenger_calling_off"
+
+        private fun Throwable.messengerOffReason(): String =
+            (this as? ApiException)?.detail?.trim()?.takeIf { it.isNotEmpty() && !it.startsWith("<") && it.length <= 200 } ?: MESSENGER_OFF
+
         /** The request left but no answer came back: it may have done its work. */
         private fun Throwable.isAmbiguous(pathEnd: String) =
             this is ApiException && status == 0 && path.endsWith(pathEnd)
@@ -1725,7 +2220,7 @@ class CallManager internal constructor(
 
         /** POST /admin/calls/{id}/answer's 409 (routers/admin.py calls_answer: "call already answered by {name}"). */
         private fun Throwable.isTakenElsewhere() =
-            this is ApiException && status == 409 && path.endsWith("/answer")
+            this is ApiException && status == 409 && path.endsWith("/answer") && !isMessengerOff()
 
         /** POST /answer's 410: "This call has already ended." (the caller gave up, a colleague declined). */
         private fun Throwable.isCallGone() = this is ApiException && status == 410
@@ -1747,7 +2242,8 @@ class CallManager internal constructor(
          */
         private fun Throwable.serverReason(): String? {
             val a = this as? ApiException ?: return null
-            if (a.status != 502 || !a.path.endsWith("/connect")) return null
+            // A structured refusal (`code`) says what happened whatever its status; an older one only on connect's 502.
+            if (a.code == null && (a.status != 502 || !a.path.endsWith("/connect"))) return null
             val d = a.detail.trim().removePrefix("call failed:").trim()
             if (d.isEmpty() || d.startsWith("<") || d.length > 160) return null
             return d.replaceFirstChar { it.uppercase() }
@@ -1756,6 +2252,10 @@ class CallManager internal constructor(
         /** answer()'s catch in lib/callContext.tsx (plus the 409 a colleague's answer causes). */
         internal fun answerError(e: Throwable): String = when {
             e is MicBlocked -> MIC_BLOCKED
+            // accept's structured 502: the reason Meta gave, said for people.
+            e is ApiException && e.status == 502 && e.code != null ->
+                e.detail.trim().removePrefix("accept failed:").trim().takeIf { it.isNotEmpty() && !it.startsWith("<") && it.length <= 160 }
+                    ?.replaceFirstChar { it.uppercase() } ?: "Couldn't connect the call"
             e.isTakenElsewhere() -> TAKEN_ELSEWHERE
             e.isOfferGone() || e.isCallGone() -> CALL_GONE
             e.isTimeout() -> ANSWER_SLOW
@@ -1780,7 +2280,18 @@ class CallManager internal constructor(
             e.isTimeout() -> "No answer from the server — the request may still arrive. Check the chat before sending again."
             e.isOffline() -> "No connection — the call request wasn't sent"
             e.statusOrNull() == 401 -> SESSION_EXPIRED
+            // A structured refusal: the server's sentence, without its "permission request failed:" prefix.
+            e is ApiException && e.code != null -> e.detail.trim().removePrefix("permission request failed:").trim()
+                .takeIf { it.isNotEmpty() && !it.startsWith("<") && it.length <= 200 }?.replaceFirstChar { it.uppercase() }
+                ?: "Couldn't send the call request"
             else -> "Couldn't send the call request"
+        }
+
+        /** A call request's structured refusal (null for a plain network failure). */
+        fun requestRefusal(e: Throwable?, admin: Boolean): CallRefusal? {
+            val a = e as? ApiException ?: return null
+            val code = a.code ?: return null
+            return CallRefusal(code, a.action, a.detail.trim(), adminCanFix = admin && code == "template_required")
         }
     }
 }

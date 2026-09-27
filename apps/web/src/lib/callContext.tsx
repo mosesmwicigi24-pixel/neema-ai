@@ -10,7 +10,10 @@
 // The phases, outcomes and words are the contract in docs/CALLING_UX.md §3/§4:
 //
 //   idle → incoming ─answer→ connecting → active ⇄ reconnecting → ending → ended
-//   idle → placing ─connect→ ringing_out ─customer answers→ connecting → active …
+//   idle → placing ─call_status ringing→ ringing_out ─customer answers→ connecting → active …
+//
+// Before placing, Meta's permission answer (GET /calls/permission, ≤ 1.5 s)
+// decides: no permission → straight to "Send call request" (no doomed connect).
 //
 // Exactly one phase at a time, and every path — a colleague answering, the
 // caller giving up, a dropped connection, a failed request — lands on `ended`
@@ -24,8 +27,9 @@ import React, {
 import { useSession } from "next-auth/react";
 import { useWs } from "@/lib/websocket";
 import {
-    callsApi, apiErrorStatus, apiErrorDetail, isNetworkError,
-    type ApiCall, type CallIceConfig,
+    callsApi, apiErrorStatus, apiErrorDetail, apiErrorInfo, isNetworkError,
+    type ApiCall, type CallIceConfig, type CallPermission, type CallErrorAction,
+    type CallChannel, type CallChannels, type CallSdpResp,
 } from "@/lib/api";
 
 export type CallPhase =
@@ -46,26 +50,34 @@ export type CallOutcome =
     | "missed"
     | "callback"
     | "no_answer"
+    | "rejected"            // the customer declined our call
     | "cancelled"
     | "connection_lost"
     | "failed"
     | "permission_needed"
     | "permission_requested"
+    | "permission_granted"  // asked, but they already allow calls — call now
     | "mic_blocked";
+
+/** Meta flagged / restricted calling (the `calling_restricted` event). */
+export interface CallRestriction { reasons: string[]; until: string | null; at: string | null; }
 
 export interface CallState {
     /** Meta's call id; "pending" while an outbound call has not got one yet. */
     callId: string;
-    /** The customer's WhatsApp number (digits, no +). */
+    /** The customer's handle: their WhatsApp number (digits, no +), or their
+     *  Messenger PSID on a Messenger call. */
     from: string;
     name?: string | null;
     direction: "inbound" | "outbound";
+    /** Which app the call is on (docs/CALLING_UX.md §2.0). */
+    channel: CallChannel;
     conversationId?: string | null;
     personId?: string | null;
 }
 
 /** A second call ringing while this device is on one (no hold in the API). */
-export interface WaitingCall { callId: string; from: string; name?: string | null; }
+export interface WaitingCall { callId: string; from: string; name?: string | null; channel: CallChannel; }
 
 export interface AudioDevice { deviceId: string; label: string; }
 
@@ -77,6 +89,16 @@ interface CallCtx {
     reason: string | null;
     /** Who answered / declined when it was not this agent. */
     byAgent: string | null;
+    /** What a refusal offers next (server `action`), its `code`, and when
+     *  asking again is possible (`request_available_at`). */
+    errAction: CallErrorAction | null;
+    errCode: string | null;
+    availableAt: string | null;
+    /** The customer's call permission as the server last told us (this call). */
+    permission: CallPermission | null;
+    /** Meta restricted calling for the business (live event), until dismissed. */
+    restriction: CallRestriction | null;
+    dismissRestriction: () => void;
     /** Seconds connected, for the wrap-up. */
     duration: number | null;
     /** Date.now() at the moment media connected — the timer's zero. */
@@ -92,7 +114,9 @@ interface CallCtx {
     recordingNote: string | null;
     waiting: WaitingCall | null;
     /** A customer this agent asked just allowed calls. */
-    granted: { waId: string; name?: string | null } | null;
+    granted: { waId: string; name?: string | null; channel: CallChannel } | null;
+    /** Which channels can call right now (GET /calls/channels); null until read. */
+    channels: CallChannels | null;
     permissionBusy: boolean;
     // Audio devices (only where the browser supports choosing them).
     inputs: AudioDevice[];
@@ -109,11 +133,12 @@ interface CallCtx {
     callbackLater: () => void;
     hangup: () => void;
     toggleMute: () => void;
-    /** Starts an outbound WhatsApp call. `ok` is true when the call card took
-     *  over (it then shows every outcome itself); false only when it could not
-     *  start at all (already on a call). */
-    initiateCall: (to: string, name?: string | null, conversationId?: string | null) =>
-        Promise<{ ok: boolean; error?: string }>;
+    /** Starts an outbound call — WhatsApp (`to` = their number) by default,
+     *  Messenger with `{channel: "messenger"}` (`to` = their PSID). `ok` is true
+     *  when the call card took over (it then shows every outcome itself); false
+     *  only when it could not start at all (already on a call). */
+    initiateCall: (to: string, name?: string | null, conversationId?: string | null,
+                   opts?: { channel?: CallChannel }) => Promise<{ ok: boolean; error?: string }>;
     requestPermission: () => void;
     redial: () => void;
     dismiss: () => void;
@@ -152,17 +177,27 @@ export interface CallPresence {
     busy: boolean;
     /** The full card covers the content area (not minimised, not idle). */
     covering: boolean;
-    /** The customer on the current call (digits), when busy. */
+    /** The customer on the current call (digits, or the PSID on Messenger), when busy. */
     waId: string | null;
+    /** Which channels can call right now (GET /calls/channels); null until read. */
+    channels: CallChannels | null;
     initiateCall: CallCtx["initiateCall"];
     expand: () => void;
 }
 const PresenceCtx = createContext<CallPresence | null>(null);
 export const useCallPresence = () => useContext(PresenceCtx);
 
-/** The name the card shows: their name, else their number. */
-export const callerLabel = (c: { name?: string | null; from?: string } | null | undefined): string =>
-    (c?.name || "").trim() || (c?.from ? `+${c.from}` : "Unknown caller");
+/** The name the card shows: their name, else their number (a Messenger PSID
+ *  is never shown — it means nothing to anyone). */
+export const callerLabel = (c: { name?: string | null; from?: string; channel?: CallChannel } | null | undefined): string =>
+    (c?.name || "").trim() || (c?.channel === "messenger" ? "Messenger caller" : c?.from ? `+${c.from}` : "Unknown caller");
+
+/** Where the call is, in words: "WhatsApp" / "Messenger". */
+export const channelLabel = (ch: CallChannel | string | null | undefined): string =>
+    ch === "messenger" ? "Messenger" : "WhatsApp";
+/** A row / event's channel, defaulting to WhatsApp (older rows carry none). */
+export const channelOf = (v: string | null | undefined): CallChannel =>
+    String(v || "").toLowerCase() === "messenger" ? "messenger" : "whatsapp";
 
 /** Words that come before a name ("Fr. Peter", "Deacon James", "Askofu Mkuu …"):
  *  never what the customer is called by. Same list as Android's firstNameOf. */
@@ -171,11 +206,11 @@ const TITLES = new Set(["fr", "father", "rev", "revd", "reverend", "sr", "sister
     "very", "askofu", "mkuu"]);
 
 /** The name to address them by — the first word that isn't a title ("Fr. Peter Kamau" → "Peter"). */
-export const firstName = (c: { name?: string | null; from?: string } | null | undefined): string => {
+export const firstName = (c: { name?: string | null; from?: string; channel?: CallChannel } | null | undefined): string => {
     const name = (c?.name || "").trim();
     const words = name.startsWith("+") ? [] : name.split(/\s+/).filter(Boolean);
     const isTitle = (w: string) => w.endsWith(".") || TITLES.has(w.toLowerCase());
-    return words.find((w) => !isTitle(w)) || words[0] || (c?.from ? `+${c.from}` : "they");
+    return words.find((w) => !isTitle(w)) || words[0] || (c?.from && c?.channel !== "messenger" ? `+${c.from}` : "they");
 };
 
 const LIVE: CallPhase[] = ["placing", "ringing_out", "connecting", "active", "reconnecting"];
@@ -195,6 +230,10 @@ interface Snap {
     outcome: CallOutcome | null;
     reason: string | null;
     byAgent: string | null;
+    errAction: CallErrorAction | null;
+    errCode: string | null;
+    availableAt: string | null;
+    permission: CallPermission | null;
     duration: number | null;
     answeredAt: number | null;
     notice: string | null;
@@ -202,6 +241,7 @@ interface Snap {
 }
 const IDLE: Snap = {
     phase: "idle", call: null, outcome: null, reason: null, byAgent: null,
+    errAction: null, errCode: null, availableAt: null, permission: null,
     duration: null, answeredAt: null, notice: null, minimised: false,
 };
 
@@ -222,7 +262,49 @@ interface CallEvent {
     call?: ApiCall;
     wa_id?: string;
     status?: string;
+    expires_at?: string | null;
+    permanent?: boolean;
+    revoked?: boolean;
+    reasons?: string[];
+    value?: unknown;
+    at?: string;
+    /** "messenger" on a Messenger call's events (absent = WhatsApp). */
+    channel?: string | null;
+    external_id?: string | null;
+    /** media_update: the renegotiation's version (apply the highest). */
+    version?: number | string | null;
+    sdp_type?: string | null;
 }
+
+/** Meta's renegotiation offer, whichever shape it came in (string or {sdp}). */
+const renegotiationSdp = (r: CallSdpResp["renegotiation"]): string | null =>
+    !r ? null : typeof r === "string" ? r : typeof r.sdp === "string" && r.sdp ? r.sdp : null;
+
+/** A restriction's end: any expiry field Meta put in the event (seconds or
+ *  ISO), else 7 days from when it was flagged (Meta's stated window). */
+function restrictionUntil(value: unknown, at?: string | null): string | null {
+    let found: string | null = null;
+    const walk = (v: unknown, depth: number) => {
+        if (found || depth > 5 || !v || typeof v !== "object") return;
+        for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+            if (/expir/i.test(k) && (typeof x === "number" || typeof x === "string")) {
+                const n = typeof x === "number" ? x : Number(x);
+                const d = Number.isFinite(n) && n > 1e9 ? new Date(n < 1e12 ? n * 1000 : n) : new Date(String(x));
+                if (Number.isFinite(d.getTime())) { found = d.toISOString(); return; }
+            }
+            walk(x, depth + 1);
+        }
+    };
+    walk(value, 0);
+    if (found) return found;
+    const t = at ? new Date(at).getTime() : NaN;
+    return Number.isFinite(t) ? new Date(t + 7 * 86_400_000).toISOString() : null;
+}
+
+/** Race a promise against a deadline; undefined when it didn't settle in time. */
+const within = <T,>(p: Promise<T>, ms: number): Promise<T | undefined> =>
+    Promise.race([p, new Promise<undefined>((r) => setTimeout(() => r(undefined), ms))]);
+const PERMISSION_WAIT_MS = 1500;
 
 type AudioContextCtor = typeof AudioContext;
 const audioContextCtor = (): AudioContextCtor | null => {
@@ -261,8 +343,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const [waiting, setWaitingState] = useState<WaitingCall | null>(null);
     const waitingRef = useRef<WaitingCall | null>(null);
     const setWaiting = useCallback((w: WaitingCall | null) => { waitingRef.current = w; setWaitingState(w); }, []);
-    const [granted, setGranted] = useState<{ waId: string; name?: string | null } | null>(null);
+    const [granted, setGranted] = useState<{ waId: string; name?: string | null; channel: CallChannel } | null>(null);
+    const [channels, setChannels] = useState<CallChannels | null>(null);
     const [permissionBusy, setPermissionBusy] = useState(false);
+    const [restriction, setRestriction] = useState<CallRestriction | null>(null);
     const [notifyPermission, setNotifyPermission] = useState<NotificationPermission | "unsupported">("unsupported");
 
     const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -276,11 +360,21 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const postedAnswerRef = useRef<string | null>(null);       // we sent an answer POST (it may have landed)
     const endedAtRef = useRef<Record<string, number>>({});     // callId → when it left this screen
     const pendingAnswerRef = useRef<Record<string, string>>({}); // outbound SDP that beat connect's reply
+    const earlyRingingRef = useRef<Set<string>>(new Set());     // call_status ringing that beat connect's reply
     const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const connectGuardRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const chatOpenerRef = useRef<ChatOpener | null>(null);
-    // Customers this agent asked for call permission (wa_id → name).
+    // Customers this agent asked for call permission ("whatsapp:<wa_id>" /
+    // "messenger:<psid>" → name).
     const requestedRef = useRef<Map<string, string | null>>(new Map());
+    const reqKey = (channel: CallChannel, id: string) => `${channel}:${id}`;
+    // Messenger renegotiation (media_update): the highest version applied per
+    // call, and one that arrived before this device had the call's connection.
+    const mediaVersionRef = useRef<Record<string, number>>({});
+    const pendingMediaRef = useRef<Record<string, { version: number; sdp: string }>>({});
+    // Our Messenger call's media path came up before the customer picked up
+    // (Meta answers our offer at once): "active" waits for call_answered.
+    const earlyMediaRef = useRef<Set<string>>(new Set());
 
     // ── ICE config: fetched ahead of time so Answer is one request, not two ───
     const cfgRef = useRef<{ at: number; cfg: CallIceConfig } | null>(null);
@@ -289,7 +383,17 @@ export function CallProvider({ children }: { children: ReactNode }) {
         if (hit && Date.now() - hit.at < 4 * 60_000) return hit.cfg;
         const cfg = await callsApi.iceConfig();
         cfgRef.current = { at: Date.now(), cfg };
+        if (cfg?.channels && typeof cfg.channels === "object" && !Array.isArray(cfg.channels)) setChannels(cfg.channels);
         return cfg;
+    }, []);
+
+    // Which channels can call (Messenger has a server switch) — read at start
+    // and whenever the socket comes back; never offer a call it says can't go.
+    const loadChannels = useCallback(async () => {
+        try {
+            const ch = await callsApi.channels();
+            if (ch && typeof ch === "object" && !Array.isArray(ch)) setChannels(ch);
+        } catch { /* keep what we knew; unknown = Messenger off */ }
     }, []);
 
     // ── Ringtone ─────────────────────────────────────────────────────────────
@@ -405,7 +509,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
                 const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
                 if (blob.size < 2000) return;   // skip near-silent / empty recordings
                 const cfg = cfgRef.current?.cfg;
-                const saved = cfg?.auto_transcribe ? "Recording saved — summary in a minute"
+                const saved = cfg?.meta_transcription ? "Recorded by WhatsApp — summary in a minute"
+                    : cfg?.auto_transcribe ? "Recording saved — summary in a minute"
                     : cfg?.transcribe ? "Recording saved — Transcribe from Calls"
                     : "Recording saved";
                 const upload = (tries: number): Promise<unknown> =>
@@ -465,7 +570,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
     // Ring this device for a call (the WS event, the poll fallback, a promoted
     // waiting call). While a call is live, a new one waits in a banner instead.
     const startRinging = useCallback((callId: string, from: string, name?: string | null,
-                                      extra?: { conversationId?: string | null; personId?: string | null }) => {
+                                      extra?: { conversationId?: string | null; personId?: string | null; channel?: CallChannel }) => {
+        const channel: CallChannel = extra?.channel ?? "whatsapp";
         const s = snapRef.current;
         if (s.call?.callId === callId && s.phase !== "idle") return;         // already on screen
         const endedAt = endedAtRef.current[callId];
@@ -476,18 +582,21 @@ export function CallProvider({ children }: { children: ReactNode }) {
             attemptRef.current += 1;
             put({
                 ...IDLE, phase: "incoming",
-                call: { callId, from: (from || "").replace(/^\+/, ""), name: name ?? null, direction: "inbound",
+                call: { callId, from: (from || "").replace(/^\+/, ""), name: name ?? null, direction: "inbound", channel,
                         conversationId: extra?.conversationId ?? null, personId: extra?.personId ?? null },
             });
             startTone("ring");
         } else if (waitingRef.current?.callId !== callId) {
-            setWaiting({ callId, from: (from || "").replace(/^\+/, ""), name: name ?? null });
+            setWaiting({ callId, from: (from || "").replace(/^\+/, ""), name: name ?? null, channel });
         }
     }, [put, teardown, resetExtras, startTone, setWaiting]);
 
     // Land on the wrap-up card. A call still waiting in the banner takes the
     // screen instead — a ringing call always beats a wrap-up.
-    const endWith = useCallback((outcome: CallOutcome, extra: { reason?: string | null; byAgent?: string | null; duration?: number | null } = {}) => {
+    const endWith = useCallback((outcome: CallOutcome, extra: {
+        reason?: string | null; byAgent?: string | null; duration?: number | null;
+        action?: CallErrorAction | null; code?: string | null; availableAt?: string | null;
+    } = {}) => {
         const s = snapRef.current;
         teardown();
         attemptRef.current += 1;
@@ -499,10 +608,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
         if (w) {
             setWaiting(null);
             put({ ...IDLE, phase: "ended", call: s.call, outcome, duration });
-            startRinging(w.callId, w.from, w.name);
+            startRinging(w.callId, w.from, w.name, { channel: w.channel });
             return;
         }
         put({ phase: "ended", outcome, reason: extra.reason ?? null, byAgent: extra.byAgent ?? null,
+              errAction: extra.action ?? null, errCode: extra.code ?? null, availableAt: extra.availableAt ?? null,
               duration, notice: null });
     }, [put, teardown, setWaiting, startRinging]);
 
@@ -522,8 +632,17 @@ export function CallProvider({ children }: { children: ReactNode }) {
     // Our outbound call: the customer picked up — media follows the SDP answer.
     const customerAnswered = useCallback(() => {
         const s = snapRef.current;
-        if (s.phase !== "ringing_out" || !s.call) return;
+        if (!s.call || !(s.phase === "ringing_out" || (s.phase === "placing" && s.call.callId !== "pending"))) return;
         stopTone();
+        // Messenger: the media path to Meta may already be up (its answer to our
+        // offer came back at once) — then they're talking now.
+        const pc = pcRef.current;
+        if (earlyMediaRef.current.has(s.call.callId) && pc && (pc.connectionState === "connected"
+            || pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed")) {
+            earlyMediaRef.current.delete(s.call.callId);
+            put({ phase: "active", answeredAt: Date.now(), notice: null });
+            return;
+        }
         put({ phase: "connecting" });
         armConnectGuard(s.call.callId);
     }, [stopTone, put, armConnectGuard]);
@@ -556,6 +675,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
             case "declined": return endWith("declined", { byAgent: other ? info.agent_name ?? "a colleague" : null });
             case "callback": return endWith("callback", { byAgent: other ? info.agent_name ?? "a colleague" : null });
             case "no_answer": return endWith("no_answer");
+            case "rejected": return endWith("rejected");
             case "cancelled": return endWith("cancelled");
             case "failed": return endWith("failed", { reason: "The call couldn't be connected" });
             default: return;   // ringing / answered — still live
@@ -570,7 +690,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
         const next: CallState = {
             ...c,
             name: c.name || row.name || null,
-            from: c.from || (row.wa_id || "").replace(/^\+/, ""),
+            from: c.from || (row.wa_id || row.external_id || "").replace(/^\+/, ""),
             conversationId: c.conversationId || row.conversation_id || null,
             personId: c.personId || row.person_id || null,
         };
@@ -606,7 +726,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
             }
             return endFromStatus(st, row);
         }
-        if (s.phase === "ringing_out") {
+        if (s.phase === "ringing_out" || (s.phase === "placing" && c.callId !== "pending")) {
             if (st === "answered") { customerAnswered(); return; }
             return endFromStatus(st, row);
         }
@@ -640,10 +760,18 @@ export function CallProvider({ children }: { children: ReactNode }) {
         if (pc !== pcRef.current) return;
         const s = snapRef.current;
         if (st === "connected") {
+            // Our Messenger call: Meta's media server answered our offer before
+            // the customer picked up — the call goes live on call_answered.
+            if (s.call?.channel === "messenger" && s.call.direction === "outbound"
+                && (s.phase === "placing" || s.phase === "ringing_out")) {
+                earlyMediaRef.current.add(s.call.callId);
+                return;
+            }
             droppedAtRef.current = null;
             if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; }
             if (connectGuardRef.current) { clearTimeout(connectGuardRef.current); connectGuardRef.current = null; }
-            if (s.phase === "connecting" || s.phase === "ringing_out" || s.phase === "reconnecting") {
+            if (s.phase === "connecting" || s.phase === "ringing_out" || s.phase === "reconnecting"
+                || (s.phase === "placing" && s.call?.callId !== "pending")) {
                 stopTone();
                 put({ phase: "active", answeredAt: s.answeredAt ?? Date.now(), notice: null });
             }
@@ -860,6 +988,42 @@ export function CallProvider({ children }: { children: ReactNode }) {
         }));
     }, [terminateInBackground, put, answeredBy]);
 
+    // Messenger renegotiation: Meta's new offer (after accept, after the
+    // customer picked up our call, or when they changed media) → a local
+    // answer. There is no route to post that answer back (§7a: Meta documents
+    // none), so it only updates this side. A failure is logged, never fatal:
+    // the call keeps the media it has.
+    const applyRemoteOffer = useCallback(async (pc: RTCPeerConnection, sdp: string, why: string) => {
+        try {
+            if (pc.signalingState !== "stable" && pc.signalingState !== "have-remote-offer") {
+                console.warn(`[call] Messenger ${why} offer ignored in state ${pc.signalingState}`);
+                return false;
+            }
+            await pc.setRemoteDescription({ type: "offer", sdp });
+            await pc.setLocalDescription(await pc.createAnswer());
+            return true;
+        } catch (e) {
+            console.warn(`[call] Messenger ${why} offer not applied:`, e);
+            return false;
+        }
+    }, []);
+
+    // `media_update {version, sdp}` — apply the highest version only.
+    const applyMediaUpdate = useCallback(async (callId: string, version: number, sdp: string) => {
+        const pc = pcRef.current;
+        const s = snapRef.current;
+        if (!pc || s.call?.callId !== callId) return;
+        if ((mediaVersionRef.current[callId] ?? -Infinity) >= version) return;
+        // Not ready for an offer yet (our own offer still out): keep it for later.
+        if (!pc.remoteDescription) {
+            const had = pendingMediaRef.current[callId];
+            if (!had || had.version < version) pendingMediaRef.current[callId] = { version, sdp };
+            return;
+        }
+        mediaVersionRef.current[callId] = version;
+        await applyRemoteOffer(pc, sdp, "media_update");
+    }, [applyRemoteOffer]);
+
     const answer = useCallback(async () => {
         const s = snapRef.current;
         const c = s.call;
@@ -880,7 +1044,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
         stopTone();
         put({ phase: "connecting", notice: null, minimised: false });
 
-        let cfg: CallIceConfig, offer: { sdp: string };
+        let cfg: CallIceConfig, offer: Awaited<ReturnType<typeof callsApi.offer>>;
         try {
             [cfg, offer] = await Promise.all([iceConfig(), callsApi.offer(id)]);
         } catch (e) {
@@ -905,9 +1069,17 @@ export function CallProvider({ children }: { children: ReactNode }) {
         const pc = buildPc(cfg.ice_servers);
         pcRef.current = pc;
         attachMic(pc, mic);
+        // Messenger sends no offer (docs/CALLING_UX.md §2.0): WE build the
+        // offer, accept with it, and Meta's answer comes back in the reply.
+        const reversed = !!offer?.offer_required || (!offer?.sdp && (offer?.channel === "messenger" || c.channel === "messenger"));
+        if (reversed && c.channel !== "messenger") put({ call: { ...c, channel: "messenger" } });
         try {
-            await pc.setRemoteDescription({ type: "offer", sdp: offer.sdp });
-            await pc.setLocalDescription(await pc.createAnswer());
+            if (reversed) {
+                await pc.setLocalDescription(await pc.createOffer());
+            } else {
+                await pc.setRemoteDescription({ type: "offer", sdp: offer.sdp ?? "" });
+                await pc.setLocalDescription(await pc.createAnswer());
+            }
             await gatherIce(pc);
         } catch {
             if (!mine()) return;
@@ -916,8 +1088,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
         if (!mine()) return;
         const retry = postedAnswerRef.current === id;
         postedAnswerRef.current = id;
+        let resp: CallSdpResp | undefined;
         try {
-            await callsApi.answer(id, pc.localDescription!.sdp);
+            resp = await callsApi.answer(id, pc.localDescription!.sdp);
         } catch (e) {
             if (!mine()) return;
             const st = apiErrorStatus(e);
@@ -929,11 +1102,37 @@ export function CallProvider({ children }: { children: ReactNode }) {
             }
             if (st === 410) return endWith("missed", { reason: "This call has already ended" });
             if (isNetworkError(e)) return backToRinging();
-            return endWith("failed", { reason: friendly(apiErrorDetail(e)) || "Couldn't connect the call" });
+            const info = apiErrorInfo(e);
+            return endWith("failed", { reason: friendly(info.detail) || "Couldn't connect the call",
+                                       action: info.action, code: info.code });
         }
         answeredHereRef.current = id;
+        if (reversed && mine()) {
+            // Meta's answer to our offer, then (when present) its renegotiation offer.
+            const answerSdp = typeof resp?.sdp === "string" && resp.sdp ? resp.sdp : null;
+            if (!answerSdp) {
+                // Accepted, but no media description to use: never a silent line.
+                endWith("failed", { reason: "The call audio couldn't connect" });
+                terminateInBackground(id);
+                return;
+            }
+            try {
+                await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+            } catch (e) {
+                if (!mine()) return;
+                console.warn("[call] Messenger answer rejected:", e);
+                endWith("failed", { reason: "Couldn't set up the call audio" });
+                terminateInBackground(id);
+                return;
+            }
+            const reneg = renegotiationSdp(resp?.renegotiation);
+            if (reneg && mine()) await applyRemoteOffer(pc, reneg, "accept");
+            const early = pendingMediaRef.current[id];
+            if (early && mine()) { delete pendingMediaRef.current[id]; await applyMediaUpdate(id, early.version, early.sdp); }
+        }
         if (mine() && snapRef.current.phase === "connecting") armConnectGuard(id);
-    }, [put, stopTone, startTone, iceConfig, getMic, buildPc, attachMic, gatherIce, endWith, armConnectGuard, answeredBy, answerLost]);
+    }, [put, stopTone, startTone, iceConfig, getMic, buildPc, attachMic, gatherIce, endWith, armConnectGuard, answeredBy, answerLost,
+        terminateInBackground, applyRemoteOffer, applyMediaUpdate]);
 
     // Declining / "call back later" end the call for the whole team (WhatsApp has
     // no per-agent decline). Shown at once; the request runs behind it — after
@@ -989,7 +1188,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
             case "incoming": return decline();
             case "placing":
                 cancelRef.current = true;
-                return endWith("cancelled");
+                endWith("cancelled");
+                // Meta already has the call (connect returned) but it isn't ringing yet.
+                if (c.callId !== "pending") terminateInBackground(c.callId);
+                return;
             case "ringing_out":
                 endWith("cancelled");
                 return terminateInBackground(c.callId);
@@ -1035,27 +1237,73 @@ export function CallProvider({ children }: { children: ReactNode }) {
         customerAnswered();
     }, [customerAnswered]);
 
+    // Meta says the customer's phone is ringing (call_status): "Calling…" → "Ringing…".
+    const nowRinging = useCallback((callId: string) => {
+        const s = snapRef.current;
+        if (s.phase !== "placing" || s.call?.callId !== callId) return;
+        put({ phase: "ringing_out" });
+        startTone("ringback");
+    }, [put, startTone]);
+
     // Business-initiated call: WE call the customer. Build an offer, ask Meta to
     // place the call; the customer's SDP answer arrives as an outbound_answer
     // event. WhatsApp needs the customer's call permission (409 otherwise) — the
     // card then offers "Send call request"; we never send it on our own, it
     // messages the customer.
-    const initiateCall = useCallback(async (to: string, name?: string | null, conversationId?: string | null) => {
+    const initiateCall = useCallback(async (to: string, name?: string | null, conversationId?: string | null,
+                                            opts?: { channel?: CallChannel }) => {
         const s = snapRef.current;
         if (isLivePhase(s.phase) || s.phase === "incoming" || s.phase === "ending") {
             return { ok: false, error: "You're already on a call — end it first." };
         }
+        const channel: CallChannel = opts?.channel ?? "whatsapp";
+        const messenger = channel === "messenger";
         const digits = (to || "").replace(/\D/g, "");
-        if (digits.length < 7) return { ok: false, error: "No valid WhatsApp number for this customer." };
+        if (messenger ? !digits : digits.length < 7) {
+            return { ok: false, error: messenger ? "No Messenger id for this customer." : "No valid WhatsApp number for this customer." };
+        }
         teardown();
         resetExtras();
         const token = ++attemptRef.current;
         cancelRef.current = false;
-        const base: CallState = { callId: "pending", from: digits, name: name ?? null, direction: "outbound",
+        const base: CallState = { callId: "pending", from: digits, name: name ?? null, direction: "outbound", channel,
                                   conversationId: conversationId ?? null, personId: null };
+        const readPermission = () => (messenger ? callsApi.messengerPermission(digits) : callsApi.permission(digits));
         put({ ...IDLE, phase: "placing", call: base });
         const placing = () => attemptRef.current === token && snapRef.current.phase === "placing";
-        const permission = callsApi.permission(digits).catch(() => null);
+        // Still this attempt, placing or ringing (for a permission answer that lands late).
+        const thisCall = () => attemptRef.current === token && snapRef.current.call?.from === digits
+            && (snapRef.current.phase === "placing" || snapRef.current.phase === "ringing_out");
+
+        // Permission truth first (Meta's answer, cached server-side): never
+        // place a call WhatsApp will refuse. Slow or failing → place it as before.
+        const permReq = readPermission().catch((e) => {
+            // Messenger calling was switched off since we last looked.
+            if (messenger && apiErrorInfo(e).code === "messenger_calling_off") { loadChannels(); return "off" as const; }
+            return null;
+        });
+        const permAny = await within(permReq, PERMISSION_WAIT_MS);
+        if (permAny === "off") {
+            if (placing()) endWith("failed", { reason: "Messenger calling is switched off — call them on WhatsApp instead.",
+                                               action: "none", code: "messenger_calling_off" });
+            return { ok: true };
+        }
+        const perm = permAny ?? undefined;
+        if (!placing()) return { ok: true };
+        if (perm) put({ permission: perm });
+        else permReq.then((p) => { if (p && p !== "off" && thisCall()) put({ permission: p }); });
+        if (perm && perm.meta_status === "no_permission" && perm.can_call !== true) {
+            if (perm.status === "requested") {
+                requestedRef.current.set(reqKey(channel, digits), name ?? null);
+                endWith("permission_requested");
+            } else {
+                endWith("permission_needed", {
+                    availableAt: perm.can_request === false ? perm.request_available_at ?? null : null,
+                    action: perm.can_request === false ? "wait" : null,
+                });
+            }
+            return { ok: true };
+        }
 
         let mic: MediaStream;
         try { mic = await getMic(); }
@@ -1089,48 +1337,100 @@ export function CallProvider({ children }: { children: ReactNode }) {
         }
         if (!placing()) return { ok: true };
         try {
+            if (messenger) {
+                // Meta answers our offer at once (no outbound_answer event).
+                const r = await callsApi.connectMessenger(digits, pc.localDescription!.sdp, name || undefined);
+                const call_id = r.call_id;
+                if (!placing() || cancelRef.current) { terminateInBackground(call_id); return { ok: true }; }
+                put({ call: { ...base, callId: call_id } });
+                if (typeof r.sdp === "string" && r.sdp) {
+                    try { await pc.setRemoteDescription({ type: "answer", sdp: r.sdp }); }
+                    catch (err) { console.warn("[call] Messenger answer rejected:", err); }
+                }
+                const reneg = renegotiationSdp(r.renegotiation);
+                if (reneg && pcRef.current === pc) await applyRemoteOffer(pc, reneg, "connect");
+                const pend = pendingMediaRef.current[call_id];
+                if (pend) { delete pendingMediaRef.current[call_id]; await applyMediaUpdate(call_id, pend.version, pend.sdp); }
+                if (earlyRingingRef.current.has(call_id)) { earlyRingingRef.current.delete(call_id); nowRinging(call_id); }
+                return { ok: true };
+            }
             const { call_id } = await callsApi.connect(digits, pc.localDescription!.sdp, name || undefined);
             // Hung up (or started another call) while Meta was placing this one.
             if (!placing() || cancelRef.current) { terminateInBackground(call_id); return { ok: true }; }
-            put({ phase: "ringing_out", call: { ...base, callId: call_id } });
-            startTone("ringback");
+            // Still "Calling…": Meta has the call, but the customer's phone
+            // rings only when `call_status {ringing}` says so.
+            put({ call: { ...base, callId: call_id } });
             const early = pendingAnswerRef.current[call_id];
             if (early) { delete pendingAnswerRef.current[call_id]; applyOutboundAnswer(call_id, early); }
+            else if (earlyRingingRef.current.has(call_id)) { earlyRingingRef.current.delete(call_id); nowRinging(call_id); }
         } catch (e) {
             if (!placing()) return { ok: true };
-            const st = apiErrorStatus(e);
-            if (st === 409) {
-                const perm = await permission;
+            const info = apiErrorInfo(e);
+            if (info.code === "messenger_calling_off") {
+                loadChannels();
+                endWith("failed", { reason: friendly(info.detail) || "Messenger calling is switched off — call them on WhatsApp instead.",
+                                    action: "none", code: info.code });
+            } else if (info.status === 409 || info.code === "138006" || info.code === "no_permission") {
+                // Meta's no-permission: re-read the (now uncached) truth, briefly.
+                const fresh = await within(readPermission().catch(() => null), PERMISSION_WAIT_MS);
                 if (!placing()) return { ok: true };
-                if (perm?.status === "requested") { requestedRef.current.set(digits, name ?? null); endWith("permission_requested"); }
-                else endWith("permission_needed");
+                const bodyPerm = info.data.permission && typeof info.data.permission === "object" ? info.data.permission as CallPermission : null;
+                const p = fresh ?? bodyPerm ?? perm ?? null;
+                if (p) put({ permission: p });
+                if (p?.status === "requested") { requestedRef.current.set(reqKey(channel, digits), name ?? null); endWith("permission_requested"); }
+                else endWith("permission_needed", {
+                    availableAt: p?.can_request === false ? p.request_available_at ?? null : null,
+                    action: p?.can_request === false ? "wait" : null,
+                });
             } else if (isNetworkError(e)) {
                 endWith("failed", { reason: "No connection — the call wasn't placed" });
             } else {
-                endWith("failed", { reason: friendly(apiErrorDetail(e)) || "Couldn't place the call" });
+                endWith("failed", { reason: friendly(info.detail) || "Couldn't place the call", action: info.action, code: info.code,
+                                    availableAt: typeof info.data.request_available_at === "string" ? info.data.request_available_at : null });
             }
         }
         return { ok: true };
     }, [teardown, resetExtras, put, getMic, endWith, iceConfig, buildPc, attachMic, gatherIce,
-        terminateInBackground, startTone, applyOutboundAnswer]);
+        terminateInBackground, applyOutboundAnswer, nowRinging, loadChannels, applyRemoteOffer, applyMediaUpdate]);
 
     const requestPermission = useCallback(async () => {
         const s = snapRef.current;
         const c = s.call;
         if (!c || s.phase !== "ended") return;
         setPermissionBusy(true);
+        const still = () => snapRef.current.call?.callId === c.callId && snapRef.current.phase === "ended";
+        const messenger = c.channel === "messenger";
         try {
-            await callsApi.requestPermission(c.from);
-            requestedRef.current.set(c.from, c.name ?? null);
-            if (snapRef.current.call?.callId === c.callId && snapRef.current.phase === "ended") {
-                put({ outcome: "permission_requested", reason: null });
+            const r = messenger ? await callsApi.requestMessengerPermission(c.from)
+                : await callsApi.requestPermission(c.from, c.name ?? null);
+            if (r?.already_permitted) {
+                // They already allow calls permanently — nothing to ask: call.
+                if (still()) put({ outcome: "permission_granted", reason: null, errAction: null, errCode: null, availableAt: null,
+                                   permission: r.permission ?? snapRef.current.permission });
+                return;
+            }
+            requestedRef.current.set(reqKey(c.channel, c.from), c.name ?? null);
+            if (still()) {
+                put({ outcome: "permission_requested", reason: null, errAction: null, errCode: null, availableAt: null,
+                      permission: r?.permission ? { ...(snapRef.current.permission ?? {}), ...r.permission,
+                          requested_at: new Date().toISOString() } as CallPermission : snapRef.current.permission });
             }
         } catch (e) {
-            if (snapRef.current.call?.callId !== c.callId || snapRef.current.phase !== "ended") return;
-            put({ reason: isNetworkError(e) ? "No connection — the request wasn't sent. Try again."
-                : friendly(apiErrorDetail(e)) || "Couldn't send the call request. Try again." });
+            if (!still()) return;
+            if (isNetworkError(e)) {
+                put({ reason: "No connection — the request wasn't sent. Try again.", errAction: "retry", errCode: null });
+                return;
+            }
+            const info = apiErrorInfo(e);
+            if (info.code === "messenger_calling_off") loadChannels();
+            const at = typeof info.data.request_available_at === "string" ? info.data.request_available_at : null;
+            put({
+                reason: friendly(info.detail) || "Couldn't send the call request. Try again.",
+                errAction: info.action ?? "retry", errCode: info.code,
+                availableAt: info.code === "138009" || info.action === "wait" ? at : snapRef.current.availableAt,
+            });
         } finally { setPermissionBusy(false); }
-    }, [put]);
+    }, [put, loadChannels]);
 
     const dismiss = useCallback(() => {
         teardown();
@@ -1144,7 +1444,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const redial = useCallback(() => {
         const c = snapRef.current.call;
         if (!c) return;
-        initiateCall(c.from, c.name, c.conversationId);
+        initiateCall(c.from, c.name, c.conversationId, { channel: c.channel });
     }, [initiateCall]);
 
     const minimise = useCallback(() => { if (snapRef.current.phase !== "idle") put({ minimised: true }); }, [put]);
@@ -1188,7 +1488,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
         const wasLive = isLivePhase(snapRef.current.phase);
         if (c) { endedAtRef.current[c.callId] = Date.now(); if (wasLive) terminateInBackground(c.callId); }
         resetExtras();
-        put({ ...IDLE, phase: "incoming", call: { callId: w.callId, from: w.from, name: w.name ?? null, direction: "inbound" } });
+        put({ ...IDLE, phase: "incoming", call: { callId: w.callId, from: w.from, name: w.name ?? null, direction: "inbound", channel: w.channel } });
         startTone("ring");   // answer() stops it at once; it keeps ringing only if answering can't start
         answer();
     }, [setWaiting, teardown, terminateInBackground, resetExtras, put, answer, startTone]);
@@ -1197,7 +1497,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const callGranted = useCallback(() => {
         const g = granted;
         setGranted(null);
-        if (g) initiateCall(g.waId, g.name ?? null);
+        if (g) initiateCall(g.waId, g.name ?? null, null, { channel: g.channel });
     }, [granted, initiateCall]);
 
     // ── Live events ──────────────────────────────────────────────────────────
@@ -1210,8 +1510,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
             const mineNow = !!evt.call_id && cur.call?.callId === evt.call_id;
             const w = waitingRef.current;
             if (type === "incoming_call" && evt.call_id) {
-                startRinging(evt.call_id, evt.from || "", evt.name,
-                    { conversationId: evt.conversation_id, personId: evt.person_id });
+                const ch = channelOf(evt.channel);
+                startRinging(evt.call_id, evt.from || (ch === "messenger" ? evt.external_id || "" : ""), evt.name,
+                    { conversationId: evt.conversation_id, personId: evt.person_id, channel: ch });
             } else if (type === "call_answered" && evt.call_id) {
                 if (w?.callId === evt.call_id) setWaiting(null);
                 if (!mineNow) return;
@@ -1222,42 +1523,81 @@ export function CallProvider({ children }: { children: ReactNode }) {
                 } else if (cur.phase === "connecting" && cur.call?.direction === "inbound"
                            && evt.agent_id && evt.agent_id !== myIdRef.current) {
                     endWith("answered_elsewhere", { byAgent: evt.agent_name ?? null });
-                } else if (cur.phase === "ringing_out") {
+                } else if (cur.phase === "ringing_out" || cur.phase === "placing") {
                     customerAnswered();
+                }
+            } else if (type === "call_status" && evt.call_id) {
+                if (evt.status !== "ringing") return;
+                if (mineNow) nowRinging(evt.call_id);
+                else if (cur.phase === "placing" && cur.call?.callId === "pending") earlyRingingRef.current.add(evt.call_id);
+            } else if (type === "media_update" && evt.call_id) {
+                // Messenger renegotiation (§2.0): apply the highest version's offer.
+                const version = Number(evt.version ?? 0);
+                const v = Number.isFinite(version) ? version : 0;
+                if (!evt.sdp || (evt.sdp_type && evt.sdp_type !== "offer")) {
+                    console.info("[call] media_update without an offer — ignored", evt.sdp_type);
+                    return;
+                }
+                if (mineNow) applyMediaUpdate(evt.call_id, v, evt.sdp);
+                else if (cur.phase === "placing" || cur.phase === "connecting") {
+                    const had = pendingMediaRef.current[evt.call_id];
+                    if (!had || had.version < v) pendingMediaRef.current[evt.call_id] = { version: v, sdp: evt.sdp };
                 }
             } else if (type === "outbound_answer" && evt.call_id && evt.sdp) {
                 if (mineNow) applyOutboundAnswer(evt.call_id, evt.sdp);
                 else if (cur.phase === "placing") pendingAnswerRef.current[evt.call_id] = evt.sdp;
             } else if (type === "call_ended" && evt.call_id) {
                 if (w?.callId === evt.call_id) setWaiting(null);
+                // Meta may correct "no answer" to "declined" a moment later — the latest wins.
+                if (mineNow && cur.phase === "ended" && cur.outcome === "no_answer" && evt.outcome === "rejected") {
+                    put({ outcome: "rejected" });
+                    return;
+                }
                 if (!mineNow || cur.phase === "ended" || cur.phase === "ending" || cur.phase === "idle") return;
                 endFromStatus(evt.outcome || "completed", evt);
             } else if (type === "call_update" && evt.call) {
                 const row = evt.call;
                 if (w?.callId === row.call_id && row.status !== "ringing") setWaiting(null);
                 if (row.call_id === cur.call?.callId) {
-                    if (cur.phase === "ended" || cur.phase === "ending") enrich(row);
-                    else applyRow(row);
+                    if (cur.phase === "ended" || cur.phase === "ending") {
+                        enrich(row);
+                        if (cur.phase === "ended" && cur.outcome === "no_answer" && row.status === "rejected") put({ outcome: "rejected" });
+                    } else applyRow(row);
                 }
-            } else if (type === "call_permission" && evt.wa_id) {
-                const wa = String(evt.wa_id).replace(/^\+/, "");
-                const onCard = cur.phase === "ended" && cur.call?.from === wa
+            } else if (type === "call_permission" && (evt.wa_id || evt.external_id)) {
+                const ch = channelOf(evt.channel);
+                const wa = String((ch === "messenger" ? evt.external_id : evt.wa_id) || "").replace(/^\+/, "");
+                if (!wa) return;
+                const sameCall = cur.call?.from === wa && (cur.call?.channel ?? "whatsapp") === ch;
+                const key = reqKey(ch, wa);
+                if (sameCall && cur.phase !== "idle") {
+                    put({ permission: { ...(cur.permission ?? { expires_at: null, permanent: false }),
+                        status: (evt.status as CallPermission["status"]) || "unknown",
+                        expires_at: evt.expires_at ?? null, permanent: !!evt.permanent, revoked: !!evt.revoked,
+                        ...(evt.status === "requested" ? { requested_at: evt.at ?? new Date().toISOString() } : {}),
+                        ...(evt.status === "granted" ? { can_call: true, meta_status: evt.permanent ? "permanent" : "temporary" } : {}),
+                    } });
+                }
+                const onCard = cur.phase === "ended" && sameCall
                     && (cur.outcome === "permission_needed" || cur.outcome === "permission_requested");
                 if (evt.status === "granted") {
-                    if (requestedRef.current.has(wa) || onCard) {
-                        setGranted({ waId: wa, name: requestedRef.current.get(wa) ?? cur.call?.name ?? null });
-                        requestedRef.current.delete(wa);
+                    if (requestedRef.current.has(key) || onCard) {
+                        setGranted({ waId: wa, name: requestedRef.current.get(key) ?? (sameCall ? cur.call?.name : null) ?? null, channel: ch });
+                        requestedRef.current.delete(key);
                         if (onCard) dismiss();
                     }
                 } else if (evt.status === "requested" && onCard && cur.outcome === "permission_needed") {
                     // A colleague sent it — don't offer to send it twice.
                     put({ outcome: "permission_requested", reason: null });
                 }
+            } else if (type === "calling_restricted") {
+                const reasons = Array.isArray(evt.reasons) ? evt.reasons.map(String) : [];
+                setRestriction({ reasons, at: evt.at ?? null, until: restrictionUntil(evt.value, evt.at) });
             }
         };
         ws.on("event", onEvent);
         return () => ws.off("event", onEvent);
-    }, [ws, startRinging, setWaiting, endWith, customerAnswered, put, applyOutboundAnswer, endFromStatus, enrich, applyRow, dismiss, answerLost]);
+    }, [ws, startRinging, setWaiting, endWith, customerAnswered, put, applyOutboundAnswer, endFromStatus, enrich, applyRow, dismiss, answerLost, nowRinging, applyMediaUpdate]);
 
     // ── Re-sync: after the socket reconnects or the tab comes back, re-read the
     // call on screen — a call that ended while we were away shows its real
@@ -1269,8 +1609,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
             const now = Date.now();
             const ringing = calls.find((c) => c.status === "ringing" && c.direction !== "outbound"
                 && c.started_at && now - new Date(c.started_at).getTime() < 90_000);
-            if (ringing) startRinging(ringing.call_id, ringing.wa_id || "", ringing.name,
-                { conversationId: ringing.conversation_id, personId: ringing.person_id });
+            if (ringing) startRinging(ringing.call_id, ringing.wa_id || ringing.external_id || "", ringing.name,
+                { conversationId: ringing.conversation_id, personId: ringing.person_id, channel: channelOf(ringing.channel) });
         } catch { /* the socket is the primary path */ }
     }, [startRinging]);
 
@@ -1289,12 +1629,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const socketUpRef = useRef(false);
     useEffect(() => {
         if (!ws) { socketUpRef.current = false; return; }
-        const onConnect = () => { socketUpRef.current = true; resync(); };
+        const onConnect = () => { socketUpRef.current = true; resync(); loadChannels(); };
         const onDown = () => { socketUpRef.current = false; };
         ws.on("connect", onConnect);
         ws.on("disconnect", onDown);
         return () => { ws.off("connect", onConnect); ws.off("disconnect", onDown); };
-    }, [ws, resync]);
+    }, [ws, resync, loadChannels]);
     useEffect(() => {
         const onVis = () => { if (document.visibilityState === "visible") resync(); };
         const onOnline = () => {
@@ -1334,6 +1674,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
         const cadence = () => {
             const p = snapRef.current.phase;
             if (p === "incoming" || p === "ringing_out" || p === "reconnecting") return 3000;
+            if (p === "placing" && snapRef.current.call?.callId !== "pending") return 3000;
             if (p === "connecting") return 5000;
             if (waitingRef.current) return 5000;
             if (p === "active") return 20_000;
@@ -1347,7 +1688,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
             const hasToken = typeof window !== "undefined" && !!(window as unknown as { __neema_token?: string }).__neema_token;
             if (!hasToken) return schedule();
             const id = s.call?.callId;
-            if (id && id !== "pending" && ["incoming", "ringing_out", "connecting", "active", "reconnecting"].includes(s.phase)) {
+            if (id && id !== "pending" && ["incoming", "placing", "ringing_out", "connecting", "active", "reconnecting"].includes(s.phase)) {
                 if (!hidden || s.phase === "incoming" || s.phase === "reconnecting") {
                     try { applyRow(await callsApi.get(id)); } catch { /* next tick */ }
                 }
@@ -1363,6 +1704,19 @@ export function CallProvider({ children }: { children: ReactNode }) {
         schedule();
         return () => { stopped = true; if (timer) clearTimeout(timer); };
     }, [applyRow, pollIdle, setWaiting]);
+
+    // Which channels can call: once signed in (the socket's connect re-reads it).
+    useEffect(() => {
+        let stop = false;
+        let t: ReturnType<typeof setTimeout> | null = null;
+        const tryLoad = (left: number) => {
+            if (stop) return;
+            if ((window as unknown as { __neema_token?: string }).__neema_token) { loadChannels(); return; }
+            if (left > 0) t = setTimeout(() => tryLoad(left - 1), 500);
+        };
+        tryLoad(40);
+        return () => { stop = true; if (t) clearTimeout(t); };
+    }, [loadChannels, session]);
 
     // Warm the ICE config once signed in, so the first Answer skips a round trip.
     useEffect(() => {
@@ -1389,6 +1743,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const ringingWho = snap.phase === "incoming" ? callerLabel(snap.call) : "";
     const ringingWhoRef = useRef("");
     ringingWhoRef.current = ringingWho;
+    const ringingAppRef = useRef("WhatsApp");
+    ringingAppRef.current = channelLabel(snap.call?.channel);
     useEffect(() => {
         if (!ringingId || typeof document === "undefined") return;
         // Only ever undo a title WE set — the dashboard may retitle the tab
@@ -1402,7 +1758,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
             if (note || !document.hidden || typeof Notification === "undefined" || Notification.permission !== "granted") return;
             try {
                 note = new Notification(`${ringingWhoRef.current} is calling`, {
-                    body: "WhatsApp voice call — click to answer", tag: `neema-call-${ringingId}`, requireInteraction: true,
+                    body: `${ringingAppRef.current} voice call — click to answer`, tag: `neema-call-${ringingId}`, requireInteraction: true,
                 });
                 note.onclick = () => { window.focus(); note?.close(); };
             } catch { /* some browsers only allow notifications from a service worker */ }
@@ -1432,21 +1788,35 @@ export function CallProvider({ children }: { children: ReactNode }) {
         return () => clearTimeout(t);
     }, [granted]);
 
-    const recordingNote = recNote && snap.call && recNote.callId === snap.call.callId ? recNote.text : null;
+    // WhatsApp transcribes the call itself (server opt-in): a summary follows
+    // even when nothing was recorded on this device.
+    const metaSummary = snap.phase === "ended" && snap.outcome === "completed" && !!cfgRef.current?.cfg.meta_transcription
+        && (snap.duration ?? 0) > 0;
+    const recordingNote = recNote && snap.call && recNote.callId === snap.call.callId ? recNote.text
+        : metaSummary ? "Recorded by WhatsApp — summary in a minute" : null;
+    const dismissRestriction = useCallback(() => setRestriction(null), []);
+    // Restrictions lift on their own (Meta: 7 days).
+    useEffect(() => {
+        if (!restriction?.until) return;
+        const ms = new Date(restriction.until).getTime() - Date.now();
+        if (ms <= 0) { setRestriction(null); return; }
+        const t = setTimeout(() => setRestriction(null), Math.min(ms, 2_147_000_000));
+        return () => clearTimeout(t);
+    }, [restriction]);
 
     // Stable context identity: an inline object here re-rendered every
     // useCall() consumer (incl. the customer sidebar) on ANY provider render.
     const ctxValue = useMemo<CallCtx>(() => ({
         ...snap,
         outbound: snap.call?.direction === "outbound",
-        muted, recording, recordingNote, waiting, granted, permissionBusy,
+        muted, recording, recordingNote, waiting, granted, channels, permissionBusy, restriction, dismissRestriction,
         inputs, outputs, inputId, outputId, canPickOutput, deviceNotice, notifyPermission,
         answer, decline, callbackLater, hangup, toggleMute, initiateCall, requestPermission, redial,
         dismiss, minimise, expand, openChat, setChatOpener,
         selectInput, selectOutput, refreshDevices,
         declineWaiting, callbackWaiting, endAndAnswerWaiting, callGranted, dismissGranted, requestNotifications,
         offerNotifications: askNotifyOnce,
-    }), [snap, muted, recording, recordingNote, waiting, granted, permissionBusy,
+    }), [snap, muted, recording, recordingNote, waiting, granted, channels, permissionBusy, restriction, dismissRestriction,
         inputs, outputs, inputId, outputId, canPickOutput, deviceNotice, notifyPermission,
         answer, decline, callbackLater, hangup, toggleMute, initiateCall, requestPermission, redial,
         dismiss, minimise, expand, openChat, setChatOpener,
@@ -1456,8 +1826,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const covering = snap.phase !== "idle" && !snap.minimised;
     const presenceWa = busy ? snap.call?.from ?? null : null;
     const presence = useMemo<CallPresence>(() => ({
-        phase: snap.phase, busy, covering, waId: presenceWa, initiateCall, expand,
-    }), [snap.phase, busy, covering, presenceWa, initiateCall, expand]);
+        phase: snap.phase, busy, covering, waId: presenceWa, channels, initiateCall, expand,
+    }), [snap.phase, busy, covering, presenceWa, channels, initiateCall, expand]);
     return (
         <Ctx.Provider value={ctxValue}>
             <PresenceCtx.Provider value={presence}>

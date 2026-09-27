@@ -9,13 +9,15 @@ from app.models import Base
 
 
 class Call(Base):
-    """A WhatsApp voice call — one row per inbound call, its whole lifecycle.
+    """A voice call (WhatsApp, or Messenger when enabled) — one row per call, its
+    whole lifecycle.
 
     status (services/call_log.py owns the transitions):
       ringing → answered → completed               (a call that connected)
       ringing → missed                             (inbound, nobody answered)
       ringing → declined | callback                (inbound, an agent turned it down)
       ringing → no_answer | cancelled | failed     (outbound, never connected)
+      ringing → rejected                           (outbound, the customer declined)
     Rows written before 2026-09 say `ended` for `completed`; the API reports both
     as `completed`. The
     webhook creates it on `connect` (ringing) and closes it on `terminate`; the
@@ -28,6 +30,11 @@ class Call(Base):
     id           : Mapped[uuid.UUID]        = mapped_column(primary_key=True, default=uuid.uuid4)
     call_id      : Mapped[str]              = mapped_column(String(200), unique=True, index=True)  # Meta wacid
     wa_id        : Mapped[str | None]       = mapped_column(String(30), index=True)   # caller number
+    # whatsapp | messenger. A Messenger call has no wa_id: the customer is the
+    # page-scoped PSID in external_id (conversations match on channel + external_id).
+    channel      : Mapped[str]              = mapped_column(String(20), default="whatsapp",
+                                                            server_default="whatsapp", nullable=False)
+    external_id  : Mapped[str | None]       = mapped_column(String(64), nullable=True, index=True)
     caller_name  : Mapped[str | None]       = mapped_column(String(200), nullable=True)
     direction    : Mapped[str]              = mapped_column(String(10), default="inbound")
     status       : Mapped[str]              = mapped_column(String(20), default="ringing", index=True)
@@ -53,3 +60,5 @@ class Call(Base):
     # A missed / callback call is an open follow-up until someone calls the
     # customer back (a later connected call closes it too) or marks it done.
     follow_up_done_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # WhatsApp voicemail: an inbound audio message whose id is this call's WACID.
+    voicemail_message_id: Mapped[str | None] = mapped_column(String(200), nullable=True)

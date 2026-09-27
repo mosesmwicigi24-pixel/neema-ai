@@ -3,6 +3,7 @@ package ke.co.bethanyhouse.neema.calls
 import app.cash.paparazzi.Paparazzi
 import ke.co.bethanyhouse.neema.app.ViewId
 import ke.co.bethanyhouse.neema.core.model.Call
+import ke.co.bethanyhouse.neema.core.model.CallPermission
 import ke.co.bethanyhouse.neema.core.model.IceConfig
 import ke.co.bethanyhouse.neema.core.net.ApiException
 import ke.co.bethanyhouse.neema.core.net.NeemaJson
@@ -209,6 +210,8 @@ class CallAcceptanceTest {
         // Call back: straight out to them.
         r.calls.redial(); r.settle()
         assertEquals(1, r.count("connect $peter"))
+        // "Calling…" turns "Ringing…" only when Meta says their phone rings.
+        assertEquals(CallPhase.Placing, r.state.phase); r.raw("""{"type":"call_status","call_id":"${r.api.connectId}","status":"ringing"}""")
         assertEquals(CallPhase.RingingOut, r.state.phase)
         assertEquals("the same customer, the same name", "Fr. Peter Kamau", r.state.who)
     }
@@ -223,6 +226,8 @@ class CallAcceptanceTest {
         assertTrue("never the loudspeaker by itself", !r.audio.speakerOn)
         r.api.connectGate!!.complete(Unit); r.settle()
         assertTrue(call.await().isSuccess)
+        // "Calling…" turns "Ringing…" only when Meta says their phone rings.
+        assertEquals(CallPhase.Placing, r.state.phase); r.raw("""{"type":"call_status","call_id":"${r.api.connectId}","status":"ringing"}""")
         assertEquals(CallPhase.RingingOut, r.state.phase)
         assertEquals("Ringing…", r.words)
         assertEquals(Triple(james, "setLocal(Offer,v=0 our-offer)+candidates", "Deacon James Mwangi"), r.api.lastConnect)
@@ -257,6 +262,8 @@ class CallAcceptanceTest {
         r.calls.callGranted(); r.settle()
         assertNull(r.calls.permissionGranted.value)
         assertEquals(2, r.count("connect $james"))
+        // "Calling…" turns "Ringing…" only when Meta says their phone rings.
+        assertEquals(CallPhase.Placing, r.state.phase); r.raw("""{"type":"call_status","call_id":"${r.api.connectId}","status":"ringing"}""")
         assertEquals(CallPhase.RingingOut, r.state.phase)
     }
 
@@ -487,6 +494,8 @@ class CallAcceptanceTest {
 
     @Test fun s14_cancelWhileItRingsThem() = rig { r ->
         r.place().await()
+        // "Calling…" turns "Ringing…" only when Meta says their phone rings.
+        assertEquals(CallPhase.Placing, r.state.phase); r.raw("""{"type":"call_status","call_id":"${r.api.connectId}","status":"ringing"}""")
         assertEquals(CallPhase.RingingOut, r.state.phase)
         r.calls.hangup(); r.settle()
         assertEquals("Call cancelled", r.words)
@@ -618,6 +627,257 @@ class CallAcceptanceTest {
         assertEquals(peter, r.state.from)
         assertEquals(CallPhase.InCall, r.state.phase)
     }
+    // ── 21. The 2026-09 refresh, end to end: permission truth → request → Allow → ringing → declined ──
+    @Test fun s21_permissionTruthThenRingingThenDeclined() = rig { r ->
+        r.api.permission = CallPermission(james, "unknown", metaStatus = "no_permission", canCall = false, canRequest = true,
+            unansweredStreak = 0, source = "meta")
+        r.place().await()
+        assertEquals("James hasn't allowed WhatsApp calls yet", r.words)
+        assertEquals("no doomed connect", 0, r.count("connect"))
+        r.calls.sendCallRequest(); r.settle()
+        assertEquals(CallOutcome.PermissionRequested, r.state.outcome)
+        r.raw("""{"type":"call_permission","wa_id":"$james","status":"granted","expires_at":null,"permanent":true}""")
+        assertNotNull(r.calls.permissionGranted.value)
+        // Call now: Meta now says yes.
+        r.api.permission = CallPermission(james, "granted", permanent = true, metaStatus = "permanent", canCall = true, source = "meta")
+        r.calls.callGranted(); r.settle()
+        assertEquals(1, r.count("connect $james"))
+        assertEquals("Calling…", r.words)
+        r.raw("""{"type":"call_status","call_id":"wacid.out1","status":"ringing"}""")
+        assertEquals("Ringing…", r.words)
+        r.raw("""{"type":"call_ended","call_id":"wacid.out1","outcome":"rejected","status":"REJECTED","direction":"outbound"}""")
+        assertEquals("James declined the call", r.words)
+        assertEquals(listOf(WrapAction.Message, WrapAction.Done), r.state.wrapActions())
+        r.pass(60_000)
+        assertEquals("the agent decides what's next", CallPhase.Ended, r.state.phase)
+    }
+
+    // ── Messenger (CALLING_UX.md §2.0): the web's M1–M6 ─────────────────────
+    private val grace = "7788990011"
+
+    private fun Rig.ringMessenger(id: String = "c_in1", name: String? = null) =
+        raw("""{"type":"incoming_call","call_id":"$id","from":"$grace","external_id":"$grace","name":${name?.let { "\"$it\"" } ?: "null"},"at":"1","channel":"messenger"}""")
+    private fun Rig.placeMessenger(name: String = "Grace Wanjiku"): Deferred<Result<Unit>> =
+        scope.async { calls.initiateCall(grace, name, "conv-grace", "messenger") }.also { settle() }
+    private fun Rig.mediaUpdate(id: String, version: Int?, sdp: String?, type: String? = "offer") =
+        raw("""{"type":"media_update","call_id":"$id","channel":"messenger","version":${version ?: "null"},"sdp_type":${type?.let { "\"$it\"" } ?: "null"},"sdp":${sdp?.let { "\"$it\"" } ?: "null"}}""")
+
+    // M1. A customer calls on Messenger: WE build the offer, Meta answers it.
+    @Test fun m1_inboundMessengerCallSendsAnOfferAndAppliesMetasAnswer() = rig { r ->
+        r.api.messengerCalls += "c_in1"
+        r.api.messengerRenegotiation = kotlinx.serialization.json.JsonPrimitive("v=0 reneg")
+        r.ringMessenger()
+        assertEquals(CallPhase.Ringing, r.state.phase)
+        assertTrue(r.state.messenger)
+        assertEquals("never a PSID on screen", "Messenger caller", r.state.who)
+        assertNull("a PSID is no number", r.state.number)
+        assertEquals("Incoming…", r.words)
+        // The name follows in a call_update, from the linked person.
+        r.raw("""{"type":"call_update","call":{"call_id":"c_in1","channel":"messenger","external_id":"$grace","wa_id":null,"name":"Grace Wanjiku","direction":"inbound","status":"ringing","conversation_id":"conv-grace"}}""")
+        assertEquals("Grace Wanjiku", r.state.who)
+        assertEquals("Open chat goes to the Messenger conversation", "conv-grace", r.state.chatKey)
+        r.calls.answer(); r.settle()
+        assertEquals(listOf("ice-config", "offer c_in1", "answer c_in1"), r.api.log.filter { !it.startsWith("list") })
+        assertEquals("our OFFER went to /answer", "setLocal(Offer,v=0 our-offer)+candidates", r.api.lastAnswerSdp)
+        val p = r.media.peer
+        assertEquals(
+            listOf("addMic(true)", "createOffer", "setLocal(Offer,v=0 our-offer)", "setRemote(Answer,v=0 meta-answer)",
+                "setRemote(Offer,v=0 reneg)", "createAnswer", "setLocal(Answer,v=0 our-answer)"),
+            p.ops,
+        )
+        assertEquals("Connecting…", r.words)
+        p.onEvent(PeerEvent.Connected); r.settle()
+        assertEquals(CallPhase.InCall, r.state.phase)
+        assertEquals("00:00", r.words)
+    }
+
+    @Test fun m1b_anAcceptWithNoAnswerIsNeverASilentLine() = rig { r ->
+        r.api.messengerCalls += "c_in1"
+        r.api.messengerAnswer = null
+        r.ringMessenger(name = "Grace Wanjiku")
+        r.calls.answer(); r.settle()
+        assertEquals(CallPhase.Ended, r.state.phase)
+        assertEquals(CallManager.AUDIO_NOT_CONNECTED, r.words)
+        assertEquals(1, r.count("terminate c_in1"))
+    }
+
+    // M2. Several agents, two apps: the first answer wins, whatever the channel; a second caller is a banner.
+    @Test fun m2_crossChannelFirstAnswerWinsAndTheWaitingBanner() = rig { r ->
+        r.api.messengerCalls += "c_in1"
+        // A colleague takes the Messenger call first.
+        r.ringMessenger(name = "Grace Wanjiku")
+        r.answered("c_in1", "agent-ann", "Ann Wanjiru")
+        assertEquals(CallOutcome.AnsweredElsewhere("Ann Wanjiru"), r.state.outcome)
+        assertEquals("Answered by Ann", r.words)
+        r.calls.dismiss(); r.pass(13_000)
+        // …or wins the lock a moment before this phone: 409 names them.
+        r.api.messengerCalls += "c_in2"
+        r.ringMessenger("c_in2", "Grace Wanjiku")
+        r.api.answerError = err(409, "/admin/calls/c_in2/answer", "call already answered by Ann Wanjiru")
+        r.calls.answer(); r.settle()
+        assertEquals("Answered by Ann", r.words)
+        assertEquals("their call is left alone", 0, r.count("terminate c_in2"))
+        r.calls.dismiss(); r.api.answerError = null; r.pass(13_000)
+        // On a WhatsApp call, a Messenger caller rings in: a banner, never a take-over.
+        r.live("wacid.9")
+        r.api.messengerCalls += "c_in3"
+        r.ringMessenger("c_in3")
+        assertEquals(CallPhase.InCall, r.state.phase)
+        val w = r.state.waiting!!
+        assertEquals("messenger", w.channel)
+        assertEquals("Messenger caller", w.who)
+        // End & answer: this call ends, theirs is answered — with our offer.
+        r.calls.endAndAnswer(); r.settle()
+        assertEquals(1, r.count("terminate wacid.9"))
+        assertEquals("c_in3", r.state.callId)
+        assertTrue(r.state.messenger)
+        assertEquals(1, r.count("answer c_in3"))
+        assertTrue(r.api.lastAnswerSdp!!.startsWith("setLocal(Offer,"))
+    }
+
+    // M3. Calling a Messenger customer: with their permission, and without (calling_optin).
+    @Test fun m3_outboundMessengerWithPermissionStaysRingingUntilAnswered() = rig { r ->
+        r.api.permission = CallPermission(null, "granted", canCall = true, source = "meta")
+        val placed = r.placeMessenger()
+        assertTrue(placed.await().isSuccess)
+        val log = r.api.log.filter { !it.startsWith("list") }
+        assertEquals(setOf("ice-config", "permission messenger $grace", "connect-messenger $grace"), log.toSet())
+        assertEquals("connect with channel + psid, after the permission read", "connect-messenger $grace", log.last())
+        assertEquals(grace, r.api.lastMessengerConnect!!.first)
+        assertTrue("our offer", r.api.lastMessengerConnect!!.second.startsWith("setLocal(Offer,"))
+        assertEquals("c_msg.out1", r.state.callId)
+        assertEquals("Calling…", r.words)
+        assertEquals("Meta's answer applied at once", "setRemote(Answer,v=0 meta-answer)", r.media.peer.ops.first { it.startsWith("setRemote") })
+        r.raw("""{"type":"call_status","call_id":"c_msg.out1","status":"ringing"}""")
+        assertEquals("Ringing…", r.words)
+        // The media path to Meta comes up before they pick up: not connected, no timer.
+        r.media.peer.onEvent(PeerEvent.Connected); r.settle()
+        r.pass(5_000)
+        assertEquals(CallPhase.RingingOut, r.state.phase)
+        assertEquals("Ringing…", r.words)
+        assertNull("the timer never starts before call_answered", r.calls.liveSinceForTest)
+        // They picked up: live at once (the media is already there).
+        r.answered("c_msg.out1", "agent-me", "Moses Mwicigi", "outbound")
+        assertEquals(CallPhase.InCall, r.state.phase)
+        assertEquals("00:00", r.words)
+        r.pass(3_000)
+        assertEquals("the call's length from the answer, not the media", "00:03", r.words)
+    }
+
+    @Test fun m3b_outboundMessengerWithoutPermissionSendsCallingOptin() = rig { r ->
+        r.api.permission = CallPermission(null, "unknown", metaStatus = "no_permission", canCall = false, canRequest = true, source = "meta")
+        r.placeMessenger()
+        assertEquals(CallOutcome.PermissionNeeded, r.state.outcome)
+        assertEquals("Grace hasn't allowed Messenger calls yet", r.words)
+        assertTrue(r.state.outcomeNote()!!.contains(CallManager.PERMISSION_EXPLAINED_MESSENGER))
+        assertEquals("no doomed connect", 0, r.count("connect-messenger"))
+        assertEquals(WrapAction.SendCallRequest, r.state.wrapActions().first())
+        r.calls.sendCallRequest(); r.settle()
+        assertEquals(1, r.count("request-permission messenger $grace"))
+        assertEquals(0, r.count("request-permission $grace"))
+        assertEquals(CallOutcome.PermissionRequested, r.state.outcome)
+        // They tap Accept: matched by channel + external_id.
+        r.raw("""{"type":"call_permission","wa_id":null,"channel":"messenger","external_id":"$grace","status":"granted","expires_at":"2026-10-03T10:00:00+00:00"}""")
+        assertEquals(PermissionGrant(grace, "Grace Wanjiku", "messenger"), r.calls.permissionGranted.value)
+        assertEquals("the banner replaces the wrap-up", CallPhase.Idle, r.state.phase)
+        // A WhatsApp frame for the same digits is someone else's.
+        r.calls.dismissGrant()
+        r.api.permission = CallPermission(null, "granted", canCall = true, source = "meta")
+        r.calls.requestPermission(grace, "Grace Wanjiku", "messenger")
+        r.raw("""{"type":"call_permission","wa_id":"$grace","status":"granted"}""")
+        assertNull(r.calls.permissionGranted.value)
+    }
+
+    @Test fun m3c_connectRefusedForNoPermissionOffersTheRequest() = rig { r ->
+        r.api.connectError = ApiException(409, "POST", "/admin/calls/connect",
+            """{"detail":"This customer hasn't allowed Messenger calls yet.","code":"no_permission","action":"request_permission"}""")
+        r.placeMessenger()
+        assertEquals(CallOutcome.PermissionNeeded, r.state.outcome)
+        assertEquals("Grace hasn't allowed Messenger calls yet", r.words)
+    }
+
+    // M4. The switch is off: no Messenger button, the sheet says so, a refusal re-reads the channels.
+    @Test fun m4_messengerCallingOffIsSaidEverywhere() = rig { r ->
+        assertEquals("read at start", 1, r.api.channelsReads)
+        assertFalse("off until read, and off here", r.calls.messengerCallsOn)
+        val conv = ke.co.bethanyhouse.neema.core.model.Conversation(id = "conv-grace", externalId = grace, channel = "messenger", name = "Grace Wanjiku")
+        val insta = conv.copy(id = "conv-ig", channel = "instagram")
+        val on = ke.co.bethanyhouse.neema.core.model.CallChannels(messenger = ke.co.bethanyhouse.neema.core.model.ChannelCalling(inbound = true, outbound = true, sdp = "offer"))
+        assertEquals(ke.co.bethanyhouse.neema.feature.conversations.customer.CallButton.Sheet(ke.co.bethanyhouse.neema.feature.conversations.customer.CallPlatform.Messenger),
+            ke.co.bethanyhouse.neema.feature.conversations.customer.callButtonFor(conv, null, null))
+        assertEquals(ke.co.bethanyhouse.neema.feature.conversations.customer.CallButton.Sheet(ke.co.bethanyhouse.neema.feature.conversations.customer.CallPlatform.Messenger),
+            ke.co.bethanyhouse.neema.feature.conversations.customer.callButtonFor(conv, ke.co.bethanyhouse.neema.core.model.CallChannels(), "254711222333"))
+        assertEquals(ke.co.bethanyhouse.neema.feature.conversations.customer.CallButton.OnMessenger(grace),
+            ke.co.bethanyhouse.neema.feature.conversations.customer.callButtonFor(conv, on, null))
+        assertEquals("Instagram never calls", ke.co.bethanyhouse.neema.feature.conversations.customer.CallButton.Sheet(ke.co.bethanyhouse.neema.feature.conversations.customer.CallPlatform.Instagram),
+            ke.co.bethanyhouse.neema.feature.conversations.customer.callButtonFor(insta, on, null))
+        assertEquals("Messenger calling isn't switched on for Neema yet.", ke.co.bethanyhouse.neema.feature.calls.cantCallWhy("Messenger"))
+        assertEquals("Instagram doesn't let businesses take calls.", ke.co.bethanyhouse.neema.feature.calls.cantCallWhy("Instagram"))
+        // Switched on: the socket reconnect re-reads it.
+        r.api.channels = on
+        r.connected.value = false; r.settle(); r.connected.value = true; r.settle()
+        assertEquals(2, r.api.channelsReads)
+        assertTrue(r.calls.messengerCallsOn)
+        // …and off again between the read and the tap: the refusal says so and re-reads.
+        r.api.channels = ke.co.bethanyhouse.neema.core.model.CallChannels()
+        r.api.connectError = ApiException(409, "POST", "/admin/calls/connect",
+            """{"detail":"Messenger calling is switched off — call them on WhatsApp instead.","code":"messenger_calling_off","action":"none"}""")
+        r.placeMessenger()
+        assertEquals("Messenger calling is switched off — call them on WhatsApp instead.", r.words)
+        assertEquals(CallManager.MESSAGE_INSTEAD, r.state.outcomeNote())
+        assertFalse("no Try again: it won't help", WrapAction.TryAgain in r.state.wrapActions())
+        assertEquals(3, r.api.channelsReads)
+        assertFalse(r.calls.messengerCallsOn)
+        // ice-config carries channels too.
+        r.calls.dismiss()
+        r.api.ice = IceConfig(record = true, channels = on)
+        r.api.connectError = null
+        r.placeMessenger()
+        assertTrue(r.calls.messengerCallsOn)
+    }
+
+    // M5. media_update: only the highest version, never another call's or an SDP-less one; held until the call is set up.
+    @Test fun m5_mediaUpdatesApplyTheHighestVersionOnly() = rig { r ->
+        r.api.permission = CallPermission(null, "granted", canCall = true, source = "meta")
+        r.placeMessenger()
+        val p = r.media.peer
+        fun offers() = p.ops.filter { it.startsWith("setRemote(Offer") }
+        r.mediaUpdate("c_msg.out1", 2, "v=0 v2")
+        assertEquals(listOf("setRemote(Offer,v=0 v2)"), offers())
+        assertEquals("answered locally", "setLocal(Answer,v=0 our-answer)", p.ops.last())
+        r.mediaUpdate("c_msg.out1", 1, "v=0 v1")
+        r.mediaUpdate("c_msg.out1", 2, "v=0 v2-again")
+        assertEquals("stale versions are never applied", listOf("setRemote(Offer,v=0 v2)"), offers())
+        r.mediaUpdate("c_other", 9, "v=0 other")
+        r.mediaUpdate("c_msg.out1", 5, null)
+        r.mediaUpdate("c_msg.out1", 6, "v=0 an-answer", type = "answer")
+        assertEquals("other calls', SDP-less and non-offers are ignored", listOf("setRemote(Offer,v=0 v2)"), offers())
+        r.mediaUpdate("c_msg.out1", 3, "v=0 v3")
+        assertEquals(listOf("setRemote(Offer,v=0 v2)", "setRemote(Offer,v=0 v3)"), offers())
+        assertEquals("nothing is sent back", 0, r.api.log.count { it.startsWith("answer") })
+    }
+
+    @Test fun m5b_aMediaUpdateBeforeSetupIsHeld() = rig { r ->
+        // Our call: it arrives while connect is still out.
+        r.api.permission = CallPermission(null, "granted", canCall = true, source = "meta")
+        r.api.connectGate = CompletableDeferred()
+        r.placeMessenger()
+        r.mediaUpdate("c_msg.out1", 1, "v=0 early1")
+        r.mediaUpdate("c_msg.out1", 4, "v=0 early4")
+        r.mediaUpdate("c_msg.out1", 2, "v=0 early2")
+        assertTrue(r.media.peer.ops.none { it.startsWith("setRemote") })
+        r.api.connectGate!!.complete(Unit); r.settle()
+        assertEquals("the answer first, then the highest held offer",
+            listOf("setRemote(Answer,v=0 meta-answer)", "setRemote(Offer,v=0 early4)"), r.media.peer.ops.filter { it.startsWith("setRemote") })
+        r.calls.hangup(); r.settle(); r.calls.dismiss(); r.pass(13_000)
+        // A customer's call: it arrives while it still rings here.
+        r.api.messengerCalls += "c_in5"
+        r.ringMessenger("c_in5", "Grace Wanjiku")
+        r.mediaUpdate("c_in5", 1, "v=0 ring-time")
+        r.calls.answer(); r.settle()
+        assertEquals(listOf("setRemote(Answer,v=0 meta-answer)", "setRemote(Offer,v=0 ring-time)"),
+            r.media.peer.ops.filter { it.startsWith("setRemote") })
+    }
 }
 
 /**
@@ -668,5 +928,44 @@ class CallAcceptanceHistoryTest {
         assertEquals("254712345678", dash.openConvKey.value)
         assertEquals(ViewId.Conversations, dash.view.value)
         assertNotNull(dash.openConvKey.value)
+    }
+
+    // ── 22. Voicemail: the log's row and a live row update carry it ─────────
+    @Test fun s22_voicemailReachesTheLog() {
+        val fake = FakeNeema.withFixtures().also(CallsFixtures::install)
+        val vm = CallsViewModel(dashboard(paparazzi.context, fake))
+        val c2 = vm.calls.value!!.first { it.callId == CallsFixtures.C2 }
+        assertFalse(c2.hasVoicemail)
+        val row = CallsFixtures.row("5b0f7d0e-8a1c-4a8e-9d64-0f1e2d3c4b02", CallsFixtures.C2, "254722000111", "Rev. Mary Achieng",
+            "inbound", "missed", null, null, CallsFixtures.pyIso(130), null, "none", false).replace("\"has_recording\":false", "\"has_recording\":false,\"has_voicemail\":true")
+        vm.mergeRow(NeemaJson.parseToJsonElement(row) as JsonObject)
+        assertTrue(vm.calls.value!!.first { it.callId == CallsFixtures.C2 }.hasVoicemail)
+    }
+
+    private val grace = "7788990011"
+    private val peter = "254712345678"
+
+    // M6. The history says which app, and the words match the web.
+    @Test fun m6_historyAndThreadSayWhichApp() {
+        val row = Call(callId = "c_1", channel = "messenger", externalId = grace, waId = null, direction = "outbound", status = "rejected")
+        assertEquals("Declined by customer", ke.co.bethanyhouse.neema.feature.calls.callRowWords(row).label)
+        assertEquals("Messenger caller", ke.co.bethanyhouse.neema.feature.calls.rowWho(row))
+        assertEquals(grace, ke.co.bethanyhouse.neema.feature.calls.callHandle(row))
+        assertEquals("Messenger", ke.co.bethanyhouse.neema.feature.calls.channelLabel(row.channel))
+        assertEquals("WhatsApp", ke.co.bethanyhouse.neema.feature.calls.channelLabel(null))
+        val wa = Call(callId = "w_1", waId = peter, direction = "inbound", status = "completed")
+        assertEquals(peter, ke.co.bethanyhouse.neema.feature.calls.callHandle(wa))
+        assertEquals("+$peter", ke.co.bethanyhouse.neema.feature.calls.rowWho(wa))
+        // A live row lands in the log with its channel.
+        val fake = FakeNeema.withFixtures().also(CallsFixtures::install)
+        val vm = CallsViewModel(dashboard(paparazzi.context, fake))
+        vm.mergeRow(NeemaJson.parseToJsonElement(
+            """{"call_id":"c_2","channel":"messenger","external_id":"$grace","wa_id":null,"name":null,"direction":"inbound","status":"missed","started_at":"2026-09-26T10:00:00+00:00"}""",
+        ) as JsonObject)
+        val landed = vm.calls.value!!.first { it.callId == "c_2" }
+        assertEquals("messenger", landed.channel)
+        assertEquals("Messenger caller", ke.co.bethanyhouse.neema.feature.calls.rowWho(landed))
+        assertFalse("Messenger calls back only while Messenger can call", vm.canCallBack(landed))
+        assertTrue(vm.canCallBack(vm.calls.value!!.first { !it.waId.isNullOrEmpty() }))
     }
 }

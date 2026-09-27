@@ -136,6 +136,12 @@ fun SettingsScreen(dash: DashboardViewModel) {
                 Spacer(Modifier.height(14.dp))
                 IntegrationsCard(vm, twoCols)
                 Spacer(Modifier.height(14.dp))
+                // WhatsApp's own calling settings are the number's: admins only (manage_settings).
+                val access by dash.access.collectAsStateWithLifecycle()
+                if (access.can(ke.co.bethanyhouse.neema.core.perm.Perms.MANAGE_SETTINGS)) {
+                    WhatsAppCallingCard(vm.calling)
+                    Spacer(Modifier.height(14.dp))
+                }
                 DangerZoneCard(vm)
                 Spacer(Modifier.height(24.dp))
             }
@@ -937,5 +943,221 @@ private fun DangerZoneCard(vm: SettingsViewModel) {
                 SmallPillButton(action, btnText, btnFill, btnEdge, vm::dangerAction)
             }
         }
+    }
+}
+
+// ── WhatsApp calling (manage_settings) ────────────────────────────────────────
+
+/**
+ * Settings → WhatsApp calling (CALLING_UX.md §2.1): callback permission, the
+ * call button, voicemail, weekly call hours and holidays, Meta's
+ * restrictions (read only), and the call-request template. Save sends only
+ * what changed; each field says what is wrong with it before anything is sent.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun WhatsAppCallingCard(m: CallingSettingsModel) {
+    // Read as the card first composes (not a frame later): with an answer on hand it shows at once.
+    remember(m) { m.start(); true }
+    val u by m.ui.collectAsStateWithLifecycle()
+    val c = Neema.colors
+    val red = if (c.isDark) Palette.Red300 else Palette.Red700
+    val green = if (c.isDark) Palette.Emerald300 else Palette.Emerald700
+    SectionCard(
+        "WhatsApp calling",
+        "How customers reach this number by WhatsApp call, and when. Changes can take up to 7 days to reach customers' phones.",
+    ) {
+        u.loadError?.let {
+            ke.co.bethanyhouse.neema.feature.reports.LoadProblem(
+                title = "Couldn't load the calling settings", message = it, retrying = u.loading, onRetry = m::load,
+                modifier = Modifier.padding(bottom = 10.dp),
+            )
+        }
+        val d = u.draft
+        if (d == null && u.loadError == null) Text("Loading…", fontSize = 12.sp, color = c.muted)
+        if (d != null) {
+            // Meta's restrictions: read only — they lift by themselves (up to 7 days).
+            if (d.restrictions.isNotEmpty()) {
+                Column(
+                    Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(RoundedCornerShape(10.dp)).background(red.copy(alpha = 0.1f))
+                        .border(1.dp, red.copy(alpha = 0.3f), RoundedCornerShape(10.dp)).padding(12.dp),
+                ) {
+                    Text("WhatsApp restricts calling on this number", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = red)
+                    d.restrictions.forEach { Text(CallingSettingsModel.restrictionWords(it), fontSize = 12.sp, color = c.textMid, lineHeight = 17.sp) }
+                    Text("Calls you place may fail until it lifts.", fontSize = 11.sp, color = c.muted, modifier = Modifier.padding(top = 2.dp))
+                }
+            }
+            if (u.changedElsewhere) {
+                Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("WhatsApp says these settings changed.", fontSize = 12.sp, color = c.textMid, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { m.discard(); m.load() }) { Text("Reload") }
+                }
+            }
+            CallingToggle(
+                "Call back customers who called",
+                "When a customer calls this number, WhatsApp lets your team call them back for 7 days without sending a call request.",
+                d.callbackPermissionStatus == "ENABLED",
+            ) { on -> m.edit { it.copy(callbackPermissionStatus = if (on) "ENABLED" else "DISABLED") } }
+            Field("Call button in WhatsApp") {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("DEFAULT" to "Show", "HIDE_IN_CHAT" to "Hide in chats", "DISABLE_ALL" to "Hide everywhere").forEach { (v, label) ->
+                        FilterChip(
+                            selected = (d.callIconVisibility ?: "DEFAULT") == v, onClick = { m.edit { it.copy(callIconVisibility = v) } },
+                            label = { Text(label, fontSize = 12.sp) }, modifier = Modifier.heightIn(min = 48.dp),
+                        )
+                    }
+                }
+            }
+            val vmOn = d.voicemail?.status == "ENABLED"
+            CallingToggle(
+                "Voicemail", "A caller nobody answers can leave a voice message — it arrives in their chat.", vmOn,
+            ) { on -> m.edit { it.copy(voicemail = (it.voicemail ?: ke.co.bethanyhouse.neema.core.model.CallVoicemail()).copy(status = if (on) "ENABLED" else "DISABLED")) } }
+            if (vmOn) {
+                val err = u.fieldErrors["voicemail.timeout"]
+                Field("Ring for (seconds) before voicemail", hint = err ?: "0–30 seconds.", hintColor = if (err != null) red else null) {
+                    SmallInput(
+                        d.voicemail?.timeoutSeconds?.toString().orEmpty(),
+                        { t -> m.edit { it.copy(voicemail = it.voicemail?.copy(timeoutSeconds = t.filter(Char::isDigit).take(3).toIntOrNull())) } },
+                        keyboardType = KeyboardType.Number, isError = err != null, modifier = Modifier.width(120.dp),
+                    )
+                }
+            }
+            val hours = d.callHours
+            val hoursOn = hours?.status == "ENABLED"
+            CallingToggle(
+                "Call hours", "Outside these hours WhatsApp tells callers you're closed.", hoursOn,
+            ) { on -> m.edit { it.copy(callHours = (it.callHours ?: ke.co.bethanyhouse.neema.core.model.CallHours(timezoneId = "Africa/Nairobi")).copy(status = if (on) "ENABLED" else "DISABLED")) } }
+            if (hoursOn && hours != null) CallHoursEditor(hours, u.fieldErrors, red) { f -> m.edit { it.copy(callHours = it.callHours?.let(f)) } }
+            Spacer(Modifier.height(6.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                SaveButton("Save calling settings", u.saving, enabled = u.dirty, onClick = m::save)
+                if (u.dirty && !u.saving) TextButton(onClick = m::discard, modifier = Modifier.heightIn(min = 48.dp)) { Text("Discard changes") }
+            }
+            u.saveError?.let { Text(it, fontSize = 12.sp, color = red, lineHeight = 17.sp, modifier = Modifier.padding(top = 6.dp)) }
+            if (u.fieldErrors.isNotEmpty()) Text("Fix the fields marked above — nothing was sent.", fontSize = 12.sp, color = red, modifier = Modifier.padding(top = 6.dp))
+            if (u.saved) Text("Saved — customers may take up to 7 days to see the change.", fontSize = 12.sp, color = green, modifier = Modifier.padding(top = 6.dp))
+        }
+        HorizontalDivider(Modifier.padding(vertical = 14.dp), color = if (c.isDark) c.border else c.hairline)
+        CallTemplateStatus(u, onCreate = m::createTemplate, red = red, green = green)
+    }
+}
+
+@Composable
+private fun CallingToggle(title: String, explanation: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    val c = Neema.colors
+    Row(
+        Modifier.fillMaxWidth().padding(bottom = 12.dp).toggleable(value = checked, role = Role.Switch, onValueChange = onChange),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = c.text)
+            Text(explanation, fontSize = 11.sp, color = c.muted, lineHeight = 15.sp)
+        }
+        Spacer(Modifier.width(8.dp))
+        Switch(checked = checked, onCheckedChange = null, colors = neemaSwitchColors())
+    }
+}
+
+/** The weekly hours (one opening per day) and the holidays. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CallHoursEditor(
+    h: ke.co.bethanyhouse.neema.core.model.CallHours,
+    errors: Map<String, String>,
+    red: Color,
+    edit: ((ke.co.bethanyhouse.neema.core.model.CallHours) -> ke.co.bethanyhouse.neema.core.model.CallHours) -> Unit,
+) {
+    val c = Neema.colors
+    val tzErr = errors["hours.timezone"]
+    Field("Time zone", hint = tzErr, hintColor = red) {
+        SmallInput(h.timezoneId.orEmpty(), { t -> edit { it.copy(timezoneId = t.trim().ifEmpty { null }) } }, placeholder = "Africa/Nairobi", isError = tzErr != null)
+    }
+    Text("Open", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.textMid)
+    CallingSettingsModel.DAYS.forEach { day ->
+        val slot = h.weekly.firstOrNull { it.dayOfWeek == day }
+        val err = errors["hours.$day"]
+        FlowRow(
+            Modifier.fillMaxWidth().padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(Modifier.width(128.dp).heightIn(min = 48.dp).toggleable(value = slot != null, role = Role.Checkbox) { on ->
+                edit { cur ->
+                    if (on) cur.copy(weekly = cur.weekly + ke.co.bethanyhouse.neema.core.model.CallHoursSlot(day, "0900", "1700"))
+                    else cur.copy(weekly = cur.weekly.filter { it.dayOfWeek != day })
+                }
+            }, verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = slot != null, onCheckedChange = null)
+                Text(day.lowercase().replaceFirstChar { it.uppercase() }.take(3), fontSize = 13.sp, color = c.text)
+            }
+            if (slot != null) {
+                fun set(open: String? = null, close: String? = null) = edit { cur ->
+                    var done = false
+                    cur.copy(weekly = cur.weekly.map {
+                        if (it.dayOfWeek == day && !done) { done = true; it.copy(openTime = open ?: it.openTime, closeTime = close ?: it.closeTime) } else it
+                    })
+                }
+                SmallInput(CallingSettingsModel.showTime(slot.openTime), { set(open = CallingSettingsModel.readTime(it)) },
+                    placeholder = "09:00", isError = err != null, modifier = Modifier.width(92.dp))
+                SmallInput(CallingSettingsModel.showTime(slot.closeTime), { set(close = CallingSettingsModel.readTime(it)) },
+                    placeholder = "17:00", isError = err != null, modifier = Modifier.width(92.dp))
+            } else Text("Closed", fontSize = 12.sp, color = c.muted, modifier = Modifier.align(Alignment.CenterVertically))
+        }
+        err?.let { Text(it, fontSize = 11.sp, color = red) }
+    }
+    Spacer(Modifier.height(10.dp))
+    Text("Holidays (closed)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = c.textMid)
+    errors["holidays"]?.let { Text(it, fontSize = 11.sp, color = red) }
+    h.holidays.forEachIndexed { i, x ->
+        val err = errors["holiday.$i"]
+        Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            fun set(f: (ke.co.bethanyhouse.neema.core.model.CallHoliday) -> ke.co.bethanyhouse.neema.core.model.CallHoliday) =
+                edit { cur -> cur.copy(holidays = cur.holidays.mapIndexed { j, y -> if (j == i) f(y) else y }) }
+            SmallInput(x.date.orEmpty(), { t -> set { it.copy(date = t.trim()) } }, placeholder = "2026-12-25", isError = err != null, modifier = Modifier.weight(1.5f))
+            SmallInput(CallingSettingsModel.showTime(x.startTime), { t -> set { it.copy(startTime = CallingSettingsModel.readTime(t)) } }, placeholder = "00:00", isError = err != null, modifier = Modifier.weight(1f))
+            SmallInput(CallingSettingsModel.showTime(x.endTime), { t -> set { it.copy(endTime = CallingSettingsModel.readTime(t)) } }, placeholder = "23:59", isError = err != null, modifier = Modifier.weight(1f))
+            IconButton(onClick = { edit { cur -> cur.copy(holidays = cur.holidays.filterIndexed { j, _ -> j != i }) } }) {
+                Icon(Icons.Filled.Close, "Remove holiday ${x.date.orEmpty()}", tint = c.muted)
+            }
+        }
+        err?.let { Text(it, fontSize = 11.sp, color = red) }
+    }
+    if (h.holidays.size < 20) TextButton(
+        onClick = { edit { it.copy(holidays = it.holidays + ke.co.bethanyhouse.neema.core.model.CallHoliday("", "0000", "2359")) } },
+        modifier = Modifier.heightIn(min = 48.dp),
+    ) {
+        Icon(Icons.Filled.Add, null, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(4.dp))
+        Text("Add holiday")
+    }
+    Spacer(Modifier.height(6.dp))
+}
+
+/** The call-request template WhatsApp needs outside the 24 h window: whether it's there, approved, and a Create. */
+@Composable
+private fun CallTemplateStatus(u: CallingSettingsUi, onCreate: () -> Unit, red: Color, green: Color) {
+    val c = Neema.colors
+    val t = u.template
+    Text("Call-request template", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = c.text)
+    Text(
+        "A customer who hasn't messaged in 24 hours can only be asked for call permission with an approved template.",
+        fontSize = 11.sp, color = c.muted, lineHeight = 15.sp,
+    )
+    Spacer(Modifier.height(6.dp))
+    val (line, tone) = when {
+        t == null -> (if (u.templateError == null) "Checking…" else null) to c.muted
+        !t.wabaConfigured -> "The server needs WABA_BUSINESS_ACCOUNT_ID set before a template can be created." to c.textMid
+        t.status == "approved" -> "Approved — ${t.name} (${t.language})" to green
+        t.status == "pending" || t.status == "in_appeal" -> "Waiting for WhatsApp to approve ${t.name}" to c.textMid
+        t.status == "rejected" -> "WhatsApp rejected ${t.name} — create it again with different wording" to red
+        t.exists == false || !t.configured -> "Not created yet — requests outside 24 hours can't be sent" to c.textMid
+        t.exists == null -> "Couldn't check with WhatsApp just now" to c.textMid
+        else -> "${t.name}: ${t.status ?: "unknown"}" to c.textMid
+    }
+    line?.let { Text(it, fontSize = 12.sp, color = tone, lineHeight = 17.sp) }
+    u.templateError?.let { Text(it, fontSize = 12.sp, color = red, lineHeight = 17.sp) }
+    val canCreate = t != null && t.wabaConfigured && (t.exists == false || !t.configured || t.status == "rejected")
+    if (canCreate) {
+        Spacer(Modifier.height(8.dp))
+        SaveButton("Create template", u.templateBusy, onClick = onCreate)
     }
 }

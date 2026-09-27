@@ -3,9 +3,12 @@ package ke.co.bethanyhouse.neema.feature.calls
 import ke.co.bethanyhouse.neema.core.api.NeemaApi
 import ke.co.bethanyhouse.neema.core.api.UploadFile
 import ke.co.bethanyhouse.neema.core.model.Call
+import ke.co.bethanyhouse.neema.core.model.CallChannels
 import ke.co.bethanyhouse.neema.core.model.CallOffer
+import ke.co.bethanyhouse.neema.core.model.CallSdpResponse
 import ke.co.bethanyhouse.neema.core.model.CallPermission
 import ke.co.bethanyhouse.neema.core.model.IceConfig
+import ke.co.bethanyhouse.neema.core.model.PermissionRequestResponse
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
 
@@ -24,15 +27,32 @@ interface CallApi {
     suspend fun get(callId: String): Call
     suspend fun iceConfig(): IceConfig
     suspend fun offer(callId: String): CallOffer
-    suspend fun answer(callId: String, sdp: String)
+    /**
+     * Accept with our SDP. WhatsApp: our answer (the reply carries nothing to
+     * apply). Messenger: our OFFER — the reply carries Meta's answer and,
+     * sometimes, a renegotiation offer (CALLING_UX.md §2.0).
+     */
+    suspend fun answer(callId: String, sdp: String): CallSdpResponse
     suspend fun terminate(callId: String)
     suspend fun callback(callId: String)
     /** Returns the new call's id. */
     suspend fun connect(to: String, sdp: String, name: String?): String
     /** GET /admin/calls/permission: has this customer allowed business calls? */
     suspend fun permission(waId: String): CallPermission
-    /** Sends WhatsApp's call-permission request; returns the permission now on file (null when the server didn't say). */
-    suspend fun requestPermission(to: String): CallPermission?
+    /** GET /calls/channels: which channels can take / place a call right now. */
+    suspend fun channels(): CallChannels
+    /** POST /calls/connect `{channel: messenger, psid, sdp}`: Meta's answer comes back at once. */
+    suspend fun connectMessenger(psid: String, sdp: String, name: String?): CallSdpResponse
+    /** GET /calls/permission?channel=messenger&psid=: did they accept our call request? */
+    suspend fun messengerPermission(psid: String): CallPermission
+    /** POST /calls/request-permission `{channel: messenger, psid}`: Messenger's `calling_optin` (Accept / Decline). */
+    suspend fun requestMessengerPermission(psid: String): PermissionRequestResponse
+    /**
+     * Sends WhatsApp's call-permission request: `{permission, route,
+     * already_permitted}`. A refusal is an [ke.co.bethanyhouse.neema.core.net.ApiException]
+     * carrying the server's `code` / `action` (template_required, 138009, …).
+     */
+    suspend fun requestPermission(to: String, name: String? = null): PermissionRequestResponse
     /** POST /admin/calls/{id}/recording — pass [UploadFile.of] a File so it streams from disk. */
     suspend fun uploadRecording(callId: String, file: UploadFile)
 }
@@ -43,12 +63,16 @@ class NeemaCallApi(private val api: NeemaApi) : CallApi {
     override suspend fun get(callId: String) = api.calls.get(callId)
     override suspend fun iceConfig() = api.calls.iceConfig()
     override suspend fun offer(callId: String) = api.calls.offer(callId)
-    override suspend fun answer(callId: String, sdp: String) { api.calls.answer(callId, sdp) }
+    override suspend fun answer(callId: String, sdp: String) = api.calls.answer(callId, sdp)
     override suspend fun terminate(callId: String) { api.calls.terminate(callId) }
     override suspend fun callback(callId: String) { api.calls.callback(callId) }
     override suspend fun connect(to: String, sdp: String, name: String?) = api.calls.connect(to, sdp, name).callId
     override suspend fun permission(waId: String) = api.calls.permission(waId)
-    override suspend fun requestPermission(to: String) = api.calls.requestPermission(to).permission
+    override suspend fun channels() = api.calls.channels()
+    override suspend fun connectMessenger(psid: String, sdp: String, name: String?) = api.calls.connectMessenger(psid, sdp, name)
+    override suspend fun messengerPermission(psid: String) = api.calls.messengerPermission(psid)
+    override suspend fun requestMessengerPermission(psid: String) = api.calls.requestMessengerPermission(psid)
+    override suspend fun requestPermission(to: String, name: String?) = api.calls.requestPermission(to, name)
     override suspend fun uploadRecording(callId: String, file: UploadFile) { api.calls.uploadRecording(callId, file) }
 }
 
@@ -112,7 +136,8 @@ interface CallMedia {
 interface CallRinger {
     fun startRinging()
     fun stopRinging()
-    fun postIncoming(callId: String, who: String, from: String?)
+    /** [from]: their number (null on Messenger — a PSID is never shown); [app]: "WhatsApp" / "Messenger". */
+    fun postIncoming(callId: String, who: String, from: String?, app: String = "WhatsApp")
     fun cancelIncoming()
 }
 

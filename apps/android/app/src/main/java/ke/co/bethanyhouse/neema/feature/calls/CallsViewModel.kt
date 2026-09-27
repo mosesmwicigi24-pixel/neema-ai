@@ -75,6 +75,20 @@ class CallsViewModel(private val dash: DashboardViewModel) : ViewModel(), SavesU
     /** The "Follow-ups" filter: only the missed / callback calls nobody has returned yet. */
     val followUpsOnly = MutableStateFlow(false)
 
+    /** The app filter (CallsView.tsx chFilter): "all" | "whatsapp" | "messenger". */
+    val channelFilter = MutableStateFlow("all")
+
+    /** Which channels can call now (the softphone's read of GET /calls/channels). */
+    val channels = dash.container.calls.channels
+
+    /**
+     * A call back goes out on the call's own app — Messenger only while it can
+     * call (the server's switch), WhatsApp whenever there is a number.
+     */
+    fun canCallBack(c: Call): Boolean =
+        if (channelOf(c.channel) == MESSENGER) !c.externalId.isNullOrEmpty() && channels.value?.messenger?.outbound == true
+        else !c.waId.isNullOrEmpty()
+
     /** Follow-ups being marked done (their button waits; a second tap sends nothing). */
     private val _doneBusy = MutableStateFlow<Set<String>>(emptySet())
     val doneBusy: StateFlow<Set<String>> = _doneBusy.asStateFlow()
@@ -173,11 +187,12 @@ class CallsViewModel(private val dash: DashboardViewModel) : ViewModel(), SavesU
         }
     }
 
-    /** The row's green call button / "Call back": a WhatsApp call to them now (the call screen says the rest). */
+    /** The row's call button / "Call back": a call to them now on the call's own app (the call screen says the rest). */
     fun callBack(c: Call) {
-        val wa = c.waId?.takeIf { it.isNotEmpty() } ?: return
+        if (!canCallBack(c)) return
+        val handle = callHandle(c).takeIf { it.isNotEmpty() } ?: return
         viewModelScope.launch {
-            val err = dash.container.calls.initiateCall(wa, c.name, c.conversationId).exceptionOrNull() ?: return@launch
+            val err = dash.container.calls.initiateCall(handle, c.name, c.conversationId, channelOf(c.channel)).exceptionOrNull() ?: return@launch
             if ((err as? CallManager.CallError)?.shown == true) return@launch
             dash.toast(err.message?.ifBlank { null } ?: "Couldn't place the call", ToastType.Error)
         }
@@ -228,7 +243,7 @@ class CallsViewModel(private val dash: DashboardViewModel) : ViewModel(), SavesU
     fun consumeFocus(key: String) {
         if (focusing == key) return
         val wa = key.removePrefix("+")
-        fun match(list: List<Call>) = list.sortedByDescending { it.startedAt ?: "" }.find { it.waId == wa }
+        fun match(list: List<Call>) = list.sortedByDescending { it.startedAt ?: "" }.find { it.waId == wa || it.externalId == wa }
         _calls.value?.let(::match)?.let { selected.value = it; dash.callsFocusKey.value = null; return }
         focusing = key
         viewModelScope.launch {
@@ -257,10 +272,12 @@ class CallsViewModel(private val dash: DashboardViewModel) : ViewModel(), SavesU
 
     override fun saveUi(): Map<String, Any?> = mapOf(
         "followUps" to followUpsOnly.value, "selected" to (selected.value?.id ?: pendingSelect),
+        "channel" to channelFilter.value,
     )
 
     override fun restoreUi(saved: Map<String, Any?>) {
         (saved["followUps"] as? Boolean)?.let { followUpsOnly.value = it }
+        (saved["channel"] as? String)?.takeIf { it in setOf("all", WHATSAPP, MESSENGER) }?.let { channelFilter.value = it }
         val id = saved.str("selected") ?: return
         val row = _calls.value?.find { it.id == id }
         if (row != null) selected.value = row else pendingSelect = id

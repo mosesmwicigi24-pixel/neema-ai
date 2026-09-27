@@ -249,6 +249,7 @@ private fun Hero(
     val templateBusy by vm.templateBusy.collectAsState()
     val inviteBusy by vm.inviteBusy.collectAsState()
     val callBusy by vm.callBusy.collectAsState()
+    val callChannels by vm.callChannels.collectAsState()
     // A dialable phone — never a web visitor's `web_<hash>` key (see realPhoneDigits).
     val phoneDigits = realPhoneDigits(p.phone)
     // A website chat visitor with no phone on file: say so, never a number made from the hash.
@@ -274,7 +275,10 @@ private fun Hero(
                     if (flag.isNotEmpty()) Text("$flag ", fontSize = 12.sp)
                     // The web: the phone when it has ≥ 7 digits, else the wa_id.
                     val phoneLike = (p.phone ?: "").count { it.isDigit() } >= 7 && !isWebVisitor(p.phone)
-                    Text(
+                    // A Messenger call's details (Calls view): the PSID standing in for the key is no number — never shown.
+                    val appId = conversation.id.startsWith("call:") && conversation.channel == "messenger" &&
+                        !conversation.externalId.isNullOrEmpty() && p.waId?.filter { it.isDigit() } == conversation.externalId?.filter { it.isDigit() }
+                    if (webVisitor || phoneLike || !appId) Text(
                         if (webVisitor) "Web chat" else Fmt.formatPhone(if (phoneLike) p.phone else p.waId),
                         fontSize = 12.sp, color = c.muted, fontFamily = if (webVisitor) null else NeemaMono,
                         maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -393,11 +397,16 @@ private fun Hero(
             }
         }
 
-        // Reach-out actions: WhatsApp voice call + the approved template (re-opens
-        // the chat / requests call permission). A WhatsApp call needs a valid phone;
-        // on Messenger / Instagram (no business calling there) Call explains that
-        // and offers WhatsApp instead.
-        val platform = callPlatformOf(conversation.channel)
+        // Reach-out actions: a voice call + the approved template (re-opens the chat /
+        // requests call permission). A WhatsApp chat calls on WhatsApp (a valid phone
+        // needed); a Messenger chat calls on Messenger while the server says Messenger
+        // calling is on (GET /calls/channels — off until read). Otherwise — and on
+        // Instagram, which has no calling API — Call opens a sheet that offers a
+        // WhatsApp call instead.
+        val button = callButtonFor(conversation, callChannels, phoneDigits)
+        val psid = (button as? CallButton.OnMessenger)?.psid
+        val messengerCall = psid != null
+        val platform = (button as? CallButton.Sheet)?.platform
         var platformSheet by remember { mutableStateOf(false) }
         if (platformSheet && platform != null) {
             CallOnWhatsAppSheet(
@@ -405,32 +414,18 @@ private fun Hero(
                 onCall = { phoneDigits?.let(vm::call) }, onAsk = vm::askForWhatsAppNumber, onDismiss = { platformSheet = false },
             )
         }
-        if ((phoneDigits != null || platform != null) && ctx.canReply) {
+        if (button != null && ctx.canReply) {
             Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = { if (platform != null) platformSheet = true else phoneDigits?.let(vm::call) },
-                    // One call at a time: a second tap while dialling would say "Already in a call".
-                    enabled = !callBusy,
-                    modifier = Modifier.weight(1f).webHeight(36.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    // White text only on a fill it reads on (the web's #008069 / the platform's deep ink), never #25D366.
-                    colors = run {
-                        val fill = when (platform) {
-                            CallPlatform.Messenger -> Color(0xFF0066E0)
-                            CallPlatform.Instagram -> Color(0xFFD62976)
-                            null -> Palette.Call.WaDeep
+                ReachCallButton(
+                    button, busy = callBusy, modifier = Modifier.weight(1f).webHeight(36.dp),
+                    onClick = {
+                        when {
+                            messengerCall && psid != null -> vm.callOnMessenger(psid)
+                            platform != null -> platformSheet = true
+                            else -> phoneDigits?.let(vm::call)
                         }
-                        ButtonDefaults.buttonColors(
-                            containerColor = fill, contentColor = Color.White,
-                            disabledContainerColor = fill.copy(alpha = 0.55f), disabledContentColor = Color.White,
-                        )
                     },
-                    contentPadding = PaddingValues(horizontal = 8.dp),
-                ) {
-                    Icon(Icons.Default.Call, null, modifier = Modifier.size(15.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text(if (callBusy) "Calling…" else "Call", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
+                )
                 if (phoneDigits != null) OutlinedButton(
                     onClick = { vm.sendTemplate(phoneDigits) },
                     enabled = !templateBusy,
@@ -553,5 +548,43 @@ private fun QuickActions(vm: CustomerViewModel, ctx: PanelCtx) {
             val next = nextStage(ctx.stage, ctx.customStages)
             if (next != ctx.stage) vm.setStage(next)
         }, Modifier.fillMaxWidth(), enabled = !busy)
+    }
+}
+
+/**
+ * The panel's Call button in its app's look: WhatsApp's deep green, Messenger's
+ * darker blue while Messenger calling is on, else the platform's ink for the
+ * "call on WhatsApp instead" sheet. White text only on a fill it reads on.
+ */
+@Composable
+internal fun ReachCallButton(button: CallButton, busy: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        // One call at a time: a second tap while dialling would say "Already in a call".
+        enabled = !busy,
+        modifier = modifier,
+        shape = RoundedCornerShape(8.dp),
+        // White text only on a fill it reads on (the web's #008069 / the platform's deep ink), never #25D366.
+        colors = run {
+            val fill = when (button) {
+                // Messenger's darker blue behind white words (5.4:1).
+                is CallButton.OnMessenger -> Color(0xFF0066D6)
+                is CallButton.Sheet -> if (button.platform == CallPlatform.Messenger) Color(0xFF0066E0) else Color(0xFFD62976)
+                is CallButton.OnWhatsApp -> Palette.Call.WaDeep
+            }
+            ButtonDefaults.buttonColors(
+                containerColor = fill, contentColor = Color.White,
+                disabledContainerColor = fill.copy(alpha = 0.55f), disabledContentColor = Color.White,
+            )
+        },
+        contentPadding = PaddingValues(horizontal = 8.dp),
+    ) {
+        Icon(
+            Icons.Default.Call,
+            if (button is CallButton.OnMessenger) "Call on Messenger" else null,
+            modifier = Modifier.size(15.dp),
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(if (busy) "Calling…" else "Call", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }

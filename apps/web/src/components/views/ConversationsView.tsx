@@ -29,9 +29,10 @@ import type {
 } from "@/types";
 import { useSession } from "next-auth/react";
 import { callStatus, CALL_ICON_PATH } from "@/lib/callStatus";
+import { ChannelGlyph } from "@/components/CallStage";
 
 // ── CallPill ──────────────────────────────────────────────────────────────────
-// A WhatsApp call where it happened in the thread (docs/CALLING_UX.md §7): a
+// A WhatsApp or Messenger call where it happened in the thread (docs/CALLING_UX.md §7): a
 // centred pill — direction / missed icon, the label ("Incoming call · 4:12",
 // "Missed call"), who took it, when. When the call was transcribed, a card
 // under it: the summary, the next action, and the suggested follow-up with
@@ -55,8 +56,13 @@ function CallPill({ msg, onUseReply, composerReady = true }: { msg: Message; onU
     const agent = msg.agent_name && !["missed", "no_answer", "cancelled", "failed"].includes(call?.status ?? "")
         ? msg.agent_name.split(" ")[0] : null;
     const at = call?.started_at || msg.created_at;
-    const label = msg.text || st.word;
+    // WhatsApp voicemail for this call: the audio is the voice note right here in the chat.
+    const baseLabel = msg.text || st.word;
+    const label = call?.has_voicemail && !/voicemail/i.test(baseLabel) ? `${baseLabel} · voicemail` : baseLabel;
     const long = !!summary && summary.length > 220;
+    // Which app the call was on — a badge, so a mixed history is never ambiguous.
+    const messengerCall = call?.channel === "messenger";
+    const app = messengerCall ? "Messenger" : "WhatsApp";
     return (
         <div className="flex flex-col items-center gap-1.5 my-2.5">
             <div className="flex items-center gap-2 w-full">
@@ -72,8 +78,14 @@ function CallPill({ msg, onUseReply, composerReady = true }: { msg: Message; onU
                                 <path d={CALL_ICON_PATH[st.icon]} />
                             </svg>
                         )}
+                    <span data-call-channel={messengerCall ? "messenger" : "whatsapp"}
+                        className="inline-flex items-center gap-1 text-[10px] font-semibold rounded-full pl-0.5 pr-1.5"
+                        style={{ color: messengerCall ? "#0066D6" : "#128C4B", backgroundColor: messengerCall ? "#EAF3FF" : "#E7F6EC" }}>
+                        <ChannelGlyph channel={messengerCall ? "messenger" : "whatsapp"} size={11} color={messengerCall ? undefined : "#128C4B"} />
+                        {app}
+                    </span>
                     <span className="text-[11px] font-semibold" style={{ color: st.icon === "missed" || st.word === "Missed" ? st.light : "#1c2917" }}>
-                        <span className="sr-only">WhatsApp call: </span>{label}
+                        <span className="sr-only">{app} call: </span>{label}
                     </span>
                     {agent && <span className="text-[10px]" style={{ color: "#57534e" }}>· {agent}</span>}
                     {at && <span className="text-[10px] tabular-nums" style={{ color: "#78716c" }}>· {clockTime(at)}</span>}
@@ -1590,8 +1602,13 @@ export function ConversationsView({
                 : event.type === "incoming_call" ? event.from : null) ?? "").replace(/^\+/, "");
             const person = event.type === "call_update" ? event.call?.person_id ?? null : event.person_id ?? null;
             const callId = event.call_id ?? event.call?.call_id ?? null;
+            // A Messenger call carries the PSID (external_id / incoming_call.from).
+            const evMessenger = (event.type === "call_update" ? event.call?.channel : event.channel) === "messenger";
+            const psid = evMessenger ? String((event.type === "call_update" ? event.call?.external_id
+                : event.external_id ?? event.from) ?? "") : "";
             const mine = !!activeConv && (
-                (!!wa && (wa === activeConv.wa_id || (activeConv.channel === "whatsapp" && wa === activeConv.external_id)))
+                (!evMessenger && !!wa && (wa === activeConv.wa_id || (activeConv.channel === "whatsapp" && wa === activeConv.external_id)))
+                || (!!psid && (activeConv.channel === "messenger" || activeConv.channel === "facebook") && psid === activeConv.external_id)
                 || (!!person && person === activeConv.person_id));
             const known = !!callId && (messages[activeConvId] ?? []).some(
                 (m) => m.call?.call_id === callId);

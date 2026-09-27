@@ -3,6 +3,7 @@ package ke.co.bethanyhouse.neema.feature.calls
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import ke.co.bethanyhouse.neema.core.util.Fmt
@@ -136,9 +137,13 @@ internal fun avatarIndex(s: String): Int {
 }
 private fun avatarColor(s: String) = Palette.Call.Avatars[avatarIndex(s)]
 
-/** The row's `who`: name, else +wa_id, else "Unknown caller" (a blank name falls through too). */
+/**
+ * The row's `who`: name, else +wa_id, else "Messenger caller" on Messenger
+ * (a PSID is never shown), else "Unknown caller" (a blank name falls through too).
+ */
 internal fun rowWho(c: Call): String =
-    c.name?.takeIf { it.isNotBlank() } ?: c.waId?.takeIf { it.isNotEmpty() }?.let { "+$it" } ?: "Unknown caller"
+    c.name?.takeIf { it.isNotBlank() } ?: c.waId?.takeIf { it.isNotEmpty() }?.let { "+$it" }
+        ?: if (channelOf(c.channel) == MESSENGER) MESSENGER_CALLER else "Unknown caller"
 
 /**
  * The row's initials: who minus its first "+", first letter of the first two
@@ -179,9 +184,12 @@ fun CallsScreen(
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()
     val loadError by vm.loadError.collectAsStateWithLifecycle()
     val followUpsOnly by vm.followUpsOnly.collectAsStateWithLifecycle()
+    val channelFilter by vm.channelFilter.collectAsStateWithLifecycle()
+    val channels by vm.channels.collectAsStateWithLifecycle()
     val selected by vm.selected.collectAsStateWithLifecycle()
     val transcript by vm.transcript.collectAsStateWithLifecycle()
     val focusKey by dash.callsFocusKey.collectAsStateWithLifecycle()
+    val restriction by dash.container.calls.restriction.collectAsStateWithLifecycle()
 
     LaunchedEffect(focusKey, calls) { focusKey?.let { if (calls != null) vm.consumeFocus(it) } }
 
@@ -189,7 +197,14 @@ fun CallsScreen(
     val list = calls
     // Once per change of the log, not per recomposition (a tick of a recording's scrubber).
     val followUps = remember(list) { list.orEmpty().count { it.followUpOpen } }
-    val shown = remember(list, followUpsOnly) { if (followUpsOnly) list?.filter { it.followUpOpen } else list }
+    // Messenger shows up (header words, the app filter) once it can call or any call was on it.
+    val anyMessenger = remember(list, channels) {
+        channels?.messenger?.let { it.inbound || it.outbound } == true || list.orEmpty().any { channelOf(it.channel) == MESSENGER }
+    }
+    val app = if (anyMessenger) channelFilter else "all"
+    val shown = remember(list, followUpsOnly, app) {
+        list?.filter { (!followUpsOnly || it.followUpOpen) && (app == "all" || channelOf(it.channel) == app) }
+    }
     val sel = selected
     val ctx = LocalContext.current
     var readiness by remember { mutableStateOf(readinessOverride ?: CallReadiness.of(ctx)) }
@@ -223,7 +238,9 @@ fun CallsScreen(
                         modifier = Modifier.widthIn(max = 560.dp).weight(1f, fill = false).fillMaxWidth(),
                         vm = vm, state = logState, shown = shown, total = list?.size ?: 0, followUps = followUps,
                         followUpsOnly = followUpsOnly, selectedId = sel?.id, openTranscript = transcript,
+                        anyMessenger = anyMessenger, channelFilter = app,
                         readiness = readiness, loadError = loadError, refreshing = refreshing, compact = compact,
+                        restriction = restriction, onDismissRestriction = dash.container.calls::dismissRestriction,
                     )
                 }
                 if (sel != null) {
@@ -267,10 +284,14 @@ private fun CallLog(
     followUpsOnly: Boolean,
     selectedId: String?,
     openTranscript: TranscriptUi?,
+    anyMessenger: Boolean = false,
+    channelFilter: String = "all",
     readiness: CallReadiness,
     loadError: String?,
     refreshing: Boolean,
     compact: Boolean = false,
+    restriction: CallingRestriction? = null,
+    onDismissRestriction: () -> Unit = {},
 ) {
     // One card, as the web draws it (gradient, outline, shadow), over a lazy
     // list: a log of a thousand calls composes only the rows on screen. The
@@ -305,7 +326,7 @@ private fun CallLog(
                     Text("Calls", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Medium,
                         modifier = Modifier.semantics { heading() })
                     Spacer(Modifier.height(2.dp))
-                    Text("WhatsApp voice calls · $total total", color = Muted, fontSize = 13.sp)
+                    Text("${if (anyMessenger) "WhatsApp and Messenger voice calls" else "WhatsApp voice calls"} · $total total", color = Muted, fontSize = 13.sp)
                     Spacer(Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip("All", selected = !followUpsOnly) { vm.followUpsOnly.value = false }
@@ -314,8 +335,18 @@ private fun CallLog(
                             alert = followUps > 0,
                         ) { vm.followUpsOnly.value = true }
                     }
+                    // Every call, or only WhatsApp / only Messenger (CallsView.tsx's app filter).
+                    if (anyMessenger) {
+                        Spacer(Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf("all" to "All apps", WHATSAPP to "WhatsApp", MESSENGER to "Messenger").forEach { (id, label) ->
+                                AppChip(id, label, selected = channelFilter == id) { vm.channelFilter.value = id }
+                            }
+                        }
+                    }
                 }
             }
+            restriction?.let { r -> item(key = "restricted", contentType = "banner") { RestrictionBanner(r, inset, onDismissRestriction) } }
             if (!readiness.ready) item(key = "readiness", contentType = "banner") { ReadinessBanner(readiness, compact, inset) }
             // The log couldn't be refreshed: what we had stays, with the reason and a way to try again.
             if (loadError != null && !shown.isNullOrEmpty()) {
@@ -341,7 +372,8 @@ private fun CallLog(
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         Text(
-                            if (followUpsOnly) "No follow-ups — every caller has been called back" else "No calls yet — incoming WhatsApp calls ring here",
+                            if (followUpsOnly) "No follow-ups — every caller has been called back"
+                            else "No calls yet — incoming ${if (anyMessenger) "WhatsApp and Messenger" else "WhatsApp"} calls ring here",
                             color = Soft, fontSize = 15.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center,
                         )
                         Spacer(Modifier.height(6.dp))
@@ -369,6 +401,9 @@ private fun CallLog(
                                 onSelect = { vm.select(c) },
                                 onToggleTranscript = { vm.toggleTranscript(c.callId) },
                                 onCallBack = { vm.callBack(c) },
+                                canCallBack = vm.canCallBack(c),
+                                // A mixed history names each row's app; a WhatsApp-only one needs no badge.
+                                showChannel = anyMessenger,
                                 compact = compact,
                             )
                             if (openTranscript?.callId == c.callId && selectedId != c.id) TranscriptPanel(openTranscript, vm, compact)
@@ -395,6 +430,29 @@ private fun FilterChip(text: String, selected: Boolean, alert: Boolean = false, 
             .pressedOn(press)
             .padding(horizontal = 14.dp, vertical = 7.dp),
     )
+}
+
+/** One app filter chip: "All apps" / WhatsApp / Messenger, with the app's glyph. */
+@Composable
+private fun AppChip(id: String, label: String, selected: Boolean, onClick: () -> Unit) {
+    val press = remember { MutableInteractionSource() }
+    Row(
+        Modifier
+            .touchCell(press, role = Role.Tab, onClickLabel = "Show $label calls") { onClick() }
+            .semantics { this.selected = selected }
+            .clip(RoundedCornerShape(50))
+            .background(if (selected) Color.White.copy(alpha = 0.12f) else Color.Transparent)
+            .border(1.dp, if (selected) Color.White.copy(alpha = 0.3f) else Color.White.copy(alpha = 0.08f), RoundedCornerShape(50))
+            .pressedOn(press)
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (id != "all") {
+            ChannelGlyph(id, 13.dp, waTint = Color(0xFF7EE2A8))
+            Spacer(Modifier.width(4.dp))
+        }
+        Text(label, color = if (selected) TextC else Sage, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+    }
 }
 
 /** A placeholder row while the log loads (no spinner: the page keeps its shape). */
@@ -482,9 +540,12 @@ private fun CallRow(
     onSelect: () -> Unit,
     onToggleTranscript: () -> Unit,
     onCallBack: () -> Unit,
+    canCallBack: Boolean = !c.waId.isNullOrEmpty(),
+    showChannel: Boolean = false,
     compact: Boolean = false,
 ) {
     val w = callRowWords(c)
+    val messenger = channelOf(c.channel) == MESSENGER
     val who = rowWho(c)
     val initials = initialsOf(who)
     val hasNote = !c.summary.isNullOrEmpty()
@@ -503,7 +564,12 @@ private fun CallRow(
             Text(initials.ifEmpty { "?" }, color = Color.White, fontSize = with(LocalDensity.current) { 13.dp.toSp() }, fontWeight = FontWeight.Medium, maxLines = 1)
         }
         Column(Modifier.weight(1f).padding(vertical = 6.dp)) {
-            Text(who, color = TextC, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(who, color = TextC, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false))
+                // Which app the call was on: a mixed history is never ambiguous.
+                if (showChannel) CallChannelBadge(c.channel, onDark = true, fontSize = 10.sp)
+            }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -512,7 +578,8 @@ private fun CallRow(
                 Icon(w.icon, null, tint = toneColor(w.tone), modifier = Modifier.size(13.dp))
                 // One run of text so a tight row trims the end ("· Mo…") rather
                 // than dropping a whole part; an en space is the web's 6px gap at 12px.
-                Text(statusLine(w, c), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(statusLine(w, c), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                if (c.hasVoicemail) VoicemailBadge()
             }
             // Little room: the time drops under the outcome, and the name keeps the line.
             if (compact) Text(time, color = Dim, fontSize = 11.sp, maxLines = 1, style = TabularNums, modifier = Modifier.padding(top = 1.dp))
@@ -530,8 +597,13 @@ private fun CallRow(
                     onClick = onToggleTranscript,
                 )
             }
-            if (!c.waId.isNullOrEmpty()) {
-                RoundIcon(
+            if (canCallBack) {
+                if (messenger) RoundIcon(
+                    icon = CallIcons.Phone, iconSize = 15.dp,
+                    label = "Call ${who} back on Messenger",
+                    bg = Msgr.BadgeBg, tint = Msgr.BadgeFg, border = Msgr.Blue.copy(alpha = 0.4f),
+                    onClick = onCallBack,
+                ) else RoundIcon(
                     icon = CallIcons.Phone, iconSize = 15.dp,
                     label = "Call ${who} back on WhatsApp",
                     // The web's row button: WhatsApp green glyph on a soft green disc.
@@ -619,7 +691,7 @@ private fun TranscriptPanel(t: TranscriptUi, vm: CallsViewModel, compact: Boolea
                 color = Muted, fontSize = 11.sp,
                 modifier = Modifier.clickable { vm.toggleFull() }.heightIn(min = 48.dp).wrapContentHeight(Alignment.CenterVertically).padding(vertical = 2.dp),
             )
-            if (t.showFull) Text(data.transcript.orEmpty(), color = Sage, fontSize = 12.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 6.dp))
+            if (t.showFull) TranscriptText(data.transcript.orEmpty())
         }
         if (st == "pending" || st == "processing") {
             Text("Transcribing… this runs on our server, usually ~1–2 min.", color = Palette.Call.Gold, fontSize = 12.sp)
@@ -652,6 +724,67 @@ private fun TranscriptPanel(t: TranscriptUi, vm: CallsViewModel, compact: Boolea
             Spacer(Modifier.height(8.dp))
             RecordingPlayer(recordingUrl(it))
         }
+    }
+}
+
+/**
+ * The transcript: WhatsApp's own is speaker-separated ("Agent: …" /
+ * "Customer: …" lines) — each turn under its speaker's label; any other
+ * transcript as plain text.
+ */
+@Composable
+private fun TranscriptText(text: String) {
+    val turns = transcriptTurns(text)
+    if (turns == null) {
+        Text(text, color = Sage, fontSize = 12.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 6.dp))
+        return
+    }
+    Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        turns.forEach { (who, said) ->
+            Column {
+                Text(who, color = if (who == "Agent") Green else Palette.Call.Gold, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                Text(said, color = Sage, fontSize = 12.sp, lineHeight = 18.sp)
+            }
+        }
+    }
+}
+
+/** "Voicemail": WhatsApp voicemail arrived for this call (the audio is in the chat). */
+@Composable
+private fun VoicemailBadge() {
+    Text(
+        VOICEMAIL, color = AmberC, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+        modifier = Modifier.clip(RoundedCornerShape(50)).background(AmberC.copy(alpha = 0.14f))
+            .border(1.dp, AmberC.copy(alpha = 0.35f), RoundedCornerShape(50)).padding(horizontal = 7.dp, vertical = 1.dp),
+    )
+}
+
+/**
+ * `calling_restricted`: Meta flagged or restricted calling on the number
+ * (low quality, low pickup, the call button hidden). Calls we place may fail
+ * until it lifts — up to 7 days.
+ */
+@Composable
+private fun RestrictionBanner(r: CallingRestriction, inset: Dp, onDismiss: () -> Unit) {
+    Row(
+        Modifier.padding(start = inset, end = inset, bottom = 16.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp))
+            .background(RedC.copy(alpha = 0.1f)).border(1.dp, RedC.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+            .padding(start = 14.dp, top = 12.dp, bottom = 12.dp, end = 4.dp)
+            .semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite },
+        verticalAlignment = Alignment.Top,
+    ) {
+        Icon(CallIcons.Alert, null, tint = RedC, modifier = Modifier.size(18.dp).padding(top = 1.dp))
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text("WhatsApp restricted calling on this number", color = TextC, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(2.dp))
+            Text(restrictionText(r), color = Sage, fontSize = 12.sp, lineHeight = 17.sp)
+        }
+        Box(
+            Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Button, onClickLabel = "Dismiss", onClick = onDismiss)
+                .semantics { contentDescription = "Dismiss" },
+            contentAlignment = Alignment.Center,
+        ) { Icon(CallIcons.Close, null, tint = Sage, modifier = Modifier.size(16.dp)) }
     }
 }
 
@@ -798,14 +931,19 @@ private fun CallDetails(
     transcript: TranscriptUi?,
     modifier: Modifier,
 ) {
-    val wa = sel.waId.orEmpty()
-    val callerCalls = remember(calls, wa) { if (wa.isEmpty()) emptyList() else calls.filter { it.waId == wa } }
+    val messenger = channelOf(sel.channel) == MESSENGER
+    // The customer's handle on the call's app: the wa_id, or (Messenger) the PSID — never shown.
+    val wa = callHandle(sel)
+    val callerCalls = remember(calls, wa, messenger) {
+        if (wa.isEmpty()) emptyList() else calls.filter { channelOf(it.channel) == channelOf(sel.channel) && callHandle(it) == wa }
+    }
+    val channelsNow by vm.channels.collectAsStateWithLifecycle()
     val doneBusy by vm.doneBusy.collectAsStateWithLifecycle()
     val w = callRowWords(sel)
     // A synthetic conversation handle is enough — the panel fetches the real CRM profile by wa_id itself.
     val conv = remember(sel.callId, wa, sel.name) {
         Conversation(
-            id = "call:${sel.callId}", waId = wa, externalId = wa, channel = "whatsapp",
+            id = "call:${sel.callId}", waId = if (messenger) null else wa, externalId = wa, channel = if (messenger) MESSENGER else WHATSAPP,
             name = sel.name, lastMessageAt = sel.startedAt,
         )
     }
@@ -828,10 +966,17 @@ private fun CallDetails(
                     modifier = Modifier.clickable(role = Role.Button) { vm.select(null) }.minimumInteractiveComponentSize().padding(horizontal = 6.dp),
                 )
             }
-            Text(
-                "${w.label}${callDuration(sel.duration).takeIf { it.isNotEmpty() }?.let { " · $it" } ?: ""} · ${Fmt.dateTime(sel.startedAt)}",
-                color = toneColor(w.tone), fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp),
-            )
+            Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    "${w.label}${callDuration(sel.duration).takeIf { it.isNotEmpty() }?.let { " · $it" } ?: ""} · ${Fmt.dateTime(sel.startedAt)}",
+                    color = toneColor(w.tone), fontSize = 12.sp, modifier = Modifier.weight(1f, fill = false),
+                )
+                if (sel.hasVoicemail) VoicemailBadge()
+                CallChannelBadge(sel.channel, onDark = true)
+            }
+            if (sel.hasVoicemail) {
+                Text("They left a voicemail — open the chat to listen.", color = Sage, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+            }
             Spacer(Modifier.height(12.dp))
             Timeline(sel)
             // Recording / transcript state (§7), and the insights the AI drew from the call.
@@ -856,8 +1001,11 @@ private fun CallDetails(
             Spacer(Modifier.height(8.dp))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (wa.isNotEmpty()) {
-                    StripButton("Call back", filled = true) { vm.callBack(sel) }
-                    StripButton("Open chat") { dash.openConversationFor(wa) }
+                    // Messenger calls back on Messenger only while it can call (channelsNow keeps this current).
+                    if (remember(sel, channelsNow) { vm.canCallBack(sel) }) {
+                        StripButton(if (messenger) "Call back on Messenger" else "Call back", filled = true, fill = if (messenger) Msgr.Ink else null) { vm.callBack(sel) }
+                    }
+                    StripButton("Open chat") { dash.openConversationFor(sel.conversationId?.takeIf { messenger && it.isNotEmpty() } ?: wa) }
                 }
                 if (sel.followUpOpen) {
                     StripButton(if (sel.callId in doneBusy) "Saving…" else "Mark follow-up done") { vm.markFollowUpDone(sel) }
@@ -949,12 +1097,12 @@ private fun InsightsBlock(i: ke.co.bethanyhouse.neema.core.model.CallInsights) {
 }
 
 @Composable
-private fun StripButton(text: String, filled: Boolean = false, onClick: () -> Unit) {
+private fun StripButton(text: String, filled: Boolean = false, fill: Color? = null, onClick: () -> Unit) {
     val press = remember { MutableInteractionSource() }
     Row(
         Modifier.touchCell(press, role = Role.Button, onClick = onClick)
             // The web's CallDetail buttons: the call one white on #008069, the rest quiet.
-            .clip(RoundedCornerShape(50)).background(if (filled) Palette.Call.WaTealText else Color.White.copy(alpha = 0.08f))
+            .clip(RoundedCornerShape(50)).background(if (filled) fill ?: Palette.Call.WaTealText else Color.White.copy(alpha = 0.08f))
             .pressedOn(press).padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

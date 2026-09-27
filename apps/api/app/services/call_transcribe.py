@@ -134,7 +134,11 @@ def _parse_insights(text: str) -> dict | None:
         if k in ("products", "objections", "commitments"):
             if isinstance(v, str):
                 v = [v] if v.strip() else []
-            v = [str(x).strip() for x in (v or []) if str(x).strip()][:8]
+            elif not isinstance(v, list):
+                v = [v] if isinstance(v, (int, float)) and not isinstance(v, bool) else []
+            v = [str(x).strip() for x in v if not isinstance(x, (dict, list)) and str(x).strip()][:8]
+        elif isinstance(v, (dict, list)):
+            v = None
         elif v is not None:
             v = str(v).strip() or None
         out[k] = v
@@ -266,30 +270,81 @@ async def _process(call_id: str) -> None:
 
         # Heavy, blocking work — off the event loop, outside any DB session.
         text, lang = await asyncio.to_thread(_transcribe_sync, path)
-        summary, insights = await analyse_call(text) if text.strip() else ("", None)
-
-        async with AsyncSessionLocal() as db:
-            c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
-            if c is None:
-                return
-            c.transcript = text or None
-            c.transcript_lang = lang or None
-            c.summary = summary or None
-            c.insights = insights
-            c.transcript_status = "done"
-            await db.commit()
-        await _publish_update(call_id)
-
-        if summary and wa_id:
-            async with AsyncSessionLocal() as db:
-                try:
-                    await _save_call_note(db, wa_id, _note_text(summary, insights))
-                except Exception as exc:
-                    _log.warning("transcribe: saving call note failed for %s: %s", call_id, exc)
+        await _finish(call_id, wa_id, text, lang)
     except Exception as exc:
         _log.warning("transcribe pipeline failed for %s: %s", call_id, exc)
         await _set_status(call_id, "failed")
         await _publish_update(call_id)
+
+
+def _sane_brief(summary, insights) -> tuple[str, dict | None]:
+    """Whatever the model handed back → (text, insights of the documented shape)."""
+    summary = summary.strip()[:8000] if isinstance(summary, str) else ""
+    if not isinstance(insights, dict):
+        return summary, None
+    clean: dict = {}
+    for k in _INSIGHT_KEYS:
+        v = insights.get(k)
+        if k in ("products", "objections", "commitments"):
+            v = [str(x).strip()[:300] for x in (v if isinstance(v, list) else [])
+                 if isinstance(x, (str, int, float)) and str(x).strip()][:8]
+        elif isinstance(v, (str, int, float)) and not isinstance(v, bool):
+            v = str(v).strip()[:1000] or None
+        else:
+            v = None
+        if v not in (None, []):
+            clean[k] = v
+    return summary, (clean or None)
+
+
+async def _keep_transcript(call_id: str, text: str, lang: str | None, status: str) -> None:
+    try:
+        async with AsyncSessionLocal() as db:
+            c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
+            if c is not None:
+                c.transcript = text or None
+                c.transcript_lang = (lang or None) and str(lang)[:12]
+                c.transcript_status = status
+                await db.commit()
+    except Exception as exc:
+        _log.warning("transcribe: keeping the transcript failed for %s: %s", call_id, exc)
+
+
+async def _finish(call_id: str, wa_id: str | None, text: str, lang: str | None) -> bool:
+    """A transcript is in (ours or Meta's): summary + insights → the Call row →
+    every screen → the customer's CRM note. True when the brief landed. When
+    the AI is down (or answers nonsense it can't use) the transcript is still
+    kept and the status is `failed` (Retry) — never a crash, never a made-up
+    brief. Raises only when the database itself fails (callers mark it)."""
+    text = text if isinstance(text, str) else ""
+    try:
+        summary, insights = await analyse_call(text) if text.strip() else ("", None)
+        summary, insights = _sane_brief(summary, insights)
+    except Exception as exc:
+        _log.warning("transcribe: analysis failed for %s: %s", call_id, exc)
+        await _keep_transcript(call_id, text, lang, "failed")
+        await _publish_update(call_id)
+        return False
+
+    async with AsyncSessionLocal() as db:
+        c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
+        if c is None:
+            return False
+        c.transcript = text or None
+        c.transcript_lang = (lang or None) and str(lang)[:12]
+        c.summary = summary or None
+        c.insights = insights
+        c.transcript_status = "done"
+        await db.commit()
+    await _publish_update(call_id)
+
+    if summary and wa_id:
+        async with AsyncSessionLocal() as db:
+            try:
+                await _save_call_note(db, wa_id, _note_text(summary, insights))
+            except Exception as exc:
+                _log.warning("transcribe: saving call note failed for %s: %s", call_id, exc)
+    return True
 
 
 def schedule_transcription(call_id: str) -> None:
@@ -298,5 +353,214 @@ def schedule_transcription(call_id: str) -> None:
     if not settings.whisper_enabled:
         return
     task = asyncio.create_task(_process(call_id))
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
+
+
+
+# ── Meta's own recording / transcription (opt-in, per call) ──────────────────
+# Arrive on the `calls` webhook as `call_transcription_available` /
+# `call_recording_available` with a media id. The download URL is valid for 5
+# minutes, so the fetch starts at once (detached — the webhook never waits on
+# it). A failure here only loses the artifact; the call is untouched.
+
+SPEAKERS = {0: "Agent", 1: "Customer"}      # Meta: channel 0 = business, 1 = customer
+_TEXT_KEYS = ("text", "transcript", "word")
+_CHANNEL_KEYS = ("channel", "channel_id", "channel_index", "speaker")
+_START_KEYS = ("start", "start_time", "start_ms", "offset")
+_LANG_KEYS = ("language", "detected_language", "language_code")
+
+
+def media_id_of(event: dict, kind: str) -> str | None:
+    """The media id in a `call_*_available` event. The brief names the media id
+    but not its field, so the likely homes are checked in order."""
+    for key in (kind, "media", "recording", "transcription"):
+        obj = event.get(key)
+        if isinstance(obj, dict):
+            for k in ("id", "media_id"):
+                if obj.get(k):
+                    return str(obj[k])
+        elif isinstance(obj, str) and key == "media" and obj:
+            return obj
+    if event.get("media_id"):
+        return str(event["media_id"])
+    return None
+
+
+def _find_lang(doc) -> str | None:
+    if isinstance(doc, dict):
+        for k in _LANG_KEYS:
+            v = doc.get(k)
+            if isinstance(v, str) and v.strip():
+                return v.strip()[:12]
+        for v in doc.values():
+            if isinstance(v, (dict, list)):
+                found = _find_lang(v)
+                if found:
+                    return found
+    elif isinstance(doc, list):
+        for v in doc:
+            found = _find_lang(v)
+            if found:
+                return found
+    return None
+
+
+def _pieces(doc, out: list) -> None:
+    """Every {channel, text} entry in the document, in document order."""
+    if isinstance(doc, dict):
+        ch = next((doc[k] for k in _CHANNEL_KEYS if k in doc), None)
+        txt = next((doc[k] for k in _TEXT_KEYS if isinstance(doc.get(k), str)), None)
+        if ch is not None and txt is not None:
+            start = next((doc[k] for k in _START_KEYS if isinstance(doc.get(k), (int, float))), None)
+            try:
+                ch = int(ch)
+            except (TypeError, ValueError):
+                pass
+            out.append((start, len(out), ch, txt.strip()))
+            return
+        for v in doc.values():
+            if isinstance(v, (dict, list)):
+                _pieces(v, out)
+    elif isinstance(doc, list):
+        for v in doc:
+            _pieces(v, out)
+
+
+def parse_meta_transcript(doc) -> tuple[str, str | None]:
+    """Meta's transcript JSON → ("Agent: …\nCustomer: …", language). Tolerant:
+    segments or words carrying a channel become speaker-labelled lines
+    (consecutive pieces of one speaker are joined); a document with only a
+    plain text field is used as it is."""
+    lang = _find_lang(doc)
+    found: list = []
+    _pieces(doc, found)
+    if found:
+        if all(p[0] is not None for p in found):
+            found.sort(key=lambda p: (p[0], p[1]))
+        lines: list[list] = []
+        for _, _, ch, txt in found:
+            if not txt:
+                continue
+            who = SPEAKERS.get(ch, f"Speaker {ch}") if isinstance(ch, int) else str(ch)
+            if lines and lines[-1][0] == who:
+                lines[-1][1].append(txt)
+            else:
+                lines.append([who, [txt]])
+        return "\n".join(f"{who}: {' '.join(parts)}" for who, parts in lines), lang
+    if isinstance(doc, dict):
+        for k in ("text", "transcript"):
+            if isinstance(doc.get(k), str):
+                return doc[k].strip(), lang
+    return "", lang
+
+
+async def ingest_meta_transcription(call_id: str, media_id: str) -> str:
+    """Download Meta's transcript, store it speaker-labelled, then summary +
+    insights + CRM note. Returns what happened (for logs / tests). Claimed on
+    the row first (Meta may deliver the event twice, at once): one download,
+    one analysis, one CRM note per call."""
+    from app.services import wa_calling
+    import json as _json
+    async with AsyncSessionLocal() as db:
+        c = (await db.execute(
+            select(Call).where(Call.call_id == call_id).with_for_update())).scalar_one_or_none()
+        if c is None:
+            return "unknown_call"
+        if c.transcript_status in ("processing", "done"):
+            return "already"
+        prev = c.transcript_status
+        wa_id = c.wa_id
+        c.transcript_status = "processing"
+        await db.commit()
+    try:
+        raw, _mime = await wa_calling.download_media(media_id)
+        doc = _json.loads(raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw)
+    except Exception as exc:
+        _log.warning("meta transcript download failed for %s: %s", call_id, exc)
+        await _restore_status(call_id, prev)     # never touches the call
+        return "download_failed"
+    text, lang = parse_meta_transcript(doc)
+    await _publish_update(call_id)
+    try:
+        ok = await _finish(call_id, wa_id, text, lang)
+    except Exception as exc:
+        _log.warning("meta transcript analysis failed for %s: %s", call_id, exc)
+        await _keep_transcript(call_id, text, lang, "failed")
+        await _publish_update(call_id)
+        return "analysis_failed"
+    return "done" if ok else "analysis_failed"
+
+
+async def _restore_status(call_id: str, prev: str | None) -> None:
+    try:
+        async with AsyncSessionLocal() as db:
+            c = (await db.execute(
+                select(Call).where(Call.call_id == call_id).with_for_update())).scalar_one_or_none()
+            if c is not None and c.transcript_status == "processing":
+                c.transcript_status = prev or "none"
+                await db.commit()
+    except Exception:
+        pass
+
+
+async def ingest_meta_recording(call_id: str, media_id: str) -> str:
+    """Keep Meta's recording as the call's recording — only when we don't
+    already have our own (the softphone's upload wins)."""
+    import os
+    import uuid
+    from app.services import wa_calling
+    async with AsyncSessionLocal() as db:
+        c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
+        if c is None:
+            return "unknown_call"
+        if c.recording_url:
+            return "already"
+    try:
+        content, _mime = await wa_calling.download_media(media_id)
+    except Exception as exc:
+        _log.warning("meta recording download failed for %s: %s", call_id, exc)
+        return "download_failed"
+    if not content:
+        return "empty"
+    from app.routers.media import MEDIA_DIR
+    os.makedirs(MEDIA_DIR, exist_ok=True)
+    name = f"call_meta_{uuid.uuid4().hex}.ogg"
+    with open(os.path.join(MEDIA_DIR, name), "wb") as f:
+        f.write(content)
+    base = (getattr(settings, "media_public_url", "") or "").rstrip("/")
+    url = f"{base}/api/admin/media/{name}" if base else name
+    async with AsyncSessionLocal() as db:
+        c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
+        if c is None or c.recording_url:
+            return "already"
+        c.recording_url = url
+        if (c.transcript_status or "none") == "none":
+            c.transcript_status = "recorded"
+        await db.commit()
+    await _publish_update(call_id)
+    return "done"
+
+
+async def _meta_artifact(kind: str, call_id: str, event: dict) -> str:
+    media_id = media_id_of(event, kind)
+    if not media_id:
+        _log.warning("meta %s event for %s carried no media id", kind, call_id)
+        return "no_media"
+    try:
+        if kind == "transcription":
+            return await ingest_meta_transcription(call_id, media_id)
+        return await ingest_meta_recording(call_id, media_id)
+    except Exception as exc:
+        _log.warning("meta %s ingest failed for %s: %s", kind, call_id, exc)
+        return "failed"
+
+
+def schedule_meta_artifact(kind: str, call_id: str, event: dict) -> None:
+    """Fetch Meta's transcript / recording now, detached from the webhook."""
+    try:
+        task = asyncio.get_running_loop().create_task(_meta_artifact(kind, call_id, event))
+    except RuntimeError:
+        return
     _bg_tasks.add(task)
     task.add_done_callback(_bg_tasks.discard)

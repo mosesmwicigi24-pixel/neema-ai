@@ -91,8 +91,9 @@ import ke.co.bethanyhouse.neema.core.ui.theme.ChannelColors
 import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 import ke.co.bethanyhouse.neema.core.ui.theme.TabularNums
 
-// docs/CALLING_UX.md §5: every call screen is a WhatsApp call, drawn in
-// WhatsApp's own dark call colours (core Palette.Call.Wa*).
+// docs/CALLING_UX.md §5: every call screen is drawn in WhatsApp's own dark call
+// colours (core Palette.Call.Wa*); a Messenger call keeps the same surface and
+// controls with Messenger's accent (see CallAccent).
 private val Top = Palette.Call.WaTop
 private val Bottom = Palette.Call.WaBottom
 private val Ink = Palette.Call.WaText
@@ -108,6 +109,18 @@ private val Control = Palette.Call.WaControl
 private val Bar = Palette.Call.WaBar
 
 private val CssEaseOut = CubicBezierEasing(0f, 0f, 0.58f, 1f)
+
+/**
+ * The one accent a call's surface changes by channel (CallStage.tsx accent()):
+ * Messenger's blue Answer, its darker blue behind white words, its blue pulse
+ * and the blue → purple ring round the avatar. Everything else is shared.
+ */
+private class CallAccent(val answer: Color, val button: Color, val pulse: Color, val dot: Color, val ring: Brush?)
+
+private val WaAccent = CallAccent(answer = Teal, button = TealText, pulse = Green, dot = Green, ring = null)
+private val MsgrAccent = CallAccent(answer = Msgr.Blue, button = Msgr.Ink, pulse = Msgr.Blue, dot = Msgr.Blue, ring = Msgr.Ring)
+
+private fun accentOf(channel: String?): CallAccent = if (channelOf(channel) == MESSENGER) MsgrAccent else WaAccent
 
 /**
  * The call over the content area. Renders nothing when idle, and only the
@@ -176,6 +189,8 @@ private fun rememberCallActions(dash: DashboardViewModel): CallActions {
             openChat = { calls.openChat()?.let(dash::openConversationFor) },
             minimise = calls::minimise, expand = calls::expand, redial = calls::redial, dismiss = calls::dismiss,
             sendCallRequest = calls::sendCallRequest,
+            callNow = calls::callNow,
+            openCallingSettings = { calls.dismiss(); dash.navigate(ke.co.bethanyhouse.neema.app.ViewId.Settings) },
             openSettings = {
                 runCatching {
                     ctx.startActivity(
@@ -241,6 +256,9 @@ class CallActions(
     val dismiss: () -> Unit = {},
     val sendCallRequest: () -> Unit = {},
     val openSettings: () -> Unit = {},
+    val callNow: () -> Unit = {},
+    /** Settings → WhatsApp calling (admins, after a template_required refusal). */
+    val openCallingSettings: () -> Unit = {},
     val declineWaiting: () -> Unit = {},
     val callbackWaiting: () -> Unit = {},
     val endAndAnswer: () -> Unit = {},
@@ -334,18 +352,25 @@ private fun ColumnScope.Who(c: CallUiState, short: Boolean) {
     val avatar = if (short) 88.dp else 120.dp
     val ringing = c.phase == CallPhase.Ringing || c.phase == CallPhase.Placing || c.phase == CallPhase.RingingOut
     val reduced = rememberReducedMotion()
+    val accent = accentOf(c.channel)
     Box(Modifier.size(avatar), contentAlignment = Alignment.Center) {
         if (ringing && !reduced) {
-            PulseRing(maxScale = 1.6f, startAlpha = 0.35f, size = avatar)
-            PulseRing(maxScale = 2f, startAlpha = 0.2f, size = avatar)
+            PulseRing(maxScale = 1.6f, startAlpha = 0.35f, size = avatar, color = accent.pulse)
+            PulseRing(maxScale = 2f, startAlpha = 0.2f, size = avatar, color = accent.pulse)
         }
+        // Messenger: the blue → purple ring around the same avatar (a gap in the call's dark between).
+        accent.ring?.let { ring -> Box(Modifier.size(avatar).clip(CircleShape).background(ring)) }
+        val inner = if (accent.ring != null) avatar - 10.dp else avatar
         Box(
-            Modifier.size(avatar).clip(CircleShape).background(Palette.Call.Avatars[avatarIndex(who)]),
+            Modifier.size(inner).clip(CircleShape).background(Palette.Call.Avatars[avatarIndex(who)])
+                .then(if (accent.ring != null) Modifier.border(2.dp, Top, CircleShape) else Modifier),
             contentAlignment = Alignment.Center,
         ) {
             // The initials are a picture inside a fixed circle: they don't grow with the font scale.
             val size = with(LocalDensity.current) { (if (short) 32.dp else 42.dp).toSp() }
-            Text(initialsOf(who).ifEmpty { "?" }, color = Color.White, fontSize = size, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            // A Messenger caller with no name yet: the handset, never initials made of "Messenger caller".
+            if (c.messenger && c.name.isNullOrBlank()) Icon(CallIcons.Phone, null, tint = Color.White, modifier = Modifier.size(if (short) 32.dp else 40.dp))
+            else Text(initialsOf(who).ifEmpty { "?" }, color = Color.White, fontSize = size, fontWeight = FontWeight.SemiBold, maxLines = 1)
         }
     }
     Spacer(Modifier.height(if (short) 12.dp else 20.dp))
@@ -353,15 +378,17 @@ private fun ColumnScope.Who(c: CallUiState, short: Boolean) {
         who, color = Ink, fontSize = 26.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis,
         textAlign = TextAlign.Center, lineHeight = 32.sp,
     )
-    if (!c.name.isNullOrBlank() && !c.from.isNullOrEmpty()) {
+    // A Messenger PSID is no number: never shown.
+    if (!c.name.isNullOrBlank() && c.number != null) {
         Spacer(Modifier.height(4.dp))
-        Text("+${c.from}", color = Sub, fontSize = 14.sp, style = TabularNums, maxLines = 1)
+        Text("+${c.number}", color = Sub, fontSize = 14.sp, style = TabularNums, maxLines = 1)
     }
     Spacer(Modifier.height(6.dp))
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(CallIcons.Phone, null, tint = Green, modifier = Modifier.size(14.dp))
+        if (c.messenger) ChannelGlyph(MESSENGER, 15.dp, waTint = Green)
+        else Icon(CallIcons.Phone, null, tint = Green, modifier = Modifier.size(14.dp))
         Spacer(Modifier.width(6.dp))
-        Text("WhatsApp voice call", color = Sub, fontSize = 14.sp, maxLines = 1)
+        Text("${c.app} voice call", color = Sub, fontSize = 14.sp, maxLines = 1)
     }
     Spacer(Modifier.height(if (short) 10.dp else 16.dp))
     StatusLine(c)
@@ -383,7 +410,8 @@ private fun StatusLine(c: CallUiState) {
         }
         c.phase == CallPhase.InCall -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(text, color = Ink, fontSize = 18.sp, style = TabularNums, modifier = live.semantics { contentDescription = "On call, ${spokenLength(c.seconds)}" })
-            if (c.recording) {
+            // Only while a recording really runs: this phone's, or WhatsApp's own (the customer heard it announced).
+            if (c.recording || c.metaTranscription) {
                 Spacer(Modifier.height(8.dp))
                 Row(
                     Modifier.clip(RoundedCornerShape(50)).background(Red.copy(alpha = 0.16f)).padding(horizontal = 10.dp, vertical = 4.dp),
@@ -391,19 +419,19 @@ private fun StatusLine(c: CallUiState) {
                 ) {
                     Box(Modifier.size(8.dp).clip(CircleShape).background(Red))
                     Spacer(Modifier.width(6.dp))
-                    Text("Recording", color = Ink, fontSize = 13.sp)
+                    Text(if (c.recording) "Recording" else "Recorded by WhatsApp", color = Ink, fontSize = 13.sp)
                 }
             }
         }
         c.phase == CallPhase.Connecting -> Row(live, verticalAlignment = Alignment.CenterVertically) {
-            CircularProgressIndicator(Modifier.size(14.dp), color = Teal, strokeWidth = 2.dp)
+            CircularProgressIndicator(Modifier.size(14.dp), color = accentOf(c.channel).answer, strokeWidth = 2.dp)
             Spacer(Modifier.width(8.dp))
             Text(text, color = Sub, fontSize = 15.sp)
         }
         // Every outcome is an icon AND words (never colour alone, §5).
         c.phase == CallPhase.Ended -> Row(live, verticalAlignment = Alignment.CenterVertically) {
             val owed = c.outcome.let {
-                it is CallOutcome.Missed || it == CallOutcome.NoAnswer || it == CallOutcome.ConnectionLost ||
+                it is CallOutcome.Missed || it == CallOutcome.NoAnswer || it == CallOutcome.Rejected || it == CallOutcome.ConnectionLost ||
                     it is CallOutcome.Failed || it == CallOutcome.MicBlocked || it == CallOutcome.PermissionNeeded
             }
             val tint = if (owed) OwedInk else Ink
@@ -412,6 +440,19 @@ private fun StatusLine(c: CallUiState) {
             Text(text, color = tint, fontSize = 16.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center)
         }
         else -> Text(text, color = Sub, fontSize = 15.sp, textAlign = TextAlign.Center, modifier = live)
+    }
+    // Before the call goes through: they left our last calls unanswered (a caution, never a block).
+    c.callCaution()?.let {
+        Spacer(Modifier.height(12.dp))
+        Row(
+            Modifier.widthIn(max = 360.dp).clip(RoundedCornerShape(12.dp)).background(Amber.copy(alpha = 0.14f))
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Icon(CallIcons.Alert, null, tint = Amber, modifier = Modifier.size(16.dp).padding(top = 1.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(it, color = Ink, fontSize = 13.sp, lineHeight = 18.sp)
+        }
     }
     c.outcomeNote()?.let {
         Spacer(Modifier.height(8.dp))
@@ -433,11 +474,11 @@ private fun StatusLine(c: CallUiState) {
 
 /** The wrap-up's outcome glyph (CallStage.tsx OUTCOME_ICON). */
 internal fun outcomeIcon(o: CallOutcome?): ImageVector = when (o) {
-    is CallOutcome.AnsweredElsewhere, CallOutcome.PermissionRequested -> CallIcons.Check
+    is CallOutcome.AnsweredElsewhere, CallOutcome.PermissionRequested, CallOutcome.AlreadyAllowed -> CallIcons.Check
     is CallOutcome.Missed -> CallIcons.DirIn
     is CallOutcome.Callback -> CallIcons.Callback
     CallOutcome.ConnectionLost -> CallIcons.NoSignal
-    CallOutcome.NoAnswer, is CallOutcome.Failed, CallOutcome.PermissionNeeded, CallOutcome.MicBlocked -> CallIcons.Alert
+    CallOutcome.NoAnswer, CallOutcome.Rejected, is CallOutcome.Failed, CallOutcome.PermissionNeeded, CallOutcome.MicBlocked -> CallIcons.Alert
     else -> CallIcons.PhoneDown
 }
 
@@ -463,7 +504,7 @@ private fun Controls(c: CallUiState, actions: CallActions, compact: Boolean) {
                 verticalAlignment = Alignment.Bottom,
             ) {
                 RoundButton("Decline", "Decline call", CallIcons.PhoneDown, Red, size = 64.dp, enabled = on, onClick = actions.decline)
-                RoundButton("Answer", "Answer call", CallIcons.PhoneFill, Teal, size = 76.dp, enabled = on, onClick = actions.answer)
+                RoundButton("Answer", "Answer call", CallIcons.PhoneFill, accentOf(c.channel).answer, size = 76.dp, enabled = on, onClick = actions.answer)
             }
             Spacer(Modifier.height(if (compact) 4.dp else 12.dp))
             TextAction(if (c.busy) "Saving…" else "Call back later", CallIcons.Callback, enabled = on, onClick = actions.callback)
@@ -551,26 +592,29 @@ internal fun routeIcon(k: AudioRouteKind): ImageVector = when (k) {
 @Composable
 private fun WrapUp(c: CallUiState, actions: CallActions) {
     val list = c.wrapActions()
+    val fill = accentOf(c.channel).button
     Column(Modifier.fillMaxWidth().widthIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         list.forEachIndexed { i, a ->
             val run = actions.run(a)
             val label = if (a == WrapAction.SendCallRequest && c.busy) "Sending…" else a.label
             val closer = a == WrapAction.Done || a == WrapAction.Cancel
+            // Meta's request limit is used up: the button stays, dimmed; the line above says when it can go.
+            val blocked = a == WrapAction.SendCallRequest && c.sendRequestBlocked() != null
             when {
                 closer -> PillButton(label, filled = false, outlined = false, onClick = run)
-                i == 0 -> PillButton(label, filled = true, enabled = !c.busy, onClick = run)
-                else -> PillButton(label, filled = false, enabled = !c.busy, onClick = run)
+                i == 0 -> PillButton(label, filled = true, enabled = !c.busy && !blocked, fill = fill, onClick = run)
+                else -> PillButton(label, filled = false, enabled = !c.busy && !blocked, onClick = run)
             }
         }
     }
 }
 
 @Composable
-private fun PillButton(text: String, filled: Boolean, outlined: Boolean = true, enabled: Boolean = true, onClick: () -> Unit) {
+private fun PillButton(text: String, filled: Boolean, outlined: Boolean = true, enabled: Boolean = true, fill: Color = TealText, onClick: () -> Unit) {
     val shape = RoundedCornerShape(50)
     Box(
         Modifier.fillMaxWidth().heightIn(min = 48.dp).alpha(if (enabled) 1f else 0.5f).clip(shape)
-            .then(if (filled) Modifier.background(TealText) else Modifier)
+            .then(if (filled) Modifier.background(fill) else Modifier)
             .then(if (!filled && outlined) Modifier.border(1.dp, Sub.copy(alpha = 0.5f), shape) else Modifier)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
@@ -598,7 +642,7 @@ private fun TextAction(text: String, icon: ImageVector, enabled: Boolean = true,
 
 /** The expanding green rings behind a ringing avatar (the only motion besides the connecting spinner). */
 @Composable
-private fun PulseRing(maxScale: Float, startAlpha: Float, size: Dp) {
+private fun PulseRing(maxScale: Float, startAlpha: Float, size: Dp, color: Color = Green) {
     val t = rememberInfiniteTransition(label = "ring")
     val p by t.animateFloat(
         0f, 1f,
@@ -613,7 +657,7 @@ private fun PulseRing(maxScale: Float, startAlpha: Float, size: Dp) {
                 alpha = startAlpha * (1f - p)
             }
             .clip(CircleShape)
-            .background(Green),
+            .background(color),
     )
 }
 
@@ -679,7 +723,7 @@ fun MinimisedCallBar(c: CallUiState, actions: CallActions) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (c.reconnecting) Icon(CallIcons.NoSignal, null, tint = Amber, modifier = Modifier.size(14.dp))
-        else Box(Modifier.size(10.dp).clip(CircleShape).background(if (ended) Sub else Green))
+        else Box(Modifier.size(10.dp).clip(CircleShape).background(if (ended) Sub else accentOf(c.channel).dot))
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
             Text(c.who, color = Ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -713,7 +757,7 @@ fun MinimisedCallBar(c: CallUiState, actions: CallActions) {
                 ) {
                     Text(
                         primary.label, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
-                        modifier = Modifier.clip(RoundedCornerShape(50)).background(TealText).padding(horizontal = 12.dp, vertical = 8.dp),
+                        modifier = Modifier.clip(RoundedCornerShape(50)).background(accentOf(c.channel).button).padding(horizontal = 12.dp, vertical = 8.dp),
                     )
                 }
             }
@@ -749,6 +793,8 @@ internal fun CallActions.run(a: WrapAction): () -> Unit = when (a) {
     WrapAction.CallAgain, WrapAction.CallBack, WrapAction.TryAgain -> redial
     WrapAction.SendCallRequest -> sendCallRequest
     WrapAction.OpenSettings -> openSettings
+    WrapAction.CallNow -> callNow
+    WrapAction.CallingSettings -> openCallingSettings
     WrapAction.Done, WrapAction.Cancel -> dismiss
 }
 
@@ -761,21 +807,26 @@ internal fun CallActions.run(a: WrapAction): () -> Unit = when (a) {
 fun WaitingBanner(w: WaitingCall, actions: CallActions, modifier: Modifier = Modifier) {
     Column(
         modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Bar)
-            .border(1.dp, Green.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
+            .border(1.dp, accentOf(w.channel).pulse.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
             .padding(horizontal = 14.dp, vertical = 10.dp)
             .semantics { liveRegion = LiveRegionMode.Polite },
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(CallIcons.Phone, null, tint = Green, modifier = Modifier.size(16.dp))
+            // Which app they're calling on: its glyph, and said for TalkBack.
+            if (channelOf(w.channel) == MESSENGER) ChannelGlyph(MESSENGER, 16.dp, waTint = Green)
+            else Icon(CallIcons.Phone, null, tint = Green, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(8.dp))
-            Text("${w.who} is also calling", color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(
+                "${w.who} is also calling", color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.semantics { contentDescription = "${w.who} is also calling on ${channelLabel(w.channel)}" },
+            )
         }
         Spacer(Modifier.height(8.dp))
         // As the web's banner: three filled pills — Decline red, Call back later quiet, End & answer green.
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             SmallAction("Decline", Red, Color.White, "Decline ${w.who}'s call", actions.declineWaiting)
             SmallAction("Call back later", Control, Ink, null, actions.callbackWaiting)
-            SmallAction("End & answer", TealText, Color.White, null, actions.endAndAnswer)
+            SmallAction("End & answer", accentOf(w.channel).button, Color.White, null, actions.endAndAnswer)
         }
     }
 }
@@ -794,21 +845,24 @@ private fun SmallAction(text: String, fill: Color, ink: Color, description: Stri
 /** "{First} allowed calls — Call now": a customer this phone asked has tapped Allow. */
 @Composable
 fun PermissionGrantBanner(g: PermissionGrant, onCall: () -> Unit, onDismiss: () -> Unit) {
-    val first = firstNameOf(g.name) ?: "+${g.waId}"
+    val messenger = channelOf(g.channel) == MESSENGER
+    // Never a PSID on screen.
+    val first = firstNameOf(g.name) ?: if (messenger) "They" else "+${g.waId}"
     Row(
         Modifier.fillMaxWidth().background(Palette.Call.WaTeal.copy(alpha = 0.18f)).heightIn(min = 56.dp)
             .padding(start = 16.dp, end = 4.dp).semantics { liveRegion = LiveRegionMode.Polite },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(CallIcons.Phone, null, tint = Green, modifier = Modifier.size(16.dp))
+        if (messenger) ChannelGlyph(MESSENGER, 16.dp, waTint = Green)
+        else Icon(CallIcons.Phone, null, tint = Green, modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(10.dp))
-        Text("$first allowed calls", color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f), maxLines = 2)
+        Text(if (messenger) "$first allowed Messenger calls" else "$first allowed calls", color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f), maxLines = 2)
         Box(
             Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(50)).clickable(role = Role.Button, onClick = onCall),
             contentAlignment = Alignment.Center,
         ) {
             Row(
-                Modifier.clip(RoundedCornerShape(50)).background(TealText).padding(horizontal = 14.dp, vertical = 8.dp),
+                Modifier.clip(RoundedCornerShape(50)).background(accentOf(g.channel).button).padding(horizontal = 14.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(CallIcons.Phone, null, tint = Color.White, modifier = Modifier.size(15.dp))

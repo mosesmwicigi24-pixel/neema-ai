@@ -15,6 +15,29 @@ class Settings(BaseSettings):
     waba_token: str = ""
     waba_phone_number_id: str = ""
     waba_api_version: str = "v21.0"
+    # Graph version for every WhatsApp CALLING request (calls, call_permissions,
+    # settings, call-permission messages/templates). Kept separate so calling
+    # runs on a supported version (v21.0 expires 2027-01-21; v23.0 → 2027-10-08)
+    # without moving all messaging at once. selfcheck warns 90 days ahead.
+    waba_calling_api_version: str = "v23.0"
+    # The WhatsApp Business Account id — needed only to read / create message
+    # templates (the call-permission template). Empty = template admin disabled.
+    waba_business_account_id: str = ""
+    # Approved template that carries a `call_permission_request` component —
+    # the only way to ask for call permission outside the 24 h window. Empty =
+    # use the one an admin created from Settings → WhatsApp calling (stored in
+    # app_settings), else outside-window requests answer 409 template_required.
+    call_permission_template: str = ""
+    call_permission_template_lang: str = "en"
+    # Body parameters, comma-separated, in order: `first_name` | `name` | any
+    # literal text. Empty = the template has no body variables.
+    call_permission_template_params: str = "first_name"
+    # Meta's own per-call recording / transcription (opt-in: Meta plays an
+    # announcement to the customer — the owner must choose it).
+    call_meta_transcription: bool = False
+    call_meta_recording: bool = False
+    call_recording_purpose: str = "to help us serve your order and train our team"
+    call_recording_language: str = "en"
     # Approved WhatsApp template used to open a thread with a customer who reached
     # us on Messenger/Facebook (Meta requires a template to message first). Body:
     # "Hello {{1}}, this is Bethany House…". Name + language must match the
@@ -68,6 +91,12 @@ class Settings(BaseSettings):
     # page-scoped, so each contact belongs to exactly one page.
     meta_page_tokens: str = ""
     meta_graph_version: str = "v21.0"
+    # Messenger voice calling (Messenger Calling API, GA 2026-02-11 —
+    # services/messenger_calling.py). OFF: Messenger `calls` webhooks are only
+    # logged (so we can see whether Meta sends them), no agent is rung, and the
+    # /calls routes refuse a Messenger call with 409 `messenger_calling_off`.
+    # Incoming calls reach us only once the Page's call routing is PARTNERS.
+    messenger_calling_enabled: bool = False
 
     # Shared secret for the server-to-server analytics rollup the Bethany hub
     # pulls (per-person × per-channel message counts). INERT until set — the
@@ -326,6 +355,13 @@ class Settings(BaseSettings):
     # Audio is recorded in the agent's browser (both sides mixed) and uploaded on
     # hangup — free. Transcription runs on OUR box via faster-whisper (no per-call
     # API cost); swap to a cloud provider later by flipping whisper_provider.
+    # A missed inbound call gets one WhatsApp / Messenger message and the chat
+    # is flagged for a person (services/missed_call.py). Off by default: it
+    # messages the customer.
+    missed_call_message_enabled: bool = False
+    missed_call_message: str = ("Sorry we missed your call \U0001F64F A member of our team will "
+                                "call you back shortly — or tell us here how we can help.")
+    missed_call_message_cooldown_h: int = 6
     call_recording_enabled: bool = True    # let the softphone record calls (browser-side)
     whisper_enabled: bool = False          # can we transcribe at all (provider installed/configured)
     whisper_auto: bool = False             # auto-transcribe every call on hangup vs. on-demand only

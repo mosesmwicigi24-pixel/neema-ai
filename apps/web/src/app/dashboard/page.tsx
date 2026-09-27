@@ -151,6 +151,17 @@ export default function NeemaDashboard(): React.ReactElement {
         setOpenConvKey(typeof req === "string" ? { key: req } : req);
         setView("conversations");
     }, []);
+    // Settings → WhatsApp calling (from a call refusal only an admin can fix).
+    const openCallingSettings = useCallback(() => {
+        setView("settings");
+        let tries = 0;
+        const find = () => {
+            const el = document.getElementById("whatsapp-calling");
+            if (el) { el.scrollIntoView({ block: "start" }); el.focus({ preventScroll: true }); return; }
+            if (++tries < 30) setTimeout(find, 100);
+        };
+        setTimeout(find, 50);
+    }, []);
     // Cross-view request to focus the Calls console on one customer's history
     // (deep-linked from the hub's order page). Holds a wa_id; CallsView consumes it.
     const [callsFocusKey, setCallsFocusKey] = useState<string | null>(null);
@@ -662,7 +673,7 @@ export default function NeemaDashboard(): React.ReactElement {
                 {...viewProps}
             />
         ),
-        settings: <SettingsView {...viewProps} />,
+        settings: <SettingsView {...viewProps} canManageCalling={can(PERMS.MANAGE_SETTINGS)} />,
     };
 
     return (
@@ -738,7 +749,8 @@ export default function NeemaDashboard(): React.ReactElement {
                     {/* Incoming/active call takes over the content area — sidebar
                         stays visible, matching the Figma. "Chat" / "Open chat"
                         on the card opens the customer's thread here. */}
-                    <CallStage onOpenConversation={openConversationFor} />
+                    <CallStage onOpenConversation={openConversationFor}
+                        onOpenCallingSettings={can(PERMS.MANAGE_SETTINGS) ? openCallingSettings : undefined} />
                 </main>
                 {isMobile && (
                     <MobileBottomNav

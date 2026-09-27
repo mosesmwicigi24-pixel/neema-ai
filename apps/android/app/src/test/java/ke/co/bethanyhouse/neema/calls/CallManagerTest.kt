@@ -460,6 +460,8 @@ class CallManagerTest {
         val res = async { r.calls.initiateCall("+254712345678", "Fr. Peter Kamau") }
         r.settle()
         assertTrue(res.await().isSuccess)
+        // "Calling…" turns "Ringing…" only when Meta says their phone rings.
+        assertEquals(CallPhase.Placing, r.state.phase); r.raw("""{"type":"call_status","call_id":"${r.api.connectId}","status":"ringing"}""")
         assertEquals("Meta is ringing them", CallPhase.RingingOut, r.state.phase)
         assertEquals("Ringing…", r.state.statusText())
         assertTrue(r.state.outbound)

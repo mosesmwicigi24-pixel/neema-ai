@@ -1,6 +1,17 @@
 package ke.co.bethanyhouse.neema.calls
 
 import ke.co.bethanyhouse.neema.core.model.Call
+import ke.co.bethanyhouse.neema.core.model.CallPermission
+import ke.co.bethanyhouse.neema.core.model.PermissionRequestResponse
+import ke.co.bethanyhouse.neema.core.net.NeemaJson
+import ke.co.bethanyhouse.neema.core.util.AppClock
+import ke.co.bethanyhouse.neema.feature.calls.CallingRestriction
+import ke.co.bethanyhouse.neema.feature.calls.callCaution
+import ke.co.bethanyhouse.neema.feature.calls.callRowWords
+import ke.co.bethanyhouse.neema.feature.calls.permissionLines
+import ke.co.bethanyhouse.neema.feature.calls.sendRequestBlocked
+import ke.co.bethanyhouse.neema.feature.calls.threadCallLabel
+import ke.co.bethanyhouse.neema.feature.calls.transcriptTurns
 import ke.co.bethanyhouse.neema.core.net.ApiException
 import ke.co.bethanyhouse.neema.feature.calls.AudioRoute
 import ke.co.bethanyhouse.neema.feature.calls.AudioRouteKind
@@ -19,6 +30,7 @@ import ke.co.bethanyhouse.neema.feature.calls.outcomeNote
 import ke.co.bethanyhouse.neema.feature.calls.wrapActions
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -266,6 +278,8 @@ class CallUxTest {
         assertTrue("call audio from the start (the ringback)", r.audio.inCall)
         r.api.connectGate!!.complete(Unit); r.settle()
         assertTrue(placed.await().isSuccess)
+        // "Calling…" turns "Ringing…" only when Meta says their phone rings.
+        assertEquals(CallPhase.Placing, r.state.phase); r.raw("""{"type":"call_status","call_id":"${r.api.connectId}","status":"ringing"}""")
         assertEquals(CallPhase.RingingOut, r.state.phase)
         // The customer picked up: call_answered for our own call.
         r.raw("""{"type":"call_answered","call_id":"wacid.out1","agent_id":"agent-me","agent_name":"Moses","direction":"outbound"}""")
@@ -287,6 +301,8 @@ class CallUxTest {
 
         r.media.gatherAtOnce = true
         assertTrue(r.placeCall().isSuccess)
+        // "Calling…" turns "Ringing…" only when Meta says their phone rings.
+        assertEquals(CallPhase.Placing, r.state.phase); r.raw("""{"type":"call_status","call_id":"${r.api.connectId}","status":"ringing"}""")
         assertEquals(CallPhase.RingingOut, r.state.phase)
         r.calls.hangup(); r.settle()
         assertEquals(CallOutcome.Cancelled, r.state.outcome)
@@ -301,6 +317,8 @@ class CallUxTest {
         assertEquals(CallPhase.Ended, r.state.phase)
         r.api.connectId = "wacid.out2"
         r.calls.redial(); r.settle()
+        // "Calling…" turns "Ringing…" only when Meta says their phone rings.
+        assertEquals(CallPhase.Placing, r.state.phase); r.raw("""{"type":"call_status","call_id":"${r.api.connectId}","status":"ringing"}""")
         assertEquals("Call again places it again", CallPhase.RingingOut, r.state.phase)
         assertEquals("wacid.out2", r.state.callId)
         assertEquals("Deacon James Mwangi", r.state.name)
@@ -354,6 +372,8 @@ class CallUxTest {
         r.api.connectError = null
         r.calls.callGranted(); r.settle()
         assertNull(r.calls.permissionGranted.value)
+        // "Calling…" turns "Ringing…" only when Meta says their phone rings.
+        assertEquals(CallPhase.Placing, r.state.phase); r.raw("""{"type":"call_status","call_id":"${r.api.connectId}","status":"ringing"}""")
         assertEquals(CallPhase.RingingOut, r.state.phase)
         assertEquals("254733444555", r.state.from)
     }
@@ -507,5 +527,299 @@ class CallUxTest {
         assertFalse(r.state.recording)
         r.calls.hangup(); r.settle()
         assertNull(r.state.recordingNote)
+    }
+
+    // ── 2026-09-27 platform refresh (CALLING_UX.md §2.1) ─────────────────────
+    private val james = "254733444555"
+    private fun meta(status: String = "unknown", canCall: Boolean? = null, canRequest: Boolean? = true, streak: Int = 0,
+                     at: String? = null, permanent: Boolean = false, expires: String? = null, revoked: Boolean = false, left: Int? = null) =
+        CallPermission(james, status, expires, permanent, metaStatus = if (canCall == false) "no_permission" else "temporary",
+            canCall = canCall, canRequest = canRequest, requestAvailableAt = at, callsLeftToday = left, revoked = revoked,
+            unansweredStreak = streak, source = "meta")
+    private fun refusal(status: Int, path: String, detail: String, code: String, action: String, extra: String = "") =
+        ApiException(status, "POST", path, """{"detail":${kotlinx.serialization.json.JsonPrimitive(detail)},"code":"$code","action":"$action"$extra}""")
+    private fun inHours(h: Int) = Instant.ofEpochMilli(AppClock.now() + h * 3_600_000L - 1_000L).toString()
+
+    @Test fun permissionTruthSkipsTheDoomedConnect() = rig { r ->
+        r.api.permission = meta(canCall = false)
+        val res = r.placeCall()
+        assertTrue("permission $james" in r.api.log)
+        assertFalse("no connect Meta would refuse", r.api.log.any { it.startsWith("connect") })
+        assertTrue("no peer, no microphone", r.media.peers.isEmpty())
+        assertEquals(CallOutcome.PermissionNeeded, r.state.outcome)
+        assertEquals((res.exceptionOrNull() as CallManager.CallError).shown, true)
+        assertEquals(listOf(WrapAction.SendCallRequest, WrapAction.Message, WrapAction.Cancel), r.state.wrapActions())
+        // Asked already (and still waiting): the card says that instead.
+        advanceTimeBy(10_000); runCurrent()
+        r.calls.dismiss()
+        r.api.permission = meta(status = "requested", canCall = false, canRequest = false)
+        r.placeCall()
+        assertEquals(CallOutcome.PermissionRequested, r.state.outcome)
+        assertFalse(r.api.log.any { it.startsWith("connect") })
+    }
+
+    @Test fun aSlowOrFailedPermissionReadNeverHoldsTheCallUp() = rig { r ->
+        r.api.permissionGate = kotlinx.coroutines.CompletableDeferred()
+        val placed = async { r.calls.initiateCall(james, "Deacon James Mwangi") }
+        runCurrent()
+        assertEquals("Calling… at once", CallPhase.Placing, r.state.phase)
+        assertFalse(r.api.log.any { it.startsWith("connect") })
+        advanceTimeBy(CallManager.PERMISSION_READ_MS + 1); runCurrent()
+        assertTrue(placed.await().isSuccess)
+        assertTrue("placed as before", "connect $james" in r.api.log)
+        assertNull(r.state.permission)
+        // A read that fails outright: placed as before too.
+        r.calls.hangup(); r.settle(); advanceTimeBy(3_000); runCurrent()
+        r.api.permissionGate = null
+        r.api.permissionReadError = ApiException(502, "GET", "/admin/calls/permission", "{}")
+        r.api.connectId = "wacid.out2"
+        assertTrue(r.placeCall().isSuccess)
+        assertEquals(2, r.api.log.count { it == "connect $james" })
+    }
+
+    @Test fun callingSaysRingingOnlyWhenMetaSaysItRings() = rig { r ->
+        assertTrue(r.placeCall().isSuccess)
+        assertEquals("Calling…", r.state.statusText())
+        r.raw("""{"type":"call_status","call_id":"wacid.other","status":"ringing"}""")
+        assertEquals("someone else's call", CallPhase.Placing, r.state.phase)
+        r.raw("""{"type":"call_status","call_id":"wacid.out1","status":"accepted"}""")
+        assertEquals(CallPhase.Placing, r.state.phase)
+        r.raw("""{"type":"call_status","call_id":"wacid.out1","status":"ringing"}""")
+        assertEquals("Ringing…", r.state.statusText())
+        // The customer picks up straight from "Calling…" too (no ringing frame ever came).
+        r.calls.hangup(); r.settle(); advanceTimeBy(3_000); runCurrent()
+        r.api.connectId = "wacid.out2"
+        r.placeCall()
+        r.raw("""{"type":"call_answered","call_id":"wacid.out2","agent_id":"agent-me","agent_name":"Moses","direction":"outbound"}""")
+        assertEquals(CallPhase.Connecting, r.state.phase)
+        // A ringing frame that beat connect's reply is applied once the id is known.
+        r.calls.hangup(); r.settle(); advanceTimeBy(3_000); runCurrent()
+        r.api.connectId = "wacid.out3"
+        r.api.connectGate = kotlinx.coroutines.CompletableDeferred()
+        val placed = async { r.calls.initiateCall(james, "Deacon James Mwangi") }
+        r.settle()
+        r.raw("""{"type":"call_status","call_id":"wacid.out3","status":"ringing"}""")
+        assertEquals(CallPhase.Placing, r.state.phase)
+        r.api.connectGate!!.complete(Unit); r.settle()
+        assertTrue(placed.await().isSuccess)
+        assertEquals(CallPhase.RingingOut, r.state.phase)
+    }
+
+    @Test fun aDeclinedCallSaysSoWithMessageAndDone() = rig { r ->
+        r.placeCall()
+        r.raw("""{"type":"call_ended","call_id":"wacid.out1","outcome":"rejected","status":"REJECTED","direction":"outbound"}""")
+        assertEquals(CallOutcome.Rejected, r.state.outcome)
+        assertEquals("James declined the call", r.state.statusText())
+        assertEquals(listOf(WrapAction.Message, WrapAction.Done), r.state.wrapActions())
+        assertNull("the agent decides: it stays", CallOutcome.Rejected.autoCloseMs)
+        assertEquals("Declined by customer", callRowWords(Call(callId = "x", direction = "outbound", status = "rejected")).label)
+        // A no_answer corrected to rejected a moment later: the latest word wins.
+        r.calls.dismiss()
+        r.api.connectId = "wacid.out2"
+        r.placeCall()
+        r.raw("""{"type":"call_ended","call_id":"wacid.out2","outcome":"no_answer","direction":"outbound"}""")
+        assertEquals(CallOutcome.NoAnswer, r.state.outcome)
+        r.raw("""{"type":"call_ended","call_id":"wacid.out2","outcome":"rejected","direction":"outbound"}""")
+        assertEquals(CallOutcome.Rejected, r.state.outcome)
+    }
+
+    @Test fun unansweredStreakCautionsButNeverBlocks() = rig { r ->
+        r.api.permission = meta(status = "granted", canCall = true, streak = 3)
+        assertTrue(r.placeCall().isSuccess)
+        assertTrue("never blocking", "connect $james" in r.api.log)
+        assertEquals(
+            "James missed your last 3 calls — WhatsApp removes call permission after 4 in a row. Consider a message first.",
+            r.state.callCaution(),
+        )
+        r.raw("""{"type":"call_status","call_id":"wacid.out1","status":"ringing"}""")
+        assertTrue(r.state.callCaution() != null)
+        r.raw("""{"type":"call_answered","call_id":"wacid.out1","agent_id":"agent-me","direction":"outbound"}""")
+        assertNull("only before it goes through", r.state.callCaution())
+        assertNull(CallUiState(phase = CallPhase.Placing, outbound = true, permission = meta(streak = 1)).callCaution())
+        // WhatsApp's revoke-after-4 rule: never warned about on a Messenger call.
+        assertNull(CallUiState(phase = CallPhase.Placing, outbound = true, channel = "messenger",
+            permission = meta(streak = 3)).callCaution())
+    }
+
+    @Test fun templateRequiredOffersSettingsToAdminsOnly() = rig { r ->
+        r.calls.canManageSettings = { true }
+        r.api.permission = meta(canCall = false)
+        r.placeCall()
+        val detail = "James hasn't messaged in 24 hours — WhatsApp only allows a call request by template then. " +
+            "An admin can create it in Settings → WhatsApp calling."
+        r.api.permissionError = refusal(409, "/admin/calls/request-permission", detail, "template_required", "admin", ""","route":"template"""")
+        r.calls.sendCallRequest(); r.settle()
+        assertEquals(detail, r.state.error)
+        assertEquals(CallOutcome.PermissionNeeded, r.state.outcome)
+        assertEquals(listOf(WrapAction.CallingSettings, WrapAction.Message, WrapAction.Cancel), r.state.wrapActions())
+        // Asking again can't work: a second tap sends nothing.
+        r.calls.sendCallRequest(); r.settle()
+        assertEquals(1, r.api.log.count { it.startsWith("request-permission") })
+        // Not an admin: no Settings button.
+        val agent = r.state.copy(refusal = r.state.refusal!!.copy(adminCanFix = false))
+        assertEquals(listOf(WrapAction.Message, WrapAction.Cancel), agent.wrapActions())
+    }
+
+    @Test fun theRequestLimitSaysWhenTheyCanAskAgain() = rig { r ->
+        r.api.permission = meta(canCall = false)
+        r.placeCall()
+        r.api.permissionError = refusal(409, "/admin/calls/request-permission",
+            "You've asked this customer recently — WhatsApp allows 1 request a day and 2 a week.", "138009", "wait",
+            ""","request_available_at":"${inHours(5)}"""")
+        r.calls.sendCallRequest(); r.settle()
+        assertNull(r.state.error)
+        assertEquals("You can ask again in 5 h", r.state.sendRequestBlocked())
+        assertTrue(r.state.outcomeNote()!!.contains("You can ask again in 5 h"))
+        r.calls.sendCallRequest(); r.settle()
+        assertEquals("the button waits", 1, r.api.log.count { it.startsWith("request-permission") })
+        // Known before anyone taps: Meta's can_request=false.
+        val known = CallUiState(phase = CallPhase.Ended, outcome = CallOutcome.PermissionNeeded, from = james,
+            permission = meta(canCall = false, canRequest = false, at = inHours(3)))
+        assertEquals("You can ask again in 3 h", known.sendRequestBlocked())
+    }
+
+    @Test fun alreadyPermittedOffersCallNow() = rig { r ->
+        r.api.permission = meta(canCall = false)
+        r.placeCall()
+        r.api.requestResponse = PermissionRequestResponse(permission = CallPermission(james, "granted", permanent = true), alreadyPermitted = true)
+        r.calls.sendCallRequest(); r.settle()
+        assertEquals(CallOutcome.AlreadyAllowed, r.state.outcome)
+        assertEquals("James already allows calls — call now", r.state.statusText())
+        assertEquals(listOf(WrapAction.CallNow, WrapAction.Message, WrapAction.Done), r.state.wrapActions())
+        r.api.permission = null
+        r.calls.callNow(); r.settle()
+        assertTrue("connect $james" in r.api.log)
+    }
+
+    @Test fun everyServerActionMapsToTheWrapUp() = rig { r ->
+        fun fail(code: String, action: String, detail: String) {
+            r.calls.dismiss()
+            r.api.connectError = refusal(502, "/admin/calls/connect", "call failed: $detail", code, action)
+            r.scope.launch { r.calls.initiateCall(james, "Deacon James Mwangi") }
+            r.settle()
+        }
+        fail("190", "admin", "WhatsApp access token expired — an admin must renew it")
+        assertEquals(CallOutcome.Failed("WhatsApp access token expired — an admin must renew it", "admin"), r.state.outcome)
+        assertEquals(listOf(WrapAction.Message, WrapAction.Done), r.state.wrapActions())
+        assertEquals(CallManager.ADMIN_MUST_ACT, r.state.outcomeNote())
+        fail("meta_unavailable", "retry", "WhatsApp isn't answering right now — try again.")
+        assertEquals(listOf(WrapAction.TryAgain, WrapAction.Message, WrapAction.Done), r.state.wrapActions())
+        assertNull(r.state.outcomeNote())
+        fail("rate_limited", "wait", "WhatsApp is rate-limiting us — try again in a minute.")
+        assertEquals(listOf(WrapAction.Message, WrapAction.Done), r.state.wrapActions())
+        assertEquals(CallManager.WAIT_A_MOMENT, r.state.outcomeNote())
+        fail("138000", "none", "This customer can't take WhatsApp calls.")
+        assertEquals(listOf(WrapAction.Message, WrapAction.Done), r.state.wrapActions())
+        assertEquals(CallManager.MESSAGE_INSTEAD, r.state.outcomeNote())
+        fail("138006", "request_permission", "This customer hasn't allowed calls yet.")
+        assertEquals(CallOutcome.PermissionNeeded, r.state.outcome)
+        assertEquals(WrapAction.SendCallRequest, r.state.wrapActions().first())
+    }
+
+    @Test fun structuredRefusalsReadTheirCodeActionAndFields() {
+        val e = refusal(409, "/admin/calls/request-permission", "x", "138009", "wait", ""","request_available_at":"2026-09-28T10:00:00+00:00"""")
+        assertEquals("138009", e.code); assertEquals("wait", e.action); assertEquals("x", e.detail)
+        assertEquals("2026-09-28T10:00:00+00:00", e.field("request_available_at"))
+        // The header alone (a body without `code`), and an older body with neither.
+        assertEquals("190", ApiException(502, "POST", "/p", """{"detail":"call failed: x"}""", reasonHeader = "190").code)
+        val old = ApiException(409, "POST", "/p", """{"detail":"no permission"}""")
+        assertNull(old.code); assertNull(old.action); assertEquals("no permission", old.detail)
+        assertNull(ApiException(502, "POST", "/p", "<html>bad gateway</html>").code)
+    }
+
+    @Test fun thePermissionIsSaidHonestly() {
+        val now = AppClock.now()
+        fun lines(p: CallPermission) = permissionLines(p, "James", now)
+        assertEquals(listOf("Allowed permanently"), lines(meta(status = "granted", canCall = true, permanent = true)))
+        assertEquals(listOf("Allowed until 3 Oct 2026"), lines(meta(status = "granted", canCall = true, expires = "2026-10-03T10:00:00+00:00")))
+        assertEquals(listOf("Request sent 2h ago — waiting for James"),
+            lines(meta(status = "requested", canCall = false, canRequest = false).copy(at = Instant.ofEpochMilli(now - 2 * 3_600_000L).toString())))
+        assertEquals(listOf("James declined calls"), lines(meta(status = "denied", canCall = false)))
+        assertEquals(listOf("Permission revoked after unanswered calls"), lines(meta(status = "denied", canCall = false, revoked = true)))
+        assertEquals(listOf("James declined calls", "You can ask again in 5 h"),
+            lines(meta(status = "denied", canCall = false, canRequest = false, at = inHours(5))))
+        assertEquals("only when Meta gave it", listOf("Allowed permanently", "Calls left today: 3"),
+            lines(meta(status = "granted", canCall = true, permanent = true, left = 3)))
+        assertTrue(lines(meta()).isEmpty())
+    }
+
+    @Test fun aPermissionFrameUpdatesTheCardHonestly() = rig { r ->
+        r.api.permission = meta(canCall = false)
+        r.placeCall()
+        r.raw("""{"type":"call_permission","wa_id":"$james","status":"denied","revoked":true,"reason":"automatic"}""")
+        assertTrue(r.state.permission!!.revoked)
+        assertTrue(r.state.outcomeNote()!!.startsWith("Permission revoked after unanswered calls"))
+    }
+
+    @Test fun voicemailShowsOnTheRowAndThePill() {
+        val row = NeemaJson.decodeFromString(Call.serializer(),
+            """{"call_id":"wacid.9","wa_id":"$james","direction":"inbound","status":"missed","has_voicemail":true}""")
+        assertTrue(row.hasVoicemail)
+        assertEquals("Missed call · voicemail", threadCallLabel("Missed call", row))
+        assertEquals("Missed · voicemail", threadCallLabel("", row))
+        assertEquals("Missed call", threadCallLabel("Missed call", row.copy(hasVoicemail = false)))
+        assertFalse("an older row", NeemaJson.decodeFromString(Call.serializer(), """{"call_id":"x","status":"missed"}""").hasVoicemail)
+    }
+
+    @Test fun whatsAppsOwnTranscriptionIsSaidHonestly() = rig { r ->
+        r.api.ice = r.api.ice.copy(record = false, metaTranscription = true)
+        r.live()
+        assertTrue("the card says WhatsApp records it", r.state.metaTranscription)
+        advanceTimeBy(5_000); runCurrent()
+        r.calls.hangup(); r.settle()
+        assertEquals(CallManager.META_SUMMARY, r.state.recordingNote)
+        // Recorded here as well: the usual note, with the summary promised.
+        advanceTimeBy(13_000); runCurrent()
+        r.api.ice = r.api.ice.copy(record = true, metaTranscription = true)
+        r.live("wacid.2")
+        r.calls.hangup(); r.settle()
+        assertEquals(CallManager.RECORDING_SAVED_AUTO, r.state.recordingNote)
+    }
+
+    @Test fun twoSpeakerTranscriptsSplitIntoTurns() {
+        assertEquals(
+            listOf("Agent" to "Hello, Bethany House.", "Customer" to "Hi, I need a cassock size 54 please."),
+            transcriptTurns("Agent: Hello, Bethany House.\n\ncustomer:  Hi, I need a cassock size 54 please."),
+        )
+        assertNull("plain text stays plain", transcriptTurns("Hello there, this is a transcript."))
+        assertNull("another labelling stays plain", transcriptTurns("Agent: Good afternoon.\nCaller: Hello, Father Peter here."))
+    }
+
+    @Test fun aCallingRestrictionRaisesTheBanner() = rig { r ->
+        assertNull(r.calls.restriction.value)
+        r.raw("""{"type":"calling_restricted","event":"restricted","reasons":["LOW_PICKUP_RATE"],"at":"2026-09-27T09:00:00Z"}""")
+        assertEquals(CallingRestriction(listOf("LOW_PICKUP_RATE"), "2026-09-27T09:00:00Z"), r.calls.restriction.value)
+        assertEquals("Low pickup rate. Calls you place may fail until it lifts (up to 7 days).",
+            ke.co.bethanyhouse.neema.feature.calls.restrictionText(r.calls.restriction.value!!))
+        r.calls.dismissRestriction()
+        assertNull(r.calls.restriction.value)
+    }
+
+    // ── The contract's words (§2.1) and a Messenger call's (§2.0) ───────────
+    @Test fun theWordsMatchTheContractAndTheWeb() {
+        val james = CallUiState(name = "Deacon James Mwangi", from = "254733444555", outbound = true)
+        assertEquals("Declined by customer", callRowWords(Call(callId = "x", direction = "outbound", status = "rejected")).label)
+        val declined = james.copy(phase = CallPhase.Ended, outcome = CallOutcome.Rejected, conversationId = "conv-james")
+        assertEquals("James declined the call", declined.statusText())
+        assertEquals(listOf(WrapAction.Message, WrapAction.Done), declined.wrapActions())
+        assertEquals(
+            "James missed your last 3 calls — WhatsApp removes call permission after 4 in a row. Consider a message first.",
+            james.copy(phase = CallPhase.RingingOut, permission = CallPermission(status = "granted", unansweredStreak = 3)).callCaution(),
+        )
+        assertEquals("Recorded by WhatsApp — summary in a minute", CallManager.META_SUMMARY)
+        // Messenger: never a PSID, the app named, the permission words its own.
+        val m = CallUiState(from = "7788990011", channel = "messenger")
+        assertEquals("Messenger caller", m.who)
+        assertEquals("Messenger", m.app)
+        assertNull(m.number)
+        assertEquals("This customer hasn't allowed Messenger calls yet", m.copy(phase = CallPhase.Ended, outcome = CallOutcome.PermissionNeeded).statusText())
+        assertEquals("The customer declined the call", m.copy(phase = CallPhase.Ended, outcome = CallOutcome.Rejected, outbound = true).statusText())
+        assertEquals("Grace hasn't allowed Messenger calls yet",
+            m.copy(name = "Grace Wanjiku", phase = CallPhase.Ended, outcome = CallOutcome.PermissionNeeded).statusText())
+        assertEquals("Messenger caller", WaitingCall("c_1", "7788990011", null, "messenger").who)
+        assertEquals("+254712345678", WaitingCall("w_1", "254712345678", null).who)
+        assertEquals("Allowed calls", permissionLines(CallPermission(status = "granted"), "James", AppClock.now()).first())
+        assertEquals("James hasn't allowed calls yet",
+            permissionLines(CallPermission(status = "unknown", metaStatus = "no_permission"), "James", AppClock.now()).first())
     }
 }

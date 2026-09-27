@@ -2,8 +2,12 @@ package ke.co.bethanyhouse.neema.calls
 
 import ke.co.bethanyhouse.neema.core.api.UploadFile
 import ke.co.bethanyhouse.neema.core.model.Call
+import ke.co.bethanyhouse.neema.core.model.CallChannels
 import ke.co.bethanyhouse.neema.core.model.CallOffer
+import ke.co.bethanyhouse.neema.core.model.CallSdpResponse
+import ke.co.bethanyhouse.neema.core.model.ChannelCalling
 import ke.co.bethanyhouse.neema.core.model.CallPermission
+import ke.co.bethanyhouse.neema.core.model.PermissionRequestResponse
 import ke.co.bethanyhouse.neema.core.net.ApiException
 import ke.co.bethanyhouse.neema.feature.calls.AudioRoute
 import ke.co.bethanyhouse.neema.feature.calls.AudioRouteKind
@@ -61,14 +65,57 @@ class FakeCallApi : CallApi {
     }
     /** What GET /calls/permission says for everyone. */
     var permissionStatus = "unknown"
-    override suspend fun permission(waId: String): CallPermission { log += "permission $waId"; return CallPermission(waId, permissionStatus) }
+    /** The whole answer of GET /calls/permission (overrides [permissionStatus] when set). */
+    var permission: CallPermission? = null
+    /** When set, permission() waits for it (a slow Meta read). */
+    var permissionGate: CompletableDeferred<Unit>? = null
+    var permissionReadError: Exception? = null
+    override suspend fun permission(waId: String): CallPermission {
+        log += "permission $waId"; permissionGate?.await(); permissionReadError?.let { throw it }
+        return permission ?: CallPermission(waId, permissionStatus)
+    }
     override suspend fun iceConfig(): IceConfig { log += "ice-config"; iceError?.let { throw it }; return ice }
+    /** Messenger calls (CALLING_UX.md §2.0): which call ids ring on Messenger (their offer route says offer_required). */
+    val messengerCalls = mutableSetOf<String>()
+    /** What Meta answers our Messenger offer with (accept / connect): the answer SDP and the renegotiation. */
+    var messengerAnswer: String? = "v=0 meta-answer"
+    var messengerRenegotiation: kotlinx.serialization.json.JsonElement? = null
+    /** GET /calls/channels (null: Messenger off — the server's switch). */
+    var channels = CallChannels()
+    var channelsError: Exception? = null
+    var messengerConnectId = "c_msg.out1"
+    var lastMessengerConnect: Triple<String, String, String?>? = null
+
     override suspend fun offer(callId: String): CallOffer {
         log += "offer $callId"; offerError?.let { throw it }
+        if (callId in messengerCalls) return CallOffer(callId, null, "7788990011", "messenger", offerRequired = true)
         return CallOffer(callId, offerSdp, "254712345678")
     }
-    override suspend fun answer(callId: String, sdp: String) {
+    override suspend fun answer(callId: String, sdp: String): CallSdpResponse {
         log += "answer $callId"; lastAnswerSdp = sdp; answerGate?.await(); answerError?.let { throw it }
+        return if (callId in messengerCalls) CallSdpResponse(callId = callId, channel = "messenger", sdp = messengerAnswer,
+            sdpType = "answer", renegotiation = messengerRenegotiation)
+        else CallSdpResponse(callId = callId)
+    }
+    /** GET /calls/channels reads (kept out of [log]: the softphone reads it at start and on every reconnect). */
+    var channelsReads = 0
+    override suspend fun channels(): CallChannels { channelsReads++; channelsError?.let { throw it }; return channels }
+    override suspend fun connectMessenger(psid: String, sdp: String, name: String?): CallSdpResponse {
+        log += "connect-messenger $psid"; lastMessengerConnect = Triple(psid, sdp, name)
+        connectGate?.await()
+        connectError?.let { throw it }
+        return CallSdpResponse(callId = messengerConnectId, channel = "messenger", sdp = messengerAnswer, sdpType = "answer",
+            renegotiation = messengerRenegotiation)
+    }
+    override suspend fun messengerPermission(psid: String): CallPermission {
+        log += "permission messenger $psid"; permissionGate?.await(); permissionReadError?.let { throw it }
+        return (permission ?: CallPermission(null, permissionStatus)).copy(waId = null, channel = "messenger", externalId = psid)
+    }
+    override suspend fun requestMessengerPermission(psid: String): PermissionRequestResponse {
+        log += "request-permission messenger $psid"; permissionError?.let { throw it }
+        return requestResponse ?: PermissionRequestResponse(
+            permission = CallPermission(null, "requested", channel = "messenger", externalId = psid), route = "calling_optin",
+        )
     }
     override suspend fun terminate(callId: String) { log += "terminate $callId"; terminateGate?.await(); terminateErrors.removeFirstOrNull()?.let { throw it } }
     override suspend fun callback(callId: String) { log += "callback $callId"; callbackGate?.await(); callbackErrors.removeFirstOrNull()?.let { throw it } }
@@ -78,8 +125,11 @@ class FakeCallApi : CallApi {
         connectError?.let { throw it }
         return connectId
     }
-    override suspend fun requestPermission(to: String): CallPermission? {
-        log += "request-permission $to"; permissionError?.let { throw it }; return CallPermission(to, "requested")
+    /** What POST /calls/request-permission answers (default: sent free-form, now "requested"). */
+    var requestResponse: PermissionRequestResponse? = null
+    override suspend fun requestPermission(to: String, name: String?): PermissionRequestResponse {
+        log += "request-permission $to"; permissionError?.let { throw it }
+        return requestResponse ?: PermissionRequestResponse(permission = CallPermission(to, "requested"), route = "free_form")
     }
     override suspend fun uploadRecording(callId: String, file: UploadFile) {
         log += "recording $callId"; uploadErrors.removeFirstOrNull()?.let { throw it }; lastUploadStreamed = file.bytes == null; uploads += callId to Triple(file.filename, file.mimeType, file.length.toInt())
@@ -137,7 +187,9 @@ class FakeRinger : CallRinger {
     var showing = false
     override fun startRinging() { ringing = true; ringStarts++ }
     override fun stopRinging() { ringing = false }
-    override fun postIncoming(callId: String, who: String, from: String?) { posted += Triple(callId, who, from); showing = true }
+    /** The app each posted notification named ("WhatsApp" / "Messenger"). */
+    val postedApps = mutableListOf<String>()
+    override fun postIncoming(callId: String, who: String, from: String?, app: String) { posted += Triple(callId, who, from); postedApps += app; showing = true }
     override fun cancelIncoming() { showing = false }
 }
 

@@ -308,6 +308,14 @@ object TeamFixtures {
             val running = isRunning(parsed)
             200 to """{"ok":true,"campaign":$parsed,"running":$running,"says":${JsonPrimitive(if (running) describe(parsed) else "")}}"""
         }
+        // routers/admin.py calls_get_settings / calls_permission_template (manage_settings): WhatsApp's
+        // calling settings as the number has them, and the call-request template waiting for review.
+        f.on("GET", "/admin/calls/settings", body = """{"status":"ENABLED","call_icon_visibility":"DEFAULT",
+            "callback_permission_status":"DISABLED","call_hours":null,
+            "voicemail":{"status":"DISABLED","triggers":["TIMEOUT"],"timeout_seconds":15},"restrictions":[],
+            "last_settings_event":null,"last_restriction_event":null}""")
+        f.on("GET", "/admin/calls/permission-template", body = """{"configured":true,"name":"neema_call_permission",
+            "language":"en","source":"app","waba_configured":true,"exists":true,"status":"approved","category":"UTILITY"}""")
     }
 
     private fun offerBody(c: String?): String {

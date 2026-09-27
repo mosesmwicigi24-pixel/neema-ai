@@ -47,6 +47,8 @@ class ApiException(
     val malformed: Boolean = false,
     /** The transport failure behind a status-0 answer (kept for crash reports and logs). */
     cause: Throwable? = null,
+    /** The `X-Neema-Reason` header a calling route's refusal carries (its `code`). */
+    val reasonHeader: String? = null,
 ) : IOException("$method $path → $status: ${body.take(500)}", cause) {
     /** The request ran out of time (the 30 s ceiling, or the long client's). */
     val timedOut: Boolean get() = status == 0 && body.startsWith("timed out")
@@ -70,6 +72,27 @@ class ApiException(
                     ?: (d["error"] as? JsonPrimitive)?.content ?: d.toString()
             }
         }.getOrNull() ?: body.trim().let { if (looksLikeHtml(it)) "" else it.take(200) }
+
+    /** The error body as a JSON object (null when it is not one). */
+    private val bodyObject: JsonObject? by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        runCatching { NeemaJson.parseToJsonElement(body) as? JsonObject }.getOrNull()
+    }
+
+    /**
+     * A structured refusal's string field (`{detail, code, action, …}` —
+     * CALLING_UX.md §2.1), e.g. `request_available_at`. Null when absent,
+     * not a string, or the body isn't JSON: every older answer reads as none.
+     */
+    fun field(name: String): String? =
+        ((bodyObject?.get(name)) as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() }
+
+    /** Meta's error code ("138006", "190") or ours (template_required, …): the body's `code`, else `X-Neema-Reason`. */
+    val code: String?
+        get() = field("code") ?: (bodyObject?.get("code") as? JsonPrimitive)?.content?.takeIf { it.isNotBlank() && it != "null" }
+            ?: reasonHeader?.trim()?.takeIf { it.isNotEmpty() }
+
+    /** What to offer: retry | request_permission | wait | admin | none (null: an older answer that doesn't say). */
+    val action: String? get() = field("action")
 
     companion object {
         /** A web page rather than an API answer (a proxy's error page, a captive portal). */
@@ -208,7 +231,7 @@ class NeemaHttp(
                         // HTML dump): only its head is worth keeping.
                         val text = runCatching { r.peekBody(MAX_ERROR_BODY).string() }.getOrDefault("")
                         if (r.code == 403 && !isIdentityRead(method, path)) _forbidden.tryEmit("$method ${gatePath(path)}")
-                        throw ApiException(r.code, method, path, text, retryAfterSeconds = retryAfter(r))
+                        throw ApiException(r.code, method, path, text, retryAfterSeconds = retryAfter(r), reasonHeader = r.header("X-Neema-Reason"))
                     }
                     // The connection can still drop while the body streams in.
                     try { r.body?.string().orEmpty() } catch (e: IOException) {

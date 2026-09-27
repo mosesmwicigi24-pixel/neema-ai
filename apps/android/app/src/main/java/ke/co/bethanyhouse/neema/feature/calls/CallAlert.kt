@@ -140,7 +140,7 @@ internal class CallAlert(private val context: Context, private val scope: Corout
         else activityAction("decline", callId, REQ_DECLINE)
 
     /** The incoming-call notification (only when the app is in the background). */
-    override fun postIncoming(callId: String, who: String, from: String?) {
+    override fun postIncoming(callId: String, who: String, from: String?, app: String) {
         if (!Notifier.canPost(context)) return
         val show = activityAction("show", callId, REQ_SHOW)
         val answer = activityAction("answer", callId, REQ_ANSWER)
@@ -149,7 +149,7 @@ internal class CallAlert(private val context: Context, private val scope: Corout
             .setSmallIcon(R.drawable.ic_stat_neema)
             .setContentTitle(who)
             // The card's own words (CALLING_UX.md §3): what it is, then the number.
-            .setContentText(if (from != null && who != "+$from") "WhatsApp voice call · Incoming… · +$from" else "WhatsApp voice call · Incoming…")
+            .setContentText(if (from != null && who != "+$from") "$app voice call · Incoming… · +$from" else "$app voice call · Incoming…")
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)

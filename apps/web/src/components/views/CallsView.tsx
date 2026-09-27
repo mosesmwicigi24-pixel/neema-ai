@@ -1,6 +1,6 @@
 "use client";
 
-// Calls — the WhatsApp call log (docs/CALLING_UX.md §7). A dark call console:
+// Calls — the WhatsApp + Messenger call log (docs/CALLING_UX.md §7, §2.0). A dark call console:
 // All · Follow-ups filter, rows grouped Today / Yesterday / date, each with the
 // direction icon + the outcome in colour AND words, duration, agent, time and a
 // one-tap call-back. A row opens its details: the call's timeline (rang →
@@ -10,8 +10,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { callsApi, type ApiCall, type CallTranscriptResp } from "@/lib/api";
 import { useWs } from "@/lib/websocket";
-import { useCall } from "@/lib/callContext";
-import { callStatus, fmtCallDuration, upsertCall, CALL_ICON_PATH } from "@/lib/callStatus";
+import { useCall, channelOf } from "@/lib/callContext";
+import { ChannelGlyph } from "@/components/CallStage";
+import { callStatus, fmtCallDuration, upsertCall, CALL_ICON_PATH, speakerTurns, dayDate } from "@/lib/callStatus";
 import type { SharedViewProps, OpenChatRequest } from "@/types";
 import { dayLabel, clockTime } from "@/lib/utils";
 import { CustomerSidebar } from "@/components/ui/CustomerSidebar";
@@ -23,7 +24,26 @@ const C = {
 
 const AV = ["#3b6ea5", "#a5417d", "#b5892f", "#3c8c5a", "#8a4fc4", "#b24a4a"];
 const avatarColor = (s: string) => AV[[...(s || "?")].reduce((a, c) => a + c.charCodeAt(0), 0) % AV.length];
-const whoOf = (c: ApiCall) => c.name || (c.wa_id ? `+${c.wa_id}` : "Unknown caller");
+const whoOf = (c: ApiCall) => c.name || (c.wa_id ? `+${c.wa_id}` : channelOf(c.channel) === "messenger" ? "Messenger caller" : "Unknown caller");
+/** The customer's handle on the call's channel (wa_id, or the PSID). */
+const handleOf = (c: ApiCall) => (channelOf(c.channel) === "messenger" ? c.external_id || "" : c.wa_id || "");
+
+// Which app a call was on — a badge on every row and detail, so a mixed
+// history is never ambiguous. On the dark console: 7:1+ text on its tint.
+const CH_BADGE = {
+    whatsapp: { label: "WhatsApp", fg: "#7EE2A8", bg: "rgba(37,211,102,0.14)" },
+    messenger: { label: "Messenger", fg: "#9CCBFF", bg: "rgba(0,132,255,0.18)" },
+} as const;
+function ChannelBadge({ c, size = 11 }: { c: ApiCall; size?: number }) {
+    const ch = channelOf(c.channel);
+    const b = CH_BADGE[ch];
+    return (
+        <span data-call-channel={ch} className="rounded-full pl-1 pr-1.5 flex items-center gap-1 flex-shrink-0"
+            style={{ fontSize: size, fontWeight: 600, color: b.fg, background: b.bg }}>
+            <ChannelGlyph channel={ch} size={size + 1} color={ch === "whatsapp" ? b.fg : undefined} /> {b.label}
+        </span>
+    );
+}
 const initialsOf = (who: string): React.ReactNode => {
     const i = who.replace("+", "").split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
     // A bare number has no initials — show a handset, as the call card does.
@@ -41,6 +61,27 @@ function CallIcon({ c, size = 13 }: { c: ApiCall; size?: number }) {
         </svg>
     );
 }
+
+// WhatsApp voicemail: the audio itself is a normal message in the chat.
+const VoicemailGlyph = ({ size = 13 }: { size?: number }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2}
+        strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="flex-shrink-0">
+        <circle cx="6" cy="12" r="3.5" /><circle cx="18" cy="12" r="3.5" /><path d="M6 15.5h12" />
+    </svg>
+);
+const VM = { fg: "#f5c451", bg: "rgba(245,196,81,0.16)" };
+
+/** Meta's restriction reasons, in words an agent can act on. */
+const RESTRICTION_WORDS: Record<string, string> = {
+    LOW_BUSINESS_INITIATED_CALLING_QUALITY: "too many of our calls were rated poorly",
+    RESTRICTED_BUSINESS_INITIATED_CALLING: "customers reported or blocked our calls",
+    LOW_USER_INITIATED_CALLING_QUALITY: "customers rated their calls to us poorly",
+    USER_INITIATED_CALLS_LOW_PICKUP_RATE: "too many customer calls went unanswered",
+    RESTRICTED_USER_INITIATED_CALLING_CALL_BUTTON_HIDDEN: "the call button is hidden from customers for now",
+    RESTRICTED_USER_INITIATED_CALLING: "customers can't call us for now",
+};
+const restrictionReason = (reasons: string[]): string =>
+    reasons.map((r) => RESTRICTION_WORDS[r] ?? r.toLowerCase().replace(/_/g, " ")).join("; ") || "calling quality";
 
 const PhoneGlyph = ({ size = 16 }: { size?: number }) => (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
@@ -155,9 +196,26 @@ function CallTranscript({ call, onUseReply }: { call: ApiCall; onUseReply?: (tex
                         style={{ fontSize: 12, color: C.sub, minHeight: 44 }}>
                         {showFull ? "Hide" : "Show"} full transcript{data.language ? ` · ${data.language}` : ""}
                     </button>
-                    {showFull && (
-                        <div style={{ fontSize: 12, color: C.sub, whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{data.transcript}</div>
-                    )}
+                    {showFull && (() => {
+                        const turns = speakerTurns(data.transcript);
+                        if (!turns) return <div style={{ fontSize: 12, color: C.sub, whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{data.transcript}</div>;
+                        // Two speakers (WhatsApp's own transcript): who said what, at a glance.
+                        return (
+                            <ol aria-label="Transcript" className="space-y-1.5">
+                                {turns.map((t, i) => (
+                                    <li key={i} className={`flex ${t.who === "Agent" ? "justify-end" : "justify-start"}`}>
+                                        <div className="rounded-xl px-3 py-1.5" style={{ maxWidth: "88%",
+                                            background: t.who === "Agent" ? "rgba(37,211,102,0.12)" : "rgba(255,255,255,0.06)" }}>
+                                            <div style={{ fontSize: 11, fontWeight: 600, color: t.who === "Agent" ? C.green : "#9fc3ff" }}>
+                                                {t.who === "Agent" ? "Agent" : "Customer"}
+                                            </div>
+                                            <div style={{ fontSize: 13, color: C.text, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{t.text}</div>
+                                        </div>
+                                    </li>
+                                ))}
+                            </ol>
+                        );
+                    })()}
                 </>
             )}
             {(st === "pending" || st === "processing") && (
@@ -243,11 +301,18 @@ function CallDetail({ c, onBack, onCallBack, onOpenChat, onUseReply, onFollowUpD
                         style={{ minHeight: 44, fontSize: 13, color: C.sub }} aria-label={isMobile ? "Back to all calls" : "Close call details"}>
                         {isMobile ? "← All calls" : "Close"}
                     </button>
-                    {c.follow_up_open && (
-                        <span className="rounded-full px-2.5 py-1" style={{ fontSize: 12, fontWeight: 600, color: "#ffb3b5", background: "rgba(242,85,90,0.16)" }}>
-                            Follow-up open
-                        </span>
-                    )}
+                    <span className="flex items-center gap-1.5">
+                        {c.has_voicemail && (
+                            <span className="rounded-full px-2.5 py-1 flex items-center gap-1" style={{ fontSize: 12, fontWeight: 600, color: VM.fg, background: VM.bg }}>
+                                <VoicemailGlyph /> Voicemail
+                            </span>
+                        )}
+                        {c.follow_up_open && (
+                            <span className="rounded-full px-2.5 py-1" style={{ fontSize: 12, fontWeight: 600, color: "#ffb3b5", background: "rgba(242,85,90,0.16)" }}>
+                                Follow-up open
+                            </span>
+                        )}
+                    </span>
                 </div>
                 <div className="flex items-center gap-3 mt-1">
                     <div className="flex items-center justify-center rounded-full flex-shrink-0"
@@ -263,6 +328,7 @@ function CallDetail({ c, onBack, onCallBack, onOpenChat, onUseReply, onFollowUpD
                                 : c.direction === "outbound" ? " · outgoing" : " · incoming"}</span>
                             {c.duration ? <span style={{ color: C.sub }}>· {fmtCallDuration(c.duration)}</span> : null}
                             {c.name && c.wa_id && <span style={{ color: C.faint }}>· +{c.wa_id}</span>}
+                            <ChannelBadge c={c} size={12} />
                         </div>
                     </div>
                 </div>
@@ -270,8 +336,8 @@ function CallDetail({ c, onBack, onCallBack, onOpenChat, onUseReply, onFollowUpD
                     {onCallBack && (
                         <button type="button" onClick={onCallBack} disabled={callBusy}
                             className="flex items-center gap-1.5 rounded-full px-4 font-semibold disabled:opacity-50"
-                            style={{ minHeight: 44, fontSize: 14, background: C.greenBtn, color: "#fff" }}>
-                            <PhoneGlyph /> {callBusy ? "On a call" : "Call back"}
+                            style={{ minHeight: 44, fontSize: 14, background: channelOf(c.channel) === "messenger" ? "#0066D6" : C.greenBtn, color: "#fff" }}>
+                            <PhoneGlyph /> {callBusy ? "On a call" : channelOf(c.channel) === "messenger" ? "Call back on Messenger" : "Call back"}
                         </button>
                     )}
                     {onOpenChat && (
@@ -290,6 +356,20 @@ function CallDetail({ c, onBack, onCallBack, onOpenChat, onUseReply, onFollowUpD
                     )}
                 </div>
             </div>
+            {c.has_voicemail && (
+                <div className="px-4 py-3 flex items-center gap-3 flex-wrap" style={{ borderBottom: `1px solid ${C.line}` }}>
+                    <span className="flex-1 min-w-0 flex items-center gap-1.5" style={{ fontSize: 13, color: VM.fg }}>
+                        <VoicemailGlyph size={15} /> {who.startsWith("+") ? "They" : who.split(/\s+/)[0]} left a voicemail — it&apos;s in the chat.
+                    </span>
+                    {onOpenChat && (
+                        <button type="button" onClick={onOpenChat} className="rounded-full px-4 font-semibold"
+                            style={{ minHeight: 44, fontSize: 13, background: VM.bg, color: VM.fg }}
+                            aria-label={`Open chat to listen to ${who}'s voicemail`}>
+                            Open chat to listen
+                        </button>
+                    )}
+                </div>
+            )}
             <div className="px-4 py-4" style={{ borderBottom: `1px solid ${C.line}` }}>
                 <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, color: C.faint, marginBottom: 8 }}>Timeline</div>
                 <Timeline c={c} />
@@ -328,6 +408,8 @@ export function CallsView({ isMobile, onOpenConversation, onToast, focusWaId, on
     const [calls, setCalls] = useState<ApiCall[] | null>(null);
     const [loadError, setLoadError] = useState(false);
     const [filter, setFilter] = useState<"all" | "follow_up">("all");
+    // Channel chip: every call, or only WhatsApp / only Messenger.
+    const [chFilter, setChFilter] = useState<"all" | "whatsapp" | "messenger">("all");
     const [followUps, setFollowUps] = useState<ApiCall[] | null>(null);
     // Clicking a call opens its details + the caller's FULL CRM panel right
     // here (profile, lead score, orders) — no bouncing to the inbox.
@@ -422,7 +504,12 @@ export function CallsView({ isMobile, onOpenConversation, onToast, focusWaId, on
         onConsumeFocus?.();
     }, [focusWaId, calls, onConsumeFocus, onToast]);
 
-    const shown = filter === "follow_up" ? followUps : calls;
+    const listed = filter === "follow_up" ? followUps : calls;
+    const shown = useMemo(() => (listed && chFilter !== "all" ? listed.filter((c) => channelOf(c.channel) === chFilter) : listed),
+        [listed, chFilter]);
+    const messengerOut = !!callCtx?.channels?.messenger?.outbound;
+    const anyMessenger = messengerOut || !!callCtx?.channels?.messenger?.inbound
+        || (calls ?? []).some((c) => channelOf(c.channel) === "messenger");
     const followCount = followUps?.length ?? 0;
     const selected = useMemo(
         () => (selectedId ? (calls ?? []).find((c) => c.call_id === selectedId)
@@ -440,12 +527,16 @@ export function CallsView({ isMobile, onOpenConversation, onToast, focusWaId, on
         return out;
     }, [shown]);
 
+    // A call back goes out on the call's own app — Messenger only while it can call.
+    const canCallBack = useCallback((c: ApiCall) =>
+        channelOf(c.channel) === "messenger" ? !!c.external_id && messengerOut : !!c.wa_id, [messengerOut]);
     const callBack = useCallback(async (c: ApiCall) => {
-        if (!c.wa_id) return;
+        if (!canCallBack(c)) return;
         if (!callCtx) return onToast("Calling unavailable", "error");
-        const r = await callCtx.initiateCall(c.wa_id, c.name, c.conversation_id ?? null);
+        const ch = channelOf(c.channel);
+        const r = await callCtx.initiateCall(handleOf(c), c.name, c.conversation_id ?? null, { channel: ch });
         if (!r.ok) onToast(r.error || "Couldn't place the call", "error");
-    }, [callCtx, onToast]);
+    }, [callCtx, onToast, canCallBack]);
 
     // No second call while one rings, is placed, live or ending.
     const callBusy = !!callCtx && callCtx.phase !== "idle" && callCtx.phase !== "ended";
@@ -454,11 +545,11 @@ export function CallsView({ isMobile, onOpenConversation, onToast, focusWaId, on
     // number (a caller who never messaged gets a clear "no chat yet" pane
     // there). A live call keeps running, minimised.
     const openChat = useCallback((c: ApiCall, prefill?: string) => {
-        if (!onOpenConversation || (!c.wa_id && !c.conversation_id)) return;
-        onOpenConversation({ key: c.wa_id || "", conversationId: c.conversation_id ?? null, name: c.name, prefill: prefill ?? null });
+        if (!onOpenConversation || (!handleOf(c) && !c.conversation_id)) return;
+        onOpenConversation({ key: handleOf(c), conversationId: c.conversation_id ?? null, name: c.name, prefill: prefill ?? null });
     }, [onOpenConversation]);
     const openChatFor = (c: ApiCall) =>
-        onOpenConversation && (c.wa_id || c.conversation_id) ? () => openChat(c) : undefined;
+        onOpenConversation && (handleOf(c) || c.conversation_id) ? () => openChat(c) : undefined;
 
     const markDone = useCallback(async (c: ApiCall) => {
         setBusyDone(c.call_id);
@@ -474,12 +565,13 @@ export function CallsView({ isMobile, onOpenConversation, onToast, focusWaId, on
 
     // The caller panel: a synthetic conversation handle is enough — the sidebar
     // fetches the real CRM profile by wa_id itself.
-    const selConv = selected?.wa_id
+    const selMessenger = !!selected && channelOf(selected.channel) === "messenger";
+    const selConv = selected && (selMessenger ? selected.external_id : selected.wa_id)
         ? ({
               id: `call:${selected.call_id}`,
-              wa_id: selected.wa_id,
-              external_id: selected.wa_id,
-              channel: "whatsapp",
+              wa_id: selMessenger ? null : selected.wa_id,
+              external_id: selMessenger ? selected.external_id : selected.wa_id,
+              channel: selMessenger ? "messenger" : "whatsapp",
               name: selected.name,
               last_message_at: selected.started_at,
           } as unknown as React.ComponentProps<typeof CustomerSidebar>["conversation"])
@@ -499,7 +591,7 @@ export function CallsView({ isMobile, onOpenConversation, onToast, focusWaId, on
 
                     <div className="px-5 pt-5 pb-3">
                         <div className="text-white" style={{ fontSize: 22, fontWeight: 500 }}>Calls</div>
-                        <div style={{ fontSize: 13, color: "#7f9b8b", marginTop: 2 }}>WhatsApp voice calls</div>
+                        <div style={{ fontSize: 13, color: "#7f9b8b", marginTop: 2 }}>{anyMessenger ? "WhatsApp and Messenger voice calls" : "WhatsApp voice calls"}</div>
                         <div role="tablist" aria-label="Filter calls" className="flex gap-2 mt-4">
                             {([["all", "All"], ["follow_up", "Follow-ups"]] as const).map(([id, label]) => {
                                 const on = filter === id;
@@ -520,8 +612,42 @@ export function CallsView({ isMobile, onOpenConversation, onToast, focusWaId, on
                                 );
                             })}
                         </div>
+                        {anyMessenger && (
+                            <div role="group" aria-label="Filter by app" className="flex gap-1.5 mt-2">
+                                {([["all", "All apps"], ["whatsapp", "WhatsApp"], ["messenger", "Messenger"]] as const).map(([id, label]) => {
+                                    const on = chFilter === id;
+                                    return (
+                                        <button key={id} type="button" aria-pressed={on} onClick={() => setChFilter(id)}
+                                            className="rounded-full px-3 flex items-center gap-1"
+                                            style={{ minHeight: 44, fontSize: 12, fontWeight: 600,
+                                                     background: on ? "rgba(255,255,255,0.12)" : "transparent",
+                                                     color: on ? C.text : C.sub,
+                                                     border: `1px solid ${on ? "rgba(255,255,255,0.3)" : "rgba(255,255,255,0.08)"}` }}>
+                                            {id !== "all" && <ChannelGlyph channel={id} size={13} color={id === "whatsapp" ? CH_BADGE.whatsapp.fg : undefined} />}
+                                            {label}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
                     </div>
 
+                    {callCtx?.restriction && (
+                        <div role="alert" className="mx-5 mb-3 rounded-xl px-3 py-2 flex items-start gap-2"
+                            style={{ fontSize: 13, background: "rgba(234,0,56,0.16)", color: "#ffc2cc", border: "1px solid rgba(234,0,56,0.35)" }}>
+                            <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2}
+                                strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="flex-shrink-0" style={{ marginTop: 2 }}>
+                                <path d="M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z" />
+                            </svg>
+                            <span className="flex-1 min-w-0">
+                                WhatsApp paused business-initiated calling{callCtx.restriction.until ? ` until ${dayDate(callCtx.restriction.until)}` : ""}: {restrictionReason(callCtx.restriction.reasons)}
+                            </span>
+                            <button type="button" onClick={callCtx.dismissRestriction} aria-label="Dismiss"
+                                className="flex-shrink-0 rounded-full flex items-center justify-center" style={{ width: 44, height: 44, marginTop: -12, marginBottom: -12, marginRight: -8 }}>
+                                <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} aria-hidden="true"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                            </button>
+                        </div>
+                    )}
                     {!online && (
                         <div role="status" className="mx-5 mb-3 rounded-xl px-3 py-2" style={{ fontSize: 13, background: "rgba(245,182,66,0.12)", color: "#f5c451" }}>
                             You&apos;re offline — showing the last loaded calls. Calls can&apos;t ring here until you&apos;re back.
@@ -557,7 +683,9 @@ export function CallsView({ isMobile, onOpenConversation, onToast, focusWaId, on
                         ) : shown.length === 0 ? (
                             <div className="px-6 py-14 text-center">
                                 <div style={{ color: "#cfe9d9", fontSize: 15, fontWeight: 500 }}>
-                                    {filter === "follow_up" ? "No follow-ups — every caller has been called back" : "No calls yet — incoming WhatsApp calls ring here"}
+                                    {chFilter !== "all" && listed && listed.length > 0 ? `No ${CH_BADGE[chFilter].label} calls here`
+                                        : filter === "follow_up" ? "No follow-ups — every caller has been called back"
+                                        : `No calls yet — incoming ${anyMessenger ? "WhatsApp and Messenger" : "WhatsApp"} calls ring here`}
                                 </div>
                                 {filter === "all" && (
                                     <div style={{ color: "#7f9b8b", fontSize: 13, marginTop: 6 }}>
@@ -588,7 +716,7 @@ export function CallsView({ isMobile, onOpenConversation, onToast, focusWaId, on
                                                 style={{ borderTop: `1px solid ${C.line}`, backgroundColor: sel ? "rgba(37,211,102,0.08)" : undefined }}>
                                                 <button type="button" onClick={() => setSelectedId(c.call_id)}
                                                     className="flex-1 min-w-0 flex items-center gap-3 text-left"
-                                                    style={{ minHeight: 48 }} aria-label={`${who}, ${st.word}, details`}>
+                                                    style={{ minHeight: 48 }} aria-label={`${who}, ${st.word}${c.has_voicemail ? ", voicemail" : ""}, details, ${CH_BADGE[channelOf(c.channel)].label}`}>
                                                     <span className="flex items-center justify-center rounded-full flex-shrink-0"
                                                         style={{ width: 40, height: 40, backgroundColor: avatarColor(who), color: "#fff", fontSize: 13, fontWeight: 500 }}>
                                                         {initialsOf(who)}
@@ -596,6 +724,7 @@ export function CallsView({ isMobile, onOpenConversation, onToast, focusWaId, on
                                                     <span className="flex-1 min-w-0">
                                                         <span className="flex items-center gap-1.5">
                                                             <span className="truncate" style={{ fontSize: 14, fontWeight: 500, color: st.icon === "missed" ? st.dark : C.text }}>{who}</span>
+                                                            <ChannelBadge c={c} />
                                                         </span>
                                                         <span className="flex items-center gap-1.5 flex-wrap" style={{ fontSize: 12, color: st.dark, marginTop: 1 }}>
                                                             <CallIcon c={c} />
@@ -604,6 +733,11 @@ export function CallsView({ isMobile, onOpenConversation, onToast, focusWaId, on
                                                             {c.follow_up_open && (
                                                                 <span className="rounded-full px-1.5" style={{ fontSize: 11, fontWeight: 600, background: "rgba(242,85,90,0.2)", color: "#ffb3b5" }}>
                                                                     Follow up
+                                                                </span>
+                                                            )}
+                                                            {c.has_voicemail && (
+                                                                <span className="rounded-full px-1.5 flex items-center gap-1" style={{ fontSize: 11, fontWeight: 600, background: VM.bg, color: VM.fg }}>
+                                                                    <VoicemailGlyph size={11} /> Voicemail
                                                                 </span>
                                                             )}
                                                             {c.duration ? <span style={{ color: "#7f9b8b" }}>· {fmtCallDuration(c.duration)}</span> : null}
@@ -617,12 +751,15 @@ export function CallsView({ isMobile, onOpenConversation, onToast, focusWaId, on
                                                     </span>
                                                     <span className="flex-shrink-0 tabular-nums" style={{ fontSize: 12, color: C.faint }}>{clock(c.started_at)}</span>
                                                 </button>
-                                                {c.wa_id && (
+                                                {canCallBack(c) && (
                                                     <button type="button" onClick={() => callBack(c)}
-                                                        aria-label={`Call ${who} back on WhatsApp`} title="Call back on WhatsApp"
+                                                        aria-label={`Call ${who} back on ${CH_BADGE[channelOf(c.channel)].label}`}
+                                                        title={`Call back on ${CH_BADGE[channelOf(c.channel)].label}`}
                                                         disabled={callBusy}
                                                         className="flex-shrink-0 flex items-center justify-center rounded-full transition-transform hover:scale-105 disabled:opacity-40"
-                                                        style={{ width: 44, height: 44, backgroundColor: "rgba(37,211,102,0.16)", color: C.green, border: "1px solid rgba(37,211,102,0.3)" }}>
+                                                        style={channelOf(c.channel) === "messenger"
+                                                            ? { width: 44, height: 44, backgroundColor: "rgba(0,132,255,0.18)", color: "#9CCBFF", border: "1px solid rgba(0,132,255,0.4)" }
+                                                            : { width: 44, height: 44, backgroundColor: "rgba(37,211,102,0.16)", color: C.green, border: "1px solid rgba(37,211,102,0.3)" }}>
                                                         <PhoneGlyph size={17} />
                                                     </button>
                                                 )}
@@ -647,7 +784,7 @@ export function CallsView({ isMobile, onOpenConversation, onToast, focusWaId, on
                         c={selected}
                         isMobile={!!isMobile}
                         onBack={() => setSelectedId(null)}
-                        onCallBack={selected.wa_id ? () => callBack(selected) : undefined}
+                        onCallBack={canCallBack(selected) ? () => callBack(selected) : undefined}
                         callBusy={callBusy}
                         onOpenChat={openChatFor(selected)}
                         onUseReply={openChatFor(selected) ? (text) => openChat(selected, text) : undefined}

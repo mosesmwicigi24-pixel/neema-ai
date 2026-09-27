@@ -41,15 +41,22 @@ import androidx.compose.ui.unit.sp
 import ke.co.bethanyhouse.neema.app.DashboardViewModel
 import ke.co.bethanyhouse.neema.app.ViewId
 import ke.co.bethanyhouse.neema.core.model.Call
+import ke.co.bethanyhouse.neema.core.model.CallPermission
+import ke.co.bethanyhouse.neema.core.util.AppClock
+import ke.co.bethanyhouse.neema.feature.calls.firstNameOf
+import ke.co.bethanyhouse.neema.feature.calls.permissionLines
+import androidx.compose.ui.draw.alpha
 import ke.co.bethanyhouse.neema.core.ui.theme.ChannelColors
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 import ke.co.bethanyhouse.neema.core.util.liveAgo
+import ke.co.bethanyhouse.neema.feature.calls.CallChannelBadge
 import ke.co.bethanyhouse.neema.feature.calls.CallIcons
 import ke.co.bethanyhouse.neema.feature.calls.CallTone
 import ke.co.bethanyhouse.neema.feature.calls.agentFirst
 import ke.co.bethanyhouse.neema.feature.calls.callDuration
 import ke.co.bethanyhouse.neema.feature.calls.callRowWords
+import ke.co.bethanyhouse.neema.feature.calls.cantCallWhy
 
 /**
  * The panel's "Calls" section (CALLING_UX.md §7): this customer's last calls —
@@ -58,12 +65,21 @@ import ke.co.bethanyhouse.neema.feature.calls.callRowWords
  */
 @Composable
 internal fun CallsSection(vm: CustomerViewModel, dash: DashboardViewModel) {
-    val key = vm.callsKey() ?: return
+    // WhatsApp's number, else (a Messenger chat) the PSID — never shown, only used to fetch and focus.
+    val key = vm.callsKey() ?: vm.psidForCalls() ?: return
+    val channels by vm.callChannels.collectAsState()
+    val psid = vm.psidForCalls()
+    val onMessenger = psid != null && channels?.messenger?.outbound == true
     val calls by vm.recentCalls.collectAsState()
+    val permission by vm.callPermission.collectAsState()
+    val request by vm.callRequest.collectAsState()
     LaunchedEffect(vm, key) {
         vm.loadCalls()
+        vm.loadPermission()
         vm.watchCalls()
     }
+    // Messenger calling switched on / off: the permission shown is the app the Call button uses.
+    LaunchedEffect(vm, onMessenger) { vm.loadPermission() }
     val c = Neema.colors
     val list = calls ?: return
     val open = list.count { it.followUpOpen }
@@ -90,15 +106,85 @@ internal fun CallsSection(vm: CustomerViewModel, dash: DashboardViewModel) {
                 contentAlignment = Alignment.Center,
             ) { Text("All calls", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = if (c.isDark) Palette.Emerald300 else Palette.Emerald700) }
         }
+        CallPermissionBlock(
+            permission, request, first = firstNameOf(vm.displayNameForCalls()) ?: "them",
+            onSend = vm::sendCallRequest, onCallNow = { if (onMessenger && psid != null) vm.callOnMessenger(psid) else vm.call(key) },
+            onSettings = { dash.navigate(ViewId.Settings) },
+        )
         if (list.isEmpty()) {
             Text("No calls with this customer yet.", fontSize = 12.sp, color = c.muted, modifier = Modifier.padding(vertical = 6.dp))
         }
-        list.forEach { CallLine(it) }
+        // Both apps in the list: each line says which.
+        val mixed = list.any { ke.co.bethanyhouse.neema.feature.calls.channelOf(it.channel) == ke.co.bethanyhouse.neema.feature.calls.MESSENGER }
+        list.forEach { CallLine(it, showChannel = mixed) }
+    }
+}
+
+/**
+ * Where this customer's call permission stands (CALLING_UX.md §2.1) — said
+ * honestly: allowed permanently / until a date, a request waiting, declined,
+ * revoked after unanswered calls, when a new request can go, calls left
+ * today — and "Send call request" when calling them needs one.
+ */
+@Composable
+internal fun CallPermissionBlock(
+    p: CallPermission?,
+    request: CustomerViewModel.CallRequestUi,
+    first: String,
+    onSend: () -> Unit,
+    onCallNow: () -> Unit,
+    onSettings: () -> Unit,
+) {
+    val c = Neema.colors
+    val lines = p?.let { permissionLines(it, first, AppClock.now()) }.orEmpty()
+    val needsRequest = p != null && p.canCall == false && p.status != "requested" && !request.sent && !request.alreadyAllowed &&
+        !request.templateRequired
+    if (lines.isEmpty() && !needsRequest && !request.sent && !request.alreadyAllowed && request.error == null) return
+    val link = if (c.isDark) Palette.Emerald300 else Palette.Emerald700
+    Column(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 4.dp, end = 8.dp)) {
+        lines.forEach { Text(it, fontSize = 12.sp, color = c.textMid, lineHeight = 17.sp) }
+        when {
+            request.alreadyAllowed -> {
+                Text("$first already allows calls", fontSize = 12.sp, color = link, lineHeight = 17.sp)
+                SmallPill("Call now", filled = true, onClick = onCallNow)
+            }
+            request.sent -> Text("Call request sent — you'll be told when $first taps Allow", fontSize = 12.sp, color = link, lineHeight = 17.sp)
+            needsRequest -> {
+                val blocked = p?.canRequest == false
+                SmallPill(if (request.busy) "Sending…" else "Send call request", filled = true, enabled = !blocked && !request.busy, onClick = onSend)
+            }
+        }
+        request.error?.let {
+            Text(it, fontSize = 12.sp, color = if (c.isDark) Palette.Red300 else Palette.Red700, lineHeight = 17.sp, modifier = Modifier.padding(top = 4.dp))
+            if (request.adminCanFix) SmallPill("Open WhatsApp calling settings", filled = false, onClick = onSettings)
+        }
     }
 }
 
 @Composable
-private fun CallLine(call: Call) {
+private fun SmallPill(text: String, filled: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
+    val c = Neema.colors
+    Box(
+        Modifier.padding(top = 4.dp).heightIn(min = 48.dp).clickable(enabled = enabled, role = Role.Button, onClick = onClick),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Row(
+            Modifier.alpha(if (enabled) 1f else 0.5f).clip(RoundedCornerShape(50))
+                .then(if (filled) Modifier.background(Palette.Call.WaDeep) else Modifier.border(1.dp, c.border, RoundedCornerShape(50)))
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (filled) {
+                Icon(CallIcons.Phone, null, tint = Color.White, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(6.dp))
+            }
+            Text(text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = if (filled) Color.White else c.text)
+        }
+    }
+}
+
+@Composable
+private fun CallLine(call: Call, showChannel: Boolean = false) {
     val c = Neema.colors
     val w = callRowWords(call)
     val tone = when (w.tone) {
@@ -110,12 +196,18 @@ private fun CallLine(call: Call) {
     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(w.icon, null, tint = tone, modifier = Modifier.size(14.dp))
         Spacer(Modifier.width(8.dp))
+        // Which app the call was on (both show here for a customer we know on both).
+        if (showChannel) {
+            CallChannelBadge(call.channel, onDark = c.isDark, fontSize = 10.sp)
+            Spacer(Modifier.width(6.dp))
+        }
         Column(Modifier.weight(1f)) {
             Text(
                 listOfNotNull(w.label, callDuration(call.duration).ifEmpty { null }, agentFirst(call.agentName)).joinToString(" · "),
                 fontSize = 12.sp, color = tone, fontWeight = FontWeight.Medium, maxLines = 1,
             )
             call.summary?.takeIf { it.isNotBlank() }?.let { Text(it, fontSize = 11.sp, color = c.textMid, maxLines = 2) }
+            if (call.hasVoicemail) Text("Voicemail — open the chat to listen", fontSize = 11.sp, color = c.textMid, maxLines = 1)
         }
         if (call.followUpOpen) {
             Text(
@@ -127,23 +219,64 @@ private fun CallLine(call: Call) {
     }
 }
 
-/** A conversation on a platform that has no business calling API. */
+/**
+ * A conversation whose app can't call right now: Messenger while the server's
+ * `messenger_calling_enabled` switch is off (or not yet read), Instagram always
+ * (no business calling API).
+ */
 enum class CallPlatform(val title: String, val colors: List<Color>) {
     Messenger("Messenger", ChannelColors.MessengerGradient),
     Instagram("Instagram", ChannelColors.InstagramGradient),
 }
 
-/** Messenger and Instagram cannot be called (never promise it); every other channel is WhatsApp's or has no call. */
+/** The sheet's platform for a Messenger / Instagram chat; every other channel is WhatsApp's or has no call. */
 fun callPlatformOf(channel: String?): CallPlatform? = when (channel) {
-    "messenger" -> CallPlatform.Messenger
+    "messenger", "facebook" -> CallPlatform.Messenger
     "instagram" -> CallPlatform.Instagram
     else -> null
 }
 
 /**
- * The Call button on a Messenger / Instagram conversation: the platform says
- * plainly that it doesn't let businesses take calls, and offers a WhatsApp
- * call instead — to the number on file, or the question that asks for it.
+ * A Messenger chat's PSID (digits), the handle a Messenger call goes to — null
+ * on any other channel. Never shown.
+ */
+fun messengerPsid(conversation: ke.co.bethanyhouse.neema.core.model.Conversation): String? =
+    conversation.externalId?.filter { it.isDigit() }?.takeIf {
+        it.isNotEmpty() && (conversation.channel == "messenger" || conversation.channel == "facebook")
+    }
+
+/** What the panel's Call button does for a chat (CustomerSidebar.tsx's reach-out Call). */
+sealed interface CallButton {
+    /** A Messenger chat while Messenger calling is on: call them on Messenger. */
+    data class OnMessenger(val psid: String) : CallButton
+    /** The chat's app can't call now: the "call on WhatsApp instead" sheet. */
+    data class Sheet(val platform: CallPlatform) : CallButton
+    /** A WhatsApp call to their number. */
+    data class OnWhatsApp(val digits: String) : CallButton
+}
+
+/**
+ * The Call button for [conversation]: Messenger only while the server says
+ * Messenger can call ([channels] unread counts as off); otherwise a Messenger
+ * or Instagram chat gets the sheet; anything else a WhatsApp call when there
+ * is a number. Null: no Call button.
+ */
+fun callButtonFor(
+    conversation: ke.co.bethanyhouse.neema.core.model.Conversation,
+    channels: ke.co.bethanyhouse.neema.core.model.CallChannels?,
+    phoneDigits: String?,
+): CallButton? {
+    val psid = messengerPsid(conversation)
+    if (psid != null && channels?.messenger?.outbound == true) return CallButton.OnMessenger(psid)
+    callPlatformOf(conversation.channel)?.let { return CallButton.Sheet(it) }
+    return phoneDigits?.let { CallButton.OnWhatsApp(it) }
+}
+
+/**
+ * The Call button on a chat whose app can't call right now: it says why
+ * plainly ([cantCallWhy] — Messenger calling isn't switched on yet; Instagram
+ * doesn't let businesses take calls) and offers a WhatsApp call instead — to
+ * the number on file, or the question that asks for it.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -184,7 +317,7 @@ fun CallOnWhatsAppContent(
             }
             Spacer(Modifier.width(12.dp))
             Text(
-                "${platform.title} doesn't let businesses take calls.", color = Color.White, fontSize = 15.sp,
+                cantCallWhy(platform.title), color = Color.White, fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold, lineHeight = 20.sp, modifier = Modifier.semantics { heading() },
             )
         }

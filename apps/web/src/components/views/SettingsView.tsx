@@ -5,6 +5,7 @@ import { InputField } from "@/components/ui/FormFields";
 import { settingsApi, type ApiTranslationSetting,
          type ApiCampaign, type ApiOfferSetting } from "@/lib/api";
 import type { SharedViewProps } from "@/types";
+import { WhatsAppCallingCard } from "@/components/views/WhatsAppCallingCard";
 
 // ── Platform SVG icons ────────────────────────────────────────────────────────
 
@@ -446,7 +447,10 @@ function SmallInput({ value, onChange, placeholder, type = "text" }: {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export function SettingsView({ onToast, isMobile }: SharedViewProps): React.ReactElement {
+export function SettingsView({ onToast, isMobile, canManageCalling = false }: SharedViewProps & {
+    /** manage_settings: the WhatsApp calling card (its routes refuse everyone else). */
+    canManageCalling?: boolean;
+}): React.ReactElement {
     const [savingBiz, setSavingBiz]   = useState(false);
     const [savingAi,  setSavingAi]    = useState(false);
     const [integrations, setIntegrations] = useState<Integration[]>(INTEGRATIONS);
@@ -568,6 +572,8 @@ export function SettingsView({ onToast, isMobile }: SharedViewProps): React.Reac
                     </button>
                 </SectionCard>
             </div>
+
+            {canManageCalling && <WhatsAppCallingCard onToast={onToast} />}
 
             {/* Integrations */}
             <SectionCard title="Integrations" description="Connected platforms and services">

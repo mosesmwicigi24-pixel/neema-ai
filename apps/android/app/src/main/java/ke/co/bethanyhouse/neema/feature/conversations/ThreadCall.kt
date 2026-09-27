@@ -45,10 +45,13 @@ import ke.co.bethanyhouse.neema.core.ui.theme.ChannelColors
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 import ke.co.bethanyhouse.neema.core.util.Fmt
+import ke.co.bethanyhouse.neema.feature.calls.CallChannelBadge
 import ke.co.bethanyhouse.neema.feature.calls.CallIcons
+import ke.co.bethanyhouse.neema.feature.calls.channelLabel
 import ke.co.bethanyhouse.neema.feature.calls.CallTone
 import ke.co.bethanyhouse.neema.feature.calls.agentFirst
 import ke.co.bethanyhouse.neema.feature.calls.callRowWords
+import ke.co.bethanyhouse.neema.feature.calls.threadCallLabel
 
 /**
  * A WhatsApp call in the thread, where it happened (CALLING_UX.md §7): a
@@ -68,7 +71,8 @@ internal fun ThreadCallEvent(msg: ThreadMsg, onUseAsReply: (String) -> Unit) {
         CallTone.Live, CallTone.Good -> if (c.isDark) Palette.Emerald300 else Palette.Emerald700
         else -> c.textMid
     }
-    val label = msg.body.ifBlank { words?.label ?: "Call" }
+    // A voicemail came with it: "Missed call · voicemail" (the audio is a message in this chat).
+    val label = threadCallLabel(msg.body, call)
     // Who took it — not for calls nobody answered (as the web's pill).
     val agent = agentFirst(msg.agentName ?: call?.agentName)
         ?.takeIf { call?.status !in setOf("missed", "no_answer", "cancelled", "failed") }
@@ -79,10 +83,13 @@ internal fun ThreadCallEvent(msg: ThreadMsg, onUseAsReply: (String) -> Unit) {
             Modifier.clip(RoundedCornerShape(50)).background(if (c.isDark) c.bg3 else Palette.Stone100)
                 .border(1.dp, if (c.isDark) c.border else Palette.Stone200, RoundedCornerShape(50))
                 .padding(horizontal = 12.dp, vertical = 6.dp)
-                .clearAndSetSemantics { contentDescription = "WhatsApp call: $line" },
+                .clearAndSetSemantics { contentDescription = "${channelLabel(call?.channel)} call: $line" },
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(words?.icon ?: CallIcons.Phone, null, tint = tone, modifier = Modifier.size(13.dp))
+            Spacer(Modifier.width(6.dp))
+            // Which app the call was on — a badge, so a mixed history is never ambiguous.
+            CallChannelBadge(call?.channel, onDark = c.isDark, fontSize = 10.sp)
             Spacer(Modifier.width(6.dp))
             Text(label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = tone, maxLines = 1)
             val rest = listOfNotNull(agent, time.ifEmpty { null }).joinToString(" · ")

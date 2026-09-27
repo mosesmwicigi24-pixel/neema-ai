@@ -308,9 +308,10 @@ class NeemaApi(val http: NeemaHttp) {
          * "follow_up" to the missed / callback calls nobody has returned yet.
          * With no argument the request carries no query (the web's own call).
          */
-        suspend fun list(waId: String? = null, view: String? = null, limit: Int? = null): List<Call> {
+        suspend fun list(waId: String? = null, view: String? = null, limit: Int? = null, psid: String? = null, channel: String? = null): List<Call> {
             val q = listOfNotNull(
-                waId?.let { "wa_id=${enc(it.removePrefix("+"))}" }, view?.let { "view=${enc(it)}" }, limit?.let { "limit=$it" },
+                waId?.let { "wa_id=${enc(it.removePrefix("+"))}" }, psid?.let { "psid=${enc(it)}" }, channel?.let { "channel=${enc(it)}" },
+                view?.let { "view=${enc(it)}" }, limit?.let { "limit=$it" },
             )
             return http.get(if (q.isEmpty()) "/admin/calls" else "/admin/calls?" + q.joinToString("&"))
         }
@@ -323,15 +324,42 @@ class NeemaApi(val http: NeemaHttp) {
             http.post("/admin/calls/${enc(callId)}/follow-up-done", JsonObject(emptyMap()))
         suspend fun iceConfig(): IceConfig = http.get("/admin/calls/ice-config")
         suspend fun offer(callId: String): CallOffer = http.get("/admin/calls/${enc(callId)}/offer")
-        suspend fun answer(callId: String, sdp: String): OkResponse =
+        /**
+         * Accept the call with our SDP: the answer on WhatsApp; on Messenger our
+         * OFFER, and the reply carries Meta's answer (+ an optional renegotiation).
+         */
+        suspend fun answer(callId: String, sdp: String): CallSdpResponse =
             http.post("/admin/calls/${enc(callId)}/answer", buildJsonObject { put("sdp", sdp) })
+        /** GET /admin/calls/channels: which channels can take / place a call right now. */
+        suspend fun channels(): CallChannels = http.get("/admin/calls/channels")
+        /** A Messenger call to [psid] with our offer: Meta's answer comes back at once. */
+        suspend fun connectMessenger(psid: String, sdp: String, name: String? = null): CallSdpResponse =
+            http.post("/admin/calls/connect", buildJsonObject {
+                put("channel", "messenger"); put("psid", psid); put("sdp", sdp); if (!name.isNullOrBlank()) put("name", name)
+            })
+        /** Whether this Messenger customer accepted our call request. */
+        suspend fun messengerPermission(psid: String): CallPermission =
+            http.get("/admin/calls/permission?channel=messenger&psid=${enc(psid)}")
+        /** Sends Messenger's `calling_optin` request (Accept / Decline); the answer arrives as `call_permission`. */
+        suspend fun requestMessengerPermission(psid: String): PermissionRequestResponse =
+            http.post("/admin/calls/request-permission", buildJsonObject { put("channel", "messenger"); put("psid", psid) })
         suspend fun terminate(callId: String): OkResponse = http.post("/admin/calls/${enc(callId)}/terminate", JsonObject(emptyMap()))
         suspend fun callback(callId: String): OkResponse = http.post("/admin/calls/${enc(callId)}/callback", JsonObject(emptyMap()))
         suspend fun connect(to: String, sdp: String, name: String? = null): ConnectResponse =
             http.post("/admin/calls/connect", buildJsonObject { put("to", to); put("sdp", sdp); if (name != null) put("name", name) })
         /** Sends the customer WhatsApp's call-permission request; their answer arrives as `call_permission`. */
-        suspend fun requestPermission(to: String): PermissionRequestResponse =
-            http.post("/admin/calls/request-permission", buildJsonObject { put("to", to) })
+        suspend fun requestPermission(to: String, name: String? = null): PermissionRequestResponse =
+            http.post("/admin/calls/request-permission", buildJsonObject {
+                put("to", to); if (!name.isNullOrBlank()) put("name", name)
+            })
+        /** GET /admin/calls/settings (manage_settings): the number's WhatsApp calling settings. */
+        suspend fun settings(): CallingSettings = http.get("/admin/calls/settings")
+        /** POST /admin/calls/settings with ONLY the fields to change (call_hours / voicemail are merged server-side). */
+        suspend fun saveSettings(change: JsonObject): CallingSettingsSaved = http.post("/admin/calls/settings", change)
+        /** GET /admin/calls/permission-template: is the outside-the-window call-request template there and approved? */
+        suspend fun permissionTemplate(): PermissionTemplate = http.get("/admin/calls/permission-template")
+        /** POST /admin/calls/permission-template: create it with the server's default wording (Meta reviews it). */
+        suspend fun createPermissionTemplate(): JsonObject = http.post("/admin/calls/permission-template", JsonObject(emptyMap()))
         suspend fun transcript(callId: String): CallTranscript = http.get("/admin/calls/${enc(callId)}/transcript")
         suspend fun transcribe(callId: String): TranscribeResponse =
             http.post("/admin/calls/${enc(callId)}/transcribe", JsonObject(emptyMap()))

@@ -103,6 +103,12 @@ async def receive_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     channel = "instagram" if payload.get("object") == "instagram" else "messenger"
 
     redis = getattr(request.app.state, "redis", None)
+    # Messenger calling (page `calls` / `call_permission_reply` fields). A tap:
+    # best-effort, and it must never cost the messages in the same delivery.
+    try:
+        await _handle_messenger_calls(payload, redis)
+    except Exception as exc:
+        _log.warning("Messenger calls tap failed (continuing): %s", exc)
     try:
         await _capture_events(db, channel, payload, redis=redis)
     except Exception as exc:                     # never let capture break the ack
@@ -424,6 +430,173 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
                                                       page_id=page_id or None, media=media)
                 except Exception as exc:
                     _log.warning("meta agent reply failed to schedule for %s: %s", sender, exc)
+
+
+# ── Messenger voice calling (the page `calls` + `call_permission_reply` fields) ──
+# Shapes: docs/research/META_CALLING_2026-09.md §7a. Call events arrive as
+# `entry[].calls[]` (we also read a `changes[]` field "calls", in case Meta
+# wraps them like other page fields); the permission reply sits on the entry
+# itself in the docs' sample (also read from `messaging[]`, since the prose
+# calls it a postback). Deduped on (call id, event) exactly like the WhatsApp
+# tap, so a Meta retry never double-rings. With messenger_calling_enabled off
+# every event is only logged: nobody is rung.
+
+def _messenger_call_events(entry: dict) -> list[dict]:
+    events = [c for c in (entry.get("calls") or []) if isinstance(c, dict)]
+    for ch in entry.get("changes") or []:
+        if isinstance(ch, dict) and ch.get("field") == "calls":
+            v = ch.get("value") or {}
+            if isinstance(v, dict):
+                events.extend(c for c in (v.get("calls") or ([v] if v.get("event") else []))
+                              if isinstance(c, dict))
+    return events
+
+
+def _messenger_permission_replies(entry: dict) -> list[tuple[str, dict]]:
+    out: list[tuple[str, dict]] = []
+    holders = [entry] + [m for m in (entry.get("messaging") or []) if isinstance(m, dict)]
+    for ch in entry.get("changes") or []:
+        if isinstance(ch, dict) and ch.get("field") == "call_permission_reply":
+            v = ch.get("value") or {}
+            if isinstance(v, dict):
+                holders.append(v if "call_permission_reply" in v
+                               else {"sender": v.get("sender"), "call_permission_reply": v})
+    for h in holders:
+        reply = h.get("call_permission_reply")
+        psid = str((h.get("sender") or {}).get("id") or "")
+        if isinstance(reply, dict) and psid:
+            out.append((psid, reply))
+    return out
+
+
+def _psid_of(call: dict, page_id: str | None) -> str | None:
+    """The customer on a Messenger call event. `from` is documented as the
+    caller (PSID) and `to` as the Page; for our own call Meta may swap them,
+    so: whichever side is not the Page. `recipient_id` on call_status."""
+    for k in ("from", "to", "recipient_id"):
+        v = str(call.get(k) or "")
+        if v and v != (page_id or "") and v not in _own_page_ids():
+            return v
+    return None
+
+
+async def _handle_messenger_calls(payload: dict, redis) -> None:
+    if payload.get("object") != "page":
+        return
+    import json
+    from app.services import call_log, messenger_calling
+    on = messenger_calling.enabled()
+    for entry in payload.get("entry", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        page_id = str(entry.get("id") or (entry.get("recipient") or {}).get("id") or "") or None
+        for call in _messenger_call_events(entry):
+            _log.warning("Messenger calls webhook (%s): %s", "on" if on else "calling off — logged only",
+                         json.dumps(call)[:400])
+            if on:
+                await _messenger_call_event(redis, call, page_id)
+        for psid, reply in _messenger_permission_replies(entry):
+            _log.warning("Messenger call_permission_reply from %s: %s", psid, json.dumps(reply)[:200])
+            await call_log.note_permission_reply(redis, psid, reply, channel="messenger")
+
+
+async def _messenger_call_event(redis, call: dict, page_id: str | None) -> None:
+    import json
+    from app.services import call_log
+    from app.routers.whatsapp_webhook import on_terminate
+    cid = str(call.get("id") or "")
+    event = str(call.get("event") or "").lower()
+    if not cid or not event:
+        return
+    status = str(call.get("call_status") or "").lower()
+    session = call.get("session") if isinstance(call.get("session"), dict) else {}
+    dedup = event
+    if event == "call_status":
+        dedup = f"status:{status.upper()}"
+    elif event == "media_update":
+        dedup = f"media_update:{session.get('version')}"
+    from app.routers.whatsapp_webhook import _first_delivery, _release
+    dedup_key = f"wa:call:{cid}:{dedup}"
+    if not await _first_delivery(redis, dedup_key):
+        return
+    psid = _psid_of(call, page_id)
+    direction = str(call.get("call_direction") or "").lower()
+    if page_id and redis is not None:
+        try:   # the Page to act as for every later action on this call
+            await redis.set(f"wa:call:page:{cid}", page_id, ex=86400)
+        except Exception:
+            pass
+
+    if event == "connect" and direction == "business_initiated":
+        # Our own call: /calls/connect writes the row from Meta's response.
+        # Should this webhook beat it, write it now (the route fills the agent).
+        if psid and not await call_log.known_call(cid):
+            await call_log.upsert_outbound(cid, None, channel="messenger", external_id=psid)
+            await call_log.apply_early(redis, cid)
+        return
+
+    if event == "connect":
+        # A customer is calling. Never ring a call that is already over.
+        if await call_log.ended_before_ring(redis, cid) is not None:
+            if not await call_log.record_ringing(cid, None, None, channel="messenger", external_id=psid):
+                await _release(redis, dedup_key)       # parked end kept for a redelivery
+                return
+            await call_log.apply_early(redis, cid)
+            await call_log.publish_update(redis, cid)
+            return
+        if await call_log.known_call(cid):
+            return
+        if redis is not None:
+            # Same key as WhatsApp's offer stash. Messenger sends no SDP: the
+            # softphone builds the offer (sdp None, offer_required).
+            try:
+                await redis.set(f"wa:call:offer:{cid}", json.dumps({
+                    "from": psid, "to": page_id, "page_id": page_id, "sdp": None,
+                    "channel": "messenger", "timestamp": call.get("timestamp"),
+                }), ex=300)
+            except Exception as exc:
+                _log.warning("Messenger call stash failed for %s: %s", cid, exc)
+        await call_log.publish(redis, {
+            "type": "incoming_call", "call_id": cid, "from": psid, "name": None,
+            "at": call.get("timestamp"), "channel": "messenger", "external_id": psid,
+        })
+        _log.warning("Messenger published incoming_call ring for %s", cid)
+        if not await call_log.record_ringing(cid, None, None, channel="messenger", external_id=psid):
+            await _release(redis, dedup_key)           # database blip: a redelivery writes it
+            return
+        await call_log.apply_early(redis, cid)      # a terminate parked meanwhile
+        await call_log.publish_update(redis, cid)   # the name, from the person
+    elif event == "call_status":
+        if status == "ringing":
+            if await call_log.status_of(cid) not in call_log.TERMINAL:
+                await call_log.publish(redis, {"type": "call_status", "call_id": cid, "status": "ringing"})
+        elif status == "accepted":
+            moved = await call_log.mark_answered(cid, None, redis)
+            if moved is not None:
+                await call_log.publish(redis, {"type": "call_answered", "call_id": cid, **moved})
+            elif not await call_log.known_call(cid):
+                await call_log.park(redis, "answer", cid)
+    elif event == "media_update":
+        # New SDP from the customer's side (they picked up our call, muted, …):
+        # the softphone applies the highest version.
+        reneg = session.get("sdp_renegotiation") or {}
+        ev = {"type": "media_update", "call_id": cid, "channel": "messenger",
+              "version": session.get("version"),
+              "sdp_type": (reneg.get("sdp_type") if isinstance(reneg, dict) else None) or "offer",
+              "sdp": reneg.get("sdp") if isinstance(reneg, dict) else reneg}
+        if redis is not None:
+            try:
+                prev = await redis.get(f"wa:call:media:{cid}")
+                if prev and int(json.loads(prev).get("version") or 0) > int(ev["version"] or 0):
+                    return          # an older SDP that arrived late: never apply it
+                await redis.set(f"wa:call:media:{cid}", json.dumps(ev), ex=3600)
+            except Exception:
+                pass
+        await call_log.publish(redis, ev)
+    elif event == "terminate":
+        if not await on_terminate(redis, cid, call.get("duration"), call.get("status"),
+                                  extra={"channel": "messenger"}):
+            await _release(redis, dedup_key)       # database blip: a redelivery applies it
 
 
 # ── Facebook/Instagram comment engagement ────────────────────────────────────
