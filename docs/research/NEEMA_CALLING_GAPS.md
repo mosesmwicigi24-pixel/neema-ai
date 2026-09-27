@@ -40,3 +40,45 @@ requests via a `calling_optin` template, `calls` and `call_permission_reply`
 page webhooks). Neema already runs Messenger messaging with `pages_messaging`, and
 its softphone is plain WebRTC offer/answer — so Messenger calls fit the existing
 engine as a second channel adapter, not a redesign.
+
+## Known limits
+
+Found by the adversarial storms in `apps/api/tests/test_calls_adversarial_db.py`
+(2026-09-27). Each is a platform limitation, or the price of degrading instead
+of failing; nothing here is fixable on our side alone.
+
+- **No exactly-once, no ordering (Meta).** We dedupe per (call, event) in
+  redis for an hour and make every handler idempotent on the row. With redis
+  down there is no dedup at all: correctness still holds (conditional moves),
+  but a redelivered `connect` whose row was lost to a database blip may ring
+  the team a second time.
+- **Terminate before connect with redis down.** A terminate that beats its
+  `connect` is parked in redis. With redis unavailable it can't be parked, so
+  the late `connect` rings a call that is already over until the 2-minute
+  stale sweep closes it (missed).
+- **Answer lock without redis is per-row.** When redis is down the answer
+  lock is a conditional update on the ringing row (still one `accept` across
+  workers). If the database is ALSO down (no row to claim) it falls back to a
+  per-process claim — two API workers could then both reach Meta; Meta
+  accepts only the first (the second gets an error the agent sees as 502).
+- **Decline vs. Meta's terminate without redis.** The "this was a decline"
+  intent lives in the redis lock; with redis down, a Meta terminate that beats
+  our own bookkeeping logs the call `missed` instead of `declined`.
+- **A caller hanging up exactly as an agent answers.** Meta can accept our
+  answer and end the call in the same instant. We log what Meta reports
+  (`completed` when its terminate carries a duration, the agent kept on the
+  row) and the phone gets 410 — the agent may have heard nothing.
+- **Accept timeout is Meta's (30–60 s WhatsApp, 60 s Messenger).** A slow
+  network between the agent's phone and us can lose the call; the phone gets
+  a 502 / 410 with the reason. Nothing we can extend.
+- **Permission request limits.** WhatsApp: 1 a day / 2 a week per customer;
+  after a request we send, Neema blocks a second one for 24 h without asking
+  Meta. Requests made outside Neema (another tool on the same number) are only
+  known from Meta's `call_permissions` counters (cached ~60 s). Messenger
+  gives usage but no reset time, so `request_available_at` stays null there.
+- **Missed-call message cooldown without redis** is per process: two API
+  workers could each send one (at most one per worker per cooldown).
+- **A transcription stuck `processing`** (the worker died mid-analysis) is not
+  re-claimed by a later Meta event; an agent's Transcribe (own recording) or a
+  manual fix is needed. Meta sends the transcription event once per call.
+

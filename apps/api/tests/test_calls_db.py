@@ -713,9 +713,12 @@ def test_outside_the_window_the_template_carries_their_first_name(env, world, mo
     r = env.client.post("/api/admin/calls/request-permission", json={"to": wa}, headers=_as(world["ann"]))
     assert r.status_code == 200 and r.json()["route"] == "template"
     assert env.meta.sent[-1] == ("permission_template", wa, "call_ok", "en_US", ("Grace",))
-    # A template without body variables: no parameters at all.
+    # A template without body variables: no parameters at all. (Another
+    # customer: WhatsApp allows one request a day, so a second to Grace is a 409.)
     monkeypatch.setattr(settings, "call_permission_template_params", "", raising=False)
-    env.client.post("/api/admin/calls/request-permission", json={"to": wa, "name": "Mary"},
+    wa2 = "254766000012"
+    _inbound_message(env, wa2, hours_ago=48, name="Mary Atieno")
+    env.client.post("/api/admin/calls/request-permission", json={"to": wa2, "name": "Mary"},
                     headers=_as(world["ann"]))
     assert env.meta.sent[-1][-1] == ()
 

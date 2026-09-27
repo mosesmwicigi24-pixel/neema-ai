@@ -79,6 +79,38 @@ beat `/calls/connect`'s outbound row are applied the moment the row lands. A
 call still `ringing` after 2 min is closed (missed / no_answer) whenever the
 Calls list or a single row is read — only `ringing` rows, never a live call.
 
+Hardening (2026-09-27, `tests/test_calls_adversarial_db.py` — no new fields):
+- A terminate carrying a `duration` means the customer picked up (Meta sends
+  it only then): the call is `completed` even when our "answered" never
+  landed first (lost race, reordered webhooks). The outcome is decided under
+  the row lock, so an answer committing at the same instant is never
+  overwritten by `missed`.
+- `POST /calls/{id}/answer` may return **410** after Meta accepted, when the
+  caller hung up in the same instant and the terminate was logged first: the
+  row says who picked up; no `call_answered` follows a `call_ended`.
+- A parked terminate (no row yet) is announced when the row lands, with the
+  real outcome — never a guess first. `call_status {ringing}` and
+  `outbound_answer` are never published for a call already ended.
+- Decline / call-back claim the ringing call with the same lock as answer, so
+  a colleague's answer and a decline never both reach Meta (the loser gets
+  409 / 410). Meta's terminate for a declined call that beats our own
+  bookkeeping still logs `declined` (not `missed`, no missed-call message).
+- Redis down (or absent): webhooks still ring and log (dedup fails open —
+  every handler is idempotent on the row); the answer lock falls back to a
+  conditional update on the ringing row, so still one `accept` per call.
+- Database blip during a webhook: the webhook is still acked at once; a ring
+  whose row was lost is written by its terminate (or a redelivery); a
+  terminate that couldn't be applied releases its dedup key so Meta's
+  redelivery applies it; otherwise the 2-minute sweep closes it.
+- `POST /calls/request-permission`: one request per customer in flight. After
+  a WhatsApp request went out, a second one within 24 h is 409 `138009`
+  (`wait`) with `request_available_at` without asking Meta, and
+  `GET /calls/permission` says `can_request: false` with that time. Messenger:
+  a second tap while one is in flight is 409 `request_limit` (`wait`).
+- Transcripts: when the AI is down or answers garbage, the transcript is kept
+  and `transcript_status` is `failed` (Retry); `insights` only ever holds the
+  documented keys and types. A transcript event delivered twice is analysed once.
+
 The thread (`GET /conversations/{id}/messages`, first page) now includes
 `system_event` items with `event_kind: "call"`, `text` (the label), `agent_name`,
 `event_reason` (the summary) and `call` (the full row).

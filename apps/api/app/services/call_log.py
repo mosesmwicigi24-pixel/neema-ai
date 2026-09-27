@@ -140,11 +140,18 @@ async def record_ringing(call_id: str, wa_id: str | None, name: str | None, *,
                         person_id = await resolve_person_id_for_wa_id(db, wa_id, source="whatsapp_call")
                     except Exception:
                         person_id = None
-                c = Call(call_id=call_id, wa_id=wa_id, caller_name=name,
-                         status="ringing", person_id=person_id, channel=channel or "whatsapp",
-                         external_id=external_id)
-                db.add(c)
+                # INSERT … ON CONFLICT: the connect and its (reordered) terminate
+                # may both write the row at once — the second must see it, not fail.
+                import uuid as _uuid
+                from sqlalchemy.dialects.postgresql import insert as pg_insert
+                await db.execute(pg_insert(Call).values(
+                    id=_uuid.uuid4(), call_id=call_id, wa_id=wa_id, caller_name=name,
+                    direction="inbound", status="ringing", person_id=person_id,
+                    channel=channel or "whatsapp", external_id=external_id,
+                    started_at=datetime.now(timezone.utc), transcript_status="none",
+                ).on_conflict_do_nothing(index_elements=["call_id"]))
                 await db.commit()
+                c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one()
             who = _who(c)
             conv = await conversation_ids_by_channel(db, [who] if who else [])
             return {"person_id": str(c.person_id) if c.person_id else None,
@@ -163,6 +170,29 @@ async def known_call(call_id: str) -> bool:
                 select(Call.id).where(Call.call_id == call_id))).first() is not None
     except Exception:
         return False
+
+
+async def status_of(call_id: str) -> str | None:
+    """The call's logged status (None when unknown or the database can't say)."""
+    try:
+        async with AsyncSessionLocal() as db:
+            return (await db.execute(
+                select(Call.status).where(Call.call_id == call_id))).scalar_one_or_none()
+    except Exception:
+        return None
+
+
+async def note_answerer(call_id: str, agent_id) -> None:
+    """Meta accepted an agent's answer but the terminate was logged first: the
+    call still connected — keep who picked it up on the row."""
+    try:
+        async with AsyncSessionLocal() as db:
+            await db.execute(update(Call).where(
+                Call.call_id == call_id, Call.agent_id.is_(None),
+                Call.status.in_(CONNECTED)).values(agent_id=agent_id))
+            await db.commit()
+    except Exception as exc:
+        _log.warning("call_log answerer note failed: %s", exc)
 
 
 async def mark_answered(call_id: str, agent_id, redis=None) -> dict | None:
@@ -184,7 +214,9 @@ async def mark_answered(call_id: str, agent_id, redis=None) -> dict | None:
             await db.commit()
             if row is None:
                 return None
-            await forget_meta_permission(redis, perm_key(row.channel, row.wa_id, row.external_id))
+            key = perm_key(row.channel, row.wa_id, row.external_id)
+            await forget_meta_permission(redis, key)
+            await finish_permission_request(redis, key, sent=False)   # a connected call resets the limits
             return {"agent_id": str(row.agent_id) if row.agent_id else None,
                     "agent_name": await _agent_name(db, row.agent_id),
                     "direction": row.direction}
@@ -193,10 +225,23 @@ async def mark_answered(call_id: str, agent_id, redis=None) -> dict | None:
         return None
 
 
-async def _close(call_id: str, status: str, *, agent_id=None, duration: int | None = None,
-                 only_if: tuple[str, ...] = LIVE) -> dict | None:
+def _connected_by_meta(duration) -> bool:
+    """Meta's terminate carries a duration only when the call was picked up."""
+    try:
+        return duration is not None and str(duration).strip() != "" and int(float(duration)) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+async def _close(call_id: str, status: str | None, *, agent_id=None, duration: int | None = None,
+                 only_if: tuple[str, ...] = LIVE, prefer: str | None = None) -> dict | None:
     """Move a live call to `status`. Returns the ended-event fields, or None when
-    the call was not in `only_if` (already over, or unknown)."""
+    the call was not in `only_if` (already over, or unknown).
+
+    `status` None = Meta's terminate decides, under the row lock (so an answer
+    committing at the same instant is seen): answered, or a terminate carrying
+    a duration (Meta: "only present when the call was picked up") → completed;
+    else `prefer` (one of our outcomes) or missed (inbound) / no_answer (outbound)."""
     try:
         async with AsyncSessionLocal() as db:
             c = (await db.execute(
@@ -204,9 +249,23 @@ async def _close(call_id: str, status: str, *, agent_id=None, duration: int | No
             if c is None or c.status not in only_if:
                 return None
             c.ended_at = datetime.now(timezone.utc)
-            if duration is not None:
-                c.duration = int(duration)
-            elif c.answered_at:
+            if status is None:
+                if c.answered_at or c.status == "answered" or _connected_by_meta(duration):
+                    status = "completed"
+                elif prefer in TERMINAL and prefer not in ("completed", "ended"):
+                    status = prefer
+                else:
+                    status = "no_answer" if c.direction == "outbound" else "missed"
+            if status == "completed" and c.answered_at is None:
+                # Picked up, but our answered-transition never landed (lost race / event).
+                secs = int(float(duration)) if _connected_by_meta(duration) else 0
+                c.answered_at = c.ended_at - timedelta(seconds=secs)
+            if duration is not None and str(duration).strip() != "":
+                try:
+                    c.duration = int(float(duration))
+                except (TypeError, ValueError):
+                    pass
+            if c.duration is None and c.answered_at and status == "completed":
                 c.duration = max(0, int((c.ended_at - c.answered_at).total_seconds()))
             c.status = status
             if agent_id is not None and status in ("declined", "callback", "cancelled"):
@@ -248,25 +307,14 @@ async def mark_rejected(call_id: str) -> dict | None:
     return await _close(call_id, "rejected", only_if=("ringing", "no_answer"))
 
 
-async def mark_ended(call_id: str, status: str | None = None, duration: int | None = None) -> dict | None:
+async def mark_ended(call_id: str, status: str | None = None, duration: int | None = None,
+                     agent_id=None) -> dict | None:
     """Close the call on Meta's `terminate` (or our hang-up of a live call).
-    Answered → completed; never answered → missed (inbound) / no_answer
-    (outbound), unless `status` names one of our outcomes."""
-    try:
-        async with AsyncSessionLocal() as db:
-            c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
-            if c is None or c.status not in LIVE:
-                return None
-            if c.answered_at or c.status == "answered":
-                final = "completed"
-            elif status in TERMINAL:
-                final = status
-            else:
-                final = "no_answer" if c.direction == "outbound" else "missed"
-    except Exception as exc:
-        _log.warning("call_log ended failed: %s", exc)
-        return None
-    return await _close(call_id, final, duration=duration)
+    Answered (or picked up, per Meta's duration) → completed; never answered →
+    missed (inbound) / no_answer (outbound), unless `status` names one of our
+    outcomes. Decided under the row lock: an answer landing in the same
+    instant is never overwritten by a stale "missed"."""
+    return await _close(call_id, None, duration=duration, prefer=status, agent_id=agent_id)
 
 
 async def sweep_stale(db, redis=None) -> int:
@@ -356,20 +404,46 @@ async def ended_before_ring(redis, call_id: str) -> dict | None:
         return None
 
 
+async def park(redis, kind: str, call_id: str, data: dict | None = None) -> bool:
+    """Park an event for a row that isn't there yet — then look again: the row
+    may have landed while we parked (its writer checked for parked events a
+    moment before). Both sides write first and check second, so one of them
+    always applies it. True when the row exists and the event was applied."""
+    await note_early(redis, kind, call_id, data)
+    if await known_call(call_id):
+        await apply_early(redis, call_id)
+        return True
+    return False
+
+
 async def apply_early(redis, call_id: str) -> None:
-    """The row now exists: replay any answer / terminate that arrived first,
-    and tell everyone (the placing phone reads the row and follows)."""
+    """The row now exists: replay any answer / terminate / REJECTED that
+    arrived first, and tell everyone (the placing phone reads the row and
+    follows). Safe to run twice: every move is conditional."""
     ans = await _take_early(redis, "answer", call_id)
     if ans is not None:
         moved = await mark_answered(call_id, None, redis)
         if moved is not None:
             await publish(redis, {"type": "call_answered", "call_id": call_id, **moved})
+    rej = await _take_early(redis, "rejected", call_id)
     end = await _take_early(redis, "end", call_id)
-    if end is not None:
-        info = await mark_ended(call_id, status=end.get("outcome"), duration=end.get("duration"))
+    if end is not None or rej is not None:
+        end = end or {}
+        outcome = "rejected" if rej is not None else end.get("outcome")
+        info = await mark_ended(call_id, status=outcome, duration=end.get("duration"))
+        if info is None and rej is not None:
+            info = await mark_rejected(call_id)       # a terminate already wrote no_answer
         if info is not None:
             info.pop("wa_id", None)
-            await publish(redis, {"type": "call_ended", **info, "status": end.get("status")})
+            await publish(redis, {"type": "call_ended", **info,
+                                  "status": end.get("status") or (rej or {}).get("status"),
+                                  **({"channel": end["channel"]} if end.get("channel") else {})})
+            if info.get("outcome") == "missed":
+                from app.services import missed_call
+                missed_call.schedule(redis, call_id)
+            if info.get("outcome") == "missed":
+                from app.services import missed_call
+                missed_call.schedule(redis, call_id)
 
 
 async def mark_follow_up_done(db, call_id: str) -> bool:
@@ -661,6 +735,79 @@ def _meta_fail_key(wa_id: str) -> str:
     return f"wa:call:permmeta:fail:{wa_id}"
 
 
+def _stale_key(wa_id: str) -> str:
+    return f"wa:call:perm:stale:{wa_id}"
+
+
+async def drop_stale_grant(redis, wa_id: str) -> None:
+    """Meta refused a call for "no permission": a grant we stored before now is
+    stale. Written as a separate marker, never over the record — a revoke or a
+    fresh grant racing this (written a moment later) must survive it."""
+    if redis is None or not wa_id:
+        return
+    try:
+        await redis.set(_stale_key(wa_id), datetime.now(timezone.utc).isoformat(), ex=PERMISSION_TTL)
+    except Exception:
+        pass
+    await forget_meta_permission(redis, wa_id)
+
+
+# One permission request per customer at a time, and none again while Meta's
+# limit is known to be hit (WhatsApp: 1 a day after a request went out). The
+# key holds "pending" while one is in flight, else when asking works again.
+PERMISSION_REQUEST_INFLIGHT_TTL = 30
+PERMISSION_REQUEST_GAP = 86400
+_local_requests: dict[str, tuple[float, str]] = {}   # redis unavailable: this process only
+
+
+def _req_key(key: str) -> str:
+    return f"wa:call:permreq:{key}"
+
+
+async def claim_permission_request(redis, key: str) -> tuple[bool, str | None]:
+    """(claimed, request_available_at). Not claimed = another request for this
+    customer is in flight (None) or the limit is known to be hit (the ISO time)."""
+    import time
+    if not key:
+        return True, None
+    if redis is not None:
+        try:
+            if await redis.set(_req_key(key), "pending", nx=True, ex=PERMISSION_REQUEST_INFLIGHT_TTL):
+                return True, None
+            held = await redis.get(_req_key(key))
+            held = held.decode() if isinstance(held, bytes) else held
+            return False, (None if not held or held == "pending" else held)
+        except Exception:
+            pass
+    now = time.monotonic()
+    held = _local_requests.get(key)
+    if held and held[0] > now:
+        return False, (None if held[1] == "pending" else held[1])
+    _local_requests[key] = (now + PERMISSION_REQUEST_INFLIGHT_TTL, "pending")
+    return True, None
+
+
+async def finish_permission_request(redis, key: str, *, sent: bool, gap_s: int = 0) -> None:
+    """Release the claim; `sent` with `gap_s` keeps it until asking works again."""
+    import time
+    if not key:
+        return
+    until = (datetime.now(timezone.utc) + timedelta(seconds=gap_s)).isoformat() if sent and gap_s else None
+    if until:
+        _local_requests[key] = (time.monotonic() + gap_s, until)
+    else:
+        _local_requests.pop(key, None)
+    if redis is None:
+        return
+    try:
+        if until:
+            await redis.set(_req_key(key), until, ex=gap_s)
+        else:
+            await redis.delete(_req_key(key))
+    except Exception:
+        pass
+
+
 async def forget_meta_permission(redis, wa_id: str | None) -> None:
     """Drop the cached Meta answer (a reply / connected call just changed it)."""
     if redis is None or not wa_id:
@@ -690,6 +837,15 @@ async def stored_permission(redis, wa_id: str) -> dict:
     except Exception:
         return out
     out.update({k: data.get(k, out[k]) for k in ("status", "expires_at", "permanent", "revoked")})
+    if out["status"] == "granted":
+        try:
+            stale = await redis.get(_stale_key(wa_id))
+            stale = stale.decode() if isinstance(stale, bytes) else stale
+            if stale and (not data.get("at")
+                          or datetime.fromisoformat(data["at"]) <= datetime.fromisoformat(stale)):
+                out.update(status="unknown", expires_at=None, permanent=False)
+        except Exception:
+            pass
     if out["status"] == "requested":
         out["requested_at"] = data.get("at")
     exp = out.get("expires_at")
@@ -766,8 +922,9 @@ async def permission(redis, wa_id: str, *, ask_meta: bool = True) -> dict:
     st = await stored_permission(redis, wa_id)
     meta = await _meta_permission(redis, wa_id) if (ask_meta and wa_id) else None
     if meta is None:
-        return _store_shape(st)
+        return await _known_limit(redis, wa_id, _store_shape(st))
     out = {"wa_id": wa_id, **meta, "revoked": False, "source": "meta", "requested_at": None}
+    out = await _known_limit(redis, wa_id, out)
     if meta["status"] != "granted":
         # Meta: no permission. Our store knows whether we asked or they said no.
         if st["status"] == "denied":
@@ -780,6 +937,21 @@ async def permission(redis, wa_id: str, *, ask_meta: bool = True) -> dict:
                     out["requested_at"] = st["requested_at"]   # "Request sent 2 h ago"
             except Exception:
                 pass
+    return out
+
+
+async def _known_limit(redis, key: str, out: dict) -> dict:
+    """A request we sent is still inside Meta's 1-a-day limit: say when asking
+    works again (Meta's cached counters may predate it)."""
+    if redis is None or not key or not out.get("can_request"):
+        return out
+    try:
+        held = await redis.get(_req_key(key))
+        held = held.decode() if isinstance(held, bytes) else held
+        if held and held != "pending" and datetime.fromisoformat(held) > datetime.now(timezone.utc):
+            return {**out, "can_request": False, "request_available_at": held}
+    except Exception:
+        pass
     return out
 
 

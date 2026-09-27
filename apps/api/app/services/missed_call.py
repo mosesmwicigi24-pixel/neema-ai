@@ -19,6 +19,20 @@ from app.core.config import settings
 
 _log = logging.getLogger("neema.wa")
 _bg: set = set()
+# The cooldown when redis can't hold it (None / down): this process only.
+_local_cooldown: dict[str, float] = {}
+
+
+def _claim_local(key: str, ttl: int) -> bool:
+    import time
+    now = time.monotonic()
+    if _local_cooldown.get(key, 0) > now:
+        return False
+    if len(_local_cooldown) > 10000:
+        for k in [k for k, t in _local_cooldown.items() if t <= now]:
+            _local_cooldown.pop(k, None)
+    _local_cooldown[key] = now + ttl
+    return True
 
 
 def schedule(redis, call_id: str) -> None:
@@ -54,13 +68,17 @@ async def _follow_up(redis, call_id: str) -> bool:
             if later is not None:
                 return False
         key = f"call:missed-msg:{channel}:{handle}"
+        ttl = max(1, int(settings.missed_call_message_cooldown_h)) * 3600
+        claimed = None
         if redis is not None:
-            ttl = max(1, int(settings.missed_call_message_cooldown_h)) * 3600
             try:
-                if not await redis.set(key, "1", nx=True, ex=ttl):
-                    return False            # told them recently — one message is enough
+                claimed = bool(await redis.set(key, "1", nx=True, ex=ttl))
             except Exception:
-                pass
+                claimed = None              # redis down: fall back to this process
+        if claimed is None:
+            claimed = _claim_local(key, ttl)
+        if not claimed:
+            return False                    # told them recently — one message is enough
         text = (settings.missed_call_message or "").strip()
         if not text:
             return False

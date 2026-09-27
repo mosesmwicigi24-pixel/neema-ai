@@ -249,11 +249,11 @@ async def _handle_calls(request: Request, payload: dict) -> None:
                              bool((call.get("session") or {}).get("sdp")))
                 if not cid:
                     continue
-                # Dedup: process each (call id, event) once.
-                if redis is not None:
-                    fresh = await redis.set(f"wa:call:{cid}:{event}", "1", nx=True, ex=3600)
-                    if not fresh:
-                        continue
+                # Dedup: process each (call id, event) once. A redis that can't
+                # answer fails open — the handlers below are idempotent anyway.
+                dedup_key = f"wa:call:{cid}:{event}"
+                if not await _first_delivery(redis, dedup_key):
+                    continue
                 sdp_type = (call.get("session") or {}).get("sdp_type")
                 # Our OUTBOUND call was accepted: the customer's SDP ANSWER arrives
                 # as a connect event with sdp_type=answer. Relay it to the browser
@@ -275,6 +275,9 @@ async def _handle_calls(request: Request, payload: dict) -> None:
                     # Our OUTBOUND call was accepted: the customer's SDP ANSWER.
                     # Relay it to the device that placed the call so it can
                     # complete the WebRTC connection, then tell every agent.
+                    # (Unless its terminate was logged first: the call is over.)
+                    if await call_log.status_of(cid) in call_log.TERMINAL:
+                        continue
                     await call_log.publish(redis, {
                         "type": "outbound_answer", "call_id": cid,
                         "sdp": (call.get("session") or {}).get("sdp"),
@@ -283,9 +286,10 @@ async def _handle_calls(request: Request, payload: dict) -> None:
                     moved = await call_log.mark_answered(cid, None, redis)
                     if moved is not None:
                         await call_log.publish(redis, {"type": "call_answered", "call_id": cid, **moved})
-                    else:
-                        # Beat /calls/connect's row: applied when it lands.
-                        await call_log.note_early(redis, "answer", cid)
+                    elif not await call_log.known_call(cid):
+                        # Beat /calls/connect's row: applied when it lands. (A row
+                        # already over — its terminate came first — stays over.)
+                        await call_log.park(redis, "answer", cid)
                     continue
 
                 if event == "connect":
@@ -296,7 +300,9 @@ async def _handle_calls(request: Request, payload: dict) -> None:
                     # we logged long ago (the dedup key only lives an hour).
                     early_end = await call_log.ended_before_ring(redis, cid)
                     if early_end is not None:
-                        await call_log.record_ringing(cid, frm, _contacts.get(str(frm)))
+                        if not await call_log.record_ringing(cid, frm, _contacts.get(str(frm))):
+                            await _release(redis, dedup_key)   # parked end kept for a redelivery
+                            continue
                         await call_log.apply_early(redis, cid)
                         await call_log.publish_update(redis, cid)
                         continue
@@ -304,17 +310,20 @@ async def _handle_calls(request: Request, payload: dict) -> None:
                         continue
                     if redis is not None:
                         # Stash the SDP offer + metadata for the accept step.
-                        await redis.set(
-                            f"wa:call:offer:{cid}",
-                            json.dumps({
-                                "from": frm,
-                                "to": call.get("to"),
-                                "phone_number_id": phone_number_id,
-                                "sdp": (call.get("session") or {}).get("sdp"),
-                                "timestamp": call.get("timestamp"),
-                            }),
-                            ex=300,
-                        )
+                        try:
+                            await redis.set(
+                                f"wa:call:offer:{cid}",
+                                json.dumps({
+                                    "from": frm,
+                                    "to": call.get("to"),
+                                    "phone_number_id": phone_number_id,
+                                    "sdp": (call.get("session") or {}).get("sdp"),
+                                    "timestamp": call.get("timestamp"),
+                                }),
+                                ex=300,
+                            )
+                        except Exception as exc:
+                            _log.warning("WA call offer stash failed for %s: %s", cid, exc)
                     # Ring first — every millisecond before an agent sees the call
                     # is the customer listening to silence — then log it and send
                     # the row (the person / chat links) as an update.
@@ -326,48 +335,138 @@ async def _handle_calls(request: Request, payload: dict) -> None:
                         "channel": "whatsapp",
                     })
                     _log.warning("WA published incoming_call ring for %s", cid)
-                    await call_log.record_ringing(cid, frm, _contacts.get(str(frm)))
+                    if not await call_log.record_ringing(cid, frm, _contacts.get(str(frm))):
+                        # The row didn't land (database blip): let a redelivery
+                        # write it; the terminate writes it too (on_terminate).
+                        await _release(redis, dedup_key)
+                        continue
+                    # A terminate parked while we wrote the row is applied now.
+                    await call_log.apply_early(redis, cid)
                     await call_log.publish_update(redis, cid)
                 elif event == "terminate":
                     _log.info("WA call %s terminated (status=%s, dur=%ss)",
                               cid, call.get("status"), (call.get("duration") or "?"))
-                    await on_terminate(redis, cid, call.get("duration"), call.get("status"))
+                    if not await on_terminate(redis, cid, call.get("duration"), call.get("status")):
+                        await _release(redis, dedup_key)   # database blip: a redelivery applies it
 
 
-async def on_terminate(redis, cid: str, duration, status, extra: dict | None = None) -> None:
+async def _first_delivery(redis, key: str) -> bool:
+    """True the first time this (call, event) is seen. Fails open when redis
+    can't answer: every call handler is idempotent on the row."""
+    if redis is None:
+        return True
+    try:
+        return bool(await redis.set(key, "1", nx=True, ex=3600))
+    except Exception as exc:
+        _log.warning("call dedup unavailable (%s) — processing %s", exc, key)
+        return True
+
+
+async def _release(redis, key: str) -> None:
+    if redis is None:
+        return
+    try:
+        await redis.delete(key)
+    except Exception:
+        pass
+
+
+async def _ring_stash(redis, cid: str) -> dict | None:
+    """What the connect webhook stashed when it rang this call (None if it never did)."""
+    if redis is None:
+        return None
+    try:
+        raw = await redis.get(f"wa:call:offer:{cid}")
+        return json.loads(raw) if raw else None
+    except Exception:
+        return None
+
+
+async def _hang_up_intent(redis, cid: str) -> tuple[str | None, object]:
+    """(declined | callback, agent id) when an agent's decline / call-back claimed
+    this call — so Meta's terminate for it, landing before our own
+    bookkeeping, logs what the agent did instead of "missed"."""
+    if redis is None:
+        return None, None
+    try:
+        raw = await redis.get(f"wa:call:answered:{cid}")
+    except Exception:
+        return None, None
+    v = raw.decode() if isinstance(raw, bytes) else str(raw or "")
+    parts = v.split("|")
+    if len(parts) >= 3 and parts[-1] in ("declined", "callback"):
+        import uuid as _uuid
+        try:
+            return parts[-1], _uuid.UUID(parts[0])
+        except ValueError:
+            return parts[-1], None
+    return None, None
+
+
+async def on_terminate(redis, cid: str, duration, status, extra: dict | None = None) -> bool:
     """Meta's `terminate` for a call (either channel): close the row and tell
     every agent. A call already closed on our side (declined, callback, the
-    stale sweep) is still announced — a screen that missed that event must stop
-    ringing now — and a terminate with no row yet is parked for when it lands."""
+    stale sweep) is still announced with its logged outcome — a screen that
+    missed that event must stop ringing now. A terminate with no row yet is
+    parked and announced (with the real outcome) when the row lands; only a
+    call that already rang (its row lost to a database blip) is announced
+    now, and its row is written from the ring stash so the log converges.
+    Returns False when the database couldn't be reached (let a redelivery in)."""
     from app.services import call_log
-    info = await call_log.mark_ended(cid, duration=duration)
+    intent, intent_agent = await _hang_up_intent(redis, cid)
+    info = await call_log.mark_ended(cid, status=intent, duration=duration, agent_id=intent_agent)
+    moved = info is not None
+    db_ok = True
     if info is None:
         try:
             from app.database import AsyncSessionLocal
             async with AsyncSessionLocal() as db:
                 r = await call_log.row(db, cid)
         except Exception:
-            r = None
+            r, db_ok = None, False
         if r is None:
-            # No row yet (this terminate beat the connect, or
-            # our outbound row): park it for when it lands.
-            await call_log.note_early(redis, "end", cid, {
-                "duration": duration, "status": status})
-        info = {"call_id": cid,
-                "outcome": (r or {}).get("status")
-                or ("completed" if duration else "missed"),
-                "duration": (r or {}).get("duration") or duration,
-                "direction": (r or {}).get("direction"),
-                "agent_id": (r or {}).get("agent_id"),
-                "agent_name": (r or {}).get("agent_name")}
+            stash = await _ring_stash(redis, cid)
+            if stash and db_ok:
+                messenger = stash.get("channel") == "messenger"
+                if await call_log.record_ringing(
+                        cid, None if messenger else stash.get("from"), None,
+                        channel="messenger" if messenger else "whatsapp",
+                        external_id=stash.get("from") if messenger else None):
+                    info = await call_log.mark_ended(cid, duration=duration)
+                    moved = info is not None
+            if info is None:
+                # No row yet (this terminate beat the connect, or our
+                # outbound row): park it for when it lands.
+                if await call_log.park(redis, "end", cid, {
+                        "duration": duration, "status": status, **(extra or {})}):
+                    return True     # the row landed meanwhile: applied and announced
+                if not stash:
+                    return db_ok      # it never rang: the row's arrival announces it
+                info = {"call_id": cid,
+                        "outcome": "completed" if call_log._connected_by_meta(duration) else "missed",
+                        "duration": duration, "direction": "inbound"}
+        elif r.get("status") in call_log.LIVE:
+            # Still live: the close itself failed (a database blip) — once more,
+            # else leave it to Meta's redelivery / the stale sweep.
+            info = await call_log.mark_ended(cid, status=intent, duration=duration, agent_id=intent_agent)
+            moved = info is not None
+            if info is None:
+                return False
+        else:
+            info = {"call_id": cid, "outcome": r.get("status"),
+                    "duration": r.get("duration") or duration,
+                    "direction": r.get("direction"),
+                    "agent_id": r.get("agent_id"),
+                    "agent_name": r.get("agent_name")}
     info.pop("wa_id", None)
     await call_log.publish(redis, {
         "type": "call_ended", **info, "call_id": cid,
         "status": status, **(extra or {}),
     })
-    if info.get("outcome") == "missed":
+    if moved and info.get("outcome") == "missed":
         from app.services import missed_call
         missed_call.schedule(redis, cid)
+    return moved or db_ok
 
 
 async def _handle_call_status(redis, st: dict) -> None:
@@ -379,23 +478,25 @@ async def _handle_call_status(redis, st: dict) -> None:
     status = str(st.get("status") or "").upper()
     if not cid or status not in ("RINGING", "ACCEPTED", "REJECTED"):
         return
-    if redis is not None:
-        try:
-            if not await redis.set(f"wa:call:{cid}:status:{status}", "1", nx=True, ex=3600):
-                return
-        except Exception:
-            pass
+    if not await _first_delivery(redis, f"wa:call:{cid}:status:{status}"):
+        return
     if st.get("biz_opaque_callback_data"):
         await call_log.row_from_opaque(cid, str(st.get("recipient_id") or "") or None,
                                        st.get("biz_opaque_callback_data"))
     if status == "RINGING":
-        await call_log.publish(redis, {"type": "call_status", "call_id": cid, "status": "ringing"})
+        # A RINGING that limps in after the call ended (REJECTED / terminate
+        # first) must not flip a finished screen back to "Ringing…".
+        if await call_log.status_of(cid) not in call_log.TERMINAL:
+            await call_log.publish(redis, {"type": "call_status", "call_id": cid, "status": "ringing"})
     elif status == "REJECTED":
         info = await call_log.mark_rejected(cid)
         if info is None:
             if not await call_log.known_call(cid):
                 # No row yet and nothing to build it from: park for the row.
-                await call_log.note_early(redis, "end", cid, {"outcome": "rejected", "status": "REJECTED"})
-            return
+                await call_log.park(redis, "rejected", cid, {"status": "REJECTED"})
+            else:
+                info = await call_log.mark_rejected(cid)   # the row landed a moment ago
+            if info is None:
+                return
         info.pop("wa_id", None)
         await call_log.publish(redis, {"type": "call_ended", **info, "status": "REJECTED"})

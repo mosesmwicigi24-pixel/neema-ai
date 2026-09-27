@@ -2499,12 +2499,103 @@ def _digits(v) -> str:
     return "".join(ch for ch in str(v or "") if ch.isdigit())[:20]
 
 
-def _answered_by(value) -> str | None:
-    """The redis answer-lock holds "<agent id>|<agent name>" (older: the id)."""
+_HANG_UP_CLAIMS = ("declined", "callback")
+
+
+def _parse_claim(value) -> tuple[str | None, str | None, str | None]:
+    """The answer-lock holds "<agent id>|<agent name>" (older: the id), or
+    "<agent id>|<agent name>|declined|callback" when an agent's decline /
+    call-back claimed the ringing call. → (agent id, name, kind)."""
     if not value:
-        return None
+        return None, None, None
     v = value.decode() if isinstance(value, bytes) else str(value)
-    return v.split("|", 1)[1] if "|" in v else None
+    parts = v.split("|")
+    kind = parts[-1] if len(parts) >= 3 and parts[-1] in _HANG_UP_CLAIMS else None
+    name = "|".join(parts[1:-1] if kind else parts[1:]) or None
+    return parts[0] or None, name, kind
+
+
+def _answered_by(value) -> str | None:
+    return _parse_claim(value)[1]
+
+
+# Redis unavailable AND no row to claim on: this process only (bounded).
+_local_claims: dict[str, str] = {}
+
+
+async def _claim_call(redis, call_id: str, agent: Agent, kind: str | None = None):
+    """Claim a ringing call for one agent — the answer lock (or a decline's).
+    Redis first; when redis can't answer, a conditional UPDATE on the ringing
+    inbound row (agent_id still empty) is the lock, so two agents can never
+    both reach Meta. → (won, holder id, holder name, holder kind)."""
+    from app.database import AsyncSessionLocal
+    lock = f"wa:call:answered:{call_id}"
+    value = f"{agent.id}|{agent.name or ''}" + (f"|{kind}" if kind else "")
+    if redis is not None:
+        try:
+            if await redis.set(lock, value, nx=True, ex=3600):
+                return True, None, None, None
+            return (False, *_parse_claim(await redis.get(lock)))
+        except Exception as exc:
+            logging.getLogger("neema.wa").warning("answer lock unavailable (%s) — claiming on the row", exc)
+    try:
+        async with AsyncSessionLocal() as db:
+            res = await db.execute(
+                update(Call).where(Call.call_id == call_id, Call.status == "ringing",
+                                   Call.agent_id.is_(None),
+                                   Call.direction.is_(None) | (Call.direction != "outbound"))
+                .values(agent_id=agent.id).returning(Call.id))
+            won = res.first() is not None
+            await db.commit()
+            if won:
+                return True, None, None, None
+            r = (await db.execute(select(Call.agent_id).where(Call.call_id == call_id))).first()
+            if r is not None:
+                holder = r.agent_id
+                return (False, str(holder) if holder else None,
+                        await _agent_display(db, holder) if holder else None, None)
+    except Exception:
+        pass
+    held = _local_claims.get(call_id)
+    if held is None:
+        if len(_local_claims) > 5000:
+            _local_claims.pop(next(iter(_local_claims)))
+        _local_claims[call_id] = value
+        return True, None, None, None
+    return (False, *_parse_claim(held))
+
+
+async def _release_call(redis, call_id: str, agent: Agent) -> None:
+    """Give a claim back (Meta refused): a colleague may try. Only our own."""
+    from app.database import AsyncSessionLocal
+    lock = f"wa:call:answered:{call_id}"
+    if redis is not None:
+        try:
+            if _parse_claim(await redis.get(lock))[0] in (str(agent.id), None):
+                await redis.delete(lock)
+        except Exception:
+            pass
+    try:
+        async with AsyncSessionLocal() as db:
+            await db.execute(update(Call).where(
+                Call.call_id == call_id, Call.status == "ringing", Call.agent_id == agent.id,
+                Call.direction.is_(None) | (Call.direction != "outbound")).values(agent_id=None))
+            await db.commit()
+    except Exception:
+        pass
+    if _parse_claim(_local_claims.get(call_id))[0] == str(agent.id):
+        _local_claims.pop(call_id, None)
+
+
+async def _redis_set(redis, key: str, value: str, ex: int) -> None:
+    """A best-effort redis write — a route that already did its Meta work must
+    never 500 over a cache."""
+    if redis is None:
+        return
+    try:
+        await redis.set(key, value, ex=ex)
+    except Exception as exc:
+        logging.getLogger("neema.wa").warning("redis write %s failed: %s", key, exc)
 
 
 MESSENGER = "messenger"
@@ -2940,20 +3031,19 @@ async def calls_answer(
                             detail="sdp offer is required" if messenger else "sdp answer is required")
     from app.services import wa_calling, call_log
     from app.database import AsyncSessionLocal
-    async with AsyncSessionLocal() as db:
-        st = (await db.execute(select(Call.status).where(Call.call_id == call_id))).scalar_one_or_none()
+    st = await call_log.status_of(call_id)
     if st is not None and st not in call_log.LIVE:
         # Over already (the caller gave up, a colleague declined it): say so
         # instead of asking Meta to accept a call that no longer exists.
         raise HTTPException(status_code=410, detail="This call has already ended.")
     redis = _redis(request)
     lock = f"wa:call:answered:{call_id}"
-    if redis is not None:
-        won = await redis.set(lock, f"{agent.id}|{agent.name or ''}", nx=True, ex=3600)
-        if not won:
-            who = _answered_by(await redis.get(lock))
-            raise HTTPException(status_code=409,
-                                detail=f"call already answered by {who}" if who else "call already answered")
+    won, _hid, who, kind = await _claim_call(redis, call_id, agent)
+    if not won:
+        if kind in _HANG_UP_CLAIMS or (await call_log.status_of(call_id)) in call_log.TERMINAL:
+            raise HTTPException(status_code=410, detail="This call has already ended.")
+        raise HTTPException(status_code=409,
+                            detail=f"call already answered by {who}" if who else "call already answered")
     if messenger:
         return await _answer_messenger(request, call_id, sdp, meta, agent, lock)
     conv_id = None
@@ -2968,17 +3058,39 @@ async def calls_answer(
         # raced and 502'd — accept alone establishes media fine.) Never retried.
         await wa_calling.accept(call_id, sdp, biz_opaque=wa_calling.opaque(agent.id, conv_id))
     except Exception as exc:
-        if redis is not None:
-            await redis.delete(lock)   # let another try
+        await _release_call(redis, call_id, agent)   # let another try
         info = wa_calling.classify_error(exc)
         return _call_error(502, f"accept failed: {info['reason']}", info["code"], info["action"])
+    ended = await _announce_answer(redis, call_id, agent)
+    if ended is not None:
+        return ended
+    return {"ok": True, "call_id": call_id}
+
+
+async def _announce_answer(redis, call_id: str, agent: Agent):
+    """After Meta accepted: ringing → answered, and tell everyone. When Meta's
+    terminate got in first (the caller hung up as we picked up), the call is
+    already logged over: never announce an answer after its end — the answer
+    is recorded on the row and the phone gets a 410."""
+    from app.services import call_log
     moved = await call_log.mark_answered(call_id, agent.id, redis)
+    if moved is None:
+        st = await call_log.status_of(call_id)
+        if st in call_log.TERMINAL:
+            await call_log.note_answerer(call_id, agent.id)
+            await call_log.publish_update(redis, call_id)
+            return _ended_410()
     await call_log.publish(redis, {
         "type": "call_answered", "call_id": call_id,
         "agent_id": str(agent.id), "agent_name": agent.name,
         "direction": (moved or {}).get("direction") or "inbound",
     })
-    return {"ok": True, "call_id": call_id}
+    return None
+
+
+def _ended_410():
+    from fastapi.responses import JSONResponse
+    return JSONResponse(status_code=410, content={"detail": "This call has already ended."})
 
 
 async def _answer_messenger(request: Request, call_id: str, sdp_offer: str, meta: dict,
@@ -2990,17 +3102,13 @@ async def _answer_messenger(request: Request, call_id: str, sdp_offer: str, meta
     try:
         sess = await messenger_calling.accept(call_id, sdp_offer, page_id=meta["page_id"])
     except Exception as exc:
-        if redis is not None:
-            await redis.delete(lock)   # let another try
+        await _release_call(redis, call_id, agent)   # let another try
         info = messenger_calling.classify_error(exc)
         return _call_error(502, f"accept failed: {info['reason']}", info["code"], info["action"],
                            channel=MESSENGER)
-    moved = await call_log.mark_answered(call_id, agent.id, redis)
-    await call_log.publish(redis, {
-        "type": "call_answered", "call_id": call_id,
-        "agent_id": str(agent.id), "agent_name": agent.name,
-        "direction": (moved or {}).get("direction") or "inbound",
-    })
+    ended = await _announce_answer(redis, call_id, agent)
+    if ended is not None:
+        return ended
     return {"ok": True, "call_id": call_id, "channel": MESSENGER,
             "sdp": sess.get("answer"), "sdp_type": "answer",
             "renegotiation": sess.get("renegotiation")}
@@ -3055,55 +3163,67 @@ async def calls_request_permission(
         return _call_error(409, reason, "138009", "wait",
                            request_available_at=cached.get("request_available_at"))
 
-    try:
-        in_window = await call_log.in_service_window(db, to)
-    except Exception:
-        await db.rollback()
-        # Can't tell: the template when there is one (it works either side of the
-        # window), else the free-form request (as before).
-        in_window = (await _permission_template(db)) is None
-    if in_window:
-        route = "free_form"
-        send = wa_calling.request_call_permission(to)
-    else:
-        tpl = await _permission_template(db)
-        if tpl is None:
-            return _call_error(
-                409, f"{who} hasn't messaged in 24 hours — WhatsApp only allows a call request "
-                     "by template then. An admin can create it in Settings → WhatsApp calling.",
-                "template_required", "admin", route="template")
-        route = "template"
-        send = wa_calling.request_call_permission_template(
-            to, tpl["name"], tpl["language"], wa_calling.template_params(first, full))
+    # One request per customer at a time; after one went out, WhatsApp's
+    # 1-a-day limit is known — ten agents tapping at once send ONE request.
+    claimed, available_at = await call_log.claim_permission_request(redis, to)
+    if not claimed:
+        reason, _ = wa_calling._CALL_ERRORS["138009"]
+        return _call_error(409, reason, "138009", "wait", request_available_at=available_at)
+    sent = False
     try:
         try:
-            await send
-        except Exception as exc:
-            # Our window read was wrong (131047: more than 24 h since they wrote):
-            # the template still reaches them, when there is one.
-            tpl = await _permission_template(db) if route == "free_form" and "131047" in str(exc) else None
+            in_window = await call_log.in_service_window(db, to)
+        except Exception:
+            await db.rollback()
+            # Can't tell: the template when there is one (it works either side of the
+            # window), else the free-form request (as before).
+            in_window = (await _permission_template(db)) is None
+        if in_window:
+            route = "free_form"
+            send = wa_calling.request_call_permission(to)
+        else:
+            tpl = await _permission_template(db)
             if tpl is None:
-                raise
+                return _call_error(
+                    409, f"{who} hasn't messaged in 24 hours — WhatsApp only allows a call request "
+                         "by template then. An admin can create it in Settings → WhatsApp calling.",
+                    "template_required", "admin", route="template")
             route = "template"
-            await wa_calling.request_call_permission_template(
+            send = wa_calling.request_call_permission_template(
                 to, tpl["name"], tpl["language"], wa_calling.template_params(first, full))
-    except Exception as exc:
-        info = wa_calling.classify_error(exc)
-        if info["code"] == "138017":
-            # A permanent permission already exists: nothing to ask — call.
-            perm = await call_log.set_permission(redis, to, "granted", permanent=True)
-            await call_log.publish(redis, {"type": "call_permission", **perm})
-            return {"ok": True, "permission": perm, "route": route, "already_permitted": True}
-        if info["code"] == "138009":
-            await call_log.forget_meta_permission(redis, to)
-            live = await call_log.permission(redis, to)
-            return _call_error(409, info["reason"], "138009", "wait",
-                               request_available_at=live.get("request_available_at"), route=route)
-        return _call_error(502, f"permission request failed: {info['reason']}",
-                           info["code"], info["action"], route=route)
-    perm = await call_log.set_permission(redis, to, "requested")
-    await call_log.publish(redis, {"type": "call_permission", **perm})
-    return {"ok": True, "permission": perm, "route": route}
+        try:
+            try:
+                await send
+            except Exception as exc:
+                # Our window read was wrong (131047: more than 24 h since they wrote):
+                # the template still reaches them, when there is one.
+                tpl = await _permission_template(db) if route == "free_form" and "131047" in str(exc) else None
+                if tpl is None:
+                    raise
+                route = "template"
+                await wa_calling.request_call_permission_template(
+                    to, tpl["name"], tpl["language"], wa_calling.template_params(first, full))
+        except Exception as exc:
+            info = wa_calling.classify_error(exc)
+            if info["code"] == "138017":
+                # A permanent permission already exists: nothing to ask — call.
+                perm = await call_log.set_permission(redis, to, "granted", permanent=True)
+                await call_log.publish(redis, {"type": "call_permission", **perm})
+                return {"ok": True, "permission": perm, "route": route, "already_permitted": True}
+            if info["code"] == "138009":
+                await call_log.forget_meta_permission(redis, to)
+                live = await call_log.permission(redis, to)
+                return _call_error(409, info["reason"], "138009", "wait",
+                                   request_available_at=live.get("request_available_at"), route=route)
+            return _call_error(502, f"permission request failed: {info['reason']}",
+                               info["code"], info["action"], route=route)
+        sent = True
+        perm = await call_log.set_permission(redis, to, "requested")
+        await call_log.publish(redis, {"type": "call_permission", **perm})
+        return {"ok": True, "permission": perm, "route": route}
+    finally:
+        await call_log.finish_permission_request(redis, to, sent=sent,
+                                                 gap_s=call_log.PERMISSION_REQUEST_GAP)
 
 
 async def _request_permission_messenger(body: dict, request: Request, agent: Agent):
@@ -3127,6 +3247,10 @@ async def _request_permission_messenger(body: dict, request: Request, agent: Age
         return _call_error(409, "You've already asked twice today — Messenger allows 2 call "
                                 "requests a day. Try again tomorrow.", "request_limit", "wait",
                            channel=MESSENGER)
+    claimed, _at = await call_log.claim_permission_request(redis, key)
+    if not claimed:
+        return _call_error(409, "A call request to them is already on its way.", "request_limit", "wait",
+                           channel=MESSENGER)
     try:
         await messenger_calling.request_call_permission(psid)
     except Exception as exc:
@@ -3135,6 +3259,9 @@ async def _request_permission_messenger(body: dict, request: Request, agent: Age
         detail = info["reason"] if status == 409 else f"permission request failed: {info['reason']}"
         return _call_error(status, detail, info["code"], info["action"], channel=MESSENGER,
                            route="calling_optin")
+    finally:
+        # Messenger allows 2 a day: only the in-flight claim is held.
+        await call_log.finish_permission_request(redis, key, sent=False)
     data = await call_log.set_permission(redis, key, "requested")
     perm = call_log.messenger_permission_shape(data, psid)
     await call_log.publish(redis, {"type": "call_permission", **perm})
@@ -3172,10 +3299,7 @@ async def _connect_messenger(body: dict, request: Request, db: AsyncSession, age
     except Exception as exc:
         info = messenger_calling.classify_error(exc)
         if info["code"] == "no_permission":
-            st = await call_log.stored_permission(redis, key)
-            if st.get("status") == "granted":
-                await call_log.set_permission(redis, key, "unknown")
-            await call_log.forget_meta_permission(redis, key)
+            await call_log.drop_stale_grant(redis, key)
             return _call_error(409, info["reason"], "no_permission", "request_permission",
                                channel=MESSENGER)
         return _call_error(502, f"call failed: {info['reason']}", info["code"], info["action"],
@@ -3184,9 +3308,8 @@ async def _connect_messenger(body: dict, request: Request, db: AsyncSession, age
     if not call_id:
         return _call_error(502, "Meta did not return a call id", "meta_unavailable", "retry",
                            channel=MESSENGER)
-    if redis is not None:
-        await redis.set(f"wa:call:answered:{call_id}", f"{agent.id}|{agent.name or ''}", ex=3600)
-        await redis.set(f"wa:call:page:{call_id}", page, ex=86400)
+    await _redis_set(redis, f"wa:call:answered:{call_id}", f"{agent.id}|{agent.name or ''}", 3600)
+    await _redis_set(redis, f"wa:call:page:{call_id}", page, 86400)
     pid = await call_log.messenger_person_id(db, psid)
     try:
         await db.commit()
@@ -3236,11 +3359,9 @@ async def calls_connect(
     except Exception as exc:
         info = wa_calling.classify_error(exc)
         if info["code"] == "138006":
-            # Meta's "no call permission": whatever we had on file is stale.
-            perm = await call_log.stored_permission(redis, to)
-            if perm.get("status") == "granted":
-                await call_log.set_permission(redis, to, "unknown")
-            await call_log.forget_meta_permission(redis, to)
+            # Meta's "no call permission": whatever grant we had on file is stale
+            # (marked, never overwritten — a revoke landing now must survive).
+            await call_log.drop_stale_grant(redis, to)
             return _call_error(409, "This customer hasn't allowed calls yet. Send them a call "
                                     "request — you can call as soon as they tap Allow.",
                                "138006", "request_permission")
@@ -3248,9 +3369,8 @@ async def calls_connect(
     call_id = ((resp.get("calls") or [{}])[0]).get("id")
     if not call_id:
         return _call_error(502, "Meta did not return a call id", "meta_unavailable", "retry")
-    if redis is not None:
-        # We own it: nobody else can "answer" our outbound call.
-        await redis.set(f"wa:call:answered:{call_id}", f"{agent.id}|{agent.name or ''}", ex=3600)
+    # We own it: nobody else can "answer" our outbound call.
+    await _redis_set(redis, f"wa:call:answered:{call_id}", f"{agent.id}|{agent.name or ''}", 3600)
     pid = None
     try:
         from app.services.identity import resolve_person_id_for_wa_id
@@ -3320,28 +3440,51 @@ async def get_call(
     return r
 
 
-async def _refuse_if_colleagues_call(request: Request, call_id: str, agent: Agent) -> None:
+async def _refuse_if_colleagues_call(request: Request, call_id: str, agent: Agent,
+                                     kind: str | None = None) -> bool:
     """A decline / call-back tapped a moment after a colleague answered must not
     cut off their live conversation: WhatsApp's terminate ends the call for
     everyone. The colleague's answer is the answer lock (set before Meta is
-    even asked) or the row already answered by someone else."""
+    even asked) or the row already answered by someone else.
+
+    With `kind` (declined | callback) a ringing inbound call is also CLAIMED
+    with the same lock before Meta is asked, so a decline and a colleague's
+    answer can never both reach Meta. Returns True when this request claimed
+    it (release it if Meta refuses)."""
     from app.database import AsyncSessionLocal
+    from app.services import call_log
     redis = _redis(request)
     holder = None
+    raw = None
     if redis is not None:
-        raw = await redis.get(f"wa:call:answered:{call_id}")
-        if raw:
-            v = raw.decode() if isinstance(raw, bytes) else str(raw)
-            if v.split("|", 1)[0] != str(agent.id):
-                holder = _answered_by(v) or "a colleague"
-    async with AsyncSessionLocal() as db:
-        c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
-        if c is not None and c.status == "answered" and c.agent_id and c.agent_id != agent.id:
-            holder = holder or await _agent_display(db, c.agent_id) or "a colleague"
-        elif c is not None and c.status not in ("ringing", "answered"):
-            holder = None      # over anyway: terminating it is harmless
+        try:
+            raw = await redis.get(f"wa:call:answered:{call_id}")
+        except Exception:
+            raw = None
+        hid, hname, hkind = _parse_claim(raw)
+        if raw and hid != str(agent.id) and hkind is None:
+            holder = hname or "a colleague"
+    c = None
+    try:
+        async with AsyncSessionLocal() as db:
+            c = (await db.execute(select(Call.status, Call.agent_id, Call.direction)
+                                  .where(Call.call_id == call_id))).first()
+            if c is not None and c.status == "answered" and c.agent_id and c.agent_id != agent.id:
+                holder = holder or await _agent_display(db, c.agent_id) or "a colleague"
+    except Exception:
+        c = None
+    if c is not None and c.status not in call_log.LIVE:
+        return False           # over anyway: terminating it is harmless
     if holder:
         raise HTTPException(status_code=409, detail=f"call already answered by {holder}")
+    if kind and not raw and c is not None and c.status == "ringing" and \
+            (c.direction or "inbound") != "outbound":
+        won, hid, hname, hkind = await _claim_call(redis, call_id, agent, kind)
+        if not won and hid and hid != str(agent.id) and hkind is None:
+            raise HTTPException(status_code=409,
+                                detail=f"call already answered by {hname or 'a colleague'}")
+        return won
+    return False
 
 
 async def _agent_display(db: AsyncSession, agent_id) -> str | None:
@@ -3353,9 +3496,12 @@ async def _hang_up_messenger(call_id: str, meta: dict) -> Exception | None:
     still ringing, `terminate` anything else. Returns the error, if any."""
     from app.services import messenger_calling
     from app.database import AsyncSessionLocal
-    async with AsyncSessionLocal() as db:
-        r = (await db.execute(select(Call.status, Call.direction)
-                              .where(Call.call_id == call_id))).first()
+    try:
+        async with AsyncSessionLocal() as db:
+            r = (await db.execute(select(Call.status, Call.direction)
+                                  .where(Call.call_id == call_id))).first()
+    except Exception:
+        r = None
     ringing_in = r is not None and r.status == "ringing" and (r.direction or "inbound") != "outbound"
     try:
         if ringing_in:
@@ -3386,10 +3532,12 @@ async def calls_terminate(
         from app.services import messenger_calling
         if not messenger_calling.enabled():
             return _messenger_off()
-    await _refuse_if_colleagues_call(request, call_id, agent)
+    claimed = await _refuse_if_colleagues_call(request, call_id, agent, kind="declined")
     if meta["channel"] == MESSENGER:
         err = await _hang_up_messenger(call_id, meta)
         if err is not None:
+            if claimed:
+                await _release_call(_redis(request), call_id, agent)
             info = messenger_calling.classify_error(err)
             return _call_error(502, f"terminate failed: {info['reason']}", info["code"], info["action"],
                                channel=MESSENGER)
@@ -3397,11 +3545,17 @@ async def calls_terminate(
         try:
             await wa_calling.terminate(call_id)      # retried once on 429 / 5xx inside
         except Exception as exc:
+            if claimed:
+                await _release_call(_redis(request), call_id, agent)   # it still rings: others may answer
             info = wa_calling.classify_error(exc)
             return _call_error(502, f"terminate failed: {info['reason']}", info["code"], info["action"])
-    async with AsyncSessionLocal() as db:
-        c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
-        status, direction = (c.status, c.direction) if c else (None, None)
+    status, direction = None, None
+    try:
+        async with AsyncSessionLocal() as db:
+            c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
+            status, direction = (c.status, c.direction) if c else (None, None)
+    except Exception:
+        pass
     reason = str((body or {}).get("reason") or "")
     info = None
     if status == "ringing" and direction == "outbound" and reason == "failed":
@@ -3416,7 +3570,11 @@ async def calls_terminate(
     if info is not None:
         info.pop("wa_id", None)
         await call_log.publish(_redis(request), {"type": "call_ended", **info})
-    return {"ok": True, "call_id": call_id, "outcome": (info or {}).get("outcome")}
+        return {"ok": True, "call_id": call_id, "outcome": info.get("outcome")}
+    # Meta's terminate webhook (or a colleague) closed it first: say how it ended.
+    st = await call_log.status_of(call_id)
+    return {"ok": True, "call_id": call_id,
+            "outcome": call_log.normalize_status(st) if st in call_log.TERMINAL else None}
 
 
 @router.post("/calls/{call_id}/callback")
@@ -3433,7 +3591,7 @@ async def calls_callback(
         from app.services import messenger_calling
         if not messenger_calling.enabled():
             return _messenger_off()
-    await _refuse_if_colleagues_call(request, call_id, agent)
+    await _refuse_if_colleagues_call(request, call_id, agent, kind="callback")
     if meta["channel"] == MESSENGER:
         await _hang_up_messenger(call_id, meta)   # may already be gone; still record the intent
     else:

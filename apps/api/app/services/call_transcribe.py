@@ -134,7 +134,11 @@ def _parse_insights(text: str) -> dict | None:
         if k in ("products", "objections", "commitments"):
             if isinstance(v, str):
                 v = [v] if v.strip() else []
-            v = [str(x).strip() for x in (v or []) if str(x).strip()][:8]
+            elif not isinstance(v, list):
+                v = [v] if isinstance(v, (int, float)) and not isinstance(v, bool) else []
+            v = [str(x).strip() for x in v if not isinstance(x, (dict, list)) and str(x).strip()][:8]
+        elif isinstance(v, (dict, list)):
+            v = None
         elif v is not None:
             v = str(v).strip() or None
         out[k] = v
@@ -273,17 +277,61 @@ async def _process(call_id: str) -> None:
         await _publish_update(call_id)
 
 
-async def _finish(call_id: str, wa_id: str | None, text: str, lang: str | None) -> None:
+def _sane_brief(summary, insights) -> tuple[str, dict | None]:
+    """Whatever the model handed back → (text, insights of the documented shape)."""
+    summary = summary.strip()[:8000] if isinstance(summary, str) else ""
+    if not isinstance(insights, dict):
+        return summary, None
+    clean: dict = {}
+    for k in _INSIGHT_KEYS:
+        v = insights.get(k)
+        if k in ("products", "objections", "commitments"):
+            v = [str(x).strip()[:300] for x in (v if isinstance(v, list) else [])
+                 if isinstance(x, (str, int, float)) and str(x).strip()][:8]
+        elif isinstance(v, (str, int, float)) and not isinstance(v, bool):
+            v = str(v).strip()[:1000] or None
+        else:
+            v = None
+        if v not in (None, []):
+            clean[k] = v
+    return summary, (clean or None)
+
+
+async def _keep_transcript(call_id: str, text: str, lang: str | None, status: str) -> None:
+    try:
+        async with AsyncSessionLocal() as db:
+            c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
+            if c is not None:
+                c.transcript = text or None
+                c.transcript_lang = (lang or None) and str(lang)[:12]
+                c.transcript_status = status
+                await db.commit()
+    except Exception as exc:
+        _log.warning("transcribe: keeping the transcript failed for %s: %s", call_id, exc)
+
+
+async def _finish(call_id: str, wa_id: str | None, text: str, lang: str | None) -> bool:
     """A transcript is in (ours or Meta's): summary + insights → the Call row →
-    every screen → the customer's CRM note. Raises on failure (callers mark it)."""
-    summary, insights = await analyse_call(text) if text.strip() else ("", None)
+    every screen → the customer's CRM note. True when the brief landed. When
+    the AI is down (or answers nonsense it can't use) the transcript is still
+    kept and the status is `failed` (Retry) — never a crash, never a made-up
+    brief. Raises only when the database itself fails (callers mark it)."""
+    text = text if isinstance(text, str) else ""
+    try:
+        summary, insights = await analyse_call(text) if text.strip() else ("", None)
+        summary, insights = _sane_brief(summary, insights)
+    except Exception as exc:
+        _log.warning("transcribe: analysis failed for %s: %s", call_id, exc)
+        await _keep_transcript(call_id, text, lang, "failed")
+        await _publish_update(call_id)
+        return False
 
     async with AsyncSessionLocal() as db:
         c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
         if c is None:
-            return
+            return False
         c.transcript = text or None
-        c.transcript_lang = lang or None
+        c.transcript_lang = (lang or None) and str(lang)[:12]
         c.summary = summary or None
         c.insights = insights
         c.transcript_status = "done"
@@ -296,6 +344,7 @@ async def _finish(call_id: str, wa_id: str | None, text: str, lang: str | None) 
                 await _save_call_note(db, wa_id, _note_text(summary, insights))
             except Exception as exc:
                 _log.warning("transcribe: saving call note failed for %s: %s", call_id, exc)
+    return True
 
 
 def schedule_transcription(call_id: str) -> None:
@@ -408,43 +457,51 @@ def parse_meta_transcript(doc) -> tuple[str, str | None]:
 
 async def ingest_meta_transcription(call_id: str, media_id: str) -> str:
     """Download Meta's transcript, store it speaker-labelled, then summary +
-    insights + CRM note. Returns what happened (for logs / tests)."""
+    insights + CRM note. Returns what happened (for logs / tests). Claimed on
+    the row first (Meta may deliver the event twice, at once): one download,
+    one analysis, one CRM note per call."""
     from app.services import wa_calling
     import json as _json
     async with AsyncSessionLocal() as db:
-        c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
+        c = (await db.execute(
+            select(Call).where(Call.call_id == call_id).with_for_update())).scalar_one_or_none()
         if c is None:
             return "unknown_call"
         if c.transcript_status in ("processing", "done"):
             return "already"
+        prev = c.transcript_status
         wa_id = c.wa_id
+        c.transcript_status = "processing"
+        await db.commit()
     try:
         raw, _mime = await wa_calling.download_media(media_id)
         doc = _json.loads(raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw)
     except Exception as exc:
         _log.warning("meta transcript download failed for %s: %s", call_id, exc)
+        await _restore_status(call_id, prev)     # never touches the call
         return "download_failed"
     text, lang = parse_meta_transcript(doc)
-    await _set_status(call_id, "processing")
     await _publish_update(call_id)
     try:
-        await _finish(call_id, wa_id, text, lang)
+        ok = await _finish(call_id, wa_id, text, lang)
     except Exception as exc:
         _log.warning("meta transcript analysis failed for %s: %s", call_id, exc)
-        # Keep the transcript even when the summary failed.
-        try:
-            async with AsyncSessionLocal() as db:
-                c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
-                if c is not None:
-                    c.transcript = text or None
-                    c.transcript_lang = lang or None
-                    c.transcript_status = "failed"
-                    await db.commit()
-        except Exception:
-            pass
+        await _keep_transcript(call_id, text, lang, "failed")
         await _publish_update(call_id)
         return "analysis_failed"
-    return "done"
+    return "done" if ok else "analysis_failed"
+
+
+async def _restore_status(call_id: str, prev: str | None) -> None:
+    try:
+        async with AsyncSessionLocal() as db:
+            c = (await db.execute(
+                select(Call).where(Call.call_id == call_id).with_for_update())).scalar_one_or_none()
+            if c is not None and c.transcript_status == "processing":
+                c.transcript_status = prev or "none"
+                await db.commit()
+    except Exception:
+        pass
 
 
 async def ingest_meta_recording(call_id: str, media_id: str) -> str:

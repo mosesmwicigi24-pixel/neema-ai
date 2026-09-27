@@ -515,12 +515,10 @@ async def _messenger_call_event(redis, call: dict, page_id: str | None) -> None:
         dedup = f"status:{status.upper()}"
     elif event == "media_update":
         dedup = f"media_update:{session.get('version')}"
-    if redis is not None:
-        try:
-            if not await redis.set(f"wa:call:{cid}:{dedup}", "1", nx=True, ex=3600):
-                return
-        except Exception:
-            pass
+    from app.routers.whatsapp_webhook import _first_delivery, _release
+    dedup_key = f"wa:call:{cid}:{dedup}"
+    if not await _first_delivery(redis, dedup_key):
+        return
     psid = _psid_of(call, page_id)
     direction = str(call.get("call_direction") or "").lower()
     if page_id and redis is not None:
@@ -540,7 +538,9 @@ async def _messenger_call_event(redis, call: dict, page_id: str | None) -> None:
     if event == "connect":
         # A customer is calling. Never ring a call that is already over.
         if await call_log.ended_before_ring(redis, cid) is not None:
-            await call_log.record_ringing(cid, None, None, channel="messenger", external_id=psid)
+            if not await call_log.record_ringing(cid, None, None, channel="messenger", external_id=psid):
+                await _release(redis, dedup_key)       # parked end kept for a redelivery
+                return
             await call_log.apply_early(redis, cid)
             await call_log.publish_update(redis, cid)
             return
@@ -549,26 +549,33 @@ async def _messenger_call_event(redis, call: dict, page_id: str | None) -> None:
         if redis is not None:
             # Same key as WhatsApp's offer stash. Messenger sends no SDP: the
             # softphone builds the offer (sdp None, offer_required).
-            await redis.set(f"wa:call:offer:{cid}", json.dumps({
-                "from": psid, "to": page_id, "page_id": page_id, "sdp": None,
-                "channel": "messenger", "timestamp": call.get("timestamp"),
-            }), ex=300)
+            try:
+                await redis.set(f"wa:call:offer:{cid}", json.dumps({
+                    "from": psid, "to": page_id, "page_id": page_id, "sdp": None,
+                    "channel": "messenger", "timestamp": call.get("timestamp"),
+                }), ex=300)
+            except Exception as exc:
+                _log.warning("Messenger call stash failed for %s: %s", cid, exc)
         await call_log.publish(redis, {
             "type": "incoming_call", "call_id": cid, "from": psid, "name": None,
             "at": call.get("timestamp"), "channel": "messenger", "external_id": psid,
         })
         _log.warning("Messenger published incoming_call ring for %s", cid)
-        await call_log.record_ringing(cid, None, None, channel="messenger", external_id=psid)
+        if not await call_log.record_ringing(cid, None, None, channel="messenger", external_id=psid):
+            await _release(redis, dedup_key)           # database blip: a redelivery writes it
+            return
+        await call_log.apply_early(redis, cid)      # a terminate parked meanwhile
         await call_log.publish_update(redis, cid)   # the name, from the person
     elif event == "call_status":
         if status == "ringing":
-            await call_log.publish(redis, {"type": "call_status", "call_id": cid, "status": "ringing"})
+            if await call_log.status_of(cid) not in call_log.TERMINAL:
+                await call_log.publish(redis, {"type": "call_status", "call_id": cid, "status": "ringing"})
         elif status == "accepted":
             moved = await call_log.mark_answered(cid, None, redis)
             if moved is not None:
                 await call_log.publish(redis, {"type": "call_answered", "call_id": cid, **moved})
             elif not await call_log.known_call(cid):
-                await call_log.note_early(redis, "answer", cid)
+                await call_log.park(redis, "answer", cid)
     elif event == "media_update":
         # New SDP from the customer's side (they picked up our call, muted, …):
         # the softphone applies the highest version.
@@ -587,8 +594,9 @@ async def _messenger_call_event(redis, call: dict, page_id: str | None) -> None:
                 pass
         await call_log.publish(redis, ev)
     elif event == "terminate":
-        await on_terminate(redis, cid, call.get("duration"), call.get("status"),
-                           extra={"channel": "messenger"})
+        if not await on_terminate(redis, cid, call.get("duration"), call.get("status"),
+                                  extra={"channel": "messenger"}):
+            await _release(redis, dedup_key)       # database blip: a redelivery applies it
 
 
 # ── Facebook/Instagram comment engagement ────────────────────────────────────
