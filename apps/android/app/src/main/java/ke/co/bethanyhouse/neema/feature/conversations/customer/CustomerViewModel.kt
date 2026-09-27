@@ -173,6 +173,27 @@ class CustomerViewModel(
     val recentCalls: StateFlow<List<Call>?> = _recentCalls.asStateFlow()
     private var callsJob: Job? = null
 
+    private val _callPermission = MutableStateFlow<ke.co.bethanyhouse.neema.core.model.CallPermission?>(null)
+    /** Whether this customer allowed WhatsApp calls (GET /calls/permission) — null until read, or when it couldn't be. */
+    val callPermission: StateFlow<ke.co.bethanyhouse.neema.core.model.CallPermission?> = _callPermission.asStateFlow()
+    private var permissionJob: Job? = null
+
+    /** The Calls section's call request: in flight, what it said, and a refusal's details. */
+    data class CallRequestUi(
+        val busy: Boolean = false,
+        /** "Call request sent — …" once the server took it. */
+        val sent: Boolean = false,
+        /** They had allowed calls permanently already: offer "Call now". */
+        val alreadyAllowed: Boolean = false,
+        val error: String? = null,
+        /** template_required and this agent can fix it in Settings → WhatsApp calling. */
+        val adminCanFix: Boolean = false,
+        /** Outside the 24 h window with no template: asking again can't work until an admin creates it. */
+        val templateRequired: Boolean = false,
+    )
+    private val _callRequest = MutableStateFlow(CallRequestUi())
+    val callRequest: StateFlow<CallRequestUi> = _callRequest.asStateFlow()
+
     // Reload bookkeeping — declared before init, whose load() already uses it.
     private var liveJob: Job? = null
     private var shownBefore = false
@@ -972,6 +993,64 @@ class CustomerViewModel(
         }
     }
 
+    /** The name the Calls section addresses the customer by. */
+    fun displayNameForCalls(): String? = _profile.value?.name ?: conversation.name
+
+    /** GET /admin/calls/permission for this customer. A failure keeps what is shown. */
+    fun loadPermission() {
+        val wa = callsKey() ?: return
+        if (permissionJob?.isActive == true) return
+        permissionJob = viewModelScope.launch {
+            try {
+                _callPermission.value = dash.api.calls.permission(wa)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Throwable) {
+            }
+        }
+    }
+
+    /**
+     * "Send call request" from the Calls section — only on the agent's tap
+     * (it messages the customer). The server's refusals say what to do next:
+     * `template_required` (an admin creates the template), `138009` (when
+     * they can ask again), `already_permitted` (call now).
+     */
+    fun sendCallRequest() {
+        val wa = callsKey() ?: return
+        if (_callRequest.value.busy) return
+        _callRequest.value = CallRequestUi(busy = true)
+        viewModelScope.launch {
+            val r = dash.container.calls.requestPermission(wa, _profile.value?.name ?: conversation.name)
+            val resp = r.getOrNull()
+            val e = r.exceptionOrNull()
+            val cm = ke.co.bethanyhouse.neema.feature.calls.CallManager
+            _callRequest.value = when {
+                resp?.alreadyPermitted == true -> CallRequestUi(alreadyAllowed = true)
+                resp != null -> CallRequestUi(sent = true)
+                else -> {
+                    val refusal = cm.requestRefusal(e, dash.can(ke.co.bethanyhouse.neema.core.perm.Perms.MANAGE_SETTINGS))
+                    if (refusal?.code == "138009") {
+                        val cur = _callPermission.value ?: ke.co.bethanyhouse.neema.core.model.CallPermission(waId = wa)
+                        _callPermission.value = cur.copy(
+                            canRequest = false,
+                            requestAvailableAt = (e as? ke.co.bethanyhouse.neema.core.net.ApiException)?.field("request_available_at") ?: cur.requestAvailableAt,
+                        )
+                        CallRequestUi()
+                    } else CallRequestUi(
+                        error = refusal?.takeIf { it.code == "template_required" }?.detail ?: cm.permissionRequestError(e),
+                        adminCanFix = refusal?.adminCanFix == true,
+                        templateRequired = refusal?.code == "template_required",
+                    )
+                }
+            }
+            resp?.permission?.let { _callPermission.value = (_callPermission.value ?: it).copy(
+                status = it.status, permanent = it.permanent, expiresAt = it.expiresAt, at = it.at,
+                canCall = if (it.status == "granted") true else _callPermission.value?.canCall,
+            ) }
+        }
+    }
+
     /**
      * While the section is on screen: a `call_update` for this customer lands
      * in place; any other call frame reads the list again (a burst is one read).
@@ -980,6 +1059,12 @@ class CustomerViewModel(
         var pending: Job? = null
         dash.container.socket.events.collect { e ->
             val type = e["type"]?.let { runCatching { (it as JsonPrimitive).content }.getOrNull() }
+            // Their answer to a call request (or WhatsApp's automatic revoke): read where it stands now.
+            if (type == "call_permission") {
+                val who = e["wa_id"]?.let { runCatching { (it as JsonPrimitive).content }.getOrNull() }?.removePrefix("+")
+                if (who != null && who == callsKey()) { permissionJob?.cancel(); loadPermission() }
+                return@collect
+            }
             if (type != "call_update" && type != "call_ended" && type != "incoming_call" && type != "call_answered") return@collect
             val wa = callsKey() ?: return@collect
             if (type == "call_update") {

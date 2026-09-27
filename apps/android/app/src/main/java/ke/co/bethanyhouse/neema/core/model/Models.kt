@@ -497,7 +497,8 @@ data class Call(
     val direction: String = "inbound",
     /**
      * ringing | answered | completed | missed | declined | callback | no_answer |
-     * cancelled | failed (legacy rows may still say `ended` = completed).
+     * rejected (the customer declined OUR call) | cancelled | failed (legacy
+     * rows may still say `ended` = completed).
      */
     val status: String = "",
     val duration: Int? = null,
@@ -515,6 +516,8 @@ data class Call(
     /** none | recorded | pending | processing | done | failed */
     @SerialName("transcript_status") val transcriptStatus: String? = null,
     @SerialName("has_recording") val hasRecording: Boolean = false,
+    /** WhatsApp voicemail for this call arrived (the audio is in the chat as a normal message). */
+    @SerialName("has_voicemail") val hasVoicemail: Boolean = false,
     /** A missed / callback call nobody has returned or marked done yet. */
     @SerialName("follow_up_open") val followUpOpen: Boolean = false,
     @SerialName("follow_up_done_at") val followUpDoneAt: String? = null,
@@ -565,7 +568,12 @@ data class CallInsights(
     }
 }
 
-/** GET /admin/calls/permission: may we call this customer? */
+/**
+ * GET /admin/calls/permission: may we call this customer? Meta's answer is the
+ * truth ([source] "meta"); our store stands in when Meta can't be reached
+ * ("store"). Every field past [permanent] is newer (CALLING_UX.md §2.1): an
+ * older server leaves them null / false / 0 and the clients behave as before.
+ */
 @Serializable
 data class CallPermission(
     @SerialName("wa_id") val waId: String? = null,
@@ -573,11 +581,39 @@ data class CallPermission(
     val status: String = "unknown",
     @SerialName("expires_at") val expiresAt: String? = null,
     val permanent: Boolean = false,
+    /** no_permission | temporary | permanent, or null when Meta was unreachable. */
+    @SerialName("meta_status") val metaStatus: String? = null,
+    /** Meta says a call can be placed now (null: the server didn't say). */
+    @SerialName("can_call") val canCall: Boolean? = null,
+    /** A call request can be sent now (null: the server didn't say). */
+    @SerialName("can_request") val canRequest: Boolean? = null,
+    /** When the request limit (1 a day, 2 a week) lets us ask again. */
+    @SerialName("request_available_at") val requestAvailableAt: String? = null,
+    @SerialName("calls_left_today") val callsLeftToday: Int? = null,
+    /** WhatsApp removed the permission after unanswered calls. */
+    val revoked: Boolean = false,
+    /** Our last outbound calls to them that went unanswered / were declined (WhatsApp revokes at 4). */
+    @SerialName("unanswered_streak") val unansweredStreak: Int = 0,
+    /** meta | store */
+    val source: String? = null,
+    /** When we asked (the store's own record, when the server passes it on). */
+    @SerialName("requested_at") val requestedAt: String? = null,
+    /** When this record was written (the request-permission reply and the live event carry it). */
+    val at: String? = null,
 )
 
-/** POST /admin/calls/request-permission → {ok, permission}. */
+/**
+ * POST /admin/calls/request-permission → {ok, permission, route, already_permitted?}.
+ * [route]: free_form (inside the 24 h window) | template (outside it).
+ */
 @Serializable
-data class PermissionRequestResponse(val ok: Boolean = true, val permission: CallPermission? = null)
+data class PermissionRequestResponse(
+    val ok: Boolean = true,
+    val permission: CallPermission? = null,
+    val route: String? = null,
+    /** They already allowed calls permanently: nothing to ask — call now. */
+    @SerialName("already_permitted") val alreadyPermitted: Boolean = false,
+)
 
 @Serializable
 data class CallTranscript(
@@ -609,6 +645,82 @@ data class IceConfig(
     val transcribe: Boolean? = null,
     /** …and without anyone asking (whisper_auto): "summary in a minute". */
     @SerialName("auto_transcribe") val autoTranscribe: Boolean? = null,
+    /**
+     * WhatsApp records and transcribes the call itself (the customer hears a
+     * short announcement): after a call "Summary in a minute", even when this
+     * device recorded nothing.
+     */
+    @SerialName("meta_transcription") val metaTranscription: Boolean? = null,
+)
+
+/** One holiday in the call hours: WhatsApp's "YYYY-MM-DD" and "HHMM" times. */
+@Serializable
+data class CallHoliday(
+    val date: String? = null,
+    @SerialName("start_time") val startTime: String? = null,
+    @SerialName("end_time") val endTime: String? = null,
+)
+
+/** One opening slot of the weekly call hours ("MONDAY", "0900", "1700"). */
+@Serializable
+data class CallHoursSlot(
+    @SerialName("day_of_week") val dayOfWeek: String? = null,
+    @SerialName("open_time") val openTime: String? = null,
+    @SerialName("close_time") val closeTime: String? = null,
+)
+
+@Serializable
+data class CallHours(
+    /** ENABLED | DISABLED */
+    val status: String? = null,
+    @SerialName("timezone_id") val timezoneId: String? = null,
+    @SerialName("weekly_operating_hours") val weekly: List<CallHoursSlot> = emptyList(),
+    @SerialName("holiday_schedule") val holidays: List<CallHoliday> = emptyList(),
+)
+
+@Serializable
+data class CallVoicemail(
+    /** ENABLED | DISABLED */
+    val status: String? = null,
+    /** REJECT and / or TIMEOUT */
+    val triggers: List<String>? = null,
+    @SerialName("timeout_seconds") val timeoutSeconds: Int? = null,
+)
+
+/** GET /admin/calls/settings: the number's WhatsApp calling settings (manage_settings). */
+@Serializable
+data class CallingSettings(
+    /** ENABLED | DISABLED */
+    val status: String? = null,
+    /** DEFAULT | DISABLE_ALL | HIDE_IN_CHAT */
+    @SerialName("call_icon_visibility") val callIconVisibility: String? = null,
+    /** ENABLED | DISABLED: a customer who calls us lets us call them back for 7 days. */
+    @SerialName("callback_permission_status") val callbackPermissionStatus: String? = null,
+    @SerialName("call_hours") val callHours: CallHours? = null,
+    val voicemail: CallVoicemail? = null,
+    /** Meta's restrictions on calling (read-only), kept raw: their shape isn't documented. */
+    val restrictions: List<JsonElement> = emptyList(),
+    @SerialName("last_restriction_event") val lastRestrictionEvent: JsonElement? = null,
+)
+
+/** POST /admin/calls/settings → {ok, sent, settings}. */
+@Serializable
+data class CallingSettingsSaved(val ok: Boolean = true, val settings: CallingSettings? = null)
+
+/** GET /admin/calls/permission-template: the call-request template used outside the 24 h window. */
+@Serializable
+data class PermissionTemplate(
+    val configured: Boolean = false,
+    val name: String? = null,
+    val language: String? = null,
+    /** env | app */
+    val source: String? = null,
+    @SerialName("waba_configured") val wabaConfigured: Boolean = false,
+    /** Null when Meta couldn't be asked. */
+    val exists: Boolean? = null,
+    /** approved | pending | rejected | … | null */
+    val status: String? = null,
+    val category: String? = null,
 )
 
 @Serializable

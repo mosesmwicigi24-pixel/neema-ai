@@ -110,7 +110,7 @@ class CallApiContractTest {
         assertEquals("requested", api.permission("+254712345678").status)
         assertEquals("wa_id=254712345678", fake.last("GET", "/admin/calls/permission").query)
         // calls_request_permission answers with the permission on file.
-        assertEquals("requested", api.requestPermission("254712345678")?.status)
+        assertEquals("requested", api.requestPermission("254712345678").permission?.status)
         // list_calls: one customer / the follow-ups, only when asked.
         raw.calls.list(waId = "+254712345678", limit = 3)
         assertEquals("wa_id=254712345678&limit=3", fake.last("GET", "/admin/calls").query)

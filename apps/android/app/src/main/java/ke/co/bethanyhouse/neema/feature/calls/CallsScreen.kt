@@ -3,6 +3,7 @@ package ke.co.bethanyhouse.neema.feature.calls
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import ke.co.bethanyhouse.neema.core.util.Fmt
@@ -182,6 +183,7 @@ fun CallsScreen(
     val selected by vm.selected.collectAsStateWithLifecycle()
     val transcript by vm.transcript.collectAsStateWithLifecycle()
     val focusKey by dash.callsFocusKey.collectAsStateWithLifecycle()
+    val restriction by dash.container.calls.restriction.collectAsStateWithLifecycle()
 
     LaunchedEffect(focusKey, calls) { focusKey?.let { if (calls != null) vm.consumeFocus(it) } }
 
@@ -224,6 +226,7 @@ fun CallsScreen(
                         vm = vm, state = logState, shown = shown, total = list?.size ?: 0, followUps = followUps,
                         followUpsOnly = followUpsOnly, selectedId = sel?.id, openTranscript = transcript,
                         readiness = readiness, loadError = loadError, refreshing = refreshing, compact = compact,
+                        restriction = restriction, onDismissRestriction = dash.container.calls::dismissRestriction,
                     )
                 }
                 if (sel != null) {
@@ -271,6 +274,8 @@ private fun CallLog(
     loadError: String?,
     refreshing: Boolean,
     compact: Boolean = false,
+    restriction: CallingRestriction? = null,
+    onDismissRestriction: () -> Unit = {},
 ) {
     // One card, as the web draws it (gradient, outline, shadow), over a lazy
     // list: a log of a thousand calls composes only the rows on screen. The
@@ -316,6 +321,7 @@ private fun CallLog(
                     }
                 }
             }
+            restriction?.let { r -> item(key = "restricted", contentType = "banner") { RestrictionBanner(r, inset, onDismissRestriction) } }
             if (!readiness.ready) item(key = "readiness", contentType = "banner") { ReadinessBanner(readiness, compact, inset) }
             // The log couldn't be refreshed: what we had stays, with the reason and a way to try again.
             if (loadError != null && !shown.isNullOrEmpty()) {
@@ -512,7 +518,8 @@ private fun CallRow(
                 Icon(w.icon, null, tint = toneColor(w.tone), modifier = Modifier.size(13.dp))
                 // One run of text so a tight row trims the end ("· Mo…") rather
                 // than dropping a whole part; an en space is the web's 6px gap at 12px.
-                Text(statusLine(w, c), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(statusLine(w, c), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                if (c.hasVoicemail) VoicemailBadge()
             }
             // Little room: the time drops under the outcome, and the name keeps the line.
             if (compact) Text(time, color = Dim, fontSize = 11.sp, maxLines = 1, style = TabularNums, modifier = Modifier.padding(top = 1.dp))
@@ -619,7 +626,7 @@ private fun TranscriptPanel(t: TranscriptUi, vm: CallsViewModel, compact: Boolea
                 color = Muted, fontSize = 11.sp,
                 modifier = Modifier.clickable { vm.toggleFull() }.heightIn(min = 48.dp).wrapContentHeight(Alignment.CenterVertically).padding(vertical = 2.dp),
             )
-            if (t.showFull) Text(data.transcript.orEmpty(), color = Sage, fontSize = 12.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 6.dp))
+            if (t.showFull) TranscriptText(data.transcript.orEmpty())
         }
         if (st == "pending" || st == "processing") {
             Text("Transcribing… this runs on our server, usually ~1–2 min.", color = Palette.Call.Gold, fontSize = 12.sp)
@@ -652,6 +659,67 @@ private fun TranscriptPanel(t: TranscriptUi, vm: CallsViewModel, compact: Boolea
             Spacer(Modifier.height(8.dp))
             RecordingPlayer(recordingUrl(it))
         }
+    }
+}
+
+/**
+ * The transcript: WhatsApp's own is speaker-separated ("Agent: …" /
+ * "Customer: …" lines) — each turn under its speaker's label; any other
+ * transcript as plain text.
+ */
+@Composable
+private fun TranscriptText(text: String) {
+    val turns = transcriptTurns(text)
+    if (turns == null) {
+        Text(text, color = Sage, fontSize = 12.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 6.dp))
+        return
+    }
+    Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        turns.forEach { (who, said) ->
+            Column {
+                Text(who, color = if (who == "Agent") Green else Palette.Call.Gold, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                Text(said, color = Sage, fontSize = 12.sp, lineHeight = 18.sp)
+            }
+        }
+    }
+}
+
+/** "Voicemail": WhatsApp voicemail arrived for this call (the audio is in the chat). */
+@Composable
+private fun VoicemailBadge() {
+    Text(
+        VOICEMAIL, color = AmberC, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+        modifier = Modifier.clip(RoundedCornerShape(50)).background(AmberC.copy(alpha = 0.14f))
+            .border(1.dp, AmberC.copy(alpha = 0.35f), RoundedCornerShape(50)).padding(horizontal = 7.dp, vertical = 1.dp),
+    )
+}
+
+/**
+ * `calling_restricted`: Meta flagged or restricted calling on the number
+ * (low quality, low pickup, the call button hidden). Calls we place may fail
+ * until it lifts — up to 7 days.
+ */
+@Composable
+private fun RestrictionBanner(r: CallingRestriction, inset: Dp, onDismiss: () -> Unit) {
+    Row(
+        Modifier.padding(start = inset, end = inset, bottom = 16.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp))
+            .background(RedC.copy(alpha = 0.1f)).border(1.dp, RedC.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+            .padding(start = 14.dp, top = 12.dp, bottom = 12.dp, end = 4.dp)
+            .semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite },
+        verticalAlignment = Alignment.Top,
+    ) {
+        Icon(CallIcons.Alert, null, tint = RedC, modifier = Modifier.size(18.dp).padding(top = 1.dp))
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text("WhatsApp restricted calling on this number", color = TextC, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(2.dp))
+            Text(restrictionText(r), color = Sage, fontSize = 12.sp, lineHeight = 17.sp)
+        }
+        Box(
+            Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Button, onClickLabel = "Dismiss", onClick = onDismiss)
+                .semantics { contentDescription = "Dismiss" },
+            contentAlignment = Alignment.Center,
+        ) { Icon(CallIcons.Close, null, tint = Sage, modifier = Modifier.size(16.dp)) }
     }
 }
 
@@ -828,10 +896,16 @@ private fun CallDetails(
                     modifier = Modifier.clickable(role = Role.Button) { vm.select(null) }.minimumInteractiveComponentSize().padding(horizontal = 6.dp),
                 )
             }
-            Text(
-                "${w.label}${callDuration(sel.duration).takeIf { it.isNotEmpty() }?.let { " · $it" } ?: ""} · ${Fmt.dateTime(sel.startedAt)}",
-                color = toneColor(w.tone), fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp),
-            )
+            Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    "${w.label}${callDuration(sel.duration).takeIf { it.isNotEmpty() }?.let { " · $it" } ?: ""} · ${Fmt.dateTime(sel.startedAt)}",
+                    color = toneColor(w.tone), fontSize = 12.sp, modifier = Modifier.weight(1f, fill = false),
+                )
+                if (sel.hasVoicemail) VoicemailBadge()
+            }
+            if (sel.hasVoicemail) {
+                Text("They left a voicemail — open the chat to listen.", color = Sage, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+            }
             Spacer(Modifier.height(12.dp))
             Timeline(sel)
             // Recording / transcript state (§7), and the insights the AI drew from the call.

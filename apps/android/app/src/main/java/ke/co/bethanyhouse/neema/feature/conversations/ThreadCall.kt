@@ -49,6 +49,7 @@ import ke.co.bethanyhouse.neema.feature.calls.CallIcons
 import ke.co.bethanyhouse.neema.feature.calls.CallTone
 import ke.co.bethanyhouse.neema.feature.calls.agentFirst
 import ke.co.bethanyhouse.neema.feature.calls.callRowWords
+import ke.co.bethanyhouse.neema.feature.calls.threadCallLabel
 
 /**
  * A WhatsApp call in the thread, where it happened (CALLING_UX.md §7): a
@@ -68,7 +69,8 @@ internal fun ThreadCallEvent(msg: ThreadMsg, onUseAsReply: (String) -> Unit) {
         CallTone.Live, CallTone.Good -> if (c.isDark) Palette.Emerald300 else Palette.Emerald700
         else -> c.textMid
     }
-    val label = msg.body.ifBlank { words?.label ?: "Call" }
+    // A voicemail came with it: "Missed call · voicemail" (the audio is a message in this chat).
+    val label = threadCallLabel(msg.body, call)
     // Who took it — not for calls nobody answered (as the web's pill).
     val agent = agentFirst(msg.agentName ?: call?.agentName)
         ?.takeIf { call?.status !in setOf("missed", "no_answer", "cancelled", "failed") }

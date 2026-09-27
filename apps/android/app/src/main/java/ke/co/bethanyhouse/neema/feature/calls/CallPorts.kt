@@ -6,6 +6,7 @@ import ke.co.bethanyhouse.neema.core.model.Call
 import ke.co.bethanyhouse.neema.core.model.CallOffer
 import ke.co.bethanyhouse.neema.core.model.CallPermission
 import ke.co.bethanyhouse.neema.core.model.IceConfig
+import ke.co.bethanyhouse.neema.core.model.PermissionRequestResponse
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
 
@@ -31,8 +32,12 @@ interface CallApi {
     suspend fun connect(to: String, sdp: String, name: String?): String
     /** GET /admin/calls/permission: has this customer allowed business calls? */
     suspend fun permission(waId: String): CallPermission
-    /** Sends WhatsApp's call-permission request; returns the permission now on file (null when the server didn't say). */
-    suspend fun requestPermission(to: String): CallPermission?
+    /**
+     * Sends WhatsApp's call-permission request: `{permission, route,
+     * already_permitted}`. A refusal is an [ke.co.bethanyhouse.neema.core.net.ApiException]
+     * carrying the server's `code` / `action` (template_required, 138009, …).
+     */
+    suspend fun requestPermission(to: String, name: String? = null): PermissionRequestResponse
     /** POST /admin/calls/{id}/recording — pass [UploadFile.of] a File so it streams from disk. */
     suspend fun uploadRecording(callId: String, file: UploadFile)
 }
@@ -48,7 +53,7 @@ class NeemaCallApi(private val api: NeemaApi) : CallApi {
     override suspend fun callback(callId: String) { api.calls.callback(callId) }
     override suspend fun connect(to: String, sdp: String, name: String?) = api.calls.connect(to, sdp, name).callId
     override suspend fun permission(waId: String) = api.calls.permission(waId)
-    override suspend fun requestPermission(to: String) = api.calls.requestPermission(to).permission
+    override suspend fun requestPermission(to: String, name: String?) = api.calls.requestPermission(to, name)
     override suspend fun uploadRecording(callId: String, file: UploadFile) { api.calls.uploadRecording(callId, file) }
 }
 

@@ -41,6 +41,11 @@ import androidx.compose.ui.unit.sp
 import ke.co.bethanyhouse.neema.app.DashboardViewModel
 import ke.co.bethanyhouse.neema.app.ViewId
 import ke.co.bethanyhouse.neema.core.model.Call
+import ke.co.bethanyhouse.neema.core.model.CallPermission
+import ke.co.bethanyhouse.neema.core.util.AppClock
+import ke.co.bethanyhouse.neema.feature.calls.firstNameOf
+import ke.co.bethanyhouse.neema.feature.calls.permissionLines
+import androidx.compose.ui.draw.alpha
 import ke.co.bethanyhouse.neema.core.ui.theme.ChannelColors
 import ke.co.bethanyhouse.neema.core.ui.theme.Neema
 import ke.co.bethanyhouse.neema.core.ui.theme.Palette
@@ -60,8 +65,11 @@ import ke.co.bethanyhouse.neema.feature.calls.callRowWords
 internal fun CallsSection(vm: CustomerViewModel, dash: DashboardViewModel) {
     val key = vm.callsKey() ?: return
     val calls by vm.recentCalls.collectAsState()
+    val permission by vm.callPermission.collectAsState()
+    val request by vm.callRequest.collectAsState()
     LaunchedEffect(vm, key) {
         vm.loadCalls()
+        vm.loadPermission()
         vm.watchCalls()
     }
     val c = Neema.colors
@@ -90,10 +98,78 @@ internal fun CallsSection(vm: CustomerViewModel, dash: DashboardViewModel) {
                 contentAlignment = Alignment.Center,
             ) { Text("All calls", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = if (c.isDark) Palette.Emerald300 else Palette.Emerald700) }
         }
+        CallPermissionBlock(
+            permission, request, first = firstNameOf(vm.displayNameForCalls()) ?: "them",
+            onSend = vm::sendCallRequest, onCallNow = { vm.call(key) },
+            onSettings = { dash.navigate(ViewId.Settings) },
+        )
         if (list.isEmpty()) {
             Text("No calls with this customer yet.", fontSize = 12.sp, color = c.muted, modifier = Modifier.padding(vertical = 6.dp))
         }
         list.forEach { CallLine(it) }
+    }
+}
+
+/**
+ * Where this customer's call permission stands (CALLING_UX.md §2.1) — said
+ * honestly: allowed permanently / until a date, a request waiting, declined,
+ * revoked after unanswered calls, when a new request can go, calls left
+ * today — and "Send call request" when calling them needs one.
+ */
+@Composable
+internal fun CallPermissionBlock(
+    p: CallPermission?,
+    request: CustomerViewModel.CallRequestUi,
+    first: String,
+    onSend: () -> Unit,
+    onCallNow: () -> Unit,
+    onSettings: () -> Unit,
+) {
+    val c = Neema.colors
+    val lines = p?.let { permissionLines(it, first, AppClock.now()) }.orEmpty()
+    val needsRequest = p != null && p.canCall == false && p.status != "requested" && !request.sent && !request.alreadyAllowed &&
+        !request.templateRequired
+    if (lines.isEmpty() && !needsRequest && !request.sent && !request.alreadyAllowed && request.error == null) return
+    val link = if (c.isDark) Palette.Emerald300 else Palette.Emerald700
+    Column(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 4.dp, end = 8.dp)) {
+        lines.forEach { Text(it, fontSize = 12.sp, color = c.textMid, lineHeight = 17.sp) }
+        when {
+            request.alreadyAllowed -> {
+                Text("$first already allowed calls", fontSize = 12.sp, color = link, lineHeight = 17.sp)
+                SmallPill("Call now", filled = true, onClick = onCallNow)
+            }
+            request.sent -> Text("Call request sent — you'll be told when $first taps Allow", fontSize = 12.sp, color = link, lineHeight = 17.sp)
+            needsRequest -> {
+                val blocked = p?.canRequest == false
+                SmallPill(if (request.busy) "Sending…" else "Send call request", filled = true, enabled = !blocked && !request.busy, onClick = onSend)
+            }
+        }
+        request.error?.let {
+            Text(it, fontSize = 12.sp, color = if (c.isDark) Palette.Red300 else Palette.Red700, lineHeight = 17.sp, modifier = Modifier.padding(top = 4.dp))
+            if (request.adminCanFix) SmallPill("Open WhatsApp calling settings", filled = false, onClick = onSettings)
+        }
+    }
+}
+
+@Composable
+private fun SmallPill(text: String, filled: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
+    val c = Neema.colors
+    Box(
+        Modifier.padding(top = 4.dp).heightIn(min = 48.dp).clickable(enabled = enabled, role = Role.Button, onClick = onClick),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Row(
+            Modifier.alpha(if (enabled) 1f else 0.5f).clip(RoundedCornerShape(50))
+                .then(if (filled) Modifier.background(Palette.Call.WaDeep) else Modifier.border(1.dp, c.border, RoundedCornerShape(50)))
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (filled) {
+                Icon(CallIcons.Phone, null, tint = Color.White, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(6.dp))
+            }
+            Text(text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = if (filled) Color.White else c.text)
+        }
     }
 }
 
@@ -116,6 +192,7 @@ private fun CallLine(call: Call) {
                 fontSize = 12.sp, color = tone, fontWeight = FontWeight.Medium, maxLines = 1,
             )
             call.summary?.takeIf { it.isNotBlank() }?.let { Text(it, fontSize = 11.sp, color = c.textMid, maxLines = 2) }
+            if (call.hasVoicemail) Text("Voicemail — open the chat to listen", fontSize = 11.sp, color = c.textMid, maxLines = 1)
         }
         if (call.followUpOpen) {
             Text(

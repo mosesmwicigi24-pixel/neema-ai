@@ -176,6 +176,8 @@ private fun rememberCallActions(dash: DashboardViewModel): CallActions {
             openChat = { calls.openChat()?.let(dash::openConversationFor) },
             minimise = calls::minimise, expand = calls::expand, redial = calls::redial, dismiss = calls::dismiss,
             sendCallRequest = calls::sendCallRequest,
+            callNow = calls::callNow,
+            openCallingSettings = { calls.dismiss(); dash.navigate(ke.co.bethanyhouse.neema.app.ViewId.Settings) },
             openSettings = {
                 runCatching {
                     ctx.startActivity(
@@ -241,6 +243,9 @@ class CallActions(
     val dismiss: () -> Unit = {},
     val sendCallRequest: () -> Unit = {},
     val openSettings: () -> Unit = {},
+    val callNow: () -> Unit = {},
+    /** Settings → WhatsApp calling (admins, after a template_required refusal). */
+    val openCallingSettings: () -> Unit = {},
     val declineWaiting: () -> Unit = {},
     val callbackWaiting: () -> Unit = {},
     val endAndAnswer: () -> Unit = {},
@@ -383,7 +388,8 @@ private fun StatusLine(c: CallUiState) {
         }
         c.phase == CallPhase.InCall -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(text, color = Ink, fontSize = 18.sp, style = TabularNums, modifier = live.semantics { contentDescription = "On call, ${spokenLength(c.seconds)}" })
-            if (c.recording) {
+            // Only while a recording really runs: this phone's, or WhatsApp's own (the customer heard it announced).
+            if (c.recording || c.metaTranscription) {
                 Spacer(Modifier.height(8.dp))
                 Row(
                     Modifier.clip(RoundedCornerShape(50)).background(Red.copy(alpha = 0.16f)).padding(horizontal = 10.dp, vertical = 4.dp),
@@ -391,7 +397,7 @@ private fun StatusLine(c: CallUiState) {
                 ) {
                     Box(Modifier.size(8.dp).clip(CircleShape).background(Red))
                     Spacer(Modifier.width(6.dp))
-                    Text("Recording", color = Ink, fontSize = 13.sp)
+                    Text(if (c.recording) "Recording" else "Recorded by WhatsApp", color = Ink, fontSize = 13.sp)
                 }
             }
         }
@@ -403,7 +409,7 @@ private fun StatusLine(c: CallUiState) {
         // Every outcome is an icon AND words (never colour alone, §5).
         c.phase == CallPhase.Ended -> Row(live, verticalAlignment = Alignment.CenterVertically) {
             val owed = c.outcome.let {
-                it is CallOutcome.Missed || it == CallOutcome.NoAnswer || it == CallOutcome.ConnectionLost ||
+                it is CallOutcome.Missed || it == CallOutcome.NoAnswer || it == CallOutcome.Rejected || it == CallOutcome.ConnectionLost ||
                     it is CallOutcome.Failed || it == CallOutcome.MicBlocked || it == CallOutcome.PermissionNeeded
             }
             val tint = if (owed) OwedInk else Ink
@@ -412,6 +418,19 @@ private fun StatusLine(c: CallUiState) {
             Text(text, color = tint, fontSize = 16.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center)
         }
         else -> Text(text, color = Sub, fontSize = 15.sp, textAlign = TextAlign.Center, modifier = live)
+    }
+    // Before the call goes through: they left our last calls unanswered (a caution, never a block).
+    c.callCaution()?.let {
+        Spacer(Modifier.height(12.dp))
+        Row(
+            Modifier.widthIn(max = 360.dp).clip(RoundedCornerShape(12.dp)).background(Amber.copy(alpha = 0.14f))
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Icon(CallIcons.Alert, null, tint = Amber, modifier = Modifier.size(16.dp).padding(top = 1.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(it, color = Ink, fontSize = 13.sp, lineHeight = 18.sp)
+        }
     }
     c.outcomeNote()?.let {
         Spacer(Modifier.height(8.dp))
@@ -433,11 +452,11 @@ private fun StatusLine(c: CallUiState) {
 
 /** The wrap-up's outcome glyph (CallStage.tsx OUTCOME_ICON). */
 internal fun outcomeIcon(o: CallOutcome?): ImageVector = when (o) {
-    is CallOutcome.AnsweredElsewhere, CallOutcome.PermissionRequested -> CallIcons.Check
+    is CallOutcome.AnsweredElsewhere, CallOutcome.PermissionRequested, CallOutcome.AlreadyAllowed -> CallIcons.Check
     is CallOutcome.Missed -> CallIcons.DirIn
     is CallOutcome.Callback -> CallIcons.Callback
     CallOutcome.ConnectionLost -> CallIcons.NoSignal
-    CallOutcome.NoAnswer, is CallOutcome.Failed, CallOutcome.PermissionNeeded, CallOutcome.MicBlocked -> CallIcons.Alert
+    CallOutcome.NoAnswer, CallOutcome.Rejected, is CallOutcome.Failed, CallOutcome.PermissionNeeded, CallOutcome.MicBlocked -> CallIcons.Alert
     else -> CallIcons.PhoneDown
 }
 
@@ -556,10 +575,12 @@ private fun WrapUp(c: CallUiState, actions: CallActions) {
             val run = actions.run(a)
             val label = if (a == WrapAction.SendCallRequest && c.busy) "Sending…" else a.label
             val closer = a == WrapAction.Done || a == WrapAction.Cancel
+            // Meta's request limit is used up: the button stays, dimmed; the line above says when it can go.
+            val blocked = a == WrapAction.SendCallRequest && c.sendRequestBlocked() != null
             when {
                 closer -> PillButton(label, filled = false, outlined = false, onClick = run)
-                i == 0 -> PillButton(label, filled = true, enabled = !c.busy, onClick = run)
-                else -> PillButton(label, filled = false, enabled = !c.busy, onClick = run)
+                i == 0 -> PillButton(label, filled = true, enabled = !c.busy && !blocked, onClick = run)
+                else -> PillButton(label, filled = false, enabled = !c.busy && !blocked, onClick = run)
             }
         }
     }
@@ -749,6 +770,8 @@ internal fun CallActions.run(a: WrapAction): () -> Unit = when (a) {
     WrapAction.CallAgain, WrapAction.CallBack, WrapAction.TryAgain -> redial
     WrapAction.SendCallRequest -> sendCallRequest
     WrapAction.OpenSettings -> openSettings
+    WrapAction.CallNow -> callNow
+    WrapAction.CallingSettings -> openCallingSettings
     WrapAction.Done, WrapAction.Cancel -> dismiss
 }
 

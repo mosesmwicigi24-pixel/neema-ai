@@ -330,8 +330,18 @@ class NeemaApi(val http: NeemaHttp) {
         suspend fun connect(to: String, sdp: String, name: String? = null): ConnectResponse =
             http.post("/admin/calls/connect", buildJsonObject { put("to", to); put("sdp", sdp); if (name != null) put("name", name) })
         /** Sends the customer WhatsApp's call-permission request; their answer arrives as `call_permission`. */
-        suspend fun requestPermission(to: String): PermissionRequestResponse =
-            http.post("/admin/calls/request-permission", buildJsonObject { put("to", to) })
+        suspend fun requestPermission(to: String, name: String? = null): PermissionRequestResponse =
+            http.post("/admin/calls/request-permission", buildJsonObject {
+                put("to", to); if (!name.isNullOrBlank()) put("name", name)
+            })
+        /** GET /admin/calls/settings (manage_settings): the number's WhatsApp calling settings. */
+        suspend fun settings(): CallingSettings = http.get("/admin/calls/settings")
+        /** POST /admin/calls/settings with ONLY the fields to change (call_hours / voicemail are merged server-side). */
+        suspend fun saveSettings(change: JsonObject): CallingSettingsSaved = http.post("/admin/calls/settings", change)
+        /** GET /admin/calls/permission-template: is the outside-the-window call-request template there and approved? */
+        suspend fun permissionTemplate(): PermissionTemplate = http.get("/admin/calls/permission-template")
+        /** POST /admin/calls/permission-template: create it with the server's default wording (Meta reviews it). */
+        suspend fun createPermissionTemplate(): JsonObject = http.post("/admin/calls/permission-template", JsonObject(emptyMap()))
         suspend fun transcript(callId: String): CallTranscript = http.get("/admin/calls/${enc(callId)}/transcript")
         suspend fun transcribe(callId: String): TranscribeResponse =
             http.post("/admin/calls/${enc(callId)}/transcribe", JsonObject(emptyMap()))

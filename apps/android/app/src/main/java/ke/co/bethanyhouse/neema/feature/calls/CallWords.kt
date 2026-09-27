@@ -2,6 +2,8 @@ package ke.co.bethanyhouse.neema.feature.calls
 
 import androidx.compose.ui.graphics.vector.ImageVector
 import ke.co.bethanyhouse.neema.core.model.Call
+import ke.co.bethanyhouse.neema.core.model.CallPermission
+import ke.co.bethanyhouse.neema.core.util.Fmt
 
 /**
  * How a logged call reads wherever it is listed (the Calls view, the customer
@@ -24,6 +26,8 @@ fun callRowWords(c: Call): CallRowWords {
         "declined" -> CallRowWords("Declined", CallTone.Warn, dir)
         "callback" -> CallRowWords("Call back", CallTone.Warn, CallIcons.DirBack)
         "no_answer" -> CallRowWords("No answer", CallTone.Bad, dir)
+        // The customer declined OUR call (Meta's REJECTED) — not a follow-up, but not a good outcome.
+        "rejected" -> CallRowWords("They declined", CallTone.Bad, dir)
         "cancelled" -> CallRowWords("Cancelled", CallTone.Neutral, dir)
         "failed" -> CallRowWords("Failed", CallTone.Bad, dir)
         else -> CallRowWords(c.status.replace('_', ' ').replaceFirstChar { it.uppercase() }.ifEmpty { "Call" }, CallTone.Neutral, dir)
@@ -35,3 +39,80 @@ fun callDuration(s: Int?): String = if (s == null || s <= 0) "" else callLength(
 
 /** The agent's first name ("Moses Mwicigi" → "Moses"). */
 fun agentFirst(name: String?): String? = name?.trim()?.split(Regex("\\s+"))?.firstOrNull()?.takeIf { it.isNotEmpty() }
+
+/** A voicemail arrived for this call: the "Voicemail" badge (rows, details) and the thread pill's " · voicemail". */
+const val VOICEMAIL = "Voicemail"
+
+/**
+ * When something becomes possible, relative to [now]: "in 12 min", "in 5 h",
+ * "on 3 Oct 2026" — "now" once it is past.
+ */
+fun untilText(iso: String, now: Long): String {
+    val t = Fmt.millis(iso) ?: return "later"
+    val mins = (t - now + 59_999L) / 60_000L
+    return when {
+        mins <= 0 -> "now"
+        mins < 60 -> "in $mins min"
+        mins < 24 * 60 -> "in ${(mins + 59) / 60} h"
+        else -> "on ${Fmt.date(iso)}"
+    }
+}
+
+/**
+ * Where a customer's call permission stands, in words (CALLING_UX.md §2.1):
+ * "Allowed permanently", "Allowed until {date}", "Request sent {time} —
+ * waiting for {First}", "{First} declined calls", "Permission revoked after
+ * unanswered calls" — null when there is nothing to say (never asked; a
+ * call may still go through).
+ */
+fun permissionLine(p: CallPermission, first: String, now: Long): String? = when {
+    p.status == "granted" && p.permanent -> "Allowed permanently"
+    p.status == "granted" && p.expiresAt != null -> "Allowed until ${Fmt.date(p.expiresAt)}"
+    p.status == "granted" -> "Allowed"
+    p.status == "requested" -> {
+        val at = (p.requestedAt ?: p.at)?.let { Fmt.timeAgo(it, now) }?.takeIf { it != "—" }
+        "Request sent${at?.let { " $it" } ?: ""} — waiting for $first"
+    }
+    p.status == "denied" && p.revoked -> "Permission revoked after unanswered calls"
+    p.status == "denied" -> "$first declined calls"
+    else -> null
+}
+
+/**
+ * Everything the customer panel says about calling them: the [permissionLine],
+ * when a new request can go ("You can ask again {relative}"), and — only when
+ * Meta gave it — "Calls left today: N".
+ */
+fun permissionLines(p: CallPermission, first: String, now: Long): List<String> = listOfNotNull(
+    permissionLine(p, first, now),
+    p.requestAvailableAt?.takeIf { p.canRequest == false && p.status != "granted" }?.let { "You can ask again ${untilText(it, now)}" },
+    p.callsLeftToday?.let { "Calls left today: $it" },
+)
+
+/**
+ * A speaker-separated transcript ("Agent: …\nCustomer: …", as the server
+ * stores WhatsApp's) as turns — null when it isn't one, i.e. when any line
+ * lacks those labels (a Whisper transcript, or another labelling: plain text then).
+ */
+fun transcriptTurns(text: String): List<Pair<String, String>>? {
+    val label = Regex("^(Agent|Customer)\\s*:\\s*(.*)$", RegexOption.IGNORE_CASE)
+    val lines = text.lines().map { it.trim() }.filter { it.isNotEmpty() }
+    if (lines.isEmpty()) return null
+    return lines.map { l ->
+        val m = label.matchEntire(l) ?: return null
+        m.groupValues[1].lowercase().replaceFirstChar { it.uppercase() } to m.groupValues[2]
+    }
+}
+
+/** The restriction banner's second line: Meta's reasons, and what it means for calls. */
+fun restrictionText(r: CallingRestriction): String {
+    val why = r.reasons.map { it.replace('_', ' ').lowercase().replaceFirstChar { c -> c.uppercase() } }.filter { it.isNotBlank() }
+    return (if (why.isEmpty()) "" else why.joinToString(" · ") + ". ") +
+        "Calls you place may fail until it lifts (up to 7 days)."
+}
+
+/** The thread pill's words: the server's label (else the row's word), and " · voicemail" when one came with the call. */
+fun threadCallLabel(body: String, call: Call?): String {
+    val label = body.ifBlank { call?.let { callRowWords(it).label } ?: "Call" }
+    return if (call?.hasVoicemail == true && !label.contains("voicemail", ignoreCase = true)) "$label · voicemail" else label
+}

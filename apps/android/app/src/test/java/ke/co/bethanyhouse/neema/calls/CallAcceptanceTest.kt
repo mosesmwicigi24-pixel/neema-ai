@@ -3,6 +3,7 @@ package ke.co.bethanyhouse.neema.calls
 import app.cash.paparazzi.Paparazzi
 import ke.co.bethanyhouse.neema.app.ViewId
 import ke.co.bethanyhouse.neema.core.model.Call
+import ke.co.bethanyhouse.neema.core.model.CallPermission
 import ke.co.bethanyhouse.neema.core.model.IceConfig
 import ke.co.bethanyhouse.neema.core.net.ApiException
 import ke.co.bethanyhouse.neema.core.net.NeemaJson
@@ -209,6 +210,8 @@ class CallAcceptanceTest {
         // Call back: straight out to them.
         r.calls.redial(); r.settle()
         assertEquals(1, r.count("connect $peter"))
+        // "Calling…" turns "Ringing…" only when Meta says their phone rings.
+        assertEquals(CallPhase.Placing, r.state.phase); r.raw("""{"type":"call_status","call_id":"${r.api.connectId}","status":"ringing"}""")
         assertEquals(CallPhase.RingingOut, r.state.phase)
         assertEquals("the same customer, the same name", "Fr. Peter Kamau", r.state.who)
     }
@@ -223,6 +226,8 @@ class CallAcceptanceTest {
         assertTrue("never the loudspeaker by itself", !r.audio.speakerOn)
         r.api.connectGate!!.complete(Unit); r.settle()
         assertTrue(call.await().isSuccess)
+        // "Calling…" turns "Ringing…" only when Meta says their phone rings.
+        assertEquals(CallPhase.Placing, r.state.phase); r.raw("""{"type":"call_status","call_id":"${r.api.connectId}","status":"ringing"}""")
         assertEquals(CallPhase.RingingOut, r.state.phase)
         assertEquals("Ringing…", r.words)
         assertEquals(Triple(james, "setLocal(Offer,v=0 our-offer)+candidates", "Deacon James Mwangi"), r.api.lastConnect)
@@ -257,6 +262,8 @@ class CallAcceptanceTest {
         r.calls.callGranted(); r.settle()
         assertNull(r.calls.permissionGranted.value)
         assertEquals(2, r.count("connect $james"))
+        // "Calling…" turns "Ringing…" only when Meta says their phone rings.
+        assertEquals(CallPhase.Placing, r.state.phase); r.raw("""{"type":"call_status","call_id":"${r.api.connectId}","status":"ringing"}""")
         assertEquals(CallPhase.RingingOut, r.state.phase)
     }
 
@@ -487,6 +494,8 @@ class CallAcceptanceTest {
 
     @Test fun s14_cancelWhileItRingsThem() = rig { r ->
         r.place().await()
+        // "Calling…" turns "Ringing…" only when Meta says their phone rings.
+        assertEquals(CallPhase.Placing, r.state.phase); r.raw("""{"type":"call_status","call_id":"${r.api.connectId}","status":"ringing"}""")
         assertEquals(CallPhase.RingingOut, r.state.phase)
         r.calls.hangup(); r.settle()
         assertEquals("Call cancelled", r.words)
@@ -618,6 +627,30 @@ class CallAcceptanceTest {
         assertEquals(peter, r.state.from)
         assertEquals(CallPhase.InCall, r.state.phase)
     }
+    // ── 21. The 2026-09 refresh, end to end: permission truth → request → Allow → ringing → declined ──
+    @Test fun s21_permissionTruthThenRingingThenDeclined() = rig { r ->
+        r.api.permission = CallPermission(james, "unknown", metaStatus = "no_permission", canCall = false, canRequest = true,
+            unansweredStreak = 0, source = "meta")
+        r.place().await()
+        assertEquals("James hasn't allowed WhatsApp calls yet", r.words)
+        assertEquals("no doomed connect", 0, r.count("connect"))
+        r.calls.sendCallRequest(); r.settle()
+        assertEquals(CallOutcome.PermissionRequested, r.state.outcome)
+        r.raw("""{"type":"call_permission","wa_id":"$james","status":"granted","expires_at":null,"permanent":true}""")
+        assertNotNull(r.calls.permissionGranted.value)
+        // Call now: Meta now says yes.
+        r.api.permission = CallPermission(james, "granted", permanent = true, metaStatus = "permanent", canCall = true, source = "meta")
+        r.calls.callGranted(); r.settle()
+        assertEquals(1, r.count("connect $james"))
+        assertEquals("Calling…", r.words)
+        r.raw("""{"type":"call_status","call_id":"wacid.out1","status":"ringing"}""")
+        assertEquals("Ringing…", r.words)
+        r.raw("""{"type":"call_ended","call_id":"wacid.out1","outcome":"rejected","status":"REJECTED","direction":"outbound"}""")
+        assertEquals("James declined the call", r.words)
+        assertEquals(listOf(WrapAction.Message, WrapAction.Done), r.state.wrapActions())
+        r.pass(60_000)
+        assertEquals("the agent decides what's next", CallPhase.Ended, r.state.phase)
+    }
 }
 
 /**
@@ -668,5 +701,17 @@ class CallAcceptanceHistoryTest {
         assertEquals("254712345678", dash.openConvKey.value)
         assertEquals(ViewId.Conversations, dash.view.value)
         assertNotNull(dash.openConvKey.value)
+    }
+
+    // ── 22. Voicemail: the log's row and a live row update carry it ─────────
+    @Test fun s22_voicemailReachesTheLog() {
+        val fake = FakeNeema.withFixtures().also(CallsFixtures::install)
+        val vm = CallsViewModel(dashboard(paparazzi.context, fake))
+        val c2 = vm.calls.value!!.first { it.callId == CallsFixtures.C2 }
+        assertFalse(c2.hasVoicemail)
+        val row = CallsFixtures.row("5b0f7d0e-8a1c-4a8e-9d64-0f1e2d3c4b02", CallsFixtures.C2, "254722000111", "Rev. Mary Achieng",
+            "inbound", "missed", null, null, CallsFixtures.pyIso(130), null, "none", false).replace("\"has_recording\":false", "\"has_recording\":false,\"has_voicemail\":true")
+        vm.mergeRow(NeemaJson.parseToJsonElement(row) as JsonObject)
+        assertTrue(vm.calls.value!!.first { it.callId == CallsFixtures.C2 }.hasVoicemail)
     }
 }

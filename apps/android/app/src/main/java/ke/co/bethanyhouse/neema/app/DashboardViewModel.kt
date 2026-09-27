@@ -505,6 +505,8 @@ class DashboardViewModel(
     init {
         // A toast restored after a process death gets its time on screen again.
         _toast.value?.let(::showToast)
+        // A refused call request outside the 24 h window: admins get Settings → WhatsApp calling on the card.
+        container.calls.canManageSettings = { can(ke.co.bethanyhouse.neema.core.perm.Perms.MANAGE_SETTINGS) }
         viewModelScope.launch { container.http.forbidden.collect { onForbidden() } }
         viewModelScope.launch {
             combine(_agents, _me, session) { _, _, _ -> }.collect { republishAccess() }

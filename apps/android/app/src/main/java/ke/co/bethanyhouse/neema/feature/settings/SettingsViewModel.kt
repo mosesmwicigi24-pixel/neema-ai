@@ -183,6 +183,9 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel(), ke.
     private val _savingAi = MutableStateFlow(false)
     val savingAi: StateFlow<Boolean> = _savingAi.asStateFlow()
 
+    /** Settings → WhatsApp calling (read only when its card is on screen, for manage_settings). */
+    val calling = CallingSettingsModel(NeemaCallingSettingsApi(dash.api), viewModelScope, dash.container.socket.events)
+
     private val _refreshing = MutableStateFlow(false)
     val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
 
@@ -237,6 +240,7 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel(), ke.
         if (_refreshing.value) return
         viewModelScope.launch {
             _refreshing.value = true
+            calling.refreshIfShown()
             try { loadAll() } finally { _refreshing.value = false }
         }
     }
