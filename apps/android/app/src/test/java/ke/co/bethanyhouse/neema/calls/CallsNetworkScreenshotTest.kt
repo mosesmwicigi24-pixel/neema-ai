@@ -7,7 +7,9 @@ import app.cash.paparazzi.Paparazzi
 import ke.co.bethanyhouse.neema.feature.calls.CallActions
 import ke.co.bethanyhouse.neema.feature.calls.CallCard
 import ke.co.bethanyhouse.neema.feature.calls.CallManager
+import ke.co.bethanyhouse.neema.feature.calls.CallOutcome
 import ke.co.bethanyhouse.neema.feature.calls.CallPhase
+import ke.co.bethanyhouse.neema.feature.calls.CallbackSave
 import ke.co.bethanyhouse.neema.feature.calls.CallReadiness
 import ke.co.bethanyhouse.neema.feature.calls.CallUiState
 import ke.co.bethanyhouse.neema.feature.calls.CallsScreen
@@ -30,6 +32,7 @@ import java.net.ConnectException
 class CallsNetworkScreenshotTest {
     @get:Rule
     val paparazzi = Paparazzi(deviceConfig = DeviceConfig.PIXEL_6, showSystemUi = false)
+    @get:Rule val clock = ke.co.bethanyhouse.neema.testing.PinnedClock()
 
     private val peter = CallUiState(callId = CallsFixtures.C1, from = "254712345678", name = "Fr. Peter Kamau")
 
@@ -37,13 +40,14 @@ class CallsNetworkScreenshotTest {
 
     @Test fun cardReconnecting() = card(peter.copy(phase = CallPhase.InCall, seconds = 187, reconnecting = true))
     @Test fun cardReconnectingDark() = card(peter.copy(phase = CallPhase.InCall, seconds = 187, reconnecting = true), dark = true)
-    @Test fun cardConnectionLost() = card(peter.copy(phase = CallPhase.Ended, seconds = 187, note = CallManager.CONNECTION_LOST))
+    @Test fun cardConnectionLost() = card(peter.copy(phase = CallPhase.Ended, seconds = 133, outcome = CallOutcome.ConnectionLost))
     @Test fun cardSavingCallback() = card(peter.copy(phase = CallPhase.Ringing, busy = true))
-    @Test fun cardCallbackRetrying() = card(peter.copy(phase = CallPhase.Ended, note = CallManager.CALLBACK_RETRYING))
-    @Test fun cardAnswerOffline() = card(peter.copy(phase = CallPhase.Connecting, error = CallManager.ANSWER_OFFLINE))
+    @Test fun cardCallbackRetrying() = card(peter.copy(phase = CallPhase.Ended, outcome = CallOutcome.Callback(CallbackSave.Retrying)))
+    /** No connection when Answer was tapped: it still rings, says so, and Answer stays live. */
+    @Test fun cardAnswerOffline() = card(peter.copy(phase = CallPhase.Ringing, error = CallManager.ANSWER_NO_CONNECTION))
     @Test fun cardOutboundUnconfirmed() = card(
-        CallUiState(phase = CallPhase.Connecting, callId = "pending", from = "254733444555", name = "Deacon James Mwangi",
-            outbound = true, error = CallManager.UNCONFIRMED_CALL),
+        CallUiState(phase = CallPhase.Ended, callId = "pending", from = "254733444555", name = "Deacon James Mwangi",
+            outbound = true, outcome = CallOutcome.Failed(CallManager.UNCONFIRMED_CALL)),
     )
     @Test fun cardReconnectingSmallPhone() {
         paparazzi.unsafeUpdateConfig(deviceConfig = DeviceConfig.NEXUS_5)

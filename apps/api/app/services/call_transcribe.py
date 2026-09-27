@@ -109,6 +109,97 @@ async def summarize_transcript(transcript: str) -> str:
     return (resp.text or "").strip()
 
 
+_INSIGHT_KEYS = ("intent", "products", "objections", "commitments", "next_action",
+                 "follow_up_message", "sentiment")
+
+
+def _parse_insights(text: str) -> dict | None:
+    """The model's JSON brief, tolerant of a code fence or prose around it."""
+    import json
+    import re
+    if not text:
+        return None
+    m = re.search(r"\{.*\}", text, re.S)
+    if not m:
+        return None
+    try:
+        data = json.loads(m.group(0))
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    out: dict = {}
+    for k in ("summary",) + _INSIGHT_KEYS:
+        v = data.get(k)
+        if k in ("products", "objections", "commitments"):
+            if isinstance(v, str):
+                v = [v] if v.strip() else []
+            v = [str(x).strip() for x in (v or []) if str(x).strip()][:8]
+        elif v is not None:
+            v = str(v).strip() or None
+        out[k] = v
+    return out
+
+
+async def analyse_call(transcript: str) -> tuple[str, dict | None]:
+    """The post-call brief: (summary text, insights). Insights are what the sales
+    team acts on — intent, products, objections, commitments, the next action and
+    a ready follow-up message — kept only when the model returns them cleanly;
+    otherwise the plain summary still lands (never a made-up field)."""
+    from app.agent.runtime import build_llm
+    llm = build_llm(model=settings.tier2_model_light, purpose="calls", cache=False)
+    system = (
+        "You analyse a phone call between a Bethany House sales agent and a "
+        "customer (clergy apparel + communion supplies, Kenya). The transcript may "
+        "be in Swahili, English, or a mix — understand all of it. Reply with ONE "
+        "JSON object, English values, nothing else:\n"
+        '{"summary": "4-7 short factual lines: who called, what they wanted, '
+        'products/quantities/sizes, any KES price agreed, decisions",\n'
+        ' "intent": "what the customer wants, one line",\n'
+        ' "products": ["each product discussed, with size/qty if said"],\n'
+        ' "objections": ["each concern or hesitation they raised"],\n'
+        ' "commitments": ["each thing either side promised, with who and when"],\n'
+        ' "next_action": "the single next step for the team, one line",\n'
+        ' "follow_up_message": "a short, warm WhatsApp message the agent could '
+        'send now to move the sale forward, in the customer\'s language",\n'
+        ' "sentiment": "positive | neutral | negative"}\n'
+        "Use [] or null for anything the call did not cover — never guess. If the "
+        'transcript is empty or unintelligible, reply {"summary": "(No clear speech captured.)"}'
+    )
+    resp = await llm.complete(
+        system=system,
+        messages=[{"role": "user", "content": transcript[:12000]}],
+        tools=[],
+    )
+    text = (resp.text or "").strip()
+    data = _parse_insights(text)
+    if data is None:
+        return text, None
+    summary = data.pop("summary", None) or ""
+    insights = {k: v for k, v in data.items() if v not in (None, [], "")}
+    return summary, (insights or None)
+
+
+def _note_text(summary: str, insights: dict | None) -> str:
+    """The CRM note: the summary, plus the next step when there is one."""
+    nxt = (insights or {}).get("next_action")
+    return f"{summary}\nNext: {nxt}" if nxt and nxt not in summary else summary
+
+
+async def _publish_update(call_id: str) -> None:
+    """Tell every open screen the call's brief is in (best-effort)."""
+    try:
+        import redis.asyncio as aioredis
+        from app.services import call_log
+        r = aioredis.from_url(settings.redis_url, decode_responses=True)
+        try:
+            await call_log.publish_update(r, call_id)
+        finally:
+            await r.aclose()
+    except Exception:
+        pass
+
+
 async def _save_call_note(db, wa_id: str, summary: str) -> None:
     """Persist the summary as a durable customer note keyed by phone number: it
     surfaces in the sidebar Notes (users.state['crm_notes']) AND feeds the agent's
@@ -171,10 +262,11 @@ async def _process(call_id: str) -> None:
                 return
             c.transcript_status = "processing"
             await db.commit()
+        await _publish_update(call_id)
 
         # Heavy, blocking work — off the event loop, outside any DB session.
         text, lang = await asyncio.to_thread(_transcribe_sync, path)
-        summary = await summarize_transcript(text) if text.strip() else ""
+        summary, insights = await analyse_call(text) if text.strip() else ("", None)
 
         async with AsyncSessionLocal() as db:
             c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
@@ -183,18 +275,21 @@ async def _process(call_id: str) -> None:
             c.transcript = text or None
             c.transcript_lang = lang or None
             c.summary = summary or None
+            c.insights = insights
             c.transcript_status = "done"
             await db.commit()
+        await _publish_update(call_id)
 
         if summary and wa_id:
             async with AsyncSessionLocal() as db:
                 try:
-                    await _save_call_note(db, wa_id, summary)
+                    await _save_call_note(db, wa_id, _note_text(summary, insights))
                 except Exception as exc:
                     _log.warning("transcribe: saving call note failed for %s: %s", call_id, exc)
     except Exception as exc:
         _log.warning("transcribe pipeline failed for %s: %s", call_id, exc)
         await _set_status(call_id, "failed")
+        await _publish_update(call_id)
 
 
 def schedule_transcription(call_id: str) -> None:

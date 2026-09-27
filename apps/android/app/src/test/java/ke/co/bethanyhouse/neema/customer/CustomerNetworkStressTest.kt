@@ -666,15 +666,12 @@ class CustomerNetworkStressTest {
         assertFalse(vm.callBusy.value)
     }
 
-    @Test fun aTimedOutPermissionRequestIsNotReportedAsFailed() {
+    @Test fun aCallWithoutPermissionNeverSendsTheRequestOnAFlakyNetwork() {
         fake.on("POST", "/admin/calls/request-permission") { _, _ -> Net.timeout() }
         val vm = vm(placeCall = { _, _ -> Result.failure(IllegalStateException("Customer hasn't granted call permission.")) })
         vm.call(CustomerFixtures.PETER)
-        assertEquals("Couldn't confirm the call request went out — check the thread before asking again.", last().message)
-        assertTrue(errors().isEmpty())
-        fake.on("POST", "/admin/calls/request-permission") { _, _ -> Net.offline() }
-        vm.call(CustomerFixtures.PETER)
-        assertEquals("Couldn't send the call request — you're offline. Check your connection and try again.", last().message)
+        assertTrue(fake.calls.none { it.path.contains("request-permission") })
+        assertEquals("Customer hasn't granted call permission.", last().message)
     }
 
     // ── Ask Neema / Answer via Neema ────────────────────────────────────────

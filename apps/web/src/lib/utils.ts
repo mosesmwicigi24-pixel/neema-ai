@@ -29,6 +29,32 @@ export const timeAgo = (iso?: string | null): string => {
     return `${Math.floor(d / 86400)}d ago`;
 };
 
+/** "Today" / "Yesterday" / "Mon 12 Sep" (+ year when not this year) — the
+ *  day headings of the thread and the Calls log. */
+export function dayLabel(iso?: string | null): string {
+    if (!iso) return "Earlier";
+    const d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return "Earlier";
+    const today = new Date();
+    const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+    const diff = Math.round((startOf(today) - startOf(d)) / 86_400_000);
+    if (diff === 0) return "Today";
+    if (diff === 1) return "Yesterday";
+    return d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short",
+        ...(d.getFullYear() !== today.getFullYear() ? { year: "numeric" } : {}) });
+}
+
+/** The local calendar day of a timestamp ("" when unknown) — for grouping. */
+export const dayKey = (iso?: string | null): string => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    return Number.isFinite(d.getTime()) ? `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}` : "";
+};
+
+/** "14:05" in the agent's locale. */
+export const clockTime = (iso?: string | null): string =>
+    iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+
 export const initials = (n?: string): string =>
     n
         ?.split(" ")

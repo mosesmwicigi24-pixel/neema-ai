@@ -35,7 +35,7 @@ class CallsParityTest {
         assertEquals("Fr. Peter Kamau", rowWho(call("Fr. Peter Kamau", "254712345678")))
         assertEquals("+254712345678", rowWho(call(null, "254712345678")))
         assertEquals("+254712345678", rowWho(call("", "254712345678")))
-        assertEquals("Unknown", rowWho(call(null, null)))
-        assertEquals("Unknown", rowWho(call(null, "")))
+        assertEquals("Unknown caller", rowWho(call(null, null)))
+        assertEquals("Unknown caller", rowWho(call(null, "")))
     }
 }

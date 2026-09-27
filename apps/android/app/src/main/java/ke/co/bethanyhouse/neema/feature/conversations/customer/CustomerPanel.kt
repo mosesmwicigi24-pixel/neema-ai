@@ -181,6 +181,10 @@ private fun ColumnScope.PanelBody(
                     LoadErrorBanner(vm, refreshing)
                     Hero(vm, ctx, saving, conversation, onOpenIdentity)
                     HorizontalDivider(color = c.hairline)
+                    if (vm.callsKey() != null) {
+                        CallsSection(vm, dash)
+                        HorizontalDivider(color = c.hairline)
+                    }
                     QuickStats(ctx)
                     HorizontalDivider(color = c.hairline)
                     if (!pinEnquiry) EnquiryCard(vm, canProduce, inline = true)
@@ -390,26 +394,44 @@ private fun Hero(
         }
 
         // Reach-out actions: WhatsApp voice call + the approved template (re-opens
-        // the chat / requests call permission). Only for a customer with a valid phone.
-        if (phoneDigits != null && ctx.canReply) {
+        // the chat / requests call permission). A WhatsApp call needs a valid phone;
+        // on Messenger / Instagram (no business calling there) Call explains that
+        // and offers WhatsApp instead.
+        val platform = callPlatformOf(conversation.channel)
+        var platformSheet by remember { mutableStateOf(false) }
+        if (platformSheet && platform != null) {
+            CallOnWhatsAppSheet(
+                platform, ke.co.bethanyhouse.neema.feature.calls.firstNameOf(p.name), phoneDigits,
+                onCall = { phoneDigits?.let(vm::call) }, onAsk = vm::askForWhatsAppNumber, onDismiss = { platformSheet = false },
+            )
+        }
+        if ((phoneDigits != null || platform != null) && ctx.canReply) {
             Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
-                    onClick = { vm.call(phoneDigits) },
+                    onClick = { if (platform != null) platformSheet = true else phoneDigits?.let(vm::call) },
                     // One call at a time: a second tap while dialling would say "Already in a call".
                     enabled = !callBusy,
                     modifier = Modifier.weight(1f).webHeight(36.dp),
                     shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = WA_GREEN, contentColor = Color.White,
-                        disabledContainerColor = WA_GREEN.copy(alpha = 0.55f), disabledContentColor = Color.White,
-                    ),
+                    // White text only on a fill it reads on (the web's #008069 / the platform's deep ink), never #25D366.
+                    colors = run {
+                        val fill = when (platform) {
+                            CallPlatform.Messenger -> Color(0xFF0066E0)
+                            CallPlatform.Instagram -> Color(0xFFD62976)
+                            null -> Palette.Call.WaDeep
+                        }
+                        ButtonDefaults.buttonColors(
+                            containerColor = fill, contentColor = Color.White,
+                            disabledContainerColor = fill.copy(alpha = 0.55f), disabledContentColor = Color.White,
+                        )
+                    },
                     contentPadding = PaddingValues(horizontal = 8.dp),
                 ) {
                     Icon(Icons.Default.Call, null, modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(6.dp))
                     Text(if (callBusy) "Calling…" else "Call", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                OutlinedButton(
+                if (phoneDigits != null) OutlinedButton(
                     onClick = { vm.sendTemplate(phoneDigits) },
                     enabled = !templateBusy,
                     modifier = Modifier.weight(1f).webHeight(36.dp),

@@ -3,6 +3,10 @@ package ke.co.bethanyhouse.neema.calls
 import ke.co.bethanyhouse.neema.core.api.UploadFile
 import ke.co.bethanyhouse.neema.core.model.Call
 import ke.co.bethanyhouse.neema.core.model.CallOffer
+import ke.co.bethanyhouse.neema.core.model.CallPermission
+import ke.co.bethanyhouse.neema.core.net.ApiException
+import ke.co.bethanyhouse.neema.feature.calls.AudioRoute
+import ke.co.bethanyhouse.neema.feature.calls.AudioRouteKind
 import ke.co.bethanyhouse.neema.core.model.IceConfig
 import ke.co.bethanyhouse.neema.feature.calls.CallApi
 import ke.co.bethanyhouse.neema.feature.calls.CallAudio
@@ -13,6 +17,7 @@ import ke.co.bethanyhouse.neema.feature.calls.CallRinger
 import ke.co.bethanyhouse.neema.feature.calls.PeerEvent
 import ke.co.bethanyhouse.neema.feature.calls.SdpType
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.MutableStateFlow
 import java.io.File
 
 /** An in-memory backend for the softphone: records every call, fails on demand. */
@@ -48,6 +53,15 @@ class FakeCallApi : CallApi {
     var lastConnect: Triple<String, String, String?>? = null
 
     override suspend fun list(): List<Call> { log += "list"; listError?.let { throw it }; return calls }
+    /** GET /admin/calls/{id}: the row from [calls], else 404 (as the handler). */
+    var getError: Exception? = null
+    override suspend fun get(callId: String): Call {
+        log += "get $callId"; getError?.let { throw it }
+        return calls.find { it.callId == callId } ?: throw ApiException(404, "GET", "/admin/calls/$callId", """{"detail":"Call not found"}""")
+    }
+    /** What GET /calls/permission says for everyone. */
+    var permissionStatus = "unknown"
+    override suspend fun permission(waId: String): CallPermission { log += "permission $waId"; return CallPermission(waId, permissionStatus) }
     override suspend fun iceConfig(): IceConfig { log += "ice-config"; iceError?.let { throw it }; return ice }
     override suspend fun offer(callId: String): CallOffer {
         log += "offer $callId"; offerError?.let { throw it }
@@ -64,7 +78,9 @@ class FakeCallApi : CallApi {
         connectError?.let { throw it }
         return connectId
     }
-    override suspend fun requestPermission(to: String) { log += "request-permission $to"; permissionError?.let { throw it } }
+    override suspend fun requestPermission(to: String): CallPermission? {
+        log += "request-permission $to"; permissionError?.let { throw it }; return CallPermission(to, "requested")
+    }
     override suspend fun uploadRecording(callId: String, file: UploadFile) {
         log += "recording $callId"; uploadErrors.removeFirstOrNull()?.let { throw it }; lastUploadStreamed = file.bytes == null; uploads += callId to Triple(file.filename, file.mimeType, file.length.toInt())
     }
@@ -128,12 +144,19 @@ class FakeRinger : CallRinger {
 class FakeAudio : CallAudio {
     var inCall = false
     var enters = 0
-    var speakerOn = false
+    /** Where the call's audio is going (null outside a call and before any choice). */
+    var route: AudioRoute? = null
+    val speakerOn: Boolean get() = route?.kind == AudioRouteKind.Speaker
     /** The microphone foreground service is up (only ever after the mic was allowed). */
     var micService = false
     var micLives = 0
-    override fun enter(speaker: Boolean) { if (!inCall) enters++; inCall = true; if (speaker) speakerOn = true }
+    override val routes = MutableStateFlow(listOf(AudioRoute.Earpiece, AudioRoute.Speaker))
+    /** A headset is plugged in / paired. */
+    fun plug(r: AudioRoute) { routes.value = routes.value + r }
+    /** …and gone again. */
+    fun unplug(r: AudioRoute) { routes.value = routes.value - r }
+    override fun enter(route: AudioRoute) { if (!inCall) enters++; inCall = true; this.route = route }
     override fun micLive() { micLives++; micService = true }
-    override fun leave() { inCall = false; speakerOn = false; micService = false }
-    override fun setSpeaker(on: Boolean) { speakerOn = on }
+    override fun leave() { inCall = false; route = null; micService = false }
+    override fun select(route: AudioRoute) { this.route = route }
 }

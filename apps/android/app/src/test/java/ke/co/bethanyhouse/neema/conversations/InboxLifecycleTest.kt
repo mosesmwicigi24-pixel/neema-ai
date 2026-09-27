@@ -220,6 +220,14 @@ class InboxLifecycleTest {
         fake.on("POST", "/admin/conversations/c1/reply") { _, _ -> server.rows += row("srv-2", "Lost in the air"); 200 to """{"ok":true}""" }
         b.vm.retrySend(failed.id)
         assertEquals(2, replies())
+        // Both attempts carry the same client_msg_id — even across the kill — so
+        // had the first actually landed, the server would answer the second with
+        // it instead of messaging the customer again.
+        val ids = fake.calls.filter { it.method == "POST" && it.path == "/admin/conversations/c1/reply" }
+            .map { kotlinx.serialization.json.Json.parseToJsonElement(it.body!!).let { j ->
+                (j as kotlinx.serialization.json.JsonObject)["client_msg_id"].toString() } }
+        assertEquals(1, ids.toSet().size)
+        assertTrue(ids.first() != "null")
         assertTrue(mine(b.vm).isEmpty())
         assertEquals(1, b.vm.thread.value.messages["c1"]!!.count { it.body == "Lost in the air" })
     }

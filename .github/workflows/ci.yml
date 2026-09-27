@@ -162,6 +162,23 @@ jobs:
             exit 1
           fi
 
+      # The access-control and send-once guarantees need a real database
+      # (conditional UPDATEs, the unique email index, JSONB permissions). Like
+      # the replay test, the module skips itself without Postgres — so assert
+      # it actually ran here, where one is guaranteed.
+      - name: Security + calling guarantees on a real database
+        env:
+          DATABASE_URL: postgresql+asyncpg://neema:neema@localhost:5432/neema
+          DATABASE_URL_SYNC: postgresql+psycopg2://neema:neema@localhost:5432/neema
+          SECRET_KEY: ci-not-a-real-secret
+        run: |
+          set -o pipefail
+          python -m pytest tests/test_security_db.py tests/test_calls_db.py -q -rs | tee /tmp/sec.log
+          if grep -q "skipped" /tmp/sec.log || ! grep -qE "[0-9]+ passed" /tmp/sec.log; then
+            echo "::error::the security tests did not run (Postgres unreachable?) — treating as failure"
+            exit 1
+          fi
+
   # ── Lint ratchet ──────────────────────────────────────────────────────────
   # apps/api has no ruff config, so this is ruff's default rule set (E4/E7/E9/F).
   # There is a standing backlog of findings; the gate is only that the number

@@ -1,3 +1,5 @@
+import type { ApiCall } from "@/lib/api";
+
 // ── Channel types ─────────────────────────────────────────────────────────────
 export type Channel =
     | "whatsapp"
@@ -59,7 +61,8 @@ export type SystemEventKind =
     | "transfer"        // Conversation transferred to another agent
     | "approve_draft"   // Agent approved an AI-generated draft
     | "pause"           // Replies held until someone resumes
-    | "flag";           // Generic "Needs Attention" flag
+    | "flag"            // Generic "Needs Attention" flag
+    | "call";           // A WhatsApp call with this customer (Message.call has the row)
 
 // ── Thread item — either a chat message or an inline system event ─────────────
 export interface Message {
@@ -81,6 +84,8 @@ export interface Message {
     event_kind?: SystemEventKind;
     // Human-readable reason text (e.g. escalation reason from the AI)
     event_reason?: string | null;
+    // event_kind "call": the call row (status, duration, summary, insights)
+    call?: ApiCall | null;
     // Media
     media_type?: "image" | "document" | "video" | "audio" | null;
     media_id?: string | null;
@@ -264,6 +269,17 @@ export type ViewId =
     | "overview"
     | "profile"
     | "settings";
+
+/** "Open this customer's chat" — from the call card, the minimised call, the
+ *  Calls view, Deals, a hub deep link. `key` is a wa_id / external_id (or the
+ *  hub's "digits|REF"); `conversationId` wins when the caller already knows
+ *  the thread; `prefill` lands in the composer (never sent). */
+export interface OpenChatRequest {
+    key: string;
+    conversationId?: string | null;
+    name?: string | null;
+    prefill?: string | null;
+}
 
 export interface SharedViewProps {
     onToast: (msg: string, type?: ToastType) => void;

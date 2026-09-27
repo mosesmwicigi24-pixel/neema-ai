@@ -375,18 +375,16 @@ class CustomerContractTest {
 
     // ── Invite / call permission / ask / answer ─────────────────────────────
 
-    @Test fun theInviteAndThePermissionRequestSendTheServersFieldNames() {
+    @Test fun theInviteSendsTheServersFieldNamesAndACallNeverAsksForPermission() {
         fake.on("POST", "/admin/whatsapp-invite", body = """{"ok":true,"wa_id":"254712345678"}""")
         val vm = CustomerViewModel(dash, CustomerFixtures.conversation("c1")) { _, _ ->
             Result.failure(IllegalStateException("This customer hasn't granted call permission yet. Send the WhatsApp template first, or wait until they message/call us."))
         }
         vm.sendTemplate(CustomerFixtures.PETER)
         assertEquals("""{"phone":"+254712345678","name":"Fr. Peter Kamau"}""", calls("POST", "/admin/whatsapp-invite").single().body)
+        // The call request is the agent's own tap on the call screen (CallManager.sendCallRequest): never sent from here.
         vm.call(CustomerFixtures.PETER)
-        assertEquals("""{"to":"254712345678"}""", calls("POST", "/admin/calls/request-permission").single().body)
-        fake.on("POST", "/admin/calls/request-permission", code = 400, body = """{"detail":"A valid phone number is required."}""")
-        vm.call(CustomerFixtures.PETER)
-        assertEquals("Couldn't send the call request — a valid phone number is required.", toasts.last().message)
+        assertTrue(calls("POST", "/admin/calls/request-permission").isEmpty())
     }
 
     @Test fun answerViaNeemaReadsTheServersErrors() {

@@ -249,8 +249,19 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
     private var draftJob: Job? = null
     private var windowJob: Job? = null
     private var activityJob: Job? = null
-    /** The newest page-one request: a newer refresh cancels it (the answer would be ignored anyway). */
+    /**
+     * The page-one request in flight. A refresh for the SAME filters joins it and
+     * asks for one more run after it ([refreshAgain]) — never cancels it: on a busy
+     * day a frame lands every second and the live page takes seconds, so cancelling
+     * meant no page ever arrived and the list sat on yesterday's copy. Only a change
+     * of filters cancels (that answer would be for the wrong list).
+     */
     private var pageJob: Job? = null
+    private var pageKey: String? = null
+    private var pageSeq = 0
+    private var refreshAgain = false
+    /** The newest refresh whose badges were shown: an older, slower answer never overwrites them. */
+    private var summaryShown = 0
     /** One messaging-window re-check per burst of new messages. */
     private var windowSoonJob: Job? = null
     /** Each thread's load in flight: a poll or catch-up never stacks a second one on it. */
@@ -352,6 +363,12 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         viewModelScope.launch {
             combine(dash.openConvKey, _inbox) { k, s -> k to s }.collect { (k, s) -> if (k != null) tryOpenKey(k, s) }
         }
+        // Words another view asked for in the open thread's composer (never sent by themselves).
+        viewModelScope.launch {
+            combine(dash.composerPrefill, _thread) { p, t -> p to t.activeId }.collect { (p, active) ->
+                if (p != null && p.first == active) { dash.composerPrefill.value = null; useAsReply(p.second) }
+            }
+        }
     }
 
     // ═══════════════════════════ The paged list (useInbox) ═══════════════════════════
@@ -385,25 +402,29 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
 
         viewModelScope.launch {
             runCatching { api.conversations.summary() }.onSuccess { s ->
-                if (seq == firstSeq) { _inbox.update { it.copy(summary = s) }; dash.inboxSummary.value = s }
+                if (seq > summaryShown) { summaryShown = seq; _inbox.update { it.copy(summary = s) }; dash.inboxSummary.value = s }
             } // on failure the badges keep their last value
         }
+        if (pageJob?.isActive == true && pageKey == key) { refreshAgain = true; return }
         pageJob?.cancel()
-        pageJob = viewModelScope.launch {
+        refreshAgain = false
+        pageKey = key
+        val pseq = ++pageSeq
+        val job = viewModelScope.launch {
             val res = try {
                 inboxApi.page(f, PAGE)
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 // Only the live filter's own failure counts; a superseded one says nothing.
                 // The rows already on screen stay; the list says why it couldn't refresh.
-                if (seq == firstSeq) _inbox.update {
+                if (pseq == pageSeq) _inbox.update {
                     val live = key == filterKeyOf(it.filters)
                     it.copy(loading = false, loadError = live, errorText = if (live) listErrorText(e) else it.errorText)
                 }
                 return@launch
             }
             // Superseded by a newer refresh, or the filters moved on.
-            if (seq != firstSeq || key != filterKeyOf(_inbox.value.filters)) return@launch
+            if (pseq != pageSeq || key != filterKeyOf(_inbox.value.filters)) return@launch
             upsert(res.items)
             val fresh = res.items.map { it.id }
             val top = fresh.toSet()
@@ -437,7 +458,15 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
             // The open thread stays fresh even when it is not on page one.
             val w = watched
             if (w != null && w !in top) {
-                runCatching { inboxApi.get(w) }.onSuccess { one -> if (seq == firstSeq) upsert(listOf(one)) }
+                runCatching { inboxApi.get(w) }.onSuccess { one -> if (pseq == pageSeq) upsert(listOf(one)) }
+            }
+        }
+        pageJob = job
+        // Finished (answered or failed, not cancelled) with refreshes asked for meanwhile: one more.
+        job.invokeOnCompletion { cause ->
+            if (cause == null && pageJob === job && refreshAgain) {
+                refreshAgain = false
+                viewModelScope.launch { refresh() }
             }
         }
     }
@@ -996,6 +1025,9 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                 if (seenFrames.size > SEEN_FRAMES) seenFrames.remove(seenFrames.first())
             }
         }
+        // A call with the open thread's customer rang, was answered, ended or got
+        // its summary: its pill (and brief) must follow, as on the web.
+        if (type in CALL_FRAMES) { onCallFrame(type, e); return }
         // Any thread moving means rows / badges moved: refetch shortly (coalesced).
         if (type in MOVING_FRAMES) scheduleSocketRefresh()
         if (convId == null) return
@@ -1040,6 +1072,36 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                 setMsgs(active) { emptyList() }
                 dash.toast("History cleared by ${e.s("clearedBy") ?: "an agent"}")
             }
+        }
+    }
+
+    private var callRefreshJob: Job? = null
+
+    /**
+     * A calls frame for the open thread's customer (their number, their person,
+     * or a call already in the thread): re-read the first page quietly — merged,
+     * so older pages, the scroll and the composer stay — to update the call pill
+     * and bring its summary in (ConversationsView.tsx does the same). A burst of
+     * frames is one read.
+     */
+    private fun onCallFrame(type: String?, e: JsonObject) {
+        val active = _thread.value.activeId
+        if (active.isEmpty()) return
+        val conv = _inbox.value.cache[active]
+        val row = e["call"] as? JsonObject
+        val wa = (if (type == "call_update") row?.s("wa_id") else if (type == "incoming_call") e.s("from") else null)
+            ?.removePrefix("+")
+        val person = if (type == "call_update") row?.s("person_id") else e.s("person_id")
+        val callId = e.s("call_id") ?: row?.s("call_id")
+        val mine = conv != null && (
+            (wa != null && (wa == conv.waId || (conv.channel == "whatsapp" && wa == conv.externalId))) ||
+                (person != null && person == conv.personId))
+        val known = callId != null && _thread.value.messages[active].orEmpty().any { it.call?.callId == callId }
+        if (!mine && !known) return
+        callRefreshJob?.cancel()
+        callRefreshJob = viewModelScope.launch {
+            delay(CALL_REFRESH_MS)
+            if (_thread.value.activeId == active) loadMessages(active, silent = true)
         }
     }
 
@@ -1388,7 +1450,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         val o = outgoing[localId] ?: return
         val err: Exception? = try {
             when (o.kind) {
-                OutKind.Reply -> inboxApi.reply(o.convId, o.text, o.replyToId, o.origText, o.origLang)
+                OutKind.Reply -> inboxApi.reply(o.convId, o.text, o.replyToId, o.origText, o.origLang, clientMsgId = o.localId)
                 OutKind.Approve -> api.conversations.approveDraft(o.convId, o.text.ifEmpty { null })
                 OutKind.Note -> api.conversations.addNote(o.convId, o.text)
             }
@@ -1909,26 +1971,29 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
     }
 
     /**
-     * Business-initiated WhatsApp call; no permission yet → ask for it automatically.
+     * Business-initiated WhatsApp call. The call screen carries every outcome —
+     * including "hasn't allowed calls yet", whose "Send call request" the agent
+     * taps (never sent by itself: it messages the customer); only a refusal the
+     * screen doesn't show ("Already in a call") is a toast.
      * Only ever a real number: a web-chat visitor's `web_<hash>` key (or a Meta
      * PSID) is not dialable, whatever digits it happens to contain.
      */
     fun call(waId: String, name: String?) {
         if (isWebVisitor(waId) || waId.any { !it.isDigit() } || waId.length !in 7..15) return
+        val convId = _thread.value.activeId.takeIf { id -> _inbox.value.cache[id]?.channel == "whatsapp" }
         viewModelScope.launch {
-            val r = dash.container.calls.initiateCall(waId, name)
+            val r = dash.container.calls.initiateCall(waId, name, convId)
             val err = r.exceptionOrNull() ?: return@launch
-            val msg = err.message ?: ""
-            if (msg.lowercase().contains("permission")) {
-                try {
-                    api.calls.requestPermission(waId)
-                    dash.toast("Asked ${name?.trim()?.split(" ")?.firstOrNull()?.ifBlank { null } ?: "them"} for permission to call — you can call once they tap Allow.")
-                } catch (e: Exception) {
-                    if (e is CancellationException) throw e
-                    dash.toast("Couldn't send the call request", ToastType.Error)
-                }
-            } else dash.toast(msg.ifBlank { "Couldn't place the call" }, ToastType.Error)
+            if ((err as? ke.co.bethanyhouse.neema.feature.calls.CallManager.CallError)?.shown == true) return@launch
+            dash.toast(err.message?.ifBlank { null } ?: "Couldn't place the call", ToastType.Error)
         }
+    }
+
+    /** "Use as reply" on a call's summary card: the AI's follow-up goes in the composer — never sent by itself. */
+    fun useAsReply(text: String) {
+        val t = text.trim()
+        if (t.isEmpty()) return
+        _composer.update { c -> c.copy(replyText = if (c.replyText.isBlank()) t else c.replyText.trimEnd() + "\n" + t) }
     }
 
     // ═══════════════════════════ Surviving process death (InboxMemory) ═══════════════════════════
@@ -2114,6 +2179,9 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         const val MAX_CACHED_THREADS = 8
         /** Message-frame ids remembered for duplicate-delivery checks. */
         const val SEEN_FRAMES = 512
+        /** Calls frames that can change the open thread's call pills ([onCallFrame]). */
+        val CALL_FRAMES = setOf("incoming_call", "call_answered", "call_ended", "call_update")
+        const val CALL_REFRESH_MS = 700L
         /** Conversation frames that move a row or a badge. */
         val MOVING_FRAMES = setOf("new_message", "message", "intercept_changed", "history_cleared")
         const val MAX_IMAGE = 5 * MB

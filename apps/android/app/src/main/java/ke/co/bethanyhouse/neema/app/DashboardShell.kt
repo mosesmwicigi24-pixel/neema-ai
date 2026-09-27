@@ -37,7 +37,9 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import ke.co.bethanyhouse.neema.core.util.Fmt
 import ke.co.bethanyhouse.neema.feature.agents.AgentsScreen
+import ke.co.bethanyhouse.neema.feature.calls.CallBar
 import ke.co.bethanyhouse.neema.feature.calls.CallStage
+import ke.co.bethanyhouse.neema.feature.calls.callBarShown
 import ke.co.bethanyhouse.neema.feature.calls.CallsScreen
 import ke.co.bethanyhouse.neema.feature.catalog.CatalogScreen
 import ke.co.bethanyhouse.neema.feature.conversations.ConversationsScreen
@@ -209,8 +211,12 @@ fun DashboardShell(
             // Immersive views (an open thread) run to the top edge and pad for the
             // status bar themselves: the banner takes that padding and the view
             // below is told the status bar is already accounted for.
-            val banner = !online || backOnline
+            val connBanner = !online || backOnline
             ConnectivityBanner(online, backOnline, if (immersive) Modifier.statusBarsPadding() else Modifier)
+            // A minimised call / "allowed calls" sits here, above the view: nothing of the view is covered.
+            val callBar = callBarShown(dash)
+            CallBar(dash, if (immersive && !connBanner) Modifier.statusBarsPadding() else Modifier)
+            val banner = connBanner || callBar
             Box(
                 Modifier.fillMaxWidth().weight(1f)
                     .then(if (immersive && banner) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier),

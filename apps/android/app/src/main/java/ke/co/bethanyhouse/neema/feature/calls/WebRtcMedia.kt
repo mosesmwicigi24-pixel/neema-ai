@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
+import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
@@ -13,6 +14,9 @@ import androidx.core.content.ContextCompat
 import ke.co.bethanyhouse.neema.core.model.IceConfig
 import ke.co.bethanyhouse.neema.core.notify.LiveService
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
@@ -229,8 +233,16 @@ internal fun iceSpecs(cfg: IceConfig): List<IceSpec> = cfg.iceServers.mapNotNull
 }
 
 /**
- * Communication-mode audio with focus, earpiece ↔ loudspeaker, and the
- * microphone foreground service that keeps the call alive in the background.
+ * Communication-mode audio with focus, the output route (earpiece, speaker,
+ * wired headset, Bluetooth), and the microphone foreground service that keeps
+ * the call alive in the background.
+ *
+ * Routes: API 31+ asks the system for its communication devices
+ * (`availableCommunicationDevices` / `setCommunicationDevice`, following
+ * `OnCommunicationDeviceChangedListener`); older phones get the classic
+ * speakerphone / Bluetooth SCO switches, best effort. Plug-ins and unplugs
+ * reach [routes] through an AudioDeviceCallback; which route the call takes
+ * is [CallManager]'s rule.
  */
 internal class AndroidCallAudio(
     private val context: Context,
@@ -243,8 +255,41 @@ internal class AndroidCallAudio(
     private var micService = false
     private var prevMode = AudioManager.MODE_NORMAL
     private var focus: AudioFocusRequest? = null
+    private var scoOn = false
 
-    override fun enter(speaker: Boolean) {
+    private val _routes = MutableStateFlow(readRoutes())
+    override val routes: StateFlow<List<AudioRoute>> = _routes.asStateFlow()
+
+    private val deviceCallback = object : AudioDeviceCallback() {
+        override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) { refresh() }
+        override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) { refresh() }
+    }
+    private var commListener: Any? = null
+
+    init {
+        // A null handler: callbacks arrive on the main looper.
+        runCatching { audio.registerAudioDeviceCallback(deviceCallback, null) }
+    }
+
+    private fun refresh() { _routes.value = readRoutes() }
+
+    /** Earpiece and speaker first (when the device has them), then the headsets. */
+    private fun readRoutes(): List<AudioRoute> = runCatching {
+        val out = ArrayList<AudioRoute>()
+        val devices: List<AudioDeviceInfo> = if (Build.VERSION.SDK_INT >= 31) audio.availableCommunicationDevices
+            else audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS).toList()
+        val hasEarpiece = devices.any { it.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE } ||
+            (Build.VERSION.SDK_INT < 31 && context.packageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY))
+        if (hasEarpiece) out += AudioRoute.Earpiece
+        out += AudioRoute.Speaker
+        if (devices.any { it.type in WIRED }) out += AudioRoute(AudioRouteKind.Wired)
+        devices.firstOrNull { it.type in BLUETOOTH }?.let { d ->
+            out += AudioRoute(AudioRouteKind.Bluetooth, d.productName?.toString()?.takeIf { it.isNotBlank() })
+        }
+        out.toList()
+    }.getOrDefault(listOf(AudioRoute.Earpiece, AudioRoute.Speaker))
+
+    override fun enter(route: AudioRoute) {
         if (inCall) return
         inCall = true
         prevMode = audio.mode
@@ -260,7 +305,13 @@ internal class AndroidCallAudio(
             audio.requestAudioFocus(req)
             focus = req
         }
-        if (speaker) setSpeaker(true)
+        if (Build.VERSION.SDK_INT >= 31) runCatching {
+            val l = AudioManager.OnCommunicationDeviceChangedListener { refresh() }
+            audio.addOnCommunicationDeviceChangedListener(ContextCompat.getMainExecutor(context), l)
+            commListener = l
+        }
+        refresh()
+        apply(route)
         // The microphone-type service waits for micLive(): on Android 14+
         // starting it before RECORD_AUDIO is granted throws, and the live
         // service would stop with it.
@@ -280,25 +331,68 @@ internal class AndroidCallAudio(
         if (!inCall && !micService) return
         inCall = false
         micService = false
-        setSpeaker(false)
+        if (Build.VERSION.SDK_INT >= 31) runCatching {
+            (commListener as? AudioManager.OnCommunicationDeviceChangedListener)?.let { audio.removeOnCommunicationDeviceChangedListener(it) }
+        }
+        commListener = null
+        runCatching {
+            if (Build.VERSION.SDK_INT >= 31) audio.clearCommunicationDevice()
+            else {
+                @Suppress("DEPRECATION")
+                audio.isSpeakerphoneOn = false
+                if (scoOn) { @Suppress("DEPRECATION") audio.stopBluetoothSco(); @Suppress("DEPRECATION") audio.isBluetoothScoOn = false }
+            }
+        }
+        scoOn = false
         runCatching { focus?.let { audio.abandonAudioFocusRequest(it) } }
         focus = null
         runCatching { audio.mode = prevMode }
         if (keepLive()) LiveService.start(context) else LiveService.stop(context)
     }
 
-    override fun setSpeaker(on: Boolean) {
+    override fun select(route: AudioRoute) {
+        // Outside a call the system route is never touched: enter() is handed the route to start on.
+        if (inCall) apply(route)
+    }
+
+    private fun apply(route: AudioRoute) {
         runCatching {
             if (Build.VERSION.SDK_INT >= 31) {
-                if (on) {
-                    audio.availableCommunicationDevices
-                        .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
-                        ?.let { audio.setCommunicationDevice(it) }
-                } else audio.clearCommunicationDevice()
+                val types = when (route.kind) {
+                    AudioRouteKind.Earpiece -> setOf(AudioDeviceInfo.TYPE_BUILTIN_EARPIECE)
+                    AudioRouteKind.Speaker -> setOf(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
+                    AudioRouteKind.Wired -> WIRED
+                    AudioRouteKind.Bluetooth -> BLUETOOTH
+                }
+                val devices = audio.availableCommunicationDevices.filter { it.type in types }
+                val d = devices.firstOrNull { route.name == null || it.productName?.toString() == route.name } ?: devices.firstOrNull()
+                if (d != null) audio.setCommunicationDevice(d) else audio.clearCommunicationDevice()
             } else {
                 @Suppress("DEPRECATION")
-                audio.isSpeakerphoneOn = on
+                when (route.kind) {
+                    AudioRouteKind.Speaker -> {
+                        if (scoOn) { audio.stopBluetoothSco(); audio.isBluetoothScoOn = false; scoOn = false }
+                        audio.isSpeakerphoneOn = true
+                    }
+                    AudioRouteKind.Bluetooth -> {
+                        audio.isSpeakerphoneOn = false
+                        audio.startBluetoothSco(); audio.isBluetoothScoOn = true; scoOn = true
+                    }
+                    // A plugged-in headset takes the call path by itself once the speaker and SCO are off.
+                    AudioRouteKind.Earpiece, AudioRouteKind.Wired -> {
+                        if (scoOn) { audio.stopBluetoothSco(); audio.isBluetoothScoOn = false; scoOn = false }
+                        audio.isSpeakerphoneOn = false
+                    }
+                }
             }
+        }
+    }
+
+    private companion object {
+        val WIRED = setOf(AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES, AudioDeviceInfo.TYPE_USB_HEADSET)
+        val BLUETOOTH: Set<Int> = buildSet {
+            add(AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
+            if (Build.VERSION.SDK_INT >= 31) add(AudioDeviceInfo.TYPE_BLE_HEADSET)
         }
     }
 }

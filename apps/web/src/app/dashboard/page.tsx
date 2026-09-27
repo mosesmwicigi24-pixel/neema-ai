@@ -26,7 +26,7 @@ import { MobileHeader, MobileBottomNav } from "@/components/ui/MobileNav";
 import { SessionExpiredModal } from "@/components/ui/SessionExpiredModal";
 import { pushNotification } from "@/components/ui/Notifications";
 
-import { CallStage } from "@/components/CallStage";
+import { CallStage, CallBar, CallCovered } from "@/components/CallStage";
 
 // ── Code splitting: ship the inbox, stream the rest ───────────────────────────
 // The dashboard used to be ONE 303 KB chunk holding all eleven views, so an
@@ -100,6 +100,7 @@ import type {
     ViewId,
     ThemeMode,
     ToastType,
+    OpenChatRequest,
 } from "@/types";
 
 const Icon = ({ d }: { d: string }) => (
@@ -142,9 +143,14 @@ export default function NeemaDashboard(): React.ReactElement {
     const [view, setView] = useState<ViewId>("conversations");
     // Cross-view request to open a specific customer's conversation in the inbox
     // (e.g. from the Calls view "message" action → open the thread in-app, not a
-    // WhatsApp popup). Holds a wa_id / external_id; ConversationsView consumes it.
-    const [openConvKey, setOpenConvKey] = useState<string | null>(null);
-    const openConversationFor = (key: string) => { setOpenConvKey(key); setView("conversations"); };
+    // WhatsApp popup). Holds a wa_id / external_id — plus, from a call, the
+    // thread id and a reply to pre-fill; ConversationsView consumes it. A live
+    // call keeps running (minimised) through the switch.
+    const [openConvKey, setOpenConvKey] = useState<OpenChatRequest | null>(null);
+    const openConversationFor = useCallback((req: string | OpenChatRequest) => {
+        setOpenConvKey(typeof req === "string" ? { key: req } : req);
+        setView("conversations");
+    }, []);
     // Cross-view request to focus the Calls console on one customer's history
     // (deep-linked from the hub's order page). Holds a wa_id; CallsView consumes it.
     const [callsFocusKey, setCallsFocusKey] = useState<string | null>(null);
@@ -720,13 +726,19 @@ export default function NeemaDashboard(): React.ReactElement {
                     />
                 )}
                 <main
-                    className="relative flex flex-1 overflow-hidden"
+                    className="relative flex flex-col flex-1 overflow-hidden"
                     style={{ marginTop: isMobile ? 56 : 0 }}
                 >
-                    {viewComponents[view]}
+                    {/* A minimised call (and "{First} allowed calls") sits in the
+                        flow above the view, so it never covers the view's header. */}
+                    <CallBar />
+                    <CallCovered className="relative flex flex-1 min-h-0 overflow-hidden">
+                        {viewComponents[view]}
+                    </CallCovered>
                     {/* Incoming/active call takes over the content area — sidebar
-                        stays visible, matching the Figma. */}
-                    <CallStage />
+                        stays visible, matching the Figma. "Chat" / "Open chat"
+                        on the card opens the customer's thread here. */}
+                    <CallStage onOpenConversation={openConversationFor} />
                 </main>
                 {isMobile && (
                     <MobileBottomNav

@@ -2,6 +2,7 @@ package ke.co.bethanyhouse.neema.calls
 
 import app.cash.paparazzi.Paparazzi
 import ke.co.bethanyhouse.neema.feature.calls.CallManager
+import ke.co.bethanyhouse.neema.feature.calls.CallOutcome
 import ke.co.bethanyhouse.neema.feature.calls.CallPhase
 import ke.co.bethanyhouse.neema.feature.calls.NeemaCallApi
 import ke.co.bethanyhouse.neema.feature.calls.PeerEvent
@@ -198,7 +199,8 @@ class CallRingsEverywhereTest {
         advance(700)
         p.backend.metaTerminate("wacid.D3")   // call_ended lost; the row is "missed" now
         advance(2_500)
-        assertEquals(CallPhase.Idle, p.state.phase)
+        assertEquals(CallPhase.Ended, p.state.phase)
+        assertEquals(CallOutcome.Missed(), p.state.outcome)
         assertFalse(p.ringer.ringing)
     }
 
@@ -271,7 +273,8 @@ class CallRingsEverywhereTest {
         assertEquals("wacid.T1", backend.answeredBy.keys.single())
         // No frame tells B; its 2.5s ringing poll sees the row "answered".
         advance(2_500)
-        assertEquals(CallPhase.Idle, b.state.phase)
+        assertEquals(CallPhase.Ended, b.state.phase)
+        assertEquals(CallOutcome.AnsweredElsewhere(null), b.state.outcome)
         assertFalse(b.ringer.ringing)
         assertFalse(b.ringer.showing)
         assertFalse("B must not end A's live call", backend.fake.called("POST", "/admin/calls/wacid.T1/terminate"))
@@ -285,12 +288,11 @@ class CallRingsEverywhereTest {
         backend.ring("wacid.T2")
         a.calls.answer()
         b.calls.answer()
-        assertEquals(CallManager.TAKEN_ELSEWHERE, b.state.error)
-        advance(1_800)
         assertEquals(CallPhase.Ended, b.state.phase)
+        assertEquals(CallOutcome.AnsweredElsewhere(null), b.state.outcome)
         assertFalse(backend.fake.called("POST", "/admin/calls/wacid.T2/terminate"))
-        advance(1_000)
-        assertEquals(CallPhase.Idle, b.state.phase)
+        advance(4_000)
+        assertEquals("a neutral wrap-up closes by itself", CallPhase.Idle, b.state.phase)
         assertEquals(CallPhase.Connecting, a.state.phase)
     }
 
@@ -306,8 +308,8 @@ class CallRingsEverywhereTest {
             assertFalse(p.ringer.ringing); assertFalse(p.ringer.showing)
         }
         advance(1_000)
-        assertEquals(CallPhase.Idle, a.state.phase)
-        assertNull(a.state.callId)
+        assertEquals(CallOutcome.Missed(), a.state.outcome)
+        assertEquals(CallOutcome.Missed(), b.state.outcome)
         assertFalse(backend.fake.called("POST", "/admin/calls/wacid.H1/terminate"))
     }
 
@@ -323,10 +325,10 @@ class CallRingsEverywhereTest {
         assertEquals(CallPhase.InCall, p.state.phase)
         assertEquals("wacid.C1", p.state.callId)
         assertEquals(1, p.ringer.ringStarts)
+        assertEquals("a banner, not a take-over", "wacid.C2", p.state.waiting?.callId)
         advance(30_000)
         p.calls.hangup()
-        assertEquals(CallPhase.Ended, p.state.phase)
-        advance(1_000)
+        advance(0)
         assertEquals("the waiting customer rings through at once", CallPhase.Ringing, p.state.phase)
         assertEquals("wacid.C2", p.state.callId)
         assertEquals("Sr. Agnes Wairimu", p.state.name)

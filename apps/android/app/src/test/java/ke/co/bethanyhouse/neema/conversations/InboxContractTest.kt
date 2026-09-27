@@ -256,8 +256,11 @@ class InboxContractTest {
         vm.setReplyText("Yes, Friday.")
         vm.sendReply()
         val b = body("POST", "/admin/conversations/k1/reply")
-        assertEquals(setOf("text"), b.keys)
+        assertEquals(setOf("text", "client_msg_id"), b.keys)
         assertEquals("Yes, Friday.", b.str("text"))
+        // The outbox bubble's id: the server sends each id once, so a resend
+        // after a lost answer can't reach the customer twice.
+        assertTrue(b.str("client_msg_id").orEmpty().isNotBlank())
         assertEquals("", vm.composer.value.replyText)
         assertTrue(toasts.none { it.type == ToastType.Error })
     }
@@ -270,7 +273,7 @@ class InboxContractTest {
         vm.sendReply()
         assertEquals("""{"text":"Yes, we deliver Friday."}""", calls("POST", "/admin/conversations/k1/translate-reply").last().body)
         val b = body("POST", "/admin/conversations/k1/reply")
-        assertEquals(setOf("text", "original_text", "original_lang"), b.keys)
+        assertEquals(setOf("text", "client_msg_id", "original_text", "original_lang"), b.keys)
         assertEquals("Oui, nous livrons vendredi.", b.str("text"))
         assertEquals("Yes, we deliver Friday.", b.str("original_text")); assertEquals("French", b.str("original_lang"))
     }

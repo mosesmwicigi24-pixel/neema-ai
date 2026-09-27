@@ -47,7 +47,7 @@ class CallApiContractTest {
         for (s in listOf("answer", "terminate", "callback")) fake.on("POST", CallsFixtures.route(C1, s), body = """{"ok":true,"call_id":"$C1"}""")
         // calls_connect → {"ok": True, "call_id": <Meta's new wacid>}
         fake.on("POST", "/admin/calls/connect", body = """{"ok":true,"call_id":"${CallsFixtures.wacid("T1VU")}"}""")
-        // calls_request_permission → {"ok": True}
+        // calls_request_permission → {"ok": True, "permission": {...}} (an older server: {"ok": True})
         fake.on("POST", "/admin/calls/request-permission", body = """{"ok":true}""")
         // calls_upload_recording → {"ok": True, "call_id": ..., "will_transcribe": auto}
         fake.on("POST", CallsFixtures.route(C1, "recording"), body = """{"ok":true,"call_id":"$C1","will_transcribe":false}""")
@@ -89,6 +89,61 @@ class CallApiContractTest {
         assertTrue(body.contains("Content-Disposition: form-data; name=\"file\"; filename=\"$C1.m4a\""))
         assertTrue(body.contains("Content-Type: audio/mp4") && body.length > 3000)
         assertEquals(".m4a", "$C1.m4a".substring("$C1.m4a".lastIndexOf('.')))
+    }
+
+    @Test fun theNewCallRoutesMatchTheHandlers() = runBlocking {
+        val (fake, api) = rig()
+        val raw = testContainer(paparazzi.context, fake).api
+        val enc = C1.replace("=", "%3D")
+        fake.on("GET", Regex.escape("/admin/calls/$enc"), body = CallsFixtures.row(
+            CallsFixtures.K1, C1, "254712345678", "Fr. Peter Kamau", "inbound", "completed", 184, "Moses Mwicigi",
+            CallsFixtures.pyIso(40), null, "done", true,
+        ))
+        fake.on("GET", "/admin/calls/permission", body = """{"wa_id":"254712345678","status":"requested","expires_at":null,"permanent":false}""")
+        fake.on("POST", "/admin/calls/request-permission",
+            body = """{"ok":true,"permission":{"wa_id":"254712345678","status":"requested","permanent":false,"expires_at":null,"at":"2026-09-26T10:00:00+00:00"}}""")
+        // get_call: GET /admin/calls/{call_id}, the id percent-encoded.
+        val row = api.get(C1)
+        assertEquals(C1, row.callId)
+        assertTrue(fake.calls.any { it.method == "GET" && it.path == "/admin/calls/$enc" })
+        // calls_permission reads ?wa_id= (no +).
+        assertEquals("requested", api.permission("+254712345678").status)
+        assertEquals("wa_id=254712345678", fake.last("GET", "/admin/calls/permission").query)
+        // calls_request_permission answers with the permission on file.
+        assertEquals("requested", api.requestPermission("254712345678")?.status)
+        // list_calls: one customer / the follow-ups, only when asked.
+        raw.calls.list(waId = "+254712345678", limit = 3)
+        assertEquals("wa_id=254712345678&limit=3", fake.last("GET", "/admin/calls").query)
+        raw.calls.list(view = "follow_up")
+        assertEquals("view=follow_up", fake.last("GET", "/admin/calls").query)
+        // calls_follow_up_done: POST, no body fields.
+        raw.calls.followUpDone(C1)
+        assertEquals("{}", fake.last("POST", "/admin/calls/$enc/follow-up-done").body)
+    }
+
+    @Test fun theNewRowShapeDecodesLeniently() {
+        val rows = NeemaJson.decodeFromString(ListSerializer(Call.serializer()), CallsFixtures.calls)
+        val peter = rows.first()
+        assertEquals("completed", peter.status)
+        assertEquals("c1", peter.conversationId)
+        assertEquals("whatsapp", peter.channel)
+        assertNotNull(peter.answeredAt); assertNotNull(peter.endedAt)
+        val i = peter.insights!!
+        assertEquals("Confirm Friday delivery to Nyeri", i.nextAction)
+        assertEquals(listOf("Clergy Shirt (Black 16\")"), i.products)
+        assertTrue(i.followUpMessage!!.startsWith("Hello Father Peter"))
+        assertTrue("missed rows owe a call", rows.first { it.status == "missed" }.followUpOpen)
+        // Odd insights never sink the row: a string where a list goes, numbers, objects, junk.
+        val odd = NeemaJson.decodeFromString(Call.serializer(), """{"call_id":"x","status":"completed","insights":{"products":"one shirt",
+            "objections":[3,{"name":"price"},null],"next_action":null,"follow_up_message":"","extra":{"a":1}},"new_key":true}""")
+        assertEquals(listOf("one shirt"), odd.insights!!.products)
+        assertEquals(listOf("3", "price"), odd.insights!!.objections)
+        assertNull(odd.insights!!.nextAction); assertNull(odd.insights!!.followUpMessage)
+        assertNull("not an object", NeemaJson.decodeFromString(Call.serializer(), """{"call_id":"y","insights":"n/a"}""").insights)
+        assertNull("empty", NeemaJson.decodeFromString(Call.serializer(), """{"call_id":"z","insights":{}}""").insights)
+        // ice-config's transcription flags.
+        val cfg = NeemaJson.decodeFromString(IceConfig.serializer(), """{"ice_servers":[],"record":true,"transcribe":true,"auto_transcribe":false}""")
+        assertEquals(true, cfg.transcribe); assertEquals(false, cfg.autoTranscribe)
     }
 
     @Test fun connectWithoutANameOmitsIt() = runBlocking {
@@ -191,10 +246,10 @@ class CallApiContractTest {
             return runCatching { api.connect("254712345678", "sdp", null) }.exceptionOrNull()!!
         }
         // calls_connect: Meta error 138006 → 409 with the permission detail.
-        val e409 = fail(409, "This customer hasn't granted call permission yet. Send the WhatsApp template first, or wait until they message/call us.")
+        val e409 = fail(409, "This customer hasn't allowed calls yet. Send them a call request — you can call as soon as they tap Allow.")
         assertTrue(e409 is ApiException && e409.status == 409)
         assertEquals(CallManager.NO_CALL_PERMISSION, CallManager.outboundError(e409))
-        assertTrue((e409 as ApiException).detail.startsWith("This customer hasn't granted call permission"))
+        assertTrue((e409 as ApiException).detail.startsWith("This customer hasn't allowed calls yet"))
         assertEquals("Couldn't place the call", CallManager.outboundError(fail(400, "A valid phone number is required.")))
         assertEquals("Couldn't place the call", CallManager.outboundError(fail(400, "sdp offer is required")))
         assertEquals("Couldn't place the call", CallManager.outboundError(fail(502, "call failed: WA call connect failed (500)")))

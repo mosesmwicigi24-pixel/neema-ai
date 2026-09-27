@@ -84,6 +84,8 @@ data class ThreadMsg(
      */
     @SerialName("comment_context") val commentRaw: JsonElement? = null,
     @SerialName("reply_to") val replyTo: QuotedRef? = null,
+    /** A call event's row (`event_kind: "call"`), kept raw and read leniently through [call]. */
+    @SerialName("call") val callRaw: JsonElement? = null,
     /** This device's own bubble on its way: "sending" (not yet confirmed) or "failed". */
     @kotlinx.serialization.Transient val sendState: String? = null,
     /** Why a failed bubble didn't go, for the line under it. */
@@ -96,6 +98,12 @@ data class ThreadMsg(
                 postId = it.s("post_id"), title = it.s("title"), permalink = it.s("permalink"), thumb = it.s("thumb"),
                 mediaType = it.s("media_type"), hasVideo = it.b("has_video"), replyTo = it.s("reply_to"),
             )
+        }
+    }
+    /** The call a `system_event` of kind "call" is about (null when absent or unreadable — the pill still shows). */
+    val call: ke.co.bethanyhouse.neema.core.model.Call? by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        (callRaw as? JsonObject)?.let {
+            runCatching { ke.co.bethanyhouse.neema.core.net.NeemaJson.decodeFromJsonElement(ke.co.bethanyhouse.neema.core.model.Call.serializer(), it) }.getOrNull()
         }
     }
     val isSystem: Boolean get() = type == "system_event"
@@ -465,9 +473,14 @@ class InboxApi(private val http: NeemaHttp) {
      * failed (Graph refused, window closed, page token) — surfaced as a throw
      * so a failed send never vanishes silently.
      */
-    suspend fun reply(id: String, text: String, replyTo: String?, originalText: String?, originalLang: String?) {
+    suspend fun reply(
+        id: String, text: String, replyTo: String?, originalText: String?, originalLang: String?,
+        /** The outbox bubble's id: a resend after a lost answer is recognised, never sent twice. */
+        clientMsgId: String? = null,
+    ) {
         val body = buildJsonObject {
             put("text", text)
+            if (clientMsgId != null) put("client_msg_id", clientMsgId)
             if (replyTo != null) put("reply_to", replyTo)
             if (originalText != null) put("original_text", originalText)
             if (originalLang != null) put("original_lang", originalLang)

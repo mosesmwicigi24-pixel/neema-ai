@@ -21,7 +21,8 @@ import java.time.temporal.ChronoUnit
  *    microseconds and a `+00:00` offset, never a `Z`;
  *  - `recording_url` is `{MEDIA_PUBLIC_URL}/api/admin/media/call_<hex>.m4a`, or
  *    the bare file name when MEDIA_PUBLIC_URL is unset.
- * Every outcome (answered, ended, missed, declined, callback, ringing), long
+ * Every status (completed, a legacy `ended`, missed, declined, callback, no_answer,
+ * cancelled, failed, ringing, answered = live), insights on a summarised call, long
  * names, a call with no wa_id, and transcripts in every status.
  */
 object CallsFixtures {
@@ -62,23 +63,35 @@ object CallsFixtures {
 
     private fun q(s: String?) = if (s == null) "null" else "\"" + s.replace("\"", "\\\"").replace("\n", "\\n") + "\""
 
-    /** One row exactly as routers/admin.py `list_calls` builds it. */
+    /** One row exactly as services/call_log.py `serialize` builds it (every key present, nullable ones null). */
     fun row(
         id: String, callId: String, waId: String?, name: String?, direction: String, status: String,
         duration: Int?, agentName: String?, startedAt: String?, summary: String?, transcriptStatus: String?,
         hasRecording: Boolean,
-    ) = """{"id":"$id","call_id":"$callId","wa_id":${q(waId)},"name":${q(name)},"direction":"$direction",
-        "status":"$status","duration":${duration ?: "null"},"agent_name":${q(agentName)},"started_at":${q(startedAt)},
-        "summary":${q(summary)},"transcript_status":${q(transcriptStatus)},"has_recording":$hasRecording}"""
+        answeredAt: String? = null, endedAt: String? = null, insights: String? = null,
+        conversationId: String? = null,
+        followUpOpen: Boolean = status == "missed" || status == "callback",
+    ) = """{"id":"$id","call_id":"$callId","wa_id":${q(waId)},"name":${q(name)},"person_id":null,
+        "conversation_id":${q(conversationId)},"channel":"whatsapp","direction":"$direction",
+        "status":"$status","duration":${duration ?: "null"},"agent_id":${if (agentName != null) "\"9c1e0f7a-agent\"" else "null"},
+        "agent_name":${q(agentName)},"started_at":${q(startedAt)},"answered_at":${q(answeredAt)},"ended_at":${q(endedAt)},
+        "summary":${q(summary)},"insights":${insights ?: "null"},"transcript_status":${q(transcriptStatus)},"has_recording":$hasRecording,
+        "follow_up_open":$followUpOpen,"follow_up_done_at":null}"""
+
+    /** `insights` as call_transcribe.py writes it. */
+    const val PETER_INSIGHTS = """{"intent":"Two black clergy shirts, size 16","products":["Clergy Shirt (Black 16\")"],
+        "objections":["Delivery to Nyeri by Friday"],"commitments":["KES 7,000 via M-Pesa on delivery"],
+        "next_action":"Confirm Friday delivery to Nyeri","follow_up_message":"Hello Father Peter, confirming your two black clergy shirts (16\") will reach Nyeri by Friday. Total KES 7,000 via M-Pesa on delivery.","sentiment":"positive"}"""
 
     // routers/admin.py list_calls → a bare JSON list (no envelope), newest first.
     val calls get() = listOf(
-        row(K1, C1, "254712345678", "Fr. Peter Kamau", "inbound", "answered", 184,
-            "Moses Mwicigi", pyIso(40), "Wants two black clergy shirts delivered to Nyeri by Friday.", "done", true),
+        row(K1, C1, "254712345678", "Fr. Peter Kamau", "inbound", "completed", 184,
+            "Moses Mwicigi", pyIso(40), "Wants two black clergy shirts delivered to Nyeri by Friday.", "done", true,
+            answeredAt = pyIso(40), endedAt = pyIso(37), insights = PETER_INSIGHTS, conversationId = "c1"),
         row("5b0f7d0e-8a1c-4a8e-9d64-0f1e2d3c4b02", C2, "254722000111", "Rev. Mary Achieng", "inbound", "missed", null,
             null, pyIso(130), null, "none", false),
-        row("5b0f7d0e-8a1c-4a8e-9d64-0f1e2d3c4b03", C3, "254733444555", "Deacon James Mwangi", "outbound", "answered", 61,
-            "Grace Wanjiru", pyIso(60 * 20), null, "pending", true),
+        row("5b0f7d0e-8a1c-4a8e-9d64-0f1e2d3c4b03", C3, "254733444555", "Deacon James Mwangi", "outbound", "completed", 61,
+            "Grace Wanjiru", pyIso(60 * 20), null, "pending", true, answeredAt = pyIso(60 * 20), endedAt = pyIso(60 * 20 - 1)),
         row("5b0f7d0e-8a1c-4a8e-9d64-0f1e2d3c4b04", C4, "254712345678", "Fr. Peter Kamau", "inbound", "callback", null,
             null, pyIso(60 * 26), null, "none", false),
         row("5b0f7d0e-8a1c-4a8e-9d64-0f1e2d3c4b05", C5, "254744555666", "The Most Reverend Archbishop Emmanuel Wabukala Onyango-Kipchumba",
@@ -94,13 +107,14 @@ object CallsFixtures {
     /** A long day: 14 rows, an emoji in a name, a no-name caller, every outcome — the card runs well past the screen. */
     val longLog get() = (0 until 14).joinToString(",", "[", "]") { i ->
         val names = listOf("Mama 🌸 Njeri", "Sr. Agnes Wairimu", null, "Bro. Kevin Ouma", "Canon Joseph Kiprono", "Mrs. Faith Chebet", "Dr. Samuel Mutua")
-        val statuses = listOf("answered", "missed", "declined", "callback", "ended", "ringing", "answered")
+        val statuses = listOf("completed", "missed", "declined", "callback", "no_answer", "ringing", "answered", "cancelled", "failed", "ended")
         val n = names[i % names.size]
         val st = statuses[i % statuses.size]
         row(
             id = "7c1d2e3f-4a5b-4c6d-8e7f-%012d".format(i), callId = wacid("TDA${i.toString().padStart(2, '0')}"),
-            waId = if (n == null) null else "2547${10_000_000 + i * 7_919}", name = n, direction = "inbound", status = st,
-            duration = if (st == "answered" || st == "ended") 45 + i * 37 else null,
+            waId = if (n == null) null else "2547${10_000_000 + i * 7_919}", name = n,
+            direction = if (st == "no_answer" || st == "cancelled" || st == "failed") "outbound" else "inbound", status = st,
+            duration = if (st == "completed" || st == "ended") 45 + i * 37 else null,
             agentName = if (i % 3 == 0) "Moses" else null, startedAt = pyIso(20L + i * 95), summary = null,
             transcriptStatus = "none", hasRecording = i % 4 == 0,
         )

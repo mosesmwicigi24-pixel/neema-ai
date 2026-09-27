@@ -32,6 +32,7 @@ import org.junit.Test
  */
 class CallsPolishScreenshotTest {
     @get:Rule val paparazzi = Paparazzi(deviceConfig = DeviceConfig.PIXEL_6, showSystemUi = false)
+    @get:Rule val clock = ke.co.bethanyhouse.neema.testing.PinnedClock()
 
     private val audit = TouchAudit()
     private val peter = CallUiState(callId = CallsFixtures.C1, from = "254712345678", name = "Askofu Mkuu Emmanuel Wabukala Onyango-Kipchumba 🙏")
@@ -44,7 +45,7 @@ class CallsPolishScreenshotTest {
 
     private fun card(device: DeviceConfig, s: CallUiState, dark: Boolean = false) {
         shot(device, dark) { CallCard(s, CallActions()) }
-        val controls = listOf("Decline", "Callback", "Answer", "Mute", "Unmute", "Speaker", "Hang up")
+        val controls = listOf("Decline call", "Answer call", "Mute", "Unmute", "Speaker", "End call", "Minimise call", "Open chat")
         assertEquals("call controls under 56dp", emptyList<Tappable>(), audit.tooSmall(56.dp, *controls.toTypedArray()))
         assertTrue("no call controls found", audit.tappables.any { t -> controls.any { t.label.contains(it) } })
     }
@@ -60,7 +61,7 @@ class CallsPolishScreenshotTest {
         }
         assertEquals(
             "log icon buttons under 48dp", emptyList<Tappable>(),
-            audit.tooSmall(48.dp, "Open the conversation", "Call summary", "Call recording", "missed", "Allow", "Retry", "Transcribe", "full transcript"),
+            audit.tooSmall(48.dp, "back on WhatsApp", "Call summary", "Call recording", "Follow-ups", "Show All", "Allow", "Retry", "Transcribe", "full transcript"),
         )
     }
 
@@ -69,6 +70,12 @@ class CallsPolishScreenshotTest {
     @Test fun ringingHugeText() = card(Devices.HugeText, peter.copy(phase = CallPhase.Ringing))
     @Test fun ringingHugeTextDark() = card(Devices.HugeText, peter.copy(phase = CallPhase.Ringing), dark = true)
     @Test fun inCallSmallPhone() = card(Devices.SmallPhoneLargeText, peter.copy(phase = CallPhase.InCall, seconds = 3_725, muted = true))
+    @Test fun inCallHugeText() = card(Devices.HugeText, peter.copy(phase = CallPhase.InCall, seconds = 187, recording = true))
+    /** A phone on its side: who on the left, the controls on the right — nothing below the fold. */
+    @Test fun inCallLandscapePhone() = card(Devices.PhoneLandscape, peter.copy(phase = CallPhase.InCall, seconds = 187))
+    @Test fun ringingLandscapePhone() = card(Devices.PhoneLandscape, peter.copy(phase = CallPhase.Ringing))
+    @Test fun ringing320() = card(Devices.Narrow320HugeText, peter.copy(phase = CallPhase.Ringing))
+    @Test fun inCall320() = card(Devices.Narrow320HugeText, peter.copy(phase = CallPhase.InCall, seconds = 187))
     @Test fun inCallHugeTextDark() = card(Devices.HugeText, peter.copy(phase = CallPhase.InCall, seconds = 187), dark = true)
     @Test fun inCallTabletPortrait() = card(Devices.TabletPortrait, peter.copy(phase = CallPhase.InCall, seconds = 42))
     @Test fun ringingFoldable() = card(Devices.Foldable, peter.copy(phase = CallPhase.Ringing))

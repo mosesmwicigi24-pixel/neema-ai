@@ -29,6 +29,12 @@ import app.main  # noqa: F401 — registers all SQLAlchemy models
 from app.core.config import settings
 
 
+@pytest.fixture(autouse=True)
+def _in_memory_action_claims(monkeypatch):
+    from tests import _action_fakes
+    _action_fakes.install(monkeypatch)
+
+
 class _Res:
     def __init__(self, one=None, many=None):
         self._one, self._many = one, many or []

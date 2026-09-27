@@ -144,6 +144,12 @@ class DashboardViewModel(
     val openConvKey = MutableStateFlow<String?>(null)
     /** Cross-view request: focus the Calls console on one customer (wa_id). */
     val callsFocusKey = MutableStateFlow<String?>(null)
+    /**
+     * Cross-view request: put these words in that conversation's composer
+     * (conversation id to text) — never sent by itself. The customer panel's
+     * "Ask for their WhatsApp number" uses it.
+     */
+    val composerPrefill = MutableStateFlow<Pair<String, String>?>(null)
 
     private val _inboxRefresh = MutableSharedFlow<Unit>(extraBufferCapacity = 4)
     /** Emits when something (a push notification) says the inbox should refetch now. */

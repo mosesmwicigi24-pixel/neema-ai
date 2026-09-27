@@ -77,7 +77,18 @@ class SettingsScreenshotTest : AreaShots() {
     )
 
     @Test fun lastDayPicker() = settings(SettingsPreview(datePicker = "ends"))
-    @Test fun firstDayPickerDark() = settings(SettingsPreview(datePicker = "starts"), dark = true)
+    /**
+     * A start date far from today, so the picker opens on April 2099: an open
+     * picker on the current month circles "today" from the real clock (the
+     * Material picker can't be pinned), and the golden changed every midnight.
+     */
+    private val startsLater get() = base().also {
+        it.on("GET", "/admin/settings/offer") { _, _ ->
+            200 to """{"campaign":${TeamFixtures.easterCampaign.replace("\"starts_on\":null", "\"starts_on\":\"2099-04-01\"")},""" +
+                """"running":false,"says":"","max_percent":70}"""
+        }
+    }
+    @Test fun firstDayPickerDark() = settings(SettingsPreview(datePicker = "starts"), dark = true, f = startsLater)
     @Test fun endOfferConfirm() = settings(SettingsPreview(confirmEnd = true))
     @Test fun productPicker() = settings(SettingsPreview(skuPicker = true), f = expired)
     @Test fun productPickerDark() = settings(SettingsPreview(skuPicker = true), f = expired, dark = true)

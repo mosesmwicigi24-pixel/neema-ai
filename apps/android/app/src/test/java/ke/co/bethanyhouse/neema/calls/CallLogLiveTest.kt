@@ -91,6 +91,27 @@ class CallLogLiveTest {
         assertEquals(loads + 2, l.loads)
     }
 
+    @Test fun aCallUpdateMergesItsRowInPlaceWithoutARead() {
+        val l = live()
+        val loads = l.loads
+        val row = CallsFixtures.row(
+            "5b0f7d0e-8a1c-4a8e-9d64-0f1e2d3c4b02", CallsFixtures.C2, "254722000111", "Rev. Mary Achieng", "inbound", "missed",
+            null, null, CallsFixtures.pyIso(130), null, "none", false, followUpOpen = false,
+        )
+        l.vm.select(l.vm.calls.value!!.first { it.callId == CallsFixtures.C2 })
+        assertEquals(true, l.vm.selected.value!!.followUpOpen)
+        l.ws.last.frame("""{"type":"call_update","call":$row}""")
+        advance(1_000)
+        assertEquals("no read: the row came whole", loads, l.loads)
+        assertEquals(7, l.vm.calls.value!!.size)
+        assertEquals(false, l.vm.calls.value!!.first { it.callId == CallsFixtures.C2 }.followUpOpen)
+        assertEquals("the open call follows", false, l.vm.selected.value!!.followUpOpen)
+        // A new call heads the log.
+        l.ws.last.frame("""{"type":"call_update","call":$newRing}""")
+        assertEquals("wacid.NEW", l.vm.calls.value!!.first().callId)
+        assertEquals(8, l.vm.calls.value!!.size)
+    }
+
     @Test fun framesThatAreNotCallLogEventsLoadNothing() {
         val l = live()
         val loads = l.loads

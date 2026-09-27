@@ -37,12 +37,14 @@ data class TranscriptUi(
 )
 
 /**
- * State for the Calls console (components/views/CallsView.tsx): the call log
- * (polled every 60s as a fallback, reloaded 500ms after call WS events —
- * a burst coalesces into one reload — and at once when the socket
- * reconnects or the app returns to the foreground),
- * the missed-only filter, the selected caller, and the open transcript panel
- * (lazily fetched, polled every 5s while a transcription job runs).
+ * State for the Calls view (components/views/CallsView.tsx, CALLING_UX.md §7):
+ * the call log (polled every 60s as a fallback, reloaded 500ms after call WS
+ * events — a burst coalesces into one reload — at once when the socket
+ * reconnects or the app returns to the foreground, and a `call_update` row
+ * merged in place without a read), the All / Follow-ups filter, the selected
+ * call's details, and the open transcript panel (lazily fetched, polled every
+ * 5s while a transcription job runs). From a row: call back, and mark a
+ * follow-up done.
  */
 class CallsViewModel(private val dash: DashboardViewModel) : ViewModel(), SavesUi {
     companion object {
@@ -70,8 +72,12 @@ class CallsViewModel(private val dash: DashboardViewModel) : ViewModel(), SavesU
      */
     val loadError: StateFlow<String?> = _loadError.asStateFlow()
 
-    /** Clicking the "N missed" badge filters to missed calls only. */
-    val missedOnly = MutableStateFlow(false)
+    /** The "Follow-ups" filter: only the missed / callback calls nobody has returned yet. */
+    val followUpsOnly = MutableStateFlow(false)
+
+    /** Follow-ups being marked done (their button waits; a second tap sends nothing). */
+    private val _doneBusy = MutableStateFlow<Set<String>>(emptySet())
+    val doneBusy: StateFlow<Set<String>> = _doneBusy.asStateFlow()
 
     /** Clicking a call opens the caller's full CRM panel right here. */
     val selected = MutableStateFlow<Call?>(null)
@@ -115,7 +121,9 @@ class CallsViewModel(private val dash: DashboardViewModel) : ViewModel(), SavesU
         viewModelScope.launch {
             dash.container.socket.events.collect { e ->
                 val t = e.str("type")
-                if ((t == "incoming_call" || t == "call_ended") && life.active && frameReload?.isActive != true) {
+                // A changed row arrives whole: merged in place, no read.
+                if (t == "call_update") { (e["call"] as? kotlinx.serialization.json.JsonObject)?.let(::mergeRow); return@collect }
+                if ((t == "incoming_call" || t == "call_ended" || t == "call_answered") && life.active && frameReload?.isActive != true) {
                     frameReload = launch { delay(FRAME_RELOAD_MS); reads.run() }
                 }
             }
@@ -123,6 +131,57 @@ class CallsViewModel(private val dash: DashboardViewModel) : ViewModel(), SavesU
     }
 
     fun load() { viewModelScope.launch { reads.run() } }
+
+    /** A `call_update` row: replaces its row where it is (or heads the log when new); the open call follows. */
+    internal fun mergeRow(raw: kotlinx.serialization.json.JsonObject) {
+        val row = runCatching { ke.co.bethanyhouse.neema.core.net.NeemaJson.decodeFromJsonElement(Call.serializer(), raw) }.getOrNull() ?: return
+        if (row.callId.isEmpty()) return
+        val cur = _calls.value ?: return
+        _calls.value = if (cur.any { it.callId == row.callId }) cur.map { if (it.callId == row.callId) row else it } else listOf(row) + cur
+        if (selected.value?.callId == row.callId) selected.value = row
+    }
+
+    /**
+     * "Mark follow-up done": off the Follow-ups list at once; put back, with the
+     * reason, if the server says no (a timeout may have landed — the next read
+     * shows the truth).
+     */
+    fun markFollowUpDone(call: Call) {
+        // The row as it is now (the caller may hold one from before an earlier tap).
+        val c = _calls.value?.find { it.callId == call.callId } ?: call
+        if (!c.followUpOpen || c.callId in _doneBusy.value) return
+        _doneBusy.value = _doneBusy.value + c.callId
+        fun set(open: Boolean) {
+            _calls.value = _calls.value?.map { if (it.callId == c.callId) it.copy(followUpOpen = open) else it }
+            selected.value?.takeIf { it.callId == c.callId }?.let { selected.value = it.copy(followUpOpen = open) }
+        }
+        set(false)
+        viewModelScope.launch {
+            try {
+                api.calls.followUpDone(c.callId)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (e is ApiException && e.status == 0 && e.body.startsWith("timed out")) reads.run()
+                else {
+                    set(true)
+                    dash.toast(actionErrorText(e, "mark the follow-up done"), ToastType.Error)
+                }
+            } finally {
+                _doneBusy.value = _doneBusy.value - c.callId
+            }
+        }
+    }
+
+    /** The row's green call button / "Call back": a WhatsApp call to them now (the call screen says the rest). */
+    fun callBack(c: Call) {
+        val wa = c.waId?.takeIf { it.isNotEmpty() } ?: return
+        viewModelScope.launch {
+            val err = dash.container.calls.initiateCall(wa, c.name, c.conversationId).exceptionOrNull() ?: return@launch
+            if ((err as? CallManager.CallError)?.shown == true) return@launch
+            dash.toast(err.message?.ifBlank { null } ?: "Couldn't place the call", ToastType.Error)
+        }
+    }
 
     /** Pull-to-refresh / Retry: the spinner shows until the answer (or the failure) is in. */
     fun refresh() {
@@ -191,17 +250,17 @@ class CallsViewModel(private val dash: DashboardViewModel) : ViewModel(), SavesU
 
     fun select(c: Call?) { selected.value = c; pendingSelect = null }
 
-    // ── Process death: the missed filter and the open caller come back ───────
+    // ── Process death: the Follow-ups filter and the open call come back ─────
     override var uiAttached = false
     /** A caller restored before the log has loaded: opened once the row is read. */
     private var pendingSelect: String? = null
 
     override fun saveUi(): Map<String, Any?> = mapOf(
-        "missedOnly" to missedOnly.value, "selected" to (selected.value?.id ?: pendingSelect),
+        "followUps" to followUpsOnly.value, "selected" to (selected.value?.id ?: pendingSelect),
     )
 
     override fun restoreUi(saved: Map<String, Any?>) {
-        (saved["missedOnly"] as? Boolean)?.let { missedOnly.value = it }
+        (saved["followUps"] as? Boolean)?.let { followUpsOnly.value = it }
         val id = saved.str("selected") ?: return
         val row = _calls.value?.find { it.id == id }
         if (row != null) selected.value = row else pendingSelect = id

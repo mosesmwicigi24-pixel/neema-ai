@@ -15,8 +15,16 @@ import asyncio
 import types
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 import app.main  # noqa: F401 — registers all SQLAlchemy models
 from app.core.config import settings
+
+
+@pytest.fixture(autouse=True)
+def _in_memory_action_claims(monkeypatch):
+    from tests import _action_fakes
+    _action_fakes.install(monkeypatch)
 
 
 # ── past baskets are visible, not just totals ────────────────────────────────

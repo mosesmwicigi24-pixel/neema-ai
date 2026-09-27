@@ -368,6 +368,7 @@ private fun ThreadPane(
                     onLoadOlder = vm::loadOlder,
                     onRetrySend = vm::retrySend,
                     onEditFailed = vm::editFailed,
+                    onUseAsReply = vm::useAsReply,
                 )
             },
             modifier = Modifier.weight(1f).fillMaxWidth(),

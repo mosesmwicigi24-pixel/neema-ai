@@ -118,9 +118,7 @@ async def _send_followup_template(db, redis, conv, action) -> bool:
             db, redis, conv.wa_id,
             f"[template {settings.wa_event_template}] {action.kind} on {number}",
             waba_msg_id=(((tpl or {}).get("messages") or [{}])[0].get("id") or None))
-        action.status = "sent"
-        action.draft = f"[template] {action.kind} on {number}"
-        await db.commit()
+        await finish(db, action, "sent", draft=f"[template] {action.kind} on {number}")
         _log.info("%s sent via template for %s", action.kind, conv.wa_id)
         return True
     except Exception as exc:
@@ -189,15 +187,26 @@ async def _repeats_earlier(db, conv, text: str, *, look_back: int = 6) -> bool:
 
 
 async def _send(db, redis, conv, text: str) -> None:
+    """Deliver, then record. Raises only when delivery failed: once the
+    message is out, a failure to record it is logged, never raised — a raise
+    there would put the action back in the queue and send it twice."""
     from app.services import n8n_bridge as svc
     recipient = conv.wa_id if conv.channel == "whatsapp" else conv.external_id
     if conv.channel == "whatsapp":
         wamid = await svc._send_waba(recipient, text)
-        await svc.save_outbound_message(db, redis, recipient, text, waba_msg_id=wamid)
+        record = svc.save_outbound_message(db, redis, recipient, text, waba_msg_id=wamid)
     else:
         from app.services.meta_send import send_to_channel
         await send_to_channel(conv.channel, recipient, text)
-        await svc.save_outbound_channel_message(db, redis, conv.channel, recipient, text)
+        record = svc.save_outbound_channel_message(db, redis, conv.channel, recipient, text)
+    try:
+        await record
+    except Exception as exc:
+        _log.error("follow-up delivered to %s but not recorded: %s", recipient, exc)
+        try:
+            await db.rollback()
+        except Exception:
+            pass
 
 
 async def _notify(redis, title: str, body: str, conv=None) -> None:
@@ -214,6 +223,86 @@ async def _notify(redis, title: str, body: str, conv=None) -> None:
         pass
 
 
+# ── Claiming an action ────────────────────────────────────────────────────────
+# Sending takes seconds (a model turn composes the text, then Meta answers).
+# Checking the status first and writing "sent" after let two senders both
+# pass the check — an operator's Send racing the scheduler, or a double tap —
+# and let a veto made meanwhile be overwritten by "sent" (the message went
+# out anyway). Every send now CLAIMS the row first with one conditional
+# UPDATE: only the caller that moves it out of the expected status sends.
+
+PENDING = ("planned", "needs_approval")
+
+
+async def claim(db, action, from_statuses, to_status: str = "sending") -> bool:
+    """Atomically move [action] from one of [from_statuses] to [to_status]
+    and commit. False when someone else got there first (or it is gone).
+    The in-memory row follows without being marked dirty, so no later
+    commit writes a stale status back."""
+    from sqlalchemy import update
+    from app.models.agent_action import AgentAction
+    res = await db.execute(
+        update(AgentAction)
+        .where(AgentAction.id == action.id,
+               AgentAction.status.in_(tuple(from_statuses)))
+        .values(status=to_status)
+        .execution_options(synchronize_session=False))
+    await db.commit()
+    won = (res.rowcount or 0) == 1
+    if won:
+        _mirror(action, status=to_status)
+    return won
+
+
+async def finish(db, action, status: str, draft: str | None = None) -> None:
+    """Settle a claimed action (sent / failed / back to where it was)."""
+    from sqlalchemy import update
+    from app.models.agent_action import AgentAction
+    values = {"status": status}
+    if draft is not None:
+        values["draft"] = draft
+    await db.execute(update(AgentAction).where(AgentAction.id == action.id)
+                     .values(**values).execution_options(synchronize_session=False))
+    await db.commit()
+    _mirror(action, **values)
+
+
+def _mirror(action, **values) -> None:
+    try:
+        from sqlalchemy.orm.attributes import set_committed_value
+        for k, v in values.items():
+            set_committed_value(action, k, v)
+    except Exception:
+        for k, v in values.items():
+            setattr(action, k, v)
+
+
+async def _recover_interrupted(db, now: datetime) -> int:
+    """A send cut off mid-way (process restart, cancelled request) leaves its
+    claim in `sending`, out of every queue. After ten minutes it comes back
+    for a human — who checks the thread first: it may have gone out."""
+    from sqlalchemy import update
+    from app.models.agent_action import AgentAction
+    try:
+        res = await db.execute(
+            update(AgentAction)
+            .where(AgentAction.status == "sending",
+                   AgentAction.updated_at < now - timedelta(minutes=10))
+            .values(status="needs_approval",
+                    reason=sa_func.concat(sa_func.coalesce(AgentAction.reason, ""),
+                                          " [send interrupted — check the thread before sending]"))
+            .execution_options(synchronize_session=False))
+        await db.commit()
+        return res.rowcount or 0
+    except Exception as exc:
+        _log.warning("could not recover interrupted sends: %s", exc)
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        return 0
+
+
 async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10) -> int:
     """Execute every due planned action: gate → auto-send or needs_approval."""
     from app.models.agent_action import AgentAction
@@ -222,6 +311,7 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
     from app.services.hub_events import _within_window, is_quiet_hours
 
     now = now or datetime.now(timezone.utc)
+    await _recover_interrupted(db, now)
     if is_quiet_hours(now):
         return 0
     rows = (await db.execute(select(AgentAction).where(
@@ -287,18 +377,25 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
                     and action.kind in ("fit_check", "replenishment")
                     and conv.channel == "whatsapp" and settings.wa_event_template
                     and settings.agent_initiative):
+                # Vetoed or sent by hand since this tick read it → leave it be.
+                if not await claim(db, action, ("planned",)):
+                    continue
                 if await _send_followup_template(db, redis, conv, action):
                     done += 1
                     continue
+                # The template didn't go: back to planned for the usual path.
+                await finish(db, action, "planned")
             if gate is not None:
                 draft = ""
                 try:
                     draft = await _compose_follow_up(db, redis, conv, action.reason or "follow up")
                 except Exception:
                     pass
-                action.status = "needs_approval"
-                action.draft = draft or action.draft
-                await db.commit()
+                # Conditional: a veto made while composing stands.
+                if not await claim(db, action, ("planned",), "needs_approval"):
+                    continue
+                if draft:
+                    await finish(db, action, "needs_approval", draft=draft)
                 await _notify(redis, "⏳ Follow-up needs your approval",
                               f"{gate} — draft ready: {(draft or '')[:80]}", conv)
                 continue
@@ -315,19 +412,28 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
             # Never nudge someone with a message they've already had. If the
             # composer only managed to echo an earlier line, a human rewords it.
             if await _repeats_earlier(db, conv, text):
-                action.status = "needs_approval"
-                action.draft = text
-                await db.commit()
+                if not await claim(db, action, ("planned",), "needs_approval"):
+                    continue
+                await finish(db, action, "needs_approval", draft=text)
                 _log.info("planned action %s held — draft repeats an earlier message",
                           action.id)
                 await _notify(redis, "⏳ Follow-up needs a reword",
                               "Neema's draft repeats what she already said: "
                               f"{text[:80]}", conv)
                 continue
-            await _send(db, redis, conv, text)
-            action.status = "sent"
-            action.draft = text
-            await db.commit()
+            # Claim it: an operator may have vetoed or sent it while the
+            # text was being composed.
+            if not await claim(db, action, ("planned",)):
+                _log.info("planned action %s changed while composing — not sent", action.id)
+                continue
+            try:
+                await _send(db, redis, conv, text)
+            except Exception:
+                # Nothing went out: planned again, for the next tick (bounded
+                # by the 3-tries counter above).
+                await finish(db, action, "planned")
+                raise
+            await finish(db, action, "sent", draft=text)
             done += 1
             _log.info("planned action %s sent to %s", action.id,
                       conv.wa_id or conv.external_id)

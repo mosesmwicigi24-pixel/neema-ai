@@ -95,7 +95,7 @@ def test_activity_is_newest_first_and_labels_read_like_english():
     assert by_kind["promise"]["label"] == "Customer promised"
     assert by_kind["checkin_planned"]["label"].startswith("Check-in planned")
     assert "Escalated" in by_kind["escalated"]["label"]
-    assert by_kind["call"]["label"] == "Call missed"
+    assert by_kind["call"]["label"] == "Missed call"   # the words the Calls view uses
 
 
 def test_activity_404s_on_a_missing_conversation():

@@ -511,6 +511,52 @@ async def _deliver_agent_reply(db: AsyncSession, conv: Conversation, text: str,
                                  human_agent=(win.get("mode") == "human_agent"))
 
 
+_REPLY_ID_TTL = 600
+
+
+async def _claim_reply_id(redis, conv_id, client_msg_id):
+    """None (no id, or no Redis — send as before), the Redis key this request
+    now owns, or — for a repeat — the first request's result (a dict). A
+    repeat that arrives while the first is still sending gets a 409."""
+    if not client_msg_id or redis is None:
+        return None
+    key = f"reply:once:{conv_id}:{str(client_msg_id)[:80]}"
+    try:
+        if await redis.set(key, "pending", nx=True, ex=_REPLY_ID_TTL):
+            return key
+        prior = await redis.get(key)
+    except Exception:
+        return None     # Redis down: fail open, send as before
+    if isinstance(prior, bytes):
+        prior = prior.decode()
+    if prior and prior != "pending":
+        import json
+        try:
+            return json.loads(prior)
+        except ValueError:
+            pass
+    from fastapi import HTTPException
+    raise HTTPException(status_code=409, detail="That message is already being sent")
+
+
+async def _release_reply_id(redis, key):
+    """Delivery failed: the same id may try again."""
+    if key and redis is not None:
+        try:
+            await redis.delete(key)
+        except Exception:
+            pass
+
+
+async def _remember_reply_id(redis, key, result: dict):
+    if key and redis is not None:
+        import json
+        try:
+            await redis.set(key, json.dumps(result), ex=_REPLY_ID_TTL)
+        except Exception:
+            pass
+
+
 async def send_agent_reply(
     db: AsyncSession,
     conv_id: str,
@@ -520,6 +566,7 @@ async def send_agent_reply(
     reply_to_id: str | None = None,
     original_text: str | None = None,
     original_lang: str | None = None,
+    client_msg_id: str | None = None,
 ) -> dict:
     result = await db.execute(select(Conversation).where(Conversation.id == conv_id))
     conv = result.scalar_one_or_none()
@@ -555,11 +602,19 @@ async def send_agent_reply(
             detail=f"Conversation is handled by {owner_name}.",
         )
 
+    # One send per request id. A client that retries after a lost answer, or
+    # a double tap, sends the same client_msg_id: the second request gets the
+    # first one's result instead of a second copy to the customer.
+    idem = await _claim_reply_id(redis, conv.id, client_msg_id)
+    if isinstance(idem, dict):
+        return idem
+
     # Deliver first; only persist the outbound if it actually went out. A send
     # failure returns a clean error (not a 500) so the inbox can surface it.
     try:
         wamid = await _deliver_agent_reply(db, conv, text, quoted=quoted)
     except Exception as exc:
+        await _release_reply_id(redis, idem)
         import logging
         logging.getLogger("neema.inbox").warning(
             "agent reply delivery failed for conv %s (%s): %s",
@@ -606,13 +661,27 @@ async def send_agent_reply(
         translated_text=((original_text or "").strip() or None),
         translated_from=((original_lang or "").strip()[:24] or None),
     )
-    db.add(msg)
-
-    conv.last_message_at = datetime.now(timezone.utc)
-    conv.last_message_preview = text[:100]
-
-    await db.commit()
-    await db.refresh(msg)
+    # It went out. From here nothing may report a failed send: a DB hiccup
+    # answered as an error made the agent press Send again and the customer
+    # got the message twice. A record that won't save is logged loudly and
+    # answered as sent-but-unsaved.
+    saved = True
+    try:
+        db.add(msg)
+        conv.last_message_at = datetime.now(timezone.utc)
+        conv.last_message_preview = text[:100]
+        await db.commit()
+        await db.refresh(msg)
+    except Exception as exc:
+        saved = False
+        import logging
+        logging.getLogger("neema.inbox").error(
+            "agent reply DELIVERED but not saved for conv %s (wamid %s): %s",
+            conv.id, wamid, exc)
+        try:
+            await db.rollback()
+        except Exception:
+            pass
 
     reply_to = None
     if quoted is not None:
@@ -629,14 +698,19 @@ async def send_agent_reply(
             "translatedFrom": ((original_lang or "").strip() or None),
         })
 
-    return {
-        "id": str(msg.id),
+    result = {
+        "id": str(msg.id) if saved and msg.id else None,
         "direction": "outbound",
         "sender": "human_agent",
         "text": text,
         "reply_to": reply_to,
-        "created_at": msg.created_at.isoformat() if msg.created_at else None,
+        "created_at": (msg.created_at.isoformat() if saved and msg.created_at
+                       else datetime.now(timezone.utc).isoformat()),
     }
+    if not saved:
+        result["saved"] = False
+    await _remember_reply_id(redis, idem, result)
+    return result
 
 
 async def approve_draft(

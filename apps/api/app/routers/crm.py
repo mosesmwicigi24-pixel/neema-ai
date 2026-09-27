@@ -943,22 +943,36 @@ async def approve_action(
     action = await db.get(AgentAction, aid)
     if action is None:
         raise HTTPException(status_code=404, detail="Action not found")
-    if action.status not in ("planned", "needs_approval"):
+    if action.status not in act.PENDING:
         raise HTTPException(status_code=409, detail=f"Action is {action.status}")
     conv = (await db.get(Conversation, action.conversation_id)
             if action.conversation_id else None)
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation gone")
+    before = action.status
+    # Claim it before the slow part: of two taps (or a tap and the
+    # scheduler), exactly one sends; a veto that landed first wins.
+    if not await act.claim(db, action, act.PENDING):
+        await db.refresh(action)
+        raise HTTPException(status_code=409, detail=f"Action is {action.status}")
     redis = getattr(request.app.state, "redis", None)
-    text = ((body or {}).get("draft") or action.draft or "").strip()
-    if not text:
-        text = await act._compose_follow_up(db, redis, conv, action.reason or "follow up")
-    if not text:
-        raise HTTPException(status_code=500, detail="Could not compose the message")
-    await act._send(db, redis, conv, text)
-    action.status = "sent"
-    action.draft = text
-    await db.commit()
+    try:
+        text = ((body or {}).get("draft") or action.draft or "").strip()
+        if not text:
+            text = await act._compose_follow_up(db, redis, conv, action.reason or "follow up")
+        if not text:
+            raise HTTPException(status_code=500, detail="Could not compose the message")
+        await act._send(db, redis, conv, text)
+    except Exception:
+        # Nothing went out (_send raises only when delivery failed): the action
+        # goes back to where it was, to be sent, reworded or vetoed.
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        await act.finish(db, action, before)
+        raise
+    await act.finish(db, action, "sent", draft=text)
     return {"ok": True, "sent": text}
 
 
@@ -974,11 +988,15 @@ async def veto_action(
         aid = _uuid.UUID(action_id)
     except ValueError:
         raise HTTPException(status_code=422, detail="Invalid action id")
+    from app.services import actions as act
     action = await db.get(AgentAction, aid)
     if action is None:
         raise HTTPException(status_code=404, detail="Action not found")
-    action.status = "vetoed"
-    await db.commit()
+    # Only a pending action can be vetoed — one already sent (or being sent)
+    # must not be relabelled "vetoed" and vanish from the record.
+    if not await act.claim(db, action, act.PENDING, "vetoed"):
+        await db.refresh(action)
+        raise HTTPException(status_code=409, detail=f"Action is {action.status}")
     return {"ok": True}
 
 

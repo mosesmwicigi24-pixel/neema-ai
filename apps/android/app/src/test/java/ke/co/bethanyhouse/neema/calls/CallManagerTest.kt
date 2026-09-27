@@ -4,7 +4,12 @@ import ke.co.bethanyhouse.neema.core.model.Call
 import ke.co.bethanyhouse.neema.core.model.IceConfig
 import ke.co.bethanyhouse.neema.core.net.ApiException
 import ke.co.bethanyhouse.neema.feature.calls.CallManager
+import ke.co.bethanyhouse.neema.feature.calls.CallOutcome
 import ke.co.bethanyhouse.neema.feature.calls.CallPhase
+import ke.co.bethanyhouse.neema.feature.calls.WaitingCall
+import ke.co.bethanyhouse.neema.feature.calls.WrapAction
+import ke.co.bethanyhouse.neema.feature.calls.statusText
+import ke.co.bethanyhouse.neema.feature.calls.wrapActions
 import ke.co.bethanyhouse.neema.feature.calls.PeerEvent
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -110,9 +115,11 @@ class CallManagerTest {
         r.calls.hangup(); r.settle()
         assertTrue("terminate wacid.1" in r.api.log)
         assertEquals(CallPhase.Ended, r.state.phase)
-        assertNull(r.state.note)
+        assertEquals(CallOutcome.Declined(), r.state.outcome)
+        assertEquals("Call declined", r.state.statusText())
         assertFalse(r.ringer.ringing)
-        advanceTimeBy(999); runCurrent()
+        // A neutral wrap-up closes by itself.
+        advanceTimeBy(4_999); runCurrent()
         assertEquals(CallPhase.Ended, r.state.phase)
         advanceTimeBy(2); runCurrent()
         assertEquals(CallPhase.Idle, r.state.phase)
@@ -139,8 +146,8 @@ class CallManagerTest {
         assertTrue("callback wacid.1" in r.api.log)
         assertFalse("terminate wacid.1" in r.api.log)
         assertEquals(CallPhase.Ended, r.state.phase)
-        assertEquals("Callback saved — find them under Calls", r.state.note)
-        advanceTimeBy(1_500); runCurrent()
+        assertEquals("Saved to call back — find it under Calls", r.state.statusText())
+        advanceTimeBy(3_900); runCurrent()
         assertEquals(CallPhase.Ended, r.state.phase)
         advanceTimeBy(200); runCurrent()
         assertEquals(CallPhase.Idle, r.state.phase)
@@ -163,8 +170,13 @@ class CallManagerTest {
         r.frame("type" to "call_ended", "call_id" to "wacid.1")
         assertEquals(CallPhase.Ended, r.state.phase)
         assertFalse(r.ringer.ringing)
-        advanceTimeBy(1_001); runCurrent()
-        assertEquals("the web left the card stuck here", CallPhase.Idle, r.state.phase)
+        // An older frame without an outcome, for a call that was ringing: the caller gave up.
+        assertEquals(CallOutcome.Missed(), r.state.outcome)
+        assertEquals(listOf(WrapAction.CallBack, WrapAction.Message, WrapAction.Done), r.state.wrapActions())
+        advanceTimeBy(60_000); runCurrent()
+        assertEquals("the team owes them a call: the wrap-up waits for the agent", CallPhase.Ended, r.state.phase)
+        r.calls.dismiss(); r.settle()
+        assertEquals(CallPhase.Idle, r.state.phase)
         assertFalse("the caller hung up: nothing to terminate", r.api.log.any { it.startsWith("terminate") })
     }
 
@@ -212,7 +224,8 @@ class CallManagerTest {
         assertEquals(CallPhase.Ringing, r.state.phase)
         r.api.calls = listOf(Call(id = "k1", callId = "wacid.1", status = "missed", startedAt = r.at(3_000)))
         r.calls.pollOnce(); r.settle()
-        assertEquals(CallPhase.Idle, r.state.phase)
+        assertEquals(CallPhase.Ended, r.state.phase)
+        assertEquals(CallOutcome.Missed(), r.state.outcome)
         assertFalse(r.ringer.ringing)
         assertFalse(r.api.log.any { it.startsWith("terminate") })
     }
@@ -272,12 +285,14 @@ class CallManagerTest {
         r.api.answerError = ApiException(409, "POST", "/admin/calls/wacid.1/answer", """{"detail":"call already answered"}""")
         r.ring()
         r.calls.answer(); r.settle()
-        assertEquals(CallManager.TAKEN_ELSEWHERE, r.state.error)
+        // Said at once, on the wrap-up: no error to read and wait out.
+        assertEquals(CallPhase.Ended, r.state.phase)
+        assertEquals(CallOutcome.AnsweredElsewhere(null), r.state.outcome)
+        assertEquals("Answered by a colleague", r.state.statusText())
         advanceTimeBy(1_801); runCurrent()
         // The colleague who won the call keeps it: no terminate from this device.
         assertFalse(r.api.log.any { it.startsWith("terminate") })
         assertTrue(r.media.peer.closed)
-        assertEquals(CallPhase.Ended, r.state.phase)
     }
 
     @Test fun answerAsksForTheMicAndProceedsWhenAllowed() = rig { r ->
@@ -337,10 +352,14 @@ class CallManagerTest {
         r.ring()
         r.calls.answer(); r.settle()
         r.calls.onMicResult(false); r.settle()
-        assertEquals(CallManager.MIC_BLOCKED, r.state.error)
+        assertEquals(CallOutcome.MicBlocked, r.state.outcome)
+        assertEquals("Microphone blocked — allow it in settings", r.state.statusText())
+        assertEquals(listOf(WrapAction.OpenSettings, WrapAction.Done), r.state.wrapActions())
         assertFalse(r.api.log.any { it.startsWith("answer") })
-        advanceTimeBy(1_801); runCurrent()
-        assertTrue("terminate wacid.1" in r.api.log)
+        advanceTimeBy(60_000); runCurrent()
+        // Nothing was answered: a colleague can still take it — declining would end it for everyone.
+        assertFalse(r.api.log.any { it.startsWith("terminate") })
+        assertEquals("sticky: the agent has something to fix", CallPhase.Ended, r.state.phase)
     }
 
     @Test fun unansweredMicPromptTimesOutAsBlocked() = rig { r ->
@@ -348,7 +367,7 @@ class CallManagerTest {
         r.ring()
         r.calls.answer(); r.settle()
         advanceTimeBy(CallManager.MIC_PROMPT_TIMEOUT_MS + 1); runCurrent()
-        assertEquals(CallManager.MIC_BLOCKED, r.state.error)
+        assertEquals(CallOutcome.MicBlocked, r.state.outcome)
         assertFalse(r.calls.micRequest.value)
     }
 
@@ -368,10 +387,11 @@ class CallManagerTest {
         p.onEvent(PeerEvent.Connected); r.settle()
         p.onEvent(PeerEvent.Ended); r.settle()
         assertEquals(CallPhase.Ended, r.state.phase)
+        assertEquals(CallOutcome.Completed, r.state.outcome)
         assertTrue(p.closed)
-        advanceTimeBy(1_001); runCurrent()
-        assertEquals(CallPhase.Idle, r.state.phase)
         assertFalse(r.audio.inCall)
+        advanceTimeBy(8_001); runCurrent()
+        assertEquals(CallPhase.Idle, r.state.phase)
     }
 
     @Test fun eventsFromAClosedPeerAreIgnored() = rig { r ->
@@ -440,7 +460,8 @@ class CallManagerTest {
         val res = async { r.calls.initiateCall("+254712345678", "Fr. Peter Kamau") }
         r.settle()
         assertTrue(res.await().isSuccess)
-        assertEquals(CallPhase.Connecting, r.state.phase)
+        assertEquals("Meta is ringing them", CallPhase.RingingOut, r.state.phase)
+        assertEquals("Ringing…", r.state.statusText())
         assertTrue(r.state.outbound)
         assertEquals("254712345678", r.state.from)
         assertEquals("wacid.out1", r.state.callId)
@@ -452,6 +473,7 @@ class CallManagerTest {
         assertFalse(r.media.peer.ops.any { it.startsWith("setRemote") })
         r.frame("type" to "outbound_answer", "call_id" to "wacid.out1", "sdp" to "v=0 their-answer")
         assertTrue("setRemote(Answer,v=0 their-answer)" in r.media.peer.ops)
+        assertEquals(CallPhase.Connecting, r.state.phase)
         r.media.peer.onEvent(PeerEvent.Connected); r.settle()
         assertEquals(CallPhase.InCall, r.state.phase)
     }
@@ -468,13 +490,14 @@ class CallManagerTest {
         r.settle()
         val msg = res.await().exceptionOrNull()!!.message!!
         assertEquals(CallManager.NO_CALL_PERMISSION, msg)
-        assertTrue("callers then ask the customer", msg.contains("permission", ignoreCase = true))
-        assertEquals(msg, r.state.error)
-        advanceTimeBy(2_199); runCurrent()
-        assertEquals(CallPhase.Connecting, r.state.phase)
-        advanceTimeBy(2); runCurrent()
-        assertEquals(CallPhase.Idle, r.state.phase)
+        assertTrue("the card says it: callers don't toast it again", (res.await().exceptionOrNull() as CallManager.CallError).shown)
+        assertEquals(CallOutcome.PermissionNeeded, r.state.outcome)
+        assertEquals("Peter hasn't allowed WhatsApp calls yet", r.state.statusText())
+        assertEquals(WrapAction.SendCallRequest, r.state.wrapActions().first())
+        advanceTimeBy(60_000); runCurrent()
+        assertEquals("sticky until the agent decides", CallPhase.Ended, r.state.phase)
         assertTrue(r.media.peer.closed)
+        assertFalse("never asked by itself: it messages the customer", r.api.log.any { it.startsWith("request-permission") })
         // The "permission" → requestPermission path: digits only.
         assertTrue(r.calls.requestPermission("+254 712 345 678").isSuccess)
         assertTrue("request-permission 254712345678" in r.api.log)
@@ -565,7 +588,7 @@ class CallManagerTest {
         r.calls.hangup(); r.settle(); advanceTimeBy(1_001); runCurrent()
         r.calls.handleAction("decline", "wacid.8"); r.settle()
         assertTrue("terminate wacid.8" in r.api.log)
-        assertEquals(CallPhase.Idle, r.state.phase)
+        assertFalse(r.state.live)
     }
 
     @Test fun errorMapping() {
@@ -671,9 +694,9 @@ class CallManagerTest {
         r.frame("type" to "call_ended", "call_id" to "wacid.1")
         assertEquals(CallPhase.Ended, r.state.phase)
         advanceTimeBy(1_001); runCurrent()
-        assertEquals(CallPhase.Idle, r.state.phase)
         r.ring()   // a duplicate that arrives after the end
-        assertEquals(CallPhase.Idle, r.state.phase)
+        assertEquals(CallPhase.Ended, r.state.phase)
+        assertEquals(1, r.ringer.ringStarts)
     }
 
     @Test fun callEndedWhileConnectingEndsTheCall() = rig { r ->
@@ -691,17 +714,17 @@ class CallManagerTest {
         r.media.peer.onEvent(PeerEvent.Connected); r.settle()
         assertEquals(CallPhase.InCall, r.state.phase)
         r.api.calls = listOf(Call(id = "k2", callId = "wacid.2", waId = "254799999999", name = "Sr. Agnes Wairimu", status = "ringing", startedAt = r.at(1_000)))
+        val polls = r.api.log.count { it == "list" }
         r.ring("wacid.2", "254799999999", "Sr. Agnes Wairimu")
-        // The web's startRinging() returns when not idle: the live call carries on, no ringtone over it.
+        // No take-over: the live call carries on, no ringtone over it — a banner says who waits.
         assertEquals(CallPhase.InCall, r.state.phase)
         assertEquals("wacid.1", r.state.callId)
+        assertEquals(WaitingCall("wacid.2", "254799999999", "Sr. Agnes Wairimu"), r.state.waiting)
         assertEquals(1, r.ringer.ringStarts)
         assertTrue(r.ringer.posted.isEmpty())
         r.calls.hangup(); r.settle()
-        val polls = r.api.log.count { it == "list" }
-        advanceTimeBy(1_001); runCurrent()
         assertEquals("looked for again the moment the phone is free", polls + 1, r.api.log.count { it == "list" })
-        assertEquals(CallPhase.Ringing, r.state.phase)
+        assertEquals("and rung at once — the wrap-up gives way", CallPhase.Ringing, r.state.phase)
         assertEquals("wacid.2", r.state.callId)
         assertEquals("Sr. Agnes Wairimu", r.state.name)
     }
@@ -712,7 +735,8 @@ class CallManagerTest {
         r.ring("wacid.2")
         r.api.calls = listOf(Call(id = "k2", callId = "wacid.2", status = "missed", startedAt = r.at(20_000)))
         r.calls.hangup(); r.settle(); advanceTimeBy(1_001); runCurrent()
-        assertEquals(CallPhase.Idle, r.state.phase)
+        assertEquals("the wrap-up of the call that ended stays", CallOutcome.Completed, r.state.outcome)
+        assertEquals("wacid.1", r.state.callId)
     }
 
     @Test fun ringingGivesUpAfterTwoMinutesWhenEveryEndSignalWasLost() = rig { r ->
@@ -721,11 +745,12 @@ class CallManagerTest {
         advanceTimeBy(119_000); runCurrent()
         assertEquals(CallPhase.Ringing, r.state.phase)
         advanceTimeBy(1_001); runCurrent()
-        assertEquals(CallPhase.Idle, r.state.phase)
+        assertEquals(CallPhase.Ended, r.state.phase)
+        assertEquals(CallOutcome.Missed(), r.state.outcome)
         assertFalse(r.ringer.ringing); assertFalse(r.ringer.showing)
         assertFalse("nothing to terminate: the caller is long gone", r.api.log.any { it.startsWith("terminate") })
         r.ring()
-        assertEquals("cooldown: a replayed frame doesn't re-ring it", CallPhase.Idle, r.state.phase)
+        assertEquals("cooldown: a replayed frame doesn't re-ring it", 1, r.ringer.ringStarts)
     }
 
     @Test fun theRingTimeoutDoesNotTouchAnAnsweredCall() = rig { r ->
