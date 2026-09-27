@@ -1363,3 +1363,11 @@ def test_a_failing_send_never_breaks_anything(env, world, monkeypatch):
     _end(env, "wacid.mc.5", status="FAILED")
     assert _a.run(missed_call._follow_up(env.redis, "wacid.mc.5")) is False
     assert _get(env, "wacid.mc.5", world["ann"])["status"] == "missed"
+
+
+def test_a_pending_request_says_when_it_was_sent(env, world):
+    wa = "254788000001"
+    _inbound_message(env, wa, hours_ago=1)
+    env.client.post("/api/admin/calls/request-permission", json={"to": wa}, headers=_as(world["ann"]))
+    perm = env.client.get(f"/api/admin/calls/permission?wa_id={wa}", headers=_as(world["ann"])).json()
+    assert perm["status"] == "requested" and perm["requested_at"]

@@ -709,7 +709,8 @@ def _store_shape(st: dict) -> dict:
             "permanent": bool(st["permanent"]), "revoked": bool(st.get("revoked")),
             "meta_status": None, "can_call": status in ("granted", "unknown"),
             "can_request": status in ("unknown", "denied"),
-            "request_available_at": None, "calls_left_today": None, "source": "store"}
+            "request_available_at": None, "calls_left_today": None, "source": "store",
+            "requested_at": st.get("requested_at") if status == "requested" else None}
 
 
 async def cached_meta_permission(redis, wa_id: str) -> dict | None:
@@ -766,7 +767,7 @@ async def permission(redis, wa_id: str, *, ask_meta: bool = True) -> dict:
     meta = await _meta_permission(redis, wa_id) if (ask_meta and wa_id) else None
     if meta is None:
         return _store_shape(st)
-    out = {"wa_id": wa_id, **meta, "revoked": False, "source": "meta"}
+    out = {"wa_id": wa_id, **meta, "revoked": False, "source": "meta", "requested_at": None}
     if meta["status"] != "granted":
         # Meta: no permission. Our store knows whether we asked or they said no.
         if st["status"] == "denied":
@@ -776,6 +777,7 @@ async def permission(redis, wa_id: str, *, ask_meta: bool = True) -> dict:
                 at = datetime.fromisoformat(st["requested_at"])
                 if datetime.now(timezone.utc) - at < timedelta(seconds=PERMISSION_REQUESTED_TTL):
                     out["status"] = "requested"
+                    out["requested_at"] = st["requested_at"]   # "Request sent 2 h ago"
             except Exception:
                 pass
     return out
