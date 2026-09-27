@@ -283,10 +283,8 @@ async def _handle_calls(request: Request, payload: dict) -> None:
                         "sdp": (call.get("session") or {}).get("sdp"),
                     })
                     _log.warning("WA outbound call %s answered by customer", cid)
-                    moved = await call_log.mark_answered(cid, None, redis)
-                    if moved is not None:
-                        await call_log.publish(redis, {"type": "call_answered", "call_id": cid, **moved})
-                    elif not await call_log.known_call(cid):
+                    moved = await call_log.mark_answered(cid, None, redis)   # announces call_answered
+                    if moved is None and not await call_log.known_call(cid):
                         # Beat /calls/connect's row: applied when it lands. (A row
                         # already over — its terminate came first — stays over.)
                         await call_log.park(redis, "answer", cid)

@@ -1402,3 +1402,29 @@ def test_burst_of_200_deliveries_latency_and_calls_list_query_count(rig):
     for i in range(100):
         c = logged[f"wacid.b.{i}"]
         assert c.status == ("completed" if i % 3 == 0 else "missed"), (i, c.status)
+
+
+def test_a_hang_up_between_answer_and_its_announcement_ends_after_it(rig):
+    """The CI storm's one-in-many race, made certain: the caller's terminate
+    arrives while the answer is being announced. The end must follow the
+    answer on every screen — never "answered" after "ended"."""
+    from app.services import call_log
+    cid = "wacid.race.1"
+    real_publish = call_log.publish
+
+    async def publish(redis, event):
+        if event.get("type") == "call_answered" and event.get("call_id") == cid:
+            spawn(rig, wa_post(rig, _wa_payload([end_ev(cid)])))   # the caller hangs up now
+            await asyncio.sleep(0.3)                                # …and gets every chance to finish first
+        await real_publish(redis, event)
+    rig.monkeypatch.setattr(call_log, "publish", publish)
+
+    async def scenario():
+        await ring(rig, cid, "254711000111")
+        r = await post(rig, f"/calls/{cid}/answer", rig.agents[0], {"sdp": "v=0 answer"})
+        assert r.status_code == 200, r.text
+        await drain(rig)
+        return await rows(rig)
+    logged = run(rig, scenario)
+    assert logged[cid].status == "completed"
+    check_events(rig, cid, "completed")

@@ -571,10 +571,8 @@ async def _messenger_call_event(redis, call: dict, page_id: str | None) -> None:
             if await call_log.status_of(cid) not in call_log.TERMINAL:
                 await call_log.publish(redis, {"type": "call_status", "call_id": cid, "status": "ringing"})
         elif status == "accepted":
-            moved = await call_log.mark_answered(cid, None, redis)
-            if moved is not None:
-                await call_log.publish(redis, {"type": "call_answered", "call_id": cid, **moved})
-            elif not await call_log.known_call(cid):
+            moved = await call_log.mark_answered(cid, None, redis)   # announces call_answered
+            if moved is None and not await call_log.known_call(cid):
                 await call_log.park(redis, "answer", cid)
     elif event == "media_update":
         # New SDP from the customer's side (they picked up our call, muted, …):

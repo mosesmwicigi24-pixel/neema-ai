@@ -3074,18 +3074,21 @@ async def _announce_answer(redis, call_id: str, agent: Agent):
     already logged over: never announce an answer after its end — the answer
     is recorded on the row and the phone gets a 410."""
     from app.services import call_log
-    moved = await call_log.mark_answered(call_id, agent.id, redis)
+    # Moving it announces `call_answered` (under the row lock, before any end).
+    moved = await call_log.mark_answered(call_id, agent.id, redis, agent_name=agent.name)
     if moved is None:
         st = await call_log.status_of(call_id)
         if st in call_log.TERMINAL:
             await call_log.note_answerer(call_id, agent.id)
             await call_log.publish_update(redis, call_id)
             return _ended_410()
-    await call_log.publish(redis, {
-        "type": "call_answered", "call_id": call_id,
-        "agent_id": str(agent.id), "agent_name": agent.name,
-        "direction": (moved or {}).get("direction") or "inbound",
-    })
+        if st == "answered":
+            return None   # already answered and announced (Meta's own event got here first)
+        # The row couldn't be written (database down): still stop every other phone.
+        await call_log.publish(redis, {
+            "type": "call_answered", "call_id": call_id,
+            "agent_id": str(agent.id), "agent_name": agent.name, "direction": "inbound",
+        })
     return None
 
 

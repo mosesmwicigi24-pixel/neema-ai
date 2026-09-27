@@ -195,11 +195,18 @@ async def note_answerer(call_id: str, agent_id) -> None:
         _log.warning("call_log answerer note failed: %s", exc)
 
 
-async def mark_answered(call_id: str, agent_id, redis=None) -> dict | None:
-    """ringing → answered. `agent_id` None (the customer answered OUR call) keeps
-    the agent who placed it. Returns {agent_id, agent_name, direction} when this
-    call moved, None when it was not ringing. A connected call resets Meta's
-    permission-request limits, so the cached permission answer is dropped."""
+async def mark_answered(call_id: str, agent_id, redis=None, *, agent_name: str | None = None) -> dict | None:
+    """ringing → answered, and `call_answered` announced. `agent_id` None (the
+    customer answered OUR call) keeps the agent who placed it. Returns
+    {agent_id, agent_name, direction} when this call moved, None when it was
+    not ringing (nothing announced). A connected call resets Meta's
+    permission-request limits, so the cached permission answer is dropped.
+
+    The event goes out while the row is still locked by this UPDATE: a
+    terminate deciding the call's end (`_close`, SELECT … FOR UPDATE) waits
+    for our commit, so its `call_ended` always follows the answer — announcing
+    after the commit let a hang-up at the same instant publish its end first,
+    and screens saw "answered" after "ended" (CI storm, 2026-09-27)."""
     try:
         async with AsyncSessionLocal() as db:
             now = datetime.now(timezone.utc)
@@ -211,15 +218,21 @@ async def mark_answered(call_id: str, agent_id, redis=None) -> dict | None:
                 .values(**values).returning(Call.agent_id, Call.direction, Call.wa_id,
                                             Call.channel, Call.external_id))
             row = res.first()
-            await db.commit()
             if row is None:
+                await db.commit()
                 return None
+            moved = {"agent_id": str(row.agent_id) if row.agent_id else None,
+                     "agent_name": agent_name or await _agent_name(db, row.agent_id),
+                     "direction": row.direction}
+            try:
+                await publish(redis, {"type": "call_answered", "call_id": call_id, **moved})
+            except Exception as exc:
+                _log.warning("call_answered publish failed for %s: %s", call_id, exc)
+            await db.commit()
             key = perm_key(row.channel, row.wa_id, row.external_id)
             await forget_meta_permission(redis, key)
             await finish_permission_request(redis, key, sent=False)   # a connected call resets the limits
-            return {"agent_id": str(row.agent_id) if row.agent_id else None,
-                    "agent_name": await _agent_name(db, row.agent_id),
-                    "direction": row.direction}
+            return moved
     except Exception as exc:
         _log.warning("call_log answered failed: %s", exc)
         return None
@@ -422,9 +435,7 @@ async def apply_early(redis, call_id: str) -> None:
     follows). Safe to run twice: every move is conditional."""
     ans = await _take_early(redis, "answer", call_id)
     if ans is not None:
-        moved = await mark_answered(call_id, None, redis)
-        if moved is not None:
-            await publish(redis, {"type": "call_answered", "call_id": call_id, **moved})
+        await mark_answered(call_id, None, redis)   # announces it when it moved
     rej = await _take_early(redis, "rejected", call_id)
     end = await _take_early(redis, "end", call_id)
     if end is not None or rej is not None:
