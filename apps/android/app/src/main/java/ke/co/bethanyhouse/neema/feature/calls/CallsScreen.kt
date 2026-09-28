@@ -239,6 +239,11 @@ fun CallsScreen(
             if (next.select != sel?.id) vm.select(next.select?.let { id -> shown?.find { it.id == id } })
             autoPicked = next.autoPicked
         }
+        // What the panes show is decided here, in composition, so the very first
+        // frame on a tablet already has the call open (the effect above only
+        // records it) — no empty half flashing before the pick lands.
+        val view = detailsPick(wide, shown?.map { it.id }.orEmpty(), sel?.id, autoPicked).select
+            ?.let { id -> if (id == sel?.id) sel else shown?.find { it.id == id } }
         // A Tab S9 Ultra on its side: both panes grow with the room (log up to
         // 640dp, details up to 600dp) instead of a 560dp column in empty space.
         val roomy = maxWidth >= 1100.dp
@@ -248,19 +253,19 @@ fun CallsScreen(
                 Modifier.fillMaxSize().padding(horizontal = sidePad),
                 horizontalArrangement = Arrangement.spacedBy(24.dp, Alignment.CenterHorizontally),
             ) {
-                if (wide || sel == null) {
+                if (wide || view == null) {
                     CallLog(
                         modifier = Modifier.widthIn(max = if (roomy) 640.dp else 560.dp).weight(1f, fill = false).fillMaxWidth(),
                         vm = vm, state = logState, shown = shown, total = list?.size ?: 0, followUps = followUps,
-                        followUpsOnly = followUpsOnly, selectedId = sel?.id, openTranscript = transcript,
+                        followUpsOnly = followUpsOnly, selectedId = view?.id, openTranscript = transcript,
                         anyMessenger = anyMessenger, channelFilter = app,
                         readiness = readiness, loadError = loadError, refreshing = refreshing, compact = compact,
                         restriction = restriction, onDismissRestriction = dash.container.calls::dismissRestriction,
                     )
                 }
-                if (sel != null) {
+                if (view != null) {
                     CallDetails(
-                        dash = dash, vm = vm, sel = sel, calls = list.orEmpty(), transcript = transcript,
+                        dash = dash, vm = vm, sel = view, calls = list.orEmpty(), transcript = transcript,
                         modifier = when {
                             roomy -> Modifier.widthIn(min = 420.dp, max = 600.dp).weight(1f, fill = false).fillMaxWidth()
                             wide -> Modifier.width(420.dp)
