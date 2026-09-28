@@ -73,6 +73,10 @@ jobs:
       # The two APKs every change ships as: Android (universal) and the
       # Galaxy Tab S9 Ultra (arm64) — scripts/two-apks.sh.
       - name: Package the two APKs
+        env:
+          NEEMA_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          NEEMA_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          NEEMA_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: SKIP_BUILD=1 scripts/two-apks.sh
 
       - name: Upload APKs

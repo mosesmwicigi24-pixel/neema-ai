@@ -7,7 +7,7 @@ test), build and send **two APKs**:
 
 | File | For |
 |---|---|
-| `Neema-Android-<version>-<sha>.apk` | every Android phone (universal build) |
+| `Neema-Android-<version>-<sha>.apk` | every Android phone, ARM 64- and 32-bit (~22 MB: the universal build without x86, which only emulators use — the full universal is over the 30 MB send limit) |
 | `Neema-TabS9Ultra-<version>-<sha>.apk` | the Samsung Galaxy Tab S9 Ultra (arm64-v8a build) |
 
 ```sh
