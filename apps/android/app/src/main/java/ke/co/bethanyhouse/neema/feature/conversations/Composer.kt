@@ -25,6 +25,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import ke.co.bethanyhouse.neema.core.ui.composerShortcut
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -164,12 +166,23 @@ internal fun Composer(
             val focus = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
             val focused by focus.collectIsFocusedAsState()
             val boxShape = RoundedCornerShape(16.dp)
+            // A hardware keyboard (the Tab S9 Ultra's Book Cover, DeX): Enter sends,
+            // Shift+Enter is a new line; Ctrl+Enter sends from any keyboard.
+            val hwKeyboard = ke.co.bethanyhouse.neema.core.ui.hardwareKeyboardAttached()
+            val canSend = state.replyText.isNotBlank() && window?.mode != "closed"
             androidx.compose.foundation.text.BasicTextField(
                 value = state.replyText, onValueChange = vm::setReplyText, interactionSource = focus,
                 textStyle = androidx.compose.ui.text.TextStyle(fontFamily = NeemaFont, fontSize = 14.sp, lineHeight = 19.sp, color = c.text),
                 cursorBrush = androidx.compose.ui.graphics.SolidColor(Amber),
                 maxLines = 6,
                 modifier = Modifier.weight(1f).heightIn(min = 44.dp, max = 132.dp)
+                    .onPreviewKeyEvent { e ->
+                        if (e.composerShortcut(hwKeyboard) == ke.co.bethanyhouse.neema.core.ui.Shortcut.Send) {
+                            // An empty box or a closed window: swallow the Enter, send nothing.
+                            if (canSend) vm.sendReply()
+                            true
+                        } else false
+                    }
                     .clip(boxShape).background(if (c.isDark) c.bg3 else Palette.SageFieldBg)
                     .border(if (focused) 2.dp else 1.dp, if (focused) Amber.copy(alpha = 0.7f) else if (c.isDark) c.border else Palette.SageField, boxShape),
                 decorationBox = { inner ->

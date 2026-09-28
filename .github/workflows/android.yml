@@ -70,11 +70,22 @@ jobs:
             apps/android/app/build/reports/tests/
             apps/android/app/build/paparazzi/failures/
 
+      # The two APKs every change ships as: Android (universal) and the
+      # Galaxy Tab S9 Ultra (arm64) — scripts/two-apks.sh.
+      - name: Package the two APKs
+        env:
+          NEEMA_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          NEEMA_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          NEEMA_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: SKIP_BUILD=1 scripts/two-apks.sh
+
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
           name: neema-android-apks
-          path: apps/android/app/build/outputs/apk/release/*.apk
+          path: |
+            apps/android/app/build/outputs/two-apks/*.apk
+            apps/android/app/build/outputs/apk/release/*.apk
 
       - name: Publish release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -88,7 +99,8 @@ jobs:
           # R8's mapping turns a crash report's obfuscated stack trace back
           # into class and method names (retrace). Not a secret.
           cp ../../mapping/release/mapping.txt "neema-${version}-${GITHUB_RUN_NUMBER}-mapping.txt"
+          cp ../../two-apks/Neema-*.apk .
           gh release create "$tag" *.apk *-mapping.txt \
             --title "Neema Android ${version} (build ${GITHUB_RUN_NUMBER})" \
-            --notes "Install \`neema-${version}-arm64-v8a-release.apk\` on almost any modern phone (\`universal\` works everywhere). Built from ${GITHUB_SHA::7}." \
+            --notes "Phones: install \`Neema-Android-${version}-${GITHUB_SHA::7}.apk\`. Samsung Galaxy Tab S9 Ultra: install \`Neema-TabS9Ultra-${version}-${GITHUB_SHA::7}.apk\`. (Per-ABI builds are attached too.) Built from ${GITHUB_SHA::7}." \
             --target "$GITHUB_SHA"

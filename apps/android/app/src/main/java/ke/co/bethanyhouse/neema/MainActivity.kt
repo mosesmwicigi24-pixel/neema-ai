@@ -1,6 +1,7 @@
 package ke.co.bethanyhouse.neema
 
 import android.Manifest
+import ke.co.bethanyhouse.neema.core.ui.appShortcut
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -112,6 +113,28 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleIntent(intent)
+    }
+
+    /**
+     * Keyboard shortcuts (a Tab S9 Ultra's Book Cover Keyboard, DeX): caught
+     * here, before focus decides where a key goes, so Ctrl+1…9 or Alt+↓ work
+     * whether the reply box, a list or nothing has focus. Only Ctrl/Alt
+     * combinations are taken — typing, Enter and Esc go on as usual.
+     */
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        // Esc closes the topmost sheet / panel / thread (never the app itself).
+        val modified = event.isCtrlPressed || event.isAltPressed || event.isShiftPressed || event.isMetaPressed
+        if (ke.co.bethanyhouse.neema.core.ui.escapeIsBack(event.keyCode, modified, onBackPressedDispatcher.hasEnabledCallbacks())) {
+            if (event.action == android.view.KeyEvent.ACTION_UP) onBackPressedDispatcher.onBackPressed()
+            return true
+        }
+        val s = androidx.compose.ui.input.key.KeyEvent(event).appShortcut()
+        if (s != null && dash.session.value != null && dash.shortcuts.tryEmit(s)) return true
+        // The key-up of a shortcut we took is ours too (no stray release reaches a field).
+        if (event.action == android.view.KeyEvent.ACTION_UP && (event.isCtrlPressed || event.isAltPressed || event.isMetaPressed) &&
+            androidx.compose.ui.input.key.KeyEvent(android.view.KeyEvent.changeAction(event, android.view.KeyEvent.ACTION_DOWN)).appShortcut() != null
+        ) return true
+        return super.dispatchKeyEvent(event)
     }
 
     /**

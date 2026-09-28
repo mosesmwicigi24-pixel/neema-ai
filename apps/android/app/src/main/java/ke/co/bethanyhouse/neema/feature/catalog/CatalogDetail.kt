@@ -28,7 +28,8 @@ import ke.co.bethanyhouse.neema.core.util.Fmt
 @Composable
 internal fun ProductSheet(item: CatalogItem, onDismiss: () -> Unit) {
     val c = Neema.colors
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = c.bg2) {
+    // A phone's bottom sheet; on a tablet window the product opens beside the grid.
+    ke.co.bethanyhouse.neema.core.ui.AdaptiveSheet(onDismiss = onDismiss, title = item.name, containerColor = c.bg2) {
         ProductDetail(item)
     }
 }

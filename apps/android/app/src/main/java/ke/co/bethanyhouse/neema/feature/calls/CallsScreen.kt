@@ -227,26 +227,50 @@ fun CallsScreen(
         val compact = maxWidth / LocalDensity.current.fontScale < 400.dp
         // Phone: the details replace the log; back returns to it.
         BackHandler(enabled = sel != null && !wide) { vm.select(null) }
+        // Tablet: the details pane is never an empty half — the newest call in
+        // view opens in it (the inbox's auto-select), and a filter that hides
+        // the open call moves the pane to the first one still shown.
+        val firstShown = shown?.firstOrNull()
+        // Which open call the app chose (not the agent): shrinking the window to
+        // a phone-sized one (a ⅓ split) shows the log again rather than that call.
+        var autoPicked by rememberSaveable { mutableStateOf<String?>(null) }
+        LaunchedEffect(wide, firstShown?.id, sel?.id, followUpsOnly, app) {
+            val next = detailsPick(wide, shown?.map { it.id }.orEmpty(), sel?.id, autoPicked)
+            if (next.select != sel?.id) vm.select(next.select?.let { id -> shown?.find { it.id == id } })
+            autoPicked = next.autoPicked
+        }
+        // What the panes show is decided here, in composition, so the very first
+        // frame on a tablet already has the call open (the effect above only
+        // records it) — no empty half flashing before the pick lands.
+        val view = detailsPick(wide, shown?.map { it.id }.orEmpty(), sel?.id, autoPicked).select
+            ?.let { id -> if (id == sel?.id) sel else shown?.find { it.id == id } }
+        // A Tab S9 Ultra on its side: both panes grow with the room (log up to
+        // 640dp, details up to 600dp) instead of a 560dp column in empty space.
+        val roomy = maxWidth >= 1100.dp
 
         PullToRefreshBox(isRefreshing = refreshing, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize()) {
             Row(
                 Modifier.fillMaxSize().padding(horizontal = sidePad),
                 horizontalArrangement = Arrangement.spacedBy(24.dp, Alignment.CenterHorizontally),
             ) {
-                if (wide || sel == null) {
+                if (wide || view == null) {
                     CallLog(
-                        modifier = Modifier.widthIn(max = 560.dp).weight(1f, fill = false).fillMaxWidth(),
+                        modifier = Modifier.widthIn(max = if (roomy) 640.dp else 560.dp).weight(1f, fill = false).fillMaxWidth(),
                         vm = vm, state = logState, shown = shown, total = list?.size ?: 0, followUps = followUps,
-                        followUpsOnly = followUpsOnly, selectedId = sel?.id, openTranscript = transcript,
+                        followUpsOnly = followUpsOnly, selectedId = view?.id, openTranscript = transcript,
                         anyMessenger = anyMessenger, channelFilter = app,
                         readiness = readiness, loadError = loadError, refreshing = refreshing, compact = compact,
                         restriction = restriction, onDismissRestriction = dash.container.calls::dismissRestriction,
                     )
                 }
-                if (sel != null) {
+                if (view != null) {
                     CallDetails(
-                        dash = dash, vm = vm, sel = sel, calls = list.orEmpty(), transcript = transcript,
-                        modifier = if (wide) Modifier.width(420.dp) else Modifier.fillMaxWidth(),
+                        dash = dash, vm = vm, sel = view, calls = list.orEmpty(), transcript = transcript,
+                        modifier = when {
+                            roomy -> Modifier.widthIn(min = 420.dp, max = 600.dp).weight(1f, fill = false).fillMaxWidth()
+                            wide -> Modifier.width(420.dp)
+                            else -> Modifier.fillMaxWidth()
+                        },
                     )
                 }
             }
@@ -1182,4 +1206,20 @@ private fun ReadinessBanner(r: CallReadiness, compact: Boolean = false, inset: D
             action()
         }
     }
+}
+
+/** What the details pane shows next, and whether the app (not the agent) chose it. */
+internal data class DetailsPick(val select: String?, val autoPicked: String?)
+
+/**
+ * The Calls view's details pane on a tablet: the newest call shown opens in it
+ * when none is open or the open one was filtered away; the agent's own pick
+ * stays. Shrinking to a phone-sized window drops only a call the app picked,
+ * so a ⅓ split shows the log rather than a call nobody asked for.
+ */
+internal fun detailsPick(wide: Boolean, shownIds: List<String>, selected: String?, autoPicked: String?): DetailsPick {
+    if (!wide) return DetailsPick(if (selected != null && selected == autoPicked) null else selected, null)
+    val first = shownIds.firstOrNull() ?: return DetailsPick(selected, autoPicked)
+    if (selected == null || selected !in shownIds) return DetailsPick(first, first)
+    return DetailsPick(selected, if (selected == autoPicked) autoPicked else null)
 }

@@ -133,4 +133,16 @@ class InboxDeviceMatrixScreenshotTest {
     @Test fun tablet_portrait_long() = screen().apply { vm.select("lp1") }.snap(tabletPortrait)
     @Test fun tablet_landscape_long_dark() = screen().apply { vm.select("lp1"); vm.setActivityOpen(true) }.snap(tabletLandscape, dark = true)
     @Test fun tablet_landscape_font20() = screen().apply { vm.select("lp1") }.snap(tabletLandscape.copy(fontScale = 2.0f))
+
+    // ── Galaxy Tab S9 Ultra: the long data on its real windows ──────────────
+    // (the inbox alone, as a docked sidebar leaves it: 1480 − 208 on its side,
+    // 924 − 60 upright, and the ⅔ split beside the rail).
+    private fun tabS9(wDp: Int, hDp: Int) = app.cash.paparazzi.DeviceConfig.PIXEL_C.copy(
+        screenWidth = wDp * 2, screenHeight = hDp * 2, xdpi = 320, ydpi = 320, density = com.android.resources.Density.XHIGH,
+        orientation = if (wDp >= hDp) com.android.resources.ScreenOrientation.LANDSCAPE else com.android.resources.ScreenOrientation.PORTRAIT,
+    )
+    @Test fun tabS9u_long_activityOpen() = screen().apply { vm.select("lp1"); vm.setActivityOpen(true) }.snap(tabS9(1272, 924))
+    @Test fun tabS9u_portrait_long() = screen().apply { vm.select("lp1") }.snap(tabS9(864, 1480))
+    @Test fun tabS9u_twoThirds_long_dark() = screen().apply { vm.select("lp1") }.snap(tabS9(920, 924), dark = true)
+    @Test fun tabS9u_long_font13() = screen().apply { vm.select("lp1") }.snap(tabS9(1272, 924).copy(fontScale = 1.3f))
 }

@@ -4,6 +4,9 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import ke.co.bethanyhouse.neema.core.ui.onSecondaryClick
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -22,6 +25,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
@@ -77,6 +81,8 @@ internal fun ConversationList(
     modifier: Modifier = Modifier,
     /** Held by the screen, so the list keeps its place while a thread covers it. */
     state: androidx.compose.foundation.lazy.LazyListState = rememberLazyListState(),
+    /** Ctrl+F / Ctrl+K (a hardware keyboard) puts the cursor in the search box. */
+    searchFocus: androidx.compose.ui.focus.FocusRequester? = null,
 ) {
     val c = Neema.colors
     val summary = inbox.summary
@@ -128,14 +134,17 @@ internal fun ConversationList(
             // Equal fifths while they fit (the web's flex-1); at a large font scale each
             // tab keeps its whole label and count, and the row scrolls sideways instead.
             BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val fifth = (maxWidth - 16.dp) / 5
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            // Every tab keeps its whole label; spare room is shared out (a 320dp
+            // tablet pane shows all five instead of cutting "Yours" off the edge).
+            val rowWidth = maxWidth
+            Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+            ke.co.bethanyhouse.neema.core.ui.FitRow(availableWidth = rowWidth, spacing = 4.dp) {
                 listOf("all", "unread", "read", "human", "yours").forEach { t ->
                     val active = f.tab == t
                     val accent = when (t) { "unread" -> Palette.Moss700; "human" -> Palette.Amber700; "yours" -> Green; else -> Palette.Ink }
                     val count = when (t) { "unread" -> unreadCount; "human" -> humanCount; "yours" -> yoursCount; else -> 0 }
                     Row(
-                        Modifier.widthIn(min = fifth).heightIn(min = 28.dp).clip(RoundedCornerShape(8.dp))
+                        Modifier.heightIn(min = 28.dp).clip(RoundedCornerShape(8.dp))
                             .background(if (active) accent else if (c.isDark) c.bg3 else Palette.StoneGreen)
                             .clickable(onClickLabel = t.replaceFirstChar { it.uppercase() }) { vm.setTab(t) }
                             .padding(horizontal = 6.dp, vertical = 2.dp),
@@ -154,6 +163,7 @@ internal fun ConversationList(
                 }
             }
             }
+            }
             Spacer(Modifier.height(8.dp))
             // ── Search (the server searches names, phones and everything said) ──
             Row(
@@ -169,7 +179,7 @@ internal fun ConversationList(
                     BasicTextField(
                         value = listUi.search, onValueChange = vm::setSearch, singleLine = true,
                         textStyle = TextStyle(fontFamily = NeemaFont, fontSize = 13.sp, color = c.text), cursorBrush = SolidColor(Green),
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().then(searchFocus?.let { Modifier.focusRequester(it) } ?: Modifier),
                     )
                 }
                 if (listUi.search.isNotEmpty()) Icon(Icons.Filled.Close, "Clear", tint = c.muted, modifier = Modifier.size(16.dp).clickable { vm.setSearch("") })
@@ -365,10 +375,22 @@ private fun ConversationRow(g: RowGroup, activeId: String, me: String?, selectMo
     val bg = when { picked -> Palette.PickedRow; isActive -> Palette.ActiveRow; else -> Color.Transparent }
     val edge = when { picked -> Green; isActive -> ROW_ACCENT; hasUnread -> Palette.UnreadEdge; else -> Color.Transparent }
 
+    // An S Pen, a DeX mouse or a trackpad hovering the row lights it (tablet /
+    // desktop); a right-click does what press-and-hold does.
+    val hoverSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val hovered by hoverSource.collectIsHoveredAsState()
+    val shown = when {
+        bg != Color.Transparent -> if (c.isDark) bg.copy(alpha = 0.12f) else bg
+        hovered -> if (c.isDark) Color.White.copy(alpha = 0.05f) else Palette.Moss600.copy(alpha = 0.05f)
+        else -> Color.Transparent
+    }
     Row(
-        Modifier.fillMaxWidth().background(if (c.isDark && bg != Color.Transparent) bg.copy(alpha = 0.12f) else bg)
+        Modifier.fillMaxWidth().background(shown)
+            .hoverable(hoverSource)
+            .onSecondaryClick { if (!selectMode) vm.enterSelect(g.key) }
             // Press and hold to start selecting — the WhatsApp gesture.
             .combinedClickable(
+                interactionSource = hoverSource, indication = androidx.compose.foundation.LocalIndication.current,
                 onClick = { if (selectMode) vm.toggleRow(g.key) else onOpen(conv.id) },
                 onLongClick = { if (!selectMode) vm.enterSelect(g.key) },
             )

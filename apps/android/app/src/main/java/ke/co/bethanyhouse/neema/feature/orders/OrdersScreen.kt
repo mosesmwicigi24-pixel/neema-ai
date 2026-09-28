@@ -11,6 +11,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
+import ke.co.bethanyhouse.neema.core.ui.SideSheet
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
@@ -139,12 +140,18 @@ fun OrdersScreen(dash: DashboardViewModel) {
     MinuteTicker {
     BoxWithConstraints(Modifier.fillMaxSize().background(c.bg)) {
         val wide = maxWidth >= 600.dp
-        // A wide tablet shows the order beside the list instead of in a sheet over it.
-        val twoPane = maxWidth >= 1000.dp
-        // Phones (and big text): the row's amount moves up beside the name.
-        val compactRows = textRoom(if (twoPane) maxWidth - PANE_WIDTH else maxWidth) < 480.dp
+        // A tablet shows the order beside the list instead of in a sheet over it —
+        // on its side and upright (a Tab S9 Ultra upright leaves 864dp beside the rail).
+        val twoPane = maxWidth >= 840.dp
+        // Split screen (600–840dp): the order slides in from the end edge, the list
+        // stays in view beside it; only phone-sized windows get the bottom sheet.
+        val sidePanel = wide && !twoPane
+        val sheetMax = maxWidth * 0.8f
         val cols = statusColumns(maxWidth, if (wide) 24.dp else 16.dp, LocalDensity.current.fontScale)
         val selected = remember(orders, selectedId) { selectedId?.let { id -> orders.find { it.id == id } } }
+        // Phones (and big text): the row's amount moves up beside the name. The
+        // order pane's width counts only while it is open beside the list.
+        val compactRows = textRoom(if (twoPane && selected != null) maxWidth - PANE_WIDTH else maxWidth) < 480.dp
         // Back closes the topmost thing first: the order pane beside the list,
         // then the search, and only then leaves the view (the phone's sheet
         // is its own window and takes back itself).
@@ -298,7 +305,21 @@ fun OrdersScreen(dash: DashboardViewModel) {
         // the first read: an order restored after process death waits for it.)
         LaunchedEffect(selectedId) { vm.select(null) }
     }
-    if (selected != null && !twoPane) {
+    if (sidePanel) Box(Modifier.fillMaxSize()) {
+        SideSheet(selected != null, minOf(PANE_WIDTH, sheetMax), "Order", onDismiss = { vm.select(null) }) {
+            selected?.let { o ->
+                Column(Modifier.padding(top = 16.dp).windowInsetsPadding(WindowInsets.navigationBars)) {
+                    OrderDetail(
+                        dash = dash, order = o,
+                        busy = updating == o.id,
+                        onStatus = { next -> vm.updateStatus(o.id, next) },
+                        onClose = { vm.select(null) },
+                    )
+                }
+            }
+        }
+    }
+    if (selected != null && !twoPane && !sidePanel) {
         ModalBottomSheet(
             onDismissRequest = { vm.select(null) },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),

@@ -249,14 +249,16 @@ fun LeadsScreen(dash: DashboardViewModel) {
         // Started once per open lead (as the lead is then), kept as typed.
         LaunchedEffect(selected.id) { vm.sheetFor(selected) }
         val draft = sheet?.takeIf { it.leadId == selected.id }
-        ModalBottomSheet(
+        // A phone's bottom sheet; on a tablet window the lead opens beside the pipeline.
+        ke.co.bethanyhouse.neema.core.ui.AdaptiveSheet(
             // A swipe or back closes the sheet but keeps what was typed for this lead.
-            onDismissRequest = { vm.dismissSheet() },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            onDismiss = { vm.dismissSheet() },
+            title = selected.name?.takeIf { it.isNotBlank() } ?: "Lead",
             containerColor = c.bg2,
             dragHandle = { WebDragHandle() },
             // The web's modal overlay: bg-black/40.
-            scrimColor = Color.Black.copy(alpha = 0.4f),
+            scrim = Color.Black.copy(alpha = 0.4f),
+            width = 480.dp,
         ) {
             LeadDetail(
                 lead = selected, stages = stages,
