@@ -109,7 +109,8 @@ class ConversationsScreenshotTest {
         }
     }
 
-    private val tabletPortrait = DeviceConfig.NEXUS_10.copy(orientation = ScreenOrientation.PORTRAIT, screenWidth = 1600, screenHeight = 2560)
+    // A Galaxy Tab S9 Ultra upright: 924 × 1480 dp.
+    private val tabletPortrait = DeviceConfig.NEXUS_10.copy(orientation = ScreenOrientation.PORTRAIT, screenWidth = 1848, screenHeight = 2960)
 
     // ═══════════════ The list ═══════════════
 

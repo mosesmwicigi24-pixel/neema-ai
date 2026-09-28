@@ -77,6 +77,43 @@ object DeviceMatrix {
     /** 1280 × 900dp Pixel C in landscape (the web's desktop layout). */
     val TABLET_LANDSCAPE = TestDevice("tablet", DeviceConfig.PIXEL_C)
 
+    // ── Samsung Galaxy Tab S9 Ultra (14.6", 2960 × 1848 px) ─────────────────
+    // Samsung's default screen zoom renders it at 320 dpi: 1480 × 924 dp. The
+    // next zoom step up (≈340 dpi) is 1393 × 870 dp. Split screen, the ⅓ / ⅔
+    // splits and the pop-up window are real, resizable windows of the same
+    // panel — the app sees only its window, so each is a profile of its own.
+    private fun tabS9(name: String, wDp: Int, hDp: Int) = TestDevice(
+        name,
+        DeviceConfig.PIXEL_C.copy(
+            screenWidth = wDp * 2, screenHeight = hDp * 2, xdpi = 320, ydpi = 320,
+            density = com.android.resources.Density.XHIGH,
+            orientation = if (wDp >= hDp) ScreenOrientation.LANDSCAPE else ScreenOrientation.PORTRAIT,
+        ),
+    )
+
+    /** Full screen, landscape, default zoom — the reference layout. */
+    val TAB_S9U = tabS9("tabS9u", 1480, 924)
+    /** Full screen, landscape, one zoom step up. */
+    val TAB_S9U_ZOOM = tabS9("tabS9uZoom", 1393, 870)
+    /** Full screen, upright. */
+    val TAB_S9U_PORTRAIT = tabS9("tabS9uPortrait", 924, 1480)
+    /** Split screen 50/50 on its side (each app gets half). */
+    val TAB_S9U_HALF = tabS9("tabS9uHalf", 736, 924)
+    /** The ⅔ side of a ⅓ / ⅔ split. */
+    val TAB_S9U_TWO_THIRDS = tabS9("tabS9uTwoThirds", 980, 924)
+    /** The ⅓ side — a phone-sized column. */
+    val TAB_S9U_THIRD = tabS9("tabS9uThird", 488, 924)
+    /** Split screen upright: top or bottom half. */
+    val TAB_S9U_PORTRAIT_HALF = tabS9("tabS9uPortraitHalf", 924, 736)
+    /** A floating pop-up window. */
+    val TAB_S9U_POPUP = tabS9("tabS9uPopup", 640, 780)
+
+    /** Every Tab S9 Ultra window the app must look designed for. */
+    val tabS9Ultra = listOf(
+        TAB_S9U, TAB_S9U_ZOOM, TAB_S9U_PORTRAIT, TAB_S9U_HALF, TAB_S9U_TWO_THIRDS, TAB_S9U_THIRD,
+        TAB_S9U_PORTRAIT_HALF, TAB_S9U_POPUP,
+    )
+
     /** Every width, light, default font. */
     val widths = listOf(SMALL_PHONE, PHONE, FOLDABLE, TABLET_PORTRAIT, TABLET_LANDSCAPE)
 

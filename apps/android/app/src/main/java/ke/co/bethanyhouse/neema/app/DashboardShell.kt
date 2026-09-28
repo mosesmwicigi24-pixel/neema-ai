@@ -30,6 +30,7 @@ import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 import ke.co.bethanyhouse.neema.core.ui.theme.scaledAtMost
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -39,6 +40,8 @@ import ke.co.bethanyhouse.neema.core.util.Fmt
 import ke.co.bethanyhouse.neema.feature.agents.AgentsScreen
 import ke.co.bethanyhouse.neema.feature.calls.CallBar
 import ke.co.bethanyhouse.neema.feature.calls.CallStage
+import ke.co.bethanyhouse.neema.feature.calls.CALL_PANEL_WIDTH
+import ke.co.bethanyhouse.neema.feature.calls.callDocks
 import ke.co.bethanyhouse.neema.feature.calls.callBarShown
 import ke.co.bethanyhouse.neema.feature.calls.CallsScreen
 import ke.co.bethanyhouse.neema.feature.catalog.CatalogScreen
@@ -99,11 +102,29 @@ fun DashboardShell(
     // font size) and the process being restored; the drawer's state is saveable too.
     var showBell by rememberSaveable { mutableStateOf(initialBellOpen) }
     var menuOpen by rememberSaveable { mutableStateOf(initialAccountMenu) }
-    // A 600–840dp window (an unfolded foldable, a small tablet upright) opens on
-    // the 60dp icon rail so the view keeps its width; the toggle still expands it.
-    var collapsed by rememberSaveable { mutableStateOf(initialCollapsed || widthClass == WindowWidthSizeClass.Medium) }
+    // Windows under 1200dp (a tablet upright, split screen, a foldable) open on
+    // the 60dp icon rail so the view keeps its width; the full sidebar docks on
+    // wider ones (a Tab S9 Ultra on its side). The toggle still switches it, and
+    // the choice holds until the window crosses into the other mode (rotation,
+    // resizing a split) — then the new window's own default applies.
+    val navMode = ke.co.bethanyhouse.neema.core.ui.navModeFor(LocalConfiguration.current.screenWidthDp)
+    var collapsed by rememberSaveable(navMode) {
+        mutableStateOf(initialCollapsed || widthClass == WindowWidthSizeClass.Medium || navMode == ke.co.bethanyhouse.neema.core.ui.NavMode.Rail)
+    }
     val unreadBell = notifications.count { !it.read }
     val wide = widthClass != WindowWidthSizeClass.Compact
+    // Keyboard: Ctrl+1…9 opens the nth view in the navigation, Ctrl+B shows or
+    // hides the sidebar's labels (tablet / DeX windows).
+    val latestItems by androidx.compose.runtime.rememberUpdatedState(items)
+    LaunchedEffect(dash, wide) {
+        dash.shortcuts.collect { s ->
+            when (s) {
+                is ke.co.bethanyhouse.neema.core.ui.Shortcut.View -> latestItems.getOrNull(s.index)?.let { dash.navigate(it.id) }
+                ke.co.bethanyhouse.neema.core.ui.Shortcut.ToggleNav -> if (wide) collapsed = !collapsed
+                else -> Unit
+            }
+        }
+    }
     val drawer = rememberDrawerState(if (initialDrawerOpen) DrawerValue.Open else DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val canGoBack by dash.canGoBack.collectAsStateWithLifecycle()
@@ -221,7 +242,35 @@ fun DashboardShell(
                 Modifier.fillMaxWidth().weight(1f)
                     .then(if (immersive && banner) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier),
             ) {
-                CompositionLocalProvider(LocalShellOverlayOpen provides (overlay != null)) {
+                // The view's own width (window minus the navigation beside it), so
+                // it lays out for the room it has — see core/ui/Adaptive.kt.
+                val navW = when {
+                    !wide || immersive -> 0
+                    collapsed -> 60
+                    else -> dockedWidth.value.toInt()
+                }
+                val viewWidth = LocalConfiguration.current.screenWidthDp - navW
+                // A tablet with room (≥ 1000dp of content): a ringing or live call
+                // docks as a panel at the end edge and the view stays usable beside
+                // it — the customer's chat, their orders — instead of being covered.
+                val callDocked = callDocks(dash, viewWidth)
+                // Anticipatory, docked only: once a call connects while the agent is in
+                // the inbox or the call log, that customer's chat opens beside it (once
+                // per call — moving elsewhere afterwards is the agent's choice).
+                val callNow by dash.container.calls.state.collectAsStateWithLifecycle()
+                var chatOpenedFor by rememberSaveable { mutableStateOf<String?>(null) }
+                LaunchedEffect(callDocked, callNow.phase, callNow.callId) {
+                    val id = callNow.callId ?: return@LaunchedEffect
+                    if (!callDocked || callNow.phase != ke.co.bethanyhouse.neema.feature.calls.CallPhase.InCall || chatOpenedFor == id) return@LaunchedEffect
+                    chatOpenedFor = id
+                    if (view == ViewId.Conversations || view == ViewId.Calls) callNow.chatKey?.let(dash::openConversationFor)
+                }
+                Row(Modifier.fillMaxSize()) {
+                Box(Modifier.weight(1f).fillMaxHeight()) {
+                CompositionLocalProvider(
+                    LocalShellOverlayOpen provides (overlay != null),
+                    ke.co.bethanyhouse.neema.core.ui.LocalContentWidthDp provides (viewWidth - if (callDocked) CALL_PANEL_WIDTH + 1 else 0),
+                ) {
                 when (view) {
                     ViewId.Conversations -> ConversationsScreen(dash)
                     ViewId.Calls -> CallsScreen(dash)
@@ -236,10 +285,16 @@ fun DashboardShell(
                     ViewId.Profile -> ProfileScreen(dash)
                 }
                 }
+                }
+                if (callDocked) {
+                    VerticalDivider(color = Color.Black.copy(alpha = 0.25f))
+                    Box(Modifier.width(CALL_PANEL_WIDTH.dp).fillMaxHeight()) { CallStage(dash) }
+                }
+                }
                 // Online but the live socket is down: it is on its way back.
                 if (wide && !connected && online) OfflineDot(Modifier.align(Alignment.TopEnd).padding(10.dp))
-                // An incoming/active call takes over the content area.
-                CallStage(dash)
+                // Phones and narrower windows: an incoming/active call takes over the content area.
+                if (!callDocked) CallStage(dash)
                 // Last of all, so the shell's overlays take back before the view does.
                 overlayBack()
             }

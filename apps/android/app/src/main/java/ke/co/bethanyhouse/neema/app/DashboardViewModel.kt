@@ -183,6 +183,13 @@ class DashboardViewModel(
      */
     val immersive = MutableStateFlow(false)
 
+    /**
+     * Hardware-keyboard shortcuts (core/ui/Shortcuts.kt), caught by the
+     * activity whatever has focus: the shell takes the view and sidebar ones,
+     * the inbox the conversation and search ones.
+     */
+    val shortcuts = MutableSharedFlow<ke.co.bethanyhouse.neema.core.ui.Shortcut>(extraBufferCapacity = 8)
+
     val dark: StateFlow<Boolean> = container.prefs.dark
     fun setDark(v: Boolean) = container.prefs.setDark(v)
 

@@ -1,6 +1,15 @@
 package ke.co.bethanyhouse.neema.feature.conversations
 
 import ke.co.bethanyhouse.neema.core.ui.components.WebModalDim
+import ke.co.bethanyhouse.neema.core.ui.InboxPanes
+import ke.co.bethanyhouse.neema.core.ui.SideMode
+import ke.co.bethanyhouse.neema.core.ui.SideSheet
+import ke.co.bethanyhouse.neema.core.ui.inboxPanes
+import ke.co.bethanyhouse.neema.core.ui.dropFiles
+import ke.co.bethanyhouse.neema.core.ui.rememberDropHover
+import ke.co.bethanyhouse.neema.core.ui.contentWidthDp
+import ke.co.bethanyhouse.neema.core.ui.Shortcut
+import ke.co.bethanyhouse.neema.core.ui.stepThrough
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -55,6 +64,19 @@ import ke.co.bethanyhouse.neema.core.ui.theme.Palette
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConversationsScreen(dash: DashboardViewModel) {
+    // The panes follow the room the inbox really has (the window minus the
+    // navigation, from the shell): a Tab S9 Ultra full screen, split in half,
+    // a ⅓ split and a pop-up window each get their own arrangement
+    // (core/ui/Adaptive.kt). Not measured here: a measuring pass would compose
+    // the inbox after the shell and put its back handlers above the shell's.
+    val w = contentWidthDp()
+    val panes = remember(w) { inboxPanes(w) }
+    ConversationsBody(dash, panes)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ConversationsBody(dash: DashboardViewModel, panes: InboxPanes) {
     val vm: ConversationsViewModel = viewModel { ConversationsViewModel(dash) }
     val inbox by vm.inbox.collectAsStateWithLifecycle()
     val listUi by vm.list.collectAsStateWithLifecycle()
@@ -64,10 +86,12 @@ fun ConversationsScreen(dash: DashboardViewModel) {
     val dialogs by vm.dialogs.collectAsStateWithLifecycle()
     val perms = rememberInboxPerms(dash)
 
-    val widthDp = LocalConfiguration.current.screenWidthDp
-    val wide = widthDp >= 600
-    // Side panes only when the thread would still have room to breathe.
-    val roomy = widthDp >= 1100
+    // Phone-shaped windows run the thread edge to edge under the status bar;
+    // tablet windows keep the shell's frame (sidebar / rail) around it.
+    val shellWide = LocalConfiguration.current.screenWidthDp >= 600
+    val wide = panes.twoPane
+    // The customer panel docks beside the thread only when the thread keeps its room.
+    val roomy = panes.customer == SideMode.Docked
     val active: Conversation? = inbox.cache[thread.activeId]
     val phoneThread = !wide && thread.threadOpen && active != null
 
@@ -122,6 +146,32 @@ fun ConversationsScreen(dash: DashboardViewModel) {
     // The list keeps its place while a thread covers it (phone) and across rotation.
     val listState = rememberLazyListState()
 
+    // Hardware keyboard (Tab S9 Ultra Book Cover, DeX): Alt+↓/↑ or Ctrl+]/[ walk
+    // the conversations in list order (the list follows), Ctrl+F / Ctrl+K search.
+    val searchFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    val latestRows by rememberUpdatedState(rows)
+    val latestActive by rememberUpdatedState(thread.activeId)
+    LaunchedEffect(vm) {
+        dash.shortcuts.collect { s ->
+            when (s) {
+                Shortcut.NextConversation, Shortcut.PreviousConversation -> {
+                    val ids = latestRows.map { it.rep.id }
+                    val next = stepThrough(ids, latestActive.ifEmpty { null }, forward = s == Shortcut.NextConversation)
+                    if (next != null && next != latestActive) {
+                        vm.select(next)
+                        // The list follows only when the row is off screen, keeping two rows of context above it.
+                        ids.indexOf(next).takeIf { it >= 0 }?.let { i ->
+                            val seen = listState.layoutInfo.visibleItemsInfo.filter { it.offset >= 0 && it.offset + it.size <= listState.layoutInfo.viewportEndOffset }.map { it.index }
+                            if (i !in seen) runCatching { listState.animateScrollToItem((i - 2).coerceAtLeast(0)) }
+                        }
+                    }
+                }
+                Shortcut.Search -> if (!phoneThread) runCatching { searchFocus.requestFocus() }
+                else -> Unit
+            }
+        }
+    }
+
     val threadPane: @Composable (Modifier) -> Unit = { mod ->
         if (active == null) {
             Box(mod.background(if (Neema.colors.isDark) Neema.colors.bg else Palette.Slate50), contentAlignment = Alignment.Center) {
@@ -134,10 +184,11 @@ fun ConversationsScreen(dash: DashboardViewModel) {
         } else {
             ThreadPane(
                 vm = vm, dash = dash, conv = active, inbox = inbox, thread = thread, composer = composer, perms = perms,
-                wide = wide, roomy = roomy, brokenVideos = brokenSet,
+                wide = wide, roomy = roomy, brokenVideos = brokenSet, edgeToEdge = !shellWide,
+                roomyHeader = panes.roomyThread,
                 onView = { viewer = it },
                 onProfile = if (!wide || !roomy) ({ customerSheet = true }) else null,
-                onActivity = if (!roomy) ({ activitySheet = true; vm.setActivityOpen(true) }) else null,
+                onActivity = if (!panes.activityRail) ({ activitySheet = true; vm.setActivityOpen(true) }) else null,
                 onAsk = { askFor = active.id }, onAnswer = { answerFor = active.id }, onInvite = { inviteFor = active.id },
                 modifier = mod,
             )
@@ -147,18 +198,17 @@ fun ConversationsScreen(dash: DashboardViewModel) {
     // Text reads in the theme's ink wherever it sits (the shell's Scaffold does the same).
     CompositionLocalProvider(LocalContentColor provides Neema.colors.text) { if (!wide) {
         if (phoneThread) threadPane(Modifier.fillMaxSize())
-        else ConversationList(vm, inbox, listUi, rows, thread.activeId, perms, Modifier.fillMaxSize(), listState)
-    } else {
+        else ConversationList(vm, inbox, listUi, rows, thread.activeId, perms, Modifier.fillMaxSize(), listState, searchFocus)
+    } else Box(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxSize()) {
-            // The web's LIST_WIDTH, clamp(340px, 38vw, 436px) — except that a small
-            // tablet keeps 320 so the thread still has room to breathe.
-            val listWidth = if (widthDp < 840) 320f else (widthDp * 0.38f).coerceIn(340f, 436f)
-            ConversationList(vm, inbox, listUi, rows, thread.activeId, perms, Modifier.width(listWidth.dp).fillMaxHeight(), listState)
+            ConversationList(vm, inbox, listUi, rows, thread.activeId, perms, Modifier.width(panes.listWidth.dp).fillMaxHeight(), listState, searchFocus)
             VerticalDivider(color = hairline())
             threadPane(Modifier.weight(1f).fillMaxHeight())
-            // The web's ACTIVITY_WIDTH, clamp(196px, 16vw, 292px); the customer sidebar is w-80.
+            // The activity log's rail and the customer panel dock only while the
+            // thread keeps its room; the log docks open only if it still does.
             if (roomy && active != null) {
-                ActivityPane(thread.activity, thread.activityOpen, (widthDp * 0.16f).coerceIn(196f, 292f).dp) { vm.setActivityOpen(it) }
+                if (panes.activityDocks) ActivityPane(thread.activity, thread.activityOpen, panes.activityWidth.dp) { vm.setActivityOpen(it) }
+                else SideRail("Activity", count = thread.activity.size) { activitySheet = true; vm.setActivityOpen(true) }
                 if (customerOpen) {
                     VerticalDivider(color = hairline())
                     CustomerPanel(
@@ -166,15 +216,39 @@ fun ConversationsScreen(dash: DashboardViewModel) {
                         onClose = { customerOpen = false },
                         onOpenIdentity = vm::openIdentity,
                         onNameChange = vm::renameCustomer,
-                        modifier = Modifier.width(320.dp).fillMaxHeight(),
+                        modifier = Modifier.width(panes.customerWidth.dp).fillMaxHeight(),
                     )
                 } else SideRail("Customer", flipArrow = true) { customerOpen = true }
             }
         }
+        // Tablet windows where the thread needs the room: the customer panel and
+        // the activity log slide over the thread from the end edge instead of
+        // docking — the conversation stays in view beside them.
+        if (active != null) {
+            SideSheet(customerSheet, panes.customerWidth.dp, "Customer profile", onDismiss = { customerSheet = false }) {
+                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Customer Profile", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { customerSheet = false }) { Icon(Icons.Filled.Close, "Close", tint = Palette.Moss600) }
+                }
+                HorizontalDivider(color = hairline())
+                CustomerPanel(
+                    dash = dash, conversation = active,
+                    onClose = { customerSheet = false },
+                    onOpenIdentity = { ch, ext -> customerSheet = false; vm.openIdentity(ch, ext) },
+                    onNameChange = vm::renameCustomer,
+                    modifier = Modifier.fillMaxSize(),
+                    hideHeader = true,
+                )
+            }
+            SideSheet(activitySheet, panes.activityWidth.coerceAtLeast(300).dp, "Activity log", onDismiss = { activitySheet = false; vm.setActivityOpen(false) }) {
+                Text("ACTIVITY LOG", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp, color = Palette.Sage300, modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp))
+                ActivityList(thread.activity, Modifier.fillMaxSize())
+            }
+        }
     } }
 
-    // ── Customer panel as a sheet (phones, narrower tablets) ──
-    if (customerSheet && active != null) {
+    // ── Customer panel as a sheet (phones, one-pane windows) ──
+    if (!wide && customerSheet && active != null) {
         // The web's mobile CRM drawer backdrop: bg-black/40.
         ModalBottomSheet(onDismissRequest = { customerSheet = false }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), scrimColor = Color.Black.copy(alpha = 0.4f)) {
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -192,7 +266,7 @@ fun ConversationsScreen(dash: DashboardViewModel) {
             )
         }
     }
-    if (activitySheet && active != null) {
+    if (!wide && activitySheet && active != null) {
         ModalBottomSheet(onDismissRequest = { activitySheet = false; vm.setActivityOpen(false) }) {
             Text("ACTIVITY LOG", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp, color = Palette.Sage300, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
             ActivityList(thread.activity, Modifier.fillMaxWidth().heightIn(min = 200.dp, max = 560.dp))
@@ -287,6 +361,10 @@ private fun ThreadPane(
     wide: Boolean,
     roomy: Boolean,
     brokenVideos: Set<String>,
+    /** A phone-shaped window: the thread runs under the status bar and pads for it. */
+    edgeToEdge: Boolean,
+    /** The thread has room for its actions beside the badges (no second row of buttons). */
+    roomyHeader: Boolean,
     onView: (Viewer) -> Unit,
     onProfile: (() -> Unit)?,
     onActivity: (() -> Unit)?,
@@ -303,9 +381,9 @@ private fun ThreadPane(
         if (can.release) add(HeaderAction("Release", "↩", "release", pin = none { it.pin }) { vm.release(conv.id) })
         if (can.pause) add(HeaderAction("Pause", "⏸", "pause") { vm.pause(conv.id) })
         if (can.resume) add(HeaderAction("Resume", "▶", "release", primary = true, pin = none { it.pin }) { vm.release(conv.id) })
-        if (can.transfer) add(HeaderAction(if (wide) "" else "Transfer", "⇄") { vm.showTransfer(true) })
-        if (can.note) add(HeaderAction(if (wide) "" else "Add note", "📝") { vm.showNote(true) })
-        if (can.clearHistory) add(HeaderAction(if (wide) "" else "Clear history", "🗑️", danger = true) { vm.showClear(true) })
+        if (can.transfer) add(HeaderAction(if (wide && roomyHeader) "" else "Transfer", "⇄") { vm.showTransfer(true) })
+        if (can.note) add(HeaderAction(if (wide && roomyHeader) "" else "Add note", "📝") { vm.showNote(true) })
+        if (can.clearHistory) add(HeaderAction(if (wide && roomyHeader) "" else "Clear history", "🗑️", danger = true) { vm.showClear(true) })
     }
     val siblings = remember(inbox.cache, conv.personId, conv.id) {
         if (conv.personId == null) listOf(conv)
@@ -330,13 +408,19 @@ private fun ThreadPane(
     }
     // Phone (edge-to-edge, shell bars hidden): keep clear of the nav bar and the
     // keyboard without counting the nav bar twice when the keyboard is up.
-    BoxWithConstraints(modifier.then(if (!wide) Modifier.windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars)) else Modifier.imePadding())) {
+    // Files dragged in from another app (Gallery / My Files beside Neema in split
+    // screen, DeX) drop anywhere on the thread and join the reply's attachments.
+    val dropHover = rememberDropHover()
+    BoxWithConstraints(
+        modifier.then(if (!wide) Modifier.windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars)) else Modifier.imePadding())
+            .dropFiles(enabled = can.composer, hovering = dropHover) { vm.addMedia(it) },
+    ) {
     // With the keyboard up (or at a large font scale) the composer's extras — the AI
     // draft, the quote, the window strip — scroll inside it; the text box never leaves.
     val composerMax = maxHeight * 0.6f
     Column(Modifier.fillMaxSize()) {
         ThreadHeader(
-            conv = conv, siblings = siblings, perms = perms, convBusy = thread.busyFor(conv.id), wide = wide,
+            conv = conv, siblings = siblings, perms = perms, convBusy = thread.busyFor(conv.id), wide = wide, roomy = roomyHeader,
             actions = actions, menu = menu,
             // Regular agents see who holds it; admins never see the lock.
             locked = if (can.locked) conv.assignedAgentName?.split(" ")?.firstOrNull() ?: "Locked" else null,
@@ -347,7 +431,7 @@ private fun ThreadPane(
             onCall = { vm.call(digits, conv.name) },
             onProfile = onProfile,
             onSwitch = { vm.select(it.id) },
-            modifier = if (!wide) Modifier.statusBarsPadding() else Modifier,
+            modifier = if (edgeToEdge) Modifier.statusBarsPadding() else Modifier,
         )
         HorizontalDivider(color = hairline())
         ThreadMessages(
@@ -398,6 +482,16 @@ private fun ThreadPane(
             }
         }
     }
+    if (dropHover.value) DropHint(Modifier.matchParentSize())
+    }
+}
+
+/** "Drop to attach" over the thread while a file is dragged across it. */
+@Composable
+private fun DropHint(modifier: Modifier) {
+    val shape = RoundedCornerShape(16.dp)
+    Box(modifier.padding(12.dp).clip(shape).background(Palette.Moss600.copy(alpha = 0.10f)).border(2.dp, Palette.Moss600, shape), contentAlignment = Alignment.Center) {
+        Text("Drop to attach to your reply", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Palette.Moss700)
     }
 }
 

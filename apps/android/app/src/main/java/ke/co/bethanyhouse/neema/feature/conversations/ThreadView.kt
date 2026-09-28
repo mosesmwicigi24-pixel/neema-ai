@@ -400,7 +400,7 @@ private fun MessageBubble(msg: ThreadMsg, album: List<ThreadMsg>?, channel: Stri
             Column(
                 Modifier.offset { IntOffset(drag.roundToInt(), 0) }
                     .fillMaxWidth(if (isMedia) 0.65f else 0.75f).wrapContentWidth(if (inbound) Alignment.Start else Alignment.End)
-                    .widthIn(max = if (isMedia) 360.dp else 560.dp)
+                    .widthIn(max = if (isMedia) 360.dp else 520.dp)
                     .clip(shape).background(bg)
                     .then(if (inbound || (c.isDark && msg.sender == "ai")) Modifier.border(1.dp, if (c.isDark) c.border else Palette.Hairline2, shape) else Modifier)
                     .padding(if (isMedia) PaddingValues(6.dp) else PaddingValues(horizontal = 16.dp, vertical = 10.dp)),
@@ -670,6 +670,8 @@ internal fun ThreadHeader(
     actions: List<HeaderAction>,
     menu: List<Pair<String, () -> Unit>>,
     locked: String?,
+    /** Beside other panes with room to spare: every action inline (icon-only ones in the top row). */
+    roomy: Boolean = true,
     showBack: Boolean,
     onBack: () -> Unit,
     canCall: Boolean,
@@ -680,6 +682,7 @@ internal fun ThreadHeader(
 ) {
     val c = Neema.colors
     val name = inboxName(conv)
+    val inline = wide && roomy
     Column(Modifier.fillMaxWidth().background(c.bg2).then(modifier).padding(horizontal = 8.dp, vertical = 8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (showBack) IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = c.muted) }
@@ -693,10 +696,16 @@ internal fun ThreadHeader(
                     Text(h, fontSize = 12.sp, color = Palette.Sage300, fontFamily = if (isWebVisitor(conv.waId)) null else NeemaMono, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
+            // A roomy tablet thread: the icon-only actions (transfer, note, clear)
+            // sit up here with the call and profile buttons, so the badge row
+            // below never wraps into a second line of buttons.
+            if (inline) actions.filter { it.label.isEmpty() }.forEach { a ->
+                Box(Modifier.padding(horizontal = 2.dp)) { HeaderButton(a, convBusy, compact = true) }
+            }
             if (canCall) IconButton(onClick = onCall) { Icon(Icons.Filled.Call, "Call on WhatsApp", tint = ChannelColors.WhatsApp) }
             if (onProfile != null) IconButton(onClick = onProfile) { Icon(Icons.Filled.Person, "View customer profile", tint = Palette.Moss700) }
             var open by remember { mutableStateOf(false) }
-            val items = (if (wide) emptyList() else actions.filterNot { it.pin }.map { a -> "${a.emoji} ${a.label}" to a.onClick }) + menu
+            val items = (if (inline) emptyList() else actions.filterNot { it.pin }.map { a -> "${a.emoji} ${a.label}" to a.onClick }) + menu
             if (items.isNotEmpty()) Box {
                 IconButton(onClick = { open = true }) { Icon(Icons.Filled.MoreVert, "More", tint = c.muted) }
                 DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
@@ -732,10 +741,10 @@ internal fun ThreadHeader(
                         .clickable(enabled = !open, onClickLabel = "Open the ${st.label} thread") { onSwitch(s) }.padding(horizontal = 6.dp, vertical = 2.dp),
                 )
             }
-            if (wide) actions.forEach { HeaderButton(it, convBusy, compact = false) }
+            if (inline) actions.filter { it.label.isNotEmpty() }.forEach { HeaderButton(it, convBusy, compact = false) }
         }
-        // Phone: the one state-changing action stays one tap away, beside the badges.
-        if (!wide) actions.firstOrNull { it.pin }?.let { a -> Spacer(Modifier.width(8.dp)); HeaderButton(a, convBusy, compact = true) }
+        // Phone / a narrow thread: the one state-changing action stays one tap away, beside the badges.
+        if (!inline) actions.firstOrNull { it.pin }?.let { a -> Spacer(Modifier.width(8.dp)); HeaderButton(a, convBusy, compact = true) }
         }
     }
 }

@@ -169,6 +169,23 @@ fun CallBar(dash: DashboardViewModel, modifier: Modifier = Modifier) {
     }
 }
 
+/** The docked call panel's width beside the view (tablets). */
+const val CALL_PANEL_WIDTH = 420
+
+/**
+ * Whether the call card docks beside the view (a view [contentWidthDp] wide
+ * with room for it and a usable view: a Tab S9 Ultra on its side, DeX) rather
+ * than covering it. A minimised call is the top bar, whatever the width.
+ */
+@Composable
+fun callDocks(dash: DashboardViewModel, contentWidthDp: Int): Boolean {
+    val c by dash.container.calls.state.collectAsStateWithLifecycle()
+    return callDocks(c.phase, c.minimised, contentWidthDp)
+}
+
+fun callDocks(phase: CallPhase, minimised: Boolean, contentWidthDp: Int): Boolean =
+    phase != CallPhase.Idle && !minimised && contentWidthDp >= 1000
+
 /** Whether [CallBar] takes room at the top of the content (the shell pads for the status bar then). */
 @Composable
 fun callBarShown(dash: DashboardViewModel): Boolean {

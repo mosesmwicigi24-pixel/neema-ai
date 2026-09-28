@@ -227,6 +227,26 @@ fun CallsScreen(
         val compact = maxWidth / LocalDensity.current.fontScale < 400.dp
         // Phone: the details replace the log; back returns to it.
         BackHandler(enabled = sel != null && !wide) { vm.select(null) }
+        // Tablet: the details pane is never an empty half — the newest call in
+        // view opens in it (the inbox's auto-select), and a filter that hides
+        // the open call moves the pane to the first one still shown.
+        val firstShown = shown?.firstOrNull()
+        // Which open call the app chose (not the agent): shrinking the window to
+        // a phone-sized one (a ⅓ split) shows the log again rather than that call.
+        var autoPicked by rememberSaveable { mutableStateOf<String?>(null) }
+        LaunchedEffect(wide, firstShown?.id, sel?.id, followUpsOnly, app) {
+            if (!wide) {
+                if (sel != null && sel.id == autoPicked) vm.select(null)
+                autoPicked = null
+                return@LaunchedEffect
+            }
+            if (firstShown == null) return@LaunchedEffect
+            if (sel == null || shown?.none { it.id == sel.id } == true) { vm.select(firstShown); autoPicked = firstShown.id }
+            else if (sel.id != autoPicked) autoPicked = null
+        }
+        // A Tab S9 Ultra on its side: both panes grow with the room (log up to
+        // 640dp, details up to 600dp) instead of a 560dp column in empty space.
+        val roomy = maxWidth >= 1100.dp
 
         PullToRefreshBox(isRefreshing = refreshing, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize()) {
             Row(
@@ -235,7 +255,7 @@ fun CallsScreen(
             ) {
                 if (wide || sel == null) {
                     CallLog(
-                        modifier = Modifier.widthIn(max = 560.dp).weight(1f, fill = false).fillMaxWidth(),
+                        modifier = Modifier.widthIn(max = if (roomy) 640.dp else 560.dp).weight(1f, fill = false).fillMaxWidth(),
                         vm = vm, state = logState, shown = shown, total = list?.size ?: 0, followUps = followUps,
                         followUpsOnly = followUpsOnly, selectedId = sel?.id, openTranscript = transcript,
                         anyMessenger = anyMessenger, channelFilter = app,
@@ -246,7 +266,11 @@ fun CallsScreen(
                 if (sel != null) {
                     CallDetails(
                         dash = dash, vm = vm, sel = sel, calls = list.orEmpty(), transcript = transcript,
-                        modifier = if (wide) Modifier.width(420.dp) else Modifier.fillMaxWidth(),
+                        modifier = when {
+                            roomy -> Modifier.widthIn(min = 420.dp, max = 600.dp).weight(1f, fill = false).fillMaxWidth()
+                            wide -> Modifier.width(420.dp)
+                            else -> Modifier.fillMaxWidth()
+                        },
                     )
                 }
             }
