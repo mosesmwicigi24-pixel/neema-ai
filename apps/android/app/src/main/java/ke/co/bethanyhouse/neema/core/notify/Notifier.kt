@@ -52,11 +52,16 @@ interface AlertSink {
 
 /** System notification channels + posting helpers. */
 object Notifier {
-    const val CH_ALERTS = "neema_alerts"
-    const val CH_MESSAGES = "neema_messages"
+    // v2: the alert, message and call channels are silent — the app plays the
+    // sound and buzz itself (MessageAlerts, CallAlert), so mute and the
+    // Profile switches work alike with the app open or closed. A channel's
+    // sound can't change once created, hence new ids (the old are deleted).
+    const val CH_ALERTS = "neema_alerts_v2"
+    const val CH_MESSAGES = "neema_messages_v2"
     const val CH_UPDATES = "neema_updates"
-    const val CH_CALLS = "neema_calls"
+    const val CH_CALLS = "neema_calls_v2"
     const val CH_LIVE = "neema_live"
+    private val RETIRED = listOf("neema_alerts", "neema_messages", "neema_calls")
 
     /** Every bell alert shares one group, so a burst stacks under one summary. */
     const val GROUP_ALERTS = "ke.co.bethanyhouse.neema.ALERTS"
@@ -72,17 +77,23 @@ object Notifier {
 
     fun createChannels(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
+        RETIRED.forEach { runCatching { nm.deleteNotificationChannel(it) } }
+        fun NotificationChannel.quiet() = apply { setSound(null, null); enableVibration(false) }
         nm.createNotificationChannel(NotificationChannel(CH_ALERTS, "Alerts", NotificationManager.IMPORTANCE_HIGH).apply {
-            description = "Escalations, transfers, new conversations, drafts and order updates"
+            description = "Escalations, transfers, new conversations, drafts and order updates. " +
+                "Sound and vibration: Neema → Profile → Sounds & vibration."
+            quiet()
         })
-        nm.createNotificationChannel(NotificationChannel(CH_MESSAGES, "Customer messages", NotificationManager.IMPORTANCE_DEFAULT).apply {
-            description = "SMS to the business number"
+        nm.createNotificationChannel(NotificationChannel(CH_MESSAGES, "Customer messages", NotificationManager.IMPORTANCE_HIGH).apply {
+            description = "Every message a customer sends. Sound and vibration: Neema → Profile → Sounds & vibration."
+            quiet()
         })
         nm.createNotificationChannel(NotificationChannel(CH_UPDATES, "Team updates", NotificationManager.IMPORTANCE_LOW).apply {
             description = "Chats released to Neema, the morning standup and system checks"
         })
         nm.createNotificationChannel(NotificationChannel(CH_CALLS, "Incoming calls", NotificationManager.IMPORTANCE_HIGH).apply {
-            description = "WhatsApp voice calls ringing the team"
+            description = "WhatsApp and Messenger calls ringing the team. Neema plays your ringtone and vibrates itself."
+            quiet()
         })
         nm.createNotificationChannel(NotificationChannel(CH_LIVE, "Live connection", NotificationManager.IMPORTANCE_MIN).apply {
             description = "Keeps Neema connected so alerts and calls arrive in the background"

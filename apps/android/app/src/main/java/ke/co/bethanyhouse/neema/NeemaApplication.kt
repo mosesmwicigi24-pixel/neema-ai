@@ -42,6 +42,7 @@ class NeemaApplication : Application() {
         ).start()
         watchNetwork()
         container.notifications.start(foreground)
+        container.messageAlerts.start(foreground)
         container.calls.start()
         container.crashReporter.start()
     }

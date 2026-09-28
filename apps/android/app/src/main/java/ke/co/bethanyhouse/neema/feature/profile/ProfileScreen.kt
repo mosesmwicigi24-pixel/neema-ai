@@ -307,13 +307,16 @@ fun ProfileScreen(dash: DashboardViewModel) {
                         backgroundLive,
                     ) { dash.container.prefs.setBackgroundLive(!backgroundLive) }
                     Spacer(Modifier.height(8.dp))
-                    LinkRow(Icons.Outlined.NotificationsActive, "System notification settings", "Sounds, pop-ups and which alerts Android shows") {
+                    LinkRow(Icons.Outlined.NotificationsActive, "System notification settings", "Pop-ups, the lock screen and which alerts Android shows") {
                         val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
                             .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
                             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         runCatching { context.startActivity(intent) }
                     }
                 }
+
+                // ── Sounds & vibration ──────────────────────────────────────
+                SoundsCard(dash.container.prefs)
 
                 // ── Permissions ─────────────────────────────────────────────
                 ProfileCard("Your Permissions") {
@@ -422,6 +425,71 @@ private fun ProfileCard(title: String, content: @Composable ColumnScope.() -> Un
         Text(title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Neema.colors.text)
         Spacer(Modifier.height(16.dp))
         content()
+    }
+}
+
+/**
+ * How Neema sounds: a beep and a buzz for every customer message, the
+ * ringtone and buzz for calls, a way to try them, and Mute for when the room
+ * needs quiet (messages only — calls keep ringing unless switched off here).
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SoundsCard(prefs: ke.co.bethanyhouse.neema.core.util.AppPrefs) {
+    val c = Neema.colors
+    val context = LocalContext.current
+    val a by prefs.alerts.collectAsStateWithLifecycle()
+    // Re-read the clock while muted, so "Muted until 3:40 PM" ends on time.
+    val now by produceState(ke.co.bethanyhouse.neema.core.util.AppClock.now(), a.mutedUntil) {
+        while (true) {
+            value = ke.co.bethanyhouse.neema.core.util.AppClock.now()
+            if (a.mutedUntil <= value) break
+            kotlinx.coroutines.delay(minOf(30_000L, a.mutedUntil - value + 50))
+        }
+    }
+    val status = ke.co.bethanyhouse.neema.core.notify.muteStatus(a.mutedUntil, now)
+    ProfileCard("Sounds & vibration") {
+        // Mute: the first thing here, as it is the thing reached for in a hurry.
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(if (status != null) "Messages muted" else "Mute messages", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = c.text)
+                Text(
+                    status ?: "Silence message sounds and vibration for a while. Messages still arrive; calls still ring.",
+                    fontSize = 12.sp, color = if (status != null) c.gold else c.faint, lineHeight = 16.sp,
+                )
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (status != null) {
+                TeamButton("Unmute", onClick = { prefs.unmute() }, variant = BtnVariant.Primary, small = true)
+            }
+            ke.co.bethanyhouse.neema.core.notify.MUTE_CHOICES.forEach { (label, ms) ->
+                TeamButton(label, onClick = { prefs.muteFor(ms) }, variant = BtnVariant.Secondary, small = true)
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        HorizontalDivider(color = c.bg3)
+        Spacer(Modifier.height(14.dp))
+        ToggleRow("Message sound", "Your phone's notification sound for every customer message", a.messageSound) {
+            prefs.setAlerts(a.copy(messageSound = !a.messageSound))
+        }
+        Spacer(Modifier.height(14.dp))
+        ToggleRow("Vibrate for messages", "A short double buzz for every customer message", a.messageVibrate) {
+            prefs.setAlerts(a.copy(messageVibrate = !a.messageVibrate))
+        }
+        Spacer(Modifier.height(14.dp))
+        ToggleRow("Ring for calls", "Your ringtone while a WhatsApp or Messenger call rings", a.callRing) {
+            prefs.setAlerts(a.copy(callRing = !a.callRing))
+        }
+        Spacer(Modifier.height(14.dp))
+        ToggleRow("Vibrate for calls", "Buzz while a call rings", a.callVibrate) {
+            prefs.setAlerts(a.copy(callVibrate = !a.callVibrate))
+        }
+        Spacer(Modifier.height(8.dp))
+        LinkRow(Icons.Outlined.NotificationsActive, "Try the message alert", "Plays it once, as a customer message would (the phone's silent switch applies)") {
+            ke.co.bethanyhouse.neema.core.notify.DeviceAlertPlayer(context).play(a.messageSound, a.messageVibrate)
+        }
     }
 }
 

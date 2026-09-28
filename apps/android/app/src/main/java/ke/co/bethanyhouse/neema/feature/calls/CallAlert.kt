@@ -11,9 +11,7 @@ import android.media.Ringtone
 import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
-import android.os.VibrationEffect
 import android.os.Vibrator
-import android.os.VibratorManager
 import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -52,7 +50,12 @@ import kotlinx.coroutines.launch
  *   foreground service); if the platform refuses it, the plain notification
  *   with Answer / Decline actions goes up instead.
  */
-internal class CallAlert(private val context: Context, private val scope: CoroutineScope) : CallRinger {
+internal class CallAlert(
+    private val context: Context,
+    private val scope: CoroutineScope,
+    /** Profile → Sounds & vibration: whether a call rings and buzzes (mute never silences calls). */
+    private val settings: () -> ke.co.bethanyhouse.neema.core.util.AlertSettings = { ke.co.bethanyhouse.neema.core.util.AlertSettings() },
+) : CallRinger {
     private var ringtone: Ringtone? = null
     private var loopJob: Job? = null
     private var vibrating = false
@@ -77,7 +80,8 @@ internal class CallAlert(private val context: Context, private val scope: Corout
 
     override fun startRinging() {
         stopRinging()
-        runCatching {
+        val want = settings()
+        if (want.callRing) runCatching {
             val uri = RingtoneManager.getActualDefaultRingtoneUri(context, RingtoneManager.TYPE_RINGTONE)
                 ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
             ringtone = RingtoneManager.getRingtone(context, uri)?.apply {
@@ -90,17 +94,17 @@ internal class CallAlert(private val context: Context, private val scope: Corout
             }
         }
         // API 26/27 have no looping ringtone: restart it when it finishes.
-        if (Build.VERSION.SDK_INT < 28) loopJob = scope.launch(Dispatchers.Main) {
+        if (want.callRing && Build.VERSION.SDK_INT < 28) loopJob = scope.launch(Dispatchers.Main) {
             while (isActive) {
                 delay(1000)
                 ringtone?.let { if (!it.isPlaying) runCatching { it.play() } }
             }
         }
-        runCatching {
-            vibrator()?.let {
-                it.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 800, 1400), 0))
-                vibrating = true
-            }
+        // A ringtone-usage buzz: Android lets it through with Neema in the
+        // background and applies the phone's own rules (none in silent mode).
+        if (want.callVibrate && ringerAllowsBuzz()) runCatching {
+            ke.co.bethanyhouse.neema.core.notify.vibrate(context, CALL_BUZZ, ring = true, repeat = 0)
+            vibrating = true
         }
     }
 
@@ -111,9 +115,10 @@ internal class CallAlert(private val context: Context, private val scope: Corout
         if (vibrating) { runCatching { vibrator()?.cancel() }; vibrating = false }
     }
 
-    private fun vibrator(): Vibrator? =
-        if (Build.VERSION.SDK_INT >= 31) context.getSystemService(VibratorManager::class.java)?.defaultVibrator
-        else @Suppress("DEPRECATION") context.getSystemService(Vibrator::class.java)
+    private fun vibrator(): Vibrator? = ke.co.bethanyhouse.neema.core.notify.vibratorOf(context)
+
+    private fun ringerAllowsBuzz(): Boolean =
+        context.getSystemService(android.media.AudioManager::class.java)?.ringerMode != android.media.AudioManager.RINGER_MODE_SILENT
 
     private fun ensureDeclineReceiver(): Boolean {
         if (receiverRegistered) return true
@@ -188,6 +193,8 @@ internal class CallAlert(private val context: Context, private val scope: Corout
 
     companion object {
         const val NOTIF_ID = 2001
+        /** A phone's ring rhythm: buzz, pause, repeated while it rings. */
+        private val CALL_BUZZ = longArrayOf(0, 800, 1400)
         private const val REQ_SHOW = 2101
         private const val REQ_ANSWER = 2102
         private const val REQ_DECLINE = 2103

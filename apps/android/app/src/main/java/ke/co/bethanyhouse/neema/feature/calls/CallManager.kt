@@ -494,7 +494,7 @@ class CallManager internal constructor(
         foreground = foreground,
         signedInFn = signedInFn,
         media = WebRtcMedia(context),
-        ringer = CallAlert(context, scope),
+        ringer = CallAlert(context, scope) { prefs.alerts.value },
         audio = AndroidCallAudio(context) { prefs.backgroundLive.value && signedInFn() },
         micGranted = {
             ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED

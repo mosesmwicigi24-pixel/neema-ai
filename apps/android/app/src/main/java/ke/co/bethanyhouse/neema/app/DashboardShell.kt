@@ -172,6 +172,7 @@ fun DashboardShell(
             if (n.convKey != null) dash.openConversationFor(n.convKey) else if (view != null) dash.navigate(view)
         }
     }
+    val alertSettings by dash.container.prefs.alerts.collectAsStateWithLifecycle()
     val panel = @Composable { modifier: Modifier, maxList: Dp ->
         NotificationsPanel(
             items = notifications,
@@ -180,6 +181,9 @@ fun DashboardShell(
             onDismissItem = { dash.container.notifications.dismiss(it) },
             onClear = { dash.container.notifications.clear() },
             modifier = modifier, listMaxHeight = maxList,
+            muteStatus = ke.co.bethanyhouse.neema.core.notify.muteStatus(alertSettings.mutedUntil, ke.co.bethanyhouse.neema.core.util.AppClock.now()),
+            onMute = { dash.container.prefs.muteFor(it) },
+            onUnmute = { dash.container.prefs.unmute() },
         )
     }
 

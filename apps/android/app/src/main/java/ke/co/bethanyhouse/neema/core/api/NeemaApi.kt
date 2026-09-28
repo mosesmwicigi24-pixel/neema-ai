@@ -163,10 +163,14 @@ class NeemaApi(val http: NeemaHttp) {
         suspend fun resolve(key: String, ref: String? = null): String? =
             http.get<ResolveResponse>("/admin/conversations/resolve${query("key" to key, "ref" to ref)}").conversationId
 
+        // Every conversation read teaches the phone its customer's name, so a
+        // message notification says who wrote (ContactNames).
         suspend fun list(mode: String? = null, status: String? = null): List<Conversation> =
-            http.get("/admin/conversations${query("mode" to mode, "status" to status)}")
+            http.get<List<Conversation>>("/admin/conversations${query("mode" to mode, "status" to status)}")
+                .also(ke.co.bethanyhouse.neema.core.notify.ContactNames::learn)
 
-        suspend fun get(id: String): Conversation = http.get("/admin/conversations/$id")
+        suspend fun get(id: String): Conversation =
+            http.get<Conversation>("/admin/conversations/$id").also(ke.co.bethanyhouse.neema.core.notify.ContactNames::learn)
 
         /** One page of the inbox — whole PEOPLE. Tolerates the legacy bare-array reply. */
         suspend fun page(q: InboxQuery, limit: Int, cursor: String? = null): ConversationPage {
@@ -180,8 +184,9 @@ class NeemaApi(val http: NeemaHttp) {
                 "q" to q.q.trim().ifEmpty { null },
             )
             val el = http.get<JsonElement>("/admin/conversations$qs")
-            return if (el is JsonArray) ConversationPage(NeemaJson.decodeFromJsonElement(el), null)
+            val page: ConversationPage = if (el is JsonArray) ConversationPage(NeemaJson.decodeFromJsonElement(el), null)
             else NeemaJson.decodeFromJsonElement(el)
+            return page.also { ke.co.bethanyhouse.neema.core.notify.ContactNames.learn(it.items) }
         }
 
         suspend fun summary(): InboxSummary = http.get("/admin/conversations/summary")
