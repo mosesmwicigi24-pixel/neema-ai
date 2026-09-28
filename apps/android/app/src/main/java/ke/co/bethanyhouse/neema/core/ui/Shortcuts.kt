@@ -12,6 +12,8 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.isSecondaryPressed
 
 /**
  * Hardware-keyboard shortcuts (a Tab S9 Ultra with its Book Cover Keyboard,
@@ -85,6 +87,14 @@ fun hardwareKeyboardAttached(): Boolean {
     return c.keyboard == Configuration.KEYBOARD_QWERTY && c.hardKeyboardHidden != Configuration.HARDKEYBOARDHIDDEN_YES
 }
 
+/**
+ * Esc on a hardware keyboard is back — close the topmost sheet, panel or
+ * thread — but only while something can be closed ([somethingOpen]): at the
+ * root it must never leave the app. Modified Esc (Ctrl/Alt/Shift) is left alone.
+ */
+fun escapeIsBack(keyCode: Int, modified: Boolean, somethingOpen: Boolean): Boolean =
+    keyCode == android.view.KeyEvent.KEYCODE_ESCAPE && !modified && somethingOpen
+
 /** The next / previous id in [ids] from [current] (wrapping never: the ends stay put). */
 fun stepThrough(ids: List<String>, current: String?, forward: Boolean): String? {
     if (ids.isEmpty()) return null
@@ -93,3 +103,22 @@ fun stepThrough(ids: List<String>, current: String?, forward: Boolean): String? 
     val j = (if (forward) i + 1 else i - 1).coerceIn(0, ids.lastIndex)
     return ids[j]
 }
+
+/**
+ * A mouse's right button (DeX, a Bluetooth mouse on the tablet): [onClick]
+ * runs on the press and the event is consumed, so the row's own tap never fires.
+ */
+fun androidx.compose.ui.Modifier.onSecondaryClick(onClick: () -> Unit): androidx.compose.ui.Modifier =
+    this.then(
+        androidx.compose.ui.Modifier.pointerInput(Unit) {
+            awaitPointerEventScope {
+                while (true) {
+                    val e = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                    if (e.type == androidx.compose.ui.input.pointer.PointerEventType.Press && e.buttons.isSecondaryPressed) {
+                        e.changes.forEach { it.consume() }
+                        onClick()
+                    }
+                }
+            }
+        },
+    )

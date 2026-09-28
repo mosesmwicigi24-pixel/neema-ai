@@ -127,6 +127,13 @@ private fun ConversationsBody(dash: DashboardViewModel, panes: InboxPanes) {
     var customerOpen by rememberSaveable { mutableStateOf(true) }      // wide side pane (open by default)
     var customerSheet by rememberSaveable { mutableStateOf(false) }    // phone / narrow wide
     var activitySheet by rememberSaveable { mutableStateOf(false) }
+    // Rotating or resizing into room for the docked pane: the slide-over one
+    // closes (the docked one shows it) — never the panel twice. The activity
+    // log that was open over the thread stays open, docked.
+    LaunchedEffect(roomy) { if (roomy && wide) customerSheet = false }
+    LaunchedEffect(panes.activityDocks) {
+        if (panes.activityDocks && activitySheet) { activitySheet = false; vm.setActivityOpen(true) }
+    }
     // The reach-out dialogs remember WHICH conversation they were opened for: a
     // deep link or a notification tap that switches threads closes them, so a
     // team answer or an invite can never go to the next customer opened.

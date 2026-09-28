@@ -142,3 +142,33 @@ class TabletLayoutTest {
         assertEquals(emptyList<Int>(), fitWidths(emptyList(), 100))
     }
 }
+
+/** The Calls view's details pane through rotations, splits and filters. */
+class CallsDetailsPickTest {
+    private fun p(wide: Boolean, shown: List<String>, sel: String?, auto: String?) =
+        ke.co.bethanyhouse.neema.feature.calls.detailsPick(wide, shown, sel, auto)
+
+    @Test fun tabletOpensTheNewest() = assertEquals("a", p(true, listOf("a", "b"), null, null).select)
+    @Test fun theAgentsPickStays() {
+        val r = p(true, listOf("a", "b"), "b", "a")
+        assertEquals("b", r.select); assertEquals(null, r.autoPicked)
+    }
+    @Test fun aFilteredAwayCallMovesToTheFirstShown() = assertEquals("c", p(true, listOf("c"), "a", null).select)
+    @Test fun shrinkingDropsOnlyTheAppsPick() {
+        assertEquals(null, p(false, listOf("a"), "a", "a").select)
+        assertEquals("b", p(false, listOf("a", "b"), "b", null).select)
+    }
+    @Test fun anEmptyLogKeepsWhatIsOpen() = assertEquals("x", p(true, emptyList(), "x", null).select)
+    @Test fun growingBackOpensTheNewestAgain() = assertEquals("a", p(true, listOf("a"), null, null).autoPicked)
+}
+
+/** Esc on the Book Cover Keyboard / DeX. */
+class EscapeKeyTest {
+    private val esc = android.view.KeyEvent.KEYCODE_ESCAPE
+    @Test fun escClosesWhatIsOpen() = assertTrue(ke.co.bethanyhouse.neema.core.ui.escapeIsBack(esc, false, true))
+    @Test fun escAtTheRootNeverLeavesTheApp() = assertFalse(ke.co.bethanyhouse.neema.core.ui.escapeIsBack(esc, false, false))
+    @Test fun modifiedEscAndOtherKeysAreLeftAlone() {
+        assertFalse(ke.co.bethanyhouse.neema.core.ui.escapeIsBack(esc, true, true))
+        assertFalse(ke.co.bethanyhouse.neema.core.ui.escapeIsBack(android.view.KeyEvent.KEYCODE_ENTER, false, true))
+    }
+}

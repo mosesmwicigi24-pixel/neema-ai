@@ -235,14 +235,9 @@ fun CallsScreen(
         // a phone-sized one (a ⅓ split) shows the log again rather than that call.
         var autoPicked by rememberSaveable { mutableStateOf<String?>(null) }
         LaunchedEffect(wide, firstShown?.id, sel?.id, followUpsOnly, app) {
-            if (!wide) {
-                if (sel != null && sel.id == autoPicked) vm.select(null)
-                autoPicked = null
-                return@LaunchedEffect
-            }
-            if (firstShown == null) return@LaunchedEffect
-            if (sel == null || shown?.none { it.id == sel.id } == true) { vm.select(firstShown); autoPicked = firstShown.id }
-            else if (sel.id != autoPicked) autoPicked = null
+            val next = detailsPick(wide, shown?.map { it.id }.orEmpty(), sel?.id, autoPicked)
+            if (next.select != sel?.id) vm.select(next.select?.let { id -> shown?.find { it.id == id } })
+            autoPicked = next.autoPicked
         }
         // A Tab S9 Ultra on its side: both panes grow with the room (log up to
         // 640dp, details up to 600dp) instead of a 560dp column in empty space.
@@ -1206,4 +1201,20 @@ private fun ReadinessBanner(r: CallReadiness, compact: Boolean = false, inset: D
             action()
         }
     }
+}
+
+/** What the details pane shows next, and whether the app (not the agent) chose it. */
+internal data class DetailsPick(val select: String?, val autoPicked: String?)
+
+/**
+ * The Calls view's details pane on a tablet: the newest call shown opens in it
+ * when none is open or the open one was filtered away; the agent's own pick
+ * stays. Shrinking to a phone-sized window drops only a call the app picked,
+ * so a ⅓ split shows the log rather than a call nobody asked for.
+ */
+internal fun detailsPick(wide: Boolean, shownIds: List<String>, selected: String?, autoPicked: String?): DetailsPick {
+    if (!wide) return DetailsPick(if (selected != null && selected == autoPicked) null else selected, null)
+    val first = shownIds.firstOrNull() ?: return DetailsPick(selected, autoPicked)
+    if (selected == null || selected !in shownIds) return DetailsPick(first, first)
+    return DetailsPick(selected, if (selected == autoPicked) autoPicked else null)
 }

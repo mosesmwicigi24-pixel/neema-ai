@@ -4,6 +4,9 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import ke.co.bethanyhouse.neema.core.ui.onSecondaryClick
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -372,10 +375,22 @@ private fun ConversationRow(g: RowGroup, activeId: String, me: String?, selectMo
     val bg = when { picked -> Palette.PickedRow; isActive -> Palette.ActiveRow; else -> Color.Transparent }
     val edge = when { picked -> Green; isActive -> ROW_ACCENT; hasUnread -> Palette.UnreadEdge; else -> Color.Transparent }
 
+    // An S Pen, a DeX mouse or a trackpad hovering the row lights it (tablet /
+    // desktop); a right-click does what press-and-hold does.
+    val hoverSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val hovered by hoverSource.collectIsHoveredAsState()
+    val shown = when {
+        bg != Color.Transparent -> if (c.isDark) bg.copy(alpha = 0.12f) else bg
+        hovered -> if (c.isDark) Color.White.copy(alpha = 0.05f) else Palette.Moss600.copy(alpha = 0.05f)
+        else -> Color.Transparent
+    }
     Row(
-        Modifier.fillMaxWidth().background(if (c.isDark && bg != Color.Transparent) bg.copy(alpha = 0.12f) else bg)
+        Modifier.fillMaxWidth().background(shown)
+            .hoverable(hoverSource)
+            .onSecondaryClick { if (!selectMode) vm.enterSelect(g.key) }
             // Press and hold to start selecting — the WhatsApp gesture.
             .combinedClickable(
+                interactionSource = hoverSource, indication = androidx.compose.foundation.LocalIndication.current,
                 onClick = { if (selectMode) vm.toggleRow(g.key) else onOpen(conv.id) },
                 onLongClick = { if (!selectMode) vm.enterSelect(g.key) },
             )

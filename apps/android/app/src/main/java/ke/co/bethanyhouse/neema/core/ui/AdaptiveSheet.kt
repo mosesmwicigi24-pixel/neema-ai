@@ -4,7 +4,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInHorizontally
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
@@ -66,8 +65,10 @@ fun AdaptiveSheet(
     }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         val shown = remember { MutableTransitionState(false).apply { targetState = true } }
+        // No scrim of our own here: the dialog window already dims what is behind
+        // it — a second layer would darken the tablet to near black.
         Box(
-            Modifier.fillMaxSize().background(scrim)
+            Modifier.fillMaxSize()
                 .clickable(remember { MutableInteractionSource() }, indication = null, onClickLabel = "Close $title", onClick = onDismiss),
         ) {
             AnimatedVisibility(shown, enter = slideInHorizontally(tween(220)) { it }, modifier = Modifier.align(Alignment.CenterEnd)) {

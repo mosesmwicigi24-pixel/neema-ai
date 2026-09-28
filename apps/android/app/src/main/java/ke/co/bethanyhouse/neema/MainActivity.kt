@@ -122,6 +122,12 @@ class MainActivity : ComponentActivity() {
      * combinations are taken — typing, Enter and Esc go on as usual.
      */
     override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        // Esc closes the topmost sheet / panel / thread (never the app itself).
+        val modified = event.isCtrlPressed || event.isAltPressed || event.isShiftPressed || event.isMetaPressed
+        if (ke.co.bethanyhouse.neema.core.ui.escapeIsBack(event.keyCode, modified, onBackPressedDispatcher.hasEnabledCallbacks())) {
+            if (event.action == android.view.KeyEvent.ACTION_UP) onBackPressedDispatcher.onBackPressed()
+            return true
+        }
         val s = androidx.compose.ui.input.key.KeyEvent(event).appShortcut()
         if (s != null && dash.session.value != null && dash.shortcuts.tryEmit(s)) return true
         // The key-up of a shortcut we took is ours too (no stray release reaches a field).
